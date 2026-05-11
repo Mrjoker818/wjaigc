@@ -16,7 +16,7 @@ export interface ApiProvider {
   // 新增：提供商预设ID
   providerPreset?: string;
   // 新增：请求风格
-  requestStyle?: 'chat-completions' | 'images-generations' | 'custom';
+  requestStyle?: 'chat-completions' | 'images-generations' | 'custom' | 'auto';
   // 新增：选定的模型ID（支持多选）
   selectedModel?: string;
   selectedModels?: string[];
@@ -212,6 +212,7 @@ export const PROVIDER_PRESETS = [
 
 // 请求风格选项
 export const REQUEST_STYLES = [
+  { id: 'auto', name: '自动识别', description: '根据模型类型自动选择接口，适用于通用模型' },
   { id: 'chat-completions', name: 'Chat Completions', description: '对话补全接口，适用于文本对话模型' },
   { id: 'images-generations', name: 'Images Generations', description: '图像生成接口，适用于AI绘图模型' },
 ] as const;

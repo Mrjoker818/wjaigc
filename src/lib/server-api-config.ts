@@ -35,7 +35,7 @@ interface AddProviderInput {
   baseUrl: string;
   apiKey: string;
   modelType: ApiKind;
-  requestStyle?: 'chat-completions' | 'images-generations' | 'custom';
+  requestStyle?: 'chat-completions' | 'images-generations' | 'custom' | 'auto';
   selectedModels?: string[];
   advancedParams?: Record<string, string>;
   isDefault?: boolean;
@@ -278,7 +278,7 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
     isEnabled: true,
     type: input.modelType === 'chat' ? 'chat' : input.modelType === 'imageEdit' ? 'imageEdit' : input.modelType === 'image' ? 'image' : 'universal',
     modelType: input.modelType,
-    requestStyle: input.requestStyle || (input.modelType === 'chat' ? 'chat-completions' : 'images-generations'),
+    requestStyle: input.requestStyle === 'auto' ? 'auto' : (input.requestStyle || (input.modelType === 'chat' ? 'chat-completions' : 'images-generations')),
     selectedModels: input.selectedModels || [],
     advancedParams: input.advancedParams || {},
     isDefault: input.isDefault,

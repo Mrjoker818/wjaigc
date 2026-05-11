@@ -13,11 +13,12 @@ interface AdminSystemProps {
   onClose: () => void;
 }
 
-type ApiKind = 'image' | 'chat' | '3d' | 'imageEdit' | 'vectorize' | 'layer';
+type ApiKind = 'universal' | 'image' | 'chat' | '3d' | 'imageEdit' | 'vectorize' | 'layer';
 type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'imageEdit' | 'vectorize' | 'layer';
 type AdminProvider = ApiProvider & { apiKeyPreview?: string };
 
 const apiKindLabels: Record<ApiKind, string> = {
+  universal: '通用模型',
   image: '图像模型',
   chat: 'LLM 模型',
   '3d': '3D 模型',
@@ -222,7 +223,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
         apiKey: apiKey.trim(),
         modelType: apiKind,
         selectedModels: models,
-        requestStyle: apiKind === 'chat' ? 'chat-completions' : 'images-generations',
+        requestStyle: apiKind === 'chat' ? 'chat-completions' : apiKind === 'universal' ? 'auto' : 'images-generations',
       }),
     });
     setApiName('');

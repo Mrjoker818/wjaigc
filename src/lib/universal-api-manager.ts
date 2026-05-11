@@ -185,7 +185,7 @@ export class UniversalApiManager {
       displayName?: string;
       modelType?: 'image' | 'chat' | '3d';
       providerPreset?: string;
-      requestStyle?: 'chat-completions' | 'images-generations';
+      requestStyle?: 'chat-completions' | 'images-generations' | 'auto';
       selectedModel?: string;
       selectedModels?: string[];
       advancedParams?: Record<string, string>;

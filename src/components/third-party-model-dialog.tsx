@@ -36,7 +36,7 @@ export function ThirdPartyModelDialog({
   const [formProvider, setFormProvider] = useState('openai');
   const [formApiKey, setFormApiKey] = useState('');
   const [formBaseUrl, setFormBaseUrl] = useState('https://api.openai.com/v1');
-  const [formRequestStyle, setFormRequestStyle] = useState<'chat-completions' | 'images-generations'>('chat-completions');
+  const [formRequestStyle, setFormRequestStyle] = useState<'chat-completions' | 'images-generations' | 'auto'>('chat-completions');
   // 多选模型
   const [formSelectedModels, setFormSelectedModels] = useState<string[]>([]);
   const [formAdvancedParams, setFormAdvancedParams] = useState<Record<string, string>>({});
