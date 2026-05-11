@@ -120,6 +120,8 @@ function CanvasApp() {
   const [navigateToImageId, setNavigateToImageId] = useState<string | null>(null);
   const [showHelpGuide, setShowHelpGuide] = useState(false);
   const [ctrlRefSelections, setCtrlRefSelections] = useState<CtrlRefSelection[]>([]);
+  // Alt+Click inline reference markers (displayed as numbered tags in the prompt textarea)
+  const [altRefMarkers, setAltRefMarkers] = useState<Array<{id: string; url: string; number: number}>>([]);
   const [showLayerGraphStudio, setShowLayerGraphStudio] = useState(false);
   const [initialGroups, setInitialGroups] = useState<Array<{id: string; name: string; note: string; imageIds: string[]; x: number; y: number; collapsed: boolean}>>([]);
   const [showPromptEquation, setShowPromptEquation] = useState(false);
@@ -1324,6 +1326,28 @@ function CanvasApp() {
     });
   }, []);
 
+  // Alt+Click 标记参考图 - 添加到创意描述文本框的数字标记
+  const handleAltMarkReference = useCallback((image: CanvasImage) => {
+    setAltRefMarkers(prev => {
+      const exists = prev.find(r => r.id === image.id);
+      if (exists) {
+        // 已标记则取消标记
+        const filtered = prev.filter(r => r.id !== image.id);
+        return filtered.map((r, i) => ({ ...r, number: i + 1 }));
+      }
+      // 添加新标记
+      return [...prev, { id: image.id, url: image.url, number: prev.length + 1 }];
+    });
+  }, []);
+
+  // 移除单个 Alt 标记
+  const handleRemoveAltRefMarker = useCallback((id: string) => {
+    setAltRefMarkers(prev => {
+      const filtered = prev.filter(r => r.id !== id);
+      return filtered.map((r, i) => ({ ...r, number: i + 1 }));
+    });
+  }, []);
+
   // 融合生成
   const handleFusionGenerate = useCallback((refs: CtrlRefSelection[], fusionPrompt: string) => {
     const refKeywords = refs.map(r => r.keyword).filter(Boolean);
@@ -1583,6 +1607,8 @@ function CanvasApp() {
           onAddImages={handleAddImages}
           onReferenceSelect={handleCanvasReferenceSelect}
           referenceIds={ctrlRefSelections.map(r => r.id)}
+          altRefMarkerIds={altRefMarkers.map(r => r.id)}
+          onAltMarkReference={handleAltMarkReference}
           isGenerating={isGenerating}
           generationProgress={generationProgress}
           themeStyle={themeStyle}
@@ -1702,6 +1728,8 @@ function CanvasApp() {
                     onRemoveCtrlRef={handleRemoveCtrlRef}
                     onUpdateCtrlRefKeyword={handleUpdateCtrlRefKeyword}
                     onFusionGenerate={handleFusionGenerate}
+                    altRefMarkers={altRefMarkers}
+                    onRemoveAltRefMarker={handleRemoveAltRefMarker}
                     themeStyle={themeStyle}
                     externalReferenceImage={externalReferenceImage}
                     onExternalReferenceImageConsumed={() => setExternalReferenceImage(null)}

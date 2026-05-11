@@ -310,6 +310,8 @@ interface InfiniteCanvasProps {
   initialGroups?: ImageGroup[];
   /** Called when Alt+Click marks an image as reference with number */
   onAltMarkReference?: (image: CanvasImage) => void;
+  /** IDs of images currently marked as Alt references */
+  altRefMarkerIds?: string[];
 }
 
 type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'img2img';
@@ -356,6 +358,7 @@ export function InfiniteCanvas({
   onGroupsChange,
   initialGroups,
   onAltMarkReference,
+  altRefMarkerIds = [],
 }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
@@ -434,6 +437,8 @@ export function InfiniteCanvas({
 
   // Ctrl key tracking for reference selection hint
   const [ctrlKeyHeld, setCtrlKeyHeld] = useState(false);
+  // Alt key tracking for reference marking hint
+  const [altKeyHeld, setAltKeyHeld] = useState(false);
 
   // Canvas-embedded image generator state
   const [showCanvasGenerator, setShowCanvasGenerator] = useState(false);
@@ -658,9 +663,11 @@ export function InfiniteCanvas({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey) setCtrlKeyHeld(true);
+      if (e.altKey) setAltKeyHeld(true);
     };
     const handleKeyUp = (e: KeyboardEvent) => {
       if (!e.ctrlKey && !e.metaKey) setCtrlKeyHeld(false);
+      if (!e.altKey) setAltKeyHeld(false);
     };
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
@@ -3837,7 +3844,9 @@ export function InfiniteCanvas({
         ref={canvasRef}
         data-canvas-viewport
         className={`absolute inset-0 overflow-hidden select-none ${
-          ctrlKeyHeld && editMode === 'none'
+          altKeyHeld && editMode === 'none'
+            ? 'cursor-copy'
+            : ctrlKeyHeld && editMode === 'none'
             ? 'cursor-pointer'
             : isPanning || isSpacePressed
             ? 'cursor-grab active:cursor-grabbing'
@@ -4055,6 +4064,16 @@ export function InfiniteCanvas({
           </div>
         )}
 
+        {/* Alt+Click reference mark hint (top center) */}
+        {altKeyHeld && editMode === 'none' && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+            <div className="px-3 py-1 rounded-full bg-[#d4af37]/90 text-black text-xs font-medium shadow-lg flex items-center gap-1.5">
+              <span className="text-xs">Alt+Click</span>
+              <span className="opacity-70">标记图片为参考图</span>
+            </div>
+          </div>
+        )}
+
         {/* Ctrl+Click reference hint (top center) */}
         {ctrlKeyHeld && editMode === 'none' && showRefFusion && (
           <div className="absolute top-2 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
@@ -4231,16 +4250,11 @@ export function InfiniteCanvas({
                   if (image.isProcessingPlaceholder) return;
                   if (editMode !== 'none') return;
                   if (e.altKey) {
-                    // Alt+Click: mark as numbered reference
+                    // Alt+Click: mark as numbered reference for creative prompt
                     onAltMarkReference?.(image);
                     return;
                   }
-                  if (e.altKey) {
-                    // Alt+Click: 数字标记参考图，添加到创意描述
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onReferenceSelect?.(image);
-                  } else if (e.ctrlKey || e.metaKey) {
+                  if (e.ctrlKey || e.metaKey) {
                     setSelectedIds(prev => {
                       const next = new Set(prev);
                       if (next.has(image.id)) {
@@ -4370,6 +4384,18 @@ export function InfiniteCanvas({
                     ))}
                   </div>
                 )}
+                {/* Alt+Click reference marker badge */}
+                {altRefMarkerIds.includes(image.id) && !image.isProcessingPlaceholder && (() => {
+                  const markerIdx = altRefMarkerIds.indexOf(image.id);
+                  return (
+                    <div className="absolute bottom-1 right-1 z-30 pointer-events-none"
+                      style={{ fontSize: `${Math.max(10, 12 / zoom)}px` }}>
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[#6366f1] text-white text-xs font-bold shadow-lg ring-2 ring-white/30">
+                        R{markerIdx + 1}
+                      </span>
+                    </div>
+                  );
+                })()}
                 {/* Ctrl+Click reference number badge */}
                 {referenceIds.includes(image.id) && (() => {
                   const refIdx = referenceIds.indexOf(image.id);

@@ -27,6 +27,7 @@ export interface GenerationParams {
     universalApiKey?: string;
     referenceCategories?: Record<number, string[]>; // per-image selected categories
     referenceStrengths?: number[];
+    altRefImageUrls?: string[]; // Alt+Click marked reference image URLs
 }
 
 export interface CtrlRefSelection {
@@ -34,6 +35,12 @@ export interface CtrlRefSelection {
     url: string;
     number: number;
     keyword?: string;
+}
+
+export interface AltRefMarker {
+    id: string;
+    url: string;
+    number: number;
 }
 
 interface GenerationPanelProps {
@@ -48,6 +55,8 @@ interface GenerationPanelProps {
     onError?: (error: string) => void;
     themeStyle?: 'gold' | 'monochrome';
     ctrlRefSelections?: CtrlRefSelection[];
+    altRefMarkers?: AltRefMarker[];
+    onRemoveAltRefMarker?: (id: string) => void;
     onRemoveCtrlRef?: (id: string) => void;
     onUpdateCtrlRefKeyword?: (id: string, keyword: string) => void;
     onFusionGenerate?: (refs: CtrlRefSelection[], fusionPrompt: string) => void;
@@ -294,6 +303,8 @@ export function GenerationPanel(
         externalPrompt,
         onExternalPromptConsumed,
         ctrlRefSelections = [],
+        altRefMarkers = [],
+        onRemoveAltRefMarker,
         onRemoveCtrlRef,
         onUpdateCtrlRefKeyword,
         onFusionGenerate,
@@ -415,8 +426,15 @@ export function GenerationPanel(
 
     // 生成
     const handleGenerate = () => {
-        if (!prompt.trim() && selectedTags.length === 0) return;
-        const fullPrompt = [prompt.trim(), ...selectedTags].filter(Boolean).join(", ");
+        if (!prompt.trim() && selectedTags.length === 0 && altRefMarkers.length === 0) return;
+        
+        // Build alt reference marker prefix
+        let altRefPrefix = '';
+        if (altRefMarkers.length > 0) {
+            altRefPrefix = altRefMarkers.map(m => `[参考图R${m.number}]`).join(' ') + ' ';
+        }
+        
+        const fullPrompt = [altRefPrefix + prompt.trim(), ...selectedTags].filter(Boolean).join(", ");
         
         // Check if model is from a universal provider
         const universalModel = discoveredModels.find(m => m.id === model);
@@ -441,7 +459,9 @@ export function GenerationPanel(
             ...(universalModel ? {
                 universalBaseUrl: universalProviders.find(p => p.id === universalModel.providerId)?.baseUrl,
                 universalApiKey: universalProviders.find(p => p.id === universalModel.providerId)?.apiKey,
-            } : {})
+            } : {}),
+            // Pass alt reference marker image URLs for image-to-image models
+            altRefImageUrls: altRefMarkers.map(m => m.url),
         });
     };
 
@@ -902,14 +922,65 @@ export function GenerationPanel(
                     })()}
                 </div>
 
-                {/* 创意描述 - 可拖动调整高度 */}
+                {/* 创意描述 - 可拖动调整高度，支持参考图标记 */}
                 <div className="space-y-1">
-                    <label className={stl}>{dot}创意描述</label>
+                    <label className={stl}>{dot}创意描述{altRefMarkers.length > 0 && <span className="ml-1.5 text-xs text-[#6366f1] font-normal">({altRefMarkers.length}张参考图)</span>}</label>
                     <div className={`relative rounded-md border ${mc ? 'border-gray-200' : 'border-[#2a2a2a]'} overflow-hidden`}>
+                        {/* Alt reference marker chips displayed above the textarea */}
+                        {altRefMarkers.length > 0 && (
+                            <div className={`flex flex-wrap gap-1.5 px-3 py-2 border-b ${mc ? 'border-gray-200 bg-gray-50' : 'border-[#2a2a2a] bg-[#141414]'}`}>
+                                {altRefMarkers.map((marker) => (
+                                    <div
+                                        key={marker.id}
+                                        className={`group inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium transition-all ${
+                                            mc
+                                                ? 'bg-white border border-indigo-200 text-indigo-700 hover:border-indigo-400'
+                                                : 'bg-[#6366f1]/15 border border-[#6366f1]/30 text-[#818cf8] hover:border-[#6366f1]/60'
+                                        }`}
+                                    >
+                                        {/* Thumbnail */}
+                                        <img
+                                            src={marker.url}
+                                            alt=""
+                                            className="w-5 h-5 rounded object-cover flex-shrink-0"
+                                        />
+                                        {/* Marker number */}
+                                        <span className="font-bold">R{marker.number}</span>
+                                        {/* Description hint */}
+                                        <span className={`${mc ? 'text-gray-400' : 'text-[#555]'}`}>参考图{marker.number}</span>
+                                        {/* Remove button */}
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onRemoveAltRefMarker?.(marker.id);
+                                            }}
+                                            className={`ml-0.5 rounded-full p-0.5 transition-colors ${
+                                                mc
+                                                    ? 'hover:bg-indigo-100 text-indigo-400 hover:text-indigo-700'
+                                                    : 'hover:bg-[#6366f1]/30 text-[#6366f1]/50 hover:text-[#818cf8]'
+                                            }`}
+                                        >
+                                            <X className="w-3 h-3" />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                         <textarea
                             value={prompt}
                             onChange={(e) => setPrompt(e.target.value)}
-                            placeholder="描述你想要创建的图像..."
+                            onKeyDown={(e) => {
+                                // Backspace at the start of textarea: remove last alt ref marker
+                                if (e.key === 'Backspace' && altRefMarkers.length > 0) {
+                                    const textarea = e.currentTarget;
+                                    if (textarea.selectionStart === 0 && textarea.selectionEnd === 0) {
+                                        e.preventDefault();
+                                        const lastMarker = altRefMarkers[altRefMarkers.length - 1];
+                                        onRemoveAltRefMarker?.(lastMarker.id);
+                                    }
+                                }
+                            }}
+                            placeholder={altRefMarkers.length > 0 ? "用 R1、R2... 引用参考图来控制生成效果..." : "描述你想要创建的图像..."}
                             style={{ height: prompt ? promptHeight : undefined, minHeight: 80 }}
                             className={`w-full px-3 py-2.5 text-sm resize-none ${mc ? 'bg-gray-50 text-gray-900 placeholder:text-gray-400' : 'bg-[#1a1a1a] text-[#e0e0e0] placeholder:text-[#555]'} leading-relaxed focus:outline-none`}
                         />
