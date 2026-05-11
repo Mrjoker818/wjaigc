@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { UniversalApiManager } from '@/lib/universal-api-manager';
-import { ApiProvider, PROVIDER_PRESETS, REQUEST_STYLES } from '@/lib/universal-api-types';
-import { X, Key, RefreshCw, Plus, Trash2, Eye, EyeOff, Check, AlertCircle, Link2, ChevronDown, ChevronUp, Image, MessageSquare, Settings, Box } from 'lucide-react';
+import { ApiProvider, PROVIDER_PRESETS, REQUEST_STYLES, inferImageProcessingSubtype, IMAGE_PROCESSING_SUBTYPE_RULES } from '@/lib/universal-api-types';
+import { X, Key, RefreshCw, Plus, Trash2, Eye, EyeOff, Check, AlertCircle, Link2, ChevronDown, ChevronUp, Image, MessageSquare, Settings, Box, Wand2 } from 'lucide-react';
 
 interface ThirdPartyModelDialogProps {
   isOpen: boolean;
@@ -13,7 +13,7 @@ interface ThirdPartyModelDialogProps {
   onProviderDeleted?: (providerId: string) => void;
   onProviderUpdated?: (provider: ApiProvider) => void;
   /** 打开时默认显示哪个类型 */
-  defaultType?: 'image' | 'chat' | '3d';
+  defaultType?: 'image' | 'chat' | 'imageProcessing';
 }
 
 export function ThirdPartyModelDialog({
@@ -27,7 +27,7 @@ export function ThirdPartyModelDialog({
 }: ThirdPartyModelDialogProps) {
   const [manager] = useState(() => UniversalApiManager.getInstance());
   const [providers, setProviders] = useState<ApiProvider[]>([]);
-  const [activeTab, setActiveTab] = useState<'image' | 'chat' | '3d'>(defaultType);
+  const [activeTab, setActiveTab] = useState<'image' | 'chat' | 'imageProcessing'>(defaultType);
 
   // 添加表单状态
   const [showAddForm, setShowAddForm] = useState(false);
@@ -36,7 +36,7 @@ export function ThirdPartyModelDialog({
   const [formProvider, setFormProvider] = useState('openai');
   const [formApiKey, setFormApiKey] = useState('');
   const [formBaseUrl, setFormBaseUrl] = useState('https://api.openai.com/v1');
-  const [formRequestStyle, setFormRequestStyle] = useState<'chat-completions' | 'images-generations'>('chat-completions');
+  const [formRequestStyle, setFormRequestStyle] = useState<'chat-completions' | 'images-generations' | 'image-processing'>('chat-completions');
   // 多选模型
   const [formSelectedModels, setFormSelectedModels] = useState<string[]>([]);
   const [formAdvancedParams, setFormAdvancedParams] = useState<Record<string, string>>({});
@@ -65,8 +65,7 @@ export function ThirdPartyModelDialog({
     setFormProvider('openai');
     setFormApiKey('');
     setFormBaseUrl('https://api.openai.com/v1');
-    setFormRequestStyle(activeTab === 'chat' ? 'chat-completions' : 'images-generations');
-    setFormSelectedModels([]);
+    setFormRequestStyle(activeTab === 'chat' ? 'chat-completions' : 'images-generations');    setFormSelectedModels([]);
     setFormAdvancedParams({});
     setShowApiKey(false);
     setShowAdvanced(false);
@@ -145,6 +144,15 @@ export function ThirdPartyModelDialog({
 
     const primaryModel = formSelectedModels.length > 0 ? formSelectedModels[0] : '';
 
+    // Auto-infer featureSubtype for imageProcessing
+    let featureSubtype: 'vectorize' | '3d' | 'layer' | undefined;
+    if (activeTab === 'imageProcessing' && formSelectedModels.length > 0) {
+      for (const modelId of formSelectedModels) {
+        const inferred = inferImageProcessingSubtype(modelId);
+        if (inferred) { featureSubtype = inferred; break; }
+      }
+    }
+
     if (editingProviderId) {
       const updated = manager.updateProvider(editingProviderId, {
         name: formDisplayName,
@@ -159,10 +167,11 @@ export function ThirdPartyModelDialog({
         selectedModels: formSelectedModels,
         advancedParams: formAdvancedParams,
         isRelay: formProvider === 'custom',
+        featureSubtype,
       });
       if (updated && onProviderUpdated) onProviderUpdated(updated);
     } else {
-      const providerKind = activeTab === '3d' ? 'universal' : activeTab;
+      const providerKind = activeTab === 'imageProcessing' ? 'universal' : activeTab;
       const provider = manager.addProvider(
         formDisplayName,
         formBaseUrl,
@@ -177,6 +186,7 @@ export function ThirdPartyModelDialog({
           selectedModels: formSelectedModels,
           advancedParams: formAdvancedParams,
           isRelay: formProvider === 'custom',
+          featureSubtype,
         }
       );
       if (onProviderAdded) onProviderAdded(provider);
@@ -249,7 +259,10 @@ export function ThirdPartyModelDialog({
   };
 
   const currentProviders = providers.filter(p => 
-    p.modelType === activeTab || p.type === 'universal' || p.type === activeTab
+    p.modelType === activeTab || p.type === 'universal' || p.type === activeTab ||
+    // For imageProcessing tab, also show legacy 3d/vectorize/layer/imageEdit providers
+    (activeTab === 'imageProcessing' && (p.modelType === '3d' || p.modelType === 'vectorize' || p.modelType === 'layer' || p.modelType === 'imageEdit' ||
+      p.type === '3d' || p.type === 'vectorize' || p.type === 'layer' || p.type === 'imageEdit'))
   );
 
   // 按搜索过滤模型
@@ -322,9 +335,9 @@ export function ThirdPartyModelDialog({
                   文本对话模型
                 </button>
                 <button
-                  onClick={() => setActiveTab('3d')}
+                  onClick={() => setActiveTab('imageProcessing')}
                   className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
-                    activeTab === '3d'
+                    activeTab === 'imageProcessing'
                       ? isGold
                         ? 'bg-[#d4af37]/15 text-[#d4af37] border border-[#d4af37]/30'
                         : 'bg-gray-100 text-gray-900 border border-gray-200'
@@ -333,8 +346,8 @@ export function ThirdPartyModelDialog({
                         : 'bg-gray-50 text-gray-400 border border-gray-100 hover:text-gray-600'
                   }`}
                 >
-                  <Box className="w-3.5 h-3.5" />
-                  3D 模型
+                  <Wand2 className="w-3.5 h-3.5" />
+                  图像处理模型
                 </button>
               </div>
 
@@ -358,8 +371,8 @@ export function ThirdPartyModelDialog({
                                 : provider.connectionStatus === 'failed' ? 'text-red-400'
                                 : isGold ? 'text-[#d4af37]' : 'text-gray-500'
                               }`} />
-                            ) : activeTab === '3d' ? (
-                              <Box className={`w-3.5 h-3.5 ${
+                            ) : activeTab === 'imageProcessing' ? (
+                              <Wand2 className={`w-3.5 h-3.5 ${
                                 provider.connectionStatus === 'success' ? 'text-green-400'
                                 : provider.connectionStatus === 'failed' ? 'text-red-400'
                                 : isGold ? 'text-[#d4af37]' : 'text-gray-500'
@@ -380,6 +393,11 @@ export function ThirdPartyModelDialog({
                               {provider.isRelay && (
                                 <span className={`text-xs px-1 py-0.5 rounded ${isGold ? 'bg-purple-900/30 text-purple-400' : 'bg-purple-50 text-purple-600'}`}>
                                   中转
+                                </span>
+                              )}
+                              {provider.featureSubtype && (
+                                <span className={`text-xs px-1 py-0.5 rounded ${isGold ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'bg-amber-50 text-amber-700'}`}>
+                                  {provider.featureSubtype === 'vectorize' ? '矢量化' : provider.featureSubtype === '3d' ? '转3D' : '编辑元素'}
                                 </span>
                               )}
                               <span className={`text-xs px-1 py-0.5 rounded ${
@@ -421,13 +439,13 @@ export function ThirdPartyModelDialog({
                   <div className={`flex flex-col items-center justify-center py-8 text-center rounded-xl mb-3 ${isGold ? 'bg-[#0f0f0f] border border-dashed border-[#2a2a2a]' : 'bg-gray-50 border border-dashed border-gray-200'}`}>
                     {activeTab === 'image' ? (
                       <Image className={`w-8 h-8 mb-2 ${isGold ? 'text-[#333]' : 'text-gray-300'}`} />
-                    ) : activeTab === '3d' ? (
-                      <Box className={`w-8 h-8 mb-2 ${isGold ? 'text-[#333]' : 'text-gray-300'}`} />
+                    ) : activeTab === 'imageProcessing' ? (
+                      <Wand2 className={`w-8 h-8 mb-2 ${isGold ? 'text-[#333]' : 'text-gray-300'}`} />
                     ) : (
                       <MessageSquare className={`w-8 h-8 mb-2 ${isGold ? 'text-[#333]' : 'text-gray-300'}`} />
                     )}
                     <p className={`text-xs font-medium ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>
-                      还没有{activeTab === 'image' ? '图像' : activeTab === '3d' ? '3D' : '对话'}模型
+                      还没有{activeTab === 'image' ? '图像' : activeTab === 'imageProcessing' ? '图像处理' : '对话'}模型
                     </p>
                     <p className={`text-xs mt-1 ${isGold ? 'text-[#444]' : 'text-gray-300'}`}>
                       点击下方按钮添加第三方模型
@@ -445,7 +463,7 @@ export function ThirdPartyModelDialog({
                   }`}
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  添加{activeTab === 'image' ? '图像' : activeTab === '3d' ? '3D' : '对话'}模型
+                  添加{activeTab === 'image' ? '图像' : activeTab === 'imageProcessing' ? '图像处理' : '对话'}模型
                 </button>
               </div>
             </>
@@ -567,6 +585,19 @@ export function ThirdPartyModelDialog({
               {/* 模型配置 - 多选 */}
               <div className="space-y-2">
                 <p className={sectionTitleCls}>模型配置</p>
+
+                {/* 图像处理模型自动匹配提示 */}
+                {activeTab === 'imageProcessing' && (
+                  <div className={`text-xs leading-relaxed p-2 rounded-lg ${isGold ? 'bg-[#0a0a0a] border border-[#2a2a2a] text-[#777]' : 'bg-gray-50 border border-gray-100 text-gray-500'}`}>
+                    <p className="mb-1">添加模型后将自动匹配对应功能：</p>
+                    {IMAGE_PROCESSING_SUBTYPE_RULES.map(rule => (
+                      <p key={rule.subtype} className="ml-2 mb-0.5">
+                        <span className={isGold ? 'text-[#d4af37]' : 'text-amber-600'}>{rule.label}</span>
+                        {' — '}{rule.description}
+                      </p>
+                    ))}
+                  </div>
+                )}
                 
                 {/* 模型搜索 + 刷新 */}
                 <div className="flex items-center gap-2">
@@ -615,6 +646,29 @@ export function ThirdPartyModelDialog({
                       <span className={`text-xs ${isGold ? 'text-[#444]' : 'text-gray-400'}`}>
                         已选 {formSelectedModels.length} 个
                       </span>
+                      {activeTab === 'imageProcessing' && formSelectedModels.length > 0 && (() => {
+                        // Show auto-matched feature subtypes
+                        const subtypeMap = new Map<string, string[]>();
+                        for (const modelId of formSelectedModels) {
+                          const sub = inferImageProcessingSubtype(modelId);
+                          const label = sub === 'vectorize' ? '矢量化' : sub === '3d' ? '转3D' : sub === 'layer' ? '编辑元素' : null;
+                          if (label) {
+                            const existing = subtypeMap.get(label) || [];
+                            existing.push(modelId);
+                            subtypeMap.set(label, existing);
+                          }
+                        }
+                        if (subtypeMap.size === 0) return null;
+                        return (
+                          <div className="flex items-center gap-1 ml-2">
+                            {Array.from(subtypeMap.entries()).map(([label, models]) => (
+                              <span key={label} className={`text-xs px-1.5 py-0.5 rounded ${isGold ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'bg-amber-50 text-amber-700'}`}>
+                                {label} ({models.length})
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 )}

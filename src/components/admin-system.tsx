@@ -6,6 +6,7 @@ import { User } from '@/lib/user-types';
 import { ConfirmDialog } from './custom-dialogs';
 import { UserManager } from '@/lib/user-manager';
 import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
+import { inferImageProcessingSubtype, IMAGE_PROCESSING_SUBTYPE_RULES } from '@/lib/universal-api-types';
 import { getModelDisplayName } from '@/lib/model-name-map';
 
 interface AdminSystemProps {
@@ -19,11 +20,19 @@ type AdminProvider = ApiProvider & { apiKeyPreview?: string };
 
 const apiKindLabels: Record<ApiKind, string> = {
   image: '图像模型',
-  chat: 'LLM 模型',
-  '3d': '3D 模型',
+  chat: '文本模型',
+  '3d': '图像处理模型',
   imageEdit: '图像处理模型',
-  vectorize: '矢量模型',
-  layer: '分层模型',
+  vectorize: '图像处理模型',
+  layer: '图像处理模型',
+};
+
+/** 用户可见的3大类别 */
+const VISIBLE_API_KINDS: ApiKind[] = ['image', 'chat', 'imageEdit'];
+const VISIBLE_KIND_LABELS: Record<string, string> = {
+  image: '图像模型',
+  chat: '文本模型',
+  imageEdit: '图像处理模型',
 };
 
 const userPermissionLabels: Record<UserPermissionKey, string> = {
@@ -197,7 +206,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
       const response = await fetch('/api/admin/apis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'discover', baseUrl: apiBaseUrl.trim(), apiKey: apiKey.trim(), modelType: apiKind }),
+        body: JSON.stringify({ action: 'discover', baseUrl: apiBaseUrl.trim(), apiKey: apiKey.trim(), modelType: apiKind === 'imageEdit' ? 'imageProcessing' : apiKind }),
       });
       const data = await response.json();
       const models = data.models || [];
@@ -218,9 +227,9 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
         name: apiName.trim(),
         baseUrl: apiBaseUrl.trim(),
         apiKey: apiKey.trim(),
-        modelType: apiKind,
+        modelType: apiKind === 'imageEdit' ? 'imageProcessing' : apiKind,
         selectedModels: models,
-        requestStyle: apiKind === 'chat' ? 'chat-completions' : 'images-generations',
+        requestStyle: apiKind === 'chat' ? 'chat-completions' : (apiKind === 'imageEdit' ? 'image-processing' : 'images-generations'),
       }),
     });
     setApiName('');
@@ -240,7 +249,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     setApiName(provider.displayName || provider.name);
     setApiBaseUrl(provider.baseUrl);
     setApiKey(''); // Don't prefill the key for security
-    setApiKind((provider.modelType || 'image') as ApiKind);
+    setApiKind((['imageProcessing', '3d', 'vectorize', 'layer'].includes(provider.modelType || '') ? 'imageEdit' : (provider.modelType || 'image')) as ApiKind);
     // Load the provider's models into discovered models
     const providerModels = provider.discoveredModels || [];
     if (providerModels.length > 0) {
@@ -260,7 +269,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     if (apiName.trim()) updates.displayName = apiName.trim();
     if (apiBaseUrl.trim()) updates.baseUrl = apiBaseUrl.trim();
     if (apiKey.trim()) updates.apiKey = apiKey.trim();
-    updates.modelType = apiKind;
+    updates.modelType = apiKind === 'imageEdit' ? 'imageProcessing' : apiKind;
     if (models) updates.selectedModels = models;
 
     await fetch('/api/admin/apis', {
@@ -446,9 +455,21 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                   <div>
                     <label className={labelClass} htmlFor="admin-api-kind">API 类型</label>
                     <select id="admin-api-kind" className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} value={apiKind} onChange={e => setApiKind(e.target.value as ApiKind)}>
-                    {(Object.keys(apiKindLabels) as ApiKind[]).map(kind => <option key={kind} value={kind}>{apiKindLabels[kind]}</option>)}
+                    {VISIBLE_API_KINDS.map(kind => <option key={kind} value={kind}>{VISIBLE_KIND_LABELS[kind]}</option>)}
                     </select>
                   </div>
+                  {/* 图像处理模型自动匹配提示 */}
+                  {apiKind === 'imageEdit' && (
+                    <div className={`text-xs leading-relaxed p-2 rounded-lg ${isGold ? 'bg-[#0a0a0a] border border-[#2a2a2a] text-[#777]' : 'bg-gray-50 border border-gray-100 text-gray-500'}`}>
+                      <p className="mb-1">添加模型后将自动匹配对应功能：</p>
+                      {IMAGE_PROCESSING_SUBTYPE_RULES.map(rule => (
+                        <p key={rule.subtype} className="ml-2 mb-0.5">
+                          <span className={isGold ? 'text-[#d4af37]' : 'text-amber-600'}>{rule.label}</span>
+                          {' — '}{rule.description}
+                        </p>
+                      ))}
+                    </div>
+                  )}
                   <button onClick={() => void handleDiscoverModels()} disabled={isDiscovering} className={`w-full h-9 rounded-lg text-sm font-semibold ${isGold ? 'bg-[#1a1a1a] text-[#d4af37] border border-[#2a2a2a]' : 'bg-gray-100 text-gray-700 border border-gray-200'}`}>
                     {isDiscovering ? '识别模型中...' : '自动识别模型'}
                   </button>
@@ -522,7 +543,21 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="text-sm font-semibold">{provider.displayName || provider.name}</p>
-                          <span className={`text-xs px-2 py-0.5 rounded ${isGold ? 'bg-[#222] text-[#aaa]' : 'bg-gray-200 text-gray-600'}`}>{apiKindLabels[provider.modelType as ApiKind] || '通用'}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded ${isGold ? 'bg-[#222] text-[#aaa]' : 'bg-gray-200 text-gray-600'}`}>{(provider.modelType && VISIBLE_KIND_LABELS[provider.modelType]) || (provider.modelType && apiKindLabels[provider.modelType as ApiKind]) || '通用'}</span>
+                          {/* 图像处理模型自动匹配子类型 */}
+                          {provider.modelType === 'imageProcessing' && (
+                            <>
+                              {(() => {
+                                const allModels = [...(provider.selectedModels || [])];
+                                if (allModels.length === 0) return null;
+                                const subtypes = new Set(allModels.map(m => inferImageProcessingSubtype(m)).filter(Boolean));
+                                return Array.from(subtypes).map(st => {
+                                  const rule = IMAGE_PROCESSING_SUBTYPE_RULES.find(r => r.subtype === st);
+                                  return rule ? <span key={st} className={`text-xs px-1.5 py-0.5 rounded ${isGold ? 'bg-[#1a1a1a] text-[#d4af37]' : 'bg-amber-50 text-amber-600'}`}>{rule.label}</span> : null;
+                                });
+                              })()}
+                            </>
+                          )}
                           {provider.isEnabled && (
                             <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/15 text-green-500">启用</span>
                           )}

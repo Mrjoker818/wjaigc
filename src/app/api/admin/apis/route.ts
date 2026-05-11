@@ -63,6 +63,7 @@ export async function POST(request: NextRequest) {
       selectedModels: Array.isArray(body.selectedModels) ? body.selectedModels : undefined,
       advancedParams: body.advancedParams,
       isDefault: Boolean(body.isDefault),
+      featureSubtype: body.featureSubtype,
     });
 
     return NextResponse.json({ success: true, provider: sanitizeProvider(provider) });
