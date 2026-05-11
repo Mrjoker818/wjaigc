@@ -245,6 +245,9 @@ PY_VECTORIZE_ENDPOINT=http://localhost:8000/vectorize
 
 # Inpainting 擦除/蒙版服务 (使用 AI 生成 API + 蒙版合成策略)
 # 擦除和蒙版均通过 AI 模型生成内容，后端自动做蒙版合成确保非编辑区域像素级保留
+
+# Upscale 放大服务 (本地 Python 服务器)
+UPSCALE_SERVER_URL=http://localhost:8081
 ```
 
 ## 安全注意事项
@@ -286,7 +289,21 @@ PY_VECTORIZE_ENDPOINT=http://localhost:8000/vectorize
 
 ## 更新日志
 
-### v2.5.1 (当前版本)
+### v2.5.2 (当前版本)
+
+**放大工具重构**
+- 基于 upscayl-ncnn 项目结构创建本地 Python 放大服务器 (scripts/upscale-server.py)
+- 支持三种放大引擎：
+  - RealESRGAN AI 模型（高质量，需下载模型权重）
+  - Lanczos 插值 + 锐化增强（默认回退，无需下载）
+  - OpenCV DNN 超分辨率（如模型可用）
+- 三种预设模型：
+  - 快速放大(4x) - Lanczos + 锐化增强，速度优先
+  - 通用高清(4x) - RealESRGAN x4plus，适合照片和插画
+  - 动漫增强(4x) - RealESRGAN x4plus-anime，适合动漫图片
+- Next.js API 路由 (/api/upscayl) 集成本地放大服务器
+- dev.sh/start.sh 自动启动放大服务器
+- .gitignore 添加 public/upscayl/
 
 **擦除/蒙版功能修复**
 - 修复蒙版检测核心 Bug：前端 canvas 导出的 PNG alpha 通道全为 255，导致后端误判整个图片为蒙版区域（99.97%覆盖率）
