@@ -305,12 +305,16 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   // ===== Vectorize Models =====
   { pattern: 'vtracer', entry: { name: 'VTracer', type: 'vectorize' } },
   { pattern: 'starvector', entry: { name: 'StarVector', type: 'vectorize' } },
+  { pattern: 'vectorizer', entry: { name: 'Vectorizer.AI', type: 'vectorize' } },
   { pattern: 'vectorize', entry: { name: '矢量化', type: 'vectorize' } },
 
   // ===== Layer Models =====
   { pattern: 'sam2', entry: { name: 'SAM 2', type: 'layer', provider: 'Meta' } },
   { pattern: 'segment-anything', entry: { name: 'SAM', type: 'layer', provider: 'Meta' } },
   { pattern: 'yolo', entry: { name: 'YOLO', type: 'layer' } },
+  { pattern: 'qwen-image-layered', entry: { name: 'Qwen 图像分层', type: 'layer', provider: 'Alibaba' } },
+  { pattern: 'rmbg', entry: { name: 'RMBG 背景移除', type: 'layer' } },
+  { pattern: 'rembg', entry: { name: 'RemBG 背景移除', type: 'layer' } },
 ];
 
 /**

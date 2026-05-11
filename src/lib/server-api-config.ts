@@ -76,6 +76,7 @@ function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 
   if (provider.modelType === '3d') return '3d';
   if (provider.modelType === 'vectorize') return 'vectorize';
   if (provider.modelType === 'layer') return 'layer';
+  if (provider.modelType === 'universal') return 'image'; // fallback for universal, actual type is per-model
   return 'image';
 }
 
@@ -83,13 +84,13 @@ function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 've
   const id = modelId.toLowerCase();
 
   // ── 3D models (check first - rare but specific) ──
-  if (id.includes('3d') || id.includes('tripo') || id.includes('meshy') || id.includes('rodin') || id.includes('hyper3d')) return '3d';
+  if (id.includes('3d') || id.includes('tripo') || id.includes('meshy') || id.includes('rodin') || id.includes('hyper3d') || id.includes('hunyuan3d') || id.includes('claydo')) return '3d';
 
   // ── Vectorize models ──
   if (id.includes('vector') || id.includes('vtracer') || id.includes('starvector') || id.includes('svg-')) return 'vectorize';
 
   // ── Segment / Layer models ──
-  if (id.includes('layer') || id.includes('segment') || id.includes('sam2') || id.includes('yolo') || id.includes('rmbg') || id.includes('rembg') || id.includes('remove-bg')) return 'layer';
+  if (id.includes('layer') || id.includes('segment') || id.includes('sam2') || id.includes('yolo') || id.includes('rmbg') || id.includes('rembg') || id.includes('remove-bg') || id.includes('layered')) return 'layer';
 
   // ── Image generation models (extensive list for 302.ai etc.) ──
   const imageKeywords = [
@@ -157,7 +158,7 @@ function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 've
     'phi-', 'phi-3', 'phi-4',
     'gemma', 'gemma-2',
     'grok', 'grok-2', 'grok-3', 'grok-4',
-    'doubao-pro', 'doubao-lite',
+    'doubao-pro', 'doubao-lite', 'doubao-1.5', 'doubao-vision', 'doubao-1',
     'hunyuan-turbos',
     'minimax-abab', 'minimax-chat',
     'step-2', 'step-1',
@@ -365,7 +366,8 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
 
   const discovery = await discoverModelsForCredentials(provider.baseUrl, provider.apiKey, input.modelType);
   provider.discoveredModels = discovery.models.map(model => ({ ...model, providerId: id }));
-  provider.selectedModels = input.selectedModels?.length ? input.selectedModels : provider.discoveredModels.map(model => model.id);
+  // For universal providers, don't auto-select all models (could be hundreds); for specific types, auto-select
+  provider.selectedModels = input.selectedModels?.length ? input.selectedModels : (input.modelType === 'universal' ? [] : provider.discoveredModels.map(model => model.id));
   provider.selectedModel = provider.selectedModels[0];
   provider.connectionStatus = discovery.success ? 'success' : 'failed';
   provider.lastTestedAt = Date.now();
@@ -483,7 +485,7 @@ export async function getPublicModels(modelType?: ApiKind): Promise<ModelInfo[]>
           id,
           name: getModelDisplayName(id),
           providerId: provider.id,
-          type: modelTypeForProvider(provider),
+          type: provider.modelType === 'universal' ? inferModelType(id, 'image') : modelTypeForProvider(provider),
         } satisfies ModelInfo))).map(model => {
           const displayName = getModelDisplayName(model.id);
           // Use mapped name if it differs from ID (mapping found), otherwise keep original name

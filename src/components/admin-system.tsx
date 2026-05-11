@@ -13,11 +13,12 @@ interface AdminSystemProps {
   onClose: () => void;
 }
 
-type ApiKind = 'image' | 'chat' | '3d' | 'imageEdit' | 'vectorize' | 'layer';
+type ApiKind = 'image' | 'chat' | '3d' | 'imageEdit' | 'vectorize' | 'layer' | 'universal';
 type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'imageEdit' | 'vectorize' | 'layer';
 type AdminProvider = ApiProvider & { apiKeyPreview?: string };
 
 const apiKindLabels: Record<ApiKind, string> = {
+  universal: '通用(全部类型)',
   image: '图像模型',
   chat: 'LLM 模型',
   '3d': '3D 模型',
