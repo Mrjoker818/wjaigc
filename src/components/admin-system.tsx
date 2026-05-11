@@ -561,7 +561,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                   </div>
                   <div>
                     <label className={labelClass} htmlFor="admin-api-base-url">接口地址</label>
-                    <input id="admin-api-base-url" className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="https://接口域名/v1" value={apiBaseUrl} onChange={e => setApiBaseUrl(e.target.value)} />
+                    <input id="admin-api-base-url" className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="https://接口域名" value={apiBaseUrl} onChange={e => setApiBaseUrl(e.target.value)} />
                   </div>
                   <div>
                     <label className={labelClass} htmlFor="admin-api-key">固定 API 密钥</label>

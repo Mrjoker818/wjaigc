@@ -544,7 +544,7 @@ export function ThirdPartyModelDialog({
                     type="text"
                     value={formBaseUrl}
                     onChange={(e) => setFormBaseUrl(e.target.value)}
-                    placeholder="https://api.example.com/v1"
+                    placeholder="https://api.example.com"
                     className={inputCls}
                   />
                 </div>

@@ -11,16 +11,13 @@ const CONFIG_PATH = path.join(SYSTEM_DIR, 'api-providers.json');
 const DISCOVERY_TIMEOUT_MS = 8000;
 
 /**
- * Normalize API base URL to always end with /v1
- * - If URL already ends with /v1, keep as-is
- * - If URL doesn't end with /v1, append /v1
- * - This ensures all API routes can consistently append paths like /images/generations
+ * Normalize API base URL
+ * - Only trims trailing slashes; does NOT auto-append /v1
+ * - Users enter the complete base URL (e.g. https://api.openai.com/v1 or https://api.example.com)
+ * - API routes append paths like /images/generations directly
  */
 export function normalizeApiBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.replace(/\/+$/, '');
-  if (trimmed.endsWith('/v1')) return trimmed;
-  if (trimmed.endsWith('/v2') || trimmed.endsWith('/v3')) return trimmed;
-  return `${trimmed}/v1`;
+  return baseUrl.replace(/\/+$/, '');
 }
 
 type ApiKind = 'image' | 'chat' | '3d' | 'imageEdit' | 'universal' | 'vectorize' | 'layer';
@@ -68,7 +65,7 @@ export function sanitizeProviders(providers: ApiProvider[]): PublicApiProvider[]
 function normalizeBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, '');
   if (!trimmed) return '';
-  return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`;
+  return trimmed;
 }
 
 function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' {
@@ -233,12 +230,16 @@ function parseBalancePayload(payload: unknown): ApiBalanceInfo {
 
 export async function refreshProviderBalance(provider: ApiProvider): Promise<ApiBalanceInfo> {
   const base = normalizeBaseUrl(provider.baseUrl);
-  const root = base.replace(/\/v1$/, '');
+  // Try both the base URL and root (without version path) for balance endpoints
+  const root = base.replace(/\/v\d+$/, '');
   const candidates = [
     `${base}/dashboard/billing/credit_grants`,
     `${base}/billing/usage`,
     `${base}/user/balance`,
     `${base}/balance`,
+    `${root}/dashboard/billing/credit_grants`,
+    `${root}/billing/usage`,
+    `${root}/user/balance`,
     `${root}/balance`,
     `${root}/api/user/balance`,
   ];

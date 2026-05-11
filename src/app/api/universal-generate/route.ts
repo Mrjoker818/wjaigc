@@ -46,7 +46,6 @@ export async function POST(request: NextRequest) {
         error: '缺少可用的后台图像模型配置',
       }, { status: 400 });
     }
-    const normalizedUrl = normalizeApiBaseUrl(baseUrl);
 
     // 构建请求体 - OpenAI兼容格式
     const requestBody: Record<string, unknown> = {
@@ -66,10 +65,10 @@ export async function POST(request: NextRequest) {
       requestBody.image_urls = [referenceImageUrl];
     }
 
-    console.log(`[Universal API] 请求: model=${resolvedModel}, baseUrl=${normalizedUrl}, size=${aspectRatio}`);
+    console.log(`[Universal API] 请求: model=${resolvedModel}, baseUrl=${baseUrl}, size=${aspectRatio}`);
 
     // 1. 提交生成任务
-    const submitResponse = await fetch(`${normalizedUrl}/images/generations`, {
+    const submitResponse = await fetch(`${baseUrl}/images/generations`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
@@ -135,7 +134,7 @@ export async function POST(request: NextRequest) {
 
       try {
         const statusResponse = await fetch(
-          `${normalizedUrl}/tasks/${taskId}?language=zh`,
+          `${baseUrl}/tasks/${taskId}?language=zh`,
           { headers: { 'Authorization': `Bearer ${apiKey}` } }
         );
         const statusData = await statusResponse.json();

@@ -23,18 +23,15 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Normalize base URL: remove trailing /v1 to avoid double /v1/v1/ paths
-    let targetBaseUrl = (baseUrl || 'https://api.apimart.ai').replace(/\/+$/, '');
-    if (targetBaseUrl.endsWith('/v1')) {
-      targetBaseUrl = targetBaseUrl.slice(0, -3);
-    }
+    // Use the base URL as-is (user provides the complete base URL including /v1 if needed)
+    const targetBaseUrl = (baseUrl || 'https://api.apimart.ai/v1').replace(/\/+$/, '');
 
     console.log('🔍 Testing API connection:', targetBaseUrl, 'credential:', apiKey.substring(0, 8) + '...');
 
-    // Strategy 1: Try /v1/models endpoint (OpenAI-compatible)
+    // Strategy 1: Try /models endpoint (OpenAI-compatible)
     // This works with most OpenAI-compatible APIs
     try {
-      const modelsResponse = await fetch(`${targetBaseUrl}/v1/models`, {
+      const modelsResponse = await fetch(`${targetBaseUrl}/models`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${apiKey}`,
@@ -51,7 +48,7 @@ export async function POST(request: NextRequest) {
         let balanceInfo = '';
         if (targetBaseUrl.includes('apimart.ai')) {
           try {
-            const balanceResponse = await fetch(`${targetBaseUrl}/v1/balance`, {
+            const balanceResponse = await fetch(`${targetBaseUrl}/balance`, {
               method: 'GET',
               headers: {
                 'Authorization': `Bearer ${apiKey}`,
@@ -91,10 +88,10 @@ export async function POST(request: NextRequest) {
       // /v1/models failed, try alternative endpoints
     }
 
-    // Strategy 2: Try /v1/balance endpoint (apimart specific)
+    // Strategy 2: Try /balance endpoint (apimart specific)
     if (targetBaseUrl.includes('apimart.ai')) {
       try {
-        const balanceResponse = await fetch(`${targetBaseUrl}/v1/balance`, {
+        const balanceResponse = await fetch(`${targetBaseUrl}/balance`, {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${apiKey}`,

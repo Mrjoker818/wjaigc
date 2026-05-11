@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 
 // APIMart 模型配置 - 所有模型已通过实际API验证测试
 // 测试日期: 2026-04-30
-// 所有模型均使用统一端点: POST /v1/images/generations
+// 所有模型均使用统一端点: POST /images/generations (baseUrl由用户提供，如包含/v1则为 /v1/images/generations)
 // 轮询由前端通过 /api/poll-task 完成，避免服务器超时
 interface ModelConfig {
   name: string;

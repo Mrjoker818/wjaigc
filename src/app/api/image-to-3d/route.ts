@@ -130,10 +130,10 @@ function buildEndpoint(request: ImageTo3DRequest): string | undefined {
       return `${baseUrl}/image-to-3d`;
 
     case 'tripo':
-      return `${baseUrl.replace(/\/v1$/, '')}/v2/openapi/image2model`;
+      return `${baseUrl.replace(/\/v\d+$/, '')}/v2/openapi/image2model`;
 
     case 'rodin':
-      return `${baseUrl.replace(/\/v1$/, '')}/api/generation/generate`;
+      return `${baseUrl.replace(/\/v\d+$/, '')}/api/generation/generate`;
 
     case 'generic':
     default:
@@ -141,7 +141,7 @@ function buildEndpoint(request: ImageTo3DRequest): string | undefined {
       if (modelName.includes('3d') || modelName.includes('mesh') || modelName.includes('obj')) {
         return `${baseUrl}/image-to-3d`;
       }
-      // Fallback: try OpenAI images format (baseUrl already includes /v1)
+      // Fallback: try OpenAI images format
       return `${baseUrl}/images/generations`;
   }
 }

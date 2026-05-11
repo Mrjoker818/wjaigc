@@ -36,8 +36,7 @@ function splitProviderModel(model?: string, providerId?: string) {
 }
 
 function normalizeChatBaseUrl(baseUrl: string): string {
-  const clean = baseUrl.replace(/\/+$/, '');
-  return clean.endsWith('/v1') ? clean : `${clean}/v1`;
+  return baseUrl.replace(/\/+$/, '');
 }
 
 export async function POST(request: NextRequest) {

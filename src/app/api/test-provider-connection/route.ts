@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
     let testUrl: string;
 
     if (style === 'chat-completions') {
-      testUrl = `${baseUrl.replace(/\/+$/, '')}/v1/chat/completions`;
+      testUrl = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
       // Send a minimal chat request
       const testBody = {
         model: 'test',
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
       }
     } else {
       // For images-generations or auto, try the models list endpoint first
-      testUrl = `${baseUrl.replace(/\/+$/, '')}/v1/models`;
+      testUrl = `${baseUrl.replace(/\/+$/, '')}/models`;
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10000);
@@ -108,8 +108,8 @@ export async function POST(request: NextRequest) {
         }
 
         if (response.status === 404) {
-          // /v1/models not found, try a direct generate endpoint
-          const generateUrl = `${baseUrl.replace(/\/+$/, '')}/v1/images/generations`;
+          // /models not found, try a direct generate endpoint
+          const generateUrl = `${baseUrl.replace(/\/+$/, '')}/images/generations`;
           const genController = new AbortController();
           const genTimeout = setTimeout(() => genController.abort(), 10000);
 
@@ -133,10 +133,10 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({
               success: genResponse.ok || [400, 422].includes(genResponse.status),
               status: genResponse.status,
-              info: 'API 可达（/v1/models 不可用，但生成端点可达）',
+              info: 'API 可达（/models 不可用，但生成端点可达）',
             });
           } catch {
-            return NextResponse.json({ success: false, error: '连接失败：/v1/models 和生成端点均不可达' });
+            return NextResponse.json({ success: false, error: '连接失败：/models 和生成端点均不可达' });
           }
         }
 

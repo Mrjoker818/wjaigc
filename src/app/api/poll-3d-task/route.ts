@@ -83,13 +83,13 @@ function buildPollConfig(request: PollRequest): PollConfig | undefined {
 
     case 'tripo':
       return {
-        endpoint: `${baseUrl.replace(/\/v1$/, '')}/v2/openapi/task/${request.taskId}`,
+        endpoint: `${baseUrl.replace(/\/v\d+$/, '')}/v2/openapi/task/${request.taskId}`,
         method: 'GET',
       };
 
     case 'rodin':
       return {
-        endpoint: `${baseUrl.replace(/\/v1$/, '')}/api/generation/status/${request.taskId}`,
+        endpoint: `${baseUrl.replace(/\/v\d+$/, '')}/api/generation/status/${request.taskId}`,
         method: 'GET',
       };
 

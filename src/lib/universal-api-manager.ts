@@ -146,9 +146,8 @@ export class UniversalApiManager {
   private async discoverModels(provider: ApiProvider): Promise<ModelInfo[]> {
     try {
       const baseUrl = provider.baseUrl.replace(/\/+$/, '');
-      const normalizedUrl = baseUrl.includes('/v1') ? baseUrl : `${baseUrl}/v1`;
       
-      const response = await fetch(`${normalizedUrl}/models`, {
+      const response = await fetch(`${baseUrl}/models`, {
         headers: {
           'Authorization': `Bearer ${provider.apiKey}`,
           'Content-Type': 'application/json',
@@ -321,9 +320,8 @@ export class UniversalApiManager {
 
     try {
       const baseUrl = provider.baseUrl.replace(/\/+$/, '');
-      const normalizedUrl = baseUrl.includes('/v1') ? baseUrl : `${baseUrl}/v1`;
       
-      const response = await fetch(`${normalizedUrl}/models`, {
+      const response = await fetch(`${baseUrl}/models`, {
         headers: {
           'Authorization': `Bearer ${provider.apiKey}`,
           'Content-Type': 'application/json',
@@ -360,9 +358,8 @@ export class UniversalApiManager {
   static async quickTestConnection(baseUrl: string, apiKey: string): Promise<{ success: boolean; message: string; models?: string[] }> {
     try {
       const url = baseUrl.replace(/\/+$/, '');
-      const normalizedUrl = url.includes('/v1') ? url : `${url}/v1`;
       
-      const response = await fetch(`${normalizedUrl}/models`, {
+      const response = await fetch(`${url}/models`, {
         headers: {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',

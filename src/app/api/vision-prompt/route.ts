@@ -177,7 +177,7 @@ export async function POST(request: NextRequest) {
       stream: false,
     };
 
-    // Build the correct endpoint - visionBaseUrl already contains /v1
+    // Build the correct endpoint
     const endpoint = `${visionBaseUrl.replace(/\/+$/, '')}/chat/completions`;
     console.log(`[vision-prompt] Calling endpoint: ${endpoint}`);
 
