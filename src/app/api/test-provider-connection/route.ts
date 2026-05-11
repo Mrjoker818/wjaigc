@@ -1,184 +1,167 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdminUser } from '@/lib/server-auth';
-import { getApiProviders } from '@/lib/server-api-config';
 
 export async function POST(request: NextRequest) {
-  const getErrorMessage = (error: unknown): string => {
-    if (error instanceof Error) return error.message;
-    if (typeof error === 'string') return error;
-    return 'Unknown error';
-  };
-
   try {
-    const admin = await requireAdminUser(request);
-    if (!admin) {
-      return NextResponse.json({ success: false, error: 'Admin session required' }, { status: 401 });
+    const body = await request.json();
+    const { baseUrl, apiKey, requestStyle, advancedParams } = body;
+
+    if (!baseUrl || !apiKey) {
+      return NextResponse.json({ success: false, error: '缺少 Base URL 或 API Key' }, { status: 400 });
     }
 
-    const { providerId } = await request.json();
-    
-    if (!providerId) {
-      return NextResponse.json({ 
-        success: false, 
-        error: 'Provider ID is required' 
-      }, { status: 400 });
+    // Build headers from base + advanced params
+    const headers: Record<string, string> = {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    };
+
+    // Apply advanced params as headers
+    if (Array.isArray(advancedParams)) {
+      for (const param of advancedParams) {
+        if (param.key && param.key.trim() && param.value !== undefined) {
+          headers[param.key.trim()] = String(param.value);
+        }
+      }
     }
 
-    // Get the provider with full API key (server-side only)
-    const providers = await getApiProviders();
-    const provider = providers.find(p => p.id === providerId);
-    
-    if (!provider) {
-      return NextResponse.json({ 
-        success: false, 
-        error: 'Provider not found' 
-      }, { status: 404 });
-    }
+    // Determine the test endpoint based on requestStyle
+    const style = requestStyle || 'images-generations';
+    let testUrl: string;
 
-    if (!provider.apiKey) {
-      return NextResponse.json({ 
-        success: false, 
-        error: '该 API 未配置 API Key' 
-      }, { status: 400 });
-    }
+    if (style === 'chat-completions') {
+      testUrl = `${baseUrl.replace(/\/+$/, '')}/v1/chat/completions`;
+      // Send a minimal chat request
+      const testBody = {
+        model: 'test',
+        messages: [{ role: 'user', content: 'hi' }],
+        max_tokens: 1,
+        stream: false,
+      };
 
-    // Normalize base URL: remove trailing /v1 to avoid double /v1/v1/ paths
-    let targetBaseUrl = (provider.baseUrl || 'https://api.apimart.ai').replace(/\/+$/, '');
-    if (targetBaseUrl.endsWith('/v1')) {
-      targetBaseUrl = targetBaseUrl.slice(0, -3);
-    }
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
 
-    console.log('🔍 Testing API connection:', targetBaseUrl, 'provider:', provider.displayName || provider.name);
+      try {
+        const response = await fetch(testUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(testBody),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
 
-    // Strategy 1: Try /v1/models endpoint (OpenAI-compatible)
-    try {
-      const modelsResponse = await fetch(`${targetBaseUrl}/v1/models`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${provider.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        signal: AbortSignal.timeout(10000),
-      });
+        // Even if the model doesn't exist, a valid API will return a structured error
+        // Only connection failures or auth failures mean the connection is bad
+        if (response.status === 401 || response.status === 403) {
+          return NextResponse.json({
+            success: false,
+            error: `认证失败 (${response.status})：API Key 无效或无权限`,
+            status: response.status,
+          });
+        }
 
-      if (modelsResponse.status === 200) {
-        const modelsData = await modelsResponse.json();
-        const modelCount = Array.isArray(modelsData.data) ? modelsData.data.length : 0;
-        
-        // Try to get balance info for apimart.ai
-        let balanceInfo = '';
-        if (targetBaseUrl.includes('apimart.ai')) {
+        if (response.status === 404) {
+          return NextResponse.json({
+            success: false,
+            error: `端点不存在 (${response.status})：请检查 Base URL 是否正确`,
+            status: response.status,
+          });
+        }
+
+        // 200, 400 (model not found), 422 (validation) all indicate the connection works
+        const data = await response.json().catch(() => null);
+        return NextResponse.json({
+          success: response.ok || [400, 422].includes(response.status),
+          status: response.status,
+          error: response.ok ? undefined : (data?.error?.message || data?.message || `HTTP ${response.status}`),
+          info: response.ok ? '连接成功' : 'API 可达，但请求有误（模型不存在或参数错误），连接本身正常',
+        });
+      } catch (fetchError) {
+        clearTimeout(timeout);
+        const msg = fetchError instanceof Error ? fetchError.message : 'Unknown error';
+        if (msg.includes('abort')) {
+          return NextResponse.json({ success: false, error: '连接超时（10秒），请检查 Base URL 是否正确' });
+        }
+        return NextResponse.json({ success: false, error: `连接失败：${msg}` });
+      }
+    } else {
+      // For images-generations or auto, try the models list endpoint first
+      testUrl = `${baseUrl.replace(/\/+$/, '')}/v1/models`;
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+
+      try {
+        const response = await fetch(testUrl, {
+          method: 'GET',
+          headers,
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (response.status === 401 || response.status === 403) {
+          return NextResponse.json({
+            success: false,
+            error: `认证失败 (${response.status})：API Key 无效或无权限`,
+            status: response.status,
+          });
+        }
+
+        if (response.status === 404) {
+          // /v1/models not found, try a direct generate endpoint
+          const generateUrl = `${baseUrl.replace(/\/+$/, '')}/v1/images/generations`;
+          const genController = new AbortController();
+          const genTimeout = setTimeout(() => genController.abort(), 10000);
+
           try {
-            const balanceResponse = await fetch(`${targetBaseUrl}/v1/balance`, {
-              method: 'GET',
-              headers: {
-                'Authorization': `Bearer ${provider.apiKey}`,
-                'Content-Type': 'application/json',
-              },
-              signal: AbortSignal.timeout(5000),
+            const genResponse = await fetch(generateUrl, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ model: 'test', prompt: 'test', n: 1, size: '256x256' }),
+              signal: genController.signal,
             });
-            if (balanceResponse.status === 200) {
-              const balanceData = await balanceResponse.json();
-              if (balanceData.success) {
-                if (balanceData.unlimited_quota) {
-                  balanceInfo = ' | 额度：无限';
-                } else {
-                  balanceInfo = ` | 余额：${balanceData.remain_balance}, 已用：${balanceData.used_balance}`;
-                }
-              }
+            clearTimeout(genTimeout);
+
+            if (genResponse.status === 401 || genResponse.status === 403) {
+              return NextResponse.json({
+                success: false,
+                error: `认证失败 (${genResponse.status})：API Key 无效或无权限`,
+                status: genResponse.status,
+              });
             }
+
+            return NextResponse.json({
+              success: genResponse.ok || [400, 422].includes(genResponse.status),
+              status: genResponse.status,
+              info: 'API 可达（/v1/models 不可用，但生成端点可达）',
+            });
           } catch {
-            // Balance check is optional
+            return NextResponse.json({ success: false, error: '连接失败：/v1/models 和生成端点均不可达' });
           }
         }
+
+        const data = await response.json().catch(() => null);
+        const modelCount = Array.isArray(data?.data) ? data.data.length : undefined;
 
         return NextResponse.json({
           success: true,
-          message: `连接成功！可用模型 ${modelCount} 个${balanceInfo}`,
-          data: { modelCount, models: modelsData.data?.slice(0, 5).map((m: { id: string }) => m.id) },
+          status: response.status,
+          modelCount,
+          info: modelCount !== undefined ? `连接成功，发现 ${modelCount} 个模型` : '连接成功',
         });
-      } else if (modelsResponse.status === 401) {
-        return NextResponse.json({
-          success: false,
-          error: 'API Key 无效或已过期',
-          step: 'authentication',
-          status: modelsResponse.status
-        }, { status: 401 });
-      } else {
-        const errorText = await modelsResponse.text().catch(() => '');
-        return NextResponse.json({
-          success: false,
-          error: `API 返回错误 (HTTP ${modelsResponse.status})${errorText ? ': ' + errorText.slice(0, 100) : ''}`,
-          step: 'api_response',
-          status: modelsResponse.status
-        });
-      }
-    } catch (fetchError: unknown) {
-      // /v1/models failed, try alternative endpoints
-      console.log('⚠️ /v1/models failed:', getErrorMessage(fetchError));
-    }
-
-    // Strategy 2: Try /v1/balance endpoint (apimart specific)
-    if (targetBaseUrl.includes('apimart.ai')) {
-      try {
-        const balanceResponse = await fetch(`${targetBaseUrl}/v1/balance`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${provider.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          signal: AbortSignal.timeout(10000),
-        });
-
-        if (balanceResponse.status === 200) {
-          const balanceData = await balanceResponse.json();
-          let message = 'API连接成功！';
-          if (balanceData.success) {
-            if (balanceData.unlimited_quota) {
-              message += ' 额度：无限';
-            } else {
-              message += ` 剩余额度：${balanceData.remain_balance}, 已使用：${balanceData.used_balance}`;
-            }
-          }
-          return NextResponse.json({ success: true, message, data: balanceData });
-        } else if (balanceResponse.status === 401) {
-          return NextResponse.json({
-            success: false,
-            error: 'API Key 无效或已过期',
-            step: 'authentication',
-          }, { status: 401 });
+      } catch (fetchError) {
+        clearTimeout(timeout);
+        const msg = fetchError instanceof Error ? fetchError.message : 'Unknown error';
+        if (msg.includes('abort')) {
+          return NextResponse.json({ success: false, error: '连接超时（10秒），请检查 Base URL 是否正确' });
         }
-      } catch {
-        // Balance check failed too
+        return NextResponse.json({ success: false, error: `连接失败：${msg}` });
       }
     }
-
-    // Strategy 3: Simple connectivity check
-    try {
-      const healthResponse = await fetch(targetBaseUrl, {
-        method: 'GET',
-        signal: AbortSignal.timeout(5000),
-      });
-      return NextResponse.json({
-        success: true,
-        message: `服务器可达 (HTTP ${healthResponse.status})，但无法验证 API Key 有效性`,
-        data: { status: healthResponse.status },
-      });
-    } catch (fetchError: unknown) {
-      return NextResponse.json({
-        success: false,
-        error: `无法连接到 ${targetBaseUrl}，请检查网络或地址是否正确`,
-        step: 'network',
-        details: getErrorMessage(fetchError),
-      }, { status: 503 });
-    }
-
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : '连接测试失败';
-    console.error('❌ Test connection error:', message);
-    return NextResponse.json({ 
-      success: false, 
-      error: message,
+  } catch (error) {
+    return NextResponse.json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Test connection failed',
     }, { status: 500 });
   }
 }

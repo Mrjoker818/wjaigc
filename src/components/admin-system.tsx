@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { X, UserPlus, Trash2, Ban, CheckCircle2, KeyRound, Plug, RefreshCw, Activity, Wallet, Pencil, Zap, CheckCircle, XCircle, Loader2, Search } from 'lucide-react';
+import { X, UserPlus, Trash2, Ban, CheckCircle2, KeyRound, Plug, RefreshCw, Activity, Wallet, Pencil, Zap, CheckCircle, XCircle, Loader2, Search, Settings, ChevronDown, Plus } from 'lucide-react';
 import { User } from '@/lib/user-types';
 import { ConfirmDialog } from './custom-dialogs';
 import { UserManager } from '@/lib/user-manager';
@@ -56,9 +56,13 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [modelSearchQuery, setModelSearchQuery] = useState('');
+  const [advancedParams, setAdvancedParams] = useState<Array<{ key: string; value: string }>>([]);
+  const [showAdvancedParams, setShowAdvancedParams] = useState(false);
   const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ providerId: string; success: boolean; message: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
+  const [isTestingNew, setIsTestingNew] = useState(false);
+  const [testNewResult, setTestNewResult] = useState<{ success: boolean; message: string; modelCount?: number; error?: string } | null>(null);
   const [apiBalances, setApiBalances] = useState<Array<{
     providerId: string; providerName: string; providerType: string;
     balance: number | null; currency: string; totalUsage: number; dailyUsage: number;
@@ -224,6 +228,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
         modelType: apiKind,
         selectedModels: models,
         requestStyle: apiKind === 'chat' ? 'chat-completions' : apiKind === 'universal' ? 'auto' : 'images-generations',
+        advancedParams: advancedParams.filter(p => p.key.trim()),
       }),
     });
     setApiName('');
@@ -233,6 +238,8 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     setDiscoveredModels([]);
     setSelectedModels([]);
     setEditingProviderId(null);
+    setAdvancedParams([]);
+    setShowAdvancedParams(false);
     window.dispatchEvent(new Event('wujie-admin-apis-updated'));
     await refresh();
   };
@@ -266,6 +273,8 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     if (apiKey.trim()) updates.apiKey = apiKey.trim();
     updates.modelType = apiKind;
     if (models) updates.selectedModels = models;
+    const filteredParams = advancedParams.filter(p => p.key.trim());
+    if (filteredParams.length > 0) updates.advancedParams = filteredParams;
 
     await fetch('/api/admin/apis', {
       method: 'POST',
@@ -280,6 +289,8 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     setApiModel('');
     setDiscoveredModels([]);
     setSelectedModels([]);
+    setAdvancedParams([]);
+    setShowAdvancedParams(false);
     window.dispatchEvent(new Event('wujie-admin-apis-updated'));
     await refresh();
   };
@@ -308,6 +319,41 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
       });
     } finally {
       setIsTesting(false);
+    }
+  };
+
+  const handleTestNewConnection = async () => {
+    if (!apiBaseUrl || !apiKey) return;
+    setIsTestingNew(true);
+    setTestNewResult(null);
+    try {
+      const advParams: Record<string, string> = {};
+      advancedParams.forEach(p => { if (p.key.trim()) advParams[p.key.trim()] = p.value; });
+      const response = await fetch('/api/test-provider-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          baseUrl: apiBaseUrl,
+          apiKey: apiKey,
+          requestStyle: apiKind === 'chat' ? 'chat-completions' : apiKind === 'universal' ? 'auto' : 'images-generations',
+          advancedParams: advParams,
+        }),
+      });
+      const data = await response.json();
+      setTestNewResult({
+        success: data.success,
+        message: data.success ? data.message : (data.error || '连接失败'),
+        modelCount: data.modelCount,
+        error: data.error,
+      });
+    } catch {
+      setTestNewResult({
+        success: false,
+        message: '网络错误，无法连接',
+      });
+    } finally {
+      setIsTestingNew(false);
     }
   };
 
@@ -525,9 +571,84 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                     <label className={labelClass} htmlFor="admin-api-model">默认模型 ID（可选）</label>
                     <input id="admin-api-model" className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="未自动识别时填写" value={apiModel} onChange={e => setApiModel(e.target.value)} />
                   </div>
-                  <button onClick={() => editingProviderId ? void handleUpdateApi() : void handleAddApi()} className={`w-full h-9 rounded-lg text-sm font-semibold ${editingProviderId ? 'bg-blue-600 text-white' : 'bg-[#d4af37] text-black'}`}>
-                    {editingProviderId ? '更新 API' : '添加 API'}
-                  </button>
+                  {/* 高级参数 */}
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowAdvancedParams(!showAdvancedParams)}
+                      className={`flex items-center gap-2 text-sm font-medium ${isGold ? 'text-[#ccc]' : 'text-gray-700'}`}
+                    >
+                      <Settings className="w-4 h-4" />
+                      <span>高级参数{advancedParams.length > 0 ? `(${advancedParams.length})` : ''}</span>
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showAdvancedParams ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showAdvancedParams && (
+                      <div className="mt-2 space-y-2">
+                        {advancedParams.map((param, idx) => (
+                          <div key={idx} className="flex items-center gap-2">
+                            <input
+                              className={`flex-1 h-9 px-2.5 rounded-lg border text-sm ${isGold ? 'bg-[#111] border-[#2a2a2a] text-[#ccc] placeholder-[#555]' : 'bg-white border-gray-200 text-gray-800 placeholder-gray-400'}`}
+                              placeholder="参数名"
+                              value={param.key}
+                              onChange={e => {
+                                const next = [...advancedParams];
+                                next[idx] = { ...next[idx], key: e.target.value };
+                                setAdvancedParams(next);
+                              }}
+                            />
+                            <input
+                              className={`flex-1 h-9 px-2.5 rounded-lg border text-sm ${isGold ? 'bg-[#111] border-[#2a2a2a] text-[#ccc] placeholder-[#555]' : 'bg-white border-gray-200 text-gray-800 placeholder-gray-400'}`}
+                              placeholder="参数值"
+                              value={param.value}
+                              onChange={e => {
+                                const next = [...advancedParams];
+                                next[idx] = { ...next[idx], value: e.target.value };
+                                setAdvancedParams(next);
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setAdvancedParams(prev => prev.filter((_, i) => i !== idx))}
+                              className="p-1.5 rounded-md text-red-500 hover:bg-red-500/10"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => setAdvancedParams(prev => [...prev, { key: `param_${Date.now().toString().slice(-5)}`, value: '' }])}
+                          className={`flex items-center gap-1.5 text-xs ${isGold ? 'text-[#888] hover:text-[#aaa]' : 'text-gray-500 hover:text-gray-700'}`}
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          添加参数
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {/* 操作按钮 */}
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleTestNewConnection()}
+                      disabled={isTestingNew || !apiBaseUrl || !apiKey}
+                      className={`flex-1 h-9 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 border disabled:opacity-40 ${isGold ? 'border-[#333] text-[#d4af37] hover:bg-[#1a1a1a]' : 'border-gray-300 text-[#d4af37] hover:bg-gray-50'}`}
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isTestingNew ? 'animate-spin' : ''}`} />
+                      {isTestingNew ? '测试中...' : '测试连接'}
+                    </button>
+                    <button
+                      onClick={() => editingProviderId ? void handleUpdateApi() : void handleAddApi()}
+                      className={`flex-1 h-9 rounded-lg text-sm font-semibold ${editingProviderId ? 'bg-blue-600 text-white' : 'bg-[#d4af37] text-black'}`}
+                    >
+                      {editingProviderId ? '更新 API' : '添加 API'}
+                    </button>
+                  </div>
+                  {testNewResult && (
+                    <div className={`text-xs px-3 py-2 rounded-lg ${testNewResult.success ? (isGold ? 'bg-green-500/10 text-green-400' : 'bg-green-50 text-green-700') : (isGold ? 'bg-red-500/10 text-red-400' : 'bg-red-50 text-red-700')}`}>
+                      {testNewResult.success ? `连接成功 · ${testNewResult.modelCount ?? 0} 个模型可用` : `连接失败：${testNewResult.error}`}
+                    </div>
+                  )}
                   {editingProviderId && (
                     <button onClick={() => { setEditingProviderId(null); setApiName(''); setApiBaseUrl(''); setApiKey(''); setApiModel(''); setDiscoveredModels([]); setSelectedModels([]); setModelSearchQuery(''); }} className={`w-full h-9 rounded-lg text-sm border ${isGold ? 'border-[#333] text-[#888] hover:bg-[#1a1a1a]' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
                       取消编辑
