@@ -1,0 +1,140 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { writeFile, mkdir, copyFile, readdir } from 'fs/promises';
+import { existsSync } from 'fs';
+import path from 'path';
+import { getServerDataRoot } from '@/lib/server-data-root';
+
+/**
+ * 将 base64 data URL 或远程图片 URL 保存到持久化目录，
+ * 返回可持久化的本地 URL 路径，避免 data:/blob: URL 丢失。
+ * 
+ * 生产环境: 保存到 /space/wujie-data/uploads/ (S3持久卷)
+ * 开发环境: 保存到 public/uploads/ (开发时HMR可访问)
+ * 
+ * 同时在 public/uploads/ 创建副本或符号链接以供 Next.js 静态服务
+ */
+export async function POST(request: NextRequest) {
+  try {
+    const { imageUrl, userId } = await request.json();
+
+    if (!imageUrl || typeof imageUrl !== 'string') {
+      return NextResponse.json({ error: 'No imageUrl provided' }, { status: 400 });
+    }
+
+    const isProd = process.env.COZE_PROJECT_ENV === 'PROD';
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2, 8);
+
+    // 确定上传目录：生产用持久卷，开发用 public/uploads
+    let uploadDir: string;
+    let webPath: string;
+    if (isProd) {
+      uploadDir = path.join(getServerDataRoot(), 'uploads');
+      webPath = '/api/serve-upload';  // 生产环境通过 API 提供文件
+    } else {
+      uploadDir = path.join(process.cwd(), 'public', 'uploads');
+      webPath = '/uploads';  // 开发环境直接通过 Next.js 静态服务
+    }
+    if (!existsSync(uploadDir)) {
+      await mkdir(uploadDir, { recursive: true });
+    }
+
+    // data:image/png;base64,... 格式
+    if (imageUrl.startsWith('data:')) {
+      const match = imageUrl.match(/^data:image\/([\w+]+);base64,(.+)$/);
+      if (!match) {
+        return NextResponse.json({ error: 'Invalid data URL format' }, { status: 400 });
+      }
+
+      const mimeType = match[1].replace('+xml', ''); // svg+xml -> svg
+      const base64Data = match[2];
+      const buffer = Buffer.from(base64Data, 'base64');
+
+      // 限制大小 (max 20MB)
+      if (buffer.length > 20 * 1024 * 1024) {
+        return NextResponse.json({ error: 'Image too large (max 20MB)' }, { status: 400 });
+      }
+
+      const ext = mimeType === 'jpeg' ? 'jpg' : mimeType === 'svg' ? 'svg' : mimeType;
+      const filename = `gen-${timestamp}-${random}.${ext}`;
+      const filePath = path.join(uploadDir, filename);
+      await writeFile(filePath, buffer);
+      // 开发环境也写入 public/uploads 以便 Next.js 静态服务
+      if (isProd) {
+        const publicDir = path.join(process.cwd(), 'public', 'uploads');
+        if (!existsSync(publicDir)) await mkdir(publicDir, { recursive: true });
+        try { await copyFile(filePath, path.join(publicDir, filename)); } catch { /* ignore */ }
+      }
+
+      return NextResponse.json({
+        success: true,
+        url: `${webPath}/${filename}`,
+        filename,
+        size: buffer.length,
+      });
+    }
+
+    // blob: URL — 前端应先转成 data URL 再发过来，这里做兜底
+    if (imageUrl.startsWith('blob:')) {
+      return NextResponse.json({ error: 'blob: URL cannot be saved server-side. Convert to data URL first.' }, { status: 400 });
+    }
+
+    // 远程 HTTP(S) URL — 下载后保存
+    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+      try {
+        const response = await fetch(imageUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          return NextResponse.json({ error: `Failed to download image: ${response.status}` }, { status: 400 });
+        }
+
+        const contentType = response.headers.get('content-type') || 'image/png';
+        const buffer = Buffer.from(await response.arrayBuffer());
+
+        if (buffer.length > 20 * 1024 * 1024) {
+          return NextResponse.json({ error: 'Image too large (max 20MB)' }, { status: 400 });
+        }
+
+        const extFromUrl = imageUrl.split('.').pop()?.split('?')[0]?.toLowerCase();
+        const extFromCt = contentType.split('/')[1]?.replace('jpeg', 'jpg').replace('svg+xml', 'svg');
+        const ext = extFromCt || extFromUrl || 'png';
+        const filename = `gen-${timestamp}-${random}.${ext}`;
+        const filePath = path.join(uploadDir, filename);
+        await writeFile(filePath, buffer);
+        // 开发环境也写入 public/uploads
+        if (isProd) {
+          const publicDir = path.join(process.cwd(), 'public', 'uploads');
+          if (!existsSync(publicDir)) await mkdir(publicDir, { recursive: true });
+          try { await copyFile(filePath, path.join(publicDir, filename)); } catch { /* ignore */ }
+        }
+
+        return NextResponse.json({
+          success: true,
+          url: `${webPath}/${filename}`,
+          filename,
+          size: buffer.length,
+        });
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        // 下载失败时，直接返回原始远程 URL（远程 URL 本身是可持久化的）
+        return NextResponse.json({
+          success: true,
+          url: imageUrl,
+          filename: null,
+          size: 0,
+          note: 'Remote URL kept as-is (download failed)',
+        });
+      }
+    }
+
+    return NextResponse.json({ error: 'Unsupported URL format' }, { status: 400 });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Save image failed';
+    console.error('Save image error:', message);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}

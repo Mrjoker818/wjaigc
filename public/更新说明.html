@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>无界AI - 更新说明</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 50%, #0d0d0d 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+            line-height: 1.8;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        
+        /* Header */
+        .header {
+            text-align: center;
+            padding: 60px 40px;
+            background: linear-gradient(145deg, rgba(212, 175, 55, 0.15), rgba(184, 134, 11, 0.08));
+            border: 1px solid rgba(212, 175, 55, 0.3);
+            border-radius: 16px;
+            margin-bottom: 40px;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, #b8860b, #d4af37, #ffd700, #d4af37, #b8860b);
+        }
+        
+        .header::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(212, 175, 55, 0.5), transparent);
+        }
+        
+        .logo {
+            font-size: 48px;
+            font-weight: bold;
+            background: linear-gradient(135deg, #ffd700, #d4af37, #b8860b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 16px;
+            text-shadow: 0 2px 20px rgba(212, 175, 55, 0.3);
+        }
+        
+        .subtitle {
+            font-size: 18px;
+            color: #888;
+            letter-spacing: 4px;
+        }
+        
+        /* Navigation */
+        .nav {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 40px;
+            flex-wrap: wrap;
+        }
+        
+        .nav-item {
+            padding: 10px 24px;
+            background: rgba(30, 30, 30, 0.8);
+            border: 1px solid rgba(212, 175, 55, 0.2);
+            border-radius: 8px;
+            color: #aaa;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            font-size: 14px;
+        }
+        
+        .nav-item:hover {
+            background: rgba(212, 175, 55, 0.15);
+            border-color: rgba(212, 175, 55, 0.5);
+            color: #d4af37;
+        }
+        
+        .nav-item.active {
+            background: linear-gradient(135deg, rgba(184, 134, 11, 0.3), rgba(212, 175, 55, 0.2));
+            border-color: #d4af37;
+            color: #ffd700;
+        }
+        
+        /* Section */
+        .section {
+            background: rgba(20, 20, 20, 0.9);
+            border: 1px solid rgba(212, 175, 55, 0.15);
+            border-radius: 12px;
+            padding: 32px;
+            margin-bottom: 24px;
+            position: relative;
+        }
+        
+        .section::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 24px;
+            right: 24px;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(212, 175, 55, 0.3), transparent);
+        }
+        
+        .section-title {
+            font-size: 22px;
+            font-weight: 600;
+            color: #d4af37;
+            margin-bottom: 24px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(212, 175, 55, 0.2);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .section-title .icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #d4af37, #b8860b);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+        
+        /* Version Card */
+        .version-card {
+            background: linear-gradient(145deg, rgba(212, 175, 55, 0.1), rgba(184, 134, 11, 0.05));
+            border: 1px solid rgba(212, 175, 55, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            position: relative;
+        }
+        
+        .version-card::before {
+            content: '';
+            position: absolute;
+            top: -1px;
+            left: 24px;
+            right: 24px;
+            height: 3px;
+            background: linear-gradient(90deg, #b8860b, #d4af37, #ffd700);
+            border-radius: 3px 3px 0 0;
+        }
+        
+        .version-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        
+        .version-number {
+            font-size: 24px;
+            font-weight: bold;
+            color: #ffd700;
+        }
+        
+        .version-date {
+            font-size: 14px;
+            color: #888;
+            background: rgba(212, 175, 55, 0.1);
+            padding: 4px 12px;
+            border-radius: 12px;
+        }
+        
+        .version-tag {
+            display: inline-block;
+            padding: 4px 12px;
+            background: linear-gradient(135deg, #d4af37, #b8860b);
+            border-radius: 4px;
+            font-size: 12px;
+            color: #0a0a0a;
+            font-weight: 600;
+            margin-left: 12px;
+        }
+        
+        /* Update List */
+        .update-item {
+            padding: 16px 20px;
+            background: rgba(30, 30, 30, 0.6);
+            border-left: 3px solid #d4af37;
+            margin-bottom: 12px;
+            border-radius: 0 8px 8px 0;
+        }
+        
+        .update-item.new {
+            border-left-color: #4CAF50;
+        }
+        
+        .update-item.fix {
+            border-left-color: #2196F3;
+        }
+        
+        .update-item.improve {
+            border-left-color: #9C27B0;
+        }
+        
+        .update-title {
+            font-weight: 600;
+            color: #e0e0e0;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .tag {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: normal;
+        }
+        
+        .tag-new {
+            background: rgba(76, 175, 80, 0.2);
+            color: #4CAF50;
+        }
+        
+        .tag-fix {
+            background: rgba(33, 150, 243, 0.2);
+            color: #2196F3;
+        }
+        
+        .tag-improve {
+            background: rgba(156, 39, 176, 0.2);
+            color: #9C27B0;
+        }
+        
+        .update-desc {
+            color: #999;
+            font-size: 14px;
+        }
+        
+        /* Roadmap */
+        .roadmap-item {
+            display: flex;
+            gap: 16px;
+            padding: 20px;
+            background: rgba(30, 30, 30, 0.6);
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+        
+        .roadmap-quarter {
+            flex-shrink: 0;
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(145deg, rgba(212, 175, 55, 0.2), rgba(184, 134, 11, 0.1));
+            border: 1px solid rgba(212, 175, 55, 0.3);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .roadmap-quarter .year {
+            font-size: 12px;
+            color: #888;
+        }
+        
+        .roadmap-quarter .q {
+            font-size: 20px;
+            font-weight: bold;
+            color: #d4af37;
+        }
+        
+        .roadmap-content h4 {
+            color: #d4af37;
+            margin-bottom: 8px;
+        }
+        
+        .roadmap-content p {
+            color: #999;
+            font-size: 14px;
+        }
+        
+        /* Alert */
+        .alert {
+            padding: 16px 20px;
+            border-radius: 8px;
+            margin: 16px 0;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+        }
+        
+        .alert-info {
+            background: rgba(70, 130, 180, 0.15);
+            border: 1px solid rgba(70, 130, 180, 0.3);
+        }
+        
+        .alert-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+        
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 40px;
+            margin-top: 40px;
+            border-top: 1px solid rgba(212, 175, 55, 0.2);
+        }
+        
+        .footer-text {
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="logo">无界AI</div>
+            <div class="subtitle">更新说明</div>
+        </div>
+        
+        <!-- Navigation -->
+        <div class="nav">
+            <a href="#" class="nav-item">使用说明</a>
+            <a href="#" class="nav-item active">更新说明</a>
+        </div>
+        
+        <!-- Current Version -->
+        <div class="section" id="changelog">
+            <div class="section-title">
+                <span class="icon">📝</span>
+                更新日志
+            </div>
+            
+            <!-- v1.0.0 -->
+            <div class="version-card">
+                <div class="version-header">
+                    <div>
+                        <span class="version-number">v1.0.0</span>
+                        <span class="version-tag">首发版本</span>
+                    </div>
+                    <span class="version-date">2026-04-27</span>
+                </div>
+                
+                <h4 style="color: #d4af37; margin-bottom: 16px;">✨ 新功能</h4>
+                <div class="update-item new">
+                    <div class="update-title">
+                        无限画布
+                        <span class="tag tag-new">NEW</span>
+                    </div>
+                    <div class="update-desc">支持图片展示、拖拽、缩放、框选生成</div>
+                </div>
+                <div class="update-item new">
+                    <div class="update-title">
+                        AI图片生成
+                        <span class="tag tag-new">NEW</span>
+                    </div>
+                    <div class="update-desc">支持 Flux、Imagen、Playground、Stable Diffusion 等多种模型</div>
+                </div>
+                <div class="update-item new">
+                    <div class="update-title">
+                        图片融合
+                        <span class="tag tag-new">NEW</span>
+                    </div>
+                    <div class="update-desc">框选画布中的图片进行融合创作，支持调整比例和画质</div>
+                </div>
+                <div class="update-item new">
+                    <div class="update-title">
+                        参考图添加
+                        <span class="tag tag-new">NEW</span>
+                    </div>
+                    <div class="update-desc">支持拖拽添加、按钮添加、右键上传等多种方式</div>
+                </div>
+                <div class="update-item new">
+                    <div class="update-title">
+                        一键提取关键词
+                        <span class="tag tag-new">NEW</span>
+                    </div>
+                    <div class="update-desc">分析图片提取AI生成提示词，中文显示</div>
+                </div>
+                <div class="update-item new">
+                    <div class="update-title">
+                        提示词助手
+                        <span class="tag tag-new">NEW</span>
+                    </div>
+                    <div class="update-desc">根据分类和产品自动推荐提示词标签</div>
+                </div>
+                <div class="update-item new">
+                    <div class="update-title">
+                        产品精修
+                        <span class="tag tag-new">NEW</span>
+                    </div>
+                    <div class="update-desc">对产品图片进行专业精修处理</div>
+                </div>
+                <div class="update-item new">
+                    <div class="update-title">
+                        生成进度显示
+                        <span class="tag tag-new">NEW</span>
+                    </div>
+                    <div class="update-desc">实时显示生成进度百分比</div>
+                </div>
+                
+                <h4 style="color: #d4af37; margin: 24px 0 16px;">🐛 问题修复</h4>
+                <div class="update-item fix">
+                    <div class="update-title">
+                        进度条显示问题
+                        <span class="tag tag-fix">FIX</span>
+                    </div>
+                    <div class="update-desc">修复进度条与实际生成进度不匹配的问题</div>
+                </div>
+                <div class="update-item fix">
+                    <div class="update-title">
+                        参考图重复添加
+                        <span class="tag tag-fix">FIX</span>
+                    </div>
+                    <div class="update-desc">修复添加到画布时重复添加已存在图片的问题</div>
+                </div>
+                <div class="update-item fix">
+                    <div class="update-title">
+                        滚动条样式
+                        <span class="tag tag-fix">FIX</span>
+                    </div>
+                    <div class="update-desc">统一界面滚动条为金色设计</div>
+                </div>
+                <div class="update-item fix">
+                    <div class="update-title">
+                        版本号重叠
+                        <span class="tag tag-fix">FIX</span>
+                    </div>
+                    <div class="update-desc">修复版本号与按钮重叠显示问题</div>
+                </div>
+                
+                <h4 style="color: #d4af37; margin: 24px 0 16px;">⚡ 优化改进</h4>
+                <div class="update-item improve">
+                    <div class="update-title">
+                        模型列表优化
+                        <span class="tag tag-improve">IMPROVE</span>
+                    </div>
+                    <div class="update-desc">移除不可用模型，保留可正常使用的高质量模型</div>
+                </div>
+                <div class="update-item improve">
+                    <div class="update-title">
+                        UI界面优化
+                        <span class="tag tag-improve">IMPROVE</span>
+                    </div>
+                    <div class="update-desc">统一黑金配色，提升视觉体验</div>
+                </div>
+                <div class="update-item improve">
+                    <div class="update-title">
+                        响应式布局
+                        <span class="tag tag-improve">IMPROVE</span>
+                    </div>
+                    <div class="update-desc">界面自适应，避免白边和显示不全</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Roadmap -->
+        <div class="section" id="roadmap">
+            <div class="section-title">
+                <span class="icon">🗺️</span>
+                更新规划
+            </div>
+            
+            <div class="roadmap-item">
+                <div class="roadmap-quarter">
+                    <span class="year">2026</span>
+                    <span class="q">Q2</span>
+                </div>
+                <div class="roadmap-content">
+                    <h4>下一个小版本</h4>
+                    <p>• 历史记录管理 - 保存生成历史<br>
+                    • 批量生成 - 支持批量处理多张图片<br>
+                    • 自定义尺寸 - 支持自定义画布尺寸<br>
+                    • 素材库 - 内置常用素材和模板</p>
+                </div>
+            </div>
+            
+            <div class="roadmap-item">
+                <div class="roadmap-quarter">
+                    <span class="year">2026</span>
+                    <span class="q">Q3</span>
+                </div>
+                <div class="roadmap-content">
+                    <h4>功能扩展</h4>
+                    <p>• 视频生成 - 支持AI视频生成<br>
+                    • 3D模型支持 - 支持3D模型预览<br>
+                    • 协作功能 - 多用户协作创作<br>
+                    • 云端存储 - 支持云端保存作品</p>
+                </div>
+            </div>
+            
+            <div class="roadmap-item">
+                <div class="roadmap-quarter">
+                    <span class="year">2026</span>
+                    <span class="q">Q4</span>
+                </div>
+                <div class="roadmap-content">
+                    <h4>企业版规划</h4>
+                    <p>• 企业定制 - 支持企业私有化部署<br>
+                    • API开放 - 提供完整的API接口<br>
+                    • SDK支持 - 多平台SDK支持<br>
+                    • 插件系统 - 支持第三方插件扩展</p>
+                </div>
+            </div>
+            
+            <div class="alert alert-info">
+                <span class="alert-icon">💡</span>
+                <div>
+                    <strong>反馈渠道：</strong>如果您有任何功能建议或问题反馈，欢迎随时联系我们。我们会认真对待每一条反馈，持续优化产品体验。
+                </div>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <div class="footer">
+            <p class="footer-text">
+                无界AI - 智能图片生成工具 | 版本 1.0.0<br>
+                <span style="color: #d4af37;">感谢您的使用与支持</span>
+            </p>
+        </div>
+    </div>
+</body>
+</html>

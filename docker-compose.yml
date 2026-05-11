@@ -1,0 +1,18 @@
+services:
+  wujieai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wujieai:latest
+    container_name: wujieai
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: ${PORT:-5000}
+      WUJIE_DATA_DIR: /data
+    ports:
+      - "${PORT:-5000}:${PORT:-5000}"
+    volumes:
+      - ./data:/data
