@@ -3,19 +3,36 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { X, UserPlus, Trash2, Ban, CheckCircle2, KeyRound, Plug, RefreshCw, Activity, Wallet, Pencil, Zap, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import { User } from '@/lib/user-types';
-import { UniversalApiManager } from '@/lib/universal-api-manager';
 import { ConfirmDialog } from './custom-dialogs';
 import { UserManager } from '@/lib/user-manager';
 import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import { UniversalApiManager } from '@/lib/universal-api-manager';
+
+// 客户端模型类型推断（与 server-api-config 保持一致）
+type ModelType = 'image' | 'chat' | '3d' | 'vectorize' | 'layer';
+const IMAGE_KW = ['dall-e','dall·e','dalle','midjourney','mj-','stable-diffusion','sdxl','sd3','stable-image','flux','flux-','imagen','kandinsky','cogview','cogviewx','minimax-image','minimax-video','kling-image','kling-v1-image','kling-v2-image','jimeng','jimeng-2','ideogram','ideogram-2','ideogram-3','recraft','recraft-v3','recraft-realism','leonardo','playground','playground-v3','playground-v2','luma-photon','seedream','seedream-3','seedream-5','wan2.7-image','wanx','gpt-image','gpt-image-1','gpt-image-2','nano-banana','gemini-3.1-flash-image','gemini-2.0-flash-image','pixart','pixart-alpha','pixart-sigma','deepfloyd','if-xl','wuerstchen','kolors','hunyuan-image','stepfun-image','bagel-image','dreamshaper','realvisxl','animagine','sdxl-turbo','sd-turbo','openjourney','open-dalle','amused','ssd-1b','sana','hidream-image','picsart','image-gen','image-generation','wan2.1-image','wan-image','doubao-seedream','grok-image','chatgpt-4o-image'];
+const CHAT_KW = ['gpt-4','gpt-4o','gpt-4-turbo','gpt-3.5','gpt-5','chatgpt','chat-latest','o1-','o3-','o4-','claude','claude-3','claude-4','claude-opus','claude-sonnet','gemini-1','gemini-2','gemini-3','deepseek','deepseek-chat','deepseek-v','deepseek-r','qwen','qwen2','qwen3','qwen-','llama','llama-2','llama-3','llama-4','mistral','mixtral','codestral','pixtral','yi-','yi-lightning','chatglm','glm-4','glm-5','moonshot','kimi','kimi-k2','spark','spark-4','spark-5','ernie','ernie-4','ernie-5','command','command-r','phi-','phi-3','phi-4','gemma','gemma-2','grok','grok-2','grok-3','grok-4','doubao-pro','doubao-lite','doubao-1.5','doubao-vision','doubao-1','hunyuan-turbos','minimax-abab','minimax-chat','step-2','step-1','internlm','internvl','solar','falcon','starcoder','codellama','wizardlm','vicuna','zephyr','openchat','nous-hermes','dolphin','hermes','granite','jamba','arctic','tinyllama','orca','qwen3-rerank','voyage','bge-','paddleocr','glm-ocr'];
+function inferModelTypeClient(modelId: string, fallback: ModelType = 'image'): ModelType {
+  const id = modelId.toLowerCase();
+  if (id.includes('3d')||id.includes('tripo')||id.includes('meshy')||id.includes('rodin')||id.includes('hyper3d')||id.includes('hunyuan3d')||id.includes('claydo')) return '3d';
+  if (id.includes('vector')||id.includes('vtracer')||id.includes('starvector')||id.includes('svg-')) return 'vectorize';
+  if (id.includes('layer')||id.includes('segment')||id.includes('sam2')||id.includes('yolo')||id.includes('rmbg')||id.includes('rembg')||id.includes('remove-bg')||id.includes('layered')) return 'layer';
+  for (const kw of IMAGE_KW) { if (id.includes(kw)) return 'image'; }
+  for (const kw of CHAT_KW) { if (id.includes(kw)) return 'chat'; }
+  if (/[-_](image|img|imgen|gen|paint|draw|art|photo)/.test(id)) return 'image';
+  if (/[-_](chat|talk|instruct|assistant|dialog|conv)/.test(id)) return 'chat';
+  if (/[a-z]+-\d+b/.test(id)) return 'chat';
+  return fallback;
+}
 
 interface AdminSystemProps {
   themeStyle?: 'gold' | 'monochrome';
   onClose: () => void;
 }
 
-type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'universal';
-type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'vectorize' | 'layer';
+type ApiKind = 'image' | 'chat' | '3d' | 'imageEdit' | 'vectorize' | 'layer' | 'universal';
+type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'imageEdit' | 'vectorize' | 'layer';
 type AdminProvider = ApiProvider & { apiKeyPreview?: string };
 
 const apiKindLabels: Record<ApiKind, string> = {
@@ -23,6 +40,7 @@ const apiKindLabels: Record<ApiKind, string> = {
   image: '图像模型',
   chat: 'LLM 模型',
   '3d': '3D 模型',
+  imageEdit: '图像处理模型',
   vectorize: '矢量模型',
   layer: '分层模型',
 };
@@ -31,25 +49,10 @@ const userPermissionLabels: Record<UserPermissionKey, string> = {
   image: '图像',
   chat: 'LLM',
   threeD: '3D',
+  imageEdit: '编辑',
   vectorize: '矢量',
   layer: '分层',
 };
-
-/** 客户端模型类型推断（与 server-api-config.ts 中 inferModelType 保持同步） */
-function inferModelTypeClient(modelId: string): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' {
-  const id = modelId.toLowerCase();
-  if (id.includes('3d') || id.includes('tripo') || id.includes('meshy') || id.includes('rodin') || id.includes('hyper3d') || id.includes('hunyuan3d') || id.includes('claydo')) return '3d';
-  if (id.includes('vector') || id.includes('vtracer') || id.includes('starvector') || id.includes('svg-')) return 'vectorize';
-  if (id.includes('layer') || id.includes('segment') || id.includes('sam2') || id.includes('yolo') || id.includes('rmbg') || id.includes('rembg') || id.includes('remove-bg') || id.includes('layered')) return 'layer';
-  const imageKws = ['dall-e','dall·e','dalle','midjourney','mj-','stable-diffusion','sdxl','sd3','stable-image','flux','flux-','imagen','kandinsky','cogview','cogviewx','minimax-image','minimax-video','kling-image','kling-v1-image','kling-v2-image','jimeng','jimeng-2','ideogram','ideogram-2','ideogram-3','recraft','recraft-v3','recraft-realism','leonardo','playground','playground-v3','playground-v2','luma-photon','seedream','seedream-3','seedream-5','wan2.7-image','wanx','gpt-image','gpt-image-1','gpt-image-2','nano-banana','gemini-3.1-flash-image','gemini-2.0-flash-image','pixart','pixart-alpha','pixart-sigma','deepfloyd','if-xl','wuerstchen','kolors','hunyuan-image','stepfun-image','bagel-image','dreamshaper','realvisxl','animagine','sdxl-turbo','sd-turbo','openjourney','open-dalle','amused','ssd-1b','sana','hidream-image','picsart','image-gen','image-generation','image-gen','wan2.1-image','wan-image','doubao-seedream','grok-image','chatgpt-4o-image'];
-  const chatKws = ['gpt-4','gpt-4o','gpt-4-turbo','gpt-3.5','gpt-5','chatgpt','chat-latest','o1-','o3-','o4-','claude','claude-3','claude-4','claude-opus','claude-sonnet','gemini-1','gemini-2','gemini-3','deepseek','deepseek-chat','deepseek-v','deepseek-r','qwen','qwen2','qwen3','qwen-','llama','llama-2','llama-3','llama-4','mistral','mixtral','codestral','pixtral','yi-','yi-lightning','chatglm','glm-4','glm-5','moonshot','kimi','kimi-k2','spark','spark-4','spark-5','ernie','ernie-4','ernie-5','command','command-r','phi-','phi-3','phi-4','gemma','gemma-2','grok','grok-2','grok-3','grok-4','doubao-pro','doubao-lite','doubao-1.5','doubao-vision','doubao-1','hunyuan-turbos','minimax-abab','minimax-chat','step-2','step-1','internlm','internvl','solar','falcon','starcoder','codellama','wizardlm','vicuna','zephyr','openchat','nous-hermes','dolphin','hermes','granite','jamba','arctic','tinyllama','orca','qwen3-rerank','voyage','bge-','paddleocr','glm-ocr'];
-  for (const kw of imageKws) { if (id.includes(kw)) return 'image'; }
-  for (const kw of chatKws) { if (id.includes(kw)) return 'chat'; }
-  if (/[-_](image|img|imgen|gen|paint|draw|art|photo)/.test(id)) return 'image';
-  if (/[-_](chat|talk|instruct|assistant|dialog|conv)/.test(id)) return 'chat';
-  if (/[a-z]+-\d+b/.test(id)) return 'chat';
-  return 'image'; // 默认归为 image
-}
 
 export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) {
   const isGold = themeStyle === 'gold';
@@ -183,6 +186,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
       image: user.apiPermissions?.image ?? true,
       chat: user.apiPermissions?.chat ?? true,
       threeD: user.apiPermissions?.threeD ?? true,
+      imageEdit: user.apiPermissions?.imageEdit ?? true,
       vectorize: user.apiPermissions?.vectorize ?? true,
       layer: user.apiPermissions?.layer ?? true,
     };
@@ -209,24 +213,27 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     if (!apiBaseUrl.trim() || !apiKey.trim()) return;
     setIsDiscovering(true);
     try {
-      // 使用客户端直接发现模型（浏览器端请求，兼容 302.ai 等无法从沙箱服务器访问的 API）
-      const result = await UniversalApiManager.quickTestConnection(apiBaseUrl.trim(), apiKey.trim());
+      // 使用客户端发现（从浏览器端直接请求目标API，绕过沙箱网络限制）
+      const result = await UniversalApiManager.quickTestConnection(
+        apiBaseUrl.trim(),
+        apiKey.trim()
+      );
       if (result.success && result.models && result.models.length > 0) {
-        // 将字符串模型 ID 转为 ModelInfo 格式，自动推断类型
-        const modelInfos: ModelInfo[] = result.models.map(id => ({
+        const models: ModelInfo[] = result.models.map((id: string) => ({
           id,
           name: getModelDisplayName(id),
           type: inferModelTypeClient(id),
-          providerId: '',
+          providerId: 'temp',
         }));
-        setDiscoveredModels(modelInfos);
+        setDiscoveredModels(models);
       } else {
         setDiscoveredModels([]);
-        alert(`未发现模型: ${result.message || '未知错误'}\n\n请检查:\n1. API 地址是否正确 (如 https://api.302.ai)\n2. API Key 是否有效\n3. 网络连接是否正常`);
+        alert(result.message || '未发现模型，请检查API地址和密钥是否正确');
       }
     } catch (err) {
-      console.error('发现模型失败:', err);
-      alert('发现模型请求失败，请检查网络连接。');
+      console.error('[Admin] 模型发现失败:', err);
+      setDiscoveredModels([]);
+      alert('模型发现失败: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setIsDiscovering(false);
     }
@@ -235,9 +242,6 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
   const handleAddApi = async () => {
     if (!apiName.trim() || !apiBaseUrl.trim() || !apiKey.trim()) return;
     const models = selectedModels.length ? selectedModels : apiModel.trim() ? [apiModel.trim()] : [];
-    // 根据选择的模型推断 requestStyle
-    const hasChatModel = selectedModels.length > 0 && selectedModels.some(id => inferModelTypeClient(id) === 'chat');
-    const requestStyle = (apiKind === 'chat' || hasChatModel) ? 'chat-completions' : 'images-generations';
     await fetch('/api/admin/apis', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -247,7 +251,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
         apiKey: apiKey.trim(),
         modelType: apiKind,
         selectedModels: models,
-        requestStyle,
+        requestStyle: apiKind === 'chat' ? 'chat-completions' : 'images-generations',
       }),
     });
     setApiName('');
@@ -311,25 +315,17 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     setIsTesting(true);
     setTestResult(null);
     try {
-      // 从服务器获取完整 API Key（前端只存 apiKeyPreview）
-      let apiKey = provider.apiKey || '';
-      if (!apiKey && provider.id) {
-        try {
-          const keyRes = await fetch('/api/admin/apis', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'test', providerId: provider.id }),
-          });
-          const keyData = await keyRes.json();
-          if (keyData.success) apiKey = keyData.apiKey;
-        } catch { /* ignore */ }
-      }
-      // 使用客户端直接测试连接（浏览器端请求，兼容 302.ai 等无法从沙箱服务器访问的 API）
-      const result = await UniversalApiManager.quickTestConnection(provider.baseUrl, apiKey);
+      const response = await fetch('/api/test-provider-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ providerId: provider.id }),
+      });
+      const data = await response.json();
       setTestResult({
         providerId: provider.id,
-        success: result.success,
-        message: result.success ? (result.message || '连接成功') : (result.message || '连接失败'),
+        success: data.success,
+        message: data.success ? data.message : (data.error || '连接失败'),
       });
     } catch {
       setTestResult({
@@ -353,61 +349,11 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
   };
 
   const handleRefreshApi = async (provider: AdminProvider) => {
-    try {
-      // 从服务器获取完整 API Key
-      let apiKey = provider.apiKey || '';
-      if (!apiKey && provider.id) {
-        try {
-          const keyRes = await fetch('/api/admin/apis', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'test', providerId: provider.id }),
-          });
-          const keyData = await keyRes.json();
-          if (keyData.success) apiKey = keyData.apiKey;
-        } catch { /* ignore */ }
-      }
-      // 使用客户端发现模型（浏览器端请求，兼容 302.ai 等无法从沙箱服务器访问的 API）
-      const result = await UniversalApiManager.quickTestConnection(provider.baseUrl, apiKey);
-      if (result.success && result.models) {
-        const modelInfos: ModelInfo[] = result.models.map((id: string) => ({
-          id,
-          name: getModelDisplayName(id),
-          type: inferModelTypeClient(id),
-          providerId: provider.id,
-        }));
-        // 更新服务端的 discoveredModels
-        await fetch('/api/admin/apis', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'update',
-            providerId: provider.id,
-            updates: {
-              discoveredModels: modelInfos.map(m => ({ ...m, providerId: provider.id })),
-              connectionStatus: 'success',
-            },
-          }),
-        });
-      } else {
-        await fetch('/api/admin/apis', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'update',
-            providerId: provider.id,
-            updates: { connectionStatus: 'failed' },
-          }),
-        });
-      }
-    } catch {
-      // fallback: try server-side refresh
-      await fetch('/api/admin/apis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'refresh', providerId: provider.id }),
-      });
-    }
+    await fetch('/api/admin/apis', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'refresh', providerId: provider.id }),
+    });
     window.dispatchEvent(new Event('wujie-admin-apis-updated'));
     await refresh();
   };
@@ -556,20 +502,15 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                         </button>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {discoveredModels.map((model) => {
-                          const typeLabel = model.type === 'image' ? '🖼' : model.type === 'chat' ? '💬' : model.type === '3d' ? '🧊' : model.type === 'vectorize' ? '📐' : model.type === 'layer' ? '🗂' : '🔧';
-                          const typeName = model.type === 'image' ? '图像' : model.type === 'chat' ? 'LLM' : model.type === '3d' ? '3D' : model.type === 'vectorize' ? '矢量' : model.type === 'layer' ? '分层' : model.type || '其他';
-                          return (
-                            <button
-                              key={model.id}
-                              onClick={() => setSelectedModels(prev => prev.includes(model.id) ? prev.filter(id => id !== model.id) : [...prev, model.id])}
-                              className={`px-2.5 py-1 rounded-md text-xs border ${selectedModels.includes(model.id) ? 'bg-[#d4af37] text-black border-transparent' : isGold ? 'bg-[#151515] text-[#999] border-[#2a2a2a]' : 'bg-gray-50 text-gray-600 border-gray-200'}`}
-                              title={`${typeName}模型`}
-                            >
-                              {typeLabel} {model.name && model.name !== model.id ? model.name : getModelDisplayName(model.id)}
-                            </button>
-                          );
-                        })}
+                        {discoveredModels.map((model) => (
+                          <button
+                            key={model.id}
+                            onClick={() => setSelectedModels(prev => prev.includes(model.id) ? prev.filter(id => id !== model.id) : [...prev, model.id])}
+                            className={`px-2.5 py-1 rounded-md text-xs border ${selectedModels.includes(model.id) ? 'bg-[#d4af37] text-black border-transparent' : isGold ? 'bg-[#151515] text-[#999] border-[#2a2a2a]' : 'bg-gray-50 text-gray-600 border-gray-200'}`}
+                          >
+                            {model.name && model.name !== model.id ? model.name : getModelDisplayName(model.id)}
+                          </button>
+                        ))}
                       </div>
                     </div>
                   )}
