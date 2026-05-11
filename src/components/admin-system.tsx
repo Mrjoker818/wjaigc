@@ -13,8 +13,8 @@ interface AdminSystemProps {
   onClose: () => void;
 }
 
-type ApiKind = 'image' | 'chat' | '3d' | 'imageEdit' | 'vectorize' | 'layer' | 'universal';
-type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'imageEdit' | 'vectorize' | 'layer';
+type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'universal';
+type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'vectorize' | 'layer';
 type AdminProvider = ApiProvider & { apiKeyPreview?: string };
 
 const apiKindLabels: Record<ApiKind, string> = {
@@ -22,7 +22,6 @@ const apiKindLabels: Record<ApiKind, string> = {
   image: '图像模型',
   chat: 'LLM 模型',
   '3d': '3D 模型',
-  imageEdit: '图像处理模型',
   vectorize: '矢量模型',
   layer: '分层模型',
 };
@@ -31,7 +30,6 @@ const userPermissionLabels: Record<UserPermissionKey, string> = {
   image: '图像',
   chat: 'LLM',
   threeD: '3D',
-  imageEdit: '编辑',
   vectorize: '矢量',
   layer: '分层',
 };
@@ -168,7 +166,6 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
       image: user.apiPermissions?.image ?? true,
       chat: user.apiPermissions?.chat ?? true,
       threeD: user.apiPermissions?.threeD ?? true,
-      imageEdit: user.apiPermissions?.imageEdit ?? true,
       vectorize: user.apiPermissions?.vectorize ?? true,
       layer: user.apiPermissions?.layer ?? true,
     };
@@ -203,7 +200,15 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
       const data = await response.json();
       const models = data.models || [];
       setDiscoveredModels(models);
+      if (models.length === 0 && data.message) {
+        alert(`未发现模型: ${data.message}\n\n请检查:\n1. API 地址是否正确 (如 https://api.302.ai)\n2. API Key 是否有效\n3. API 类型是否匹配 (图像模型选"图像"，聊天模型选"LLM"，混合模型选"通用(全部类型)")`);
+      } else if (models.length === 0) {
+        alert('未发现任何模型。请检查 API 地址、Key 和类型设置是否正确。');
+      }
       // 默认不选择任何模型，管理员手动选择
+    } catch (err) {
+      console.error('发现模型失败:', err);
+      alert('发现模型请求失败，请检查网络连接。');
     } finally {
       setIsDiscovering(false);
     }
@@ -472,15 +477,20 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                         </button>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {discoveredModels.map((model) => (
-                          <button
-                            key={model.id}
-                            onClick={() => setSelectedModels(prev => prev.includes(model.id) ? prev.filter(id => id !== model.id) : [...prev, model.id])}
-                            className={`px-2.5 py-1 rounded-md text-xs border ${selectedModels.includes(model.id) ? 'bg-[#d4af37] text-black border-transparent' : isGold ? 'bg-[#151515] text-[#999] border-[#2a2a2a]' : 'bg-gray-50 text-gray-600 border-gray-200'}`}
-                          >
-                            {model.name && model.name !== model.id ? model.name : getModelDisplayName(model.id)}
-                          </button>
-                        ))}
+                        {discoveredModels.map((model) => {
+                          const typeLabel = model.type === 'image' ? '🖼' : model.type === 'chat' ? '💬' : model.type === '3d' ? '🧊' : model.type === 'vectorize' ? '📐' : model.type === 'layer' ? '🗂' : '🔧';
+                          const typeName = model.type === 'image' ? '图像' : model.type === 'chat' ? 'LLM' : model.type === '3d' ? '3D' : model.type === 'vectorize' ? '矢量' : model.type === 'layer' ? '分层' : model.type || '其他';
+                          return (
+                            <button
+                              key={model.id}
+                              onClick={() => setSelectedModels(prev => prev.includes(model.id) ? prev.filter(id => id !== model.id) : [...prev, model.id])}
+                              className={`px-2.5 py-1 rounded-md text-xs border ${selectedModels.includes(model.id) ? 'bg-[#d4af37] text-black border-transparent' : isGold ? 'bg-[#151515] text-[#999] border-[#2a2a2a]' : 'bg-gray-50 text-gray-600 border-gray-200'}`}
+                              title={`${typeName}模型`}
+                            >
+                              {typeLabel} {model.name && model.name !== model.id ? model.name : getModelDisplayName(model.id)}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   )}

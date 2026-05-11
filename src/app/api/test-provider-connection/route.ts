@@ -58,13 +58,29 @@ export async function POST(request: NextRequest) {
           'Authorization': `Bearer ${provider.apiKey}`,
           'Content-Type': 'application/json',
         },
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(15000), // 15s timeout (large model lists can be slow)
       });
 
+      console.log('🔍 /v1/models response status:', modelsResponse.status, 'for provider:', provider.displayName || provider.name);
+
       if (modelsResponse.status === 200) {
-        const modelsData = await modelsResponse.json();
-        const modelCount = Array.isArray(modelsData.data) ? modelsData.data.length : 0;
-        
+        const responseText = await modelsResponse.text();
+        let modelsData: { data?: Array<{ id: string }>; models?: Array<{ id: string }> };
+        try {
+          modelsData = JSON.parse(responseText);
+        } catch {
+          console.error('❌ Failed to parse /v1/models response as JSON:', responseText.substring(0, 200));
+          return NextResponse.json({
+            success: false,
+            error: '服务器返回了非 JSON 格式的响应',
+            step: 'api_response',
+          });
+        }
+
+        // Handle both OpenAI format {data: [...]} and alternative format {models: [...]}
+        const modelList = modelsData.data || modelsData.models || [];
+        const modelCount = Array.isArray(modelList) ? modelList.length : 0;
+
         // Try to get balance info for apimart.ai
         let balanceInfo = '';
         if (targetBaseUrl.includes('apimart.ai')) {
@@ -95,9 +111,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           success: true,
           message: `连接成功！可用模型 ${modelCount} 个${balanceInfo}`,
-          data: { modelCount, models: modelsData.data?.slice(0, 5).map((m: { id: string }) => m.id) },
+          data: { modelCount, models: modelList.slice(0, 5).map((m: { id: string }) => m.id) },
         });
-      } else if (modelsResponse.status === 401) {
+      } else if (modelsResponse.status === 401 || modelsResponse.status === 403) {
         return NextResponse.json({
           success: false,
           error: 'API Key 无效或已过期',
@@ -105,17 +121,13 @@ export async function POST(request: NextRequest) {
           status: modelsResponse.status
         }, { status: 401 });
       } else {
+        // Non-200/401/403 status - log and fall through to strategy 2/3
         const errorText = await modelsResponse.text().catch(() => '');
-        return NextResponse.json({
-          success: false,
-          error: `API 返回错误 (HTTP ${modelsResponse.status})${errorText ? ': ' + errorText.slice(0, 100) : ''}`,
-          step: 'api_response',
-          status: modelsResponse.status
-        });
+        console.log(`⚠️ /v1/models returned HTTP ${modelsResponse.status}:`, errorText.substring(0, 200));
       }
     } catch (fetchError: unknown) {
-      // /v1/models failed, try alternative endpoints
-      console.log('⚠️ /v1/models failed:', getErrorMessage(fetchError));
+      // /v1/models failed (timeout, network error, etc.)
+      console.log('⚠️ /v1/models request failed:', getErrorMessage(fetchError));
     }
 
     // Strategy 2: Try /v1/balance endpoint (apimart specific)

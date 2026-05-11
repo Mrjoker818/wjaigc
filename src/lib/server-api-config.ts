@@ -8,7 +8,6 @@ import { getServerSystemDir } from './server-data-root';
 
 const SYSTEM_DIR = getServerSystemDir();
 const CONFIG_PATH = path.join(SYSTEM_DIR, 'api-providers.json');
-const DISCOVERY_TIMEOUT_MS = 8000;
 
 /**
  * Normalize API base URL to always end with /v1
@@ -223,7 +222,7 @@ export async function getPublicApiProviders(): Promise<PublicApiProvider[]> {
 export async function discoverModelsForCredentials(
   baseUrl: string,
   apiKey: string,
-  modelType: ApiKind,
+  modelType: ApiKind, // eslint-disable-line @typescript-eslint/no-unused-vars -- 保留参数以兼容现有调用方
 ): Promise<{ success: boolean; models: ModelInfo[]; message: string; latencyMs: number }> {
   const startedAt = Date.now();
   const probeProvider: ApiProvider = {
@@ -232,39 +231,53 @@ export async function discoverModelsForCredentials(
     baseUrl,
     apiKey,
     isEnabled: true,
-    type: modelType === 'chat' ? 'chat' : modelType === 'imageEdit' ? 'imageEdit' : modelType === 'image' ? 'image' : 'universal',
-    modelType,
+    type: 'universal',
+    modelType: 'universal',
     createdAt: startedAt,
     updatedAt: startedAt,
   };
 
   try {
-    const response = await fetch(`${normalizeBaseUrl(baseUrl)}/models`, {
+    const normalizedUrl = normalizeBaseUrl(baseUrl);
+    const response = await fetch(`${normalizedUrl}/models`, {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
+      signal: AbortSignal.timeout(15_000),
     });
 
     const latencyMs = Date.now() - startedAt;
     if (!response.ok) {
-      return { success: false, models: [], message: `${response.status} ${response.statusText}`, latencyMs };
+      const errorText = await response.text().catch(() => '');
+      console.error(`❌ Model discovery failed: HTTP ${response.status} from ${normalizedUrl}/models`, errorText.substring(0, 200));
+      return { success: false, models: [], message: `HTTP ${response.status}: ${response.statusText}`, latencyMs };
     }
 
-    const data = await response.json();
+    const responseText = await response.text();
+    let data: { data?: unknown[]; models?: unknown[] };
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      console.error('❌ Failed to parse /models response as JSON:', responseText.substring(0, 200));
+      return { success: false, models: [], message: '服务器返回了非 JSON 格式的响应', latencyMs };
+    }
     const rawModels = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
-    const models = rawModels
-      .map((m: Record<string, unknown>) => formatModel(m, probeProvider))
-      .filter((m: ModelInfo) => m.id && (modelType === 'universal' || modelType === 'imageEdit' || m.type === modelType || (modelType === 'image' && m.type === 'image')));
+    console.log(`📋 Discovered ${rawModels.length} raw models from ${normalizedUrl}`);
 
-    return { success: true, models, message: `Found ${models.length} models`, latencyMs };
+    // 不按类型过滤，返回所有模型；每个模型通过 inferModelType 自动推断类型
+    const models = rawModels
+      .map((m: unknown) => formatModel(m as Record<string, unknown>, probeProvider))
+      .filter((m: ModelInfo) => m.id);
+
+    return { success: true, models, message: `发现 ${models.length} 个模型`, latencyMs };
   } catch (error) {
     const latencyMs = Date.now() - startedAt;
+    console.error('❌ Model discovery error:', error instanceof Error ? error.message : String(error));
     return {
       success: false,
       models: [],
-      message: error instanceof Error ? error.message : 'Model discovery failed',
+      message: error instanceof Error ? error.message : '模型发现失败',
       latencyMs,
     };
   }
@@ -353,7 +366,7 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
     baseUrl: normalizeBaseUrl(input.baseUrl),
     apiKey: input.apiKey.trim(),
     isEnabled: true,
-    type: input.modelType === 'chat' ? 'chat' : input.modelType === 'imageEdit' ? 'imageEdit' : input.modelType === 'image' ? 'image' : 'universal',
+    type: input.modelType === 'chat' ? 'chat' : input.modelType === 'image' ? 'image' : 'universal',
     modelType: input.modelType,
     requestStyle: input.requestStyle || (input.modelType === 'chat' ? 'chat-completions' : 'images-generations'),
     selectedModels: input.selectedModels || [],
@@ -439,19 +452,21 @@ export async function refreshApiProvider(providerId: string): Promise<ApiProvide
 export async function findProviderForModel(modelId: string, modelType?: ApiKind): Promise<ApiProvider | null> {
   const providers = await getApiProviders();
   const enabled = providers.filter(provider => provider.isEnabled);
+  // imageEdit 也能匹配 image 类型的提供商（图像处理模型通常共用图像 API）
+  const effectiveModelType = modelType === 'imageEdit' ? 'image' : modelType;
   const exact = enabled.find(provider =>
-    (!modelType || modelType === 'universal' || provider.modelType === modelType || provider.modelType === 'universal') &&
+    (!effectiveModelType || effectiveModelType === 'universal' || provider.modelType === effectiveModelType || provider.modelType === modelType || provider.modelType === 'universal') &&
     (provider.selectedModels || []).includes(modelId),
   );
   if (exact) return exact;
 
   const byDefault = enabled.find(provider =>
-    (!modelType || modelType === 'universal' || provider.modelType === modelType || provider.modelType === 'universal') &&
+    (!effectiveModelType || effectiveModelType === 'universal' || provider.modelType === effectiveModelType || provider.modelType === modelType || provider.modelType === 'universal') &&
     provider.isDefault,
   );
   if (byDefault) return byDefault;
 
-  return enabled.find(provider => !modelType || provider.modelType === modelType || provider.modelType === 'universal') || null;
+  return enabled.find(provider => !effectiveModelType || provider.modelType === effectiveModelType || provider.modelType === modelType || provider.modelType === 'universal') || null;
 }
 
 /** 根据功能类型查找对应的 API 提供商（矢量化/分层/3D等） */
