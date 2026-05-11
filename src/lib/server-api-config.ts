@@ -81,28 +81,104 @@ function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 
 
 function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 'vectorize' | 'layer'): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' {
   const id = modelId.toLowerCase();
-  if (id.includes('3d') || id.includes('tripo') || id.includes('meshy') || id.includes('hunyuan')) return '3d';
-  if (id.includes('vector') || id.includes('vtracer') || id.includes('starvector') || id.includes('svg')) return 'vectorize';
-  if (id.includes('layer') || id.includes('segment') || id.includes('sam') || id.includes('detection') || id.includes('yolo')) return 'layer';
-  if (
-    id.includes('image') ||
-    id.includes('dall-e') ||
-    id.includes('flux') ||
-    id.includes('stable') ||
-    id.includes('sd') ||
-    id.includes('midjourney') ||
-    id.includes('imagen') ||
-    id.includes('seedream')
-  ) return 'image';
-  if (
-    id.includes('gpt') ||
-    id.includes('claude') ||
-    id.includes('gemini') ||
-    id.includes('qwen') ||
-    id.includes('deepseek') ||
-    id.includes('llama') ||
-    id.includes('glm')
-  ) return 'chat';
+
+  // ── 3D models (check first - rare but specific) ──
+  if (id.includes('3d') || id.includes('tripo') || id.includes('meshy') || id.includes('rodin') || id.includes('hyper3d')) return '3d';
+
+  // ── Vectorize models ──
+  if (id.includes('vector') || id.includes('vtracer') || id.includes('starvector') || id.includes('svg-')) return 'vectorize';
+
+  // ── Segment / Layer models ──
+  if (id.includes('layer') || id.includes('segment') || id.includes('sam2') || id.includes('yolo') || id.includes('rmbg') || id.includes('rembg') || id.includes('remove-bg')) return 'layer';
+
+  // ── Image generation models (extensive list for 302.ai etc.) ──
+  const imageKeywords = [
+    'dall-e', 'dall·e', 'dalle',
+    'midjourney', 'mj-',
+    'stable-diffusion', 'sdxl', 'sd3', 'stable-image',
+    'flux', 'flux-',
+    'imagen',
+    'kandinsky',
+    'cogview', 'cogviewx',
+    'minimax-image', 'minimax-video',
+    'kling-image', 'kling-v1-image', 'kling-v2-image',
+    'jimeng', 'jimeng-2',
+    'ideogram', 'ideogram-2', 'ideogram-3',
+    'recraft', 'recraft-v3', 'recraft-realism',
+    'leonardo',
+    'playground', 'playground-v3', 'playground-v2',
+    'luma-photon',
+    'seedream', 'seedream-3', 'seedream-5',
+    'wan2.7-image', 'wanx',
+    'gpt-image', 'gpt-image-1', 'gpt-image-2',
+    'nano-banana', 'gemini-3.1-flash-image', 'gemini-2.0-flash-image',
+    'pixart', 'pixart-alpha', 'pixart-sigma',
+    'deepfloyd', 'if-xl',
+    'wuerstchen',
+    'kolors',
+    'hunyuan-image',
+    'stepfun-image',
+    'bagel-image',
+    'dreamshaper',
+    'realvisxl',
+    'animagine',
+    'sdxl-turbo', 'sd-turbo',
+    'openjourney', 'open-dalle',
+    'amused', 'ssd-1b', 'sana',
+    'hidream-image',
+    'picsart',
+    'image-gen', 'image-generation', 'image-gen',
+    'wan2.1-image', 'wan-image',
+    'doubao-seedream',
+    'grok-image',
+    'chatgpt-4o-image',
+  ];
+  for (const kw of imageKeywords) {
+    if (id.includes(kw)) return 'image';
+  }
+
+  // ── Chat / LLM models (extensive list for 302.ai etc.) ──
+  const chatKeywords = [
+    'gpt-4', 'gpt-4o', 'gpt-4-turbo', 'gpt-3.5', 'gpt-5',
+    'chatgpt', 'chat-latest',
+    'o1-', 'o3-', 'o4-',
+    'claude', 'claude-3', 'claude-4', 'claude-opus', 'claude-sonnet',
+    'gemini-1', 'gemini-2', 'gemini-3',
+    'deepseek', 'deepseek-chat', 'deepseek-v', 'deepseek-r',
+    'qwen', 'qwen2', 'qwen3', 'qwen-',
+    'llama', 'llama-2', 'llama-3', 'llama-4',
+    'mistral', 'mixtral', 'codestral', 'pixtral',
+    'yi-', 'yi-lightning',
+    'chatglm', 'glm-4', 'glm-5',
+    'moonshot', 'kimi', 'kimi-k2',
+    'spark', 'spark-4', 'spark-5',
+    'ernie', 'ernie-4', 'ernie-5',
+    'command', 'command-r',
+    'phi-', 'phi-3', 'phi-4',
+    'gemma', 'gemma-2',
+    'grok', 'grok-2', 'grok-3', 'grok-4',
+    'doubao-pro', 'doubao-lite',
+    'hunyuan-turbos',
+    'minimax-abab', 'minimax-chat',
+    'step-2', 'step-1',
+    'internlm', 'internvl',
+    'solar', 'falcon', 'starcoder', 'codellama',
+    'wizardlm', 'vicuna', 'zephyr', 'openchat',
+    'nous-hermes', 'dolphin', 'hermes',
+    'granite', 'jamba', 'arctic',
+    'tinyllama', 'orca',
+    'qwen3-rerank', 'voyage', 'bge-',
+    'paddleocr', 'glm-ocr',
+  ];
+  for (const kw of chatKeywords) {
+    if (id.includes(kw)) return 'chat';
+  }
+
+  // ── Heuristic fallbacks ──
+  if (/[-_](image|img|imgen|gen|paint|draw|art|photo)/.test(id)) return 'image';
+  if (/[-_](chat|talk|instruct|assistant|dialog|conv)/.test(id)) return 'chat';
+  if (/[a-z]+-\d+b/.test(id)) return 'chat';  // e.g. qwen3-6b, llama3-8b
+
   return fallback;
 }
 
