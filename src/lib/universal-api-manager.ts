@@ -183,14 +183,13 @@ export class UniversalApiManager {
     type: 'image' | 'chat' | 'universal' = 'universal',
     options?: {
       displayName?: string;
-      modelType?: 'image' | 'chat' | '3d' | 'imageProcessing';
+      modelType?: 'image' | 'chat' | '3d';
       providerPreset?: string;
-      requestStyle?: 'chat-completions' | 'images-generations' | 'image-processing';
+      requestStyle?: 'chat-completions' | 'images-generations';
       selectedModel?: string;
       selectedModels?: string[];
       advancedParams?: Record<string, string>;
       isRelay?: boolean;
-      featureSubtype?: string;
     }
   ): ApiProvider {
     const provider: ApiProvider = {
@@ -210,7 +209,6 @@ export class UniversalApiManager {
       selectedModels: options?.selectedModels || (options?.selectedModel ? [options.selectedModel] : []),
       advancedParams: options?.advancedParams || {},
       isRelay: options?.isRelay,
-      featureSubtype: options?.featureSubtype as ApiProvider['featureSubtype'],
       connectionStatus: 'untested',
     };
 

@@ -4,7 +4,7 @@ import { getPublicApiProviders, getPublicModels } from '@/lib/server-api-config'
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  const type = request.nextUrl.searchParams.get('type') as 'image' | 'chat' | '3d' | 'imageEdit' | 'imageProcessing' | 'universal' | null;
+  const type = request.nextUrl.searchParams.get('type') as 'image' | 'chat' | '3d' | 'imageEdit' | 'universal' | null;
   const [providers, models] = await Promise.all([
     getPublicApiProviders(),
     getPublicModels(type || undefined),

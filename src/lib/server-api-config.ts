@@ -23,7 +23,7 @@ export function normalizeApiBaseUrl(baseUrl: string): string {
   return `${trimmed}/v1`;
 }
 
-type ApiKind = 'image' | 'chat' | '3d' | 'imageEdit' | 'imageProcessing' | 'universal' | 'vectorize' | 'layer';
+type ApiKind = 'image' | 'chat' | '3d' | 'imageEdit' | 'universal' | 'vectorize' | 'layer';
 
 interface StoredApiConfig {
   providers: ApiProvider[];
@@ -39,7 +39,6 @@ interface AddProviderInput {
   selectedModels?: string[];
   advancedParams?: Record<string, string>;
   isDefault?: boolean;
-  featureSubtype?: 'vectorize' | '3d' | 'layer';
 }
 
 export type PublicApiProvider = Omit<ApiProvider, 'apiKey'> & {
@@ -72,20 +71,19 @@ function normalizeBaseUrl(baseUrl: string): string {
   return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`;
 }
 
-function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'imageProcessing' {
+function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' {
   if (provider.modelType === 'chat') return 'chat';
   if (provider.modelType === '3d') return '3d';
   if (provider.modelType === 'vectorize') return 'vectorize';
   if (provider.modelType === 'layer') return 'layer';
-  if (provider.modelType === 'imageProcessing') return 'imageProcessing';
   return 'image';
 }
 
-function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'imageProcessing'): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'imageProcessing' {
+function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 'vectorize' | 'layer'): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' {
   const id = modelId.toLowerCase();
-  if (id.includes('3d') || id.includes('tripo') || id.includes('meshy') || id.includes('hunyuan3d') || id.includes('hunyuan') || id.includes('rodin') || id.includes('deemos')) return '3d';
-  if (id.includes('vectorizer') || id.includes('vtracer') || id.includes('starvector') || id.includes('svg')) return 'vectorize';
-  if (id.includes('qwen-image-layered') || id.includes('layer') || id.includes('segment') || id.includes('sam') || id.includes('detection') || id.includes('yolo')) return 'layer';
+  if (id.includes('3d') || id.includes('tripo') || id.includes('meshy') || id.includes('hunyuan')) return '3d';
+  if (id.includes('vector') || id.includes('vtracer') || id.includes('starvector') || id.includes('svg')) return 'vectorize';
+  if (id.includes('layer') || id.includes('segment') || id.includes('sam') || id.includes('detection') || id.includes('yolo')) return 'layer';
   if (
     id.includes('image') ||
     id.includes('dall-e') ||
@@ -106,21 +104,6 @@ function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 've
     id.includes('glm')
   ) return 'chat';
   return fallback;
-}
-
-/** Infer the featureSubtype for imageProcessing models based on model name */
-function inferFeatureSubtype(modelId: string): 'vectorize' | '3d' | 'layer' | undefined {
-  const id = modelId.toLowerCase();
-  // Specific matches first
-  if (id.includes('vectorizer') || id.includes('vtracer') || id.includes('starvector')) return 'vectorize';
-  if (id.includes('hunyuan3d') || id.includes('hunyuan')) return '3d';
-  if (id.includes('qwen-image-layered')) return 'layer';
-  if (id.includes('tripo') || id.includes('meshy') || id.includes('rodin') || id.includes('deemos')) return '3d';
-  // Generic matches
-  if (id.includes('vector') || id.includes('svg')) return 'vectorize';
-  if (id.includes('3d')) return '3d';
-  if (id.includes('layer') || id.includes('segment') || id.includes('sam')) return 'layer';
-  return undefined;
 }
 
 function formatModel(model: Record<string, unknown>, provider: ApiProvider): ModelInfo {
@@ -172,7 +155,7 @@ export async function discoverModelsForCredentials(
     baseUrl,
     apiKey,
     isEnabled: true,
-    type: modelType === 'chat' ? 'chat' : modelType === 'imageEdit' ? 'imageEdit' : modelType === 'image' ? 'image' : modelType === 'imageProcessing' ? 'imageProcessing' : 'universal',
+    type: modelType === 'chat' ? 'chat' : modelType === 'imageEdit' ? 'imageEdit' : modelType === 'image' ? 'image' : 'universal',
     modelType,
     createdAt: startedAt,
     updatedAt: startedAt,
@@ -196,7 +179,7 @@ export async function discoverModelsForCredentials(
     const rawModels = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
     const models = rawModels
       .map((m: Record<string, unknown>) => formatModel(m, probeProvider))
-      .filter((m: ModelInfo) => m.id && (modelType === 'universal' || modelType === 'imageEdit' || modelType === 'imageProcessing' || m.type === modelType || (modelType === 'image' && m.type === 'image')));
+      .filter((m: ModelInfo) => m.id && (modelType === 'universal' || modelType === 'imageEdit' || m.type === modelType || (modelType === 'image' && m.type === 'image')));
 
     return { success: true, models, message: `Found ${models.length} models`, latencyMs };
   } catch (error) {
@@ -286,27 +269,6 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
   const config = await readConfig();
   const now = Date.now();
   const id = `api_${now}_${Math.random().toString(36).slice(2, 9)}`;
-
-  // Determine the internal type from the user-facing modelType
-  let internalType: ApiProvider['type'] = 'universal';
-  if (input.modelType === 'chat') internalType = 'chat';
-  else if (input.modelType === 'imageEdit') internalType = 'imageEdit';
-  else if (input.modelType === 'image') internalType = 'image';
-  else if (input.modelType === '3d') internalType = '3d';
-  else if (input.modelType === 'vectorize') internalType = 'vectorize';
-  else if (input.modelType === 'layer') internalType = 'layer';
-  else if (input.modelType === 'imageProcessing') internalType = 'imageProcessing';
-
-  // Auto-infer featureSubtype for imageProcessing type based on model names
-  let featureSubtype = input.featureSubtype;
-  if (input.modelType === 'imageProcessing' && !featureSubtype && input.selectedModels?.length) {
-    // Try to infer from the first selected model
-    for (const modelId of input.selectedModels) {
-      const inferred = inferFeatureSubtype(modelId);
-      if (inferred) { featureSubtype = inferred; break; }
-    }
-  }
-
   const provider: ApiProvider = {
     id,
     name: input.name.trim(),
@@ -314,9 +276,8 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
     baseUrl: normalizeBaseUrl(input.baseUrl),
     apiKey: input.apiKey.trim(),
     isEnabled: true,
-    type: internalType,
+    type: input.modelType === 'chat' ? 'chat' : input.modelType === 'imageEdit' ? 'imageEdit' : input.modelType === 'image' ? 'image' : 'universal',
     modelType: input.modelType,
-    featureSubtype,
     requestStyle: input.requestStyle || (input.modelType === 'chat' ? 'chat-completions' : 'images-generations'),
     selectedModels: input.selectedModels || [],
     advancedParams: input.advancedParams || {},
@@ -329,15 +290,6 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
   const discovery = await discoverModelsForCredentials(provider.baseUrl, provider.apiKey, input.modelType);
   provider.discoveredModels = discovery.models.map(model => ({ ...model, providerId: id }));
   provider.selectedModels = input.selectedModels?.length ? input.selectedModels : provider.discoveredModels.map(model => model.id);
-
-  // Re-infer featureSubtype from discovered models if still not set
-  if (input.modelType === 'imageProcessing' && !featureSubtype && provider.selectedModels.length) {
-    for (const modelId of provider.selectedModels) {
-      const inferred = inferFeatureSubtype(modelId);
-      if (inferred) { featureSubtype = inferred; provider.featureSubtype = inferred; break; }
-    }
-  }
-
   provider.selectedModel = provider.selectedModels[0];
   provider.connectionStatus = discovery.success ? 'success' : 'failed';
   provider.lastTestedAt = Date.now();
@@ -426,56 +378,25 @@ export async function findProviderForModel(modelId: string, modelType?: ApiKind)
 
 /** 根据功能类型查找对应的 API 提供商（矢量化/分层/3D等） */
 export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3d'): Promise<ApiProvider | null> {
+  const kindMap: Record<string, ApiKind> = {
+    vectorize: 'vectorize',
+    layer: 'layer',
+    '3d': '3d',
+  };
+  const kind = kindMap[feature];
+  if (!kind) return null;
   const providers = await getApiProviders();
-  const enabled = providers.filter(p => p.isEnabled);
-
-  // 1. Check imageProcessing providers:
-  //    a) with explicit featureSubtype matching
-  //    b) with selectedModels that infer to the requested feature subtype
-  const imageProcessingProviders = enabled.filter(p => p.modelType === 'imageProcessing');
-  const subtyped = imageProcessingProviders.filter(p => {
-    if (p.featureSubtype === feature) return true;
-    // Also check if any selected model infers to this feature
-    const allModels = [...(p.selectedModels || []), ...(p.discoveredModels || []).map(m => m.id)];
-    return allModels.some(m => inferFeatureSubtype(m) === feature);
-  });
-  const defaultSubtyped = subtyped.find(p => p.isDefault);
-  if (defaultSubtyped) return defaultSubtyped;
-  if (subtyped.length > 0) return subtyped[0];
-
-  // 2. Check legacy providers with explicit modelType (old system: 3d/vectorize/layer)
-  const legacy = enabled.filter(p => p.modelType === feature || p.modelType === 'universal');
-  const defaultLegacy = legacy.find(p => p.isDefault);
-  if (defaultLegacy) return defaultLegacy;
-  return legacy[0] || null;
+  const enabled = providers.filter(p => p.isEnabled && (p.modelType === kind || p.modelType === 'universal'));
+  // 优先返回默认提供商
+  const defaultProvider = enabled.find(p => p.isDefault);
+  if (defaultProvider) return defaultProvider;
+  return enabled[0] || null;
 }
 
 export async function getPublicModels(modelType?: ApiKind): Promise<ModelInfo[]> {
   const providers = await getApiProviders();
-
-  // Map legacy type requests to imageProcessing subtype matching
-  const legacyToSubtype: Record<string, string> = { '3d': '3d', vectorize: 'vectorize', layer: 'layer' };
-  const requestedSubtype = modelType ? legacyToSubtype[modelType] : undefined;
-
   return providers
-    .filter(provider => {
-      if (!provider.isEnabled) return false;
-      if (!modelType || modelType === 'universal') return provider.modelType === 'universal';
-      // Exact type match
-      if (provider.modelType === modelType) return true;
-      // imageProcessing providers match when:
-      //   a) requesting imageProcessing type
-      //   b) requesting a legacy type that matches a subtype
-      if (provider.modelType === 'imageProcessing') {
-        if (modelType === 'imageProcessing') return true;
-        if (requestedSubtype) {
-          // Check if any selected model matches the requested subtype
-          const allModels = [...(provider.selectedModels || []), ...(provider.discoveredModels || []).map(m => m.id)];
-          return allModels.some(m => inferFeatureSubtype(m) === requestedSubtype);
-        }
-      }
-      return provider.modelType === 'universal';
-    })
+    .filter(provider => provider.isEnabled && (!modelType || modelType === 'universal' || provider.modelType === modelType || provider.modelType === 'universal'))
     .flatMap(provider => {
       const selected = new Set(provider.selectedModels || []);
       const discovered = provider.discoveredModels || [];

@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
-import { inferImageProcessingSubtype } from '@/lib/universal-api-types';
 import {
   Plus, Trash2, Copy, Download, Image as ImageIcon,
   Move, ZoomIn, ZoomOut, Maximize2, Hand, Info,
@@ -1851,39 +1850,34 @@ export function InfiniteCanvas({
   useEffect(() => {
     const loadAdmin3DModels = async () => {
       try {
-        const res = await fetch('/api/models?type=imageProcessing');
+        const res = await fetch('/api/models?type=3d');
         if (res.ok) {
           const data = await res.json();
           const models: Array<{ id: string; name: string; baseUrl: string; apiKey: string; model?: string; providerPreset?: string; providerName: string; advancedParams?: Record<string, string> }> = [];
-          // 从 providers[].models 读取，仅筛选 3D 子类型模型
+          // 从 providers[].models 读取
           if (data.providers && Array.isArray(data.providers)) {
             for (const provider of data.providers) {
               if (provider.models && Array.isArray(provider.models)) {
                 for (const m of provider.models) {
-                  const modelName = m.id || m.name || '';
-                  if (inferImageProcessingSubtype(modelName) === '3d') {
-                    models.push({
-                      id: `admin-3d::${provider.id}::${m.id || m.name}`,
-                      name: provider.name || provider.displayName || '管理员',
-                      baseUrl: provider.baseUrl,
-                      apiKey: provider.apiKey,
-                      model: m.id || m.name,
-                      providerPreset: provider.providerPreset || '',
-                      providerName: provider.name || provider.displayName || '管理员',
-                      advancedParams: provider.advancedParams,
-                    });
-                  }
+                  models.push({
+                    id: `admin-3d::${provider.id}::${m.id || m.name}`,
+                    name: provider.name || provider.displayName || '管理员',
+                    baseUrl: provider.baseUrl,
+                    apiKey: provider.apiKey,
+                    model: m.id || m.name,
+                    providerPreset: provider.providerPreset || '',
+                    providerName: provider.name || provider.displayName || '管理员',
+                    advancedParams: provider.advancedParams,
+                  });
                 }
               }
             }
           }
-          // 也从顶层 models 数组读取（管理员配置的图像处理模型，仅筛选 3D 子类型）
+          // 也从顶层 models 数组读取（管理员配置的3D模型）
           if (data.models && Array.isArray(data.models)) {
             const existingIds = new Set(models.map(m => m.id));
             for (const m of data.models) {
-              const modelName = m.id || m.name || '';
-              if (inferImageProcessingSubtype(modelName) !== '3d') continue;
-              const modelId = `admin-3d::${m.providerId}::${modelName}`;
+              const modelId = `admin-3d::${m.providerId}::${m.id || m.name}`;
               if (!existingIds.has(modelId)) {
                 const provider = data.providers?.find((p: {id: string}) => p.id === m.providerId);
                 models.push({
