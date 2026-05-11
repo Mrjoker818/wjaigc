@@ -4116,7 +4116,7 @@ export function InfiniteCanvas({
                   <Info size={14} /> 操作说明
                 </button>
                 <button onClick={() => setShowHelpModal('updates')} className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-all border ${isMonochrome ? 'text-gray-600 border-gray-200 hover:text-gray-900 hover:border-gray-400' : 'text-[#888] border-[#2a2a2a] hover:text-[#d4af37] hover:border-[#d4af37]/40'}`}>
-                  <FileText size={14} /> 更新说明
+                  <FileText size={14} /> 更新内容
                 </button>
               </div>
               <div className={`text-xs ${isMonochrome ? 'text-gray-500' : 'text-gray-500'}`}>点击下方按钮开始创作</div>
@@ -5896,7 +5896,7 @@ export function InfiniteCanvas({
               <div className={`flex items-center justify-between px-5 py-3.5 border-b ${isMonochrome ? 'border-gray-100' : 'border-[#2a2a2a]'}`}>
                 <div className="flex items-center gap-2">
                   {showHelpModal === 'instructions' ? <Info size={16} className={isMonochrome ? 'text-gray-700' : 'text-[#d4af37]'} /> : <FileText size={16} className={isMonochrome ? 'text-gray-700' : 'text-[#d4af37]'} />}
-                  <span className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>{showHelpModal === 'instructions' ? '操作说明' : '更新说明'}</span>
+                  <span className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>{showHelpModal === 'instructions' ? '操作说明' : '更新内容'}</span>
                 </div>
                 <button onClick={() => setShowHelpModal(null)} className={`p-1 rounded-lg transition-colors ${isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-[#666] hover:text-white hover:bg-[#2a2a2a]'}`}><X size={16} /></button>
               </div>
@@ -5906,7 +5906,7 @@ export function InfiniteCanvas({
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>画布操作</div>
                       <div className="space-y-2">
-                        {[['左键单击', '选择图片'], ['长按左键拖动', '拖动图片'], ['左键拖拽空白', '框选多图'], ['Ctrl+左键', '多选图片'], ['空格+拖动', '抓手平移画布'], ['Ctrl+滚轮', '缩放画布'], ['Ctrl + / Ctrl -', '放大/缩小视图'], ['双击鼠标中键', '100%视图居中'], ['长按鼠标中键', '平移画布'], ['鼠标滚轮', '垂直滚动画布'], ['右键', '上下文菜单'], ['Ctrl+D', '复制选中图片'], ['ESC', '退出编辑/取消选择'], ['Delete', '删除选中图片']].map(([k, v]) => (
+                        {[['左键单击', '选择图片'], ['左键拖拽空白区域', '框选多图'], ['Ctrl+左键', '多选图片'], ['Alt+左键', '标记图片为参考图'], ['长按左键拖动图片', '移动图片'], ['空格+拖动 / 长按中键', '平移画布'], ['滚轮 / Ctrl+滚轮', '缩放画布'], ['右键', '上下文菜单'], ['Ctrl+D', '复制选中图片'], ['Ctrl+Z', '撤回操作'], ['ESC', '退出编辑/取消选择'], ['Delete', '删除选中图片']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
                         ))}
                       </div>
@@ -5915,16 +5915,34 @@ export function InfiniteCanvas({
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>图片操作工具栏</div>
                       <div className="space-y-2">
-                        {[['放大', '选择倍率/尺寸，AI超分辨率放大'], ['移除背景', '自动去背景，右侧生成PNG透明图'], ['栅格化', '转换为SVG矢量图，右侧生成'], ['擦除', '画笔涂抹+Alt反向+确认擦除'], ['蒙版', '画笔涂抹+关键词+AI重新生成'], ['扩展', '比例预设+AI扩图'], ['裁切', '自由/预设比例+拖拽裁切+数值输入'], ['下载', 'PNG/SVG/PSD三格式']].map(([k, v]) => (
+                        {[['放大', '智能补细节，变大变高清'], ['移除背景', '一键去背景，生成透明底图'], ['矢量化', '转换为SVG矢量图'], ['擦除', '画笔涂抹消除，AI自动补全'], ['蒙版', '精准遮罩控制，AI重新生成'], ['编辑元素', '按元素智能分层，独立编辑'], ['多角度', '多视角生成图片'], ['转3D', '生成3D模型预览'], ['扩展', '向四周延伸画面，自动补齐'], ['裁切', '自由/预设比例裁切'], ['图生图', '6大类别参考，基于当前图生成新图'], ['下载', 'PNG/SVG/PSD多格式下载']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
                         ))}
                       </div>
                     </div>
                     <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-[#1a1a1a]'}`} />
                     <div>
-                      <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>编辑模式</div>
+                      <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>组与参考图</div>
                       <div className="space-y-2">
-                        {[['擦除', '画笔大小→涂抹→Alt反向→确认擦除'], ['蒙版', '画笔涂抹→确认→输入关键词→AI生成'], ['扩图', '选择比例预设→确认扩展'], ['裁切', '自由/预设比例→拖拽裁切→数值输入'], ['ESC', '退出当前编辑模式']].map(([k, v]) => (
+                        {[['多图右键', '创建组'], ['组标题栏折叠按钮', '折叠/展开组内容'], ['长按组标题栏拖动', '移动整个组'], ['Alt+左键点击图片', '标记为参考图（紫色R标记）'], ['参考图标记', '自动添加到创意描述文本框'], ['Backspace（光标起始处）', '删除最后一个参考图标记']].map(([k, v]) => (
+                          <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-[#1a1a1a]'}`} />
+                    <div>
+                      <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>左上角工具栏</div>
+                      <div className="space-y-2">
+                        {[['Oh My Prompt', '提示词管理与图片识词'], ['参考融合', 'Ctrl+Click选择参考图融合生成'], ['设置', '应用配置'], ['主题切换', '黑白/彩色模式切换'], ['用户管理', '多用户切换与管理'], ['项目数据', '项目保存与加载'], ['管理员系统', 'API与模型配置（仅管理员）'], ['使用说明', '操作与更新内容']].map(([k, v]) => (
+                          <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-[#1a1a1a]'}`} />
+                    <div>
+                      <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>底部工具栏</div>
+                      <div className="space-y-2">
+                        {[['选择工具', '默认模式，点击/框选图片'], ['抓手工具', '平移画布'], ['图片上传', '上传本地图片到画布'], ['图像生成器', 'AI图像生成（金色按钮）'], ['图层', '打开Layer Graph设计工程'], ['缩放控制', '放大/缩小/百分比/重置视图']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
                         ))}
                       </div>
@@ -5935,17 +5953,27 @@ export function InfiniteCanvas({
                     <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>{APP_VERSION_LABEL}</div>
                     <div className="space-y-2.5">
                       {[
-                        '8大图片工具全面重做：放大/移除背景/栅格化/擦除/蒙版/扩展/裁切/下载',
-                        '放大：2x/3x/4x倍率选择 + 自定义尺寸 + 锁定比例',
-                        '移除背景：一键去背景，结果自动显示在原图右侧',
-                        '栅格化：将图片转换为SVG矢量格式，右侧生成',
-                        '擦除：浮动画笔工具栏 + Alt反向涂抹 + 确认擦除',
-                        '蒙版：画笔涂抹 + 关键词弹窗 + AI重新生成',
-                        '扩展：比例预设选择 + AI自然扩图',
-                        '裁切：自由/预设比例 + 拖拽裁切点 + 数值输入',
-                        '下载：PNG/SVG/PSD三格式，PSD为Photoshop兼容分层文件',
-                        '所有工具跟随选中图片位置浮动显示',
-                        '使用当前选中模型的API Key进行AI运算',
+                        '12大图片工具：放大/移除背景/矢量化/擦除/蒙版/编辑元素/多角度/转3D/扩展/裁切/图生图/下载',
+                        '放大：智能补细节把图片变大变高清，不改画面内容',
+                        '移除背景：一键删除背景，生成透明底主体图',
+                        '矢量化：调用管理员配置的矢量模型API，转换为SVG矢量图',
+                        '擦除：画笔涂抹消除 + AI自动补全画面，Alt键反向涂抹',
+                        '蒙版：精准遮罩控制 + AI重新生成指定区域',
+                        '编辑元素：根据图片元素进行智能分层，独立编辑',
+                        '多角度：多视角生成图片',
+                        '转3D：生成3D模型并可在线预览旋转',
+                        '扩展：比例预设 + AI向四周延伸画面',
+                        '图生图：6大类别参考（风格/构图/场景/色彩/主体/细节），每类独立强度控制',
+                        'Alt+Click标记参考图：标记画布图片为参考图，自动添加到创意描述',
+                        'Ctrl+Click参考融合：选择画布图片直接融合生成',
+                        '组功能：多图右键创建组，支持折叠/展开，长按标题栏拖动',
+                        '框选：左键拖拽空白区域直接框选，显示选择矩形',
+                        'Ctrl+Z无限撤回：纯ref同步管理，流畅操作',
+                        '右键菜单：图片右键可复制/下载/发送参考图/提取关键词',
+                        '下载：PNG/SVG/PSD三种格式，PSD支持Basic/Pro/Studio模式',
+                        '服务器端API密钥管理：管理员统一配置，用户无需输入Key',
+                        '通用模型类型：API管理支持通用模型，自动识别所有可用模型',
+                        '高级参数与连接测试：添加固定API时支持高级参数和测试连接',
                       ].map((item, i) => (
                         <div key={i} className="flex items-start gap-2"><span className={`mt-1.5 w-1 h-1 rounded-full flex-shrink-0 ${isMonochrome ? 'bg-gray-400' : 'bg-[#d4af37]'}`} /><span>{item}</span></div>
                       ))}

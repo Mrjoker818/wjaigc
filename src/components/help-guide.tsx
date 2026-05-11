@@ -9,7 +9,8 @@ import {
   Pen, Eraser, Crop, Expand, Wand2, Settings,
   Move, BoxSelect,
   Bot, Lightbulb, BookOpen, Info, Zap,
-  GitMerge, Shapes, Palette, Users, Wrench
+  GitMerge, Shapes, Palette, Users, Wrench, Shield, FolderOpen, HelpCircle,
+  ImagePlus
 } from 'lucide-react';
 
 interface HelpGuideProps {
@@ -131,10 +132,10 @@ function CanvasSection({ themeStyle }: { themeStyle: string }) {
       </SectionTitle>
 
       <div className="grid grid-cols-2 gap-3 mb-5">
-        <FeatureCard icon={<MousePointer size={16} />} title="选择图片" titleEn="Select" description="左键单击选择图片，Ctrl+左键多选，拖拽框选区域内的图片" themeStyle={themeStyle} />
+        <FeatureCard icon={<MousePointer size={16} />} title="选择图片" titleEn="Select" description="左键单击选择图片，Ctrl+左键多选，左键拖拽空白区域框选" themeStyle={themeStyle} />
         <FeatureCard icon={<Hand size={16} />} title="平移画布" titleEn="Pan" description="空白区域长按拖动平移画布，或按住空格键拖动" themeStyle={themeStyle} />
         <FeatureCard icon={<ZoomIn size={16} />} title="缩放视图" titleEn="Zoom" description="鼠标滚轮缩放画布，支持触摸板双指缩放" themeStyle={themeStyle} />
-        <FeatureCard icon={<BoxSelect size={16} />} title="框选多图" titleEn="Marquee" description="在空白区域拖拽创建选区，松开后选区内的图片被选中" themeStyle={themeStyle} />
+        <FeatureCard icon={<BoxSelect size={16} />} title="框选多图" titleEn="Marquee" description="在空白区域左键拖拽，显示选择矩形，松开后选区图片被选中" themeStyle={themeStyle} />
       </div>
 
       <SubSection title="画布左上角折叠工具栏" themeStyle={themeStyle}>
@@ -146,12 +147,14 @@ function CanvasSection({ themeStyle }: { themeStyle: string }) {
           </p>
           <div className="grid grid-cols-3 gap-2">
             {[
-              { icon: <Sparkles size={14} />, label: '灵感提示词库', desc: '提示词管理面板' },
+              { icon: <Sparkles size={14} />, label: '灵感提示词库', desc: '提示词管理+图片识词' },
               { icon: <GitMerge size={14} />, label: '参考融合', desc: 'Ctrl+点击融图' },
-              { icon: <Settings size={14} />, label: '设置', desc: '生成参数面板' },
+              { icon: <Settings size={14} />, label: '设置', desc: '应用配置' },
               { icon: <Palette size={14} />, label: 'UI 主题', desc: '黑白/彩色切换' },
-              { icon: <Users size={14} />, label: '用户管理', desc: '多用户与后台模型' },
-              { icon: <Wrench size={14} />, label: '使用说明', desc: '本帮助指南' },
+              { icon: <Users size={14} />, label: '用户管理', desc: '多用户切换与管理' },
+              { icon: <FolderOpen size={14} />, label: '项目数据', desc: '项目保存与加载' },
+              { icon: <Shield size={14} />, label: '管理员系统', desc: 'API与模型配置' },
+              { icon: <HelpCircle size={14} />, label: '使用说明', desc: '操作与更新内容' },
             ].map((tool) => (
               <div key={tool.label} className="flex flex-col items-center gap-1">
                 <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${
@@ -179,13 +182,17 @@ function CanvasSection({ themeStyle }: { themeStyle: string }) {
         }`}>
           <div className="grid grid-cols-4 gap-3">
             {[
-              { icon: <ZoomIn size={14} />, label: '放大', desc: '高分辨率放大' },
-              { icon: <Eraser size={14} />, label: '移除背景', desc: '智能去背景' },
-              { icon: <Shapes size={14} />, label: '矢量化', desc: '转为SVG矢量' },
-              { icon: <Pen size={14} />, label: '擦除', desc: '画笔擦除区域' },
-              { icon: <Wand2 size={14} />, label: '蒙版', desc: '蒙版+提示词生成' },
-              { icon: <Expand size={14} />, label: '扩展', desc: '智能扩展画面' },
-              { icon: <Crop size={14} />, label: '裁切', desc: '自定义比例裁切' },
+              { icon: <ZoomIn size={14} />, label: '放大', desc: '智能补细节放大' },
+              { icon: <Eraser size={14} />, label: '移除背景', desc: '一键去背景' },
+              { icon: <Shapes size={14} />, label: '矢量化', desc: '转SVG矢量图' },
+              { icon: <Pen size={14} />, label: '擦除', desc: '涂抹消除+AI补全' },
+              { icon: <Wand2 size={14} />, label: '蒙版', desc: '遮罩+AI重新生成' },
+              { icon: <Layers size={14} />, label: '编辑元素', desc: '按元素智能分层' },
+              { icon: <Move size={14} />, label: '多角度', desc: '多视角生成' },
+              { icon: <BoxSelect size={14} />, label: '转3D', desc: '生成3D模型' },
+              { icon: <Expand size={14} />, label: '扩展', desc: '向四周延伸画面' },
+              { icon: <Crop size={14} />, label: '裁切', desc: '自由/预设比例' },
+              { icon: <ImagePlus size={14} />, label: '图生图', desc: '6类参考生成' },
               { icon: <Download size={14} />, label: '下载', desc: 'PNG/SVG/PSD' },
             ].map((tool) => (
               <div key={tool.label} className="flex flex-col items-center gap-1">
@@ -211,10 +218,11 @@ function CanvasSection({ themeStyle }: { themeStyle: string }) {
       <SubSection title="编辑模式" themeStyle={themeStyle}>
         <div className="space-y-2">
           {[
-            { mode: '擦除模式', desc: '调整画笔大小后在图片上涂抹擦除区域，点击"确认擦除"执行', icon: <Eraser size={14} /> },
+            { mode: '擦除模式', desc: '调整画笔大小后在图片上涂抹擦除区域，Alt键反向涂抹，点击"确认擦除"执行', icon: <Eraser size={14} /> },
             { mode: '蒙版模式', desc: '用画笔标记需要修改的区域，输入提示词后点击生成', icon: <Wand2 size={14} /> },
-            { mode: '扩展模式', desc: '选择扩展比例预设（1:1/16:9等），确认后智能扩展画面', icon: <Expand size={14} /> },
+            { mode: '扩展模式', desc: '选择扩展比例预设和缩放比例，确认后智能扩展画面', icon: <Expand size={14} /> },
             { mode: '裁切模式', desc: '自由裁切或选择预设比例（1:1/4:3/16:9），确认裁切', icon: <Crop size={14} /> },
+            { mode: '图生图模式', desc: '6大参考类别（风格/构图/场景/色彩/主体/细节），每类独立强度滑块，基于当前图生成新图', icon: <ImagePlus size={14} /> },
           ].map((item) => (
             <div key={item.mode} className={`flex items-start gap-3 p-3 rounded-lg ${
               themeStyle === 'monochrome' ? 'bg-gray-50' : 'bg-[#111]'
@@ -286,6 +294,49 @@ function CanvasSection({ themeStyle }: { themeStyle: string }) {
                 {tag.label} - {tag.desc}
               </span>
             ))}
+          </div>
+        </div>
+      </SubSection>
+
+      <SubSection title="组与参考图标记" themeStyle={themeStyle}>
+        <div className={`rounded-xl p-4 border ${
+          themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
+        }`}>
+          <p className={`text-xs mb-3 ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>
+            画布支持多图组合与参考图标记功能：
+          </p>
+          <div className="space-y-3">
+            <div className={`p-3 rounded-lg border ${
+              themeStyle === 'monochrome' ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#2a2a2a]'
+            }`}>
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${
+                  themeStyle === 'monochrome' ? 'bg-purple-100 text-purple-700' : 'bg-purple-500/15 text-purple-400'
+                }`}>组</span>
+                <span className={`text-xs font-semibold ${themeStyle === 'monochrome' ? 'text-gray-800' : 'text-[#e0e0e0]'}`}>图片组</span>
+              </div>
+              <ul className={`text-xs space-y-1 ml-4 list-disc ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>
+                <li>多图右键 → 创建组，组内图片统一管理</li>
+                <li>组标题栏折叠按钮 → 折叠/展开组内容</li>
+                <li>长按组标题栏拖动 → 移动整个组</li>
+              </ul>
+            </div>
+            <div className={`p-3 rounded-lg border ${
+              themeStyle === 'monochrome' ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#2a2a2a]'
+            }`}>
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${
+                  themeStyle === 'monochrome' ? 'bg-violet-100 text-violet-700' : 'bg-violet-500/15 text-violet-400'
+                }`}>参考</span>
+                <span className={`text-xs font-semibold ${themeStyle === 'monochrome' ? 'text-gray-800' : 'text-[#e0e0e0]'}`}>Alt+点击标记参考图</span>
+              </div>
+              <ul className={`text-xs space-y-1 ml-4 list-disc ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>
+                <li>按住 Alt 键 + 左键点击图片 → 标记为参考图（紫色R1/R2标记）</li>
+                <li>参考图自动添加到创意描述文本框上方（缩略图+编号chip）</li>
+                <li>生成时自动在提示词前添加 [参考图R1] 等标记</li>
+                <li>在文本框中按 Backspace（光标起始位置）可删除最后一个参考图标记</li>
+              </ul>
+            </div>
           </div>
         </div>
       </SubSection>
@@ -399,14 +450,16 @@ function GenerateSection({ themeStyle }: { themeStyle: string }) {
           themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
         }`}>
           <p className={`text-xs mb-3 ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>
-            上传参考图后，支持4种参考类型与强度调节，精确控制生成效果：
+            上传参考图后，支持6种参考类型与强度调节，精确控制生成效果：
           </p>
           <div className="grid grid-cols-2 gap-2">
             {[
               { type: '风格参考', desc: '参照参考图的风格、色调、艺术风格生成', tag: '风格' },
               { type: '构图参考', desc: '参照参考图的构图、布局、空间结构生成', tag: '构图' },
-              { type: '角色参考', desc: '参照参考图中的角色形象、人物特征生成', tag: '角色' },
-              { type: 'IP 适配器', desc: '高度还原参考图中的核心视觉元素', tag: '图像适配' },
+              { type: '场景参考', desc: '参照参考图的场景氛围、环境要素生成', tag: '场景' },
+              { type: '色彩参考', desc: '参照参考图的色彩搭配、色调倾向生成', tag: '色彩' },
+              { type: '主体参考', desc: '参照参考图中的主体形象、核心元素生成', tag: '主体' },
+              { type: '细节参考', desc: '参照参考图的纹理、质感、精细元素生成', tag: '细节' },
             ].map((ref) => (
               <div key={ref.type} className={`p-3 rounded-lg border ${
                 themeStyle === 'monochrome'
@@ -665,8 +718,10 @@ function FusionSection({ themeStyle }: { themeStyle: string }) {
             {[
               { type: '风格参考', desc: '融合参考图的风格、色调、艺术风格', strength: '30-60% 效果较佳' },
               { type: '构图参考', desc: '融合参考图的构图、布局、空间结构', strength: '40-70% 效果较佳' },
-              { type: '角色参考', desc: '融合参考图中的角色形象和人物特征', strength: '50-80% 效果较佳' },
-              { type: '图像适配器', desc: '高度还原参考图中的核心视觉元素', strength: '60-90% 效果较佳' },
+              { type: '场景参考', desc: '融合参考图的场景氛围、环境要素', strength: '30-60% 效果较佳' },
+              { type: '色彩参考', desc: '融合参考图的色彩搭配、色调倾向', strength: '20-50% 效果较佳' },
+              { type: '主体参考', desc: '融合参考图中的主体形象、核心元素', strength: '50-80% 效果较佳' },
+              { type: '细节参考', desc: '融合参考图的纹理、质感、精细元素', strength: '30-60% 效果较佳' },
             ].map((ref) => (
               <div key={ref.type} className={`p-3 rounded-lg border ${
                 themeStyle === 'monochrome'
@@ -906,6 +961,72 @@ function ChangelogSection({ themeStyle }: { themeStyle: string }) {
       </SectionTitle>
 
       <div className="space-y-4">
+        {/* v2.5.1 */}
+        <div className={`rounded-xl p-4 border ${
+          themeStyle === 'monochrome' ? 'bg-yellow-50/50 border-yellow-200' : 'bg-[#d4af37]/5 border-[#d4af37]/30'
+        }`}>
+          <div className="flex items-center gap-2 mb-3">
+            <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+              themeStyle === 'monochrome'
+                ? 'bg-yellow-100 text-yellow-700'
+                : 'bg-[#d4af37]/15 text-[#d4af37]'
+            }`}>v2.5.1</span>
+            <span className={`text-xs ${themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#888]'}`}>当前版本</span>
+          </div>
+          <div className="space-y-2">
+            {[
+              { type: 'fix', text: '擦除/蒙版功能修复 - 改用 AI 生成 API + 蒙版合成策略，移除 IOPaint 依赖' },
+              { type: 'fix', text: '蒙版检测核心Bug修复 - 改用 RGB 亮度阈值判断，不再依赖 alpha 通道' },
+              { type: 'fix', text: '接口地址不再自动追加 /v1 - 用户完全控制 API URL 格式' },
+            ].map((item, idx) => (
+              <div key={idx} className="flex items-start gap-2">
+                <span className={`px-1.5 py-0.5 rounded text-xs font-bold flex-shrink-0 mt-0.5 ${
+                  item.type === 'feat'
+                    ? (themeStyle === 'monochrome' ? 'bg-green-100 text-green-700' : 'bg-green-500/15 text-green-400')
+                    : (themeStyle === 'monochrome' ? 'bg-blue-100 text-blue-700' : 'bg-blue-500/15 text-blue-400')
+                }`}>{item.type === 'feat' ? '功能' : item.type === 'fix' ? '修复' : item.type}</span>
+                <span className={`text-xs ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>{item.text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* v2.5.0 */}
+        <div className={`rounded-xl p-4 border ${
+          themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
+        }`}>
+          <div className="flex items-center gap-2 mb-3">
+            <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+              themeStyle === 'monochrome'
+                ? 'bg-gray-200 text-gray-600'
+                : 'bg-[#2a2a2a] text-[#888]'
+            }`}>v2.5.0</span>
+          </div>
+          <div className="space-y-2">
+            {[
+              { type: 'feat', text: '参考图与图生图6大类别统一 - 风格/构图/场景/色彩/主体/细节' },
+              { type: 'feat', text: '图片工具栏全面升级 - 放大/移除背景/矢量化/擦除/蒙版/编辑元素/多角度/转3D/扩展/裁切/图生图/下载' },
+              { type: 'feat', text: 'Alt+Click 标记参考图 - 画布图片标记后自动添加到创意描述文本框' },
+              { type: 'feat', text: 'Ctrl+Click 参考融合 - 选择画布图片直接融合生成' },
+              { type: 'feat', text: '组功能 - 多图右键创建组，支持折叠/展开，长按标题栏拖动' },
+              { type: 'feat', text: '框选功能 - 左键拖拽空白区域直接框选，显示选择矩形' },
+              { type: 'feat', text: '管理员系统增强 - 通用模型类型、高级参数、连接测试、API用量分析' },
+              { type: 'feat', text: '服务器端API密钥管理 - 管理员统一配置，用户无需输入Key' },
+              { type: 'fix', text: 'Ctrl+Z无限撤回优化 - 纯ref同步管理，流畅操作无toast' },
+              { type: 'fix', text: '所有编辑操作（除扩展和裁切）保持原图比例' },
+            ].map((item, idx) => (
+              <div key={idx} className="flex items-start gap-2">
+                <span className={`px-1.5 py-0.5 rounded text-xs font-bold flex-shrink-0 mt-0.5 ${
+                  item.type === 'feat'
+                    ? (themeStyle === 'monochrome' ? 'bg-green-100 text-green-700' : 'bg-green-500/15 text-green-400')
+                    : (themeStyle === 'monochrome' ? 'bg-blue-100 text-blue-700' : 'bg-blue-500/15 text-blue-400')
+                }`}>{item.type === 'feat' ? '功能' : item.type === 'fix' ? '修复' : item.type}</span>
+                <span className={`text-xs ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>{item.text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* v2.2.0 */}
         <div className={`rounded-xl p-4 border ${
           themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
@@ -913,10 +1034,9 @@ function ChangelogSection({ themeStyle }: { themeStyle: string }) {
           <div className="flex items-center gap-2 mb-3">
             <span className={`px-2 py-0.5 rounded text-xs font-bold ${
               themeStyle === 'monochrome'
-                ? 'bg-yellow-100 text-yellow-700'
-                : 'bg-[#d4af37]/15 text-[#d4af37]'
+                ? 'bg-gray-200 text-gray-600'
+                : 'bg-[#2a2a2a] text-[#888]'
             }`}>v2.2.0</span>
-            <span className={`text-xs ${themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#888]'}`}>最新版本</span>
           </div>
           <div className="space-y-2">
             {[
@@ -1022,7 +1142,10 @@ function ShortcutsSection({ themeStyle }: { themeStyle: string }) {
         }`}>
           <ShortcutRow shortcut="Space + 拖动" description="抓手工具平移画布" themeStyle={themeStyle} />
           <ShortcutRow shortcut="滚轮" description="缩放画布" themeStyle={themeStyle} />
+          <ShortcutRow shortcut="Alt + 点击" description="标记图片为参考图" themeStyle={themeStyle} />
           <ShortcutRow shortcut="Ctrl + 点击" description="选择参考图片（融合模式） / 多选图片" themeStyle={themeStyle} />
+          <ShortcutRow shortcut="Ctrl + Z" description="撤回操作（无限步数）" themeStyle={themeStyle} />
+          <ShortcutRow shortcut="Ctrl + D" description="复制选中图片" themeStyle={themeStyle} />
           <ShortcutRow shortcut="ESC" description="退出编辑模式 / 取消选择 / 关闭弹出面板" themeStyle={themeStyle} />
           <ShortcutRow shortcut="Delete / Backspace" description="删除选中图片" themeStyle={themeStyle} />
         </div>
@@ -1076,6 +1199,11 @@ function TipsSection({ themeStyle }: { themeStyle: string }) {
             icon: <Sparkles size={14} />,
           },
           {
+            title: 'Alt+点击快速标记参考图',
+            desc: '在画布上按住 Alt 键点击图片，即可标记为参考图。参考图会自动添加到创意描述文本框，生成时自动在提示词前添加 [参考图R1] 等标记，用文字描述控制参考图的使用方式。',
+            icon: <ImagePlus size={14} />,
+          },
+          {
             title: 'Ctrl+点击参考融合',
             desc: '开启参考融合模式后，Ctrl+点击选择多张图片，为每张图输入关键词描述，融合生成全新的创意图片。适合混搭风格、组合元素。',
             icon: <GitMerge size={14} />,
@@ -1086,18 +1214,18 @@ function TipsSection({ themeStyle }: { themeStyle: string }) {
             icon: <Layers size={14} />,
           },
           {
-            title: '参考图类型精准控制',
-            desc: '上传参考图后选择合适的参考类型：风格参考参照色调和画风，构图参考参照布局，角色参考还原人物，IP适配器高度还原核心视觉元素。调节强度滑块微调效果。',
+            title: '图生图6大类别精准控制',
+            desc: '选中图片后点击图生图按钮，6大参考类别（风格/构图/场景/色彩/主体/细节）每类独立强度滑块，精确控制生成效果。也可用"当前图片描述"一键填充原始描述。',
             icon: <ImageIcon size={14} />,
           },
           {
             title: 'SVG 矢量化导出',
-            desc: '选中图片后点击“矢量化”按钮，将位图转为 SVG 矢量格式。快速模式 16 色快速转换，专业模式 32 色优化，工作室模式 48 色带形状识别和元数据。',
+            desc: '选中图片后点击“矢量化”按钮，调用管理员配置的矢量模型API转换为 SVG 矢量格式，支持快速/专业/工作室三种模式。',
             icon: <Shapes size={14} />,
           },
           {
-            title: '画布支持自由排版',
-            desc: '所有生成的图片可以自由拖拽、缩放、排列。支持框选多图批量操作，适合对比和拼合方案展示。',
+            title: '画布支持自由排版与撤回',
+            desc: '所有生成的图片可以自由拖拽、缩放、排列。支持框选多图批量操作，Ctrl+Z 无限步数撤回，适合对比和拼合方案展示。',
             icon: <Move size={14} />,
           },
         ].map((tip) => (
