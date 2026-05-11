@@ -376,7 +376,7 @@ export class UniversalApiManager {
 
       const data = await response.json();
       const rawModels = data.data || data.models || [];
-      const modelNames = rawModels.map((m: Record<string, unknown>) => m.id as string);
+      const modelNames = rawModels.map((m: Record<string, unknown>) => String(m.id || '')).filter(Boolean);
       
       return { 
         success: true, 
