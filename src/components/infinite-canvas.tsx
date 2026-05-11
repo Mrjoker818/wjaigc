@@ -2873,7 +2873,8 @@ export function InfiniteCanvas({
     setIsEditProcessing(false);
   }, [selectedImageData, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame]);
 
-  // 3. VECTORIZE - convert raster image to true vector SVG
+  // 3. VECTORIZE - convert raster image to true vector SVG via server API
+  // Priority: admin-configured vectorize model → PY_VECTORIZE_ENDPOINT → client-side vtracer fallback
   const handleRasterize = useCallback(async () => {
     const img = selectedImageData;
     if (!img) return;
@@ -2887,41 +2888,62 @@ export function InfiniteCanvas({
     );
     setIsEditProcessing(true);
     try {
-      // Dynamically import the SVG export module
-      updateProcessingFrame(placeholderId, { progress: 18, status: '正在加载 SVG 转换模块...' });
-      const { exportAsSVG } = await import('@/lib/svg-export');
-      updateProcessingFrame(placeholderId, { progress: 34, status: '正在追踪矢量路径...' });
-      const result = await exportAsSVG(img.url, { mode: 'pro' });
+      // Call server-side vectorize API (uses admin-configured vectorize model)
+      updateProcessingFrame(placeholderId, { progress: 18, status: '正在调用矢量模型...' });
+      const response = await fetch('/api/design/vectorize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: img.url, layerId: img.id, mode: 'auto' }),
+      });
+      const data = await response.json();
 
-      if (result.svgString && result.svgString.length > 0) {
+      if (data.success && data.svg) {
         updateProcessingFrame(placeholderId, { progress: 88, status: '正在渲染 SVG 预览...' });
-        const svgBlob = new Blob([result.svgString], { type: 'image/svg+xml;charset=utf-8' });
+        const svgBlob = new Blob([data.svg], { type: 'image/svg+xml;charset=utf-8' });
         const svgUrl = URL.createObjectURL(svgBlob);
+        const engineLabel = data.engine === 'raster-svg-wrapper' ? '容器模式' : (data.engine || '矢量');
         completeProcessingFrame(placeholderId, svgUrl, img.width, img.height, {
-          modifyPrompt: `矢量化 SVG (${result.quality?.label || '完成'})`,
+          modifyPrompt: `矢量化 SVG (${engineLabel})`,
         });
+        if (data.warnings && data.warnings.length > 0) {
+          console.warn('Vectorize warnings:', data.warnings);
+        }
       } else {
-        // Fallback: embed PNG in SVG wrapper if vectorization fails
-        const image = new Image();
-        image.crossOrigin = 'anonymous';
-        await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = reject; image.src = img.url; });
-        const canvas = document.createElement('canvas');
-        const width = image.naturalWidth || Math.round(img.originalWidth || img.width);
-        const height = image.naturalHeight || Math.round(img.originalHeight || img.height);
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) throw new Error('Canvas context unavailable');
-        ctx.drawImage(image, 0, 0, width, height);
-        const embeddedPng = canvas.toDataURL('image/png');
-        const svgContent = `<?xml version="1.0" encoding="UTF-8"?>
+        // Server API failed, fallback to client-side vtracer
+        updateProcessingFrame(placeholderId, { progress: 34, status: '服务端矢量模型不可用，使用本地转换...' });
+        const { exportAsSVG } = await import('@/lib/svg-export');
+        const result = await exportAsSVG(img.url, { mode: 'pro' });
+
+        if (result.svgString && result.svgString.length > 0) {
+          updateProcessingFrame(placeholderId, { progress: 88, status: '正在渲染 SVG 预览...' });
+          const svgBlob = new Blob([result.svgString], { type: 'image/svg+xml;charset=utf-8' });
+          const svgUrl = URL.createObjectURL(svgBlob);
+          completeProcessingFrame(placeholderId, svgUrl, img.width, img.height, {
+            modifyPrompt: `矢量化 SVG (${result.quality?.label || '本地'})`,
+          });
+        } else {
+          // Ultimate fallback: embed PNG in SVG wrapper
+          const image = new Image();
+          image.crossOrigin = 'anonymous';
+          await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = reject; image.src = img.url; });
+          const canvas = document.createElement('canvas');
+          const width = image.naturalWidth || Math.round(img.originalWidth || img.width);
+          const height = image.naturalHeight || Math.round(img.originalHeight || img.height);
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) throw new Error('Canvas context unavailable');
+          ctx.drawImage(image, 0, 0, width, height);
+          const embeddedPng = canvas.toDataURL('image/png');
+          const svgContent = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
   <image href="${embeddedPng}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="none"/>
 </svg>`;
-        const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
-        completeProcessingFrame(placeholderId, svgUrl, img.width, img.height, {
-          modifyPrompt: '栅格化 (SVG)',
-        });
+          const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
+          completeProcessingFrame(placeholderId, svgUrl, img.width, img.height, {
+            modifyPrompt: '栅格化 (SVG)',
+          });
+        }
       }
     } catch (e) {
       console.error('Vectorize failed:', e);

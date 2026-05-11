@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { X, UserPlus, Trash2, Ban, CheckCircle2, KeyRound, Plug, RefreshCw, Activity, Wallet, Pencil, Zap, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { X, UserPlus, Trash2, Ban, CheckCircle2, KeyRound, Plug, RefreshCw, Activity, Wallet, Pencil, Zap, CheckCircle, XCircle, Loader2, Search } from 'lucide-react';
 import { User } from '@/lib/user-types';
 import { ConfirmDialog } from './custom-dialogs';
 import { UserManager } from '@/lib/user-manager';
@@ -54,6 +54,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
   const [discoveredModels, setDiscoveredModels] = useState<ModelInfo[]>([]);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [isDiscovering, setIsDiscovering] = useState(false);
+  const [modelSearchQuery, setModelSearchQuery] = useState('');
   const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ providerId: string; success: boolean; message: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
@@ -202,6 +203,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
       const data = await response.json();
       const models = data.models || [];
       setDiscoveredModels(models);
+      setModelSearchQuery('');
       // 默认不选择任何模型，管理员手动选择
     } finally {
       setIsDiscovering(false);
@@ -246,6 +248,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     if (providerModels.length > 0) {
       setDiscoveredModels(providerModels);
       setSelectedModels(provider.selectedModels || []);
+      setModelSearchQuery('');
     } else {
       setDiscoveredModels([]);
       setSelectedModels([]);
@@ -454,7 +457,17 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                   </button>
                   {discoveredModels.length > 0 && (
                     <div className={`rounded-lg border p-3 ${isGold ? 'bg-[#0d0d0d] border-[#2a2a2a]' : 'bg-white border-gray-200'}`}>
-                      <div className="flex items-center justify-between mb-2">
+                      {/* 模型搜索框 */}
+                      <div className="relative mb-2">
+                        <Search className={`absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 ${isGold ? 'text-[#666]' : 'text-gray-400'}`} />
+                        <input
+                          type="text"
+                          placeholder="搜索模型..."
+                          value={modelSearchQuery}
+                          onChange={e => setModelSearchQuery(e.target.value)}
+                          className={`w-full h-8 pl-8 pr-3 rounded-md border text-xs ${isGold ? 'bg-[#151515] border-[#2a2a2a] text-[#ccc] placeholder:text-[#555]' : 'bg-gray-50 border-gray-200 text-gray-700 placeholder:text-gray-400'}`}
+                        />
+                      </div>                      <div className="flex items-center justify-between mb-2">
                         <p className={`text-xs ${isGold ? 'text-[#777]' : 'text-gray-500'}`}>选择前端可见模型</p>
                         <button
                           onClick={() => {
@@ -471,15 +484,27 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                         </button>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {discoveredModels.map((model) => (
-                          <button
-                            key={model.id}
-                            onClick={() => setSelectedModels(prev => prev.includes(model.id) ? prev.filter(id => id !== model.id) : [...prev, model.id])}
-                            className={`px-2.5 py-1 rounded-md text-xs border ${selectedModels.includes(model.id) ? 'bg-[#d4af37] text-black border-transparent' : isGold ? 'bg-[#151515] text-[#999] border-[#2a2a2a]' : 'bg-gray-50 text-gray-600 border-gray-200'}`}
-                          >
-                            {model.name && model.name !== model.id ? model.name : getModelDisplayName(model.id)}
-                          </button>
-                        ))}
+                        {(() => {
+                          const q = modelSearchQuery.toLowerCase().trim();
+                          const sorted = q
+                            ? [...discoveredModels].sort((a, b) => {
+                                const aName = (a.name || a.id).toLowerCase();
+                                const bName = (b.name || b.id).toLowerCase();
+                                const aMatch = aName.includes(q) ? 0 : 1;
+                                const bMatch = bName.includes(q) ? 0 : 1;
+                                return aMatch - bMatch;
+                              })
+                            : discoveredModels;
+                          return sorted.map((model) => (
+                            <button
+                              key={model.id}
+                              onClick={() => setSelectedModels(prev => prev.includes(model.id) ? prev.filter(id => id !== model.id) : [...prev, model.id])}
+                              className={`px-2.5 py-1 rounded-md text-xs border ${selectedModels.includes(model.id) ? 'bg-[#d4af37] text-black border-transparent' : isGold ? 'bg-[#151515] text-[#999] border-[#2a2a2a]' : 'bg-gray-50 text-gray-600 border-gray-200'}`}
+                            >
+                              {model.name && model.name !== model.id ? model.name : getModelDisplayName(model.id)}
+                            </button>
+                          ));
+                        })()}
                       </div>
                     </div>
                   )}
@@ -503,7 +528,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                     {editingProviderId ? '更新 API' : '添加 API'}
                   </button>
                   {editingProviderId && (
-                    <button onClick={() => { setEditingProviderId(null); setApiName(''); setApiBaseUrl(''); setApiKey(''); setApiModel(''); setDiscoveredModels([]); setSelectedModels([]); }} className={`w-full h-9 rounded-lg text-sm border ${isGold ? 'border-[#333] text-[#888] hover:bg-[#1a1a1a]' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
+                    <button onClick={() => { setEditingProviderId(null); setApiName(''); setApiBaseUrl(''); setApiKey(''); setApiModel(''); setDiscoveredModels([]); setSelectedModels([]); setModelSearchQuery(''); }} className={`w-full h-9 rounded-lg text-sm border ${isGold ? 'border-[#333] text-[#888] hover:bg-[#1a1a1a]' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
                       取消编辑
                     </button>
                   )}
