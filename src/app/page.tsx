@@ -234,11 +234,17 @@ function CanvasApp() {
 
   // 自动保存画布图片到当前项目
   const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 项目切换中标记：防止自动保存回调用旧闭包数据覆盖刚保存的新数据
+  const switchingProjectRef = useRef(false);
   useEffect(() => {
     if (!currentProject || images.length === 0) return;
+    // 项目切换进行中时，跳过自动保存，避免旧闭包数据覆盖
+    if (switchingProjectRef.current) return;
     // 防抖：1秒后保存
     if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
     autoSaveRef.current = setTimeout(async () => {
+      // 二次检查：定时器触发时如果正在切换项目，也跳过
+      if (switchingProjectRef.current) return;
       try {
         const mgr = UserManagerCore.getInstance();
         // 先将 data:/blob: URL 持久化到服务器
@@ -1976,7 +1982,15 @@ function CanvasApp() {
             });
           }}
           onSelectProject={async (project) => {
-            // 切换项目前先保存当前项目数据（同步保存，含 data: URL 持久化）
+            // 标记项目切换中，阻止自动保存用旧闭包数据覆盖
+            switchingProjectRef.current = true;
+            // 清除可能正在等待的自动保存定时器
+            if (autoSaveRef.current) {
+              clearTimeout(autoSaveRef.current);
+              autoSaveRef.current = null;
+            }
+
+            // 切换项目前先保存当前项目数据（含 data: URL 持久化 + metadata/groups）
             try {
               if (currentProject && images.length > 0) {
                 const mgr = UserManagerCore.getInstance();
@@ -2028,13 +2042,26 @@ function CanvasApp() {
                     groupId: img.groupId || '',
                   }))
                   .filter(img => img.url);
-                mgr.updateProject(currentProject.id, { canvasImages: persistableCanvasImages });
+                // 保存 canvasImages + metadata(groups)，与自动保存逻辑保持一致
+                mgr.updateProject(currentProject.id, {
+                  canvasImages: persistableCanvasImages,
+                  metadata: {
+                    ...(currentProject.metadata || {}),
+                    groups: groupsRef.current,
+                  },
+                });
               }
             } catch { /* save failed - non-blocking */ }
-            setCurrentProject(project);
+
+            // 从 UserManager 单例获取最新项目数据（而非组件中的过快照）
+            // 避免因组件 state 未刷新导致使用过时的 canvasImages（可能为空）
+            const mgr = UserManagerCore.getInstance();
+            const freshProject = mgr.getProject(project.id) || project;
+
+            setCurrentProject(freshProject);
             // 加载项目画布数据
-            if (project.canvasImages && project.canvasImages.length > 0) {
-              setImages(project.canvasImages.map(img => ({
+            if (freshProject.canvasImages && freshProject.canvasImages.length > 0) {
+              setImages(freshProject.canvasImages.map(img => ({
                 id: img.id,
                 url: img.url,
                 prompt: img.prompt || '',
@@ -2055,8 +2082,8 @@ function CanvasApp() {
                 createdAt: img.createdAt || Date.now(),
               })));
               // 恢复分组数据
-              if (project.metadata?.groups) {
-                setInitialGroups(project.metadata.groups.map(g => ({
+              if (freshProject.metadata?.groups) {
+                setInitialGroups(freshProject.metadata.groups.map(g => ({
                   id: g.id,
                   name: g.name,
                   note: g.note || '',
@@ -2067,7 +2094,7 @@ function CanvasApp() {
                 })));
               }
               toast.success('项目已加载', {
-                description: `${project.name} - ${project.canvasImages.length} 张图片`,
+                description: `${freshProject.name} - ${freshProject.canvasImages.length} 张图片`,
                 className: themeStyle === 'monochrome'
                   ? 'bg-white border border-gray-200 text-gray-900'
                   : 'bg-[#141414] border border-[#d4af37]/50 text-white',
@@ -2076,13 +2103,15 @@ function CanvasApp() {
               // 项目无图片，清空画布
               setImages([]);
               toast.info('项目已加载', {
-                description: `${project.name} - 暂无图片`,
+                description: `${freshProject.name} - 暂无图片`,
                 className: themeStyle === 'monochrome'
                   ? 'bg-white border border-gray-200 text-gray-900'
                   : 'bg-[#141414] border border-[#2a2a2a] text-white',
               });
             }
             setShowUserManager(false);
+            // 项目切换完成，解除自动保存拦截
+            switchingProjectRef.current = false;
           }}
         />
       )}
