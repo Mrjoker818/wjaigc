@@ -587,7 +587,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                         {advancedParams.map((param, idx) => (
                           <div key={idx} className="flex items-center gap-2">
                             <input
-                              className={`flex-1 h-9 px-2.5 rounded-lg border text-sm ${isGold ? 'bg-[#111] border-[#2a2a2a] text-[#ccc] placeholder-[#555]' : 'bg-white border-gray-200 text-gray-800 placeholder-gray-400'}`}
+                              className={`w-[35%] shrink-0 h-9 px-2.5 rounded-lg border text-sm ${isGold ? 'bg-[#111] border-[#2a2a2a] text-[#ccc] placeholder-[#555]' : 'bg-white border-gray-200 text-gray-800 placeholder-gray-400'}`}
                               placeholder="参数名"
                               value={param.key}
                               onChange={e => {
@@ -597,7 +597,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                               }}
                             />
                             <input
-                              className={`flex-1 h-9 px-2.5 rounded-lg border text-sm ${isGold ? 'bg-[#111] border-[#2a2a2a] text-[#ccc] placeholder-[#555]' : 'bg-white border-gray-200 text-gray-800 placeholder-gray-400'}`}
+                              className={`flex-1 min-w-0 h-9 px-2.5 rounded-lg border text-sm ${isGold ? 'bg-[#111] border-[#2a2a2a] text-[#ccc] placeholder-[#555]' : 'bg-white border-gray-200 text-gray-800 placeholder-gray-400'}`}
                               placeholder="参数值"
                               value={param.value}
                               onChange={e => {
