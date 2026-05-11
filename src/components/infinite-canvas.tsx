@@ -400,6 +400,13 @@ export function InfiniteCanvas({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
+  // Group drag state
+  const [groupDragTarget, setGroupDragTarget] = useState<string | null>(null);
+  const [groupDragStart, setGroupDragStart] = useState({ x: 0, y: 0 });
+  const [groupDragOffset, setGroupDragOffset] = useState({ x: 0, y: 0 });
+  const groupDragReadyRef = useRef(false);
+  const groupDragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // 同步groups到父组件
   useEffect(() => {
     onGroupsChange?.(groups);
@@ -1384,12 +1391,9 @@ export function InfiniteCanvas({
       selectImage(null);
       setActiveTool('none');
       setShowDownloadPopup(false);
-      // Box select requires long press on blank area
-      longPressTimerRef.current = setTimeout(() => {
-        setIsLongPressing(true);
-        setBoxSelectStart({ x: e.clientX, y: e.clientY });
-        setBoxSelectEnd({ x: e.clientX, y: e.clientY });
-      }, 300);
+      // Box select: left-click drag on blank area immediately starts box selection
+      setBoxSelectStart({ x: e.clientX, y: e.clientY });
+      setBoxSelectEnd({ x: e.clientX, y: e.clientY });
     }
   }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown]);
 
@@ -1417,8 +1421,8 @@ export function InfiniteCanvas({
       return;
     }
 
-    // Box select (long press on blank area triggered)
-    if (boxSelectStart && isLongPressing) {
+    // Box select (left-click drag on blank area)
+    if (boxSelectStart) {
       setBoxSelectEnd({ x: e.clientX, y: e.clientY });
       return;
     }
@@ -1464,7 +1468,14 @@ export function InfiniteCanvas({
       const offsetY = canvasPos.y - dragStart.y;
       setDragOffset({ x: offsetX, y: offsetY });
     }
-  }, [editMode, isPanning, isMiddlePanning, panStart, boxSelectStart, isLongPressing, resizingImage, resizeCorner, images, dragTarget, dragStart, resizeStart, screenToCanvas, onImagesChange, handleEditMouseMove]);
+
+    // Group drag: only allow after long press (groupDragReadyRef)
+    if (groupDragTarget && groupDragReadyRef.current) {
+      const offsetX = canvasPos.x - groupDragStart.x;
+      const offsetY = canvasPos.y - groupDragStart.y;
+      setGroupDragOffset({ x: offsetX, y: offsetY });
+    }
+  }, [editMode, isPanning, isMiddlePanning, panStart, boxSelectStart, isLongPressing, resizingImage, resizeCorner, images, dragTarget, dragStart, resizeStart, screenToCanvas, onImagesChange, handleEditMouseMove, groupDragTarget, groupDragStart]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     if (editMode !== 'none') {
@@ -1490,27 +1501,32 @@ export function InfiniteCanvas({
     }
 
     if (boxSelectStart && boxSelectEnd) {
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (rect) {
-        const left = Math.min(boxSelectStart.x, boxSelectEnd.x) - rect.left;
-        const top = Math.min(boxSelectStart.y, boxSelectEnd.y) - rect.top;
-        const right = Math.max(boxSelectStart.x, boxSelectEnd.x) - rect.left;
-        const bottom = Math.max(boxSelectStart.y, boxSelectEnd.y) - rect.top;
+      const selectDx = Math.abs(boxSelectEnd.x - boxSelectStart.x);
+      const selectDy = Math.abs(boxSelectEnd.y - boxSelectStart.y);
+      // Only select images if the drag distance is meaningful (> 5px)
+      if (selectDx > 5 || selectDy > 5) {
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (rect) {
+          const left = Math.min(boxSelectStart.x, boxSelectEnd.x) - rect.left;
+          const top = Math.min(boxSelectStart.y, boxSelectEnd.y) - rect.top;
+          const right = Math.max(boxSelectStart.x, boxSelectEnd.x) - rect.left;
+          const bottom = Math.max(boxSelectStart.y, boxSelectEnd.y) - rect.top;
 
-        const selected = new Set<string>();
-        images.forEach(img => {
-          const imgScreenLeft = img.x * zoom + viewOffset.x;
-          const imgScreenTop = img.y * zoom + viewOffset.y;
-          const imgScreenRight = (img.x + img.width) * zoom + viewOffset.x;
-          const imgScreenBottom = (img.y + img.height) * zoom + viewOffset.y;
+          const selected = new Set<string>();
+          images.forEach(img => {
+            const imgScreenLeft = img.x * zoom + viewOffset.x;
+            const imgScreenTop = img.y * zoom + viewOffset.y;
+            const imgScreenRight = (img.x + img.width) * zoom + viewOffset.x;
+            const imgScreenBottom = (img.y + img.height) * zoom + viewOffset.y;
 
-          if (imgScreenRight > left && imgScreenLeft < right &&
-              imgScreenBottom > top && imgScreenTop < bottom) {
-            selected.add(img.id);
+            if (imgScreenRight > left && imgScreenLeft < right &&
+                imgScreenBottom > top && imgScreenTop < bottom) {
+              selected.add(img.id);
+            }
+          });
+          if (selected.size > 0) {
+            setSelectedIds(selected);
           }
-        });
-        if (selected.size > 0) {
-          setSelectedIds(selected);
         }
       }
       setBoxSelectStart(null);
@@ -1535,8 +1551,28 @@ export function InfiniteCanvas({
       imageDragReadyRef.current = false;
     }
 
+    // Group drag finish
+    if (groupDragTarget) {
+      if (groupDragReadyRef.current && (groupDragOffset.x !== 0 || groupDragOffset.y !== 0)) {
+        // Move all images in the group by the drag offset
+        onImagesChange(images.map(img => {
+          if (img.groupId === groupDragTarget) {
+            return { ...img, x: img.x + groupDragOffset.x, y: img.y + groupDragOffset.y };
+          }
+          return img;
+        }));
+      }
+      setGroupDragTarget(null);
+      setGroupDragOffset({ x: 0, y: 0 });
+      groupDragReadyRef.current = false;
+    }
+    if (groupDragTimerRef.current) {
+      clearTimeout(groupDragTimerRef.current);
+      groupDragTimerRef.current = null;
+    }
+
     mouseDownOnImageRef.current = false;
-  }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp]);
+  }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp, groupDragTarget, groupDragOffset]);
 
   const handleMouseLeave = useCallback(() => {
     if (editMode !== 'none') {
@@ -1560,6 +1596,15 @@ export function InfiniteCanvas({
       setDragTarget(null);
       setDragOffset({ x: 0, y: 0 });
       imageDragReadyRef.current = false;
+    }
+    if (groupDragTarget) {
+      setGroupDragTarget(null);
+      setGroupDragOffset({ x: 0, y: 0 });
+      groupDragReadyRef.current = false;
+    }
+    if (groupDragTimerRef.current) {
+      clearTimeout(groupDragTimerRef.current);
+      groupDragTimerRef.current = null;
     }
   }, [dragTarget, editMode, handleEditMouseUp]);
 
@@ -3794,8 +3839,10 @@ export function InfiniteCanvas({
         className={`absolute inset-0 overflow-hidden select-none ${
           ctrlKeyHeld && editMode === 'none'
             ? 'cursor-pointer'
-            : isPanning || isLongPressing || isSpacePressed
+            : isPanning || isSpacePressed
             ? 'cursor-grab active:cursor-grabbing'
+            : boxSelectStart
+            ? 'cursor-crosshair'
             : (editMode === 'erase' || editMode === 'mask')
             ? 'cursor-none'
             : editMode !== 'none'
@@ -4048,8 +4095,9 @@ export function InfiniteCanvas({
             const minY = Math.min(...groupImages.map(i => i.y));
             const maxX = Math.max(...groupImages.map(i => i.x + i.width));
             const maxY = Math.max(...groupImages.map(i => i.y + i.height));
-            const groupX = minX - padding;
-            const groupY = minY - titleBarH - padding;
+            const dragOff = (groupDragTarget === group.id && (groupDragReadyRef.current || groupDragOffset.x !== 0 || groupDragOffset.y !== 0)) ? groupDragOffset : { x: 0, y: 0 };
+            const groupX = minX - padding + dragOff.x;
+            const groupY = minY - titleBarH - padding + dragOff.y;
             const groupW = maxX - minX + padding * 2;
             const groupH = maxY - minY + titleBarH + padding * 2;
             const isEditing = editingGroupId === group.id;
@@ -4069,12 +4117,30 @@ export function InfiniteCanvas({
               >
                 {/* Title bar */}
                 <div
-                  className={`flex items-center gap-2 px-3 ${isMonochrome ? 'bg-amber-50/80' : 'bg-[#1a1a1a]/90'} rounded-t-lg h-[36px] cursor-pointer select-none`}
+                  className={`flex items-center gap-2 px-3 ${isMonochrome ? 'bg-amber-50/80' : 'bg-[#1a1a1a]/90'} rounded-t-lg h-[36px] select-none ${groupDragTarget === group.id && groupDragReadyRef.current ? 'cursor-grabbing' : 'cursor-grab'}`}
                   onClick={(e) => { e.stopPropagation(); }}
                   onDoubleClick={() => {
+                    if (editingGroupId === group.id) return; // already editing
                     setEditingGroupId(group.id);
                     setGroupEditName(group.name);
                     setGroupEditNote(group.note);
+                  }}
+                  onMouseDown={(e) => {
+                    if (e.button !== 0) return; // only left button
+                    // Don't start drag if clicking on buttons or input
+                    const target = e.target as HTMLElement;
+                    if (target.closest('button') || target.closest('input')) return;
+                    e.stopPropagation();
+                    if (editingGroupId === group.id) return; // don't drag while editing name
+                    // Start long press timer for group drag (hold 200ms before dragging)
+                    groupDragReadyRef.current = false;
+                    setGroupDragTarget(group.id);
+                    const canvasPos = screenToCanvas(e.clientX, e.clientY);
+                    setGroupDragStart(canvasPos);
+                    setGroupDragOffset({ x: 0, y: 0 });
+                    groupDragTimerRef.current = setTimeout(() => {
+                      groupDragReadyRef.current = true;
+                    }, 200);
                   }}
                 >
                   {isEditing ? (
@@ -4137,15 +4203,20 @@ export function InfiniteCanvas({
           {images.map(image => {
             const isSelected = selectedIds.has(image.id);
             const isDragging = dragTarget && selectedIds.has(image.id);
+            // Hide images belonging to collapsed groups
+            const isGroupCollapsed = image.groupId ? (groups.find(g => g.id === image.groupId)?.collapsed ?? false) : false;
+            // Apply group drag offset to images in the dragged group
+            const isGroupDragging = groupDragTarget && image.groupId === groupDragTarget;
             return (
               <div
                 key={image.id}
                 className={`absolute group z-10 ${isSelected ? 'z-20' : ''} ${editMode !== 'none' && editImageId !== image.id ? 'opacity-30' : ''}`}
                 style={{
-                  left: image.x + (isDragging ? dragOffset.x : 0),
-                  top: image.y + (isDragging ? dragOffset.y : 0),
+                  left: image.x + (isDragging ? dragOffset.x : 0) + (isGroupDragging ? groupDragOffset.x : 0),
+                  top: image.y + (isDragging ? dragOffset.y : 0) + (isGroupDragging ? groupDragOffset.y : 0),
                   width: image.width,
                   height: image.height,
+                  display: isGroupCollapsed ? 'none' : undefined,
                 }}
                 onMouseEnter={() => {
                   if (visionPromptEnabled && editMode === 'none') {
@@ -4526,7 +4597,7 @@ export function InfiniteCanvas({
           })()}
         </div>
 
-        {boxSelectStart && boxSelectEnd && !isLongPressing && (
+        {boxSelectStart && boxSelectEnd && (
           <div
             className="absolute border border-[#d4af37]/50 bg-[#d4af37]/10 z-30 pointer-events-none"
             style={{
