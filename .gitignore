@@ -99,8 +99,3 @@ Desktop.ini
 .turbo
 
 .coze-logs
-
-# Generated image directories
-public/inpaint/
-public/uploads/
-public/upscayl/

@@ -7,36 +7,17 @@ import { ConfirmDialog } from './custom-dialogs';
 import { UserManager } from '@/lib/user-manager';
 import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
 import { getModelDisplayName } from '@/lib/model-name-map';
-import { UniversalApiManager } from '@/lib/universal-api-manager';
-
-// 客户端模型类型推断（与 server-api-config 保持一致）
-type ModelType = 'image' | 'chat' | '3d' | 'vectorize' | 'layer';
-const IMAGE_KW = ['dall-e','dall·e','dalle','midjourney','mj-','stable-diffusion','sdxl','sd3','stable-image','flux','flux-','imagen','kandinsky','cogview','cogviewx','minimax-image','minimax-video','kling-image','kling-v1-image','kling-v2-image','jimeng','jimeng-2','ideogram','ideogram-2','ideogram-3','recraft','recraft-v3','recraft-realism','leonardo','playground','playground-v3','playground-v2','luma-photon','seedream','seedream-3','seedream-5','wan2.7-image','wanx','gpt-image','gpt-image-1','gpt-image-2','nano-banana','gemini-3.1-flash-image','gemini-2.0-flash-image','pixart','pixart-alpha','pixart-sigma','deepfloyd','if-xl','wuerstchen','kolors','hunyuan-image','stepfun-image','bagel-image','dreamshaper','realvisxl','animagine','sdxl-turbo','sd-turbo','openjourney','open-dalle','amused','ssd-1b','sana','hidream-image','picsart','image-gen','image-generation','wan2.1-image','wan-image','doubao-seedream','grok-image','chatgpt-4o-image'];
-const CHAT_KW = ['gpt-4','gpt-4o','gpt-4-turbo','gpt-3.5','gpt-5','chatgpt','chat-latest','o1-','o3-','o4-','claude','claude-3','claude-4','claude-opus','claude-sonnet','gemini-1','gemini-2','gemini-3','deepseek','deepseek-chat','deepseek-v','deepseek-r','qwen','qwen2','qwen3','qwen-','llama','llama-2','llama-3','llama-4','mistral','mixtral','codestral','pixtral','yi-','yi-lightning','chatglm','glm-4','glm-5','moonshot','kimi','kimi-k2','spark','spark-4','spark-5','ernie','ernie-4','ernie-5','command','command-r','phi-','phi-3','phi-4','gemma','gemma-2','grok','grok-2','grok-3','grok-4','doubao-pro','doubao-lite','doubao-1.5','doubao-vision','doubao-1','hunyuan-turbos','minimax-abab','minimax-chat','step-2','step-1','internlm','internvl','solar','falcon','starcoder','codellama','wizardlm','vicuna','zephyr','openchat','nous-hermes','dolphin','hermes','granite','jamba','arctic','tinyllama','orca','qwen3-rerank','voyage','bge-','paddleocr','glm-ocr'];
-function inferModelTypeClient(modelId: string, fallback: ModelType = 'image'): ModelType {
-  const id = modelId.toLowerCase();
-  if (id.includes('3d')||id.includes('tripo')||id.includes('meshy')||id.includes('rodin')||id.includes('hyper3d')||id.includes('hunyuan3d')||id.includes('claydo')) return '3d';
-  if (id.includes('vector')||id.includes('vtracer')||id.includes('starvector')||id.includes('svg-')) return 'vectorize';
-  if (id.includes('layer')||id.includes('segment')||id.includes('sam2')||id.includes('yolo')||id.includes('rmbg')||id.includes('rembg')||id.includes('remove-bg')||id.includes('layered')) return 'layer';
-  for (const kw of IMAGE_KW) { if (id.includes(kw)) return 'image'; }
-  for (const kw of CHAT_KW) { if (id.includes(kw)) return 'chat'; }
-  if (/[-_](image|img|imgen|gen|paint|draw|art|photo)/.test(id)) return 'image';
-  if (/[-_](chat|talk|instruct|assistant|dialog|conv)/.test(id)) return 'chat';
-  if (/[a-z]+-\d+b/.test(id)) return 'chat';
-  return fallback;
-}
 
 interface AdminSystemProps {
   themeStyle?: 'gold' | 'monochrome';
   onClose: () => void;
 }
 
-type ApiKind = 'image' | 'chat' | '3d' | 'imageEdit' | 'vectorize' | 'layer' | 'universal';
+type ApiKind = 'image' | 'chat' | '3d' | 'imageEdit' | 'vectorize' | 'layer';
 type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'imageEdit' | 'vectorize' | 'layer';
 type AdminProvider = ApiProvider & { apiKeyPreview?: string };
 
 const apiKindLabels: Record<ApiKind, string> = {
-  universal: '通用(全部类型)',
   image: '图像模型',
   chat: 'LLM 模型',
   '3d': '3D 模型',
@@ -213,27 +194,15 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     if (!apiBaseUrl.trim() || !apiKey.trim()) return;
     setIsDiscovering(true);
     try {
-      // 使用客户端发现（从浏览器端直接请求目标API，绕过沙箱网络限制）
-      const result = await UniversalApiManager.quickTestConnection(
-        apiBaseUrl.trim(),
-        apiKey.trim()
-      );
-      if (result.success && result.models && result.models.length > 0) {
-        const models: ModelInfo[] = result.models.map((id: string) => ({
-          id,
-          name: getModelDisplayName(id),
-          type: inferModelTypeClient(id),
-          providerId: 'temp',
-        }));
-        setDiscoveredModels(models);
-      } else {
-        setDiscoveredModels([]);
-        alert(result.message || '未发现模型，请检查API地址和密钥是否正确');
-      }
-    } catch (err) {
-      console.error('[Admin] 模型发现失败:', err);
-      setDiscoveredModels([]);
-      alert('模型发现失败: ' + (err instanceof Error ? err.message : String(err)));
+      const response = await fetch('/api/admin/apis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'discover', baseUrl: apiBaseUrl.trim(), apiKey: apiKey.trim(), modelType: apiKind }),
+      });
+      const data = await response.json();
+      const models = data.models || [];
+      setDiscoveredModels(models);
+      // 默认不选择任何模型，管理员手动选择
     } finally {
       setIsDiscovering(false);
     }

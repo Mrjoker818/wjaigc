@@ -3,7 +3,6 @@ import {
   addApiProvider,
   deleteApiProvider,
   discoverModelsForCredentials,
-  getApiProviders,
   getPublicApiProviders,
   refreshApiProvider,
   sanitizeProvider,
@@ -41,16 +40,6 @@ export async function POST(request: NextRequest) {
     if (action === 'delete') {
       const success = await deleteApiProvider(String(body.providerId || ''));
       return NextResponse.json({ success });
-    }
-
-    if (action === 'test') {
-      // Return full API key for client-side connection testing (browser can reach APIs that sandbox cannot)
-      const providers = await getApiProviders();
-      const provider = providers.find((p: ApiProvider) => p.id === String(body.providerId || ''));
-      if (!provider) {
-        return NextResponse.json({ success: false, error: 'Provider not found' }, { status: 404 });
-      }
-      return NextResponse.json({ success: true, apiKey: provider.apiKey, baseUrl: provider.baseUrl });
     }
 
     if (action === 'update') {

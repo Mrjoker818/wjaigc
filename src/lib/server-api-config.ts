@@ -8,6 +8,7 @@ import { getServerSystemDir } from './server-data-root';
 
 const SYSTEM_DIR = getServerSystemDir();
 const CONFIG_PATH = path.join(SYSTEM_DIR, 'api-providers.json');
+const DISCOVERY_TIMEOUT_MS = 8000;
 
 /**
  * Normalize API base URL to always end with /v1
@@ -75,110 +76,33 @@ function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 
   if (provider.modelType === '3d') return '3d';
   if (provider.modelType === 'vectorize') return 'vectorize';
   if (provider.modelType === 'layer') return 'layer';
-  if (provider.modelType === 'universal') return 'image'; // fallback for universal, actual type is per-model
   return 'image';
 }
 
 function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 'vectorize' | 'layer'): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' {
   const id = modelId.toLowerCase();
-
-  // ── 3D models (check first - rare but specific) ──
-  if (id.includes('3d') || id.includes('tripo') || id.includes('meshy') || id.includes('rodin') || id.includes('hyper3d') || id.includes('hunyuan3d') || id.includes('claydo')) return '3d';
-
-  // ── Vectorize models ──
-  if (id.includes('vector') || id.includes('vtracer') || id.includes('starvector') || id.includes('svg-')) return 'vectorize';
-
-  // ── Segment / Layer models ──
-  if (id.includes('layer') || id.includes('segment') || id.includes('sam2') || id.includes('yolo') || id.includes('rmbg') || id.includes('rembg') || id.includes('remove-bg') || id.includes('layered')) return 'layer';
-
-  // ── Image generation models (extensive list for 302.ai etc.) ──
-  const imageKeywords = [
-    'dall-e', 'dall·e', 'dalle',
-    'midjourney', 'mj-',
-    'stable-diffusion', 'sdxl', 'sd3', 'stable-image',
-    'flux', 'flux-',
-    'imagen',
-    'kandinsky',
-    'cogview', 'cogviewx',
-    'minimax-image', 'minimax-video',
-    'kling-image', 'kling-v1-image', 'kling-v2-image',
-    'jimeng', 'jimeng-2',
-    'ideogram', 'ideogram-2', 'ideogram-3',
-    'recraft', 'recraft-v3', 'recraft-realism',
-    'leonardo',
-    'playground', 'playground-v3', 'playground-v2',
-    'luma-photon',
-    'seedream', 'seedream-3', 'seedream-5',
-    'wan2.7-image', 'wanx',
-    'gpt-image', 'gpt-image-1', 'gpt-image-2',
-    'nano-banana', 'gemini-3.1-flash-image', 'gemini-2.0-flash-image',
-    'pixart', 'pixart-alpha', 'pixart-sigma',
-    'deepfloyd', 'if-xl',
-    'wuerstchen',
-    'kolors',
-    'hunyuan-image',
-    'stepfun-image',
-    'bagel-image',
-    'dreamshaper',
-    'realvisxl',
-    'animagine',
-    'sdxl-turbo', 'sd-turbo',
-    'openjourney', 'open-dalle',
-    'amused', 'ssd-1b', 'sana',
-    'hidream-image',
-    'picsart',
-    'image-gen', 'image-generation', 'image-gen',
-    'wan2.1-image', 'wan-image',
-    'doubao-seedream',
-    'grok-image',
-    'chatgpt-4o-image',
-  ];
-  for (const kw of imageKeywords) {
-    if (id.includes(kw)) return 'image';
-  }
-
-  // ── Chat / LLM models (extensive list for 302.ai etc.) ──
-  const chatKeywords = [
-    'gpt-4', 'gpt-4o', 'gpt-4-turbo', 'gpt-3.5', 'gpt-5',
-    'chatgpt', 'chat-latest',
-    'o1-', 'o3-', 'o4-',
-    'claude', 'claude-3', 'claude-4', 'claude-opus', 'claude-sonnet',
-    'gemini-1', 'gemini-2', 'gemini-3',
-    'deepseek', 'deepseek-chat', 'deepseek-v', 'deepseek-r',
-    'qwen', 'qwen2', 'qwen3', 'qwen-',
-    'llama', 'llama-2', 'llama-3', 'llama-4',
-    'mistral', 'mixtral', 'codestral', 'pixtral',
-    'yi-', 'yi-lightning',
-    'chatglm', 'glm-4', 'glm-5',
-    'moonshot', 'kimi', 'kimi-k2',
-    'spark', 'spark-4', 'spark-5',
-    'ernie', 'ernie-4', 'ernie-5',
-    'command', 'command-r',
-    'phi-', 'phi-3', 'phi-4',
-    'gemma', 'gemma-2',
-    'grok', 'grok-2', 'grok-3', 'grok-4',
-    'doubao-pro', 'doubao-lite', 'doubao-1.5', 'doubao-vision', 'doubao-1',
-    'hunyuan-turbos',
-    'minimax-abab', 'minimax-chat',
-    'step-2', 'step-1',
-    'internlm', 'internvl',
-    'solar', 'falcon', 'starcoder', 'codellama',
-    'wizardlm', 'vicuna', 'zephyr', 'openchat',
-    'nous-hermes', 'dolphin', 'hermes',
-    'granite', 'jamba', 'arctic',
-    'tinyllama', 'orca',
-    'qwen3-rerank', 'voyage', 'bge-',
-    'paddleocr', 'glm-ocr',
-  ];
-  for (const kw of chatKeywords) {
-    if (id.includes(kw)) return 'chat';
-  }
-
-  // ── Heuristic fallbacks ──
-  if (/[-_](image|img|imgen|gen|paint|draw|art|photo)/.test(id)) return 'image';
-  if (/[-_](chat|talk|instruct|assistant|dialog|conv)/.test(id)) return 'chat';
-  if (/[a-z]+-\d+b/.test(id)) return 'chat';  // e.g. qwen3-6b, llama3-8b
-
+  if (id.includes('3d') || id.includes('tripo') || id.includes('meshy') || id.includes('hunyuan')) return '3d';
+  if (id.includes('vector') || id.includes('vtracer') || id.includes('starvector') || id.includes('svg')) return 'vectorize';
+  if (id.includes('layer') || id.includes('segment') || id.includes('sam') || id.includes('detection') || id.includes('yolo')) return 'layer';
+  if (
+    id.includes('image') ||
+    id.includes('dall-e') ||
+    id.includes('flux') ||
+    id.includes('stable') ||
+    id.includes('sd') ||
+    id.includes('midjourney') ||
+    id.includes('imagen') ||
+    id.includes('seedream')
+  ) return 'image';
+  if (
+    id.includes('gpt') ||
+    id.includes('claude') ||
+    id.includes('gemini') ||
+    id.includes('qwen') ||
+    id.includes('deepseek') ||
+    id.includes('llama') ||
+    id.includes('glm')
+  ) return 'chat';
   return fallback;
 }
 
@@ -222,7 +146,7 @@ export async function getPublicApiProviders(): Promise<PublicApiProvider[]> {
 export async function discoverModelsForCredentials(
   baseUrl: string,
   apiKey: string,
-  modelType: ApiKind, // eslint-disable-line @typescript-eslint/no-unused-vars -- 保留参数以兼容现有调用方
+  modelType: ApiKind,
 ): Promise<{ success: boolean; models: ModelInfo[]; message: string; latencyMs: number }> {
   const startedAt = Date.now();
   const probeProvider: ApiProvider = {
@@ -231,53 +155,39 @@ export async function discoverModelsForCredentials(
     baseUrl,
     apiKey,
     isEnabled: true,
-    type: 'universal',
-    modelType: 'universal',
+    type: modelType === 'chat' ? 'chat' : modelType === 'imageEdit' ? 'imageEdit' : modelType === 'image' ? 'image' : 'universal',
+    modelType,
     createdAt: startedAt,
     updatedAt: startedAt,
   };
 
   try {
-    const normalizedUrl = normalizeBaseUrl(baseUrl);
-    const response = await fetch(`${normalizedUrl}/models`, {
+    const response = await fetch(`${normalizeBaseUrl(baseUrl)}/models`, {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
     });
 
     const latencyMs = Date.now() - startedAt;
     if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      console.error(`❌ Model discovery failed: HTTP ${response.status} from ${normalizedUrl}/models`, errorText.substring(0, 200));
-      return { success: false, models: [], message: `HTTP ${response.status}: ${response.statusText}`, latencyMs };
+      return { success: false, models: [], message: `${response.status} ${response.statusText}`, latencyMs };
     }
 
-    const responseText = await response.text();
-    let data: { data?: unknown[]; models?: unknown[] };
-    try {
-      data = JSON.parse(responseText);
-    } catch {
-      console.error('❌ Failed to parse /models response as JSON:', responseText.substring(0, 200));
-      return { success: false, models: [], message: '服务器返回了非 JSON 格式的响应', latencyMs };
-    }
+    const data = await response.json();
     const rawModels = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
-    console.log(`📋 Discovered ${rawModels.length} raw models from ${normalizedUrl}`);
-
-    // 不按类型过滤，返回所有模型；每个模型通过 inferModelType 自动推断类型
     const models = rawModels
-      .map((m: unknown) => formatModel(m as Record<string, unknown>, probeProvider))
-      .filter((m: ModelInfo) => m.id);
+      .map((m: Record<string, unknown>) => formatModel(m, probeProvider))
+      .filter((m: ModelInfo) => m.id && (modelType === 'universal' || modelType === 'imageEdit' || m.type === modelType || (modelType === 'image' && m.type === 'image')));
 
-    return { success: true, models, message: `发现 ${models.length} 个模型`, latencyMs };
+    return { success: true, models, message: `Found ${models.length} models`, latencyMs };
   } catch (error) {
     const latencyMs = Date.now() - startedAt;
-    console.error('❌ Model discovery error:', error instanceof Error ? error.message : String(error));
     return {
       success: false,
       models: [],
-      message: error instanceof Error ? error.message : '模型发现失败',
+      message: error instanceof Error ? error.message : 'Model discovery failed',
       latencyMs,
     };
   }
@@ -366,7 +276,7 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
     baseUrl: normalizeBaseUrl(input.baseUrl),
     apiKey: input.apiKey.trim(),
     isEnabled: true,
-    type: input.modelType === 'chat' ? 'chat' : input.modelType === 'image' ? 'image' : 'universal',
+    type: input.modelType === 'chat' ? 'chat' : input.modelType === 'imageEdit' ? 'imageEdit' : input.modelType === 'image' ? 'image' : 'universal',
     modelType: input.modelType,
     requestStyle: input.requestStyle || (input.modelType === 'chat' ? 'chat-completions' : 'images-generations'),
     selectedModels: input.selectedModels || [],
@@ -379,8 +289,7 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
 
   const discovery = await discoverModelsForCredentials(provider.baseUrl, provider.apiKey, input.modelType);
   provider.discoveredModels = discovery.models.map(model => ({ ...model, providerId: id }));
-  // For universal providers, don't auto-select all models (could be hundreds); for specific types, auto-select
-  provider.selectedModels = input.selectedModels?.length ? input.selectedModels : (input.modelType === 'universal' ? [] : provider.discoveredModels.map(model => model.id));
+  provider.selectedModels = input.selectedModels?.length ? input.selectedModels : provider.discoveredModels.map(model => model.id);
   provider.selectedModel = provider.selectedModels[0];
   provider.connectionStatus = discovery.success ? 'success' : 'failed';
   provider.lastTestedAt = Date.now();
@@ -452,21 +361,19 @@ export async function refreshApiProvider(providerId: string): Promise<ApiProvide
 export async function findProviderForModel(modelId: string, modelType?: ApiKind): Promise<ApiProvider | null> {
   const providers = await getApiProviders();
   const enabled = providers.filter(provider => provider.isEnabled);
-  // imageEdit 也能匹配 image 类型的提供商（图像处理模型通常共用图像 API）
-  const effectiveModelType = modelType === 'imageEdit' ? 'image' : modelType;
   const exact = enabled.find(provider =>
-    (!effectiveModelType || effectiveModelType === 'universal' || provider.modelType === effectiveModelType || provider.modelType === modelType || provider.modelType === 'universal') &&
+    (!modelType || modelType === 'universal' || provider.modelType === modelType || provider.modelType === 'universal') &&
     (provider.selectedModels || []).includes(modelId),
   );
   if (exact) return exact;
 
   const byDefault = enabled.find(provider =>
-    (!effectiveModelType || effectiveModelType === 'universal' || provider.modelType === effectiveModelType || provider.modelType === modelType || provider.modelType === 'universal') &&
+    (!modelType || modelType === 'universal' || provider.modelType === modelType || provider.modelType === 'universal') &&
     provider.isDefault,
   );
   if (byDefault) return byDefault;
 
-  return enabled.find(provider => !effectiveModelType || provider.modelType === effectiveModelType || provider.modelType === modelType || provider.modelType === 'universal') || null;
+  return enabled.find(provider => !modelType || provider.modelType === modelType || provider.modelType === 'universal') || null;
 }
 
 /** 根据功能类型查找对应的 API 提供商（矢量化/分层/3D等） */
@@ -500,7 +407,7 @@ export async function getPublicModels(modelType?: ApiKind): Promise<ModelInfo[]>
           id,
           name: getModelDisplayName(id),
           providerId: provider.id,
-          type: provider.modelType === 'universal' ? inferModelType(id, 'image') : modelTypeForProvider(provider),
+          type: modelTypeForProvider(provider),
         } satisfies ModelInfo))).map(model => {
           const displayName = getModelDisplayName(model.id);
           // Use mapped name if it differs from ID (mapping found), otherwise keep original name

@@ -101,26 +101,6 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'kling', entry: { name: '可灵', type: 'image', provider: 'Kuaishou' } },
   // HiDream
   { pattern: 'hidream', entry: { name: 'HiDream', type: 'image', provider: 'HiDream AI' } },
-  // Picsart
-  { pattern: 'picsart', entry: { name: 'Picsart', type: 'image', provider: 'Picsart' } },
-  // Recraft
-  { pattern: 'recraft-realism', entry: { name: 'Recraft Realism', type: 'image', provider: 'Recraft' } },
-  { pattern: 'recraft-v3', entry: { name: 'Recraft V3', type: 'image', provider: 'Recraft' } },
-  { pattern: 'recraft', entry: { name: 'Recraft', type: 'image', provider: 'Recraft' } },
-  // Playground
-  { pattern: 'playground-v3', entry: { name: 'Playground V3', type: 'image', provider: 'Playground' } },
-  { pattern: 'playground-v2', entry: { name: 'Playground V2', type: 'image', provider: 'Playground' } },
-  { pattern: 'playground', entry: { name: 'Playground', type: 'image', provider: 'Playground' } },
-  // Leonardo
-  { pattern: 'leonardo', entry: { name: 'Leonardo', type: 'image', provider: 'Leonardo' } },
-  // Luma Photon
-  { pattern: 'luma-photon', entry: { name: 'Luma Photon', type: 'image', provider: 'Luma' } },
-  // Kolors (快手)
-  { pattern: 'kolors', entry: { name: 'Kolors', type: 'image', provider: 'Kuaishou' } },
-  // Bagel
-  { pattern: 'bagel-image', entry: { name: 'Bagel Image', type: 'image', provider: 'Bagel' } },
-  // StepFun Image
-  { pattern: 'stepfun-image', entry: { name: '阶跃图像', type: 'image', provider: 'StepFun' } },
   // Grok Imagine
   { pattern: 'grok-imagine', entry: { name: 'Grok Imagine', type: 'image', provider: 'xAI' } },
   // Sora
@@ -255,39 +235,6 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   // MiniMax
   { pattern: 'minimax-m2', entry: { name: 'MiniMax M2', type: 'chat', provider: 'MiniMax' } },
   { pattern: 'minimax', entry: { name: 'MiniMax', type: 'chat', provider: 'MiniMax' } },
-  // Grok (xAI)
-  { pattern: 'grok-4', entry: { name: 'Grok 4', type: 'chat', provider: 'xAI' } },
-  { pattern: 'grok-3', entry: { name: 'Grok 3', type: 'chat', provider: 'xAI' } },
-  { pattern: 'grok-2', entry: { name: 'Grok 2', type: 'chat', provider: 'xAI' } },
-  { pattern: 'grok', entry: { name: 'Grok', type: 'chat', provider: 'xAI' } },
-  // Command (Cohere)
-  { pattern: 'command-r-plus', entry: { name: 'Command R+', type: 'chat', provider: 'Cohere' } },
-  { pattern: 'command-r', entry: { name: 'Command R', type: 'chat', provider: 'Cohere' } },
-  { pattern: 'command', entry: { name: 'Command', type: 'chat', provider: 'Cohere' } },
-  // Phi (Microsoft)
-  { pattern: 'phi-4', entry: { name: 'Phi-4', type: 'chat', provider: 'Microsoft' } },
-  { pattern: 'phi-3', entry: { name: 'Phi-3', type: 'chat', provider: 'Microsoft' } },
-  { pattern: 'phi', entry: { name: 'Phi', type: 'chat', provider: 'Microsoft' } },
-  // Gemma (Google)
-  { pattern: 'gemma-2', entry: { name: 'Gemma 2', type: 'chat', provider: 'Google' } },
-  { pattern: 'gemma', entry: { name: 'Gemma', type: 'chat', provider: 'Google' } },
-  // Pixtral (Mistral)
-  { pattern: 'pixtral', entry: { name: 'Pixtral', type: 'chat', provider: 'Mistral' } },
-  // InternLM (上海AI实验室)
-  { pattern: 'internlm', entry: { name: 'InternLM', type: 'chat', provider: 'Shanghai AI Lab' } },
-  // StepFun (阶跃星辰)
-  { pattern: 'step-2', entry: { name: '阶跃 Step-2', type: 'chat', provider: 'StepFun' } },
-  { pattern: 'step-1', entry: { name: '阶跃 Step-1', type: 'chat', provider: 'StepFun' } },
-  // StarCoder
-  { pattern: 'starcoder', entry: { name: 'StarCoder', type: 'chat', provider: 'BigCode' } },
-  // CodeLlama
-  { pattern: 'codellama', entry: { name: 'Code Llama', type: 'chat', provider: 'Meta' } },
-  // Spark (讯飞星火)
-  { pattern: 'spark-4', entry: { name: '星火 4.0', type: 'chat', provider: 'iFLYTEK' } },
-  { pattern: 'spark', entry: { name: '星火', type: 'chat', provider: 'iFLYTEK' } },
-  // Ernie (文心一言)
-  { pattern: 'ernie-4', entry: { name: '文心 4.0', type: 'chat', provider: 'Baidu' } },
-  { pattern: 'ernie', entry: { name: '文心', type: 'chat', provider: 'Baidu' } },
 
   // ===== 3D Models =====
   { pattern: 'hunyuan3d', entry: { name: '混元3D', type: '3d', provider: 'Tencent' } },
@@ -305,16 +252,12 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   // ===== Vectorize Models =====
   { pattern: 'vtracer', entry: { name: 'VTracer', type: 'vectorize' } },
   { pattern: 'starvector', entry: { name: 'StarVector', type: 'vectorize' } },
-  { pattern: 'vectorizer', entry: { name: 'Vectorizer.AI', type: 'vectorize' } },
   { pattern: 'vectorize', entry: { name: '矢量化', type: 'vectorize' } },
 
   // ===== Layer Models =====
   { pattern: 'sam2', entry: { name: 'SAM 2', type: 'layer', provider: 'Meta' } },
   { pattern: 'segment-anything', entry: { name: 'SAM', type: 'layer', provider: 'Meta' } },
   { pattern: 'yolo', entry: { name: 'YOLO', type: 'layer' } },
-  { pattern: 'qwen-image-layered', entry: { name: 'Qwen 图像分层', type: 'layer', provider: 'Alibaba' } },
-  { pattern: 'rmbg', entry: { name: 'RMBG 背景移除', type: 'layer' } },
-  { pattern: 'rembg', entry: { name: 'RemBG 背景移除', type: 'layer' } },
 ];
 
 /**

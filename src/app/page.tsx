@@ -129,12 +129,6 @@ function CanvasApp() {
     model: string; providerId: string; providerPreset?: string;
   } | null>(null);
 
-  // Login state
-  const [loginUsername, setLoginUsername] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-  const [loginError, setLoginError] = useState('');
-  const [isLoginLoading, setIsLoginLoading] = useState(false);
-
   // Oh My Prompt - Vision Prompt state
   const [visionPromptEnabled, setVisionPromptEnabled] = useState(false);
   const [isVisionAnalyzing, setIsVisionAnalyzing] = useState(false);
@@ -192,6 +186,7 @@ function CanvasApp() {
         userMgr.logout();
         if (cancelled) return;
         setCurrentUser(null);
+        setShowUserManager(true);
       } catch {}
     };
     void initCurrentUser();
@@ -218,38 +213,6 @@ function CanvasApp() {
       });
     });
   }, []);
-
-  // 登录提交处理
-  const handleLoginSubmit = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoginError('');
-    if (!loginUsername.trim() || !loginPassword.trim()) {
-      setLoginError('请输入用户名和密码');
-      return;
-    }
-    setIsLoginLoading(true);
-    try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: loginUsername.trim(), password: loginPassword }),
-      });
-      const data = await response.json() as { user?: User };
-      if (!data.user) {
-        setLoginError('登录失败，用户名或密码错误');
-        return;
-      }
-      const userMgr = UserManagerCore.getInstance();
-      const loggedIn = userMgr.upsertUserFromServer(data.user);
-      setCurrentUser(loggedIn);
-      setLoginUsername('');
-      setLoginPassword('');
-    } catch {
-      setLoginError('登录失败，请检查网络连接');
-    } finally {
-      setIsLoginLoading(false);
-    }
-  }, [loginUsername, loginPassword]);
 
   // 应用主题
   useEffect(() => {
@@ -1596,84 +1559,6 @@ function CanvasApp() {
     });
   }, [handleFusion]);
 
-  // ──── 登录界面 ────
-  if (!currentUser) {
-    return (
-      <div className="h-screen w-screen flex items-center justify-center bg-[#0a0a0a] relative overflow-hidden">
-        {/* 背景装饰 */}
-        <div className="absolute inset-0 opacity-20">
-          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-amber-500/20 rounded-full blur-3xl" />
-          <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-purple-500/20 rounded-full blur-3xl" />
-        </div>
-
-        <div className="relative z-10 w-full max-w-md px-6">
-          {/* Logo 和标题 */}
-          <div className="text-center mb-10">
-            <h1 className="text-4xl font-bold text-white mb-2">
-              无界<span className="text-amber-400">AI</span>
-            </h1>
-            <p className="text-gray-400 text-sm">AI 图像生成与协作平台</p>
-          </div>
-
-          {/* 登录卡片 */}
-          <div className="bg-[#141414] border border-white/10 rounded-2xl p-8 shadow-2xl">
-            <h2 className="text-xl font-semibold text-white mb-6">登录</h2>
-
-            {loginError && (
-              <div className="mb-4 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
-                {loginError}
-              </div>
-            )}
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-gray-400 mb-1.5">用户名</label>
-                <input
-                  type="text"
-                  value={loginUsername}
-                  onChange={(e) => setLoginUsername(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleLoginSubmit(e as unknown as React.FormEvent); }}
-                  placeholder="请输入用户名"
-                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-gray-600 focus:outline-none focus:border-amber-400/50 focus:ring-1 focus:ring-amber-400/30 transition-all"
-                  autoFocus
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm text-gray-400 mb-1.5">密码</label>
-                <input
-                  type="password"
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleLoginSubmit(e as unknown as React.FormEvent); }}
-                  placeholder="请输入密码"
-                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-gray-600 focus:outline-none focus:border-amber-400/50 focus:ring-1 focus:ring-amber-400/30 transition-all"
-                />
-              </div>
-
-              <button
-                onClick={handleLoginSubmit}
-                disabled={isLoginLoading}
-                className="w-full py-3 bg-amber-500 hover:bg-amber-400 disabled:bg-amber-500/50 disabled:cursor-not-allowed text-black font-semibold rounded-xl transition-all active:scale-[0.98]"
-              >
-                {isLoginLoading ? '登录中...' : '登录'}
-              </button>
-            </div>
-
-            <p className="mt-6 text-center text-gray-500 text-sm">
-              没有账号？请联系管理员创建
-            </p>
-          </div>
-
-          <p className="text-center text-gray-600 text-xs mt-6">
-            无界AI v2.5.2
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // ──── 主画布界面 ────
   return (
     <div className={`h-screen w-screen relative overflow-hidden ${themeStyle === 'monochrome' ? 'bg-white' : 'bg-[#0a0a0a]'}`}>
       {/* Canvas - 全屏 */}
@@ -2081,7 +1966,8 @@ function CanvasApp() {
             setCurrentUser(null);
             setCurrentProject(null);
             setImages([]);
-            // currentUser=null 自动触发全屏登录界面
+            // 显示登录界面
+            setShowUserManager(true);
             toast.info('已退出登录', {
               description: '请重新登录以继续使用',
               className: themeStyle === 'monochrome'
