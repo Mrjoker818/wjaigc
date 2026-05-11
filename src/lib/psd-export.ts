@@ -808,6 +808,88 @@ async function tryExternalLayerSplit(
   height: number,
   onProgress?: (stage: string, progress: number) => void
 ): Promise<SceneBuildResult | null> {
+  // ── Try Qwen-Image-Layered first (high-quality RGBA layer decomposition) ──
+  try {
+    onProgress?.('layer_split_service', 10);
+    const qwenResp = await fetch('/api/layered-decompose', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageUrl,
+        prompt,
+        layers: mode === 'studio' ? 6 : mode === 'pro' ? 4 : 3,
+        resolution: 640,
+      }),
+    });
+
+    if (qwenResp.ok) {
+      const qwenResult = await qwenResp.json() as { success?: boolean; layers?: Array<{ id?: string; name?: string; imageUrl?: string; dataUrl?: string; url?: string; role?: string; opacity?: number; blendMode?: string }>; width?: number; height?: number; engine?: string };
+      if (qwenResult.success && Array.isArray(qwenResult.layers) && qwenResult.layers.length > 0) {
+        onProgress?.('building_rgba_layers', 40);
+        const sceneWidth = qwenResult.width || width;
+        const sceneHeight = qwenResult.height || height;
+        const layers: DesignLayer[] = [];
+
+        for (let i = 0; i < qwenResult.layers.length; i++) {
+          const item = qwenResult.layers[i];
+          const layerUrl = item.dataUrl || item.imageUrl || item.url;
+          if (!layerUrl) continue;
+          const role = i === 0 ? 'background' as LayerRole : i === qwenResult.layers.length - 1 ? 'subject' as LayerRole : 'subject' as LayerRole;
+          const canvas = await canvasFromImageUrl(layerUrl, sceneWidth, sceneHeight);
+          const box = { x: 0, y: 0, width: sceneWidth, height: sceneHeight };
+          layers.push({
+            id: item.id || `qwen_layer_${i}`,
+            role,
+            name: item.name || v4LayerName(role, i, role === 'background' ? 'main' : `layer_${i + 1}`),
+            visible: true,
+            opacity: item.opacity ?? 1,
+            blendMode: item.blendMode || 'normal',
+            canvas,
+            imageDataUrl: layerUrl,
+            boundingBox: box,
+            bbox: [box.x, box.y, box.x + box.width, box.y + box.height],
+            maskScore: 0.95,
+            edgeScore: 0.93,
+            semanticLabel: role === 'background' ? 'background' : 'main_subject',
+            reconstructMode: 'raster-safe',
+            source: 'original',
+            warnings: [`Layer decomposed by Qwen-Image-Layered (${qwenResult.engine || 'RGBA decomposition'}).`],
+          });
+        }
+
+        if (layers.length > 0) {
+          const groups: DesignGroup[] = [];
+          const bgLayerIds = layers.filter(l => l.role === 'background').map(l => l.id);
+          const subjectLayerIds = layers.filter(l => l.role !== 'background').map(l => l.id);
+          if (bgLayerIds.length > 0) groups.push({ id: 'group_qwen_bg', name: 'group/background', role: 'background', layerIds: bgLayerIds, visible: true });
+          if (subjectLayerIds.length > 0) groups.push({ id: 'group_qwen_subjects', name: 'group/subjects', role: 'subject', layerIds: subjectLayerIds, visible: true });
+
+          const qualityMetrics: QualityMetrics = {
+            maskBoundary: 0.93, ocr: 0.78, fontMatch: 0.7,
+            inpaint: 0.92, layerConsistency: 0.95, openability: 0.96,
+          };
+          for (const layer of layers) {
+            if (layer.canvas && !layer.imageDataUrl) {
+              try { layer.imageDataUrl = layer.canvas.toDataURL('image/png'); } catch { /* skip */ }
+            }
+          }
+          return {
+            layers,
+            groups,
+            fallbacks: [{ stage: 'layer_split', reason: 'Qwen-Image-Layered available', action: 'Used Qwen-Image-Layered RGBA decomposition' }],
+            qualityMetrics,
+            exportNotes: [{ level: 'info', message: `Qwen-Image-Layered decomposition: ${layers.length} RGBA layers` }],
+            width: sceneWidth,
+            height: sceneHeight,
+          };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[tryExternalLayerSplit] Qwen-Image-Layered failed, falling back:', e instanceof Error ? e.message : e);
+  }
+
+  // ── Fallback: legacy layer-split endpoint ──
   try {
     onProgress?.('layer_split_service', 12);
     const response = await fetch('/api/design/layer-split', {

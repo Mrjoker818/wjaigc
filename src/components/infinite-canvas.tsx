@@ -5161,7 +5161,7 @@ export function InfiniteCanvas({
                 <div className="flex items-center gap-1.5 px-2 py-1 rounded-md" style={{ background: upscaylAvailable ? 'rgba(34,197,94,0.12)' : 'rgba(234,179,8,0.12)' }}>
                   <div className={`w-1.5 h-1.5 rounded-full ${upscaylAvailable ? 'bg-green-400' : 'bg-yellow-400'}`} />
                   <span className="text-[10px] font-medium" style={{ color: upscaylAvailable ? '#22c55e' : '#eab308' }}>
-                    {upscaylChecking ? '检测中...' : upscaylAvailable ? 'Upscayl NCNN 本地引擎' : 'API 云端模式'}
+                    {upscaylChecking ? '检测中...' : upscaylAvailable ? 'Upscayl AI 无损放大引擎' : 'API 云端模式'}
                   </span>
                 </div>
                 {/* Model selector (only for Upscayl) */}

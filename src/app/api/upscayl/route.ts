@@ -5,7 +5,7 @@ import os from 'os';
 import fs from 'fs';
 import sharp from 'sharp';
 
-// Upscayl 模型描述信息
+// Upscayl 模型描述信息 (基于 upscayl/upscayl-ncnn Real-ESRGAN)
 const UPSCAYL_MODELS: Record<string, { name: string; description: string; scale: number }> = {
   'realesrgan-x4plus': {
     name: '通用高清',
@@ -31,6 +31,26 @@ const UPSCAYL_MODELS: Record<string, { name: string; description: string; scale:
     name: '视频帧增强',
     description: '适合视频截图和动画帧放大',
     scale: 2,
+  },
+  'remacri': {
+    name: 'Remacri 高保真',
+    description: '高保真细节恢复，适合纹理丰富的图片',
+    scale: 4,
+  },
+  'ultrasharp': {
+    name: 'UltraSharp 锐利',
+    description: '极致锐利细节增强，适合文字和线条',
+    scale: 4,
+  },
+  'ultramix-balanced': {
+    name: 'UltraMix 均衡',
+    description: '均衡放大，兼顾清晰度和自然感',
+    scale: 4,
+  },
+  'hfa2k': {
+    name: 'HFA2k 艺术',
+    description: '高保真艺术风格放大，适合绘画和设计',
+    scale: 4,
   },
 };
 
@@ -296,6 +316,52 @@ async function downloadImageToTemp(imageUrl: string, tmpDir: string): Promise<{ 
 
 // GET: 获取可用模型和状态
 export async function GET() {
+  const upscaylEndpoint = process.env.UPSCAYL_ENDPOINT || '';
+
+  // 优先检查外部 Upscayl 服务
+  if (upscaylEndpoint) {
+    try {
+      const resp = await fetch(`${upscaylEndpoint}/health`, { signal: AbortSignal.timeout(5000) });
+      if (resp.ok) {
+        const health = await resp.json() as { upscayl_available?: boolean; available_models?: string[] };
+        if (health.upscayl_available) {
+          // 从外部服务获取模型列表
+          try {
+            const modelsResp = await fetch(`${upscaylEndpoint}/models`, { signal: AbortSignal.timeout(5000) });
+            if (modelsResp.ok) {
+              const modelsData = await modelsResp.json() as { models: Array<{ id: string; name: string; description: string; scale: number }> };
+              return NextResponse.json({
+                available: true,
+                models: modelsData.models,
+                source: 'external',
+                endpoint: upscaylEndpoint,
+              });
+            }
+          } catch { /* fall back to local models */ }
+
+          // 使用外部服务但用本地模型描述
+          const availableModelIds = health.available_models || Object.keys(UPSCAYL_MODELS);
+          const models = availableModelIds.map(id => {
+            const info = UPSCAYL_MODELS[id];
+            return {
+              id,
+              name: info?.name || id,
+              description: info?.description || '',
+              scale: info?.scale || 4,
+            };
+          });
+          return NextResponse.json({
+            available: true,
+            models,
+            source: 'external',
+            endpoint: upscaylEndpoint,
+          });
+        }
+      }
+    } catch { /* external service not reachable, fall through to local */ }
+  }
+
+  // 本地 Upscayl
   const available = await isUpscaylAvailable();
   const availableModelIds = getAvailableModels();
 
@@ -312,6 +378,7 @@ export async function GET() {
   return NextResponse.json({
     available,
     models,
+    source: 'local',
     binPath: getUpscaylBinPath() || null,
     modelsPath: getModelsPath() || null,
   });
@@ -341,7 +408,56 @@ export async function POST(request: NextRequest) {
     const compress = compression ?? 90;
     const format = outputFormat || 'png';
 
-    // 检查 upscayl 可用性
+    // 优先使用外部 Upscayl 服务
+    const upscaylEndpoint = process.env.UPSCAYL_ENDPOINT || '';
+    if (upscaylEndpoint) {
+      try {
+        const resp = await fetch(`${upscaylEndpoint}/upscale`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image_url: imageUrl,
+            model: modelName,
+            scale: upscaleScale,
+            tile_size: tile,
+            output_format: format,
+            compression: compress,
+          }),
+          signal: AbortSignal.timeout(300000), // 5分钟超时
+        });
+        if (resp.ok) {
+          const result = await resp.json() as {
+            success: boolean;
+            image_url?: string;
+            original_size?: { width: number; height: number };
+            upscaled_size?: { width: number; height: number };
+            error?: string;
+          };
+          if (result.success && result.image_url) {
+            // 如果外部服务返回的是相对路径，拼接完整URL
+            let resultImageUrl = result.image_url;
+            if (resultImageUrl.startsWith('/')) {
+              resultImageUrl = `${upscaylEndpoint}${resultImageUrl}`;
+            }
+            return NextResponse.json({
+              success: true,
+              imageUrl: resultImageUrl,
+              originalSize: result.original_size || null,
+              upscaledSize: result.upscaled_size || null,
+              model: modelName,
+              scale: upscaleScale,
+              source: 'external',
+            });
+          }
+          // 外部服务返回失败，继续尝试本地
+          console.log('[upscayl] External service returned failure, falling back to local');
+        }
+      } catch (err) {
+        console.log('[upscayl] External service not reachable, falling back to local:', err instanceof Error ? err.message : err);
+      }
+    }
+
+    // 本地 Upscayl
     const available = await isUpscaylAvailable();
     if (!available) {
       return NextResponse.json({

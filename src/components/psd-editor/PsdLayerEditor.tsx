@@ -20,8 +20,8 @@ type EditorStage = 'loading' | 'editing' | 'exporting' | 'done' | 'error';
 function stageLabel(stage: string) {
   const labels: Record<string, string> = {
     loading_image: '正在读取图片...',
-    layer_split_service: '正在尝试高质量图层分离...',
-    building_rgba_layers: '正在构建透明图层...',
+    layer_split_service: '正在使用 Qwen-Image-Layered 进行智能分层...',
+    building_rgba_layers: '正在构建 RGBA 透明图层...',
     ai_analyzing: '正在分析语义结构...',
     detecting_background: '正在识别背景...',
     removing_background: '正在分离主体...',
