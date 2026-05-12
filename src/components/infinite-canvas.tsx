@@ -2716,7 +2716,7 @@ export function InfiniteCanvas({
         return;
       }
 
-      updateProcessingFrame(placeholderId, { progress: 22, status: 'AI 正在放大细节...' });
+      updateProcessingFrame(placeholderId, { progress: 22, status: data.engine === 'tile-upscale' ? 'AI 正在分块放大（更高质量，耗时稍长）...' : 'AI 正在放大细节...' });
       const usedModel = data.usedModel || model;
       const resultUrl = data.imageUrl || await pollForResult(data.taskId, usedModel, (progress, status) => {
         updateProcessingFrame(placeholderId, { progress, status });
