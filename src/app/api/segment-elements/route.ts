@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findProviderForFeature, normalizeApiBaseUrl, getFirstAvailableModel } from '@/lib/server-api-config';
+import { findProviderForFeature, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import fsSync from 'fs';
@@ -105,8 +105,7 @@ export async function POST(request: NextRequest) {
 
     const baseUrl = normalizeApiBaseUrl(layerProvider.baseUrl.replace(/\/+$/, ''));
     const selectedModels = layerProvider.selectedModels || [];
-    const firstLayerModel = await getFirstAvailableModel('layer');
-    const modelId = selectedModels[0] || body.model || firstLayerModel?.model || 'qwen-image-layered';
+    const modelId = selectedModels[0] || body.model || 'qwen-image-layered';
 
     // Pre-resolve image to base64
     const imageBase64 = await resolveImageToBase64(imageUrl);

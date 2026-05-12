@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findProviderForModel, getApiProviders, getFirstAvailableModel } from '@/lib/server-api-config';
+import { findProviderForModel, getApiProviders } from '@/lib/server-api-config';
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
@@ -57,12 +57,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '缺少必要参数：prompt' }, { status: 400 });
     }
 
-    // 动态获取默认 chat 模型
-    const firstChatModel = await getFirstAvailableModel('chat', DEFAULT_MODEL);
-    const defaultModel = firstChatModel?.model || DEFAULT_MODEL;
-
     const resolved = splitProviderModel(model, providerId);
-    let selectedModel = resolved.model || defaultModel;
+    let selectedModel = resolved.model;
     let apiKey = process.env.APIMART_API_KEY || '';
     let baseUrl = DEFAULT_BASE_URL;
     let resolvedProviderId = resolved.providerId;
@@ -74,7 +70,7 @@ export async function POST(request: NextRequest) {
       }
       apiKey = provider.apiKey;
       baseUrl = normalizeChatBaseUrl(provider.baseUrl);
-      selectedModel = selectedModel || provider.selectedModels?.[0] || defaultModel;
+      selectedModel = selectedModel || provider.selectedModels?.[0] || DEFAULT_MODEL;
     } else {
       const provider = await findProviderForModel(selectedModel, 'chat');
       if (provider?.apiKey) {
