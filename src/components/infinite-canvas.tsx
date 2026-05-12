@@ -456,6 +456,16 @@ export function InfiniteCanvas({
     onGroupsChange?.(groups);
   }, [groups, onGroupsChange]);
 
+  // 当 initialGroups 从外部变化时同步更新 groups（项目切换、页面刷新加载）
+  const prevInitialGroupsRef = useRef<string>('');
+  useEffect(() => {
+    const key = initialGroups ? JSON.stringify(initialGroups) : '__empty__';
+    if (key !== prevInitialGroupsRef.current) {
+      prevInitialGroupsRef.current = key;
+      setGroups(initialGroups || []);
+    }
+  }, [initialGroups]);
+
   // Resize
   const [resizingImage, setResizingImage] = useState<string | null>(null);
   const [resizeCorner, setResizeCorner] = useState<string | null>(null);

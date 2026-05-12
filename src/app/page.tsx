@@ -165,6 +165,7 @@ function CanvasApp() {
                   stylePreset: img.stylePreset || '',
                   category: img.category || '',
                   size: img.size || '',
+                  groupId: img.groupId || '',
                   x: img.x,
                   y: img.y,
                   width: img.width || 256,
@@ -173,6 +174,18 @@ function CanvasApp() {
                   originalHeight: img.originalHeight || 512,
                   createdAt: img.createdAt || Date.now(),
                 })));
+                // 恢复分组数据
+                if (projects[0].metadata?.groups) {
+                  setInitialGroups(projects[0].metadata.groups.map(g => ({
+                    id: g.id,
+                    name: g.name,
+                    note: g.note || '',
+                    imageIds: g.imageIds,
+                    x: g.x || 0,
+                    y: g.y || 0,
+                    collapsed: g.collapsed || false,
+                  })));
+                }
               }
             } else {
               const defaultProject = userMgr.createProject('默认项目', '我的第一个创作项目');
@@ -1920,11 +1933,13 @@ function CanvasApp() {
                     }
                   } else {
                     setImages([]);
+                    setInitialGroups([]);
                   }
                 } else {
                   const defaultProject = userMgr.createProject('默认项目', '我的第一个创作项目');
                   setCurrentProject(defaultProject);
                   setImages([]);
+                  setInitialGroups([]);
                 }
               } catch { /* Project creation failed - non-blocking */ }
               toast.success('登录成功', {
@@ -2003,6 +2018,7 @@ function CanvasApp() {
             setCurrentUser(null);
             setCurrentProject(null);
             setImages([]);
+            setInitialGroups([]);
             // 显示登录界面
             setShowUserManager(true);
             toast.info('已退出登录', {
@@ -2133,6 +2149,7 @@ function CanvasApp() {
             } else {
               // 项目无图片，清空画布
               setImages([]);
+              setInitialGroups([]);
               toast.info('项目已加载', {
                 description: `${freshProject.name} - 暂无图片`,
                 className: themeStyle === 'monochrome'
