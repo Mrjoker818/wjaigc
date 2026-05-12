@@ -2653,18 +2653,14 @@ export function InfiniteCanvas({
     setUpscaleMultiplier(mult);
   }, []);
 
-  // Compute target dimensions from preset (2K/4K/8K) keeping aspect ratio
+  // Compute target dimensions from preset (2x/4x/8x multiplier based on actual image size)
   const getUpscaleTargetDimensions = useCallback((origW: number, origH: number, preset: '2k' | '4k' | '8k') => {
-    // Target long edge: 2K=2048, 4K=4096, 8K=8192
-    const targetLongEdge = preset === '2k' ? 2048 : preset === '4k' ? 4096 : 8192;
-    const currentLongEdge = Math.max(origW, origH);
-    // Only upscale, never downscale
-    if (currentLongEdge >= targetLongEdge) return { w: origW, h: origH, multiplier: 1 };
-    const multiplier = targetLongEdge / currentLongEdge;
+    // Preset multiplier: 2K=2x, 4K=4x, 8K=8x based on actual image dimensions
+    const multiplier = preset === '2k' ? 2 : preset === '4k' ? 4 : 8;
     return {
       w: Math.round(origW * multiplier),
       h: Math.round(origH * multiplier),
-      multiplier: Math.round(multiplier * 10) / 10,
+      multiplier,
     };
   }, []);
 
@@ -2676,12 +2672,6 @@ export function InfiniteCanvas({
     const origW = upscaleActualW || img.originalWidth || img.width;
     const origH = upscaleActualH || img.originalHeight || img.height;
     const { w: targetW, h: targetH, multiplier: upMultiplier } = getUpscaleTargetDimensions(origW, origH, upscalePreset);
-
-    // If already at or above target resolution, notify and skip
-    if (upMultiplier <= 1) {
-      alert('当前图片分辨率已达到或超过所选目标，无需放大');
-      return;
-    }
 
     const placeholderId = createProcessingFrameRightOf(
       img,
@@ -2770,11 +2760,11 @@ export function InfiniteCanvas({
       const actualH = imgEl.naturalHeight;
       setUpscaleActualW(actualW);
       setUpscaleActualH(actualH);
-      // Calculate default preset based on actual image size
+      // Auto-select preset based on actual image size
       const maxDim = Math.max(actualW, actualH);
-      if (maxDim <= 1080) setUpscalePreset('2k');
-      else if (maxDim <= 2048) setUpscalePreset('4k');
-      else setUpscalePreset('8k');
+      if (maxDim >= 2000) setUpscalePreset('2k'); // Large images: 2x is enough
+      else if (maxDim >= 800) setUpscalePreset('4k'); // Medium: 4x
+      else setUpscalePreset('2k'); // Small: 2x default
     };
     imgEl.onerror = () => {
       // Fallback to stored dimensions
@@ -2783,9 +2773,9 @@ export function InfiniteCanvas({
       setUpscaleActualW(origW);
       setUpscaleActualH(origH);
       const maxDim = Math.max(origW, origH);
-      if (maxDim <= 1080) setUpscalePreset('2k');
-      else if (maxDim <= 2048) setUpscalePreset('4k');
-      else setUpscalePreset('8k');
+      if (maxDim >= 2000) setUpscalePreset('2k');
+      else if (maxDim >= 800) setUpscalePreset('4k');
+      else setUpscalePreset('2k');
     };
     imgEl.src = img.url;
   }, [selectedImageData]);
@@ -4656,6 +4646,7 @@ export function InfiniteCanvas({
           const origW = upscaleActualW || editImg.originalWidth || editImg.width;
           const origH = upscaleActualH || editImg.originalHeight || editImg.height;
           const targetDim = getUpscaleTargetDimensions(origW, origH, upscalePreset);
+          const isSizeLoaded = upscaleActualW > 0 && upscaleActualH > 0;
 
           return (
             <div
@@ -4669,6 +4660,11 @@ export function InfiniteCanvas({
                 <ZoomIn size={14} className="text-[#d4af37]" />
                 <span className={panelLabelClass}>HD 高清放大</span>
                 <div className={panelDividerClass} />
+                {/* Original size display */}
+                <span className={`text-xs tabular-nums ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>
+                  {isSizeLoaded ? `${origW}×${origH}` : '...'}
+                </span>
+                <div className={panelDividerClass} />
                 {/* Resolution preset dropdown */}
                 <div className="relative">
                   <button
@@ -4677,24 +4673,28 @@ export function InfiniteCanvas({
                       isMonochrome ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-[#252525] text-[#ccc] hover:bg-[#333]'
                     }`}
                   >
-                    {upscalePreset.toUpperCase()}
+                    {upscalePreset === '2k' ? '2×' : upscalePreset === '4k' ? '4×' : '8×'}
                     <ChevronDown size={10} />
                   </button>
                   {showUpscalePresetMenu && (
                     <div className={`absolute top-full left-0 mt-1 py-1 rounded-lg border shadow-xl z-50 min-w-[100px] ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#333]'}`}>
-                      {(['2k', '4k', '8k'] as const).map(p => (
-                        <button key={p} onClick={(e) => { e.stopPropagation(); setUpscalePreset(p); setShowUpscalePresetMenu(false); }} className={`w-full px-3 py-1.5 text-xs text-left flex items-center justify-between hover:bg-[#d4af37]/10 ${upscalePreset === p ? 'text-[#d4af37]' : isMonochrome ? 'text-gray-600' : 'text-[#ccc]'}`}>
-                          <span>{p.toUpperCase()}</span>
-                          {upscalePreset === p && <span className="text-[#d4af37]">✓</span>}
-                        </button>
-                      ))}
+                      {(['2k', '4k', '8k'] as const).map(p => {
+                        const pMul = p === '2k' ? 2 : p === '4k' ? 4 : 8;
+                        const pTarget = getUpscaleTargetDimensions(origW, origH, p);
+                        return (
+                          <button key={p} onClick={(e) => { e.stopPropagation(); setUpscalePreset(p); setShowUpscalePresetMenu(false); }} className={`w-full px-3 py-1.5 text-xs text-left flex items-center justify-between hover:bg-[#d4af37]/10 ${upscalePreset === p ? 'text-[#d4af37]' : isMonochrome ? 'text-gray-600' : 'text-[#ccc]'}`}>
+                            <span>{pMul}× <span className="opacity-60 ml-1">{pTarget.w}×{pTarget.h}</span></span>
+                            {upscalePreset === p && <span className="text-[#d4af37]">✓</span>}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
                 <div className={panelDividerClass} />
                 {/* Target dimensions */}
-                <span className={`text-xs tabular-nums ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>
-                  W {targetDim.w} H {targetDim.h}
+                <span className={`text-xs tabular-nums font-semibold ${isMonochrome ? 'text-gray-700' : 'text-[#ccc]'}`}>
+                  {isSizeLoaded ? `${targetDim.w}×${targetDim.h}` : '...'}
                 </span>
                 <div className={panelDividerClass} />
                 {/* Execute button */}
