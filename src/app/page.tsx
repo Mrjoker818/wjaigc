@@ -174,9 +174,11 @@ function CanvasApp() {
                   originalHeight: img.originalHeight || 512,
                   createdAt: img.createdAt || Date.now(),
                 })));
-                // 恢复分组数据
-                if (projects[0].metadata?.groups) {
-                  setInitialGroups(projects[0].metadata.groups.map(g => ({
+                // 恢复分组数据（优先 metadata，其次 localStorage 兜底）
+                const metaGroups = projects[0].metadata?.groups;
+                let restoredGroups: Array<{id: string; name: string; note: string; imageIds: string[]; x: number; y: number; collapsed: boolean}> = [];
+                if (metaGroups && metaGroups.length > 0) {
+                  restoredGroups = metaGroups.map(g => ({
                     id: g.id,
                     name: g.name,
                     note: g.note || '',
@@ -184,8 +186,17 @@ function CanvasApp() {
                     x: g.x || 0,
                     y: g.y || 0,
                     collapsed: g.collapsed || false,
-                  })));
+                  }));
+                } else {
+                  // localStorage 兜底：防止 metadata 未保存时分组丢失
+                  try {
+                    const lsGroups = localStorage.getItem(`wujie-groups-${projects[0].id}`);
+                    if (lsGroups) {
+                      restoredGroups = JSON.parse(lsGroups);
+                    }
+                  } catch {}
                 }
+                setInitialGroups(restoredGroups);
               }
             } else {
               const defaultProject = userMgr.createProject('默认项目', '我的第一个创作项目');
@@ -341,19 +352,30 @@ function CanvasApp() {
           }))
           .filter(img => img.url);
 
+        const updatedMeta = {
+          ...(currentProject.metadata || {}),
+          groups: groupsRef.current,
+        };
         mgr.updateProject(currentProject.id, {
           canvasImages: persistableCanvasImages,
-          metadata: {
-            ...(currentProject.metadata || {}),
-            groups: groupsRef.current,
-          },
+          metadata: updatedMeta,
         });
+        // 同步更新 React 状态，确保后续自动保存使用最新 metadata
+        setCurrentProject(prev => prev ? { ...prev, canvasImages: persistableCanvasImages, metadata: updatedMeta, updatedAt: Date.now() } : prev);
         recordUserData({
           userId: currentUser?.id,
           area: 'projects',
           type: 'autosave',
           filename: `${currentProject.id}.json`,
-          content: JSON.stringify({ projectId: currentProject.id, canvasImages: persistableCanvasImages, savedAt: Date.now() }, null, 2),
+          content: JSON.stringify({
+            projectId: currentProject.id,
+            canvasImages: persistableCanvasImages,
+            metadata: {
+              ...(currentProject.metadata || {}),
+              groups: groupsRef.current,
+            },
+            savedAt: Date.now(),
+          }, null, 2),
           metadata: { projectId: currentProject.id, imageCount: persistableCanvasImages.length },
         });
       } catch (e) {
@@ -392,9 +414,16 @@ function CanvasApp() {
             stylePreset: img.stylePreset || '',
             category: img.category || '',
             size: img.size || '',
+            groupId: img.groupId || '',
           }))
           .filter(img => img.url);
-        mgr.updateProject(currentProject.id, { canvasImages: persistableCanvasImages });
+        mgr.updateProject(currentProject.id, {
+          canvasImages: persistableCanvasImages,
+          metadata: {
+            ...(currentProject.metadata || {}),
+            groups: groupsRef.current,
+          },
+        });
       } catch { /* best effort */ }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -1649,7 +1678,15 @@ function CanvasApp() {
           isPanelCollapsed={panelCollapsed}
           navigateToImageId={navigateToImageId}
           onNavigateToImageComplete={() => setNavigateToImageId(null)}
-          onGroupsChange={(groups) => { groupsRef.current = groups; }}
+          onGroupsChange={(groups) => {
+            groupsRef.current = groups;
+            // 额外持久化分组到 localStorage，防止竞态条件下数据丢失
+            try {
+              if (currentProject?.id) {
+                localStorage.setItem(`wujie-groups-${currentProject.id}`, JSON.stringify(groups));
+              }
+            } catch {}
+          }}
           initialGroups={initialGroups}
         />
       </div>
@@ -1919,9 +1956,11 @@ function CanvasApp() {
                       originalHeight: img.originalHeight || 512,
                       createdAt: img.createdAt || Date.now(),
                     })));
-                    // 恢复分组数据
-                    if (project.metadata?.groups) {
-                      setInitialGroups(project.metadata.groups.map(g => ({
+                    // 恢复分组数据（优先 metadata，其次 localStorage 兜底）
+                    const metaGroups = project.metadata?.groups;
+                    let restoredGroups: Array<{id: string; name: string; note: string; imageIds: string[]; x: number; y: number; collapsed: boolean}> = [];
+                    if (metaGroups && metaGroups.length > 0) {
+                      restoredGroups = metaGroups.map(g => ({
                         id: g.id,
                         name: g.name,
                         note: g.note || '',
@@ -1929,8 +1968,14 @@ function CanvasApp() {
                         x: g.x || 0,
                         y: g.y || 0,
                         collapsed: g.collapsed || false,
-                      })));
+                      }));
+                    } else {
+                      try {
+                        const lsGroups = localStorage.getItem(`wujie-groups-${project.id}`);
+                        if (lsGroups) restoredGroups = JSON.parse(lsGroups);
+                      } catch {}
                     }
+                    setInitialGroups(restoredGroups);
                   } else {
                     setImages([]);
                     setInitialGroups([]);
@@ -2012,7 +2057,13 @@ function CanvasApp() {
                     groupId: img.groupId || '',
                   }))
                   .filter(img => img.url);
-                mgr.updateProject(currentProject.id, { canvasImages: persistableCanvasImages });
+                mgr.updateProject(currentProject.id, {
+                  canvasImages: persistableCanvasImages,
+                  metadata: {
+                    ...(currentProject.metadata || {}),
+                    groups: groupsRef.current,
+                  },
+                });
               }
             } catch { /* save failed - non-blocking */ }
             setCurrentUser(null);
@@ -2128,9 +2179,11 @@ function CanvasApp() {
                 originalHeight: img.originalHeight || 512,
                 createdAt: img.createdAt || Date.now(),
               })));
-              // 恢复分组数据
-              if (freshProject.metadata?.groups) {
-                setInitialGroups(freshProject.metadata.groups.map(g => ({
+              // 恢复分组数据（优先 metadata，其次 localStorage 兜底）
+              const metaGroups = freshProject.metadata?.groups;
+              let restoredGroups: Array<{id: string; name: string; note: string; imageIds: string[]; x: number; y: number; collapsed: boolean}> = [];
+              if (metaGroups && metaGroups.length > 0) {
+                restoredGroups = metaGroups.map(g => ({
                   id: g.id,
                   name: g.name,
                   note: g.note || '',
@@ -2138,8 +2191,14 @@ function CanvasApp() {
                   x: g.x || 0,
                   y: g.y || 0,
                   collapsed: g.collapsed || false,
-                })));
+                }));
+              } else {
+                try {
+                  const lsGroups = localStorage.getItem(`wujie-groups-${freshProject.id}`);
+                  if (lsGroups) restoredGroups = JSON.parse(lsGroups);
+                } catch {}
               }
+              setInitialGroups(restoredGroups);
               toast.success('项目已加载', {
                 description: `${freshProject.name} - ${freshProject.canvasImages.length} 张图片`,
                 className: themeStyle === 'monochrome'
