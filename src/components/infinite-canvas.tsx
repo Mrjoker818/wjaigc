@@ -952,6 +952,8 @@ export function InfiniteCanvas({
           isDrawingRef.current = false;
           currentStrokeRef.current = [];
           setActiveTool('none');
+          setShowUpscaleDialog(false);
+          setShowImageEditPanel(false);
         } else {
           setActiveTool('none');
           setShowDownloadPopup(false);
@@ -1118,6 +1120,8 @@ export function InfiniteCanvas({
   const handleEditMouseDown = useCallback((e: React.MouseEvent) => {
     if (editMode === 'none') return;
     if (e.button !== 0) return; // Only left click
+    // 新的 ImageEditPanel 打开时，不在画布上捕获编辑事件
+    if (showImageEditPanel && (editMode === 'erase' || editMode === 'mask')) return;
 
     const editImg = images.find(i => i.id === editImageId);
     if (!editImg) return;
@@ -1195,9 +1199,11 @@ export function InfiniteCanvas({
       setCropRect({ x: clampedX, y: clampedY, w: 0, h: 0 });
       setCropDragOrigin(null);
     }
-  }, [editMode, editImageId, images, screenToCanvas, cropRect, zoom, viewOffset]);
+  }, [editMode, editImageId, images, screenToCanvas, cropRect, zoom, viewOffset, showImageEditPanel]);
 
   const handleEditMouseMove = useCallback((e: React.MouseEvent) => {
+    // 新的 ImageEditPanel 打开时，不在画布上处理编辑事件
+    if (showImageEditPanel && (editMode === 'erase' || editMode === 'mask')) return;
     if (editMode === 'erase' || editMode === 'mask') {
       // Convert to canvas coordinates
       const canvasPos = screenToCanvas(e.clientX, e.clientY);
@@ -1356,7 +1362,7 @@ export function InfiniteCanvas({
         setCropRect({ x: newX, y: newY, w: newW, h: newH });
       }
     }
-  }, [editMode, editImageId, images, screenToCanvas, cropDragStart, cropDragMode, cropDragOrigin, cropRatio, zoom, viewOffset]);
+  }, [editMode, editImageId, images, screenToCanvas, cropDragStart, cropDragMode, cropDragOrigin, cropRatio, zoom, viewOffset, showImageEditPanel]);
 
   const handleEditMouseUp = useCallback(() => {
     if (isDrawingRef.current) {
@@ -1541,7 +1547,7 @@ export function InfiniteCanvas({
   }, [editMode, isPanning, isMiddlePanning, panStart, boxSelectStart, isLongPressing, resizingImage, resizeCorner, images, dragTarget, dragStart, resizeStart, screenToCanvas, onImagesChange, handleEditMouseMove, groupDragTarget, groupDragStart]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
-    if (editMode !== 'none') {
+    if (editMode !== 'none' && !(showImageEditPanel && (editMode === 'erase' || editMode === 'mask'))) {
       handleEditMouseUp();
       return;
     }
@@ -1638,7 +1644,7 @@ export function InfiniteCanvas({
   }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp, groupDragTarget, groupDragOffset]);
 
   const handleMouseLeave = useCallback(() => {
-    if (editMode !== 'none') {
+    if (editMode !== 'none' && !(showImageEditPanel && (editMode === 'erase' || editMode === 'mask'))) {
       handleEditMouseUp();
       return;
     }
@@ -3312,6 +3318,9 @@ export function InfiniteCanvas({
     setBrushCursorScreenPos(null);
     setStrokesVersion(v => v + 1);
     currentStrokeRef.current = [];
+    // 同时关闭新的浮窗面板
+    setShowUpscaleDialog(false);
+    setShowImageEditPanel(false);
   }, []);
 
   // Edit confirm for erase/mask/expand/crop
@@ -3943,8 +3952,10 @@ export function InfiniteCanvas({
             ? 'cursor-grab active:cursor-grabbing'
             : boxSelectStart
             ? 'cursor-crosshair'
-            : (editMode === 'erase' || editMode === 'mask')
+            : (editMode === 'erase' || editMode === 'mask') && !showImageEditPanel
             ? 'cursor-none'
+            : (editMode === 'erase' || editMode === 'mask') && showImageEditPanel
+            ? 'cursor-default'
             : editMode !== 'none'
             ? 'cursor-crosshair'
             : isSpacePressed
@@ -4532,8 +4543,8 @@ export function InfiniteCanvas({
                     {image.originalWidth || image.width} × {image.originalHeight || image.height}
                   </span>
                 </div>
-                {/* Edit mode stroke overlay */}
-                {editImageId === image.id && (editMode === 'erase' || editMode === 'mask') && (
+                {/* Edit mode stroke overlay — 仅在新的 ImageEditPanel 未打开时显示旧笔画叠加层 */}
+                {editImageId === image.id && (editMode === 'erase' || editMode === 'mask') && !showImageEditPanel && (
                   <svg className="absolute inset-0 w-full h-full pointer-events-none z-30" viewBox={`0 0 ${image.width} ${image.height}`}>
                     {editStrokes.map((stroke, si) => {
                       const normalPoints = stroke.filter(p => !p.reverse);
@@ -4832,8 +4843,8 @@ export function InfiniteCanvas({
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
             >
-              {/* ERASE toolbar */}
-              {editMode === 'erase' && (
+              {/* ERASE toolbar — 仅在新的 ImageEditPanel 未打开时显示旧内联工具栏 */}
+              {editMode === 'erase' && !showImageEditPanel && (
                 <div className={panelBaseClass} onMouseDown={(e) => e.stopPropagation()}>
                   <Paintbrush size={14} className="text-[#d4af37]" />
                   <span className={panelLabelClass}>擦除模式</span>
@@ -4855,8 +4866,8 @@ export function InfiniteCanvas({
                 </div>
               )}
 
-              {/* MASK toolbar */}
-              {editMode === 'mask' && (
+              {/* MASK toolbar — 仅在新的 ImageEditPanel 未打开时显示旧内联工具栏 */}
+              {editMode === 'mask' && !showImageEditPanel && (
                 <div className={panelBaseClass} onMouseDown={(e) => e.stopPropagation()}>
                   <Wand2 size={14} className="text-[#d4af37]" />
                   <span className={panelLabelClass}>蒙版模式</span>

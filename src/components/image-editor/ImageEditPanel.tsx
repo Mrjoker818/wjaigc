@@ -21,12 +21,25 @@ export default function ImageEditPanel({ imageUrl, mode, onClose, onSuccess }: I
   const [healthStatus, setHealthStatus] = useState<{ iopaintAvailable: boolean } | null>(null);
   const maskRef = useRef<MaskBrushCanvasRef>(null);
 
-  // 检测 IOPaint 服务状态
+  // 检测 IOPaint 服务状态并自动启动
   useEffect(() => {
     fetch('/api/image/health')
       .then(r => r.json())
-      .then(data => {
-        setHealthStatus({ iopaintAvailable: data.iopaint?.available ?? false });
+      .then(async (data) => {
+        const iopaintAvailable = data.iopaint?.available ?? false;
+        if (!iopaintAvailable) {
+          // 尝试自动启动服务
+          try {
+            await fetch('/api/image/start-services', { method: 'POST' });
+            // 重新检测
+            const recheck = await fetch('/api/image/health').then(r => r.json());
+            setHealthStatus({ iopaintAvailable: recheck.iopaint?.available ?? false });
+          } catch {
+            setHealthStatus({ iopaintAvailable: false });
+          }
+        } else {
+          setHealthStatus({ iopaintAvailable: true });
+        }
       })
       .catch(() => {
         setHealthStatus({ iopaintAvailable: false });

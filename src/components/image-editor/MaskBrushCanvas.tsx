@@ -111,6 +111,21 @@ const MaskBrushCanvas = forwardRef<MaskBrushCanvasRef, MaskBrushCanvasProps>(
       setIsDrawing(false);
     }, []);
 
+    // 光标管理：画布区域内显示画笔光标，外部显示箭头
+    const handleStageMouseEnter = useCallback(() => {
+      const stage = stageRef.current;
+      if (stage) {
+        stage.container().style.cursor = brushMode === 'eraser' ? 'cell' : 'crosshair';
+      }
+    }, [brushMode]);
+
+    const handleStageMouseLeave = useCallback(() => {
+      const stage = stageRef.current;
+      if (stage) {
+        stage.container().style.cursor = 'default';
+      }
+    }, []);
+
     // 暴露方法
     useImperativeHandle(ref, () => ({
       undo: () => setLines(prev => prev.slice(0, -1)),
@@ -168,6 +183,8 @@ const MaskBrushCanvas = forwardRef<MaskBrushCanvasRef, MaskBrushCanvasProps>(
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
+            onMouseEnter={handleStageMouseEnter}
+            onMouseLeave={handleStageMouseLeave}
             onTouchStart={handleMouseDown}
             onTouchMove={handleMouseMove}
             onTouchEnd={handleMouseUp}

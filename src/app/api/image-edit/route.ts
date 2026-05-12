@@ -166,7 +166,13 @@ async function submitImageTask(
 
     // 清理常见 API 错误信息，提供更友好的中文提示
     if (errorMsg.includes('ratio or price') || errorMsg.includes('not configured')) {
-      throw new Error(`当前模型暂不可用，请切换其他模型或联系管理员配置`);
+      throw new Error(`当前模型不支持此操作，请切换支持图像编辑的模型（如 DALL-E、Flux 等）或联系管理员配置`);
+    }
+    if (errorMsg.includes('image_urls') || errorMsg.includes('mask_image') || errorMsg.includes('image editing')) {
+      throw new Error(`当前模型不支持图像编辑功能，请切换支持图生图/扩展的模型`);
+    }
+    if (errorMsg.includes('must be an URL') || errorMsg.includes('Invalid URL') || errorMsg.includes('data:')) {
+      throw new Error(`当前模型不支持 Base64 图片输入，请切换支持图像编辑的模型`);
     }
     if (errorMsg.includes('Insufficient balance') || errorMsg.includes('insufficient')) {
       throw new Error(`API 余额不足，请联系管理员充值`);
@@ -504,8 +510,19 @@ export async function POST(request: NextRequest) {
       // 6. 确保 imageUrl 是 API 可访问的完整 URL
       let accessibleImageUrl = imageUrl;
       if (imageUrl.startsWith('/')) {
-        const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-        accessibleImageUrl = `${domain}${imageUrl}`;
+        const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT;
+        if (domain) {
+          accessibleImageUrl = `${domain}${imageUrl}`;
+        } else {
+          // 无公网域名时，将本地图片转为 base64 数据 URL
+          try {
+            const imgBuffer = await fetchImageBuffer(imageUrl);
+            const imgBase64 = `data:image/png;base64,${imgBuffer.toString('base64')}`;
+            accessibleImageUrl = imgBase64;
+          } catch {
+            accessibleImageUrl = `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}`;
+          }
+        }
       }
 
       // 7. 计算宽高比
@@ -729,8 +746,10 @@ export async function POST(request: NextRequest) {
       await fs.writeFile(compositePath, compositeImage);
       await fs.writeFile(maskPath, finalMask);
 
-      const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || 'http://localhost:5000';
-      const compositeUrl = `${domain}/outpaint/${compositeFileName}`;
+      const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
+      // 优先使用 base64 数据 URL 发送图片（避免外部 API 无法访问 localhost）
+      const compositeBase64 = `data:image/png;base64,${compositeImage.toString('base64')}`;
+      const compositeUrl = domain ? `${domain}/outpaint/${compositeFileName}` : compositeBase64;
       const maskFileBase64 = `data:image/png;base64,${finalMask.toString('base64')}`;
 
       // 构建扩图方向的提示词
@@ -756,13 +775,13 @@ export async function POST(request: NextRequest) {
       const targetRatioStr = `${targetW}:${targetH}`;
       const targetSize = findClosestAspectRatio(targetRatioStr);
 
-      // 使用合成图URL + mask_image（双策略：API 支持 mask 则用，不支持则后端合成兜底）
+      // 使用 base64 数据 URL 发送图片（确保外部 API 可访问）+ mask_image
       const requestBody: Record<string, unknown> = {
         model,
         prompt: outpaintPrompt,
         size: targetSize,
         n: 1,
-        image_urls: [compositeUrl],
+        image_urls: [compositeBase64],
         mask_image: maskFileBase64,
       };
 

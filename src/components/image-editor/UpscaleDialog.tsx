@@ -21,14 +21,27 @@ export default function UpscaleDialog({ imageUrl, onClose, onSuccess }: UpscaleD
     upscaylAvailable: boolean;
   } | null>(null);
 
-  // 检测服务状态
+  // 检测服务状态并自动启动
   useEffect(() => {
     fetch('/api/image/health')
       .then(r => r.json())
-      .then(data => {
-        setHealthStatus({
-          upscaylAvailable: data.upscayl?.available ?? false,
-        });
+      .then(async (data) => {
+        const upscaylAvailable = data.upscayl?.available ?? false;
+        if (!upscaylAvailable) {
+          // 尝试自动启动服务
+          try {
+            await fetch('/api/image/start-services', { method: 'POST' });
+            // 重新检测
+            const recheck = await fetch('/api/image/health').then(r => r.json());
+            setHealthStatus({
+              upscaylAvailable: recheck.upscayl?.available ?? false,
+            });
+          } catch {
+            setHealthStatus({ upscaylAvailable: false });
+          }
+        } else {
+          setHealthStatus({ upscaylAvailable: true });
+        }
       })
       .catch(() => {
         setHealthStatus({ upscaylAvailable: false });
