@@ -19,6 +19,8 @@ import dynamic from 'next/dynamic';
 const ModelViewer3D = dynamic(() => import('@/components/model-viewer-3d'), { ssr: false });
 
 const PsdLayerEditor = lazy(() => import('@/components/psd-editor/PsdLayerEditor'));
+const UpscaleDialog = lazy(() => import('@/components/image-editor/UpscaleDialog'));
+const ImageEditPanel = lazy(() => import('@/components/image-editor/ImageEditPanel'));
 
 /* ====== Multi-Angle Sphere Preview (Canvas 2D) ====== */
 function MultiAngleSpherePreview({
@@ -590,6 +592,9 @@ export function InfiniteCanvas({
 
   // Image to 3D state
   const [show3DModal, setShow3DModal] = useState(false);
+  const [showUpscaleDialog, setShowUpscaleDialog] = useState(false);
+  const [showImageEditPanel, setShowImageEditPanel] = useState(false);
+  const [imageEditMode, setImageEditMode] = useState<'erase' | 'mask'>('erase');
   const [threeDBackend, setThreeDBackend] = useState<ThreeDBackend>('api');
   const [threeDType, setThreeDType] = useState<ThreeDType>('ip');
 
@@ -2730,8 +2735,7 @@ export function InfiniteCanvas({
   const handleOpenUpscale = useCallback(() => {
     const img = selectedImageData;
     if (!img) return;
-    setUpscaleMultiplier(2);
-    setActiveTool('upscale');
+    setShowUpscaleDialog(true);
   }, [selectedImageData]);
 
   const handleUpscaleMultiplierChange = useCallback((mult: number) => {
@@ -3234,30 +3238,20 @@ export function InfiniteCanvas({
     }
   }, [selectedImageData, getThreeDProviders, threeDProviderId, threeDBackend, threeDType, threeDQuality, threeDTexture, threeDFormat, threeDLocalEndpoint, threeDLocalModel, renderEditElementsPreview, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
 
-  // 4. ERASE - floating toolbar with brush, Alt to reverse
+  // 4. ERASE - open ImageEditPanel
   const handleOpenErase = useCallback(() => {
     const img = selectedImageData;
     if (!img) return;
     setEditMode('erase');
-    setEditImageId(img.id);
-    setEditStrokes([]);
-    setCurrentStroke([]);
-    brushCursorPosRef.current = null;
-    setBrushCursorScreenPos(null);
-    isDrawingRef.current = false;
+    setShowImageEditPanel(true);
   }, [selectedImageData]);
 
-  // 5. MASK - same toolbar as erase, confirm/cancel, keyword popup
+  // 5. MASK - open ImageEditPanel
   const handleOpenMask = useCallback(() => {
     const img = selectedImageData;
     if (!img) return;
     setEditMode('mask');
-    setEditImageId(img.id);
-    setEditStrokes([]);
-    setCurrentStroke([]);
-    brushCursorPosRef.current = null;
-    setBrushCursorScreenPos(null);
-    isDrawingRef.current = false;
+    setShowImageEditPanel(true);
   }, [selectedImageData]);
 
   // 6. EXPAND - floating toolbar with ratio presets
@@ -3402,75 +3396,90 @@ export function InfiniteCanvas({
       exitEditMode();
 
       try {
-        // IOPaint/LaMa-style prompt strategy:
-        // Erase: 不指定内容，让模型根据周围上下文自动补全（LaMa风格）
-        //   关键：不写"clean background"这种引导性提示词，避免生成不匹配的内容
-        // Mask: 用用户关键词描述要在蒙版区域生成的内容
+        // 优先尝试本地 IOPaint/LaMa 修复
         const prompt = currentEditMode === 'mask'
           ? (currentMaskKeyword || currentEditPrompt || '')
-          : ''; // 擦除模式：空提示词，让API根据周围上下文自动补全
-
-        const model = getCurrentModel();
-        const res = await fetch('/api/image-edit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'inpaint',
-            imageUrl: currentEditImg.url,
-            maskImage: maskBase64,
-            prompt,
-            aspectRatio: `${currentEditImg.originalWidth || currentEditImg.width}:${currentEditImg.originalHeight || currentEditImg.height}`,
-            model,
-            apiKey,
-          }),
-        });
-
-        const data = await res.json();
-        if (!data.success) {
-          console.error('Image edit failed:', data.error);
-          removeProcessingFrame(placeholderId);
-          return;
-        }
-
-        // 处理两种响应模式：
-        // 1. 同步结果: data.imageUrl 存在（后端已合成好）
-        // 2. 异步结果: data.taskId 存在（需要轮询后前端合成）
-        const syncResultUrl: string | undefined = data.imageUrl;
-        const cropInfo = data.cropInfo || null;
+          : ''; // 擦除模式：空提示词
 
         let resultUrl: string | null = null;
+        let usedLocalInpaint = false;
 
-        if (syncResultUrl) {
-          // 同步结果 - 后端已经完成了蒙版合成，直接使用
-          updateProcessingFrame(placeholderId, { progress: 80, status: '正在载入编辑结果...' });
-          resultUrl = syncResultUrl;
-        } else if (data.taskId) {
-          // 异步结果 - 需要轮询
-          updateProcessingFrame(placeholderId, { progress: 24, status: 'AI 正在重绘选区...' });
-          resultUrl = await pollForResult(data.taskId, apiKey, (progress, status) => {
-            updateProcessingFrame(placeholderId, { progress, status });
+        // 1. 尝试本地 IOPaint 修复
+        try {
+          const formData = new FormData();
+          // 将图片URL转为blob
+          const imgResp = await fetch(currentEditImg.url);
+          const imgBlob = await imgResp.blob();
+          formData.append('image', imgBlob, 'image.png');
+
+          // 将mask base64转为blob
+          const maskResp = await fetch(maskBase64);
+          const maskBlob = await maskResp.blob();
+          formData.append('mask', maskBlob, 'mask.png');
+
+          if (prompt) formData.append('prompt', prompt);
+
+          const localRes = await fetch('/api/image/inpaint', {
+            method: 'POST',
+            body: formData,
           });
-        } else {
-          // 没有结果
-          removeProcessingFrame(placeholderId);
-          return;
+          const localData = await localRes.json();
+
+          if (localData.success && localData.imageUrl) {
+            resultUrl = localData.imageUrl;
+            usedLocalInpaint = true;
+            updateProcessingFrame(placeholderId, { progress: 80, status: '本地 LaMa 修复完成，正在载入...' });
+          } else {
+            console.warn('[Inpaint] Local IOPaint not available, falling back to cloud API:', localData.error);
+          }
+        } catch (localErr) {
+          console.warn('[Inpaint] Local IOPaint failed, falling back to cloud API:', localErr);
         }
 
-        if (resultUrl) {
-          updateProcessingFrame(placeholderId, { progress: 96, status: '正在合成编辑结果...' });
+        // 2. 本地不可用时，回退到云端 API
+        if (!usedLocalInpaint) {
+          updateProcessingFrame(placeholderId, { progress: 12, status: '正在使用云端 AI 修复...' });
 
-          // 仅对异步结果做前端蒙版合成（同步结果后端已合成）
+          const model = getCurrentModel();
+          const res = await fetch('/api/image-edit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'inpaint',
+              imageUrl: currentEditImg.url,
+              maskImage: maskBase64,
+              prompt,
+              aspectRatio: `${currentEditImg.originalWidth || currentEditImg.width}:${currentEditImg.originalHeight || currentEditImg.height}`,
+              model,
+              apiKey,
+            }),
+          });
+
+          const data = await res.json();
+          if (!data.success) {
+            console.error('Image edit failed:', data.error);
+            removeProcessingFrame(placeholderId);
+            return;
+          }
+
+          const syncResultUrl: string | undefined = data.imageUrl;
+          const cropInfo = data.cropInfo || null;
+
           if (syncResultUrl) {
-            // 同步结果：后端已经完成合成，直接使用
-            try {
-              const stableUrl = await toStableImageUrl(resultUrl);
-              completeProcessingFrame(placeholderId, stableUrl, currentEditImg.width, currentEditImg.height, { originalWidth: currentEditImg.originalWidth || Math.round(currentEditImg.width), originalHeight: currentEditImg.originalHeight || Math.round(currentEditImg.height) });
-            } catch (stableErr) {
-              console.error('Stable URL conversion failed:', stableErr);
-              completeProcessingFrame(placeholderId, resultUrl, currentEditImg.width, currentEditImg.height, { originalWidth: currentEditImg.originalWidth || Math.round(currentEditImg.width), originalHeight: currentEditImg.originalHeight || Math.round(currentEditImg.height) });
-            }
+            updateProcessingFrame(placeholderId, { progress: 80, status: '正在载入编辑结果...' });
+            resultUrl = syncResultUrl;
+          } else if (data.taskId) {
+            updateProcessingFrame(placeholderId, { progress: 24, status: 'AI 正在重绘选区...' });
+            resultUrl = await pollForResult(data.taskId, apiKey, (progress, status) => {
+              updateProcessingFrame(placeholderId, { progress, status });
+            });
           } else {
-            // 异步结果：前端做蒙版合成确保只影响涂抹区域
+            removeProcessingFrame(placeholderId);
+            return;
+          }
+
+          // 异步结果前端蒙版合成
+          if (resultUrl && !syncResultUrl) {
             try {
               const compositeUrl = await compositeInpaintResult(
                 currentEditImg.url,
@@ -3480,13 +3489,21 @@ export function InfiniteCanvas({
                 currentEditImg.originalHeight || Math.round(currentEditImg.height),
                 cropInfo
               );
-              const stableUrl = await toStableImageUrl(compositeUrl);
-              completeProcessingFrame(placeholderId, stableUrl, currentEditImg.width, currentEditImg.height, { originalWidth: currentEditImg.originalWidth || Math.round(currentEditImg.width), originalHeight: currentEditImg.originalHeight || Math.round(currentEditImg.height) });
+              resultUrl = compositeUrl;
             } catch (compositeErr) {
               console.error('Composite inpaint failed, using raw result:', compositeErr);
-              const stableUrl = await toStableImageUrl(resultUrl);
-              completeProcessingFrame(placeholderId, stableUrl, currentEditImg.width, currentEditImg.height, { originalWidth: currentEditImg.originalWidth || Math.round(currentEditImg.width), originalHeight: currentEditImg.originalHeight || Math.round(currentEditImg.height) });
             }
+          }
+        }
+
+        if (resultUrl) {
+          updateProcessingFrame(placeholderId, { progress: 96, status: '正在合成编辑结果...' });
+          try {
+            const stableUrl = await toStableImageUrl(resultUrl);
+            completeProcessingFrame(placeholderId, stableUrl, currentEditImg.width, currentEditImg.height, { originalWidth: currentEditImg.originalWidth || Math.round(currentEditImg.width), originalHeight: currentEditImg.originalHeight || Math.round(currentEditImg.height) });
+          } catch (stableErr) {
+            console.error('Stable URL conversion failed:', stableErr);
+            completeProcessingFrame(placeholderId, resultUrl, currentEditImg.width, currentEditImg.height, { originalWidth: currentEditImg.originalWidth || Math.round(currentEditImg.width), originalHeight: currentEditImg.originalHeight || Math.round(currentEditImg.height) });
           }
         } else {
           removeProcessingFrame(placeholderId);
@@ -5840,6 +5857,35 @@ export function InfiniteCanvas({
             modelUrls={viewer3DModelUrls}
             previewImageUrl={viewer3DPreviewUrl}
             onClose={() => { setShow3DViewer(false); setViewer3DModelUrl(''); setViewer3DPreviewUrl(''); setViewer3DModelUrls({}); }}
+          />
+        )}
+
+        {/* ====== UPSCALE DIALOG ====== */}
+        {showUpscaleDialog && selectedImageData && (
+          <UpscaleDialog
+            imageUrl={selectedImageData.url}
+            onClose={() => setShowUpscaleDialog(false)}
+            onSuccess={(resultUrl: string) => {
+              setShowUpscaleDialog(false);
+              if (onAddImages) onAddImages([resultUrl]);
+            }}
+          />
+        )}
+
+        {/* ====== IMAGE EDIT PANEL (Erase / Mask) ====== */}
+        {showImageEditPanel && selectedImageData && (
+          <ImageEditPanel
+            imageUrl={selectedImageData.url}
+            mode={editMode === 'mask' ? 'mask' : 'erase'}
+            onClose={() => {
+              setShowImageEditPanel(false);
+              setEditMode('none');
+            }}
+            onSuccess={(resultUrl: string) => {
+              setShowImageEditPanel(false);
+              setEditMode('none');
+              if (onAddImages) onAddImages([resultUrl]);
+            }}
           />
         )}
 

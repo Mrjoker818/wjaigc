@@ -10,7 +10,7 @@
 - **语言**: TypeScript 5
 - **AI 集成**: apimart.ai API (兼容 OpenAI 格式) + Google Gemini
 - **图像生成**: DALL-E 3、Midjourney、Stable Diffusion 等多种模型
-- **特色功能**: 无限画布、图生图、Layer Graph 设计工程、PSD/SVG 导出、3D 模型预览、Ctrl+Z 撤回
+- **特色功能**: 无限画布、图生图、Layer Graph 设计工程、PSD/SVG 导出、3D 模型预览、本地图像编辑(upscayl/IOPaint)、Ctrl+Z 撤回
 
 ### 项目结构
 ```
@@ -30,6 +30,11 @@ src/
 │       ├── vision-prompt/route.ts  # 图片识词 API (SSE流+JSON双模式)
 │       ├── poll-3d-task/route.ts   # 3D 模型任务轮询 API
 │       ├── segment-elements/route.ts  # 元素分层 API (支持管理员配置的分层模型)
+│       ├── upscayl/route.ts        # [旧] 无损放大 API (向后兼容)
+│       ├── image/
+│       │   ├── health/route.ts     # 本地图像工具健康检测 API
+│       │   ├── upscale/route.ts    # 无损放大 API (upscayl-node)
+│       │   └── inpaint/route.ts    # 涂抹消除/蒙版修图 API (IOPaint+LaMa)
 │       ├── admin/
 │       │   └── api-balance/route.ts   # API 余额与用量分析 API
 │       └── design/
@@ -40,6 +45,11 @@ src/
 │   ├── chat-panel.tsx              # AI 聊天面板
 │   ├── image-preview.tsx           # 图片预览组件
 │   ├── model-viewer-3d.tsx         # 3D 模型预览组件
+│   ├── image-editor/
+│   │   ├── ImageEditPanel.tsx      # 擦除/蒙版修图浮窗面板 (黑金UI)
+│   │   ├── ImageEditToolbar.tsx    # 图像编辑工具栏
+│   │   ├── MaskBrushCanvas.tsx     # 蒙版画布 (react-konva, 画笔/橡皮擦/撤销/导出)
+│   │   └── UpscaleDialog.tsx       # 无损放大弹窗 (模型/倍率/格式选择)
 │   ├── design-studio/
 │   │   ├── LayerGraphStudio.tsx    # Layer Graph 主弹窗
 │   │   ├── LayerPanel.tsx          # 图层面板 (可见/锁定/排序)
@@ -54,9 +64,18 @@ src/
 │   ├── design-export.ts            # .wujie 工程文件导入导出
 │   ├── psd-export.ts               # PSD 导出功能
 │   ├── svg-export.ts               # SVG 矢量化导出
-│   └── config.ts                   # 配置文件
-└── types/
-    └── designGraph.ts              # Layer Graph 类型系统
+│   ├── config.ts                   # 配置文件
+│   └── image-tools/
+│       ├── config.ts               # 本地图像工具配置 (环境变量/目录/超时)
+│       ├── file.ts                 # 文件工具 (读取/缩放/保存/清理)
+│       ├── mask.ts                 # 蒙版工具 (校验/归一化/反转)
+│       ├── upscayl.ts              # upscayl-node 放大引擎
+│       └── iopaint-client.ts       # IOPaint+LaMa 修图客户端
+├── types/
+│   ├── designGraph.ts              # Layer Graph 类型系统
+│   └── image-tools.ts              # 本地图像工具类型定义
+scripts/
+└── start-iopaint-lama.sh           # IOPaint LaMa 启动脚本
 ```
 
 ## 核心功能说明
@@ -193,6 +212,33 @@ src/
 - 双模式解析: stream: false 优先 + SSE流回退解析
 - 快速识别图片关键词用于提示词生成
 
+### 10. 本地图像编辑 (image-editor/ + image-tools/)
+
+统一架构的本地图像编辑能力，不依赖云端 API，使用 upscayl-node (放大) 和 IOPaint+LaMa (涂抹消除/蒙版修图)。
+
+- **入口**: 无限画布图片选中后顶部工具栏中的"放大"、"擦除"、"蒙版"
+- **无损放大 (UpscaleDialog)**:
+  - 弹窗选择放大模型、倍率(2x/4x)、输出格式(PNG/JPG/WEBP)
+  - 后端调用 upscayl-node (NCNN 二进制)，大图先用 sharp 缩小再放大
+  - 成功后新图片添加到原图右侧（不覆盖原图）
+  - 旧 `/api/upscayl` 入口保留向后兼容
+- **涂抹消除 / 蒙版修图 (ImageEditPanel)**:
+  - 基于 react-konva 的蒙版画布 (MaskBrushCanvas)
+  - 支持画笔/橡皮擦模式、画笔大小调整、撤销、清空
+  - 白色笔迹=擦除区域，黑色背景=保留区域
+  - 导出蒙版尺寸与原图原始尺寸一致
+  - 后端调用 IOPaint+LaMa 本地修复服务
+  - 修复结果替换原图
+- **健康检测**:
+  - GET `/api/image/health` - 检查 IOPaint 和 upscayl 可用性
+  - 前端根据状态显示服务未启动提示
+- **API 接口**:
+  - POST `/api/image/upscale` - 无损放大 (imageUrl, model, scale, outputFormat, compression)
+  - POST `/api/image/inpaint` - 涂抹消除/蒙版修图 (imageUrl, maskDataUrl, prompt)
+  - GET `/api/image/health` - 健康检测
+- **配置**: 通过环境变量控制 (LOCAL_AI_ENABLED, IOPAINT_BASE_URL, UPSCAYL_MODELS_DIR 等)
+- **启动脚本**: `scripts/start-iopaint-lama.sh`
+
 ## 构建和测试命令
 
 ```bash
@@ -255,6 +301,24 @@ PY_VECTORIZE_ENDPOINT=http://localhost:8000/vectorize
 
 # Inpainting 擦除/蒙版服务 (使用 AI 生成 API + 蒙版合成策略)
 # 擦除和蒙版均通过 AI 模型生成内容，后端自动做蒙版合成确保非编辑区域像素级保留
+
+# ========== 本地图像工具 ==========
+# 是否启用本地 AI 工具 (upscayl / IOPaint)
+LOCAL_AI_ENABLED=true
+
+# IOPaint (LaMa) 本地修图服务
+IOPAINT_BASE_URL=http://127.0.0.1:8080
+IOPAINT_TIMEOUT_MS=300000
+
+# 图片上传限制
+IMAGE_MAX_SIZE_MB=20
+IMAGE_MAX_EDGE=2048
+
+# 无损放大
+UPSCAYL_MODELS_DIR=./upscayl-models
+UPSCALE_DEFAULT_SCALE=2
+UPSCALE_MAX_SCALE=4
+UPSCALE_TIMEOUT_MS=300000
 ```
 
 ## 安全注意事项
