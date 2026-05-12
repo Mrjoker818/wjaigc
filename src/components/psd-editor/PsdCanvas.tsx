@@ -133,20 +133,8 @@ export function PsdCanvas({
     const cw = canvas.clientWidth;
     const ch = canvas.clientHeight;
 
-    // Full-screen checkerboard background
-    if (checkerPatternRef.current) {
-      ctx.fillStyle = checkerPatternRef.current;
-      ctx.fillRect(0, 0, cw, ch);
-    } else {
-      // Fallback: draw checkerboard manually
-      const size = 8;
-      for (let y = 0; y < ch; y += size) {
-        for (let x = 0; x < cw; x += size) {
-          ctx.fillStyle = (Math.floor(x / size) + Math.floor(y / size)) % 2 === 0 ? '#ffffff' : '#e8e8e8';
-          ctx.fillRect(x, y, size, size);
-        }
-      }
-    }
+    // Transparent background - checkerboard handled by parent CSS
+    ctx.clearRect(0, 0, cw, ch);
 
     ctx.save();
     ctx.translate(pan.x, pan.y);

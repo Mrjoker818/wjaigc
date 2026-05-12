@@ -5846,7 +5846,7 @@ export function InfiniteCanvas({
         {/* ====== PSD LAYER EDITOR MODAL ====== */}
         {showPsdEditor && psdEditorImageUrl && (
           <div
-            className="fixed inset-0 z-[999]"
+            className="fixed inset-0 z-[100] pointer-events-none"
             data-modal="psd-editor"
             onWheel={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
