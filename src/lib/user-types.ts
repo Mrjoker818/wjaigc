@@ -105,7 +105,7 @@ export interface UserData {
 
 export interface WujieProjectFile {
   format: 'wujie-project';
-  version: '1.0';
+  version: '1.0' | '2.0';
   exportedAt: number;
   project: Project;
 }

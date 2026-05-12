@@ -164,7 +164,7 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
 
   const handleExportProject = (project: Project) => {
     const content = userManager.exportProjectToWujie(project.id);
-    const blob = new Blob([content], { type: 'application/json' });
+    const blob = new Blob([content], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -397,7 +397,7 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
               <div className="flex justify-between items-center mb-3 gap-2">
                 <p className={`text-xs font-medium uppercase tracking-wider ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>我的项目</p>
                 <div className="flex items-center gap-2">
-                  <input ref={importProjectInputRef} type="file" accept=".wujie,application/json" className="hidden" onChange={handleImportProject} />
+                  <input ref={importProjectInputRef} type="file" accept=".wujie,application/json,text/html" className="hidden" onChange={handleImportProject} />
                   <button onClick={() => importProjectInputRef.current?.click()} className={`text-xs font-medium flex items-center gap-1 px-3 py-1.5 rounded-lg transition-all ${isGold ? 'bg-[#1a1a1a] text-[#d4af37] border border-[#2a2a2a]' : 'bg-gray-100 text-gray-700 border border-gray-200'}`}>
                     <Upload className="w-3 h-3" />
                     导入 .wujie

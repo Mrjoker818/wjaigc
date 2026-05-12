@@ -58,7 +58,18 @@ export function exportSceneAsSvg(scene: SceneGraph, filename = 'wujie-layer-grap
 
 export async function importWujieDocument(file: File): Promise<DesignDocument> {
   const text = await file.text();
-  const doc = JSON.parse(text) as DesignDocument;
+  const trimmed = text.trim();
+  let jsonText: string;
+  if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) {
+    const match = trimmed.match(/<script\s+id="wujie-project-data"\s+type="application\/json"[^>]*>([\s\S]*?)<\/script>/);
+    if (!match || !match[1]) {
+      throw new Error('不是有效的 .wujie 文件：未找到嵌入数据');
+    }
+    jsonText = match[1].replace(/<\\\//g, '</');
+  } else {
+    jsonText = trimmed;
+  }
+  const doc = JSON.parse(jsonText) as DesignDocument;
   if (doc.schema !== 'wujie.design.v1') {
     throw new Error('不是有效的 .wujie 设计工程文件');
   }

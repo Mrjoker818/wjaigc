@@ -873,22 +873,277 @@ export class UserManager {
   exportProjectToWujie(projectId: string): string {
     const project = this.getProject(projectId);
     if (!project) throw new Error('Project not found');
+    const userData = this.getCurrentUserData();
+    const user = userData?.user;
+
+    const modelNames: Record<string, string> = {
+      'gemini-2.5-flash-image-preview': 'Nano Banana (2.5-flash)',
+      'gemini-2.5-flash-image': 'Nano Banana (2.5-flash)',
+      'gemini-2.0-flash-exp-image': 'Nano Banana 2 (3.1-flash)',
+      'gemini-2.0-flash-exp': 'Nano Banana 2 (3.1-flash)',
+      'gemini-2.5-pro-image-preview': 'Nano Banana Pro (3-pro)',
+      'seedance-4k': '豆包4.5 (Seedance)',
+      'gpt-image-2-official': 'GPT-Image 2',
+    };
+    const getModelLabel = (m: string) => modelNames[m] || m;
+    const formatDate = (ts: number) => new Date(ts).toLocaleString('zh-CN', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+    });
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+    // Embed JSON data for re-import
     const payload: WujieProjectFile = {
       format: 'wujie-project',
-      version: '1.0',
+      version: '2.0',
       exportedAt: Date.now(),
       project,
     };
-    return JSON.stringify(payload, null, 2);
+    const jsonBlock = JSON.stringify(payload);
+
+    // Model stats
+    const modelStats: Record<string, number> = {};
+    project.canvasImages.forEach(img => {
+      const m = img.model || 'unknown';
+      modelStats[m] = (modelStats[m] || 0) + 1;
+    });
+    const maxModelCount = Math.max(1, ...Object.values(modelStats));
+
+    // Group stats
+    const groupCount = project.metadata?.groups?.length || 0;
+
+    const html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${esc(project.name)} - 无界AI 图册</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Noto Sans SC',sans-serif;background:#080808;color:#ccc;line-height:1.6;min-height:100vh}
+  ::selection{background:#d4af3744;color:#fff}
+  ::-webkit-scrollbar{width:6px}
+  ::-webkit-scrollbar-track{background:#111}
+  ::-webkit-scrollbar-thumb{background:#333;border-radius:3px}
+  ::-webkit-scrollbar-thumb:hover{background:#555}
+
+  .page{max-width:1200px;margin:0 auto;padding:48px 32px 80px}
+
+  /* ── Hero ── */
+  .hero{text-align:center;margin-bottom:56px;position:relative}
+  .hero::after{content:'';position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:120px;height:1px;background:linear-gradient(90deg,transparent,#d4af37,transparent)}
+  .hero .logo{display:inline-flex;align-items:center;gap:8px;margin-bottom:16px}
+  .hero .logo svg{width:32px;height:32px}
+  .hero .logo span{font-size:14px;letter-spacing:4px;color:#d4af37;font-weight:300;text-transform:uppercase}
+  .hero h1{font-size:36px;font-weight:700;color:#fff;margin-bottom:8px;letter-spacing:1px}
+  .hero .meta-line{font-size:13px;color:#666;display:flex;justify-content:center;gap:16px;flex-wrap:wrap;margin-bottom:12px}
+  .hero .meta-line .sep{color:#333}
+  .hero .desc{font-size:14px;color:#888;max-width:600px;margin:0 auto}
+
+  /* ── User Card ── */
+  .user-card{display:flex;align-items:center;gap:16px;background:linear-gradient(135deg,#0f0f0f,#141414);border:1px solid #1e1e1e;border-radius:16px;padding:20px 24px;margin-bottom:40px}
+  .user-card .avatar{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#d4af37,#b8860b);display:flex;align-items:center;justify-content:center;font-size:20px;color:#000;font-weight:700;flex-shrink:0}
+  .user-card .info{flex:1}
+  .user-card .info .name{font-size:16px;color:#eee;font-weight:600}
+  .user-card .info .role{font-size:12px;color:#d4af37;margin-left:8px;font-weight:400;vertical-align:middle}
+  .user-card .info .email{font-size:12px;color:#666;margin-top:2px}
+  .user-card .export-time{font-size:12px;color:#555;text-align:right;white-space:nowrap}
+
+  /* ── Stats Bar ── */
+  .stats-bar{display:flex;gap:1px;margin-bottom:40px;border-radius:12px;overflow:hidden;border:1px solid #1a1a1a}
+  .stat-item{flex:1;background:#0d0d0d;padding:16px 12px;text-align:center}
+  .stat-item .num{font-size:24px;font-weight:700;color:#d4af37;line-height:1.2}
+  .stat-item .num small{font-size:12px;font-weight:400;color:#666;margin-left:2px}
+  .stat-item .label{font-size:11px;color:#555;margin-top:4px;letter-spacing:1px}
+
+  /* ── Model Usage ── */
+  .section{margin-bottom:36px}
+  .section-title{font-size:14px;font-weight:600;color:#d4af37;margin-bottom:16px;display:flex;align-items:center;gap:10px;letter-spacing:1px;text-transform:uppercase}
+  .section-title::before{content:'';width:3px;height:14px;background:#d4af37;border-radius:2px}
+  .model-row{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+  .model-row .name{font-size:13px;color:#aaa;min-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .model-row .bar-wrap{flex:1;height:4px;background:#1a1a1a;border-radius:2px;overflow:hidden}
+  .model-row .bar-fill{height:100%;background:linear-gradient(90deg,#d4af37,#b8860b);border-radius:2px;transition:width 0.6s ease}
+  .model-row .cnt{font-size:12px;color:#777;min-width:36px;text-align:right}
+
+  /* ── Image Gallery ── */
+  .gallery{columns:3;column-gap:20px}
+  @media(max-width:900px){.gallery{columns:2}}
+  @media(max-width:560px){.gallery{columns:1}}
+  .img-card{break-inside:avoid;margin-bottom:20px;background:#0d0d0d;border:1px solid #1a1a1a;border-radius:14px;overflow:hidden;transition:border-color 0.3s}
+  .img-card:hover{border-color:#d4af3733}
+  .img-card .img-wrap{position:relative;overflow:hidden;background:#080808}
+  .img-card .img-wrap img{width:100%;display:block;transition:transform 0.4s ease}
+  .img-card:hover .img-wrap img{transform:scale(1.02)}
+  .img-card .img-wrap .idx{position:absolute;top:10px;left:10px;background:#000a;color:#d4af37;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600}
+  .img-card .img-wrap .dims{position:absolute;bottom:10px;right:10px;background:#000a;color:#888;font-size:10px;padding:2px 8px;border-radius:4px}
+  .img-card .card-body{padding:14px 16px}
+  .img-card .prompt{font-size:13px;color:#bbb;line-height:1.6;margin-bottom:10px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .img-card .tags{display:flex;flex-wrap:wrap;gap:5px}
+  .img-card .tag{font-size:10px;padding:2px 8px;border-radius:4px;letter-spacing:0.3px}
+  .img-card .tag.model{color:#d4af37;background:#d4af3712;border:1px solid #d4af3722}
+  .img-card .tag.quality{color:#a78bfa;background:#a78bfa12;border:1px solid #a78bfa22}
+  .img-card .tag.ratio{color:#22d3ee;background:#22d3ee12;border:1px solid #22d3ee22}
+  .img-card .tag.size{color:#34d399;background:#34d39912;border:1px solid #34d39922}
+  .img-card .tag.cat{color:#888;background:#ffffff08;border:1px solid #ffffff12}
+  .img-card .card-footer{display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:11px;color:#555}
+  .img-card .modify-prompt{font-size:11px;color:#666;margin-top:6px;font-style:italic;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .img-card .modify-prompt::before{content:'✎ ';color:#d4af37;font-style:normal}
+
+  .no-images{text-align:center;padding:60px 20px;color:#444;font-size:14px}
+
+  /* ── Footer ── */
+  .footer{text-align:center;margin-top:64px;padding-top:24px;border-top:1px solid #1a1a1a}
+  .footer .brand{font-size:13px;color:#333;letter-spacing:2px}
+  .footer .brand b{color:#d4af37;font-weight:500}
+  .footer .tip{font-size:11px;color:#2a2a2a;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Hero -->
+  <div class="hero">
+    <div class="logo">
+      <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="32" height="32" rx="8" fill="#d4af37" fill-opacity="0.15"/>
+        <path d="M8 22L16 10L24 22H8Z" stroke="#d4af37" stroke-width="2" stroke-linejoin="round"/>
+        <circle cx="16" cy="18" r="3" fill="#d4af37" fill-opacity="0.6"/>
+      </svg>
+      <span>无界 AI</span>
+    </div>
+    <h1>${esc(project.name)}</h1>
+    <div class="meta-line">
+      <span>${project.canvasImages.length} 张作品</span>
+      <span class="sep">|</span>
+      <span>创建于 ${formatDate(project.createdAt)}</span>
+      <span class="sep">|</span>
+      <span>${APP_VERSION_LABEL}</span>
+    </div>
+    ${project.description ? `<div class="desc">${esc(project.description)}</div>` : ''}
+  </div>
+
+  <!-- User Card -->
+  ${user ? `
+  <div class="user-card">
+    <div class="avatar">${esc(user.name.charAt(0).toUpperCase())}</div>
+    <div class="info">
+      <div><span class="name">${esc(user.name)}</span>${user.role === 'admin' ? '<span class="role">管理员</span>' : ''}</div>
+      ${user.email ? `<div class="email">${esc(user.email)}</div>` : ''}
+    </div>
+    <div class="export-time">
+      导出时间<br/>${formatDate(Date.now())}
+    </div>
+  </div>
+  ` : ''}
+
+  <!-- Stats Bar -->
+  <div class="stats-bar">
+    <div class="stat-item">
+      <div class="num">${project.canvasImages.length}<small>张</small></div>
+      <div class="label">作品数</div>
+    </div>
+    <div class="stat-item">
+      <div class="num">${Object.keys(modelStats).length}<small>个</small></div>
+      <div class="label">使用模型</div>
+    </div>
+    <div class="stat-item">
+      <div class="num">${groupCount}<small>组</small></div>
+      <div class="label">图片分组</div>
+    </div>
+    <div class="stat-item">
+      <div class="num">${Math.round((Date.now() - project.createdAt) / 86400000)}<small>天</small></div>
+      <div class="label">项目周期</div>
+    </div>
+  </div>
+
+  ${Object.keys(modelStats).length > 0 ? `
+  <!-- Model Usage -->
+  <div class="section">
+    <div class="section-title">模型使用</div>
+    ${Object.entries(modelStats).sort((a, b) => b[1] - a[1]).map(([modelId, count]) => `
+    <div class="model-row">
+      <div class="name">${esc(getModelLabel(modelId))}</div>
+      <div class="bar-wrap"><div class="bar-fill" style="width:${Math.round((count / maxModelCount) * 100)}%"></div></div>
+      <div class="cnt">${count}张</div>
+    </div>
+    `).join('')}
+  </div>
+  ` : ''}
+
+  <!-- Gallery -->
+  <div class="section">
+    <div class="section-title">作品画廊</div>
+    ${project.canvasImages.length > 0 ? `
+    <div class="gallery">
+      ${project.canvasImages.map((img, idx) => `
+      <div class="img-card">
+        <div class="img-wrap">
+          <img src="${esc(img.url)}" alt="作品 ${idx + 1}" loading="lazy" onerror="this.parentElement.innerHTML='<div style=\\'padding:40px;text-align:center;color:#333;font-size:13px\\'>图片不可用</div>'" />
+          <div class="idx">#${idx + 1}</div>
+          <div class="dims">${img.originalWidth}×${img.originalHeight}</div>
+        </div>
+        <div class="card-body">
+          ${img.prompt ? `<div class="prompt">${esc(img.prompt)}</div>` : '<div class="prompt" style="color:#444">无提示词</div>'}
+          ${img.modifyPrompt ? `<div class="modify-prompt">${esc(img.modifyPrompt)}</div>` : ''}
+          <div class="tags">
+            ${img.model ? `<span class="tag model">${esc(getModelLabel(img.model))}</span>` : ''}
+            ${img.quality ? `<span class="tag quality">${esc(img.quality)}</span>` : ''}
+            ${img.aspectRatio ? `<span class="tag ratio">${esc(img.aspectRatio)}</span>` : ''}
+            ${img.size ? `<span class="tag size">${esc(img.size.replace(/x/g, '×'))}</span>` : ''}
+            ${img.category ? `<span class="tag cat">${esc(img.category)}</span>` : ''}
+            ${img.stylePreset && img.stylePreset !== 'auto' ? `<span class="tag cat">${esc(img.stylePreset)}</span>` : ''}
+          </div>
+          <div class="card-footer">
+            <span>${formatDate(img.createdAt)}</span>
+          </div>
+        </div>
+      </div>
+      `).join('')}
+    </div>
+    ` : '<div class="no-images">暂无作品</div>'}
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="brand">由 <b>无界AI</b> 平台导出</div>
+    <div class="tip">本文件为 HTML 格式，可直接用浏览器打开浏览 · 扩展名 .wujie</div>
+  </div>
+</div>
+
+<!-- Embedded project data for re-import -->
+<script id="wujie-project-data" type="application/json">${jsonBlock.replace(/<\//g, '<\\/')}</script>
+</body>
+</html>`;
+    return html;
   }
 
   importProjectFromWujie(content: string): Project {
     const userData = this.getCurrentUserData();
     if (!userData?.user) throw new Error('No user found');
-    const payload = JSON.parse(content) as WujieProjectFile;
+
+    let payload: WujieProjectFile;
+
+    // Support both HTML (v2+) and JSON (v1) formats
+    const trimmed = content.trim();
+    if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) {
+      // HTML format: extract JSON from <script id="wujie-project-data">
+      const match = trimmed.match(/<script\s+id="wujie-project-data"\s+type="application\/json"[^>]*>([\s\S]*?)<\/script>/);
+      if (!match || !match[1]) {
+        throw new Error('Invalid .wujie file: embedded project data not found');
+      }
+      // Only need to unescape the <\/ we escaped during export
+      const jsonStr = match[1].replace(/<\\\//g, '</');
+      payload = JSON.parse(jsonStr) as WujieProjectFile;
+    } else {
+      // Legacy JSON format
+      payload = JSON.parse(trimmed) as WujieProjectFile;
+    }
+
     if (payload.format !== 'wujie-project' || !payload.project) {
       throw new Error('Invalid .wujie project file');
     }
+
     const project: Project = {
       ...payload.project,
       id: `project_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,

@@ -69,7 +69,7 @@ export function LayerGraphStudio({ open, images, onClose }: LayerGraphStudioProp
             <button onClick={() => exportDesignDocument(document)} className="rounded-lg bg-[#d4af37] px-3 py-2 text-xs font-semibold text-black hover:bg-[#e2c45a] flex items-center gap-2"><Download className="w-4 h-4" />导出工程</button>
             <button onClick={onClose} className="rounded-lg border border-[#2a2a2a] p-2 text-[#aaa] hover:text-white"><X className="w-4 h-4" /></button>
           </div>
-          <input ref={inputRef} type="file" accept=".wujie,application/json" className="hidden" onChange={(e) => void handleImport(e.target.files?.[0])} />
+          <input ref={inputRef} type="file" accept=".wujie,application/json,text/html" className="hidden" onChange={(e) => void handleImport(e.target.files?.[0])} />
         </header>
         <div className="flex-1 flex min-h-0">
           <LayerPanel scene={document.scene} onSceneChange={setScene} />
