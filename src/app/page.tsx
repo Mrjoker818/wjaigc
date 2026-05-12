@@ -115,6 +115,7 @@ function CanvasApp() {
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [activePanel, setActivePanel] = useState<ActivePanel>('generate');
   const [showUserManager, setShowUserManager] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
   const [showAdminSystem, setShowAdminSystem] = useState(false);
   const [showProjectData, setShowProjectData] = useState(false);
   const [navigateToImageId, setNavigateToImageId] = useState<string | null>(null);
@@ -179,6 +180,7 @@ function CanvasApp() {
             }
           } catch { /* non-blocking */ }
           setShowUserManager(false);
+          setAuthChecked(true);
           return;
         }
       } catch {}
@@ -190,6 +192,7 @@ function CanvasApp() {
         setCurrentUser(null);
         setShowUserManager(true);
       } catch {}
+      if (!cancelled) setAuthChecked(true);
     };
     void initCurrentUser();
     return () => {
@@ -2185,6 +2188,30 @@ function CanvasApp() {
         }}
         isMonochrome={themeStyle === 'monochrome'}
       />
+
+      {/* Auth gate overlay - covers everything when not authenticated */}
+      {!authChecked && (
+        <div className="fixed inset-0 flex items-center justify-center z-[99999] bg-[#0a0a0a]">
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-10 h-10 border-2 border-[#d4af37] border-t-transparent rounded-full animate-spin" />
+            <p className="text-white/60 text-sm">正在验证身份...</p>
+          </div>
+        </div>
+      )}
+      {authChecked && !currentUser && !showUserManager && (
+        <div className="fixed inset-0 flex items-center justify-center z-[99999] bg-[#0a0a0a]">
+          <div className="flex flex-col items-center gap-6">
+            <h1 className="text-2xl font-bold text-white">无界 AI</h1>
+            <p className="text-white/50 text-sm">请先登录以使用画布</p>
+            <button
+              onClick={() => setShowUserManager(true)}
+              className="px-6 py-2.5 bg-[#d4af37] text-black font-medium rounded-lg hover:bg-[#c4a030] transition-colors"
+            >
+              登录 / 注册
+            </button>
+          </div>
+        </div>
+      )}
 
     </div>
   );
