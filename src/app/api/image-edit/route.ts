@@ -589,17 +589,14 @@ export async function POST(request: NextRequest) {
 
     if (action === 'upscale') {
       // ============================================================
-      // AI 无损放大 - 两步策略
+      // AI 超清放大 - 三级策略
       //
-      // 核心问题：images/generations 的 image_urls 只是"参考图"，
-      // 不保证保留原图内容。如果 prompt 不精确描述原图，生成结果
-      // 会偏离原图。
+      // 目标：生成一张与原图完全一致但分辨率更高的图片
+      // 关键：最大程度保留原图内容，只增加细节和清晰度
       //
-      // 策略：Step 1 用 chat vision 模型描述原图内容 →
-      //       Step 2 用描述 + image_urls + 低 strength 提交 images/generations
-      //
-      // 这样 images/generations 既有参考图(image_urls)又有精确描述，
-      // 生成结果会尽可能贴近原图。
+      // Level 1: /images/generations + input_fidelity: "high" + 极低 strength
+      // Level 2: /images/generations + image_urls + 极低 strength
+      // Level 3: 纯 /images/generations + 精确描述 (兜底)
       // ============================================================
 
       const tw = targetWidth || 2048;
@@ -624,81 +621,127 @@ export async function POST(request: NextRequest) {
             return bestRatio;
           })();
 
-      // 将图片转为 base64（用于 chat vision 描述）
+      // 将图片转为 base64
       const imageBase64ForVision = await resolveImageToBase64(imageUrl);
 
       // Step 1: 用 chat vision 模型获取图片精确描述
-      // 这样 prompt 会精确描述原图内容，而非泛泛的"upscale this image"
       console.log(`[image-edit] upscale: Step 1 - getting image description via vision model`);
       const visionDescription = await describeImageWithVision(
         imageBase64ForVision,
-        '请详细描述这张图片的内容、构图、主体、色彩、风格、氛围和所有视觉细节。描述要足够精确，让人仅凭文字就能还原这张图片。请用中英文各描述一次。' +
-        '\n\nDescribe this image in detail: composition, subject, colors, style, mood, and all visual details. Be precise enough that someone could recreate the image from text alone.'
+        'Describe this image with extreme visual precision for an AI upscaler. Include: exact subject identity and pose, precise color palette (hex-like), lighting direction and type, texture materials, background details, composition framing, and artistic style. Output a dense, keyword-rich description that captures every visual element. No introductory text, just the description.'
       );
 
-      // Step 2: 构建增强 prompt + image_urls + 低 strength
+      // Step 2: 构建精炼的画质增强 prompt
       const userDescription = prompt || '';
-      let enhancedPrompt: string;
+      const descSnippet = visionDescription && visionDescription.length > 30
+        ? visionDescription.substring(0, 600)
+        : userDescription || '';
 
-      if (visionDescription && visionDescription.length > 30) {
-        // 有视觉描述：用描述增强 prompt
-        console.log(`[image-edit] upscale: Step 2 - using vision description (${visionDescription.length} chars)`);
-        enhancedPrompt = `[IMG2IMG UPSCALE] Create a high-resolution version of the reference image. ` +
-          `The image depicts: ${visionDescription.substring(0, 500)}. ` +
-          (userDescription ? `User context: ${userDescription}. ` : '') +
-          `CRITICAL: Keep the EXACT same composition, subjects, colors, style, mood and artistic choices as the reference image. ` +
-          `Only add finer details, sharper textures and crisper edges. ` +
-          `Do NOT change, replace, add or remove any element. ` +
-          `The output must be a high-resolution version of the SAME image, not a new creation. ` +
-          `masterpiece, best quality, ultra-detailed, 8k uhd, highres`;
-      } else {
-        // 无视觉描述：用用户描述 + 泛化 prompt
-        console.log(`[image-edit] upscale: Step 2 - no vision description, using generic upscale prompt`);
-        enhancedPrompt = (userDescription
-          ? `[IMG2IMG UPSCALE] Create a high-resolution version of the reference image. The image depicts: ${userDescription}. `
-          : `[IMG2IMG UPSCALE] Create a high-resolution version of the reference image. `
-        ) +
-          `CRITICAL: Keep the EXACT same composition, subjects, colors, style, mood and artistic choices. ` +
-          `Only add finer details, sharper textures and crisper edges. Do NOT change any element. ` +
-          `The output must be a high-resolution version of the SAME image, not a new creation. ` +
-          `masterpiece, best quality, ultra-detailed, 8k uhd, highres`;
-      }
+      console.log(`[image-edit] upscale: Step 2 - building enhanced prompt (desc: ${descSnippet.length} chars)`);
 
-      // strength 越低越接近原图；放大需要极低值
-      // 2×: 0.15, 4×: 0.20, 8×: 0.25
-      const upscaleStrength = Math.min(0.10 + scaleVal * 0.025, 0.25);
+      // 精炼 prompt：专注于画质增强而非"重新创作"
+      const upscalePrompt = [
+        `Ultra-high resolution upscale of the reference image.`,
+        descSnippet ? `Image content: ${descSnippet}.` : '',
+        `PRESERVE exactly: same composition, same subject, same colors, same style, same pose, same lighting, same background, same mood. Every pixel of the original must be faithfully represented at higher resolution.`,
+        `ENHANCE only: add finer skin/clothing/object textures, sharper edges, crisper details, more subtle gradients, higher definition.`,
+        `DO NOT: change any element, add new objects, alter colors, modify composition, or create new content.`,
+        `Quality: masterpiece, best quality, ultra-detailed, 8k uhd, extremely sharp, highres, photorealistic detail enhancement.`,
+      ].filter(Boolean).join(' ');
 
-      console.log(`[image-edit] upscale: target=${tw}x${th}, scale=${scaleVal}×, ratio=${effectiveSize}, strength=${upscaleStrength}`);
-
-      // 确保 image_urls 使用可访问的 URL（APImart 需要能访问到图片）
+      // 确保 image_urls 使用可访问的 URL
       let accessibleImageUrl = imageUrl;
       if (imageUrl.startsWith('/')) {
         const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
         accessibleImageUrl = `${domain}${imageUrl}`;
       } else if (imageUrl.startsWith('blob:')) {
-        // blob URL 无法从服务端访问，使用 base64
         accessibleImageUrl = imageBase64ForVision;
       }
+
+      const negativePrompt = '(worst quality, low quality, normal quality:2), blurry, pixelated, jpeg artifacts, noise, grain, different composition, different subject, different style, different colors, changed background, new elements, missing elements, extra objects, altered pose, distorted face, deformed';
+
+      // ============================================================
+      // Level 1: /images/generations + image_urls + input_fidelity + 极低 strength
+      //  (APImart 不支持 /images/edits 端点，但 /images/generations 也支持
+      //   input_fidelity 参数来提升原图保真度)
+      // ============================================================
+      console.log(`[image-edit] upscale: Level 1 - /images/generations with input_fidelity=high, strength=0.05`);
+      try {
+        const editsResult = await autoTrySubmitImageTask(candidateModels, (m) => ({
+          model: m,
+          prompt: upscalePrompt,
+          size: effectiveSize,
+          n: 1,
+          image: imageBase64ForVision,
+          image_urls: [accessibleImageUrl],
+          strength: 0.05,
+          input_fidelity: 'high',
+          negative_prompt: negativePrompt,
+        }), '放大(HQ)');
+        if (editsResult.directUrl) {
+          return NextResponse.json({ success: true, imageUrl: editsResult.directUrl, action, engine: 'ai-upscale-hq', usedModel: editsResult.usedModel });
+        }
+        return NextResponse.json({ success: true, taskId: editsResult.taskId, action, engine: 'ai-upscale-hq', usedModel: editsResult.usedModel });
+      } catch (hqErr: unknown) {
+        const errMsg = hqErr instanceof Error ? hqErr.message : String(hqErr);
+        console.log(`[image-edit] upscale: Level 1 (HQ) failed: ${errMsg}, trying Level 2...`);
+      }
+
+      // ============================================================
+      // Level 2: /images/generations + image_urls + 极低 strength
+      // ============================================================
+      // strength 极低确保最大程度保留原图
+      // 2x: 0.06, 4x: 0.08, 8x: 0.10
+      const genStrength = Math.min(0.04 + scaleVal * 0.01, 0.10);
+      console.log(`[image-edit] upscale: Level 2 - /images/generations with strength=${genStrength}`);
 
       try {
         const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
           model: m,
-          prompt: enhancedPrompt,
+          prompt: upscalePrompt,
           size: effectiveSize,
           n: 1,
           image_urls: [accessibleImageUrl],
-          strength: upscaleStrength,
-          negative_prompt: '(worst quality, low quality, normal quality:2), blurry, pixelated, different composition, different subject, different style, different colors, new elements, extra objects, missing objects, changed background',
-        }), '放大');
+          strength: genStrength,
+          negative_prompt: negativePrompt,
+        }), '放大(gen)');
         if (result.directUrl) {
-          return NextResponse.json({ success: true, imageUrl: result.directUrl, action, engine: 'ai-upscale-vision-enhanced', usedModel: result.usedModel });
+          return NextResponse.json({ success: true, imageUrl: result.directUrl, action, engine: 'ai-upscale-gen', usedModel: result.usedModel });
         }
-        return NextResponse.json({ success: true, taskId: result.taskId, action, engine: 'ai-upscale-vision-enhanced', usedModel: result.usedModel });
-      } catch (imgErr: unknown) {
-        if (imgErr instanceof ModelCapabilityError) {
-          return NextResponse.json({ success: false, error: imgErr.message }, { status: 500 });
+        return NextResponse.json({ success: true, taskId: result.taskId, action, engine: 'ai-upscale-gen', usedModel: result.usedModel });
+      } catch (genErr: unknown) {
+        if (!(genErr instanceof ModelCapabilityError)) {
+          throw genErr;
         }
-        throw imgErr;
+        console.log(`[image-edit] upscale: Level 2 failed, trying Level 3 (text-only)...`);
+      }
+
+      // ============================================================
+      // Level 3: 纯文本描述 + /images/generations (兜底)
+      // ============================================================
+      const textOnlyPrompt = [
+        `Create a high-resolution image matching this exact description:`,
+        descSnippet || 'A high quality image.',
+        `The output must be an ultra-high-resolution, extremely detailed, sharp version. masterpiece, best quality, 8k uhd, highres.`,
+      ].join(' ');
+
+      try {
+        const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
+          model: m,
+          prompt: textOnlyPrompt,
+          size: effectiveSize,
+          n: 1,
+          negative_prompt: negativePrompt,
+        }), '放大(text-only)');
+        if (result.directUrl) {
+          return NextResponse.json({ success: true, imageUrl: result.directUrl, action, engine: 'ai-upscale-text', usedModel: result.usedModel });
+        }
+        return NextResponse.json({ success: true, taskId: result.taskId, action, engine: 'ai-upscale-text', usedModel: result.usedModel });
+      } catch (textErr: unknown) {
+        if (textErr instanceof ModelCapabilityError) {
+          return NextResponse.json({ success: false, error: textErr.message }, { status: 500 });
+        }
+        throw textErr;
       }
     }
 
