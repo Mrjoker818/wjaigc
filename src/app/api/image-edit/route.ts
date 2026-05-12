@@ -850,13 +850,15 @@ export async function POST(request: NextRequest) {
 
     if (action === 'upscale') {
       // ============================================================
-      // AI 分块超清放大 (Tile-based Upscale)
+      // 超清放大 (Upscale)
       //
-      // 核心思路：将原图切成 N 块，每块单独 AI 放大，最后无缝拼接
-      // 优势：每块区域 AI 专注处理，细节更丰富；整体融合后画质显著提升
+      // 策略 A (推荐): upscayl-node 分块放大 — 像素级忠实，Real-ESRGAN 神经网络
+      //   流程：Split → upscayl each tile → Merge
+      //   优势：每个 tile 由专门的放大模型处理，像素级保留 + 细节增强
       //
-      // 流程：Split → AI Upscale each tile → Merge → 返回最终图片
-      // 分块策略：小图(<800px) 2×2=4块，中图(<1600px) 2×3=6块，大图 3×3=9块
+      // 策略 B (兜底): AI 整图放大 — 用 images/generations + 低 strength
+      //   流程：Describe → Generate with reference
+      //   注意：不用分块！images/generations 不保留 tile 原始内容
       // ============================================================
 
       const scaleVal = body.scale || 2;
@@ -865,31 +867,152 @@ export async function POST(request: NextRequest) {
       const targetW = targetWidth || origW * scaleVal;
       const targetH = targetHeight || origH * scaleVal;
 
-      // ---- 分块策略 ----
-      const maxEdge = Math.max(origW, origH);
-      let cols: number, rows: number;
-      if (maxEdge < 800) { cols = 2; rows = 2; }       // 4 tiles
-      else if (maxEdge < 1600) { cols = 2; rows = 3; }  // 6 tiles
-      else { cols = 3; rows = 3; }                       // 9 tiles
-
-      const totalTiles = cols * rows;
-      const overlap = 24; // 重叠像素，保证拼接无缝
-
-      console.log(`[image-edit] upscale: Tile-based mode. Original: ${origW}x${origH}, Scale: ${scaleVal}x, Target: ${targetW}x${targetH}, Grid: ${cols}x${rows}=${totalTiles} tiles, Overlap: ${overlap}px`);
-
-      // ---- Step 1: 下载原图并分块 ----
-      let imageBuffer: Buffer;
+      // ---- 检测 upscayl 可用性 ----
+      let useUpscayl = false;
+      let upscaylModule: typeof import('@/lib/image-tools/upscayl') | null = null;
       try {
-        imageBuffer = await fetchImageBuffer(imageUrl);
+        upscaylModule = await import('@/lib/image-tools/upscayl');
+        const upscaylStatus = await upscaylModule.isUpscaylAvailable();
+        const upscaylModels = upscaylStatus.available ? await upscaylModule.listUpscaylModels() : [];
+        useUpscayl = upscaylStatus.available && upscaylModels.length > 0;
+        if (useUpscayl) {
+          console.log(`[image-edit] upscale: upscayl available, will try tile mode first`);
+        }
       } catch (e) {
-        console.error('[image-edit] upscale: Failed to fetch source image:', e);
-        return NextResponse.json({ success: false, error: '无法获取原始图片' }, { status: 500 });
+        console.log(`[image-edit] upscale: upscayl not available:`, e);
       }
 
-      const { tiles } = await splitImageIntoTiles(imageBuffer, cols, rows, overlap);
-      console.log(`[image-edit] upscale: Split into ${tiles.length} tiles`);
+      if (useUpscayl && upscaylModule) {
+        // ============================================================
+        // 策略 A: upscayl-node 分块放大（如果失败自动回退到策略 B）
+        // ============================================================
+        try {
+        const maxEdge = Math.max(origW, origH);
+        let cols: number, rows: number;
+        if (maxEdge < 800) { cols = 2; rows = 2; }
+        else if (maxEdge < 1600) { cols = 2; rows = 3; }
+        else { cols = 3; rows = 3; }
 
-      // ---- Step 2: 获取整图视觉描述（用于 prompt 增强）----
+        const totalTiles = cols * rows;
+        const overlap = 24;
+
+        console.log(`[image-edit] upscale: upscayl tile mode. Original: ${origW}x${origH}, Scale: ${scaleVal}x, Grid: ${cols}x${rows}=${totalTiles} tiles`);
+
+        // Step 1: 下载原图
+        let imageBuffer: Buffer;
+        try {
+          imageBuffer = await fetchImageBuffer(imageUrl);
+        } catch (e) {
+          console.error('[image-edit] upscale: Failed to fetch source image:', e);
+          return NextResponse.json({ success: false, error: '无法获取原始图片' }, { status: 500 });
+        }
+
+        // Step 2: 分块
+        const { tiles } = await splitImageIntoTiles(imageBuffer, cols, rows, overlap);
+        console.log(`[image-edit] upscale: Split into ${tiles.length} tiles`);
+
+        // Step 3: 用 upscayl 逐块放大
+        // upscayl 模型固定 4x 放大，scale=2 时先 4x 再缩放回 2x
+        const upscaylAvailableModels = await upscaylModule.listUpscaylModels();
+        const upscaylModel = upscaylAvailableModels.includes('realesrgan-x4plus') ? 'realesrgan-x4plus' : upscaylAvailableModels[0];
+        const upscaylScale = 4; // upscayl 强制 4x
+
+        const tileResultBuffers: Buffer[] = [];
+        const tmpDir = path.join('/tmp', `upscayl_tiles_${Date.now()}`);
+        await fs.mkdir(tmpDir, { recursive: true });
+
+        try {
+          for (let i = 0; i < tiles.length; i++) {
+            const tile = tiles[i];
+            // 使用 data URL 传递 tile，避免 readImageToBuffer 的路径拼接问题
+            const tileDataUrl = `data:image/png;base64,${tile.buffer.toString('base64')}`;
+
+            // 调用 upscayl 放大
+            console.log(`[image-edit] upscale: upscayl processing tile ${i + 1}/${tiles.length}`);
+            const result = await upscaylModule.performUpscale({
+              imageUrl: tileDataUrl,
+              model: upscaylModel,
+              scale: upscaylScale as 2 | 4,
+              outputFormat: 'png',
+            });
+
+            if (!result.success || !result.imageUrl) {
+              throw new Error(`Tile ${i} upscayl failed: ${result.error || 'no output'}`);
+            }
+
+            // 读取 upscayl 输出
+            let outputBuffer: Buffer;
+            if (result.imageUrl && result.imageUrl.startsWith('/')) {
+              // upscayl 输出路径如 /outputs/upscale/xxx.png → 实际在 process.cwd()/public/outputs/...
+              const absPath = path.join(process.cwd(), 'public', result.imageUrl);
+              outputBuffer = await fs.readFile(absPath);
+            } else if (result.imageUrl) {
+              const res = await fetch(result.imageUrl, { signal: AbortSignal.timeout(30000) });
+              outputBuffer = Buffer.from(await res.arrayBuffer());
+            } else {
+              throw new Error(`Tile ${i} upscayl returned no output URL`);
+            }
+
+            // 如果 upscaylScale > scaleVal，resize 到目标倍率
+            if (upscaylScale > scaleVal) {
+              const resizeRatio = scaleVal / upscaylScale;
+              const tileMeta = await sharp(outputBuffer).metadata();
+              const newW = Math.round((tileMeta.width || tile.width * upscaylScale) * resizeRatio);
+              const newH = Math.round((tileMeta.height || tile.height * upscaylScale) * resizeRatio);
+              outputBuffer = await sharp(outputBuffer)
+                .resize(newW, newH, { kernel: 'lanczos3' })
+                .png()
+                .toBuffer();
+            }
+
+            tileResultBuffers.push(outputBuffer);
+          }
+        } finally {
+          // 清理临时目录
+          try { await fs.rm(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+        }
+
+        // Step 4: 合并 tiles
+        console.log(`[image-edit] upscale: Merging ${tiles.length} tiles into ${targetW}x${targetH} image`);
+        const mergedBuffer = await mergeTiles(tileResultBuffers, tiles, scaleVal, targetW, targetH);
+
+        // Step 5: 保存并返回
+        const timestamp = Date.now();
+        const randomSuffix = Math.random().toString(36).substring(2, 8);
+        const filename = `upscale_${timestamp}_${randomSuffix}.png`;
+        const savedPath = await saveBufferToPublic(mergedBuffer, filename);
+
+        const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+        const fullUrl = `${domain}${savedPath}`;
+
+        console.log(`[image-edit] upscale: upscayl tile upscale complete. Output: ${savedPath} (${(mergedBuffer.length / 1024).toFixed(0)}KB)`);
+
+        return NextResponse.json({
+          success: true,
+          imageUrl: fullUrl,
+          action,
+          engine: 'upscayl-tile',
+          usedModel: upscaylModel,
+          tileInfo: { cols, rows, totalTiles, overlap, scale: scaleVal },
+        });
+        } catch (upscaylError) {
+          // upscayl 执行失败（如无 GPU），回退到 AI 整图放大
+          console.log(`[image-edit] upscale: upscayl tile mode failed, falling back to AI:`, upscaylError instanceof Error ? upscaylError.message : upscaylError);
+        }
+      }
+
+      // ============================================================
+      // 策略 B: AI 整图放大 (upscayl 不可用或失败时的兜底方案)
+      // 注意：不做分块！images/generations 不保留 tile 原始内容
+      // ============================================================
+      console.log(`[image-edit] upscale: using AI whole-image upscale`);
+
+      const effectiveSize = (() => {
+        const ar = aspectRatio || (origW >= origH ? `${origW}:${origH}` : `${origW}:${origH}`);
+        return findClosestAspectRatio(ar);
+      })();
+
+      // Step 1: 获取视觉描述
       const imageBase64ForVision = await resolveImageToBase64(imageUrl);
       const visionDescription = await describeImageWithVision(
         imageBase64ForVision,
@@ -898,187 +1021,47 @@ export async function POST(request: NextRequest) {
       const descSnippet = visionDescription && visionDescription.length > 20
         ? visionDescription.substring(0, 500) : (prompt || '');
 
-      // ---- Step 3: 逐 tile 提交 AI 放大任务 ----
-      // 每个 tile 的 prompt 更精简，专注于保留+增强细节
-      const tileUpscalePrompt = [
-        `Ultra-high resolution upscale. PRESERVE exactly: same content, colors, style, composition, lighting. ENHANCE only: add finer textures, sharper edges, crisper details. DO NOT change any element or add new objects. masterpiece, best quality, ultra-detailed, 8k uhd, extremely sharp.`,
-        descSnippet ? `Content: ${descSnippet.substring(0, 200)}.` : '',
+      // Step 2: 构建整图放大 prompt
+      const upscalePrompt = [
+        `Ultra-high resolution upscale. PRESERVE exactly: same content, colors, style, composition, lighting, every detail. ENHANCE only: add finer textures, sharper edges, crisper details. DO NOT change any element, pose, or color. DO NOT add new objects. masterpiece, best quality, ultra-detailed, 8k uhd, extremely sharp.`,
+        descSnippet ? `Content: ${descSnippet.substring(0, 300)}.` : '',
       ].filter(Boolean).join(' ');
 
-      const tileNegativePrompt = '(worst quality, low quality, normal quality:2), blurry, pixelated, jpeg artifacts, noise, grain, changed content, new elements, different colors, altered composition';
+      const negativePrompt = '(worst quality, low quality, normal quality:2), blurry, pixelated, jpeg artifacts, noise, grain, changed content, new elements, different colors, altered composition, deformed';
 
-      // 尝试找到一个可用的模型组合
-      let usedModel = '';
-      let usedApiKey = '';
-      let usedApiBaseUrl = '';
+      // Step 3: 提交整图 AI 放大
+      const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
+        model: m,
+        prompt: upscalePrompt,
+        size: effectiveSize,
+        n: 1,
+        image: imageBase64ForVision,
+        image_urls: [imageBase64ForVision],
+        strength: 0.05,
+        input_fidelity: 'high',
+        negative_prompt: negativePrompt,
+      }), 'AI放大');
 
-      // 尝试提交一个测试 tile 确认模型可用
-      const testTile = tiles[0];
-      const testTileBase64 = `data:image/png;base64,${testTile.buffer.toString('base64')}`;
-      const testTileRatio = (() => {
-        const g = (a: number, b: number): number => b === 0 ? a : g(b, a % b);
-        const gcdVal = g(testTile.width, testTile.height);
-        const rw = testTile.width / gcdVal;
-        const rh = testTile.height / gcdVal;
-        const supported = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
-        let best = supported[0]; let bestD = Infinity;
-        for (const sr of supported) {
-          const [sw, sh] = sr.split(':').map(Number);
-          const d = Math.abs(rw / rh - sw / sh);
-          if (d < bestD) { bestD = d; best = sr; }
-        }
-        return best;
-      })();
-
-      let testTaskId: string | undefined;
-      let testDirectUrl: string | undefined;
-
-      // 尝试使用候选模型提交测试 tile
-      for (const candidate of candidateModels) {
-        try {
-          console.log(`[image-edit] upscale: Testing model ${candidate.model} for tile processing`);
-          const result = await submitImageTask(
-            candidate.apiBaseUrl, candidate.apiKey,
-            {
-              model: candidate.model,
-              prompt: tileUpscalePrompt,
-              size: testTileRatio,
-              n: 1,
-              image: testTileBase64,
-              image_urls: [testTileBase64],
-              strength: 0.03, // 极低 strength，最大限度保留
-              input_fidelity: 'high',
-              negative_prompt: tileNegativePrompt,
-            }
-          );
-          testTaskId = result.taskId;
-          testDirectUrl = result.directUrl;
-          usedModel = candidate.model;
-          usedApiKey = candidate.apiKey;
-          usedApiBaseUrl = candidate.apiBaseUrl;
-          console.log(`[image-edit] upscale: Model ${candidate.model} accepted. Proceeding with all tiles.`);
-          break;
-        } catch (err: unknown) {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          console.warn(`[image-edit] upscale: Model ${candidate.model} rejected: ${errMsg}`);
-          if (err instanceof ModelCapabilityError) continue;
-          // 非模型能力错误，直接抛出
-          throw err;
-        }
-      }
-
-      if (!usedModel) {
+      if (result.directUrl) {
         return NextResponse.json({
-          success: false,
-          error: '没有可用的图像模型支持放大操作，请在管理员系统配置图像模型',
-        }, { status: 500 });
+          success: true,
+          imageUrl: result.directUrl,
+          action,
+          engine: 'ai-upscale-hq',
+          usedModel: result.usedModel,
+        });
       }
-
-      // ---- Step 4: 并行提交剩余 tile 任务 ----
-      // 测试 tile 已提交，现在提交其余 tiles
-      const tileTaskIds: Array<{ taskId?: string; directUrl?: string; tileIndex: number }> = [
-        { taskId: testTaskId, directUrl: testDirectUrl, tileIndex: 0 }
-      ];
-
-      // 并行提交其余 tiles（限制并发为 3，避免 rate limit）
-      const batchSize = 3;
-      for (let batchStart = 1; batchStart < tiles.length; batchStart += batchSize) {
-        const batchEnd = Math.min(batchStart + batchSize, tiles.length);
-        const batchPromises = [];
-
-        for (let i = batchStart; i < batchEnd; i++) {
-          const tile = tiles[i];
-          const tileBase64 = `data:image/png;base64,${tile.buffer.toString('base64')}`;
-          const tileRatio = (() => {
-            const g = (a: number, b: number): number => b === 0 ? a : g(b, a % b);
-            const gcdVal = g(tile.width, tile.height);
-            const rw = tile.width / gcdVal;
-            const rh = tile.height / gcdVal;
-            const supported = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
-            let best = supported[0]; let bestD = Infinity;
-            for (const sr of supported) {
-              const [sw, sh] = sr.split(':').map(Number);
-              const d = Math.abs(rw / rh - sw / sh);
-              if (d < bestD) { bestD = d; best = sr; }
-            }
-            return best;
-          })();
-
-          batchPromises.push(
-            submitImageTask(usedApiBaseUrl, usedApiKey, {
-              model: usedModel,
-              prompt: tileUpscalePrompt,
-              size: tileRatio,
-              n: 1,
-              image: tileBase64,
-              image_urls: [tileBase64],
-              strength: 0.03,
-              input_fidelity: 'high',
-              negative_prompt: tileNegativePrompt,
-            }).then(result => ({ ...result, tileIndex: i }))
-          );
-        }
-
-        const batchResults = await Promise.all(batchPromises);
-        tileTaskIds.push(...batchResults);
-        console.log(`[image-edit] upscale: Submitted batch ${batchStart}-${batchEnd - 1} of ${tiles.length} tiles`);
-      }
-
-      // ---- Step 5: 轮询所有 tile 任务直到完成 ----
-      console.log(`[image-edit] upscale: Polling ${tileTaskIds.length} tile tasks...`);
-
-      const tileImageUrls: string[] = new Array(tiles.length).fill('');
-      const pollPromises = tileTaskIds.map(async (entry) => {
-        if (entry.directUrl) {
-          tileImageUrls[entry.tileIndex] = entry.directUrl;
-          return;
-        }
-        if (!entry.taskId) {
-          throw new Error(`Tile ${entry.tileIndex} has no taskId or directUrl`);
-        }
-        const url = await pollTaskUntilComplete(entry.taskId, usedApiKey, usedApiBaseUrl);
-        tileImageUrls[entry.tileIndex] = url;
-      });
-
-      await Promise.all(pollPromises);
-      console.log(`[image-edit] upscale: All ${tiles.length} tiles completed`);
-
-      // ---- Step 6: 下载所有 tile 结果图片 ----
-      const tileResultBuffers: Buffer[] = [];
-      for (let i = 0; i < tileImageUrls.length; i++) {
-        const url = tileImageUrls[i];
-        console.log(`[image-edit] upscale: Downloading tile ${i} result from ${url.substring(0, 80)}...`);
-        const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
-        if (!res.ok) throw new Error(`Failed to download tile ${i}: ${res.status}`);
-        const buf = Buffer.from(await res.arrayBuffer());
-        tileResultBuffers.push(buf);
-      }
-
-      // ---- Step 7: 合并 tiles ----
-      console.log(`[image-edit] upscale: Merging ${tiles.length} tiles into ${targetW}x${targetH} image`);
-      const mergedBuffer = await mergeTiles(tileResultBuffers, tiles, scaleVal, targetW, targetH);
-
-      // ---- Step 8: 保存合并结果并返回 ----
-      const timestamp = Date.now();
-      const randomSuffix = Math.random().toString(36).substring(2, 8);
-      const filename = `upscale_${timestamp}_${randomSuffix}.png`;
-      const savedPath = await saveBufferToPublic(mergedBuffer, filename);
-
-      // 构建完整 URL
-      const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-      const fullUrl = `${domain}${savedPath}`;
-
-      console.log(`[image-edit] upscale: Tile-based upscale complete. Output: ${savedPath} (${(mergedBuffer.length / 1024).toFixed(0)}KB)`);
 
       return NextResponse.json({
         success: true,
-        imageUrl: fullUrl,
+        taskId: result.taskId,
         action,
-        engine: 'tile-upscale',
-        usedModel,
-        tileInfo: { cols, rows, totalTiles, overlap, scale: scaleVal },
+        engine: 'ai-upscale',
+        prompt: upscalePrompt,
+        usedModel: result.usedModel,
       });
     }
+
 
     if (action === 'remove_background') {
       const bgSize = aspectRatio ? findClosestAspectRatio(aspectRatio) : '1:1';
