@@ -19,8 +19,7 @@ import dynamic from 'next/dynamic';
 const ModelViewer3D = dynamic(() => import('@/components/model-viewer-3d'), { ssr: false });
 
 const PsdLayerEditor = lazy(() => import('@/components/psd-editor/PsdLayerEditor'));
-const UpscaleDialog = lazy(() => import('@/components/image-editor/UpscaleDialog'));
-const ImageEditPanel = lazy(() => import('@/components/image-editor/ImageEditPanel'));
+
 
 /* ====== Multi-Angle Sphere Preview (Canvas 2D) ====== */
 function MultiAngleSpherePreview({
@@ -592,8 +591,7 @@ export function InfiniteCanvas({
 
   // Image to 3D state
   const [show3DModal, setShow3DModal] = useState(false);
-  const [showUpscaleDialog, setShowUpscaleDialog] = useState(false);
-  const [showImageEditPanel, setShowImageEditPanel] = useState(false);
+
   const [imageEditMode, setImageEditMode] = useState<'erase' | 'mask'>('erase');
   const [threeDBackend, setThreeDBackend] = useState<ThreeDBackend>('api');
   const [threeDType, setThreeDType] = useState<ThreeDType>('ip');
@@ -952,8 +950,6 @@ export function InfiniteCanvas({
           isDrawingRef.current = false;
           currentStrokeRef.current = [];
           setActiveTool('none');
-          setShowUpscaleDialog(false);
-          setShowImageEditPanel(false);
         } else {
           setActiveTool('none');
           setShowDownloadPopup(false);
@@ -1121,7 +1117,7 @@ export function InfiniteCanvas({
     if (editMode === 'none') return;
     if (e.button !== 0) return; // Only left click
     // 新的 ImageEditPanel 打开时，不在画布上捕获编辑事件
-    if (showImageEditPanel && (editMode === 'erase' || editMode === 'mask')) return;
+
 
     const editImg = images.find(i => i.id === editImageId);
     if (!editImg) return;
@@ -1199,11 +1195,10 @@ export function InfiniteCanvas({
       setCropRect({ x: clampedX, y: clampedY, w: 0, h: 0 });
       setCropDragOrigin(null);
     }
-  }, [editMode, editImageId, images, screenToCanvas, cropRect, zoom, viewOffset, showImageEditPanel]);
+  }, [editMode, editImageId, images, screenToCanvas, cropRect, zoom, viewOffset]);
 
   const handleEditMouseMove = useCallback((e: React.MouseEvent) => {
     // 新的 ImageEditPanel 打开时，不在画布上处理编辑事件
-    if (showImageEditPanel && (editMode === 'erase' || editMode === 'mask')) return;
     if (editMode === 'erase' || editMode === 'mask') {
       // Convert to canvas coordinates
       const canvasPos = screenToCanvas(e.clientX, e.clientY);
@@ -1362,7 +1357,7 @@ export function InfiniteCanvas({
         setCropRect({ x: newX, y: newY, w: newW, h: newH });
       }
     }
-  }, [editMode, editImageId, images, screenToCanvas, cropDragStart, cropDragMode, cropDragOrigin, cropRatio, zoom, viewOffset, showImageEditPanel]);
+  }, [editMode, editImageId, images, screenToCanvas, cropDragStart, cropDragMode, cropDragOrigin, cropRatio, zoom, viewOffset]);
 
   const handleEditMouseUp = useCallback(() => {
     if (isDrawingRef.current) {
@@ -1547,7 +1542,7 @@ export function InfiniteCanvas({
   }, [editMode, isPanning, isMiddlePanning, panStart, boxSelectStart, isLongPressing, resizingImage, resizeCorner, images, dragTarget, dragStart, resizeStart, screenToCanvas, onImagesChange, handleEditMouseMove, groupDragTarget, groupDragStart]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
-    if (editMode !== 'none' && !(showImageEditPanel && (editMode === 'erase' || editMode === 'mask'))) {
+    if (editMode !== 'none') {
       handleEditMouseUp();
       return;
     }
@@ -1644,7 +1639,7 @@ export function InfiniteCanvas({
   }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp, groupDragTarget, groupDragOffset]);
 
   const handleMouseLeave = useCallback(() => {
-    if (editMode !== 'none' && !(showImageEditPanel && (editMode === 'erase' || editMode === 'mask'))) {
+    if (editMode !== 'none') {
       handleEditMouseUp();
       return;
     }
@@ -2738,12 +2733,6 @@ export function InfiniteCanvas({
   }, [images, canvasGenFrameId, showCanvasGenerator]);
 
   // 1. UPSCALE - floating panel with size options
-  const handleOpenUpscale = useCallback(() => {
-    const img = selectedImageData;
-    if (!img) return;
-    setShowUpscaleDialog(true);
-  }, [selectedImageData]);
-
   const handleUpscaleMultiplierChange = useCallback((mult: number) => {
     setUpscaleMultiplier(mult);
   }, []);
@@ -2873,6 +2862,13 @@ export function InfiniteCanvas({
     setIsEditProcessing(false);
     setActiveTool('none');
   }, [selectedImageData, upscaleMultiplier, upscaylAvailable, upscaylSelectedModel, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, toStableImageUrl]);
+
+  // 1b. Upscale trigger - calls handleUpscaleConfirm directly
+  const handleOpenUpscale = useCallback(() => {
+    const img = selectedImageData;
+    if (!img) return;
+    handleUpscaleConfirm();
+  }, [selectedImageData, handleUpscaleConfirm]);
 
   // 2. REMOVE BACKGROUND - auto, result to the right
   const handleRemoveBackground = useCallback(async () => {
@@ -3244,20 +3240,22 @@ export function InfiniteCanvas({
     }
   }, [selectedImageData, getThreeDProviders, threeDProviderId, threeDBackend, threeDType, threeDQuality, threeDTexture, threeDFormat, threeDLocalEndpoint, threeDLocalModel, renderEditElementsPreview, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
 
-  // 4. ERASE - open ImageEditPanel
+  // 4. ERASE - canvas inline brush mode
   const handleOpenErase = useCallback(() => {
     const img = selectedImageData;
     if (!img) return;
+    setEditImageId(img.id);
     setEditMode('erase');
-    setShowImageEditPanel(true);
+    setEditStrokes([]);
   }, [selectedImageData]);
 
-  // 5. MASK - open ImageEditPanel
+  // 5. MASK - canvas inline brush mode
   const handleOpenMask = useCallback(() => {
     const img = selectedImageData;
     if (!img) return;
+    setEditImageId(img.id);
     setEditMode('mask');
-    setShowImageEditPanel(true);
+    setEditStrokes([]);
   }, [selectedImageData]);
 
   // 6. EXPAND - floating toolbar with ratio presets
@@ -3318,9 +3316,6 @@ export function InfiniteCanvas({
     setBrushCursorScreenPos(null);
     setStrokesVersion(v => v + 1);
     currentStrokeRef.current = [];
-    // 同时关闭新的浮窗面板
-    setShowUpscaleDialog(false);
-    setShowImageEditPanel(false);
   }, []);
 
   // Edit confirm for erase/mask/expand/crop
@@ -3952,10 +3947,8 @@ export function InfiniteCanvas({
             ? 'cursor-grab active:cursor-grabbing'
             : boxSelectStart
             ? 'cursor-crosshair'
-            : (editMode === 'erase' || editMode === 'mask') && !showImageEditPanel
+            : (editMode === 'erase' || editMode === 'mask')
             ? 'cursor-none'
-            : (editMode === 'erase' || editMode === 'mask') && showImageEditPanel
-            ? 'cursor-default'
             : editMode !== 'none'
             ? 'cursor-crosshair'
             : isSpacePressed
@@ -4543,8 +4536,8 @@ export function InfiniteCanvas({
                     {image.originalWidth || image.width} × {image.originalHeight || image.height}
                   </span>
                 </div>
-                {/* Edit mode stroke overlay — 仅在新的 ImageEditPanel 未打开时显示旧笔画叠加层 */}
-                {editImageId === image.id && (editMode === 'erase' || editMode === 'mask') && !showImageEditPanel && (
+                {/* Edit mode stroke overlay */}
+                {editImageId === image.id && (editMode === 'erase' || editMode === 'mask') && (
                   <svg className="absolute inset-0 w-full h-full pointer-events-none z-30" viewBox={`0 0 ${image.width} ${image.height}`}>
                     {editStrokes.map((stroke, si) => {
                       const normalPoints = stroke.filter(p => !p.reverse);
@@ -4844,7 +4837,7 @@ export function InfiniteCanvas({
               onWheel={(e) => e.stopPropagation()}
             >
               {/* ERASE toolbar — 仅在新的 ImageEditPanel 未打开时显示旧内联工具栏 */}
-              {editMode === 'erase' && !showImageEditPanel && (
+              {editMode === 'erase' && (
                 <div className={panelBaseClass} onMouseDown={(e) => e.stopPropagation()}>
                   <Paintbrush size={14} className="text-[#d4af37]" />
                   <span className={panelLabelClass}>擦除模式</span>
@@ -4867,7 +4860,7 @@ export function InfiniteCanvas({
               )}
 
               {/* MASK toolbar — 仅在新的 ImageEditPanel 未打开时显示旧内联工具栏 */}
-              {editMode === 'mask' && !showImageEditPanel && (
+              {editMode === 'mask' && (
                 <div className={panelBaseClass} onMouseDown={(e) => e.stopPropagation()}>
                   <Wand2 size={14} className="text-[#d4af37]" />
                   <span className={panelLabelClass}>蒙版模式</span>
@@ -5221,100 +5214,6 @@ export function InfiniteCanvas({
           );
         })()}
 
-        {/* ====== UPSCALE FLOATING PANEL ====== */}
-        {activeTool === 'upscale' && selectedImageData && editMode === 'none' && (() => {
-          const pos = getToolbarPosition();
-          return (
-            <div
-              className="absolute z-50 pointer-events-auto"
-              data-toolbar="image-actions"
-              style={{ left: pos.x, top: pos.y, transform: 'translate(-50%, -100%)' }}
-              onMouseDown={(e) => e.stopPropagation()}
-              onWheel={(e) => e.stopPropagation()}
-            >
-              <div className={`${panelBaseClass} flex-col !items-stretch !gap-2 !p-3 min-w-[260px]`} onMouseDown={(e) => e.stopPropagation()}>
-                <div className="flex items-center gap-2">
-                  <ZoomIn size={14} className="text-[#d4af37]" />
-                  <span className={panelLabelClass}>AI 超分辨率放大</span>
-                </div>
-                {/* Engine indicator */}
-                <div className="flex items-center gap-1.5 px-2 py-1 rounded-md" style={{ background: upscaylAvailable ? 'rgba(34,197,94,0.12)' : 'rgba(234,179,8,0.12)' }}>
-                  <div className={`w-1.5 h-1.5 rounded-full ${upscaylAvailable ? 'bg-green-400' : 'bg-yellow-400'}`} />
-                  <span className="text-[10px] font-medium" style={{ color: upscaylAvailable ? '#22c55e' : '#eab308' }}>
-                    {upscaylChecking ? '检测中...' : upscaylAvailable ? 'Upscayl AI 无损放大引擎' : 'API 云端模式'}
-                  </span>
-                </div>
-                {/* Model selector (only for Upscayl) */}
-                {upscaylAvailable && upscaylModels.length > 0 && (
-                  <div className="flex flex-col gap-1">
-                    <span className={panelSmallLabelClass}>AI 模型</span>
-                    <select
-                      value={upscaylSelectedModel}
-                      onChange={(e) => {
-                        setUpscaylSelectedModel(e.target.value);
-                        // Auto-select the native scale for this model
-                        const model = upscaylModels.find((m: { id: string }) => m.id === e.target.value);
-                        if (model && (model as { scale?: number }).scale) {
-                          setUpscaleMultiplier((model as { scale: number }).scale);
-                        }
-                      }}
-                      className="w-full px-2 py-1.5 text-xs rounded-lg outline-none"
-                      style={{ background: isMonochrome ? '#f5f5f5' : '#1a1a1a', color: isMonochrome ? '#333' : '#ccc', border: isMonochrome ? '1px solid #ddd' : '1px solid #333' }}
-                    >
-                      {upscaylModels.map(m => (
-                        <option key={m.id} value={m.id}>{m.name} ({m.scale}x) - {m.description}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-                {/* Scale multiplier */}
-                <div className="flex items-center gap-1">
-                  {(() => {
-                    const selectedModel = upscaylModels.find((m: { id: string }) => m.id === upscaylSelectedModel);
-                    const nativeScale = selectedModel && (selectedModel as { scale?: number }).scale ? (selectedModel as { scale: number }).scale : 4;
-                    // Show scales from 2x up to 2x the native scale (e.g. 4x model: 2x,4x; 2x model: 2x,4x)
-                    const availableScales = [2, 4].filter(s => s <= nativeScale * 2);
-                    // Always include native scale
-                    if (!availableScales.includes(nativeScale)) availableScales.push(nativeScale);
-                    if (!availableScales.includes(2)) availableScales.push(2);
-                    availableScales.sort((a, b) => a - b);
-                    return availableScales.map(m => (
-                      <button
-                        key={m}
-                        onClick={() => handleUpscaleMultiplierChange(m)}
-                        className={`flex-1 px-2 py-1.5 text-xs rounded-lg transition-all font-medium ${
-                          upscaleMultiplier === m
-                            ? 'bg-[#d4af37] text-black'
-                            : m === nativeScale
-                              ? isMonochrome
-                                ? 'bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100'
-                                : 'bg-[#2a2518] text-[#d4af37] border border-[#d4af37]/30 hover:bg-[#332b1a]'
-                              : isMonochrome
-                                ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                : 'bg-[#252525] text-[#999] hover:bg-[#333]'
-                        }`}
-                      >
-                        {m}x{m === nativeScale ? ' ★' : ''}
-                      </button>
-                    ));
-                  })()}
-                </div>
-                <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-[#222]'}`} />
-                {/* Result size preview - auto calculated from multiplier */}
-                <div className="flex items-center gap-2">
-                  <span className={panelSmallLabelClass}>输出尺寸</span>
-                  <span className="text-xs font-mono" style={{ color: isMonochrome ? '#666' : '#aaa' }}>
-                    {(selectedImageData?.originalWidth || selectedImageData?.width || 0) * upscaleMultiplier} × {(selectedImageData?.originalHeight || selectedImageData?.height || 0) * upscaleMultiplier} px
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 mt-1">
-                  <button onClick={handleUpscaleConfirm} className={`${panelBtnClass} flex-1`}>确认放大</button>
-                  <button onClick={() => setActiveTool('none')} className={panelCancelBtnClass}>取消</button>
-                </div>
-              </div>
-            </div>
-          );
-        })()}
 
         {/* ====== MULTI-ANGLE FLOATING PANEL ====== */}
         {activeTool === 'multiAngle' && selectedImageData && editMode === 'none' && (() => {
@@ -5871,34 +5770,6 @@ export function InfiniteCanvas({
           />
         )}
 
-        {/* ====== UPSCALE DIALOG ====== */}
-        {showUpscaleDialog && selectedImageData && (
-          <UpscaleDialog
-            imageUrl={selectedImageData.url}
-            onClose={() => setShowUpscaleDialog(false)}
-            onSuccess={(resultUrl: string) => {
-              setShowUpscaleDialog(false);
-              if (onAddImages) onAddImages([resultUrl]);
-            }}
-          />
-        )}
-
-        {/* ====== IMAGE EDIT PANEL (Erase / Mask) ====== */}
-        {showImageEditPanel && selectedImageData && (
-          <ImageEditPanel
-            imageUrl={selectedImageData.url}
-            mode={editMode === 'mask' ? 'mask' : 'erase'}
-            onClose={() => {
-              setShowImageEditPanel(false);
-              setEditMode('none');
-            }}
-            onSuccess={(resultUrl: string) => {
-              setShowImageEditPanel(false);
-              setEditMode('none');
-              if (onAddImages) onAddImages([resultUrl]);
-            }}
-          />
-        )}
 
         {/* ====== PSD LAYER EDITOR MODAL ====== */}
         {showPsdEditor && psdEditorImageUrl && (
@@ -5917,7 +5788,7 @@ export function InfiniteCanvas({
         )}
 
         {/* ====== IMAGE ACTION TOOLBAR (follows selected image) ====== */}
-        {selectedIds.size === 1 && editMode === 'none' && activeTool === 'none' && !showDownloadPopup && !showUpscaleDialog && !showImageEditPanel && (() => {
+        {selectedIds.size === 1 && editMode === 'none' && activeTool === 'none' && !showDownloadPopup && (() => {
           const img = selectedImageData;
           if (!img) return null;
           const pos = getToolbarPosition();
