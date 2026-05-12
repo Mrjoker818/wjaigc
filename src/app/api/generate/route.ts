@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { appendUserJsonl } from '@/lib/server-user-storage';
-import { findProviderForModel, normalizeApiBaseUrl, findAllProvidersForType } from '@/lib/server-api-config';
+import { findProviderForModel, normalizeApiBaseUrl, findAllProvidersForType, getFirstAvailableModel } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 
@@ -25,6 +25,96 @@ interface ModelConfig {
   maxN: number;
   // 模型预估生成时间（秒），用于前端轮询策略
   estimatedTime: number;
+}
+
+/**
+ * 根据模型ID智能推断模型配置
+ * 管理员添加的未知模型也能被正确识别和使用
+ */
+function inferModelConfig(modelId: string, providerDisplayName?: string): ModelConfig {
+  const id = modelId.toLowerCase();
+  // 视频/3D生成模型（不支持图生图，参数类型为none）
+  if (id.includes('kling') || id.includes('luma') || id.includes('pika') || id.includes('runway') || id.includes('haiper') || id.includes('vidu') || id.includes('hailuo')) {
+    return {
+      name: providerDisplayName || modelId,
+      modelId,
+      paramType: 'none',
+      supportedSizes: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+      supportsImageToImage: false,
+      maxN: 1,
+      estimatedTime: 60,
+    };
+  }
+  // DALL-E 系列
+  if (id.includes('dall-e') || id.includes('dalle')) {
+    return {
+      name: providerDisplayName || modelId,
+      modelId,
+      paramType: 'quality',
+      supportedSizes: ['1:1', '3:2', '2:3'],
+      supportsImageToImage: true,
+      maxN: 4,
+      estimatedTime: 60,
+    };
+  }
+  // Midjourney / Stable Diffusion / Flux
+  if (id.includes('midjourney') || id.includes('mj-') || id.includes('flux') || id.includes('sd-') || id.includes('stable')) {
+    return {
+      name: providerDisplayName || modelId,
+      modelId,
+      paramType: 'quality',
+      supportedSizes: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+      supportsImageToImage: true,
+      maxN: 4,
+      estimatedTime: 45,
+    };
+  }
+  // Gemini / Google
+  if (id.includes('gemini') || id.includes('imagen')) {
+    return {
+      name: providerDisplayName || modelId,
+      modelId,
+      paramType: 'resolution',
+      supportedSizes: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
+      supportsImageToImage: true,
+      maxN: 4,
+      estimatedTime: 30,
+    };
+  }
+  // GPT-Image / OpenAI
+  if (id.includes('gpt-image') || id.includes('gpt-4o-image')) {
+    return {
+      name: providerDisplayName || modelId,
+      modelId,
+      paramType: 'quality',
+      supportedSizes: ['1:1', '3:2', '2:3'],
+      supportsImageToImage: true,
+      maxN: 4,
+      estimatedTime: 90,
+    };
+  }
+  // 豆包 / Seedream
+  if (id.includes('doubao') || id.includes('seedance') || id.includes('seedream')) {
+    return {
+      name: providerDisplayName || modelId,
+      modelId,
+      paramType: 'resolution',
+      supportedSizes: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', '9:21'],
+      supportsImageToImage: true,
+      maxN: 4,
+      estimatedTime: 25,
+    };
+  }
+  // 通用图像模型（默认配置，支持所有常见比例）
+  return {
+    name: providerDisplayName || modelId,
+    modelId,
+    paramType: 'none',
+    supportedSizes: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    supportsImageToImage: true,
+    maxN: 4,
+    estimatedTime: 30,
+  };
 }
 
 const APIMART_MODEL_CONFIG: Record<string, ModelConfig> = {
@@ -82,6 +172,10 @@ const APIMART_MODEL_CONFIG: Record<string, ModelConfig> = {
 
 export async function POST(request: NextRequest) {
   try {
+    // 如果前端没传模型，从管理员配置获取第一个可用的 image 模型
+    const firstImageModel = await getFirstAvailableModel('image', 'gemini-2.5-flash-image-preview');
+    const defaultModel = firstImageModel?.model || 'gemini-2.5-flash-image-preview';
+
     const { 
       prompt, 
       aspectRatio = '1:1', 
@@ -91,7 +185,7 @@ export async function POST(request: NextRequest) {
       productCategory, 
       stylePreset, 
       outputCount,
-      model = 'gemini-2.5-flash-image-preview',
+      model = defaultModel,
       quality = '1K',
       userId: requestUserId,
     } = await request.json();
@@ -109,15 +203,7 @@ export async function POST(request: NextRequest) {
     let provider = await findProviderForModel(model, 'image');
     let serverApiKey = provider?.apiKey || process.env.APIMART_API_KEY;
     let apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || process.env.APIMART_BASE_URL || 'https://api.apimart.ai');
-    let modelConfig = APIMART_MODEL_CONFIG[model] || {
-      name: provider?.displayName || model,
-      modelId: model,
-      paramType: 'none' as const,
-      supportedSizes: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
-      supportsImageToImage: true,
-      maxN: 4,
-      estimatedTime: 30,
-    };
+    let modelConfig = APIMART_MODEL_CONFIG[model] || inferModelConfig(model, provider?.displayName);
 
     // 构建备选模型列表（排除当前模型，优先管理员配置的模型）
     const candidateModels: { modelId: string; apiKey: string; baseUrl: string; providerId: string; displayName: string }[] = [];

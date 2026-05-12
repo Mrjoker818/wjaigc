@@ -551,6 +551,27 @@ export async function findAllProvidersForType(modelType: ApiKind): Promise<Array
   }).filter(entry => entry.models.length > 0);
 }
 
+/**
+ * Get the first available model from admin-configured providers.
+ * Falls back to the provided default if no admin model is found.
+ */
+export async function getFirstAvailableModel(
+  type: ApiKind,
+  fallback?: string
+): Promise<{ model: string; provider?: ApiProvider } | null> {
+  const allProviders = await findAllProvidersForType(type);
+  if (allProviders.length > 0) {
+    const first = allProviders[0];
+    if (first.models.length > 0) {
+      return { model: first.models[0], provider: first.provider };
+    }
+  }
+  if (fallback) {
+    return { model: fallback };
+  }
+  return null;
+}
+
 export async function getPublicModels(modelType?: ApiKind): Promise<ModelInfo[]> {
   const providers = await getApiProviders();
   return providers

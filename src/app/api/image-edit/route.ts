@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findProviderForModel, findProviderForFeature, findAllProvidersForType, normalizeApiBaseUrl } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderForFeature, findAllProvidersForType, normalizeApiBaseUrl, getFirstAvailableModel } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import sharp from 'sharp';
@@ -421,8 +421,12 @@ export async function POST(request: NextRequest) {
       rotation = 0,
       tilt = 0,
       zoom = 1,
-      model = 'gemini-2.5-flash-image-preview',
+      model: rawModel,
     } = body;
+
+    // 如果前端没传模型，从管理员配置获取第一个可用的 image 模型
+    const firstImageModel = await getFirstAvailableModel('image', 'gemini-2.5-flash-image-preview');
+    const model = rawModel || firstImageModel?.model || 'gemini-2.5-flash-image-preview';
 
     // 放大/擦除/蒙版 均使用管理员系统的 image 类型模型
     // 策略：自动识别管理员配置的所有可用 image 模型，按优先级逐一尝试
