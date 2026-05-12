@@ -3112,6 +3112,9 @@ export function InfiniteCanvas({
         '正在创建图生 3D 任务...'
       );
       updateProcessingFrame(placeholderId, { progress: 16, status: '正在提交 3D 转换参数...' });
+      // 关闭3D弹窗，回到画布查看进度
+      setShow3DModal(false);
+      setActiveTool('none');
       // Determine 3D version from model name
       const modelName3D = (provider?.model || '').toLowerCase();
       const threeDVersion: 'rapid' | 'pro' = modelName3D.includes('lite') || modelName3D.includes('rapid') || modelName3D.includes('极速')
@@ -3224,8 +3227,6 @@ export function InfiniteCanvas({
         threeDModelUrls: threeDModelUrls || data.modelUrls,
       });
       setThreeDProgress(null);
-      setShow3DModal(false);
-      setActiveTool('none');
     } catch (e) {
       console.error('Image to 3D failed:', e);
       alert('图生 3D 调用失败，请检查 API 或本地模型服务');
