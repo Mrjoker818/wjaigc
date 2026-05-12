@@ -1,17 +1,23 @@
 'use client';
 
-import React, { useState } from 'react';
-import { APP_VERSION_LABEL } from '@/config/app-meta';
+import { useState } from 'react';
 import {
-  X, MousePointer, Hand, ZoomIn,
-  Image as ImageIcon, Sparkles, MessageSquare, Layers,
-  Download, ChevronRight, Keyboard,
-  Pen, Eraser, Crop, Expand, Wand2, Settings,
-  Move, BoxSelect,
-  Bot, Lightbulb, BookOpen, Info, Zap,
-  GitMerge, Shapes, Palette, Users, Wrench, Shield, FolderOpen, HelpCircle,
-  ImagePlus
+  Move, Sparkles, MessageSquare, Layers, Keyboard, Lightbulb,
+  BookOpen, X, Info, Pen, Wand2, ImagePlus, GitMerge, ImageIcon,
+  ZoomIn, Eraser, Maximize, Download, Shapes, Settings, Database,
+  FileBox, ChevronRight, Check
 } from 'lucide-react';
+import { APP_VERSION_LABEL } from '@/config/app-meta';
+
+// ─── Types ──────────────────────────────────────────────────────
+
+type SectionId = 'canvas' | 'generate' | 'img2img' | 'chat' | 'tools' | 'layer-graph' | 'project' | 'admin' | 'shortcuts' | 'tips' | 'changelog';
+
+interface Section {
+  id: SectionId;
+  title: string;
+  icon: React.ReactNode;
+}
 
 interface HelpGuideProps {
   isOpen: boolean;
@@ -19,1236 +25,741 @@ interface HelpGuideProps {
   themeStyle?: 'gold' | 'monochrome';
 }
 
-type SectionId = 'canvas' | 'generate' | 'chat' | 'psd-editor' | 'omp' | 'fusion' | 'shortcuts' | 'tips' | 'changelog';
-
-interface Section {
-  id: SectionId;
-  title: string;
-  titleEn: string;
-  icon: React.ReactNode;
-}
-
 const SECTIONS: Section[] = [
-  { id: 'canvas', title: '无限画布', titleEn: 'Infinite Canvas', icon: <Move size={16} /> },
-  { id: 'generate', title: '图像生成', titleEn: 'Image Generation', icon: <Sparkles size={16} /> },
-  { id: 'chat', title: '智能对话', titleEn: 'AI Chat', icon: <MessageSquare size={16} /> },
-  { id: 'omp', title: 'Oh My Prompt', titleEn: 'Prompt Manager', icon: <Sparkles size={16} /> },
-  { id: 'fusion', title: '参考融合', titleEn: 'Reference Fusion', icon: <GitMerge size={16} /> },
-  { id: 'psd-editor', title: 'PSD 图层编辑器', titleEn: 'PSD Layer Editor', icon: <Layers size={16} /> },
-  { id: 'shortcuts', title: '快捷键', titleEn: 'Shortcuts', icon: <Keyboard size={16} /> },
-  { id: 'tips', title: '使用技巧', titleEn: 'Tips', icon: <Lightbulb size={16} /> },
-  { id: 'changelog', title: '更新日志', titleEn: 'Changelog', icon: <BookOpen size={16} /> },
+  { id: 'canvas', title: '无限画布', icon: <Move size={16} /> },
+  { id: 'generate', title: '图像生成', icon: <Sparkles size={16} /> },
+  { id: 'img2img', title: '图生图', icon: <ImagePlus size={16} /> },
+  { id: 'chat', title: '智能对话', icon: <MessageSquare size={16} /> },
+  { id: 'tools', title: '图片编辑工具', icon: <Eraser size={16} /> },
+  { id: 'layer-graph', title: 'Layer Graph', icon: <Layers size={16} /> },
+  { id: 'project', title: '项目与文件', icon: <FileBox size={16} /> },
+  { id: 'admin', title: '管理员系统', icon: <Settings size={16} /> },
+  { id: 'shortcuts', title: '快捷键', icon: <Keyboard size={16} /> },
+  { id: 'tips', title: '使用技巧', icon: <Lightbulb size={16} /> },
+  { id: 'changelog', title: '更新日志', icon: <BookOpen size={16} /> },
 ];
 
-// ─── Sub-components ──────────────────────────────────────────────
+// ─── Theme helpers ──────────────────────────────────────────────
 
-function ShortcutBadge({ keys, themeStyle }: { keys: string; themeStyle: string }) {
+interface TH { s: string }
+function th(themeStyle: string): TH {
+  const isGold = themeStyle !== 'monochrome';
+  return {
+    s: isGold ? 'gold' : 'mono',
+  };
+}
+
+// Reusable styled components
+function Card({ children, className = '', themeStyle }: { children: React.ReactNode; className?: string; themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium ${
-      themeStyle === 'monochrome'
-        ? 'bg-gray-100 text-gray-700 border border-gray-300'
-        : 'bg-[#1a1a1a] text-[#d4af37] border border-[#d4af37]/30'
-    }`}>
-      {keys}
-    </span>
+    <div className={`rounded-xl border p-4 ${isGold ? 'bg-[#111] border-[#2a2a2a]' : 'bg-white border-gray-200'} ${className}`}>
+      {children}
+    </div>
   );
 }
 
-function FeatureCard({
-  icon, title, description, themeStyle
-}: {
-  icon: React.ReactNode; title: string; titleEn?: string; description: string; themeStyle: string;
-}) {
+function CardHighlight({ children, className = '', themeStyle }: { children: React.ReactNode; className?: string; themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
   return (
-    <div className={`rounded-xl p-4 border transition-all ${
-      themeStyle === 'monochrome'
-        ? 'bg-white border-gray-200 hover:border-yellow-300 hover:shadow-md'
-        : 'bg-[#1a1a1a] border-[#2a2a2a] hover:border-[#d4af37]/40'
-    }`}>
-      <div className="flex items-center gap-2.5 mb-2">
-        <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-          themeStyle === 'monochrome'
-            ? 'bg-yellow-100 text-yellow-600'
-            : 'bg-[#d4af37]/15 text-[#d4af37]'
-        }`}>
-          {icon}
-        </div>
-        <div>
-          <h4 className={`text-sm font-semibold ${
-            themeStyle === 'monochrome' ? 'text-gray-900' : 'text-white'
-          }`}>{title}</h4>
-        </div>
-      </div>
-      <p className={`text-xs leading-relaxed ${
-        themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'
-      }`}>{description}</p>
+    <div className={`rounded-xl border p-4 ${isGold ? 'bg-[#d4af37]/5 border-[#d4af37]/30' : 'bg-yellow-50 border-yellow-200'} ${className}`}>
+      {children}
     </div>
   );
 }
 
 function SectionTitle({ children, themeStyle }: { children: React.ReactNode; themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
   return (
-    <h3 className={`text-base font-bold mb-4 flex items-center gap-2 ${
-      themeStyle === 'monochrome' ? 'text-gray-900' : 'text-white'
-    }`}>
+    <div className={`flex items-center gap-2 mb-4 pb-3 border-b ${isGold ? 'border-[#2a2a2a]' : 'border-gray-200'}`}>
       {children}
-    </h3>
+    </div>
   );
 }
 
-function SubSection({ title, themeStyle, children }: { title: string; themeStyle: string; children: React.ReactNode }) {
+function SubTitle({ children, themeStyle }: { children: React.ReactNode; themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
   return (
-    <div className="mb-5">
-      <h4 className={`text-sm font-semibold mb-2 flex items-center gap-1.5 ${
-        themeStyle === 'monochrome' ? 'text-gray-800' : 'text-[#e0e0e0]'
-      }`}>
-        <ChevronRight size={14} className={themeStyle === 'monochrome' ? 'text-yellow-500' : 'text-[#d4af37]'} />
-        {title}
-      </h4>
+    <h4 className={`text-xs font-semibold mb-2 ${isGold ? 'text-[#d4af37]' : 'text-yellow-600'}`}>{children}</h4>
+  );
+}
+
+function Text({ children, themeStyle, muted = false }: { children: React.ReactNode; themeStyle: string; muted?: boolean }) {
+  const isGold = themeStyle !== 'monochrome';
+  return (
+    <span className={`text-xs leading-relaxed ${muted ? (isGold ? 'text-[#888]' : 'text-gray-500') : (isGold ? 'text-[#ccc]' : 'text-gray-700')}`}>
       {children}
+    </span>
+  );
+}
+
+function Tag({ children, color = 'gold', themeStyle }: { children: React.ReactNode; color?: 'gold' | 'green' | 'blue' | 'purple' | 'red' | 'cyan'; themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
+  const styles: Record<string, string> = {
+    gold: isGold ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'bg-yellow-100 text-yellow-700',
+    green: isGold ? 'bg-green-500/15 text-green-400' : 'bg-green-100 text-green-700',
+    blue: isGold ? 'bg-blue-500/15 text-blue-400' : 'bg-blue-100 text-blue-700',
+    purple: isGold ? 'bg-purple-500/15 text-purple-400' : 'bg-purple-100 text-purple-700',
+    red: isGold ? 'bg-red-500/15 text-red-400' : 'bg-red-100 text-red-700',
+    cyan: isGold ? 'bg-cyan-500/15 text-cyan-400' : 'bg-cyan-100 text-cyan-700',
+  };
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${styles[color]}`}>{children}</span>;
+}
+
+function StepItem({ step, title, desc, themeStyle, isLast = false }: { step: string; title: string; desc: string; themeStyle: string; isLast?: boolean }) {
+  const isGold = themeStyle !== 'monochrome';
+  return (
+    <div className="flex items-start gap-3 relative">
+      {!isLast && (
+        <div className={`absolute left-[15px] top-[32px] w-px h-[calc(100%-16px)] ${isGold ? 'bg-[#2a2a2a]' : 'bg-gray-200'}`} />
+      )}
+      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold z-10 ${
+        isGold ? 'bg-[#d4af37]/20 text-[#d4af37] border border-[#d4af37]/40' : 'bg-yellow-100 text-yellow-700 border border-yellow-300'
+      }`}>
+        {step}
+      </div>
+      <div className="pb-4">
+        <div className={`text-xs font-semibold ${isGold ? 'text-[#e0e0e0]' : 'text-gray-800'}`}>{title}</div>
+        <Text themeStyle={themeStyle} muted>{desc}</Text>
+      </div>
+    </div>
+  );
+}
+
+function FeatureItem({ icon, title, desc, themeStyle }: { icon: React.ReactNode; title: string; desc: string; themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
+  return (
+    <div className={`p-3 rounded-lg ${isGold ? 'bg-[#0d0d0d]' : 'bg-gray-50'}`}>
+      <div className="flex items-center gap-2 mb-1.5">
+        <div className={`w-6 h-6 rounded flex items-center justify-center ${isGold ? 'text-[#d4af37] bg-[#d4af37]/15' : 'text-yellow-600 bg-yellow-100'}`}>
+          {icon}
+        </div>
+        <span className={`text-xs font-semibold ${isGold ? 'text-[#e0e0e0]' : 'text-gray-800'}`}>{title}</span>
+      </div>
+      <Text themeStyle={themeStyle} muted>{desc}</Text>
     </div>
   );
 }
 
 function ShortcutRow({ shortcut, description, themeStyle }: { shortcut: string; description: string; themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
   return (
-    <div className="flex items-center justify-between py-2 border-b last:border-b-0">
-      <span className={`text-xs ${
-        themeStyle === 'monochrome' ? 'text-gray-700' : 'text-[#ccc]'
-      }`}>{description}</span>
-      <ShortcutBadge keys={shortcut} themeStyle={themeStyle} />
+    <div className={`flex items-center justify-between px-3 py-2.5 border-b last:border-b-0 ${isGold ? 'border-[#1a1a1a]' : 'border-gray-100'}`}>
+      <span className={`text-xs ${isGold ? 'text-[#999]' : 'text-gray-600'}`}>{description}</span>
+      <span className={`px-2 py-0.5 rounded text-xs font-mono font-medium ${
+        isGold ? 'bg-[#1a1a1a] text-[#d4af37] border border-[#d4af37]/30' : 'bg-gray-100 text-gray-700 border border-gray-300'
+      }`}>{shortcut}</span>
     </div>
   );
 }
 
-// ─── Section Renderers ───────────────────────────────────────────
+// ─── Section Components ─────────────────────────────────────────
 
 function CanvasSection({ themeStyle }: { themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
   return (
     <div>
       <SectionTitle themeStyle={themeStyle}>
-        <Move size={18} className={themeStyle === 'monochrome' ? 'text-yellow-500' : 'text-[#d4af37]'} />
-        无限画布
+        <Move size={18} className={isGold ? 'text-[#d4af37]' : 'text-yellow-500'} />
+        <span className={`text-sm font-bold ${isGold ? 'text-white' : 'text-gray-900'}`}>无限画布</span>
       </SectionTitle>
 
-      <div className="grid grid-cols-2 gap-3 mb-5">
-        <FeatureCard icon={<MousePointer size={16} />} title="选择图片" titleEn="Select" description="左键单击选择图片，Ctrl+左键多选，左键拖拽空白区域框选" themeStyle={themeStyle} />
-        <FeatureCard icon={<Hand size={16} />} title="平移画布" titleEn="Pan" description="空白区域长按拖动平移画布，或按住空格键拖动" themeStyle={themeStyle} />
-        <FeatureCard icon={<ZoomIn size={16} />} title="缩放视图" titleEn="Zoom" description="鼠标滚轮缩放画布，支持触摸板双指缩放" themeStyle={themeStyle} />
-        <FeatureCard icon={<BoxSelect size={16} />} title="框选多图" titleEn="Marquee" description="在空白区域左键拖拽，显示选择矩形，松开后选区图片被选中" themeStyle={themeStyle} />
-      </div>
-
-      <SubSection title="画布左上角折叠工具栏" themeStyle={themeStyle}>
-        <div className={`rounded-xl p-4 border ${
-          themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
-        }`}>
-          <p className={`text-xs mb-3 ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>
-            画布左上角的折叠工具栏整合了所有功能按钮，鼠标悬停自动展开，移开自动收起。
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            {[
-              { icon: <Sparkles size={14} />, label: '灵感提示词库', desc: '提示词管理+图片识词' },
-              { icon: <GitMerge size={14} />, label: '参考融合', desc: 'Ctrl+点击融图' },
-              { icon: <Settings size={14} />, label: '设置', desc: '应用配置' },
-              { icon: <Palette size={14} />, label: 'UI 主题', desc: '黑白/彩色切换' },
-              { icon: <Users size={14} />, label: '用户管理', desc: '多用户切换与管理' },
-              { icon: <FolderOpen size={14} />, label: '项目数据', desc: '项目保存与加载' },
-              { icon: <Shield size={14} />, label: '管理员系统', desc: 'API与模型配置' },
-              { icon: <HelpCircle size={14} />, label: '使用说明', desc: '操作与更新内容' },
-            ].map((tool) => (
-              <div key={tool.label} className="flex flex-col items-center gap-1">
-                <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${
-                  themeStyle === 'monochrome'
-                    ? 'bg-white text-gray-600 border border-gray-200'
-                    : 'bg-[#1a1a1a] text-[#d4af37] border border-[#2a2a2a]'
-                }`}>
-                  {tool.icon}
-                </div>
-                <span className={`text-xs font-medium ${
-                  themeStyle === 'monochrome' ? 'text-gray-700' : 'text-[#ddd]'
-                }`}>{tool.label}</span>
-                <span className={`text-xs text-center ${
-                  themeStyle === 'monochrome' ? 'text-gray-400' : 'text-[#666]'
-                }`}>{tool.desc}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </SubSection>
-
-      <SubSection title="图片操作工具栏" themeStyle={themeStyle}>
-        <div className={`rounded-xl p-4 border ${
-          themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
-        }`}>
-          <div className="grid grid-cols-4 gap-3">
-            {[
-              { icon: <ZoomIn size={14} />, label: '放大', desc: '智能补细节放大' },
-              { icon: <Eraser size={14} />, label: '移除背景', desc: '一键去背景' },
-              { icon: <Shapes size={14} />, label: '矢量化', desc: '转SVG矢量图' },
-              { icon: <Pen size={14} />, label: '擦除', desc: '涂抹消除+AI补全' },
-              { icon: <Wand2 size={14} />, label: '蒙版', desc: '遮罩+AI重新生成' },
-              { icon: <Layers size={14} />, label: '编辑元素', desc: '按元素智能分层' },
-              { icon: <Move size={14} />, label: '多角度', desc: '多视角生成' },
-              { icon: <BoxSelect size={14} />, label: '转3D', desc: '生成3D模型' },
-              { icon: <Expand size={14} />, label: '扩展', desc: '向四周延伸画面' },
-              { icon: <Crop size={14} />, label: '裁切', desc: '自由/预设比例' },
-              { icon: <ImagePlus size={14} />, label: '图生图', desc: '6类参考生成' },
-              { icon: <Download size={14} />, label: '下载', desc: 'PNG/SVG/PSD' },
-            ].map((tool) => (
-              <div key={tool.label} className="flex flex-col items-center gap-1">
-                <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${
-                  themeStyle === 'monochrome'
-                    ? 'bg-white text-gray-600 border border-gray-200'
-                    : 'bg-[#1a1a1a] text-[#d4af37] border border-[#2a2a2a]'
-                }`}>
-                  {tool.icon}
-                </div>
-                <span className={`text-xs font-medium ${
-                  themeStyle === 'monochrome' ? 'text-gray-700' : 'text-[#ddd]'
-                }`}>{tool.label}</span>
-                <span className={`text-xs text-center ${
-                  themeStyle === 'monochrome' ? 'text-gray-400' : 'text-[#666]'
-                }`}>{tool.desc}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </SubSection>
-
-      <SubSection title="编辑模式" themeStyle={themeStyle}>
-        <div className="space-y-2">
+      <div className="space-y-4">
+        <SubTitle themeStyle={themeStyle}>核心交互</SubTitle>
+        <div className="grid grid-cols-2 gap-2">
           {[
-            { mode: '擦除模式', desc: '调整画笔大小后在图片上涂抹擦除区域，Alt键反向涂抹，点击"确认擦除"执行', icon: <Eraser size={14} /> },
-            { mode: '蒙版模式', desc: '用画笔标记需要修改的区域，输入提示词后点击生成', icon: <Wand2 size={14} /> },
-            { mode: '扩展模式', desc: '选择扩展比例预设和缩放比例，确认后智能扩展画面', icon: <Expand size={14} /> },
-            { mode: '裁切模式', desc: '自由裁切或选择预设比例（1:1/4:3/16:9），确认裁切', icon: <Crop size={14} /> },
-            { mode: '图生图模式', desc: '6大参考类别（风格/构图/场景/色彩/主体/细节），每类独立强度滑块，基于当前图生成新图', icon: <ImagePlus size={14} /> },
-          ].map((item) => (
-            <div key={item.mode} className={`flex items-start gap-3 p-3 rounded-lg ${
-              themeStyle === 'monochrome' ? 'bg-gray-50' : 'bg-[#111]'
-            }`}>
-              <div className={`w-6 h-6 rounded flex items-center justify-center flex-shrink-0 mt-0.5 ${
-                themeStyle === 'monochrome' ? 'text-yellow-600 bg-yellow-100' : 'text-[#d4af37] bg-[#d4af37]/15'
-              }`}>{item.icon}</div>
-              <div>
-                <span className={`text-xs font-semibold ${
-                  themeStyle === 'monochrome' ? 'text-gray-800' : 'text-[#e0e0e0]'
-                }`}>{item.mode}</span>
-                <p className={`text-xs mt-0.5 ${
-                  themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#888]'
-                }`}>{item.desc}</p>
-              </div>
-            </div>
+            { icon: <Move size={14} />, title: '自由拖拽', desc: '图片可随意拖拽、缩放、排列' },
+            { icon: <ZoomIn size={14} />, title: '缩放画布', desc: '滚轮缩放，Space+拖动平移' },
+            { icon: <Layers size={14} />, title: '多选框选', desc: 'Ctrl+点击多选，拖拽空白框选' },
+            { icon: <Maximize size={14} />, title: '编辑模式', desc: '擦除/蒙版/扩展/图生图/裁切' },
+          ].map(item => (
+            <FeatureItem key={item.title} {...item} themeStyle={themeStyle} />
           ))}
         </div>
-      </SubSection>
 
-      <SubSection title="下载格式" themeStyle={themeStyle}>
+        <SubTitle themeStyle={themeStyle}>底部工具栏</SubTitle>
         <div className="grid grid-cols-3 gap-2">
           {[
-            { fmt: 'PNG', desc: '位图导出', modes: '标准位图', color: 'blue' },
-            { fmt: 'SVG', desc: '矢量导出', modes: '快速/专业/工作室', color: 'green' },
-            { fmt: 'PSD', desc: '分层导出', modes: '基础/专业/工作室', color: 'purple' },
-          ].map((item) => (
-            <div key={item.fmt} className={`text-center p-3 rounded-lg border ${
-              themeStyle === 'monochrome'
-                ? 'bg-white border-gray-200'
-                : 'bg-[#1a1a1a] border-[#2a2a2a]'
-            }`}>
-              <div className={`text-lg font-bold ${
-                item.fmt === 'PNG' ? (themeStyle === 'monochrome' ? 'text-blue-600' : 'text-blue-400')
-                : item.fmt === 'SVG' ? (themeStyle === 'monochrome' ? 'text-green-600' : 'text-green-400')
-                : (themeStyle === 'monochrome' ? 'text-purple-600' : 'text-purple-400')
-              }`}>{item.fmt}</div>
-              <div className={`text-xs ${
-                themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#888]'
-              }`}>{item.desc}</div>
-              <div className={`text-xs mt-0.5 ${
-                themeStyle === 'monochrome' ? 'text-gray-400' : 'text-[#666]'
-              }`}>{item.modes}</div>
-            </div>
+            { icon: <Move size={12} />, title: '选择/平移', desc: '切换选择和平移工具' },
+            { icon: <ImageIcon size={12} />, title: '上传图片', desc: '从本地上传图片到画布' },
+            { icon: <Layers size={12} />, title: '图层管理', desc: '打开 Layer Graph Studio' },
+            { icon: <ZoomIn size={12} />, title: '缩放控制', desc: '放大/缩小/百分比/重置' },
+            { icon: <Eraser size={12} />, title: '编辑工具', desc: '选中图片后显示编辑工具' },
+            { icon: <Download size={12} />, title: '下载导出', desc: 'PNG/SVG/PSD 多格式' },
+          ].map(item => (
+            <FeatureItem key={item.title} {...item} themeStyle={themeStyle} />
           ))}
         </div>
-      </SubSection>
 
-      <SubSection title="图片来源标签" themeStyle={themeStyle}>
-        <div className={`rounded-lg p-3 border ${
-          themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
-        }`}>
-          <p className={`text-xs mb-2 ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>
-            画布中每张图片左上角会显示来源标签，方便区分图片来源：
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {[
-              { label: '生成', color: 'green', desc: 'AI 生成的图片' },
-              { label: '上传', color: 'blue', desc: '用户上传的图片' },
-              { label: '编辑', color: 'orange', desc: '编辑修改过的图片' },
-              { label: '矢量化', color: 'cyan', desc: 'SVG 矢量化后的图片' },
-            ].map((tag) => (
-              <span key={tag.label} className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${
-                tag.color === 'green' ? (themeStyle === 'monochrome' ? 'bg-green-100 text-green-700' : 'bg-green-500/15 text-green-400')
-                : tag.color === 'blue' ? (themeStyle === 'monochrome' ? 'bg-blue-100 text-blue-700' : 'bg-blue-500/15 text-blue-400')
-                : tag.color === 'orange' ? (themeStyle === 'monochrome' ? 'bg-orange-100 text-orange-700' : 'bg-orange-500/15 text-orange-400')
-                : (themeStyle === 'monochrome' ? 'bg-cyan-100 text-cyan-700' : 'bg-cyan-500/15 text-cyan-400')
-              }`}>
-                {tag.label} - {tag.desc}
-              </span>
-            ))}
-          </div>
-        </div>
-      </SubSection>
-
-      <SubSection title="组与参考图标记" themeStyle={themeStyle}>
-        <div className={`rounded-xl p-4 border ${
-          themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
-        }`}>
-          <p className={`text-xs mb-3 ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>
-            画布支持多图组合与参考图标记功能：
-          </p>
-          <div className="space-y-3">
-            <div className={`p-3 rounded-lg border ${
-              themeStyle === 'monochrome' ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#2a2a2a]'
-            }`}>
-              <div className="flex items-center gap-2 mb-1.5">
-                <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${
-                  themeStyle === 'monochrome' ? 'bg-purple-100 text-purple-700' : 'bg-purple-500/15 text-purple-400'
-                }`}>组</span>
-                <span className={`text-xs font-semibold ${themeStyle === 'monochrome' ? 'text-gray-800' : 'text-[#e0e0e0]'}`}>图片组</span>
-              </div>
-              <ul className={`text-xs space-y-1 ml-4 list-disc ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>
-                <li>多图右键 → 创建组，组内图片统一管理</li>
-                <li>组标题栏折叠按钮 → 折叠/展开组内容</li>
-                <li>长按组标题栏拖动 → 移动整个组</li>
-              </ul>
-            </div>
-            <div className={`p-3 rounded-lg border ${
-              themeStyle === 'monochrome' ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#2a2a2a]'
-            }`}>
-              <div className="flex items-center gap-2 mb-1.5">
-                <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${
-                  themeStyle === 'monochrome' ? 'bg-violet-100 text-violet-700' : 'bg-violet-500/15 text-violet-400'
-                }`}>参考</span>
-                <span className={`text-xs font-semibold ${themeStyle === 'monochrome' ? 'text-gray-800' : 'text-[#e0e0e0]'}`}>Alt+点击标记参考图</span>
-              </div>
-              <ul className={`text-xs space-y-1 ml-4 list-disc ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>
-                <li>按住 Alt 键 + 左键点击图片 → 标记为参考图（紫色R1/R2标记）</li>
-                <li>参考图自动添加到创意描述文本框上方（缩略图+编号chip）</li>
-                <li>生成时自动在提示词前添加 [参考图R1] 等标记</li>
-                <li>在文本框中按 Backspace（光标起始位置）可删除最后一个参考图标记</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </SubSection>
+        <SubTitle themeStyle={themeStyle}>Ctrl+Z 无限撤回</SubTitle>
+        <Card themeStyle={themeStyle}>
+          <Text themeStyle={themeStyle}>支持无限步数撤回，纯内存同步管理，流畅无卡顿，无 toast 提示干扰。每次图片操作（生成、上传、编辑、删除等）都会自动记录到历史栈。</Text>
+        </Card>
+      </div>
     </div>
   );
 }
 
 function GenerateSection({ themeStyle }: { themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
   return (
     <div>
       <SectionTitle themeStyle={themeStyle}>
-        <Sparkles size={18} className={themeStyle === 'monochrome' ? 'text-yellow-500' : 'text-[#d4af37]'} />
-        图像生成
+        <Sparkles size={18} className={isGold ? 'text-[#d4af37]' : 'text-yellow-500'} />
+        <span className={`text-sm font-bold ${isGold ? 'text-white' : 'text-gray-900'}`}>图像生成</span>
       </SectionTitle>
 
-      <SubSection title="生成流程" themeStyle={themeStyle}>
-        <div className="space-y-0">
-          {[
-            { step: '1', title: '输入创意描述', desc: '在文本框中输入你想要的图像描述' },
-            { step: '2', title: '选择模型与参数', desc: '选择生图模型、画面比例、质量等参数' },
-            { step: '3', title: '点击生成', desc: '等待AI生成图像，支持多张同时生成' },
-            { step: '4', title: '添加至画布', desc: '生成完成后图片自动添加到画布中' },
-          ].map((item, i) => (
-            <div key={item.step} className="flex items-start gap-3 relative">
-              {/* Step line */}
-              {i < 3 && (
-                <div className={`absolute left-[15px] top-[32px] w-px h-[calc(100%-16px)] ${
-                  themeStyle === 'monochrome' ? 'bg-gray-200' : 'bg-[#2a2a2a]'
-                }`} />
-              )}
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold z-10 ${
-                themeStyle === 'monochrome'
-                  ? 'bg-yellow-100 text-yellow-700 border border-yellow-300'
-                  : 'bg-[#d4af37]/20 text-[#d4af37] border border-[#d4af37]/40'
-              }`}>
-                {item.step}
-              </div>
-              <div className="pb-4">
-                <span className={`text-xs font-semibold ${
-                  themeStyle === 'monochrome' ? 'text-gray-800' : 'text-[#e0e0e0]'
-                }`}>{item.title}</span>
-                <p className={`text-xs mt-0.5 ${
-                  themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#888]'
-                }`}>{item.desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </SubSection>
+      <div className="space-y-4">
+        <SubTitle themeStyle={themeStyle}>生成流程</SubTitle>
+        {[
+          { s: '1', t: '选择模型', d: '从管理员配置的模型列表中选择图像模型' },
+          { s: '2', t: '输入创意描述', d: '描述你想生成的画面，越具体效果越好' },
+          { s: '3', t: '设置参数', d: '选择画面比例、生图质量、产品品类' },
+          { s: '4', t: '点击生成', d: '等待 AI 生成，结果自动添加到画布', last: true },
+        ].map(item => (
+          <StepItem key={item.s} step={item.s} title={item.t} desc={item.d} themeStyle={themeStyle} isLast={!!item.last} />
+        ))}
 
-      <SubSection title="支持模型" themeStyle={themeStyle}>
+        <SubTitle themeStyle={themeStyle}>高级设置</SubTitle>
+        <div className="grid grid-cols-2 gap-2">
+          <Card themeStyle={themeStyle}>
+            <div className={`text-xs font-semibold mb-1 ${isGold ? 'text-[#d4af37]' : 'text-yellow-600'}`}>画面比例</div>
+            <Text themeStyle={themeStyle} muted>带比例图形预览，直观展示比例样式</Text>
+          </Card>
+          <Card themeStyle={themeStyle}>
+            <div className={`text-xs font-semibold mb-1 ${isGold ? 'text-[#d4af37]' : 'text-yellow-600'}`}>生图质量</div>
+            <Text themeStyle={themeStyle} muted>根据所选模型支持的质量设置调整</Text>
+          </Card>
+        </div>
+
+        <SubTitle themeStyle={themeStyle}>提示词优化</SubTitle>
+        <CardHighlight themeStyle={themeStyle}>
+          <Text themeStyle={themeStyle}>在聊天面板中使用提示词优化功能，支持三种模式：</Text>
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            <Tag color="green" themeStyle={themeStyle}>增强模式</Tag>
+            <Tag color="blue" themeStyle={themeStyle}>扩展模式</Tag>
+            <Tag color="purple" themeStyle={themeStyle}>精简模式</Tag>
+          </div>
+          <Text themeStyle={themeStyle} muted>优化结果一键发送到图像生成面板的创意描述</Text>
+        </CardHighlight>
+      </div>
+    </div>
+  );
+}
+
+function Img2ImgSection({ themeStyle }: { themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
+  return (
+    <div>
+      <SectionTitle themeStyle={themeStyle}>
+        <ImagePlus size={18} className={isGold ? 'text-[#d4af37]' : 'text-yellow-500'} />
+        <span className={`text-sm font-bold ${isGold ? 'text-white' : 'text-gray-900'}`}>图生图</span>
+      </SectionTitle>
+
+      <div className="space-y-4">
+        <SubTitle themeStyle={themeStyle}>工作原理</SubTitle>
+        <CardHighlight themeStyle={themeStyle}>
+          <Text themeStyle={themeStyle}>以当前图片为参考图，调整参考参数和关键词，生成新的图片。AI 会根据你选择的参考类别和强度，在原图基础上生成风格/构图/色彩等维度的变化。</Text>
+        </CardHighlight>
+
+        <SubTitle themeStyle={themeStyle}>6大参考类别</SubTitle>
         <div className="grid grid-cols-2 gap-2">
           {[
-            { name: '达利3', provider: '开放人工智能', type: '创意' },
-            { name: '中途绘图', provider: '中途绘图', type: '艺术' },
-            { name: '稳定扩散', provider: '稳定人工智能', type: '写实' },
-            { name: 'Flux 专业版', provider: '黑森林实验室', type: '精细' },
-          ].map((model) => (
-            <div key={model.name} className={`p-3 rounded-lg border ${
-              themeStyle === 'monochrome'
-                ? 'bg-white border-gray-200'
-                : 'bg-[#1a1a1a] border-[#2a2a2a]'
-            }`}>
-              <div className={`text-xs font-semibold ${
-                themeStyle === 'monochrome' ? 'text-gray-800' : 'text-white'
-              }`}>{model.name}</div>
-              <div className={`text-xs mt-0.5 flex items-center justify-between ${
-                themeStyle === 'monochrome' ? 'text-gray-400' : 'text-[#666]'
-              }`}>
-                <span>{model.provider}</span>
-                <span className={`px-1.5 py-0.5 rounded text-xs ${
-                  themeStyle === 'monochrome'
-                    ? 'bg-yellow-50 text-yellow-600'
-                    : 'bg-[#d4af37]/10 text-[#d4af37]'
-                }`}>{model.type}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </SubSection>
-
-      <SubSection title="高级设置" themeStyle={themeStyle}>
-        <div className="space-y-2">
-          {[
-            { label: '画面比例', desc: '1:1 / 16:9 / 9:16 / 4:3 / 3:4 等，根据模型自动适配' },
-            { label: '生图质量', desc: '标准 / 高清 / 超高清，部分模型支持' },
-            { label: '生成数量', desc: 'x1/x2/x3/x4 多张同时生成，根据模型能力自动调整' },
-            { label: '产品品类', desc: '通用 / 服装 / 鞋类 / 美妆等，优化品类效果' },
-          ].map((setting) => (
-            <div key={setting.label} className={`flex items-start gap-2 p-2.5 rounded-lg ${
-              themeStyle === 'monochrome' ? 'bg-gray-50' : 'bg-[#111]'
-            }`}>
-              <Zap size={12} className={`mt-0.5 flex-shrink-0 ${
-                themeStyle === 'monochrome' ? 'text-yellow-500' : 'text-[#d4af37]'
-              }`} />
-              <div>
-                <span className={`text-xs font-medium ${
-                  themeStyle === 'monochrome' ? 'text-gray-700' : 'text-[#ccc]'
-                }`}>{setting.label}</span>
-                <span className={`text-xs ml-1 ${
-                  themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#888]'
-                }`}>{setting.desc}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </SubSection>
-
-      <SubSection title="参考图片（增强）" themeStyle={themeStyle}>
-        <div className={`rounded-xl p-4 border ${
-          themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
-        }`}>
-          <p className={`text-xs mb-3 ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>
-            上传参考图后，支持6种参考类型与强度调节，精确控制生成效果：
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { type: '风格参考', desc: '参照参考图的风格、色调、艺术风格生成', tag: '风格' },
-              { type: '构图参考', desc: '参照参考图的构图、布局、空间结构生成', tag: '构图' },
-              { type: '场景参考', desc: '参照参考图的场景氛围、环境要素生成', tag: '场景' },
-              { type: '色彩参考', desc: '参照参考图的色彩搭配、色调倾向生成', tag: '色彩' },
-              { type: '主体参考', desc: '参照参考图中的主体形象、核心元素生成', tag: '主体' },
-              { type: '细节参考', desc: '参照参考图的纹理、质感、精细元素生成', tag: '细节' },
-            ].map((ref) => (
-              <div key={ref.type} className={`p-3 rounded-lg border ${
-                themeStyle === 'monochrome'
-                  ? 'bg-white border-gray-200'
-                  : 'bg-[#1a1a1a] border-[#2a2a2a]'
-              }`}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className={`text-xs font-semibold ${
-                    themeStyle === 'monochrome' ? 'text-gray-800' : 'text-white'
-                  }`}>{ref.type}</span>
-                  <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
-                    themeStyle === 'monochrome'
-                      ? 'bg-yellow-100 text-yellow-700'
-                      : 'bg-[#d4af37]/15 text-[#d4af37]'
-                  }`}>{ref.tag}</span>
+            { icon: <Sparkles size={12} />, title: '风格', desc: '保持或变化艺术风格', tag: 'style' },
+            { icon: <Maximize size={12} />, title: '构图', desc: '保持或重新构图', tag: 'composition' },
+            { icon: <ImageIcon size={12} />, title: '场景', desc: '保持或重新设定场景', tag: 'scene' },
+            { icon: <Wand2 size={12} />, title: '色彩', desc: '保持或调整色调氛围', tag: 'color' },
+            { icon: <Shapes size={12} />, title: '主体', desc: '保持或替换画面主体', tag: 'subject' },
+            { icon: <Pen size={12} />, title: '细节', desc: '保持或丰富画面细节', tag: 'detail' },
+          ].map(item => (
+            <Card key={item.title} themeStyle={themeStyle} className="p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <div className={`w-5 h-5 rounded flex items-center justify-center ${isGold ? 'text-[#d4af37] bg-[#d4af37]/15' : 'text-yellow-600 bg-yellow-100'}`}>
+                  {item.icon}
                 </div>
-                <p className={`text-xs ${themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#888]'}`}>{ref.desc}</p>
+                <span className={`text-xs font-semibold ${isGold ? 'text-[#e0e0e0]' : 'text-gray-800'}`}>{item.title}</span>
+                <Tag color="gold" themeStyle={themeStyle}>{item.tag}</Tag>
               </div>
-            ))}
-          </div>
-          <p className={`text-xs mt-2 ${themeStyle === 'monochrome' ? 'text-gray-400' : 'text-[#666]'}`}>
-            每张参考图可独立设置强度（0-100%），强度越高参考效果越明显
-          </p>
+              <Text themeStyle={themeStyle} muted>{item.desc}</Text>
+            </Card>
+          ))}
         </div>
-      </SubSection>
+
+        <SubTitle themeStyle={themeStyle}>使用步骤</SubTitle>
+        {[
+          { s: '1', t: '选中图片', d: '在画布中点击选中一张图片' },
+          { s: '2', t: '点击图生图按钮', d: '在顶部工具栏中点击 ImagePlus 图标' },
+          { s: '3', t: '调整参考参数', d: '选择参考类别，调整每类强度滑块 (0-100%)' },
+          { s: '4', t: '输入关键词并生成', d: '输入创意关键词，点击生成按钮', last: true },
+        ].map(item => (
+          <StepItem key={item.s} step={item.s} title={item.t} desc={item.d} themeStyle={themeStyle} isLast={!!item.last} />
+        ))}
+
+        <SubTitle themeStyle={themeStyle}>快捷功能</SubTitle>
+        <div className="space-y-2">
+          <Card themeStyle={themeStyle} className="p-3">
+            <div className="flex items-center gap-2 mb-1">
+              <Tag color="gold" themeStyle={themeStyle}>当前图片描述</Tag>
+            </div>
+            <Text themeStyle={themeStyle} muted>一键填充图片原始描述到关键词输入框</Text>
+          </Card>
+          <Card themeStyle={themeStyle} className="p-3">
+            <div className="flex items-center gap-2 mb-1">
+              <Tag color="red" themeStyle={themeStyle}>反向提示词</Tag>
+            </div>
+            <Text themeStyle={themeStyle} muted>自动填充默认反向提示词（低质量/模糊/变形等），用户可编辑修改</Text>
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }
 
 function ChatSection({ themeStyle }: { themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
   return (
     <div>
       <SectionTitle themeStyle={themeStyle}>
-        <MessageSquare size={18} className={themeStyle === 'monochrome' ? 'text-yellow-500' : 'text-[#d4af37]'} />
-        智能对话
+        <MessageSquare size={18} className={isGold ? 'text-[#d4af37]' : 'text-yellow-500'} />
+        <span className={`text-sm font-bold ${isGold ? 'text-white' : 'text-gray-900'}`}>智能对话</span>
       </SectionTitle>
 
-      <div className="grid grid-cols-2 gap-3 mb-5">
-        <FeatureCard icon={<Bot size={16} />} title="人工智能模型" titleEn="AI Models" description="支持复杂推理、快速对话与轻量分析等联网思考模式" themeStyle={themeStyle} />
-        <FeatureCard icon={<ImageIcon size={16} />} title="图像理解" titleEn="Image Understanding" description="上传图片让人工智能分析内容、提取关键词、优化提示词" themeStyle={themeStyle} />
-        <FeatureCard icon={<Wand2 size={16} />} title="提示词优化" titleEn="Prompt Master" description="增强/扩展/精简三种优化模式，结果一键发送到生成面板" themeStyle={themeStyle} />
-        <FeatureCard icon={<Settings size={16} />} title="智能体" titleEn="Agents" description="内置酒类包装、品牌VI等专业智能体，精准行业方案" themeStyle={themeStyle} />
-      </div>
-
-      <SubSection title="提示词优化模式" themeStyle={themeStyle}>
-        <div className="space-y-2">
-          {[
-            { mode: '增强模式', desc: '保留原意，补充细节描述和构图要素，提升画面表现力', tag: '增强' },
-            { mode: '扩展模式', desc: '在原意基础上发散扩展，增加更多创意元素和场景描述', tag: '扩展' },
-            { mode: '精简模式', desc: '提炼核心要素，去除冗余，生成精准的高质量提示词', tag: '精简' },
-          ].map((item) => (
-            <div key={item.mode} className={`flex items-center justify-between p-3 rounded-lg border ${
-              themeStyle === 'monochrome'
-                ? 'bg-white border-gray-200'
-                : 'bg-[#1a1a1a] border-[#2a2a2a]'
-            }`}>
-              <div>
-                <span className={`text-xs font-semibold ${
-                  themeStyle === 'monochrome' ? 'text-gray-800' : 'text-[#e0e0e0]'
-                }`}>{item.mode}</span>
-                <p className={`text-xs mt-0.5 ${
-                  themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#888]'
-                }`}>{item.desc}</p>
-              </div>
-              <span className={`px-2 py-1 rounded text-xs font-medium ${
-                themeStyle === 'monochrome'
-                  ? 'bg-yellow-100 text-yellow-700'
-                  : 'bg-[#d4af37]/15 text-[#d4af37]'
-              }`}>{item.tag}</span>
-            </div>
-          ))}
+      <div className="space-y-4">
+        <SubTitle themeStyle={themeStyle}>功能特性</SubTitle>
+        <div className="grid grid-cols-2 gap-2">
+          <FeatureItem icon={<MessageSquare size={14} />} title="AI 对话" desc="支持 Gemini 等大语言模型对话" themeStyle={themeStyle} />
+          <FeatureItem icon={<Wand2 size={14} />} title="提示词优化" desc="增强/扩展/精简三种模式" themeStyle={themeStyle} />
+          <FeatureItem icon={<ImageIcon size={14} />} title="图像理解" desc="AI 可识别和分析图片内容" themeStyle={themeStyle} />
+          <FeatureItem icon={<Sparkles size={14} />} title="联网思考" desc="Agent 联网搜索模式" themeStyle={themeStyle} />
         </div>
-      </SubSection>
+
+        <SubTitle themeStyle={themeStyle}>提示词优化流程</SubTitle>
+        {[
+          { s: '1', t: '输入简短描述', d: '在聊天面板输入框中描述你的创意' },
+          { s: '2', t: '选择优化模式', d: '点击提示词优化按钮，选择增强/扩展/精简' },
+          { s: '3', t: '一键发送到生成面板', d: '优化结果一键填充到图像生成面板', last: true },
+        ].map(item => (
+          <StepItem key={item.s} step={item.s} title={item.t} desc={item.d} themeStyle={themeStyle} isLast={!!item.last} />
+        ))}
+      </div>
     </div>
   );
 }
 
-function OmpSection({ themeStyle }: { themeStyle: string }) {
+function ToolsSection({ themeStyle }: { themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
   return (
     <div>
       <SectionTitle themeStyle={themeStyle}>
-        <Sparkles size={18} className={themeStyle === 'monochrome' ? 'text-yellow-500' : 'text-[#d4af37]'} />
-        灵感提示词库
+        <Eraser size={18} className={isGold ? 'text-[#d4af37]' : 'text-yellow-500'} />
+        <span className={`text-sm font-bold ${isGold ? 'text-white' : 'text-gray-900'}`}>图片编辑工具</span>
       </SectionTitle>
 
-      <SubSection title="功能概览" themeStyle={themeStyle}>
-        <div className={`rounded-xl p-4 border ${
-          themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
-        }`}>
-          <p className={`text-xs mb-3 ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>
-            灵感提示词库是内置的提示词管理工具，通过画布左上角折叠工具栏中的按钮打开。提供四大核心功能：
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { title: '一键插入', desc: '从预设分类中选择提示词，一键插入到图像生成的创意描述', icon: '📋', tag: '插入' },
-              { title: '分类管理', desc: '创建、编辑、删除自定义提示词分类，管理你的提示词库', icon: '📁', tag: '管理' },
-              { title: '资源库', desc: '内置人物肖像、风景自然、建筑空间、艺术风格四大分类精选提示词', icon: '📚', tag: '资源' },
-              { title: '图片识词', desc: '人工智能视觉分析图片内容，自动生成中英双语提示词描述', icon: '👁', tag: '识图' },
-            ].map((item) => (
-              <div key={item.title} className={`p-3 rounded-lg border ${
-                themeStyle === 'monochrome'
-                  ? 'bg-white border-gray-200'
-                  : 'bg-[#1a1a1a] border-[#2a2a2a]'
-              }`}>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-base">{item.icon}</span>
-                  <span className={`text-xs font-semibold ${
-                    themeStyle === 'monochrome' ? 'text-gray-800' : 'text-[#e0e0e0]'
-                  }`}>{item.title}</span>
-                  <span className={`ml-auto px-1.5 py-0.5 rounded text-xs font-medium ${
-                    themeStyle === 'monochrome'
-                      ? 'bg-yellow-100 text-yellow-700'
-                      : 'bg-[#d4af37]/15 text-[#d4af37]'
-                  }`}>{item.tag}</span>
+      <div className="space-y-4">
+        <SubTitle themeStyle={themeStyle}>选中图片后顶部工具栏</SubTitle>
+        <div className="space-y-2">
+          {[
+            { icon: <ZoomIn size={14} />, title: '放大', desc: 'AI 无损放大，支持 upscayl 分块放大（有 GPU 时自动启用）或 AI 整图放大（兜底方案），保持原图元素和风格不变，增大尺寸并增加细节', tags: ['AI增强', '分块'] },
+            { icon: <Eraser size={14} />, title: '移除背景', desc: '自动把主体和背景分开，一键删掉杂乱背景', tags: ['AI分割'] },
+            { icon: <Eraser size={14} />, title: '擦除', desc: '画笔涂抹消除并自动无缝补上新的画面，支持画笔大小调节', tags: ['画笔', 'AI修复'] },
+            { icon: <Shapes size={14} />, title: '蒙版', desc: '给图片加"透明遮罩膜"，精准控制编辑范围，支持画笔/橡皮擦/撤销', tags: ['画笔', '提示词'] },
+            { icon: <Layers size={14} />, title: '编辑元素', desc: '根据图片元素进行分层处理，支持导出 PSD', tags: ['分层', 'PSD'] },
+            { icon: <Maximize size={14} />, title: '扩展', desc: '往图片四周延伸画面，支持缩放比例(1x-4x)和画面比例选择', tags: ['比例', '扩展'] },
+            { icon: <ImagePlus size={14} />, title: '图生图', desc: '6大参考类别 + 独立强度滑块，精准控制生成效果', tags: ['参考', '强度'] },
+            { icon: <Download size={14} />, title: '下载', desc: 'PNG/SVG/PSD 多格式，PSD 支持基础/专业/工作室模式', tags: ['多格式'] },
+          ].map(item => (
+            <Card key={item.title} themeStyle={themeStyle} className="p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <div className={`w-5 h-5 rounded flex items-center justify-center ${isGold ? 'text-[#d4af37] bg-[#d4af37]/15' : 'text-yellow-600 bg-yellow-100'}`}>
+                  {item.icon}
                 </div>
-                <p className={`text-xs ${themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#888]'}`}>{item.desc}</p>
+                <span className={`text-xs font-semibold ${isGold ? 'text-[#e0e0e0]' : 'text-gray-800'}`}>{item.title}</span>
+                <div className="flex gap-1 ml-auto">
+                  {item.tags.map(tag => (
+                    <Tag key={tag} color={tag === 'AI增强' || tag === 'AI分割' || tag === 'AI修复' ? 'green' : tag === '分块' || tag === '分层' ? 'purple' : tag === '提示词' || tag === '参考' ? 'blue' : tag === '强度' ? 'cyan' : 'gold'} themeStyle={themeStyle}>{tag}</Tag>
+                  ))}
+                </div>
               </div>
-            ))}
-          </div>
+              <Text themeStyle={themeStyle} muted>{item.desc}</Text>
+            </Card>
+          ))}
         </div>
-      </SubSection>
 
-      <SubSection title="打开方式" themeStyle={themeStyle}>
-        <div className={`rounded-lg p-3 border ${
-          themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
-        }`}>
-          <div className="flex items-start gap-3">
-            <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
-              themeStyle === 'monochrome'
-                ? 'bg-yellow-100 text-yellow-600'
-                : 'bg-[#d4af37]/15 text-[#d4af37]'
-            }`}>
-              <Sparkles size={18} />
+        <SubTitle themeStyle={themeStyle}>放大功能详解</SubTitle>
+        <CardHighlight themeStyle={themeStyle}>
+          <div className="space-y-3">
+            <div>
+              <div className={`text-xs font-semibold mb-1 ${isGold ? 'text-[#d4af37]' : 'text-yellow-600'}`}>策略 A：upscayl 分块放大（推荐）</div>
+              <Text themeStyle={themeStyle} muted>将图片切成 2x2/2x3/3x3 网格块，每块用 Real-ESRGAN 神经网络放大，最后无缝拼接。像素级忠实原图，细节最丰富。需要 GPU 环境。</Text>
             </div>
             <div>
-              <p className={`text-xs font-medium mb-1 ${themeStyle === 'monochrome' ? 'text-gray-700' : 'text-[#ccc]'}`}>
-                画布左上角折叠工具栏 → 灵感提示词库按钮
-              </p>
-              <p className={`text-xs ${themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#888]'}`}>
-                鼠标悬停工具栏展开按钮 → 点击星光图标 → 弹出提示词库面板
-              </p>
+              <div className={`text-xs font-semibold mb-1 ${isGold ? 'text-[#d4af37]' : 'text-yellow-600'}`}>策略 B：AI 整图放大（兜底）</div>
+              <Text themeStyle={themeStyle} muted>用 AI 视觉模型描述原图，再通过 images/generations + 极低 strength 生成超清版本。无需 GPU，在 upscayl 不可用时自动启用。</Text>
             </div>
           </div>
-        </div>
-      </SubSection>
-
-      <SubSection title="图片识词工作流" themeStyle={themeStyle}>
-        <div className={`rounded-xl p-4 border ${
-          themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
-        }`}>
-          <div className="space-y-2">
-            {[
-              { step: 1, text: '在画布左上角工具栏开启灵感提示词库功能' },
-              { step: 2, text: '将鼠标悬停在画布中的任意图片上' },
-              { step: 3, text: '点击图片上出现的 ✨ 按钮触发 AI 视觉分析' },
-              { step: 4, text: 'AI 自动分析图片内容，生成中英双语提示词' },
-              { step: 5, text: '分析结果自动插入到图像生成的创意描述中' },
-            ].map((item) => (
-              <div key={item.step} className="flex items-start gap-2">
-                <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold ${
-                  themeStyle === 'monochrome'
-                    ? 'bg-yellow-100 text-yellow-700'
-                    : 'bg-[#d4af37]/15 text-[#d4af37]'
-                }`}>{item.step}</div>
-                <span className={`text-xs pt-0.5 ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>{item.text}</span>
-              </div>
-            ))}
-          </div>
-          <p className={`text-xs mt-3 ${themeStyle === 'monochrome' ? 'text-gray-400' : 'text-[#666]'}`}>
-            模型自动同步：使用当前选择的模型对应的后台配置，无需额外输入
-          </p>
-        </div>
-      </SubSection>
+        </CardHighlight>
+      </div>
     </div>
   );
 }
 
-function FusionSection({ themeStyle }: { themeStyle: string }) {
+function LayerGraphSection({ themeStyle }: { themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
   return (
     <div>
       <SectionTitle themeStyle={themeStyle}>
-        <GitMerge size={18} className={themeStyle === 'monochrome' ? 'text-yellow-500' : 'text-[#d4af37]'} />
-        参考融合
+        <Layers size={18} className={isGold ? 'text-[#d4af37]' : 'text-yellow-500'} />
+        <span className={`text-sm font-bold ${isGold ? 'text-white' : 'text-gray-900'}`}>Layer Graph 设计工程</span>
       </SectionTitle>
 
-      <SubSection title="功能概览" themeStyle={themeStyle}>
-        <div className={`rounded-xl p-4 border ${
-          themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
-        }`}>
-          <p className={`text-xs mb-3 ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>
-            参考融合允许你从画布中选择多张图片作为参考，为每张图指定关键词，然后融合生成一张全新的创意图片。
-            选中的图片会以 SVG 连接线连接到输出框，直观展示融合关系。
-          </p>
-          <div className={`rounded-lg p-3 border ${
-            themeStyle === 'monochrome' ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#2a2a2a]'
-          }`}>
-            <div className="flex items-center gap-2 mb-2">
-              <GitMerge size={14} className={themeStyle === 'monochrome' ? 'text-yellow-500' : 'text-[#d4af37]'} />
-              <span className={`text-xs font-semibold ${themeStyle === 'monochrome' ? 'text-gray-700' : 'text-[#ccc]'}`}>
-                核心能力
-              </span>
-            </div>
-            <ul className={`text-xs space-y-1 ml-6 list-disc ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>
-              <li>多张图片融合，每张可指定不同关键词</li>
-              <li>SVG 连接线可视化参考关系</li>
-              <li>融合描述框统一描述目标效果</li>
-              <li>右侧面板调整关键词与画面尺寸</li>
-            </ul>
-          </div>
-        </div>
-      </SubSection>
+      <div className="space-y-4">
+        <SubTitle themeStyle={themeStyle}>功能概览</SubTitle>
+        <CardHighlight themeStyle={themeStyle}>
+          <Text themeStyle={themeStyle}>将画布图片转换为可编辑图层的设计工程，三栏布局专业设计工具。入口：画布底部工具栏"图层"图标按钮。</Text>
+        </CardHighlight>
 
-      <SubSection title="使用步骤" themeStyle={themeStyle}>
-        <div className={`rounded-xl p-4 border ${
-          themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
-        }`}>
-          <div className="space-y-3">
-            {[
-              { step: 1, text: '在画布左上角折叠工具栏中开启「参考融合」开关', highlight: '工具栏 → 参考融合' },
-              { step: 2, text: '按住 Ctrl 键（Mac: Cmd 键），依次点击要融合的图片', highlight: 'Ctrl + 点击' },
-              { step: 3, text: '选中的图片左上角显示金色编号徽章，SVG 连接线指向输出框', highlight: '可视化连接' },
-              { step: 4, text: '在右侧图像生成面板中，为每张参考图输入关键词描述', highlight: '关键词输入' },
-              { step: 5, text: '在融合描述框中输入整体融合目标描述', highlight: '融合描述' },
-              { step: 6, text: '点击「融合生成」按钮，AI 根据参考图 + 关键词 + 融合描述生成新图', highlight: '生成结果' },
-            ].map((item) => (
-              <div key={item.step} className={`flex items-start gap-3 p-2 rounded-lg ${
-                themeStyle === 'monochrome' ? 'bg-white' : 'bg-[#1a1a1a]'
-              }`}>
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold ${
-                  themeStyle === 'monochrome'
-                    ? 'bg-yellow-100 text-yellow-700'
-                    : 'bg-[#d4af37]/15 text-[#d4af37]'
-                }`}>{item.step}</div>
-                <div className="flex-1">
-                  <p className={`text-xs ${themeStyle === 'monochrome' ? 'text-gray-700' : 'text-[#ccc]'}`}>{item.text}</p>
-                  <span className={`inline-block mt-0.5 px-1.5 py-0.5 rounded text-xs font-medium ${
-                    themeStyle === 'monochrome'
-                      ? 'bg-gray-100 text-gray-600'
-                      : 'bg-[#2a2a2a] text-[#888]'
-                  }`}>{item.highlight}</span>
-                </div>
-              </div>
-            ))}
-          </div>
+        <SubTitle themeStyle={themeStyle}>三栏布局</SubTitle>
+        <div className="grid grid-cols-3 gap-2">
+          <Card themeStyle={themeStyle}>
+            <div className={`text-xs font-semibold mb-1 ${isGold ? 'text-[#d4af37]' : 'text-yellow-600'}`}>图层面板</div>
+            <Text themeStyle={themeStyle} muted>可见性切换、锁定、拖拽排序</Text>
+          </Card>
+          <Card themeStyle={themeStyle}>
+            <div className={`text-xs font-semibold mb-1 ${isGold ? 'text-[#d4af37]' : 'text-yellow-600'}`}>设计画布</div>
+            <Text themeStyle={themeStyle} muted>图层渲染、选择高亮</Text>
+          </Card>
+          <Card themeStyle={themeStyle}>
+            <div className={`text-xs font-semibold mb-1 ${isGold ? 'text-[#d4af37]' : 'text-yellow-600'}`}>属性面板</div>
+            <Text themeStyle={themeStyle} muted>名称/透明度/位置尺寸/矢量化</Text>
+          </Card>
         </div>
-      </SubSection>
 
-      <SubSection title="参考类型与强度" themeStyle={themeStyle}>
-        <div className={`rounded-xl p-4 border ${
-          themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
-        }`}>
-          <p className={`text-xs mb-3 ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>
-            融合模式下，每张参考图还可以通过右侧面板设置参考类型和强度：
-          </p>
-          <div className="space-y-2">
-            {[
-              { type: '风格参考', desc: '融合参考图的风格、色调、艺术风格', strength: '30-60% 效果较佳' },
-              { type: '构图参考', desc: '融合参考图的构图、布局、空间结构', strength: '40-70% 效果较佳' },
-              { type: '场景参考', desc: '融合参考图的场景氛围、环境要素', strength: '30-60% 效果较佳' },
-              { type: '色彩参考', desc: '融合参考图的色彩搭配、色调倾向', strength: '20-50% 效果较佳' },
-              { type: '主体参考', desc: '融合参考图中的主体形象、核心元素', strength: '50-80% 效果较佳' },
-              { type: '细节参考', desc: '融合参考图的纹理、质感、精细元素', strength: '30-60% 效果较佳' },
-            ].map((ref) => (
-              <div key={ref.type} className={`p-3 rounded-lg border ${
-                themeStyle === 'monochrome'
-                  ? 'bg-white border-gray-200'
-                  : 'bg-[#1a1a1a] border-[#2a2a2a]'
-              }`}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className={`text-xs font-semibold ${
-                    themeStyle === 'monochrome' ? 'text-gray-800' : 'text-[#e0e0e0]'
-                  }`}>{ref.type}</span>
-                </div>
-                <p className={`text-xs mb-1 ${themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#888]'}`}>{ref.desc}</p>
-                <p className={`text-xs ${themeStyle === 'monochrome' ? 'text-gray-400' : 'text-[#666]'}`}>
-                  推荐强度：{ref.strength}
-                </p>
-              </div>
-            ))}
-          </div>
+        <SubTitle themeStyle={themeStyle}>矢量化</SubTitle>
+        <Card themeStyle={themeStyle}>
+          <Text themeStyle={themeStyle}>支持多策略自动降级：管理员矢量模型API → LLM视觉模型fallback → 本地vtracer → raster-svg-wrapper兜底</Text>
+        </Card>
+
+        <SubTitle themeStyle={themeStyle}>工程文件</SubTitle>
+        <div className="grid grid-cols-2 gap-2">
+          <Card themeStyle={themeStyle}>
+            <div className={`text-xs font-semibold mb-1 ${isGold ? 'text-[#d4af37]' : 'text-yellow-600'}`}>.wujie 格式</div>
+            <Text themeStyle={themeStyle} muted>导入导出设计工程文件</Text>
+          </Card>
+          <Card themeStyle={themeStyle}>
+            <div className={`text-xs font-semibold mb-1 ${isGold ? 'text-[#d4af37]' : 'text-yellow-600'}`}>SVG 导出</div>
+            <Text themeStyle={themeStyle} muted>快速/专业/工作室三种模式</Text>
+          </Card>
         </div>
-      </SubSection>
+      </div>
     </div>
   );
 }
 
-function PsdEditorSection({ themeStyle }: { themeStyle: string }) {
+function ProjectSection({ themeStyle }: { themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
   return (
     <div>
       <SectionTitle themeStyle={themeStyle}>
-        <Layers size={18} className={themeStyle === 'monochrome' ? 'text-yellow-500' : 'text-[#d4af37]'} />
-        PSD 图层编辑器
+        <FileBox size={18} className={isGold ? 'text-[#d4af37]' : 'text-yellow-500'} />
+        <span className={`text-sm font-bold ${isGold ? 'text-white' : 'text-gray-900'}`}>项目与文件</span>
       </SectionTitle>
 
-      <SubSection title="功能概览" themeStyle={themeStyle}>
-        <div className={`rounded-xl p-4 border ${
-          themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
-        }`}>
-          <p className={`text-xs leading-relaxed mb-3 ${
-            themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'
-          }`}>
-            PSD 图层编辑器采用智能背景移除 + 连通域分析技术，确保每个元素的完整性。每个图层输出为全画布透明 PNG，便于 Photoshop 中叠加编辑。
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            <div className={`text-center p-2 rounded-lg ${
-              themeStyle === 'monochrome' ? 'bg-white' : 'bg-[#1a1a1a]'
-            }`}>
-              <div className={`text-lg font-bold ${
-                themeStyle === 'monochrome' ? 'text-yellow-600' : 'text-[#d4af37]'
-              }`}>5</div>
-              <div className={`text-xs ${
-                themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#888]'
-              }`}>背景检测模式</div>
-            </div>
-            <div className={`text-center p-2 rounded-lg ${
-              themeStyle === 'monochrome' ? 'bg-white' : 'bg-[#1a1a1a]'
-            }`}>
-              <div className={`text-lg font-bold ${
-                themeStyle === 'monochrome' ? 'text-yellow-600' : 'text-[#d4af37]'
-              }`}>V4</div>
-              <div className={`text-xs ${
-                themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#888]'
-              }`}>图层命名规范</div>
-            </div>
-            <div className={`text-center p-2 rounded-lg ${
-              themeStyle === 'monochrome' ? 'bg-white' : 'bg-[#1a1a1a]'
-            }`}>
-              <div className={`text-lg font-bold ${
-                themeStyle === 'monochrome' ? 'text-yellow-600' : 'text-[#d4af37]'
-              }`}>3</div>
-              <div className={`text-xs ${
-                themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#888]'
-              }`}>导出模式</div>
-            </div>
+      <div className="space-y-4">
+        <SubTitle themeStyle={themeStyle}>项目管理</SubTitle>
+        <Card themeStyle={themeStyle}>
+          <Text themeStyle={themeStyle}>支持多项目管理，每个项目独立保存画布数据和图片。项目数据自动同步到服务器数据库，确保重新部署后数据不丢失。</Text>
+        </Card>
+
+        <SubTitle themeStyle={themeStyle}>.wujie 文件格式</SubTitle>
+        <CardHighlight themeStyle={themeStyle}>
+          <Text themeStyle={themeStyle}>项目导出为 .wujie 文件，实际为精美的 HTML 网页图册。用浏览器直接打开即可浏览，包含：</Text>
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            <Tag color="gold" themeStyle={themeStyle}>用户信息</Tag>
+            <Tag color="green" themeStyle={themeStyle}>图片画廊</Tag>
+            <Tag color="blue" themeStyle={themeStyle}>生成参数</Tag>
+            <Tag color="purple" themeStyle={themeStyle}>模型标签</Tag>
           </div>
-        </div>
-      </SubSection>
+        </CardHighlight>
 
-      <SubSection title="使用步骤" themeStyle={themeStyle}>
-        <div className="space-y-0">
-          {[
-            { step: '1', title: '在画布中选中一张图片', desc: '点击画布上的图片将其选中' },
-            { step: '2', title: '选择 PSD 下载模式', desc: '点击下载按钮，选择 PSD 格式' },
-            { step: '3', title: '选择导出模式', desc: '基础 / 专业 / 工作室 三种模式' },
-            { step: '4', title: '点击确认，等待分析', desc: 'AI 自动分析图片结构并分割图层' },
-          ].map((item, i) => (
-            <div key={item.step} className="flex items-start gap-3 relative">
-              {i < 3 && (
-                <div className={`absolute left-[15px] top-[32px] w-px h-[calc(100%-16px)] ${
-                  themeStyle === 'monochrome' ? 'bg-gray-200' : 'bg-[#2a2a2a]'
-                }`} />
-              )}
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold z-10 ${
-                themeStyle === 'monochrome'
-                  ? 'bg-yellow-100 text-yellow-700 border border-yellow-300'
-                  : 'bg-[#d4af37]/20 text-[#d4af37] border border-[#d4af37]/40'
-              }`}>
-                {item.step}
-              </div>
-              <div className="pb-4">
-                <span className={`text-xs font-semibold ${
-                  themeStyle === 'monochrome' ? 'text-gray-800' : 'text-[#e0e0e0]'
-                }`}>{item.title}</span>
-                <p className={`text-xs mt-0.5 ${
-                  themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#888]'
-                }`}>{item.desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </SubSection>
-
-      <SubSection title="导出模式对比" themeStyle={themeStyle}>
+        <SubTitle themeStyle={themeStyle}>PSD 导出模式</SubTitle>
         <div className="space-y-2">
           {[
-            {
-              mode: '基础',
-              name: '基础模式',
-              desc: '原图 + 白色背景 + 注释层，安全快速导出',
-              features: ['保留原图', '白色背景层', '注释说明'],
-              recommended: false,
-            },
-            {
-              mode: '专业',
-              name: '专业模式',
-              desc: '背景移除 + 连通域分析 + 语义命名 + 背景重建',
-              features: ['智能背景移除', '语义图层命名', '背景重建', 'V4 XMP元数据'],
-              recommended: true,
-            },
-            {
-              mode: '工作室',
-              name: '工作室模式',
-              desc: '专业模式全部功能 + 阴影估算 + 语义分组 + 质量评分',
-              features: ['阴影/反射层', '语义分组', '质量评分', '完整V4清单'],
-              recommended: false,
-            },
-          ].map((item) => (
-            <div key={item.mode} className={`p-4 rounded-xl border relative ${
-              item.recommended
-                ? themeStyle === 'monochrome'
-                  ? 'bg-yellow-50 border-yellow-300'
-                  : 'bg-[#d4af37]/5 border-[#d4af37]/40'
-                : themeStyle === 'monochrome'
-                  ? 'bg-white border-gray-200'
-                  : 'bg-[#1a1a1a] border-[#2a2a2a]'
-            }`}>
-              {item.recommended && (
-                <span className={`absolute -top-2 right-3 px-2 py-0.5 rounded-full text-xs font-bold ${
-                  themeStyle === 'monochrome'
-                    ? 'bg-yellow-400 text-yellow-900'
-                    : 'bg-[#d4af37] text-black'
-                }`}>推荐</span>
+            { mode: '基础', desc: '原图 + 白色背景 + 注释层，安全快速', features: ['保留原图', '白色背景层', '注释说明'], rec: false },
+            { mode: '专业', desc: '背景移除 + 连通域分析 + 语义命名 + 背景重建', features: ['智能背景移除', '语义图层命名', '背景重建', 'V4 XMP元数据'], rec: true },
+            { mode: '工作室', desc: '专业模式全部 + 阴影估算 + 语义分组 + 质量评分', features: ['阴影/反射层', '语义分组', '质量评分', '完整V4清单'], rec: false },
+          ].map(item => (
+            <Card key={item.mode} themeStyle={themeStyle} className={`relative ${item.rec ? (isGold ? '!border-[#d4af37]/40 !bg-[#d4af37]/5' : '!border-yellow-300 !bg-yellow-50') : ''}`}>
+              {item.rec && (
+                <span className={`absolute -top-2 right-3 px-2 py-0.5 rounded-full text-xs font-bold ${isGold ? 'bg-[#d4af37] text-black' : 'bg-yellow-400 text-yellow-900'}`}>推荐</span>
               )}
               <div className="flex items-center gap-2 mb-1.5">
-                <span className={`text-sm font-bold ${
-                  item.recommended
-                    ? themeStyle === 'monochrome' ? 'text-yellow-700' : 'text-[#d4af37]'
-                    : themeStyle === 'monochrome' ? 'text-gray-800' : 'text-white'
-                }`}>{item.mode}</span>
-                <span className={`text-xs ${
-                  themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#888]'
-                }`}>{item.name}</span>
+                <span className={`text-xs font-bold ${item.rec ? (isGold ? 'text-[#d4af37]' : 'text-yellow-700') : (isGold ? 'text-white' : 'text-gray-800')}`}>{item.mode}</span>
               </div>
-              <p className={`text-xs mb-2 ${
-                themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#888]'
-              }`}>{item.desc}</p>
-              <div className="flex flex-wrap gap-1.5">
-                {item.features.map((f) => (
-                  <span key={f} className={`px-2 py-0.5 rounded text-xs ${
-                    item.recommended
-                      ? themeStyle === 'monochrome'
-                        ? 'bg-yellow-200/60 text-yellow-800'
-                        : 'bg-[#d4af37]/15 text-[#d4af37]'
-                      : themeStyle === 'monochrome'
-                        ? 'bg-gray-100 text-gray-600'
-                        : 'bg-[#222] text-[#aaa]'
-                  }`}>{f}</span>
+              <Text themeStyle={themeStyle} muted>{item.desc}</Text>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {item.features.map(f => (
+                  <Tag key={f} color={item.rec ? 'gold' : 'blue'} themeStyle={themeStyle}>{f}</Tag>
                 ))}
               </div>
-            </div>
+            </Card>
           ))}
         </div>
-      </SubSection>
 
-      <SubSection title="V4 图层命名规范" themeStyle={themeStyle}>
-        <div className={`rounded-lg overflow-hidden border ${
-          themeStyle === 'monochrome' ? 'border-gray-200' : 'border-[#2a2a2a]'
-        }`}>
+        <SubTitle themeStyle={themeStyle}>V4 图层命名规范</SubTitle>
+        <div className={`rounded-lg overflow-hidden border ${isGold ? 'border-[#2a2a2a]' : 'border-gray-200'}`}>
           <table className="w-full text-xs">
             <thead>
-              <tr className={themeStyle === 'monochrome' ? 'bg-gray-100' : 'bg-[#111]'}>
-                <th className={`text-left px-3 py-2 font-semibold ${
-                  themeStyle === 'monochrome' ? 'text-gray-700' : 'text-[#ccc]'
-                }`}>前缀</th>
-                <th className={`text-left px-3 py-2 font-semibold ${
-                  themeStyle === 'monochrome' ? 'text-gray-700' : 'text-[#ccc]'
-                }`}>类型</th>
-                <th className={`text-left px-3 py-2 font-semibold ${
-                  themeStyle === 'monochrome' ? 'text-gray-700' : 'text-[#ccc]'
-                }`}>示例</th>
+              <tr className={isGold ? 'bg-[#111]' : 'bg-gray-100'}>
+                <th className={`text-left px-3 py-2 font-semibold ${isGold ? 'text-[#ccc]' : 'text-gray-700'}`}>前缀</th>
+                <th className={`text-left px-3 py-2 font-semibold ${isGold ? 'text-[#ccc]' : 'text-gray-700'}`}>类型</th>
+                <th className={`text-left px-3 py-2 font-semibold ${isGold ? 'text-[#ccc]' : 'text-gray-700'}`}>示例</th>
               </tr>
             </thead>
             <tbody>
               {[
-            { prefix: 'bg/', type: '背景层', example: 'bg/main' },
-            { prefix: 'subject/', type: '主体层', example: 'subject/1/person' },
-            { prefix: 'text/', type: '文字层', example: 'text/1/标题' },
-            { prefix: 'fx/', type: '阴影/特效', example: 'fx/shadow/1' },
-            { prefix: 'deco/', type: '装饰层', example: 'deco/1/丝带' },
+                { prefix: 'bg/', type: '背景层', example: 'bg/main' },
+                { prefix: 'subject/', type: '主体层', example: 'subject/1/person' },
+                { prefix: 'text/', type: '文字层', example: 'text/1/标题' },
+                { prefix: 'fx/', type: '阴影/特效', example: 'fx/shadow/1' },
+                { prefix: 'deco/', type: '装饰层', example: 'deco/1/丝带' },
               ].map((row, i) => (
-                <tr key={row.prefix} className={`border-t ${
-                  themeStyle === 'monochrome' ? 'border-gray-100' : 'border-[#1a1a1a]'
-                } ${i % 2 === 0 ? (themeStyle === 'monochrome' ? 'bg-white' : 'bg-[#0a0a0a]') : ''}`}>
-                  <td className={`px-3 py-2 font-mono ${
-                    themeStyle === 'monochrome' ? 'text-yellow-600' : 'text-[#d4af37]'
-                  }`}>{row.prefix}</td>
-                  <td className={`px-3 py-2 ${
-                    themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'
-                  }`}>{row.type}</td>
-                  <td className={`px-3 py-2 font-mono ${
-                    themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#777]'
-                  }`}>{row.example}</td>
+                <tr key={row.prefix} className={`border-t ${isGold ? 'border-[#1a1a1a]' : 'border-gray-100'} ${i % 2 === 0 ? (isGold ? 'bg-[#0a0a0a]' : '') : ''}`}>
+                  <td className={`px-3 py-2 font-mono ${isGold ? 'text-[#d4af37]' : 'text-yellow-600'}`}>{row.prefix}</td>
+                  <td className={`px-3 py-2 ${isGold ? 'text-[#999]' : 'text-gray-600'}`}>{row.type}</td>
+                  <td className={`px-3 py-2 font-mono ${isGold ? 'text-[#777]' : 'text-gray-500'}`}>{row.example}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      </SubSection>
+      </div>
     </div>
   );
 }
 
-function ChangelogSection({ themeStyle }: { themeStyle: string }) {
+function AdminSection({ themeStyle }: { themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
   return (
     <div>
       <SectionTitle themeStyle={themeStyle}>
-        <BookOpen size={18} className={themeStyle === 'monochrome' ? 'text-yellow-500' : 'text-[#d4af37]'} />
-        更新日志
+        <Settings size={18} className={isGold ? 'text-[#d4af37]' : 'text-yellow-500'} />
+        <span className={`text-sm font-bold ${isGold ? 'text-white' : 'text-gray-900'}`}>管理员系统</span>
       </SectionTitle>
 
       <div className="space-y-4">
-        {/* v2.5.1 */}
-        <div className={`rounded-xl p-4 border ${
-          themeStyle === 'monochrome' ? 'bg-yellow-50/50 border-yellow-200' : 'bg-[#d4af37]/5 border-[#d4af37]/30'
-        }`}>
-          <div className="flex items-center gap-2 mb-3">
-            <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-              themeStyle === 'monochrome'
-                ? 'bg-yellow-100 text-yellow-700'
-                : 'bg-[#d4af37]/15 text-[#d4af37]'
-            }`}>v2.5.1</span>
-            <span className={`text-xs ${themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#888]'}`}>当前版本</span>
+        <SubTitle themeStyle={themeStyle}>API 提供商管理</SubTitle>
+        <Card themeStyle={themeStyle}>
+          <Text themeStyle={themeStyle}>管理员统一配置 API 密钥，用户无需手动输入。支持5种模型类型：</Text>
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            <Tag color="green" themeStyle={themeStyle}>图像模型</Tag>
+            <Tag color="blue" themeStyle={themeStyle}>LLM 模型</Tag>
+            <Tag color="purple" themeStyle={themeStyle}>3D 模型</Tag>
+            <Tag color="cyan" themeStyle={themeStyle}>矢量模型</Tag>
+            <Tag color="gold" themeStyle={themeStyle}>图片分层模型</Tag>
           </div>
-          <div className="space-y-2">
-            {[
-              { type: 'fix', text: '擦除/蒙版功能修复 - 改用 AI 生成 API + 蒙版合成策略，移除 IOPaint 依赖' },
-              { type: 'fix', text: '蒙版检测核心Bug修复 - 改用 RGB 亮度阈值判断，不再依赖 alpha 通道' },
-              { type: 'fix', text: '接口地址不再自动追加 /v1 - 用户完全控制 API URL 格式' },
-            ].map((item, idx) => (
-              <div key={idx} className="flex items-start gap-2">
-                <span className={`px-1.5 py-0.5 rounded text-xs font-bold flex-shrink-0 mt-0.5 ${
-                  item.type === 'feat'
-                    ? (themeStyle === 'monochrome' ? 'bg-green-100 text-green-700' : 'bg-green-500/15 text-green-400')
-                    : (themeStyle === 'monochrome' ? 'bg-blue-100 text-blue-700' : 'bg-blue-500/15 text-blue-400')
-                }`}>{item.type === 'feat' ? '功能' : item.type === 'fix' ? '修复' : item.type}</span>
-                <span className={`text-xs ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>{item.text}</span>
-              </div>
-            ))}
-          </div>
+        </Card>
+
+        <SubTitle themeStyle={themeStyle}>关键能力</SubTitle>
+        <div className="grid grid-cols-2 gap-2">
+          <FeatureItem icon={<Settings size={14} />} title="自动识别模型" desc="添加 API 后自动识别可用模型" themeStyle={themeStyle} />
+          <FeatureItem icon={<Sparkles size={14} />} title="模型选择" desc="管理员手动选择启用的模型" themeStyle={themeStyle} />
+          <FeatureItem icon={<Database size={14} />} title="连接测试" desc="测试 API 连通性和余额" themeStyle={themeStyle} />
+          <FeatureItem icon={<Wand2 size={14} />} title="用量分析" desc="API 余额与用量统计" themeStyle={themeStyle} />
         </div>
 
-        {/* v2.5.0 */}
-        <div className={`rounded-xl p-4 border ${
-          themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
-        }`}>
-          <div className="flex items-center gap-2 mb-3">
-            <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-              themeStyle === 'monochrome'
-                ? 'bg-gray-200 text-gray-600'
-                : 'bg-[#2a2a2a] text-[#888]'
-            }`}>v2.5.0</span>
+        <SubTitle themeStyle={themeStyle}>数据持久化</SubTitle>
+        <Card themeStyle={themeStyle}>
+          <Text themeStyle={themeStyle}>所有管理员数据（用户、API 配置、系统设置）存储在 PostgreSQL 数据库中，重新部署后数据不丢失。</Text>
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            <Tag color="green" themeStyle={themeStyle}>数据库优先</Tag>
+            <Tag color="blue" themeStyle={themeStyle}>文件系统兜底</Tag>
+            <Tag color="purple" themeStyle={themeStyle}>双写保证一致性</Tag>
           </div>
-          <div className="space-y-2">
-            {[
-              { type: 'feat', text: '参考图与图生图6大类别统一 - 风格/构图/场景/色彩/主体/细节' },
-              { type: 'feat', text: '图片工具栏全面升级 - 放大/移除背景/矢量化/擦除/蒙版/编辑元素/多角度/转3D/扩展/裁切/图生图/下载' },
-              { type: 'feat', text: 'Alt+Click 标记参考图 - 画布图片标记后自动添加到创意描述文本框' },
-              { type: 'feat', text: 'Ctrl+Click 参考融合 - 选择画布图片直接融合生成' },
-              { type: 'feat', text: '组功能 - 多图右键创建组，支持折叠/展开，长按标题栏拖动' },
-              { type: 'feat', text: '框选功能 - 左键拖拽空白区域直接框选，显示选择矩形' },
-              { type: 'feat', text: '管理员系统增强 - 通用模型类型、高级参数、连接测试、API用量分析' },
-              { type: 'feat', text: '服务器端API密钥管理 - 管理员统一配置，用户无需输入Key' },
-              { type: 'fix', text: 'Ctrl+Z无限撤回优化 - 纯ref同步管理，流畅操作无toast' },
-              { type: 'fix', text: '所有编辑操作（除扩展和裁切）保持原图比例' },
-            ].map((item, idx) => (
-              <div key={idx} className="flex items-start gap-2">
-                <span className={`px-1.5 py-0.5 rounded text-xs font-bold flex-shrink-0 mt-0.5 ${
-                  item.type === 'feat'
-                    ? (themeStyle === 'monochrome' ? 'bg-green-100 text-green-700' : 'bg-green-500/15 text-green-400')
-                    : (themeStyle === 'monochrome' ? 'bg-blue-100 text-blue-700' : 'bg-blue-500/15 text-blue-400')
-                }`}>{item.type === 'feat' ? '功能' : item.type === 'fix' ? '修复' : item.type}</span>
-                <span className={`text-xs ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>{item.text}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* v2.2.0 */}
-        <div className={`rounded-xl p-4 border ${
-          themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
-        }`}>
-          <div className="flex items-center gap-2 mb-3">
-            <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-              themeStyle === 'monochrome'
-                ? 'bg-gray-200 text-gray-600'
-                : 'bg-[#2a2a2a] text-[#888]'
-            }`}>v2.2.0</span>
-          </div>
-          <div className="space-y-2">
-            {[
-              { type: 'feat', text: '灵感提示词库提示词管理面板 - 一键插入、分类管理、资源库、图片识词四大功能' },
-              { type: 'feat', text: '参考融合（Ctrl+点击融合）- 画布中选择多图，SVG 连线可视化，关键词驱动的融合生成' },
-              { type: 'feat', text: '参考图片增强 - 4种参考类型（风格/构图/角色/IP适配器）+ 独立强度滑块' },
-              { type: 'feat', text: 'SVG 矢量化导出 - 快速/专业/工作室 三种模式替代原栅格化功能' },
-              { type: 'feat', text: '图片来源标签 - 生成/上传/编辑/矢量化四种来源标识' },
-              { type: 'feat', text: '折叠工具栏 - 所有功能按钮整合到画布左上角，悬停展开，移开收起' },
-              { type: 'fix', text: '生成数量 x2/x3/x4 不生效问题修复' },
-              { type: 'fix', text: 'SVG 融合连接线不显示问题修复 - 移入 transform 容器内，统一坐标空间' },
-              { type: 'fix', text: '视觉提示词模型同步 - 支持第三方模型提供商自动同步' },
-            ].map((item, idx) => (
-              <div key={idx} className="flex items-start gap-2">
-                <span className={`px-1.5 py-0.5 rounded text-xs font-bold flex-shrink-0 mt-0.5 ${
-                  item.type === 'feat'
-                    ? (themeStyle === 'monochrome' ? 'bg-green-100 text-green-700' : 'bg-green-500/15 text-green-400')
-                    : (themeStyle === 'monochrome' ? 'bg-blue-100 text-blue-700' : 'bg-blue-500/15 text-blue-400')
-                }`}>{item.type === 'feat' ? '功能' : item.type === 'fix' ? '修复' : item.type}</span>
-                <span className={`text-xs ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>{item.text}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* v2.1.0 */}
-        <div className={`rounded-xl p-4 border ${
-          themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
-        }`}>
-          <div className="flex items-center gap-2 mb-3">
-            <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-              themeStyle === 'monochrome'
-                ? 'bg-gray-200 text-gray-600'
-                : 'bg-[#2a2a2a] text-[#888]'
-            }`}>v2.1.0</span>
-          </div>
-          <div className="space-y-2">
-            {[
-              { type: 'feat', text: 'PSD 三种导出模式（基础/专业/工作室）+ V4 规范图层命名' },
-              { type: 'feat', text: '人工智能视觉分析图片结构 (/api/analyze-psd)' },
-              { type: 'feat', text: '提示词优化 - 增强/扩展/精简三种模式' },
-              { type: 'feat', text: '智能体联网思考模式' },
-              { type: 'feat', text: '画布工具栏 - 上传/缩放/重置视图' },
-            ].map((item, idx) => (
-              <div key={idx} className="flex items-start gap-2">
-                <span className={`px-1.5 py-0.5 rounded text-xs font-bold flex-shrink-0 mt-0.5 ${
-                  item.type === 'feat'
-                    ? (themeStyle === 'monochrome' ? 'bg-green-100 text-green-700' : 'bg-green-500/15 text-green-400')
-                    : (themeStyle === 'monochrome' ? 'bg-blue-100 text-blue-700' : 'bg-blue-500/15 text-blue-400')
-                }`}>{item.type === 'feat' ? '功能' : item.type === 'fix' ? '修复' : item.type}</span>
-                <span className={`text-xs ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>{item.text}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* v2.0.0 */}
-        <div className={`rounded-xl p-4 border ${
-          themeStyle === 'monochrome' ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-[#2a2a2a]'
-        }`}>
-          <div className="flex items-center gap-2 mb-3">
-            <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-              themeStyle === 'monochrome'
-                ? 'bg-gray-200 text-gray-600'
-                : 'bg-[#2a2a2a] text-[#888]'
-            }`}>v2.0.0</span>
-          </div>
-          <div className="space-y-2">
-            {[
-              { type: 'feat', text: '无限画布 - 拖拽/缩放/多选/框选/编辑模式' },
-              { type: 'feat', text: '多模型支持 - 图像与对话模型统一接入' },
-              { type: 'feat', text: '智能聊天面板 - 支持模型对话与图像理解' },
-              { type: 'feat', text: '图片操作工具栏 - 放大/去背景/擦除/蒙版/扩展/裁切/下载' },
-              { type: 'feat', text: '黑白/彩色双主题风格切换' },
-            ].map((item, idx) => (
-              <div key={idx} className="flex items-start gap-2">
-                <span className={`px-1.5 py-0.5 rounded text-xs font-bold flex-shrink-0 mt-0.5 ${
-                  item.type === 'feat'
-                    ? (themeStyle === 'monochrome' ? 'bg-green-100 text-green-700' : 'bg-green-500/15 text-green-400')
-                    : (themeStyle === 'monochrome' ? 'bg-blue-100 text-blue-700' : 'bg-blue-500/15 text-blue-400')
-                }`}>{item.type === 'feat' ? '功能' : item.type === 'fix' ? '修复' : item.type}</span>
-                <span className={`text-xs ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'}`}>{item.text}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        </Card>
       </div>
     </div>
   );
 }
 
 function ShortcutsSection({ themeStyle }: { themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
   return (
     <div>
       <SectionTitle themeStyle={themeStyle}>
-        <Keyboard size={18} className={themeStyle === 'monochrome' ? 'text-yellow-500' : 'text-[#d4af37]'} />
-        快捷键
+        <Keyboard size={18} className={isGold ? 'text-[#d4af37]' : 'text-yellow-500'} />
+        <span className={`text-sm font-bold ${isGold ? 'text-white' : 'text-gray-900'}`}>快捷键</span>
       </SectionTitle>
 
-      <SubSection title="画布操作" themeStyle={themeStyle}>
-        <div className={`rounded-lg border overflow-hidden ${
-          themeStyle === 'monochrome' ? 'border-gray-200' : 'border-[#2a2a2a]'
-        }`}>
+      <div className="space-y-4">
+        <SubTitle themeStyle={themeStyle}>画布操作</SubTitle>
+        <div className={`rounded-lg border overflow-hidden ${isGold ? 'border-[#2a2a2a]' : 'border-gray-200'}`}>
           <ShortcutRow shortcut="Space + 拖动" description="抓手工具平移画布" themeStyle={themeStyle} />
           <ShortcutRow shortcut="滚轮" description="缩放画布" themeStyle={themeStyle} />
           <ShortcutRow shortcut="Alt + 点击" description="标记图片为参考图" themeStyle={themeStyle} />
-          <ShortcutRow shortcut="Ctrl + 点击" description="选择参考图片（融合模式） / 多选图片" themeStyle={themeStyle} />
+          <ShortcutRow shortcut="Ctrl + 点击" description="多选图片" themeStyle={themeStyle} />
           <ShortcutRow shortcut="Ctrl + Z" description="撤回操作（无限步数）" themeStyle={themeStyle} />
           <ShortcutRow shortcut="Ctrl + D" description="复制选中图片" themeStyle={themeStyle} />
           <ShortcutRow shortcut="ESC" description="退出编辑模式 / 取消选择 / 关闭弹出面板" themeStyle={themeStyle} />
           <ShortcutRow shortcut="Delete / Backspace" description="删除选中图片" themeStyle={themeStyle} />
         </div>
-      </SubSection>
 
-      <SubSection title="编辑模式" themeStyle={themeStyle}>
-        <div className={`rounded-lg border overflow-hidden ${
-          themeStyle === 'monochrome' ? 'border-gray-200' : 'border-[#2a2a2a]'
-        }`}>
+        <SubTitle themeStyle={themeStyle}>编辑模式</SubTitle>
+        <div className={`rounded-lg border overflow-hidden ${isGold ? 'border-[#2a2a2a]' : 'border-gray-200'}`}>
           <ShortcutRow shortcut="ESC" description="退出当前编辑模式" themeStyle={themeStyle} />
           <ShortcutRow shortcut="[ / ]" description="调整画笔大小" themeStyle={themeStyle} />
           <ShortcutRow shortcut="Enter" description="确认当前操作" themeStyle={themeStyle} />
         </div>
-      </SubSection>
 
-      <SubSection title="面板操作" themeStyle={themeStyle}>
-        <div className={`rounded-lg border overflow-hidden ${
-          themeStyle === 'monochrome' ? 'border-gray-200' : 'border-[#2a2a2a]'
-        }`}>
+        <SubTitle themeStyle={themeStyle}>面板操作</SubTitle>
+        <div className={`rounded-lg border overflow-hidden ${isGold ? 'border-[#2a2a2a]' : 'border-gray-200'}`}>
           <ShortcutRow shortcut="Ctrl + G" description="切换生成面板" themeStyle={themeStyle} />
           <ShortcutRow shortcut="Ctrl + Shift + C" description="切换聊天面板" themeStyle={themeStyle} />
         </div>
-      </SubSection>
+      </div>
     </div>
   );
 }
 
 function TipsSection({ themeStyle }: { themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
   return (
     <div>
       <SectionTitle themeStyle={themeStyle}>
-        <Lightbulb size={18} className={themeStyle === 'monochrome' ? 'text-yellow-500' : 'text-[#d4af37]'} />
-        使用技巧
+        <Lightbulb size={18} className={isGold ? 'text-[#d4af37]' : 'text-yellow-500'} />
+        <span className={`text-sm font-bold ${isGold ? 'text-white' : 'text-gray-900'}`}>使用技巧</span>
       </SectionTitle>
 
-      <div className="space-y-3">
+      <div className="space-y-2">
         {[
-          {
-            title: '提示词越具体，效果越好',
-            desc: '描述画面主体、风格、光影、色调等细节。例如：「一只金色的凤凰在暗夜中展翅，周围飘散着火花，电影级光影，8K超高清」比「一只凤凰」效果好得多。',
-            icon: <Pen size={14} />,
-          },
-          {
-            title: '善用提示词优化器',
-            desc: '在聊天面板中使用提示词优化功能，输入简短描述后选择"增强"模式，AI 会自动补充细节和构图要素，大幅提升出图质量。',
-            icon: <Wand2 size={14} />,
-          },
-          {
-            title: '提示词库一键插入',
-            desc: '点击左上角工具栏的灵感提示词库按钮，从资源库中一键插入专业提示词到创意描述，省去手动输入的麻烦。',
-            icon: <Sparkles size={14} />,
-          },
-          {
-            title: 'Alt+点击快速标记参考图',
-            desc: '在画布上按住 Alt 键点击图片，即可标记为参考图。参考图会自动添加到创意描述文本框，生成时自动在提示词前添加 [参考图R1] 等标记，用文字描述控制参考图的使用方式。',
-            icon: <ImagePlus size={14} />,
-          },
-          {
-            title: 'Ctrl+点击参考融合',
-            desc: '开启参考融合模式后，Ctrl+点击选择多张图片，为每张图输入关键词描述，融合生成全新的创意图片。适合混搭风格、组合元素。',
-            icon: <GitMerge size={14} />,
-          },
-          {
-            title: 'PSD 导出选择专业模式',
-            desc: '专业模式使用智能背景移除 + 连通域分析，能保证元素完整性，比基础模式提供更专业的分层效果，适合大多数场景。',
-            icon: <Layers size={14} />,
-          },
-          {
-            title: '图生图6大类别精准控制',
-            desc: '选中图片后点击图生图按钮，6大参考类别（风格/构图/场景/色彩/主体/细节）每类独立强度滑块，精确控制生成效果。也可用"当前图片描述"一键填充原始描述。',
-            icon: <ImageIcon size={14} />,
-          },
-          {
-            title: 'SVG 矢量化导出',
-            desc: '选中图片后点击“矢量化”按钮，调用管理员配置的矢量模型API转换为 SVG 矢量格式，支持快速/专业/工作室三种模式。',
-            icon: <Shapes size={14} />,
-          },
-          {
-            title: '画布支持自由排版与撤回',
-            desc: '所有生成的图片可以自由拖拽、缩放、排列。支持框选多图批量操作，Ctrl+Z 无限步数撤回，适合对比和拼合方案展示。',
-            icon: <Move size={14} />,
-          },
-        ].map((tip) => (
-          <div key={tip.title} className={`p-4 rounded-xl border ${
-            themeStyle === 'monochrome'
-              ? 'bg-white border-gray-200'
-              : 'bg-[#1a1a1a] border-[#2a2a2a]'
-          }`}>
+          { icon: <Pen size={14} />, title: '提示词越具体，效果越好', desc: '描述画面主体、风格、光影、色调等细节。例如："一只金色的凤凰在暗夜中展翅，周围飘散着火花，电影级光影，8K超高清"比"一只凤凰"效果好得多。' },
+          { icon: <Wand2 size={14} />, title: '善用提示词优化器', desc: '在聊天面板中使用提示词优化功能，输入简短描述后选择"增强"模式，AI 会自动补充细节和构图要素。' },
+          { icon: <ImagePlus size={14} />, title: '图生图精准控制', desc: '6大参考类别（风格/构图/场景/色彩/主体/细节）每类独立强度滑块，精确控制生成效果。用"当前图片描述"一键填充原始描述。' },
+          { icon: <ZoomIn size={14} />, title: '放大选好策略', desc: '有 GPU 环境下 upscayl 分块放大效果最佳（像素级忠实），无 GPU 时自动使用 AI 整图放大。' },
+          { icon: <Layers size={14} />, title: 'PSD 导出选专业模式', desc: '专业模式使用智能背景移除 + 连通域分析，保证元素完整性，比基础模式提供更专业的分层效果。' },
+          { icon: <FileBox size={14} />, title: '.wujie 文件可浏览器打开', desc: '导出的项目文件是精美的 HTML 网页图册，可直接在浏览器中浏览，也可以重新导入恢复项目。' },
+          { icon: <Move size={14} />, title: '画布自由排版与撤回', desc: '所有图片可自由拖拽、缩放、排列。Ctrl+Z 无限步数撤回，适合对比和拼合方案展示。' },
+        ].map(tip => (
+          <Card key={tip.title} themeStyle={themeStyle}>
             <div className="flex items-center gap-2 mb-2">
-              <div className={`w-6 h-6 rounded flex items-center justify-center ${
-                themeStyle === 'monochrome'
-                  ? 'text-yellow-600 bg-yellow-100'
-                  : 'text-[#d4af37] bg-[#d4af37]/15'
-              }`}>{tip.icon}</div>
-              <span className={`text-xs font-semibold ${
-                themeStyle === 'monochrome' ? 'text-gray-800' : 'text-[#e0e0e0]'
-              }`}>{tip.title}</span>
+              <div className={`w-6 h-6 rounded flex items-center justify-center ${isGold ? 'text-[#d4af37] bg-[#d4af37]/15' : 'text-yellow-600 bg-yellow-100'}`}>{tip.icon}</div>
+              <span className={`text-xs font-semibold ${isGold ? 'text-[#e0e0e0]' : 'text-gray-800'}`}>{tip.title}</span>
             </div>
-            <p className={`text-xs leading-relaxed ${
-              themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#888]'
-            }`}>{tip.desc}</p>
-          </div>
+            <Text themeStyle={themeStyle} muted>{tip.desc}</Text>
+          </Card>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function ChangelogSection({ themeStyle }: { themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
+  return (
+    <div>
+      <SectionTitle themeStyle={themeStyle}>
+        <BookOpen size={18} className={isGold ? 'text-[#d4af37]' : 'text-yellow-500'} />
+        <span className={`text-sm font-bold ${isGold ? 'text-white' : 'text-gray-900'}`}>更新日志</span>
+      </SectionTitle>
+
+      <div className="space-y-4">
+        {/* v2.7.0 */}
+        <CardHighlight themeStyle={themeStyle}>
+          <div className="flex items-center gap-2 mb-3">
+            <span className={`px-2 py-0.5 rounded text-xs font-bold ${isGold ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'bg-yellow-100 text-yellow-700'}`}>v2.7.0</span>
+            <span className={`text-xs ${isGold ? 'text-[#888]' : 'text-gray-500'}`}>当前版本</span>
+          </div>
+          <div className="space-y-2">
+            {[
+              { type: 'feat', text: '客户端数据服务器同步 — 项目数据自动同步到数据库，重部署不丢失' },
+              { type: 'feat', text: '.wujie 文件改为 HTML 格式导出 — 黑金配色网页图册，浏览器直接打开' },
+              { type: 'feat', text: '图生图功能全面升级 — 6大参考类别 + 独立强度滑块 + 视觉描述增强' },
+              { type: 'feat', text: '分块放大(Tile Upscale) — upscayl Real-ESRGAN 分块放大 + AI 兜底' },
+              { type: 'fix', text: '图生图参考图 URL 可访问性修复 — 自动转换为公开 URL' },
+              { type: 'fix', text: 'z-index 层级规范 — 重构全局 z-index 防止弹窗遮挡' },
+              { type: 'fix', text: '组数据持久化修复 — beforeunload/退出登录/自动保存均正确同步' },
+            ].map((item, idx) => (
+              <div key={idx} className="flex items-start gap-2">
+                <span className={`px-1.5 py-0.5 rounded text-xs font-bold flex-shrink-0 mt-0.5 ${
+                  item.type === 'feat'
+                    ? (isGold ? 'bg-green-500/15 text-green-400' : 'bg-green-100 text-green-700')
+                    : (isGold ? 'bg-blue-500/15 text-blue-400' : 'bg-blue-100 text-blue-700')
+                }`}>{item.type === 'feat' ? '功能' : '修复'}</span>
+                <span className={`text-xs ${isGold ? 'text-[#999]' : 'text-gray-600'}`}>{item.text}</span>
+              </div>
+            ))}
+          </div>
+        </CardHighlight>
+
+        {/* v2.6.0 */}
+        <Card themeStyle={themeStyle}>
+          <div className="flex items-center gap-2 mb-3">
+            <span className={`px-2 py-0.5 rounded text-xs font-bold ${isGold ? 'bg-[#2a2a2a] text-[#888]' : 'bg-gray-200 text-gray-600'}`}>v2.6.0</span>
+          </div>
+          <div className="space-y-2">
+            {[
+              { type: 'feat', text: '数据库持久化存储 — PostgreSQL 存储，读取先数据库后文件系统，写入双写' },
+              { type: 'feat', text: 'API 兼容性修复 — fetchWithV1Retry 自动处理 /v1 兼容' },
+              { type: 'feat', text: '管理员系统增强 — API 用量分析和余额显示' },
+              { type: 'fix', text: '登录界面不显示问题修复 — authChecked 状态和认证门控' },
+              { type: 'fix', text: '上传/生成图片后视图自动居中' },
+            ].map((item, idx) => (
+              <div key={idx} className="flex items-start gap-2">
+                <span className={`px-1.5 py-0.5 rounded text-xs font-bold flex-shrink-0 mt-0.5 ${
+                  item.type === 'feat'
+                    ? (isGold ? 'bg-green-500/15 text-green-400' : 'bg-green-100 text-green-700')
+                    : (isGold ? 'bg-blue-500/15 text-blue-400' : 'bg-blue-100 text-blue-700')
+                }`}>{item.type === 'feat' ? '功能' : '修复'}</span>
+                <span className={`text-xs ${isGold ? 'text-[#999]' : 'text-gray-600'}`}>{item.text}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* v2.5.1 */}
+        <Card themeStyle={themeStyle}>
+          <div className="flex items-center gap-2 mb-3">
+            <span className={`px-2 py-0.5 rounded text-xs font-bold ${isGold ? 'bg-[#2a2a2a] text-[#888]' : 'bg-gray-200 text-gray-600'}`}>v2.5.1</span>
+          </div>
+          <div className="space-y-2">
+            {[
+              { type: 'fix', text: '擦除/蒙版功能修复 — AI 生成 API + 蒙版合成策略' },
+              { type: 'fix', text: '蒙版检测核心 Bug — 改用 RGB 亮度阈值判断' },
+              { type: 'fix', text: '接口地址不再自动追加 /v1' },
+            ].map((item, idx) => (
+              <div key={idx} className="flex items-start gap-2">
+                <span className={`px-1.5 py-0.5 rounded text-xs font-bold flex-shrink-0 mt-0.5 ${
+                  isGold ? 'bg-blue-500/15 text-blue-400' : 'bg-blue-100 text-blue-700'
+                }`}>修复</span>
+                <span className={`text-xs ${isGold ? 'text-[#999]' : 'text-gray-600'}`}>{item.text}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* v2.5.0 */}
+        <Card themeStyle={themeStyle}>
+          <div className="flex items-center gap-2 mb-3">
+            <span className={`px-2 py-0.5 rounded text-xs font-bold ${isGold ? 'bg-[#2a2a2a] text-[#888]' : 'bg-gray-200 text-gray-600'}`}>v2.5.0</span>
+          </div>
+          <div className="space-y-2">
+            {[
+              { type: 'feat', text: '参考图与图生图6大类别统一' },
+              { type: 'feat', text: '图片工具栏全面升级' },
+              { type: 'feat', text: '管理员系统增强 — 通用模型类型、API用量分析' },
+              { type: 'feat', text: '服务器端API密钥管理' },
+              { type: 'fix', text: '所有编辑操作（除扩展和裁切）保持原图比例' },
+            ].map((item, idx) => (
+              <div key={idx} className="flex items-start gap-2">
+                <span className={`px-1.5 py-0.5 rounded text-xs font-bold flex-shrink-0 mt-0.5 ${
+                  item.type === 'feat'
+                    ? (isGold ? 'bg-green-500/15 text-green-400' : 'bg-green-100 text-green-700')
+                    : (isGold ? 'bg-blue-500/15 text-blue-400' : 'bg-blue-100 text-blue-700')
+                }`}>{item.type === 'feat' ? '功能' : '修复'}</span>
+                <span className={`text-xs ${isGold ? 'text-[#999]' : 'text-gray-600'}`}>{item.text}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
       </div>
     </div>
   );
@@ -1261,115 +772,75 @@ export function HelpGuide({ isOpen, onClose, themeStyle = 'gold' }: HelpGuidePro
 
   if (!isOpen) return null;
 
-  const toggleSection = (id: SectionId) => {
-    setActiveSection(id);
-  };
-
-  const renderSection = () => {
-    switch (activeSection) {
-      case 'canvas': return <CanvasSection themeStyle={themeStyle} />;
-      case 'generate': return <GenerateSection themeStyle={themeStyle} />;
-      case 'chat': return <ChatSection themeStyle={themeStyle} />;
-      case 'omp': return <OmpSection themeStyle={themeStyle} />;
-      case 'fusion': return <FusionSection themeStyle={themeStyle} />;
-      case 'psd-editor': return <PsdEditorSection themeStyle={themeStyle} />;
-      case 'shortcuts': return <ShortcutsSection themeStyle={themeStyle} />;
-      case 'tips': return <TipsSection themeStyle={themeStyle} />;
-      case 'changelog': return <ChangelogSection themeStyle={themeStyle} />;
-    }
-  };
+  const isGold = themeStyle !== 'monochrome';
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
 
       {/* Modal */}
-      <div className={`relative w-[90vw] max-w-[960px] h-[85vh] rounded-2xl border shadow-2xl flex overflow-hidden ${
-        themeStyle === 'monochrome'
-          ? 'bg-white border-gray-200'
-          : 'bg-[#0a0a0a] border-[#d4af37]/20'
+      <div className={`relative w-[92vw] max-w-[1000px] h-[88vh] rounded-2xl border shadow-2xl flex overflow-hidden ${
+        isGold ? 'bg-[#0a0a0a] border-[#d4af37]/20' : 'bg-white border-gray-200'
       }`}>
-        {/* Left Sidebar - Navigation */}
-        <div className={`w-[200px] flex-shrink-0 border-r flex flex-col ${
-          themeStyle === 'monochrome'
-            ? 'bg-gray-50 border-gray-200'
-            : 'bg-[#0f0f0f] border-[#1a1a1a]'
+        {/* Left Sidebar */}
+        <div className={`w-[180px] flex-shrink-0 border-r flex flex-col ${
+          isGold ? 'bg-[#0d0d0d] border-[#1a1a1a]' : 'bg-gray-50 border-gray-200'
         }`}>
           {/* Header */}
-          <div className={`px-4 py-4 border-b ${
-            themeStyle === 'monochrome' ? 'border-gray-200' : 'border-[#1a1a1a]'
-          }`}>
+          <div className={`px-4 py-4 border-b ${isGold ? 'border-[#1a1a1a]' : 'border-gray-200'}`}>
             <div className="flex items-center gap-2">
-              <BookOpen size={18} className={themeStyle === 'monochrome' ? 'text-yellow-600' : 'text-[#d4af37]'} />
+              <BookOpen size={16} className={isGold ? 'text-[#d4af37]' : 'text-yellow-600'} />
               <div>
-                <h2 className={`text-sm font-bold ${
-                  themeStyle === 'monochrome' ? 'text-gray-900' : 'text-white'
-                }`}>使用指南</h2>
-                <span className={`text-xs ${
-                  themeStyle === 'monochrome' ? 'text-gray-400' : 'text-[#666]'
-                }`}>使用指南</span>
+                <h2 className={`text-sm font-bold ${isGold ? 'text-white' : 'text-gray-900'}`}>使用指南</h2>
+                <span className={`text-xs ${isGold ? 'text-[#555]' : 'text-gray-400'}`}>{APP_VERSION_LABEL}</span>
               </div>
             </div>
           </div>
 
-          {/* Nav Items */}
-          <nav className="flex-1 py-2 px-2 space-y-0.5">
+          {/* Nav */}
+          <nav className="flex-1 py-2 px-2 space-y-0.5 overflow-y-auto">
             {SECTIONS.map((section) => (
               <button
                 key={section.id}
-                onClick={() => toggleSection(section.id)}
-                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-all text-xs ${
+                onClick={() => setActiveSection(section.id)}
+                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all text-xs ${
                   activeSection === section.id
-                    ? themeStyle === 'monochrome'
-                      ? 'bg-yellow-100 text-yellow-800 font-semibold'
-                      : 'bg-[#d4af37]/15 text-[#d4af37] font-semibold'
-                    : themeStyle === 'monochrome'
-                      ? 'text-gray-600 hover:bg-gray-100'
-                      : 'text-[#888] hover:bg-[#1a1a1a] hover:text-white'
+                    ? isGold
+                      ? 'bg-[#d4af37]/15 text-[#d4af37] font-semibold'
+                      : 'bg-yellow-100 text-yellow-800 font-semibold'
+                    : isGold
+                      ? 'text-[#888] hover:bg-[#1a1a1a] hover:text-white'
+                      : 'text-gray-600 hover:bg-gray-100'
                 }`}
               >
-                <span className={activeSection === section.id && themeStyle !== 'monochrome' ? 'text-[#d4af37]' : ''}>
+                <span className={activeSection === section.id && isGold ? 'text-[#d4af37]' : ''}>
                   {section.icon}
                 </span>
-                <div className="flex flex-col">
-                  <span>{section.title}</span>
-                </div>
+                <span>{section.title}</span>
               </button>
             ))}
           </nav>
 
-          {/* Version */}
-          <div className={`px-4 py-3 border-t text-center ${
-            themeStyle === 'monochrome' ? 'border-gray-200' : 'border-[#1a1a1a]'
-          }`}>
-            <span className={`text-xs ${
-              themeStyle === 'monochrome' ? 'text-gray-400' : 'text-[#555]'
-            }`}>{APP_VERSION_LABEL}</span>
+          {/* Footer */}
+          <div className={`px-4 py-3 border-t text-center ${isGold ? 'border-[#1a1a1a]' : 'border-gray-200'}`}>
+            <span className={`text-xs ${isGold ? 'text-[#555]' : 'text-gray-400'}`}>{APP_VERSION_LABEL}</span>
           </div>
         </div>
 
         {/* Right Content */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Content Header */}
-          <div className={`px-6 py-3 border-b flex items-center justify-between flex-shrink-0 ${
-            themeStyle === 'monochrome' ? 'border-gray-200' : 'border-[#1a1a1a]'
-          }`}>
+          <div className={`px-6 py-3 border-b flex items-center justify-between flex-shrink-0 ${isGold ? 'border-[#1a1a1a]' : 'border-gray-200'}`}>
             <div className="flex items-center gap-2">
-              <Info size={14} className={themeStyle === 'monochrome' ? 'text-yellow-500' : 'text-[#d4af37]'} />
-              <span className={`text-sm font-semibold ${
-                themeStyle === 'monochrome' ? 'text-gray-900' : 'text-white'
-              }`}>
+              <Info size={14} className={isGold ? 'text-[#d4af37]' : 'text-yellow-500'} />
+              <span className={`text-sm font-semibold ${isGold ? 'text-white' : 'text-gray-900'}`}>
                 {SECTIONS.find(s => s.id === activeSection)?.title}
               </span>
             </div>
             <button
               onClick={onClose}
-              className={`p-1.5 rounded-lg transition-all ${
-                themeStyle === 'monochrome'
-                  ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-                  : 'text-[#666] hover:text-white hover:bg-[#1a1a1a]'
-              }`}
+              className={`p-1.5 rounded-lg transition-all ${isGold ? 'text-[#666] hover:text-white hover:bg-[#1a1a1a]' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
             >
               <X size={16} />
             </button>
@@ -1378,9 +849,23 @@ export function HelpGuide({ isOpen, onClose, themeStyle = 'gold' }: HelpGuidePro
           {/* Scrollable Content */}
           <div className="flex-1 overflow-y-auto px-6 py-5" style={{
             scrollbarWidth: 'thin',
-            scrollbarColor: themeStyle === 'monochrome' ? '#d1d5db transparent' : '#333 transparent'
+            scrollbarColor: isGold ? '#333 transparent' : '#d1d5db transparent'
           }}>
-            {renderSection()}
+            {(() => {
+              switch (activeSection) {
+                case 'canvas': return <CanvasSection themeStyle={themeStyle} />;
+                case 'generate': return <GenerateSection themeStyle={themeStyle} />;
+                case 'img2img': return <Img2ImgSection themeStyle={themeStyle} />;
+                case 'chat': return <ChatSection themeStyle={themeStyle} />;
+                case 'tools': return <ToolsSection themeStyle={themeStyle} />;
+                case 'layer-graph': return <LayerGraphSection themeStyle={themeStyle} />;
+                case 'project': return <ProjectSection themeStyle={themeStyle} />;
+                case 'admin': return <AdminSection themeStyle={themeStyle} />;
+                case 'shortcuts': return <ShortcutsSection themeStyle={themeStyle} />;
+                case 'tips': return <TipsSection themeStyle={themeStyle} />;
+                case 'changelog': return <ChangelogSection themeStyle={themeStyle} />;
+              }
+            })()}
           </div>
         </div>
       </div>
