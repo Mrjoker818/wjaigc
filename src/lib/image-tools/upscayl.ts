@@ -305,8 +305,10 @@ export async function performUpscale(
     };
   }
 
-  // 确定模型
-  const modelName = requestedModel || availability.models[0] || 'realesrgan-x4plus';
+  // 确定模型：验证请求的模型是否可用，不可用则回退到第一个可用模型
+  const modelName = (requestedModel && availability.models.includes(requestedModel))
+    ? requestedModel
+    : availability.models[0] || 'realesrgan-x4plus';
 
   ensureOutputDirs();
 

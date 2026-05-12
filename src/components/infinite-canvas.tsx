@@ -5917,7 +5917,7 @@ export function InfiniteCanvas({
         )}
 
         {/* ====== IMAGE ACTION TOOLBAR (follows selected image) ====== */}
-        {selectedIds.size === 1 && editMode === 'none' && activeTool === 'none' && !showDownloadPopup && (() => {
+        {selectedIds.size === 1 && editMode === 'none' && activeTool === 'none' && !showDownloadPopup && !showUpscaleDialog && !showImageEditPanel && (() => {
           const img = selectedImageData;
           if (!img) return null;
           const pos = getToolbarPosition();

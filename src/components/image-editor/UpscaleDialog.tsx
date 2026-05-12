@@ -2,8 +2,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { X, Loader2, ZoomIn } from 'lucide-react';
-import type { UpscaleModel } from '@/types/image-tools';
-import { UPSCALE_MODELS } from '@/types/image-tools';
 
 export interface UpscaleDialogProps {
   imageUrl: string;
@@ -12,43 +10,64 @@ export interface UpscaleDialogProps {
 }
 
 export default function UpscaleDialog({ imageUrl, onClose, onSuccess }: UpscaleDialogProps) {
-  const [model, setModel] = useState<UpscaleModel>('remacri');
+  const [model, setModel] = useState('');
   const [scale, setScale] = useState<2 | 4>(2);
   const [outputFormat, setOutputFormat] = useState<'png' | 'jpg' | 'webp'>('png');
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [healthStatus, setHealthStatus] = useState<{
-    upscaylAvailable: boolean;
-  } | null>(null);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [serviceReady, setServiceReady] = useState(false);
 
   // 检测服务状态并自动启动
   useEffect(() => {
-    fetch('/api/image/health')
-      .then(r => r.json())
-      .then(async (data) => {
-        const upscaylAvailable = data.upscayl?.available ?? false;
+    let cancelled = false;
+    (async () => {
+      try {
+        const healthRes = await fetch('/api/image/health');
+        const health = await healthRes.json();
+        let upscaylAvailable = health.upscayl?.available ?? false;
+
         if (!upscaylAvailable) {
           // 尝试自动启动服务
           try {
             await fetch('/api/image/start-services', { method: 'POST' });
             // 重新检测
             const recheck = await fetch('/api/image/health').then(r => r.json());
-            setHealthStatus({
-              upscaylAvailable: recheck.upscayl?.available ?? false,
-            });
+            upscaylAvailable = recheck.upscayl?.available ?? false;
+            if (!cancelled && upscaylAvailable) {
+              setAvailableModels(recheck.upscayl?.models || []);
+            }
           } catch {
-            setHealthStatus({ upscaylAvailable: false });
+            // 启动失败，忽略
           }
         } else {
-          setHealthStatus({ upscaylAvailable: true });
+          if (!cancelled) {
+            setAvailableModels(health.upscayl?.models || []);
+          }
         }
-      })
-      .catch(() => {
-        setHealthStatus({ upscaylAvailable: false });
-      });
+
+        if (!cancelled) {
+          setServiceReady(upscaylAvailable);
+          // 默认选择第一个可用模型
+          if (upscaylAvailable && health.upscayl?.models?.length > 0 && !model) {
+            setModel(health.upscayl.models[0]);
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          setServiceReady(false);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleUpscale = useCallback(async () => {
+    if (!model) {
+      setError('请选择放大模型');
+      return;
+    }
     setIsProcessing(true);
     setError(null);
 
@@ -78,9 +97,45 @@ export default function UpscaleDialog({ imageUrl, onClose, onSuccess }: UpscaleD
     }
   }, [imageUrl, model, scale, outputFormat, onSuccess]);
 
+  // 获取模型的友好名称
+  const getModelLabel = (id: string): string => {
+    const labels: Record<string, string> = {
+      'realesrgan-x4plus': 'RealESRGAN x4+ (写实高清)',
+      'realesrgan-x4fast': 'RealESRGAN x4 Fast (快速)',
+      'realesrgan-x4plus-anime': 'RealESRGAN x4+ Anime (动漫)',
+      'remacri': 'Remacri (通用)',
+      'ultramix-balanced': 'UltraMix Balanced (均衡)',
+      'ultrasharp': 'UltraSharp (锐利)',
+      '4x-UltraSharp': '4x UltraSharp (超清)',
+    };
+    return labels[id] || id;
+  };
+
+  // 点击蒙层关闭
+  const handleOverlayClick = useCallback((e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) {
+      onClose();
+    }
+  }, [onClose]);
+
+  // ESC 关闭
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   return (
-    <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-[#1a1a1a] border border-[#d4af37]/30 rounded-xl shadow-2xl w-[480px] max-h-[80vh] overflow-hidden">
+    <div
+      className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={handleOverlayClick}
+    >
+      <div
+        className="bg-[#1a1a1a] border border-[#d4af37]/30 rounded-xl shadow-2xl w-[480px] max-h-[80vh] overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
         {/* 标题栏 */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#d4af37]/20">
           <div className="flex items-center gap-2">
@@ -98,7 +153,7 @@ export default function UpscaleDialog({ imageUrl, onClose, onSuccess }: UpscaleD
         {/* 内容区 */}
         <div className="px-6 py-5 space-y-5">
           {/* 服务状态 */}
-          {healthStatus && !healthStatus.upscaylAvailable && (
+          {!serviceReady && (
             <div className="bg-yellow-900/30 border border-yellow-600/40 rounded-lg p-3 text-sm text-yellow-300">
               本地无损放大引擎不可用，请检查 upscayl-node、Vulkan/Mesa 驱动或 upscayl-models 模型目录。
             </div>
@@ -107,15 +162,21 @@ export default function UpscaleDialog({ imageUrl, onClose, onSuccess }: UpscaleD
           {/* 模型选择 */}
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">放大模型</label>
-            <select
-              value={model}
-              onChange={e => setModel(e.target.value as UpscaleModel)}
-              className="w-full bg-[#2a2a2a] border border-[#d4af37]/20 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#d4af37]/40"
-            >
-              {UPSCALE_MODELS.map(m => (
-                <option key={m.id} value={m.id}>{m.label}</option>
-              ))}
-            </select>
+            {availableModels.length > 0 ? (
+              <select
+                value={model}
+                onChange={e => setModel(e.target.value)}
+                className="w-full bg-[#2a2a2a] border border-[#d4af37]/20 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#d4af37]/40"
+              >
+                {availableModels.map(m => (
+                  <option key={m} value={m}>{getModelLabel(m)}</option>
+                ))}
+              </select>
+            ) : (
+              <div className="w-full bg-[#2a2a2a] border border-[#d4af37]/20 text-gray-500 rounded-lg px-3 py-2 text-sm">
+                {serviceReady ? '正在加载模型...' : '无可用模型'}
+              </div>
+            )}
           </div>
 
           {/* 放大倍率 */}
@@ -176,7 +237,7 @@ export default function UpscaleDialog({ imageUrl, onClose, onSuccess }: UpscaleD
           </button>
           <button
             onClick={handleUpscale}
-            disabled={isProcessing || (healthStatus !== null && !healthStatus.upscaylAvailable)}
+            disabled={isProcessing || !serviceReady || !model}
             className="px-6 py-2 bg-[#d4af37] text-black text-sm font-semibold rounded-lg hover:bg-[#e5c349] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             {isProcessing ? (
