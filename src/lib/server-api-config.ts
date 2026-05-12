@@ -500,13 +500,14 @@ export async function findProviderForModel(modelId: string, modelType?: ApiKind)
   return enabled.find(provider => !modelType || provider.modelType === modelType || provider.modelType === 'universal') || null;
 }
 
-/** 根据功能类型查找对应的 API 提供商（矢量化/分层/3D等） */
-export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3d' | 'imageEdit'): Promise<ApiProvider | null> {
+/** 根据功能类型查找对应的 API 提供商（矢量化/分层/3D/聊天等） */
+export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3d' | 'imageEdit' | 'chat'): Promise<ApiProvider | null> {
   const kindMap: Record<string, ApiKind> = {
     vectorize: 'vectorize',
     layer: 'layer',
     '3d': '3d',
     imageEdit: 'image',
+    chat: 'chat',
   };
   const kind = kindMap[feature];
   if (!kind) return null;

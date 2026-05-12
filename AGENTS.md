@@ -158,8 +158,11 @@ src/
   - 导入 .wujie 工程文件
   - 导出 SVG 文件
 - **矢量化 API** (api/design/vectorize):
-  - 支持配置 PY_VECTORIZE_ENDPOINT 环境变量对接 VTracer/StarVector/SAM2
-  - 默认 safe-svg-wrapper 模式（SVG容器包裹原图）
+  - 多策略自动降级: 管理员矢量模型API → LLM视觉模型fallback → 本地vtracer → raster-svg-wrapper兜底
+  - 管理员矢量模型支持: chat/completions(SSE流解析) + multipart form + JSON + OpenAI images格式
+  - LLM fallback: 当矢量模型API失败时，自动使用管理员配置的聊天模型(Gemini/GPT-4o等)生成SVG
+  - 支持 SSE 流式响应解析 (parseSSEContent)，兼容 apimart.ai 等代理的流式返回
+  - 支持配置 PY_VECTORIZE_ENDPOINT 环境变量对接 VTracer/StarVector
   - POST 参数: imageUrl / layerId / mode
 
 ### 6. PSD 导出 (lib/psd-export.ts)
@@ -400,10 +403,12 @@ PY_VECTORIZE_ENDPOINT=http://localhost:8000/vectorize
 - 下载图片比例与生成结果一致
 
 **管理员系统增强**
-- 新增 API 类型：矢量模型、分层模型、3D模型，自动适配到对应功能
-- 矢量化功能使用管理员配置的矢量模型 API
-- 编辑元素功能使用管理员配置的分层模型 API（`/api/segment-elements`）
-- 转3D功能使用管理员配置的3D模型 API
+- API 类型精简为5种：图像模型、LLM模型、3D模型、矢量模型、图片分层模型
+- 图像/LLM/3D模型：支持自动识别模型，管理员选择后对接功能
+- 矢量模型：自动匹配 vectorize/vector/svg/tracer 模型，对接矢量化工具和导出SVG
+- 图片分层模型：自动匹配 qwen-image-layered/layer/segment 模型，对接编辑元素和下载PSD
+- 旧类型 imageEdit/universal 自动映射为 image 类型保持兼容
+- `findProviderForFeature` 新增 'chat' 支持，供矢量化 fallback 使用
 - 新增 API 用量分析和余额显示（`/api/admin/api-balance`）
 - 管理员添加 API 后自动识别模型列表默认不选择，管理员手动单选/多选
 - 新增全选/取消全选按钮
