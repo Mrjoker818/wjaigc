@@ -186,7 +186,7 @@ export async function POST(request: NextRequest) {
       fetchOptions.body = JSON.stringify(config.body);
     }
 
-    let response = await fetch(config.endpoint, fetchOptions);
+    const response = await fetch(config.endpoint, fetchOptions);
     console.log('[poll-3d-task] Response status:', response.status);
 
     if (!response.ok) {

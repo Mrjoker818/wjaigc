@@ -12,18 +12,24 @@ interface AdminSystemProps {
   onClose: () => void;
 }
 
-type ApiKind = 'universal' | 'image' | 'chat' | '3d' | 'imageEdit' | 'vectorize' | 'layer';
+type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer';
 type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'imageEdit' | 'vectorize' | 'layer';
 type AdminProvider = ApiProvider & { apiKeyPreview?: string };
 
 const apiKindLabels: Record<ApiKind, string> = {
-  universal: '通用模型',
   image: '图像模型',
   chat: 'LLM 模型',
   '3d': '3D 模型',
-  imageEdit: '图像处理模型',
   vectorize: '矢量模型',
-  layer: '分层模型',
+  layer: '图片分层模型',
+};
+
+const apiKindDescriptions: Record<ApiKind, string> = {
+  image: '支持自动识别模型，管理员选择后对接到图像生成功能',
+  chat: '支持自动识别模型，管理员选择后对接到AI聊天功能',
+  '3d': '支持自动识别模型，管理员选择后对接到一键转3D功能',
+  vectorize: '添加API后系统自动识别 vectorize 模型，对接到矢量化工具和导出SVG',
+  layer: '添加API后系统自动识别 qwen-image-layered 模型，对接到编辑元素和下载PSD',
 };
 
 const userPermissionLabels: Record<UserPermissionKey, string> = {
@@ -209,7 +215,31 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
       const models = data.models || [];
       setDiscoveredModels(models);
       setModelSearchQuery('');
-      // 默认不选择任何模型，管理员手动选择
+
+      // 矢量模型和分层模型：自动匹配特定模型
+      if (apiKind === 'vectorize') {
+        const vectorizeModels = models.filter((m: ModelInfo) => {
+          const id = m.id.toLowerCase();
+          return id.includes('vector') || id.includes('vectorize') || id.includes('svg') || id.includes('tracer') || id.includes('starvector');
+        });
+        if (vectorizeModels.length > 0) {
+          setSelectedModels(vectorizeModels.map((m: ModelInfo) => m.id));
+        } else if (models.length > 0) {
+          // 如果没找到特定模型，选择所有模型让管理员挑选
+          setSelectedModels([]);
+        }
+      } else if (apiKind === 'layer') {
+        const layerModels = models.filter((m: ModelInfo) => {
+          const id = m.id.toLowerCase();
+          return id.includes('layer') || id.includes('segment') || id.includes('qwen-image-layered');
+        });
+        if (layerModels.length > 0) {
+          setSelectedModels(layerModels.map((m: ModelInfo) => m.id));
+        } else if (models.length > 0) {
+          setSelectedModels([]);
+        }
+      }
+      // 图像/LLM/3D模型：默认不选择，管理员手动选择
     } finally {
       setIsDiscovering(false);
     }
@@ -227,7 +257,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
         apiKey: apiKey.trim(),
         modelType: apiKind,
         selectedModels: models,
-        requestStyle: apiKind === 'chat' ? 'chat-completions' : apiKind === 'universal' ? 'auto' : 'images-generations',
+        requestStyle: apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' ? 'chat-completions' : 'images-generations',
         advancedParams: advancedParams.filter(p => p.key.trim()),
       }),
     });
@@ -336,7 +366,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
         body: JSON.stringify({
           baseUrl: apiBaseUrl,
           apiKey: apiKey,
-          requestStyle: apiKind === 'chat' ? 'chat-completions' : apiKind === 'universal' ? 'auto' : 'images-generations',
+          requestStyle: apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' ? 'chat-completions' : 'images-generations',
           advancedParams: advParams,
         }),
       });
@@ -495,13 +525,20 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                 <div className="space-y-3">
                   <div>
                     <label className={labelClass} htmlFor="admin-api-kind">API 类型</label>
-                    <select id="admin-api-kind" className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} value={apiKind} onChange={e => setApiKind(e.target.value as ApiKind)}>
+                    <select id="admin-api-kind" className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} value={apiKind} onChange={e => { setApiKind(e.target.value as ApiKind); setDiscoveredModels([]); setSelectedModels([]); }}>
                     {(Object.keys(apiKindLabels) as ApiKind[]).map(kind => <option key={kind} value={kind}>{apiKindLabels[kind]}</option>)}
                     </select>
+                    <p className={`text-xs mt-1 ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>{apiKindDescriptions[apiKind]}</p>
                   </div>
                   <button onClick={() => void handleDiscoverModels()} disabled={isDiscovering} className={`w-full h-9 rounded-lg text-sm font-semibold ${isGold ? 'bg-[#1a1a1a] text-[#d4af37] border border-[#2a2a2a]' : 'bg-gray-100 text-gray-700 border border-gray-200'}`}>
-                    {isDiscovering ? '识别模型中...' : '自动识别模型'}
+                    {isDiscovering ? '识别模型中...' : (apiKind === 'vectorize' ? '识别矢量化模型' : apiKind === 'layer' ? '识别分层模型' : '自动识别模型')}
                   </button>
+                  {apiKind === 'vectorize' && !isDiscovering && discoveredModels.length === 0 && (
+                    <p className={`text-xs ${isGold ? 'text-[#777]' : 'text-gray-500'}`}>系统将自动匹配名称中包含 vectorize / vector / svg / tracer 的模型</p>
+                  )}
+                  {apiKind === 'layer' && !isDiscovering && discoveredModels.length === 0 && (
+                    <p className={`text-xs ${isGold ? 'text-[#777]' : 'text-gray-500'}`}>系统将自动匹配名称中包含 qwen-image-layered / layer / segment 的模型</p>
+                  )}
                   {discoveredModels.length > 0 && (
                     <div className={`rounded-lg border p-3 ${isGold ? 'bg-[#0d0d0d] border-[#2a2a2a]' : 'bg-white border-gray-200'}`}>
                       {/* 模型搜索框 */}
@@ -669,7 +706,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="text-sm font-semibold">{provider.displayName || provider.name}</p>
-                          <span className={`text-xs px-2 py-0.5 rounded ${isGold ? 'bg-[#222] text-[#aaa]' : 'bg-gray-200 text-gray-600'}`}>{apiKindLabels[provider.modelType as ApiKind] || '通用'}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded ${isGold ? 'bg-[#222] text-[#aaa]' : 'bg-gray-200 text-gray-600'}`}>{apiKindLabels[provider.modelType as ApiKind] || (provider.modelType === 'imageEdit' ? '图像处理' : provider.modelType === 'universal' ? '通用' : provider.modelType)}</span>
                           {provider.isEnabled && (
                             <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/15 text-green-500">启用</span>
                           )}
@@ -685,6 +722,17 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                                 <span key={modelId} className={`text-xs px-2 py-0.5 rounded ${isGold ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'bg-amber-50 text-amber-700'}`}>{getModelDisplayName(modelId)}</span>
                               ))}
                             </div>
+                          </div>
+                        )}
+                        {/* 功能对接提示 */}
+                        {provider.modelType === 'vectorize' && provider.isEnabled && (
+                          <div className={`mt-2 text-xs px-2 py-1 rounded ${isGold ? 'bg-[#d4af37]/10 text-[#d4af37]' : 'bg-amber-50 text-amber-700'}`}>
+                            已对接：矢量化工具 / 导出SVG
+                          </div>
+                        )}
+                        {provider.modelType === 'layer' && provider.isEnabled && (
+                          <div className={`mt-2 text-xs px-2 py-1 rounded ${isGold ? 'bg-[#d4af37]/10 text-[#d4af37]' : 'bg-amber-50 text-amber-700'}`}>
+                            已对接：编辑元素 / 下载PSD
                           </div>
                         )}
                         {/* 余额/用量信息 */}

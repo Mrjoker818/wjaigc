@@ -487,8 +487,8 @@ function visvalingamSimplify(path: Point[], minArea: number): Point[] {
   }
 
   // Iteratively remove the point with smallest area
-  let currentPath = [...path];
-  let currentAreas = [...areas];
+  const currentPath = [...path];
+  const currentAreas = [...areas];
 
   while (currentPath.length > 3) {
     // Find minimum area
@@ -834,6 +834,36 @@ export async function downloadSVG(
   mode: 'fast' | 'pro' | 'studio' = 'pro',
   onProgress?: (stage: string, progress: number) => void
 ): Promise<void> {
+  // Try server-side vectorize API first (uses admin-configured vectorize model for better quality)
+  try {
+    onProgress?.('calling_vector_model', 10);
+    const response = await fetch('/api/design/vectorize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageUrl, mode }),
+    });
+    const data = await response.json();
+    if (data.success && data.svg) {
+      onProgress?.('rendering_preview', 90);
+      const blob = new Blob([data.svg], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `vectorized-${mode}.svg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      onProgress?.('completed', 100);
+      return;
+    }
+    // Server API failed, fall through to client-side
+    console.warn('Server vectorize API unavailable, falling back to client-side:', data.error);
+  } catch (e) {
+    console.warn('Server vectorize API error, falling back to client-side:', e);
+  }
+
+  // Fallback: client-side vtracer algorithm
   const result = await exportAsSVG(imageUrl, { mode, onProgress });
   const blob = new Blob([result.svgString], { type: 'image/svg+xml' });
   const url = URL.createObjectURL(blob);

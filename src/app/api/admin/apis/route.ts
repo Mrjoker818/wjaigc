@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     const action = body.action as string | undefined;
 
     if (action === 'discover') {
-      const result = await discoverModelsForCredentials(body.baseUrl, body.apiKey, body.modelType || 'universal');
+      const result = await discoverModelsForCredentials(body.baseUrl, body.apiKey, body.modelType || 'image');
       return NextResponse.json(result);
     }
 

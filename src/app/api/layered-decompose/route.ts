@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
-import os from 'os';
 import fs from 'fs';
 import sharp from 'sharp';
+import { fetchWithV1Retry } from '@/lib/api-helpers';
 
 /**
  * Qwen-Image-Layered RGBA 图层分解 API
@@ -131,7 +131,20 @@ async function decomposeViaAI(
   const provider = await findProviderForFeature('layer');
 
   if (!provider) {
-    throw new Error('未配置分层模型 API，请在管理员系统中添加分层模型，或配置 QWEN_LAYERED_ENDPOINT');
+    throw new Error('未配置分层模型 API，请在管理员系统中添加图片分层模型，或配置 QWEN_LAYERED_ENDPOINT');
+  }
+
+  // Resolve local image URL to base64 for external API access
+  let resolvedImageUrl = imageUrl;
+  if (imageUrl.startsWith('/uploads/') || imageUrl.startsWith('/api/serve-upload/')) {
+    const dataRoot = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
+    const filename = imageUrl.split('/').pop() || '';
+    const localPath = path.join(dataRoot, 'public', 'uploads', filename);
+    if (fs.existsSync(localPath)) {
+      const buffer = fs.readFileSync(localPath);
+      const base64 = buffer.toString('base64');
+      resolvedImageUrl = `data:image/png;base64,${base64}`;
+    }
   }
 
   // 使用 AI 图像生成 API 来生成分层结果
@@ -150,13 +163,16 @@ async function decomposeViaAI(
     });
   }
 
-  // 调用图像编辑/分层 API
-  const editUrl = `${baseUrl}/images/edits`;
-  const resp = await fetch(editUrl, {
+  // Try chat/completions format first (for qwen-image-layered models)
+  const selectedModel = provider.selectedModels?.[0] || provider.discoveredModels?.[0] || '';
+  
+  // Try /images/edits endpoint with fetchWithV1Retry for /v1 compatibility
+  const resp = await fetchWithV1Retry(baseUrl, '/images/edits', {
     method: 'POST',
     headers,
     body: JSON.stringify({
-      image: imageUrl,
+      model: selectedModel,
+      image: resolvedImageUrl,
       n: numLayers,
       size: '1024x1024',
       response_format: 'b64_json',

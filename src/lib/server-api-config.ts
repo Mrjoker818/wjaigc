@@ -22,7 +22,7 @@ export function normalizeApiBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '');
 }
 
-type ApiKind = 'image' | 'chat' | '3d' | 'imageEdit' | 'universal' | 'vectorize' | 'layer';
+type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'imageEdit' | 'universal';
 
 interface StoredApiConfig {
   providers: ApiProvider[];
@@ -75,14 +75,20 @@ function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 
   if (provider.modelType === '3d') return '3d';
   if (provider.modelType === 'vectorize') return 'vectorize';
   if (provider.modelType === 'layer') return 'layer';
+  // Legacy types map to image
+  if (provider.modelType === 'imageEdit' || provider.modelType === 'universal') return 'image';
   return 'image';
 }
 
 function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 'vectorize' | 'layer'): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' {
   const id = modelId.toLowerCase();
+  // 矢量化模型关键词匹配
+  if (id.includes('vectorize') || id.includes('vector') || id.includes('vtracer') || id.includes('starvector') || id.includes('svg-convert') || id.includes('svgconvert')) return 'vectorize';
+  // 分层模型关键词匹配
+  if (id.includes('qwen-image-layered') || id.includes('layer') || id.includes('segment') || id.includes('sam') || id.includes('detection') || id.includes('yolo')) return 'layer';
+  // 3D模型关键词匹配
   if (id.includes('3d') || id.includes('tripo') || id.includes('meshy') || id.includes('hunyuan')) return '3d';
-  if (id.includes('vector') || id.includes('vtracer') || id.includes('starvector') || id.includes('svg')) return 'vectorize';
-  if (id.includes('layer') || id.includes('segment') || id.includes('sam') || id.includes('detection') || id.includes('yolo')) return 'layer';
+  // 图像模型关键词匹配
   if (
     id.includes('image') ||
     id.includes('dall-e') ||
@@ -93,6 +99,7 @@ function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 've
     id.includes('imagen') ||
     id.includes('seedream')
   ) return 'image';
+  // LLM模型关键词匹配
   if (
     id.includes('gpt') ||
     id.includes('claude') ||
@@ -228,7 +235,7 @@ export async function discoverModelsForCredentials(
     baseUrl,
     apiKey,
     isEnabled: true,
-    type: modelType === 'chat' ? 'chat' : modelType === 'imageEdit' ? 'imageEdit' : modelType === 'image' ? 'image' : 'universal',
+    type: modelType === 'chat' ? 'chat' : modelType === 'vectorize' ? 'vectorize' : modelType === 'layer' ? 'layer' : modelType === '3d' ? '3d' : modelType === 'imageEdit' ? 'imageEdit' : 'image',
     modelType,
     createdAt: startedAt,
     updatedAt: startedAt,
@@ -256,7 +263,17 @@ export async function discoverModelsForCredentials(
     const rawModels = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
     const models = rawModels
       .map((m: Record<string, unknown>) => formatModel(m, probeProvider))
-      .filter((m: ModelInfo) => m.id && (modelType === 'universal' || modelType === 'imageEdit' || m.type === modelType || (modelType === 'image' && m.type === 'image')));
+      .filter((m: ModelInfo) => m.id && (
+        modelType === 'universal' ||
+        modelType === 'imageEdit' ||
+        // For vectorize/layer: show all models (admin may need to pick from all available)
+        // The inferModelType already assigns the right type, so matching works
+        m.type === modelType ||
+        (modelType === 'image' && m.type === 'image') ||
+        // Allow cross-type matches so admins can see all models from the provider
+        modelType === 'vectorize' ||
+        modelType === 'layer'
+      ));
 
     return { success: true, models, message: `Found ${models.length} models`, latencyMs };
   } catch (error) {
@@ -357,7 +374,7 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
     baseUrl: normalizeBaseUrl(input.baseUrl),
     apiKey: input.apiKey.trim(),
     isEnabled: true,
-    type: input.modelType === 'chat' ? 'chat' : input.modelType === 'imageEdit' ? 'imageEdit' : input.modelType === 'image' ? 'image' : 'universal',
+    type: input.modelType === 'chat' ? 'chat' : input.modelType === 'vectorize' ? 'vectorize' : input.modelType === 'layer' ? 'layer' : input.modelType === '3d' ? '3d' : input.modelType === 'imageEdit' ? 'imageEdit' : 'image',
     modelType: input.modelType,
     requestStyle: input.requestStyle === 'auto' ? 'auto' : (input.requestStyle || (input.modelType === 'chat' ? 'chat-completions' : 'images-generations')),
     selectedModels: input.selectedModels || [],
@@ -370,7 +387,31 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
 
   const discovery = await discoverModelsForCredentials(provider.baseUrl, provider.apiKey, input.modelType);
   provider.discoveredModels = discovery.models.map(model => ({ ...model, providerId: id }));
-  provider.selectedModels = input.selectedModels?.length ? input.selectedModels : provider.discoveredModels.map(model => model.id);
+
+  // Auto-select matching models for vectorize/layer types
+  if (input.selectedModels && input.selectedModels.length > 0) {
+    provider.selectedModels = input.selectedModels;
+  } else if (input.modelType === 'vectorize') {
+    const matched = provider.discoveredModels.filter(m =>
+      m.id.toLowerCase().includes('vectorize') ||
+      m.id.toLowerCase().includes('vector') ||
+      m.id.toLowerCase().includes('svg') ||
+      m.id.toLowerCase().includes('tracer') ||
+      m.id.toLowerCase().includes('starvector')
+    );
+    provider.selectedModels = matched.length > 0 ? matched.map(m => m.id) : provider.discoveredModels.map(model => model.id);
+  } else if (input.modelType === 'layer') {
+    const matched = provider.discoveredModels.filter(m =>
+      m.id.toLowerCase().includes('qwen-image-layered') ||
+      m.id.toLowerCase().includes('layer') ||
+      m.id.toLowerCase().includes('segment') ||
+      m.id.toLowerCase().includes('sam')
+    );
+    provider.selectedModels = matched.length > 0 ? matched.map(m => m.id) : provider.discoveredModels.map(model => model.id);
+  } else {
+    provider.selectedModels = input.selectedModels?.length ? input.selectedModels : provider.discoveredModels.map(model => model.id);
+  }
+
   provider.selectedModel = provider.selectedModels[0];
   provider.connectionStatus = discovery.success ? 'success' : 'failed';
   provider.lastTestedAt = Date.now();
@@ -460,16 +501,23 @@ export async function findProviderForModel(modelId: string, modelType?: ApiKind)
 }
 
 /** 根据功能类型查找对应的 API 提供商（矢量化/分层/3D等） */
-export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3d'): Promise<ApiProvider | null> {
+export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3d' | 'imageEdit'): Promise<ApiProvider | null> {
   const kindMap: Record<string, ApiKind> = {
     vectorize: 'vectorize',
     layer: 'layer',
     '3d': '3d',
+    imageEdit: 'image',
   };
   const kind = kindMap[feature];
   if (!kind) return null;
   const providers = await getApiProviders();
-  const enabled = providers.filter(p => p.isEnabled && (p.modelType === kind || p.modelType === 'universal'));
+  // For imageEdit, search image-type providers that have editing-capable models
+  if (feature === 'imageEdit') {
+    const imageProviders = providers.filter(p => p.isEnabled && (p.modelType === 'image'));
+    const defaultProvider = imageProviders.find(p => p.isDefault);
+    return defaultProvider || imageProviders[0] || null;
+  }
+  const enabled = providers.filter(p => p.isEnabled && (p.modelType === kind));
   // 优先返回默认提供商
   const defaultProvider = enabled.find(p => p.isDefault);
   if (defaultProvider) return defaultProvider;
