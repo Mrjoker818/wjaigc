@@ -154,25 +154,27 @@ function CanvasApp() {
               setCurrentProject(projects[0]);
               // 加载项目画布数据，确保刷新后图片不丢失
               if (projects[0].canvasImages && projects[0].canvasImages.length > 0) {
-                setImages(projects[0].canvasImages.map(img => ({
-                  id: img.id,
-                  url: img.url,
-                  prompt: img.prompt || '',
-                  modifyPrompt: img.modifyPrompt || '',
-                  model: img.model || '',
-                  quality: img.quality || '',
-                  aspectRatio: img.aspectRatio || '',
-                  stylePreset: img.stylePreset || '',
-                  category: img.category || '',
-                  size: img.size || '',
-                  groupId: img.groupId || '',
-                  x: img.x,
-                  y: img.y,
-                  width: img.width || 256,
-                  height: img.height || 256,
-                  originalWidth: img.originalWidth || 512,
-                  originalHeight: img.originalHeight || 512,
-                  createdAt: img.createdAt || Date.now(),
+                setImages((projects[0].canvasImages as unknown as Record<string, unknown>[]).map(img => ({
+                  id: img.id as string,
+                  url: img.url as string,
+                  prompt: (img.prompt as string) || '',
+                  modifyPrompt: (img.modifyPrompt as string) || '',
+                  model: (img.model as string) || '',
+                  quality: (img.quality as string) || '',
+                  aspectRatio: (img.aspectRatio as string) || '',
+                  stylePreset: (img.stylePreset as string) || '',
+                  category: (img.category as string) || '',
+                  size: (img.size as string) || '',
+                  groupId: (img.groupId as string) || '',
+                  threeDModelUrl: (img.threeDModelUrl as string) || '',
+                  threeDModelUrls: (img.threeDModelUrls as Record<string, string>) || undefined,
+                  x: img.x as number,
+                  y: img.y as number,
+                  width: (img.width as number) || 256,
+                  height: (img.height as number) || 256,
+                  originalWidth: (img.originalWidth as number) || 512,
+                  originalHeight: (img.originalHeight as number) || 512,
+                  createdAt: (img.createdAt as number) || Date.now(),
                 })));
                 // 恢复分组数据（优先 metadata，其次 localStorage 兜底）
                 const metaGroups = projects[0].metadata?.groups;
@@ -349,6 +351,8 @@ function CanvasApp() {
             category: img.category || '',
             size: img.size || '',
             groupId: img.groupId || '',
+            threeDModelUrl: img.threeDModelUrl || '',
+            threeDModelUrls: img.threeDModelUrls || undefined,
           }))
           .filter(img => img.url);
 
@@ -415,6 +419,8 @@ function CanvasApp() {
             category: img.category || '',
             size: img.size || '',
             groupId: img.groupId || '',
+            threeDModelUrl: img.threeDModelUrl || '',
+            threeDModelUrls: img.threeDModelUrls || undefined,
           }))
           .filter(img => img.url);
         mgr.updateProject(currentProject.id, {
@@ -1936,25 +1942,27 @@ function CanvasApp() {
                   setCurrentProject(project);
                   // 加载项目画布数据
                   if (project.canvasImages && project.canvasImages.length > 0) {
-                    setImages(project.canvasImages.map(img => ({
-                      id: img.id,
-                      url: img.url,
-                      prompt: img.prompt || '',
-                      modifyPrompt: img.modifyPrompt || '',
-                      model: img.model || '',
-                      quality: img.quality || '',
-                      aspectRatio: img.aspectRatio || '',
-                      stylePreset: img.stylePreset || '',
-                      category: img.category || '',
-                      size: img.size || '',
-                      groupId: img.groupId || '',
-                      x: img.x,
-                      y: img.y,
-                      width: img.width || 256,
-                      height: img.height || 256,
-                      originalWidth: img.originalWidth || 512,
-                      originalHeight: img.originalHeight || 512,
-                      createdAt: img.createdAt || Date.now(),
+                    setImages((project.canvasImages as unknown as Record<string, unknown>[]).map(img => ({
+                      id: img.id as string,
+                      url: img.url as string,
+                      prompt: (img.prompt as string) || '',
+                      modifyPrompt: (img.modifyPrompt as string) || '',
+                      model: (img.model as string) || '',
+                      quality: (img.quality as string) || '',
+                      aspectRatio: (img.aspectRatio as string) || '',
+                      stylePreset: (img.stylePreset as string) || '',
+                      category: (img.category as string) || '',
+                      size: (img.size as string) || '',
+                      groupId: (img.groupId as string) || '',
+                      threeDModelUrl: (img.threeDModelUrl as string) || '',
+                      threeDModelUrls: (img.threeDModelUrls as Record<string, string>) || undefined,
+                      x: img.x as number,
+                      y: img.y as number,
+                      width: (img.width as number) || 256,
+                      height: (img.height as number) || 256,
+                      originalWidth: (img.originalWidth as number) || 512,
+                      originalHeight: (img.originalHeight as number) || 512,
+                      createdAt: (img.createdAt as number) || Date.now(),
                     })));
                     // 恢复分组数据（优先 metadata，其次 localStorage 兜底）
                     const metaGroups = project.metadata?.groups;
@@ -2055,6 +2063,8 @@ function CanvasApp() {
                     category: img.category || '',
                     size: img.size || '',
                     groupId: img.groupId || '',
+                    threeDModelUrl: img.threeDModelUrl || '',
+                    threeDModelUrls: img.threeDModelUrls || undefined,
                   }))
                   .filter(img => img.url);
                 mgr.updateProject(currentProject.id, {
@@ -2138,6 +2148,8 @@ function CanvasApp() {
                     aspectRatio: img.aspectRatio || '', stylePreset: img.stylePreset || '',
                     category: img.category || '', size: img.size || '',
                     groupId: img.groupId || '',
+                    threeDModelUrl: img.threeDModelUrl || '',
+                    threeDModelUrls: img.threeDModelUrls || undefined,
                   }))
                   .filter(img => img.url);
                 // 保存 canvasImages + metadata(groups)，与自动保存逻辑保持一致
@@ -2159,25 +2171,27 @@ function CanvasApp() {
             setCurrentProject(freshProject);
             // 加载项目画布数据
             if (freshProject.canvasImages && freshProject.canvasImages.length > 0) {
-              setImages(freshProject.canvasImages.map(img => ({
-                id: img.id,
-                url: img.url,
-                prompt: img.prompt || '',
-                modifyPrompt: img.modifyPrompt || '',
-                model: img.model || '',
-                quality: img.quality || '',
-                aspectRatio: img.aspectRatio || '',
-                stylePreset: img.stylePreset || '',
-                category: img.category || '',
-                size: img.size || '',
-                groupId: img.groupId || '',
-                x: img.x,
-                y: img.y,
-                width: img.width || 256,
-                height: img.height || 256,
-                originalWidth: img.originalWidth || 512,
-                originalHeight: img.originalHeight || 512,
-                createdAt: img.createdAt || Date.now(),
+              setImages((freshProject.canvasImages as unknown as Record<string, unknown>[]).map(img => ({
+                id: img.id as string,
+                url: img.url as string,
+                prompt: (img.prompt as string) || '',
+                modifyPrompt: (img.modifyPrompt as string) || '',
+                model: (img.model as string) || '',
+                quality: (img.quality as string) || '',
+                aspectRatio: (img.aspectRatio as string) || '',
+                stylePreset: (img.stylePreset as string) || '',
+                category: (img.category as string) || '',
+                size: (img.size as string) || '',
+                groupId: (img.groupId as string) || '',
+                threeDModelUrl: (img.threeDModelUrl as string) || '',
+                threeDModelUrls: (img.threeDModelUrls as Record<string, string>) || undefined,
+                x: img.x as number,
+                y: img.y as number,
+                width: (img.width as number) || 256,
+                height: (img.height as number) || 256,
+                originalWidth: (img.originalWidth as number) || 512,
+                originalHeight: (img.originalHeight as number) || 512,
+                createdAt: (img.createdAt as number) || Date.now(),
               })));
               // 恢复分组数据（优先 metadata，其次 localStorage 兜底）
               const metaGroups = freshProject.metadata?.groups;
