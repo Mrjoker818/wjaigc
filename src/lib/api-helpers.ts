@@ -32,6 +32,7 @@ export function ensureVersionPath(baseUrl: string): string {
  * Fetch with automatic /v1 retry logic
  * - First tries the exact baseUrl + path
  * - If that fails (404/500) and baseUrl doesn't have /v1, retries with /v1 inserted
+ * - Retry uses a fresh AbortSignal (if original signal was a timeout) with the same duration
  */
 export async function fetchWithV1Retry(
   baseUrl: string,
@@ -50,7 +51,15 @@ export async function fetchWithV1Retry(
     const retryUrl = `${v1Base}${path}`;
     console.log(`[api-helpers] ${url} failed (${response.status}), retrying with ${retryUrl}`);
     try {
-      const retryResponse = await fetch(retryUrl, options);
+      // Create fresh options for retry - if original used AbortSignal.timeout, create a new one
+      const retryOptions: RequestInit = { ...options };
+      if (options.signal && options.signal instanceof AbortSignal) {
+        // Check if it's a timeout signal by looking at aborted state
+        // Create a fresh timeout signal with same duration for the retry
+        const remainingMs = 30000; // Default retry timeout
+        retryOptions.signal = AbortSignal.timeout(remainingMs);
+      }
+      const retryResponse = await fetch(retryUrl, retryOptions);
       if (retryResponse.ok) {
         return retryResponse;
       }

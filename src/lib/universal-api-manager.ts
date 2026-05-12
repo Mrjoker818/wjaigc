@@ -1,5 +1,6 @@
 // 第三方模型管理器
-import { 
+import { fetchWithV1Retry } from './api-helpers';
+import {
   ApiProvider, 
   ModelInfo, 
   ApiProviderConfig, 
@@ -147,7 +148,7 @@ export class UniversalApiManager {
     try {
       const baseUrl = provider.baseUrl.replace(/\/+$/, '');
       
-      const response = await fetch(`${baseUrl}/models`, {
+      const response = await fetchWithV1Retry(baseUrl, '/models', {
         headers: {
           'Authorization': `Bearer ${provider.apiKey}`,
           'Content-Type': 'application/json',
@@ -321,7 +322,7 @@ export class UniversalApiManager {
     try {
       const baseUrl = provider.baseUrl.replace(/\/+$/, '');
       
-      const response = await fetch(`${baseUrl}/models`, {
+      const response = await fetchWithV1Retry(baseUrl, '/models', {
         headers: {
           'Authorization': `Bearer ${provider.apiKey}`,
           'Content-Type': 'application/json',
@@ -359,7 +360,7 @@ export class UniversalApiManager {
     try {
       const url = baseUrl.replace(/\/+$/, '');
       
-      const response = await fetch(`${url}/models`, {
+      const response = await fetchWithV1Retry(url, '/models', {
         headers: {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',

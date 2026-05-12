@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getApiProvider } from '@/lib/server-api-config';
+import { fetchWithV1Retry } from '@/lib/api-helpers';
 
 export async function POST(request: NextRequest) {
   try {
@@ -105,13 +106,14 @@ export async function POST(request: NextRequest) {
       }
     } else {
       // For images-generations or auto, try the models list endpoint first
-      testUrl = `${baseUrl.replace(/\/+$/, '')}/models`;
+      // Use fetchWithV1Retry to handle APIs like 302.ai that need /v1 prefix
+      const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
 
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10000);
+      const timeout = setTimeout(() => controller.abort(), 15000);
 
       try {
-        const response = await fetch(testUrl, {
+        const response = await fetchWithV1Retry(cleanBaseUrl, '/models', {
           method: 'GET',
           headers,
           signal: controller.signal,
@@ -128,12 +130,11 @@ export async function POST(request: NextRequest) {
 
         if (response.status === 404) {
           // /models not found, try a direct generate endpoint
-          const generateUrl = `${baseUrl.replace(/\/+$/, '')}/images/generations`;
           const genController = new AbortController();
-          const genTimeout = setTimeout(() => genController.abort(), 10000);
+          const genTimeout = setTimeout(() => genController.abort(), 15000);
 
           try {
-            const genResponse = await fetch(generateUrl, {
+            const genResponse = await fetchWithV1Retry(cleanBaseUrl, '/images/generations', {
               method: 'POST',
               headers,
               body: JSON.stringify({ model: 'test', prompt: 'test', n: 1, size: '256x256' }),

@@ -3,13 +3,14 @@ import 'server-only';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import type { ApiBalanceInfo, ApiProvider, ModelInfo } from './universal-api-types';
+import { fetchWithV1Retry } from './api-helpers';
 import { getModelDisplayName } from './model-name-map';
 import { getServerSystemDir } from './server-data-root';
 import { dbGetApiProviders, dbUpsertApiProvider, dbDeleteApiProvider } from './db-storage';
 
 const SYSTEM_DIR = getServerSystemDir();
 const CONFIG_PATH = path.join(SYSTEM_DIR, 'api-providers.json');
-const DISCOVERY_TIMEOUT_MS = 8000;
+const DISCOVERY_TIMEOUT_MS = 30000;
 
 /**
  * Normalize API base URL
@@ -234,13 +235,17 @@ export async function discoverModelsForCredentials(
   };
 
   try {
-    const response = await fetch(`${normalizeBaseUrl(baseUrl)}/models`, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
-    });
+    const response = await fetchWithV1Retry(
+      normalizeBaseUrl(baseUrl),
+      '/models',
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
+      }
+    );
 
     const latencyMs = Date.now() - startedAt;
     if (!response.ok) {
