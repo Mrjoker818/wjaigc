@@ -321,7 +321,28 @@ PY_VECTORIZE_ENDPOINT=http://localhost:8000/vectorize
 
 ## 更新日志
 
-### v2.6.0 (当前版本)
+### v2.7.0 (当前版本)
+
+**客户端数据服务器同步**
+- `UserManagerCore` 新增 `syncToServer()` / `loadProjectsFromServer()` 方法
+- 每次 `saveData()` 后自动通过 `/api/user-data/sync` 将项目数据同步到数据库（2秒防抖）
+- 登录时自动从服务器加载项目数据（localStorage 为空时从数据库恢复）
+- 新增 `/api/user-data/sync` API（GET/POST），支持按 key 读写用户数据到 `wujie_user_data` 表
+- 管理员面板不再 fallback 到 localStorage，数据来源统一为服务器 API + 数据库
+
+**z-index 层级规范**
+- 重构全局 z-index 层级：z-[90] 认证覆盖层 → z-[100] UserManager/LayerGraphStudio → z-[200/201] Dialog
+- 修复新建项目弹窗被 UserManager 遮挡的 BUG（Dialog z-index 提升）
+- 移除过高的 z-[99999]/z-[100000] 值
+
+**组数据持久化修复**
+- beforeunload 处理器补充 groupId 和 metadata.groups
+- 退出登录保存补充 groupId 和 metadata.groups
+- 自动保存后同步更新 currentProject React 状态
+- 新增 localStorage 独立兜底机制：onGroupsChange 时同步写入 localStorage
+- 三处加载路径（auto-login / onLogin / project select）均增加 localStorage 兜底读取
+
+### v2.6.0
 
 **数据库持久化存储**
 - 将管理员系统数据存储从文件系统迁移到 PostgreSQL 数据库，确保重新部署后数据不丢失

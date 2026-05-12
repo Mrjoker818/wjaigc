@@ -4,7 +4,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { X, UserPlus, Trash2, Ban, CheckCircle2, KeyRound, Plug, RefreshCw, Activity, Wallet, Pencil, Zap, CheckCircle, XCircle, Loader2, Search, Settings, ChevronDown, Plus } from 'lucide-react';
 import { User } from '@/lib/user-types';
 import { ConfirmDialog } from './custom-dialogs';
-import { UserManager } from '@/lib/user-manager';
 import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
 import { getModelDisplayName } from '@/lib/model-name-map';
 
@@ -38,7 +37,6 @@ const userPermissionLabels: Record<UserPermissionKey, string> = {
 
 export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) {
   const isGold = themeStyle === 'gold';
-  const [userManager] = useState(() => UserManager.getInstance());
   const [users, setUsers] = useState<User[]>([]);
   const [providers, setProviders] = useState<AdminProvider[]>([]);
   const [activeTab, setActiveTab] = useState<'users' | 'apis' | 'data'>('users');
@@ -76,19 +74,21 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
       if (data.success && Array.isArray(data.users)) {
         setUsers(data.users);
       } else {
-        setUsers(userManager.getAllUsers());
+        // 服务器返回失败时不回退到 localStorage，因为部署后 localStorage 为空
+        setUsers([]);
       }
     } catch {
-      setUsers(userManager.getAllUsers());
+      setUsers([]);
     }
     try {
-      const response = await fetch('/api/admin/apis', { cache: 'no-store' });
+      const response = await fetch('/api/admin/apis', { cache: 'no-store', credentials: 'include' });
       const data = await response.json();
       if (data.success) setProviders(data.providers || []);
+      else setProviders([]);
     } catch {
       setProviders([]);
     }
-  }, [userManager]);
+  }, []);
 
   const refreshBalances = useCallback(async () => {
     try {

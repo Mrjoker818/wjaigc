@@ -1,5 +1,5 @@
-// 用户数据管理器 - 使用 localStorage 存储用户数据
-import { User, Project, ApiKey, UsageStats, UserData, CanvasImage, WujieProjectFile } from './user-types';
+// 用户数据管理器 - localStorage + 服务器数据库双重存储
+import { User, Project, ApiKey, UsageStats, UserData, WujieProjectFile } from './user-types';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
 
 const STORAGE_KEY = 'unbounded_ai_user_data';
@@ -161,6 +161,103 @@ export class UserManager {
     } catch (error) {
       console.error('Failed to save user data:', error);
     }
+
+    // 同步当前用户的项目数据到服务器数据库（防抖）
+    this.scheduleServerSync();
+  }
+
+  // ====== 服务器同步 ======
+  private serverSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly SYNC_DEBOUNCE_MS = 2000; // 2秒防抖
+
+  private scheduleServerSync(): void {
+    if (typeof window === 'undefined') return;
+    if (this.serverSyncTimer) clearTimeout(this.serverSyncTimer);
+    this.serverSyncTimer = setTimeout(() => {
+      this.serverSyncTimer = null;
+      void this.syncToServer();
+    }, UserManager.SYNC_DEBOUNCE_MS);
+  }
+
+  /** 将当前用户的项目数据同步到服务器数据库 */
+  private async syncToServer(): Promise<void> {
+    if (!this.currentUserId || !this.multiUserData) return;
+    const userData = this.multiUserData.userData[this.currentUserId];
+    if (!userData) return;
+
+    try {
+      // 只同步项目数据（最关键的画布数据）
+      const projectsPayload = userData.projects.map(p => ({
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        canvasImages: p.canvasImages,
+        metadata: p.metadata,
+        settings: p.settings,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+      }));
+
+      await fetch('/api/user-data/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ key: 'projects', value: projectsPayload }),
+      });
+    } catch {
+      // 服务器同步是尽力而为，失败不影响本地功能
+    }
+  }
+
+  /** 从服务器加载当前用户的项目数据 */
+  async loadProjectsFromServer(): Promise<void> {
+    if (!this.currentUserId || !this.multiUserData) return;
+    const userData = this.multiUserData.userData[this.currentUserId];
+    if (!userData) return;
+
+    try {
+      const res = await fetch('/api/user-data/sync?key=projects', {
+        credentials: 'include',
+      });
+      if (!res.ok) return;
+      const data = await res.json() as { success: boolean; value?: unknown };
+      if (!data.success || !data.value) return;
+
+      // value 可能是字符串（需要 JSON.parse）或已解析的对象
+      let serverProjects: Project[];
+      if (typeof data.value === 'string') {
+        try {
+          serverProjects = JSON.parse(data.value) as Project[];
+        } catch {
+          return;
+        }
+      } else if (Array.isArray(data.value)) {
+        serverProjects = data.value as Project[];
+      } else {
+        return;
+      }
+      if (serverProjects.length === 0) return;
+
+      // 合并策略：以服务器数据为主，但保留本地独有的项目
+      const serverProjectIds = new Set(serverProjects.map(p => p.id));
+      const localOnlyProjects = userData.projects.filter(p => !serverProjectIds.has(p.id));
+      // 如果服务器有项目且本地为空，或服务器项目更新时间更晚，则使用服务器数据
+      const localHasData = userData.projects.length > 0;
+      const serverHasData = serverProjects.length > 0;
+
+      if (!localHasData && serverHasData) {
+        // 本地无数据，直接使用服务器数据
+        userData.projects = serverProjects;
+      } else if (localHasData && serverHasData) {
+        // 双方都有数据，合并（服务器优先，保留本地独有的）
+        userData.projects = [...serverProjects, ...localOnlyProjects];
+      }
+      // 如果只有本地数据，不做任何修改
+
+      this.saveData();
+    } catch {
+      // 加载失败不影响本地功能
+    }
   }
 
   private async syncAdminUserAction(
@@ -180,7 +277,7 @@ export class UserManager {
     }
   }
 
-  upsertUserFromServer(user: User, password?: string): User {
+  async upsertUserFromServer(user: User, password?: string): Promise<User> {
     if (!this.multiUserData) {
       this.multiUserData = { users: [], userData: {} };
     }
@@ -209,6 +306,11 @@ export class UserManager {
         apiKeys: [],
         usageStats: [],
       };
+      // 新用户（localStorage为空），从服务器加载项目数据
+      const prevUserId = this.currentUserId;
+      this.currentUserId = nextUser.id;
+      await this.loadProjectsFromServer();
+      this.currentUserId = prevUserId || nextUser.id;
     } else {
       this.multiUserData.userData[nextUser.id].user = nextUser;
     }

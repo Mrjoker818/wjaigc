@@ -145,7 +145,7 @@ function CanvasApp() {
         const data = await response.json() as { success?: boolean; user?: User | null };
         if (!cancelled && data.success && data.user) {
           const userMgr = UserManagerCore.getInstance();
-          const hydratedUser = userMgr.upsertUserFromServer(data.user);
+          const hydratedUser = await userMgr.upsertUserFromServer(data.user);
           setCurrentUser(hydratedUser);
           // Auto-load most recent project or create default
           try {
@@ -2267,7 +2267,7 @@ function CanvasApp() {
 
       {/* Auth gate overlay - covers everything when not authenticated */}
       {!authChecked && (
-        <div className="fixed inset-0 flex items-center justify-center z-[99999] bg-[#0a0a0a]">
+        <div className="fixed inset-0 flex items-center justify-center z-[90] bg-[#0a0a0a]">
           <div className="flex flex-col items-center gap-4">
             <div className="w-10 h-10 border-2 border-[#d4af37] border-t-transparent rounded-full animate-spin" />
             <p className="text-white/60 text-sm">正在验证身份...</p>
@@ -2275,7 +2275,7 @@ function CanvasApp() {
         </div>
       )}
       {authChecked && !currentUser && !showUserManager && (
-        <div className="fixed inset-0 flex items-center justify-center z-[99999] bg-[#0a0a0a]">
+        <div className="fixed inset-0 flex items-center justify-center z-[90] bg-[#0a0a0a]">
           <div className="flex flex-col items-center gap-6">
             <h1 className="text-2xl font-bold text-white">无界 AI</h1>
             <p className="text-white/50 text-sm">请先登录以使用画布</p>
