@@ -540,12 +540,12 @@ export function InfiniteCanvas({
     { key: '细节', prefix: 'with the details of', placeholder: '如：细腻纹理' },
   ];
 
-  const [img2imgStrengths, setImg2imgStrengths] = useState<Record<string, number>>({ '风格': 60, '构图': 50, '场景': 50, '色彩': 40, '主体': 50, '细节': 40 });
+  const [img2imgStrengths, setImg2imgStrengths] = useState<Record<string, number>>({ '风格': 0, '构图': 0, '场景': 0, '色彩': 0, '主体': 0, '细节': 0 });
   const [img2imgKeyword, setImg2imgKeyword] = useState('');
   const [img2imgNegativePrompt, setImg2imgNegativePrompt] = useState('');
   const [img2imgGenerating, setImg2imgGenerating] = useState(false);
   const [img2imgShowNegative, setImg2imgShowNegative] = useState(false);
-  const [img2imgActiveCategories, setImg2imgActiveCategories] = useState<Set<string>>(new Set(['风格', '构图', '场景', '色彩', '主体', '细节']));
+  const [img2imgActiveCategories, setImg2imgActiveCategories] = useState<Set<string>>(new Set());
 
   // Active tool panel
   const [activeTool, setActiveTool] = useState<ActiveTool>('none');
@@ -3430,34 +3430,58 @@ export function InfiniteCanvas({
     if (editMode === 'img2img') {
       const img2imgModel = getCurrentModel();
 
-      // 根据激活的分类构建提示词
-      const categoryPrefixes: Record<string, string> = Object.fromEntries(
-        IMG2IMG_CATEGORIES.map(c => [c.key, c.prefix])
-      );
+      // 图生图提示词构建：以自然语言描述参考图的使用方式
+      // 每个激活的分类作为参考维度，强度映射为描述性修饰词
+      const strengthLabel = (s: number): string => {
+        if (s >= 80) return 'strongly';
+        if (s >= 50) return 'moderately';
+        if (s >= 20) return 'subtly';
+        return 'lightly';
+      };
+
+      const categoryDescriptions: Record<string, string> = {
+        '风格': 'style',
+        '构图': 'composition',
+        '场景': 'scene',
+        '色彩': 'color palette',
+        '主体': 'subject',
+        '细节': 'details',
+      };
+
       let fullPrompt = img2imgKeyword.trim();
-      if (!fullPrompt) {
-        // 无关键词时，使用激活分类的默认提示
-        const activePrefixes = Array.from(img2imgActiveCategories)
-          .filter(cat => img2imgStrengths[cat] > 0)
-          .map(cat => categoryPrefixes[cat] || cat);
-        fullPrompt = activePrefixes.length > 0 ? activePrefixes.join(', ') : 'creative transformation';
-      } else {
-        // 有关键词时，追加激活分类的前缀
-        const activePrefixes = Array.from(img2imgActiveCategories)
-          .filter(cat => img2imgStrengths[cat] > 0)
-          .map(cat => `${categoryPrefixes[cat]} (strength: ${img2imgStrengths[cat]}%)`);
-        if (activePrefixes.length > 0) {
-          fullPrompt = `${fullPrompt}, ${activePrefixes.join(', ')}`;
-        }
-      }
-      // Append negative prompt if present
-      if (img2imgNegativePrompt.trim()) {
-        fullPrompt += ` [negative: ${img2imgNegativePrompt.trim()}]`;
+
+      // 构建参考指令：告诉模型参考原图的哪些方面
+      const activeRefs = Array.from(img2imgActiveCategories)
+        .filter(cat => img2imgStrengths[cat] > 0)
+        .map(cat => `${strengthLabel(img2imgStrengths[cat])} reference the ${categoryDescriptions[cat] || cat} of the original image`)
+        .filter(Boolean);
+
+      if (activeRefs.length > 0) {
+        const refInstruction = `Based on the provided reference image, ${activeRefs.join(', ')}.`;
+        fullPrompt = fullPrompt
+          ? `${refInstruction} ${fullPrompt}`
+          : refInstruction;
+      } else if (!fullPrompt) {
+        fullPrompt = 'Generate a creative variation based on the reference image.';
       }
 
-      // 使用最高强度的激活分类作为 strength 参数
-      const maxStrength = Array.from(img2imgActiveCategories)
-        .reduce((max, cat) => Math.max(max, img2imgStrengths[cat] || 0), 0);
+      // Append negative prompt if present
+      if (img2imgNegativePrompt.trim()) {
+        fullPrompt += ` Avoid: ${img2imgNegativePrompt.trim()}`;
+      }
+
+      // strength 计算：基于激活分类的平均强度
+      // 0 = 完全保留原图，1 = 完全自由生成
+      // 低强度分类多 → 偏向保留原图 → strength 低
+      // 高强度分类多 → 偏向自由生成 → strength 高
+      const activeStrengths = Array.from(img2imgActiveCategories)
+        .map(cat => img2imgStrengths[cat] || 0)
+        .filter(s => s > 0);
+      const avgStrength = activeStrengths.length > 0
+        ? activeStrengths.reduce((a, b) => a + b, 0) / activeStrengths.length
+        : 50;
+      const img2imgStrength = avgStrength / 100;
+
       const placeholderId = createProcessingFrameRightOf(
         editImg,
         '图生图中',
@@ -3484,7 +3508,7 @@ export function InfiniteCanvas({
             quality: 'standard',
             count: 1,
             referenceImages: [editImg.url],
-            strength: maxStrength / 100,
+            strength: img2imgStrength,
           }),
         });
 
@@ -5348,7 +5372,15 @@ export function InfiniteCanvas({
                             e.stopPropagation();
                             setImg2imgActiveCategories(prev => {
                               const next = new Set(prev);
-                              if (next.has(cat)) next.delete(cat); else next.add(cat);
+                              if (next.has(cat)) {
+                                next.delete(cat);
+                              } else {
+                                next.add(cat);
+                                // 激活时设置默认强度为50%
+                                if ((img2imgStrengths[cat] ?? 0) === 0) {
+                                  setImg2imgStrengths(prev2 => ({ ...prev2, [cat]: 50 }));
+                                }
+                              }
                               return next;
                             });
                           }}
@@ -5391,7 +5423,7 @@ export function InfiniteCanvas({
                   <textarea
                     value={img2imgKeyword}
                     onChange={(e) => setImg2imgKeyword(e.target.value)}
-                    placeholder={Array.from(activeCategories).map(c => placeholderHints[c]).filter(Boolean).join(' / ') || '输入关键词...'}
+                    placeholder="输入关键词描述你想要的效果，如：蒙娜丽莎"
                     rows={2}
                     className="w-full px-2.5 py-1.5 text-xs rounded-lg border-none outline-none focus:ring-1 focus:ring-[#d4af37]/50 resize-y min-h-[36px] max-h-[120px]"
                     style={{ background: '#252520', color: '#e0e0e0' }}

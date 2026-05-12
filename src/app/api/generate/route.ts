@@ -94,6 +94,7 @@ export async function POST(request: NextRequest) {
       model = 'gemini-2.5-flash-image-preview',
       quality = '1K',
       userId: requestUserId,
+      strength,
     } = await request.json();
     const sessionUser = await getSessionUser(request);
     const userId = (sessionUser?.id || "anonymous") || requestUserId;
@@ -279,6 +280,10 @@ export async function POST(request: NextRequest) {
       // 添加参考图片
       if (referenceImages && referenceImages.length > 0 && currentModelConfig.supportsImageToImage) {
         requestBody.image_urls = referenceImages;
+        // 图生图 strength 参数：控制输出与参考图的偏离程度（0=完全保留原图，1=完全自由生成）
+        if (typeof strength === 'number' && strength > 0 && strength <= 1) {
+          requestBody.strength = strength;
+        }
       }
 
       console.log('Submitting to APIMart:', {
@@ -286,6 +291,8 @@ export async function POST(request: NextRequest) {
         prompt: enhancedPrompt.substring(0, 50) + '...',
         size: effectiveSize,
         paramType: currentModelConfig.paramType,
+        hasRefImages: !!(referenceImages && referenceImages.length > 0),
+        strength: requestBody.strength || undefined,
       });
 
       const controller = new AbortController();
