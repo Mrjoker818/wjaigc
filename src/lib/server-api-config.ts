@@ -5,6 +5,7 @@ import path from 'path';
 import type { ApiBalanceInfo, ApiProvider, ModelInfo } from './universal-api-types';
 import { getModelDisplayName } from './model-name-map';
 import { getServerSystemDir } from './server-data-root';
+import { dbGetApiProviders, dbUpsertApiProvider, dbDeleteApiProvider } from './db-storage';
 
 const SYSTEM_DIR = getServerSystemDir();
 const CONFIG_PATH = path.join(SYSTEM_DIR, 'api-providers.json');
@@ -115,19 +116,88 @@ function formatModel(model: Record<string, unknown>, provider: ApiProvider): Mod
 }
 
 async function readConfig(): Promise<StoredApiConfig> {
+  // Try database first (persistent across deployments)
+  try {
+    const dbProviderRows = await dbGetApiProviders();
+    if (dbProviderRows && dbProviderRows.length > 0) {
+      const providers: ApiProvider[] = dbProviderRows.map(p => ({
+        id: p.id,
+        name: p.name,
+        displayName: p.display_name || p.name,
+        baseUrl: p.base_url,
+        apiKey: p.api_key,
+        isEnabled: p.is_enabled,
+        type: p.type as ApiProvider['type'],
+        modelType: p.model_type as ApiKind,
+        requestStyle: p.request_style as ApiProvider['requestStyle'],
+        selectedModels: Array.isArray(p.selected_models) ? p.selected_models : [],
+        advancedParams: (p.advanced_params && typeof p.advanced_params === 'object') ? p.advanced_params as Record<string, string> : {},
+        isDefault: p.is_default,
+        createdAt: p.created_at,
+        updatedAt: p.updated_at,
+        connectionStatus: (['untested', 'success', 'failed'].includes(p.connection_status || '') ? p.connection_status as ApiProvider['connectionStatus'] : undefined),
+        discoveredModels: Array.isArray(p.discovered_models) ? p.discovered_models.map((m: Record<string, unknown>) => ({
+          id: (m.id as string) || (m as unknown as string),
+          name: (m.name as string) || (typeof m === 'string' ? m : m.id as string),
+          providerId: p.id,
+          type: (m.type as string) || p.model_type,
+        })) as ModelInfo[] : [],
+      }));
+      return {
+        providers,
+        updatedAt: Date.now(),
+      };
+    }
+  } catch {
+    // DB not available, fall through to file
+  }
+
+  // Fallback to file system
   try {
     const raw = await readFile(CONFIG_PATH, 'utf8');
     const parsed = JSON.parse(raw) as StoredApiConfig;
-    return {
+    const config = {
       providers: Array.isArray(parsed.providers) ? parsed.providers : [],
       updatedAt: parsed.updatedAt || Date.now(),
     };
+    // Migrate file data to database if DB is available
+    if (config.providers.length > 0) {
+      migrateProvidersToDb(config.providers).catch(() => {});
+    }
+    return config;
   } catch {
     return { providers: [], updatedAt: Date.now() };
   }
 }
 
+async function migrateProvidersToDb(providers: ApiProvider[]): Promise<void> {
+  for (const p of providers) {
+    await dbUpsertApiProvider({
+      id: p.id,
+      name: p.name,
+      display_name: p.displayName || p.name,
+      base_url: p.baseUrl,
+      api_key: p.apiKey,
+      is_enabled: p.isEnabled,
+      type: p.type || 'image',
+      model_type: p.modelType || 'image',
+      request_style: p.requestStyle || 'images-generations',
+      selected_models: p.selectedModels || [],
+      advanced_params: p.advancedParams || {},
+      is_default: p.isDefault ?? false,
+      created_at: p.createdAt || Date.now(),
+      updated_at: p.updatedAt || Date.now(),
+      connection_status: p.connectionStatus,
+      discovered_models: (p.discoveredModels || []) as unknown as Record<string, unknown>[],
+    });
+  }
+}
+
 async function writeConfig(config: StoredApiConfig): Promise<void> {
+  // Write to database (persistent across deployments)
+  migrateProvidersToDb(config.providers).catch(() => {});
+
+  // Also write to file system as backup
   await mkdir(SYSTEM_DIR, { recursive: true });
   await writeFile(CONFIG_PATH, JSON.stringify({ ...config, updatedAt: Date.now() }, null, 2), 'utf8');
 }
@@ -346,6 +416,8 @@ export async function deleteApiProvider(providerId: string): Promise<boolean> {
   const config = await readConfig();
   const next = config.providers.filter(provider => provider.id !== providerId);
   if (next.length === config.providers.length) return false;
+  // Delete from database explicitly
+  dbDeleteApiProvider(providerId).catch(() => {});
   await writeConfig({ providers: next, updatedAt: Date.now() });
   return true;
 }

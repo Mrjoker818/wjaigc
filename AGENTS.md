@@ -47,6 +47,9 @@ src/
 │   │   └── PropertiesPanel.tsx     # 属性面板 (名称/透明度/位置/矢量化)
 │   └── ui/                         # shadcn/ui 组件库
 ├── lib/
+│   ├── db-client.ts                # PostgreSQL 连接池（使用 PGDATABASE_URL 环境变量）
+│   ├── db-storage.ts               # 数据库持久化存储（用户/API提供商/用户数据/系统设置）
+│   ├── api-helpers.ts              # API 辅助函数（fetchWithV1Retry 智能 /v1 重试）
 │   ├── design-graph.ts             # Layer Graph 图层转换与操作
 │   ├── design-export.ts            # .wujie 工程文件导入导出
 │   ├── psd-export.ts               # PSD 导出功能
@@ -240,6 +243,10 @@ APIMART_BASE_URL=https://api.apimart.ai
 # Google Gemini 配置
 GEMINI_API_KEY=your_gemini_key
 
+# 数据库持久化（关键：确保重部署后数据不丢失）
+PGDATABASE_URL=postgresql://user:pass@host:5432/dbname?sslmode=require
+# 也支持 DATABASE_URL 环境变量
+
 # Layer Graph 矢量化 (可选)
 PY_VECTORIZE_ENDPOINT=http://localhost:8000/vectorize
 
@@ -253,6 +260,34 @@ PY_VECTORIZE_ENDPOINT=http://localhost:8000/vectorize
 2. **文件上传**: 限制上传文件类型和大小
 3. **用户输入**: 对所有用户输入进行验证和 sanitize
 4. **CORS**: 正确配置跨域策略
+
+## 数据库持久化架构
+
+### 概述
+管理员系统的用户数据、API 配置等核心数据已迁移到 PostgreSQL 数据库存储，确保应用重新部署后数据不丢失。
+
+### 存储策略：数据库优先 + 文件系统兜底
+- **读取**: 先尝试数据库，数据库不可用时回退到文件系统
+- **写入**: 同时写入数据库和文件系统（双写），保证数据一致性和可恢复性
+- **迁移**: 应用启动时自动将文件系统数据迁移到数据库（`instrumentation.ts`）
+
+### 数据库表
+| 表名 | 说明 | 关键字段 |
+|------|------|----------|
+| `wujie_users` | 用户数据 | id, name, password_hash, role, status, api_permissions, email |
+| `wujie_api_providers` | API 提供商 | id, name, base_url, api_key, model_type, selected_models, discovered_models |
+| `wujie_user_data` | 用户项目/图片数据 | user_id, data_key, data_value (联合主键) |
+| `wujie_system_settings` | 系统设置 | key, value |
+
+### 核心文件
+- `src/lib/db-client.ts`: PostgreSQL 连接池（读取 `PGDATABASE_URL` 或 `DATABASE_URL`）
+- `src/lib/db-storage.ts`: 数据库 CRUD 操作 + 文件迁移函数
+- `src/instrumentation.ts`: 启动时自动触发 `migrateFileDataToDb()`
+- `src/lib/server-auth.ts`: 用户认证（读取先数据库后文件，写入双写）
+- `src/lib/server-api-config.ts`: API 提供商配置（读取先数据库后文件，写入双写）
+
+### API 辅助
+- `src/lib/api-helpers.ts`: `fetchWithV1Retry()` - 先尝试原始 URL，失败后自动重试带 `/v1` 的 URL
 
 ## 常见问题
 
@@ -286,7 +321,33 @@ PY_VECTORIZE_ENDPOINT=http://localhost:8000/vectorize
 
 ## 更新日志
 
-### v2.5.1 (当前版本)
+### v2.6.0 (当前版本)
+
+**数据库持久化存储**
+- 将管理员系统数据存储从文件系统迁移到 PostgreSQL 数据库，确保重新部署后数据不丢失
+- 新增 `db-client.ts`：PostgreSQL 连接池，支持 `PGDATABASE_URL` 和 `DATABASE_URL` 环境变量
+- 新增 `db-storage.ts`：数据库 CRUD 操作（用户、API 提供商、用户数据、系统设置）
+- 新增 `instrumentation.ts`：应用启动时自动将文件系统数据迁移到数据库
+- 存储策略：读取先数据库后文件系统，写入双写（数据库+文件），确保数据一致性和可恢复性
+- 数据库表：`wujie_users`、`wujie_api_providers`、`wujie_user_data`、`wujie_system_settings`
+- 用户认证（`server-auth.ts`）和 API 配置（`server-api-config.ts`）均已更新为数据库优先模式
+
+**API 兼容性修复**
+- 新增 `fetchWithV1Retry()` 辅助函数：先尝试原始 URL，失败后自动重试带 `/v1` 的 URL
+- 所有 API 路由（generate、chat、image-edit、optimize-prompt 等）均已使用此函数
+- 移除自动追加 `/v1` 的逻辑，由用户完全控制 API URL 格式
+
+**管理员系统增强**
+- 测试连接支持 `providerId` 参数，直接从服务器存储读取配置
+- LLM 模型测试连接扩大成功状态码判断范围（200/400/422/429/500+ 均视为 API 可达）
+- 测试连接使用 `fetchWithV1Retry` 自动处理 `/v1` 兼容
+
+**UI 修复**
+- 修复登录界面不显示问题：添加 `authChecked` 状态和认证门控覆盖层
+- 新增图片自动居中：上传/生成图片后视图自动跳转到当前图片并居中显示
+- 帮助文字更新："更新说明"改为"更新内容"
+
+### v2.5.1
 
 **擦除/蒙版功能修复**
 - 修复蒙版检测核心 Bug：前端 canvas 导出的 PNG alpha 通道全为 255，导致后端误判整个图片为蒙版区域（99.97%覆盖率）

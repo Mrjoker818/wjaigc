@@ -7,6 +7,7 @@ import type { NextRequest } from 'next/server';
 import type { User } from './user-types';
 import { ensureUserDataDirs, getUserDataDir } from './server-user-storage';
 import { getServerSystemDir, getServerUsersDir } from './server-data-root';
+import { dbReadUsers, dbWriteUsers } from './db-storage';
 
 const SYSTEM_DIR = getServerSystemDir();
 const USERS_PATH = path.join(SYSTEM_DIR, 'users.json');
@@ -96,21 +97,62 @@ function normalizeStoredUser(user: StoredUser): StoredUser {
 }
 
 async function writeStore(file: StoredUsersFile): Promise<void> {
+  const data = { ...file, updatedAt: Date.now() };
+  // Write to file (backward compatible)
   await mkdir(SYSTEM_DIR, { recursive: true });
-  await writeFile(USERS_PATH, JSON.stringify({ ...file, updatedAt: Date.now() }, null, 2), 'utf8');
+  await writeFile(USERS_PATH, JSON.stringify(data, null, 2), 'utf8');
+  // Write to database (persistent)
+  await dbWriteUsers(data.users.map(u => ({
+    id: u.id,
+    name: u.name,
+    passwordHash: u.passwordHash,
+    role: u.role || 'user',
+    status: u.status || 'active',
+    apiPermissions: u.apiPermissions || defaultApiPermissions(),
+    storageFolder: u.storageFolder || storageFolder(u.id),
+    email: u.email || null,
+    createdAt: u.createdAt || Date.now(),
+    updatedAt: u.updatedAt || Date.now(),
+  })));
 }
 
 async function readStore(): Promise<StoredUsersFile> {
   let file: StoredUsersFile;
+
+  // Try database first (persistent across deployments)
   try {
-    const raw = await readFile(USERS_PATH, 'utf8');
-    const parsed = JSON.parse(raw) as StoredUsersFile;
-    file = {
-      users: Array.isArray(parsed.users) ? parsed.users.map(normalizeStoredUser) : [],
-      updatedAt: parsed.updatedAt || Date.now(),
-    };
+    const dbUsers = await dbReadUsers();
+    if (dbUsers && dbUsers.length > 0) {
+      file = {
+        users: dbUsers.map(u => normalizeStoredUser({
+          id: u.id,
+          name: u.name,
+          passwordHash: u.password_hash,
+          role: (u.role || 'user') as 'admin' | 'user',
+          status: (u.status || 'active') as 'active' | 'disabled',
+          apiPermissions: u.api_permissions && typeof u.api_permissions === 'object' ? u.api_permissions as User['apiPermissions'] : defaultApiPermissions(),
+          storageFolder: u.storage_folder || storageFolder(u.id),
+          email: u.email || undefined,
+          createdAt: u.created_at,
+          updatedAt: u.updated_at,
+        })),
+        updatedAt: Date.now(),
+      };
+    } else {
+      throw new Error('No users in DB');
+    }
   } catch {
-    file = { users: [], updatedAt: Date.now() };
+    // Fallback to file system
+    try {
+      const raw = await readFile(USERS_PATH, 'utf8');
+      const parsed = JSON.parse(raw) as StoredUsersFile;
+      file = {
+        users: Array.isArray(parsed.users) ? parsed.users.map(normalizeStoredUser) : [],
+        updatedAt: parsed.updatedAt || Date.now(),
+      };
+    } catch {
+      file = { users: [], updatedAt: Date.now() };
+    }
   }
 
   const now = Date.now();
