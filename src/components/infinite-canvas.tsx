@@ -3430,57 +3430,75 @@ export function InfiniteCanvas({
     if (editMode === 'img2img') {
       const img2imgModel = getCurrentModel();
 
-      // 图生图提示词构建：以自然语言描述参考图的使用方式
-      // 每个激活的分类作为参考维度，强度映射为描述性修饰词
-      const strengthLabel = (s: number): string => {
-        if (s >= 80) return 'strongly';
-        if (s >= 50) return 'moderately';
-        if (s >= 20) return 'subtly';
-        return 'lightly';
+      // 图生图提示词构建：明确告诉模型参考原图的哪些方面 + 用关键词作为新内容
+      const categoryEnMap: Record<string, string> = {
+        '风格': 'artistic style and visual aesthetics',
+        '构图': 'composition and layout structure',
+        '场景': 'scene and environment setting',
+        '色彩': 'color palette and tone',
+        '主体': 'main subject and focal point',
+        '细节': 'fine details and textures',
       };
 
-      const categoryDescriptions: Record<string, string> = {
-        '风格': 'style',
-        '构图': 'composition',
-        '场景': 'scene',
-        '色彩': 'color palette',
-        '主体': 'subject',
-        '细节': 'details',
-      };
+      const keyword = img2imgKeyword.trim();
 
-      let fullPrompt = img2imgKeyword.trim();
+      // 收集激活的类别（强度>0表示要保留原图该方面）
+      const preserveAspects = Array.from(img2imgActiveCategories)
+        .filter(cat => (img2imgStrengths[cat] || 0) > 0)
+        .map(cat => {
+          const s = img2imgStrengths[cat] || 0;
+          const desc = categoryEnMap[cat] || cat;
+          if (s >= 80) return `strictly preserve the ${desc} of the reference image`;
+          if (s >= 50) return `maintain the ${desc} of the reference image`;
+          if (s >= 20) return `subtly reference the ${desc} of the reference image`;
+          return `lightly hint at the ${desc} of the reference image`;
+        });
 
-      // 构建参考指令：告诉模型参考原图的哪些方面
-      const activeRefs = Array.from(img2imgActiveCategories)
-        .filter(cat => img2imgStrengths[cat] > 0)
-        .map(cat => `${strengthLabel(img2imgStrengths[cat])} reference the ${categoryDescriptions[cat] || cat} of the original image`)
-        .filter(Boolean);
+      // 收集未激活的类别（可以自由改变）
+      const freeAspects = Object.keys(categoryEnMap)
+        .filter(cat => !img2imgActiveCategories.has(cat) || (img2imgStrengths[cat] || 0) === 0)
+        .map(cat => categoryEnMap[cat]);
 
-      if (activeRefs.length > 0) {
-        const refInstruction = `Based on the provided reference image, ${activeRefs.join(', ')}.`;
-        fullPrompt = fullPrompt
-          ? `${refInstruction} ${fullPrompt}`
-          : refInstruction;
-      } else if (!fullPrompt) {
-        fullPrompt = 'Generate a creative variation based on the reference image.';
+      // 构建完整提示词
+      let fullPrompt = '';
+      if (keyword) {
+        // 有关键词：以关键词为主题，保留原图指定方面
+        fullPrompt = `Create an image of: ${keyword}.`;
+        if (preserveAspects.length > 0) {
+          fullPrompt += ` While creating this new image, ${preserveAspects.join(', ')}.`;
+        }
+        if (freeAspects.length > 0) {
+          fullPrompt += ` Feel free to reimagine the ${freeAspects.join(', ')}.`;
+        }
+      } else {
+        // 无关键词：对原图做创意变体
+        fullPrompt = 'Generate a creative variation of the reference image.';
+        if (preserveAspects.length > 0) {
+          fullPrompt += ` Keep the ${preserveAspects.join(', ')}.`;
+        }
+        if (freeAspects.length > 0) {
+          fullPrompt += ` Creatively transform the ${freeAspects.join(', ')}.`;
+        }
       }
+
+      // 关键：显式告诉模型使用参考图作为基础
+      fullPrompt = `[img2img] Use the provided reference image as the base. ${fullPrompt}`;
 
       // Append negative prompt if present
       if (img2imgNegativePrompt.trim()) {
         fullPrompt += ` Avoid: ${img2imgNegativePrompt.trim()}`;
       }
 
-      // strength 计算：基于激活分类的平均强度
-      // 0 = 完全保留原图，1 = 完全自由生成
-      // 低强度分类多 → 偏向保留原图 → strength 低
-      // 高强度分类多 → 偏向自由生成 → strength 高
-      const activeStrengths = Array.from(img2imgActiveCategories)
-        .map(cat => img2imgStrengths[cat] || 0)
-        .filter(s => s > 0);
-      const avgStrength = activeStrengths.length > 0
-        ? activeStrengths.reduce((a, b) => a + b, 0) / activeStrengths.length
-        : 50;
-      const img2imgStrength = avgStrength / 100;
+      // strength 计算：
+      // 保留方面多/强 → 需要更接近原图 → strength 低（偏离少）
+      // 保留方面少/弱 → 允许更多自由 → strength 高（偏离多）
+      // 基础 strength = 0.6，每个保留方面降低一些
+      const totalPreserveScore = Array.from(img2imgActiveCategories)
+        .reduce((sum, cat) => sum + (img2imgStrengths[cat] || 0), 0);
+      const maxPossibleScore = 600; // 6个类别 * 100
+      const preserveRatio = totalPreserveScore / maxPossibleScore;
+      // strength 范围: 0.25（大量保留） ~ 0.85（几乎不保留）
+      const img2imgStrength = 0.85 - preserveRatio * 0.6;
 
       const placeholderId = createProcessingFrameRightOf(
         editImg,

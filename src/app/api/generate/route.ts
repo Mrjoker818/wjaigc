@@ -103,6 +103,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
     }
 
+    // 转换参考图片 URL 为公网可访问格式（APImart 无法访问本地路径）
+    let accessibleReferenceImages: string[] = [];
+    if (referenceImages && referenceImages.length > 0) {
+      const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT;
+      for (const img of referenceImages) {
+        if (img.startsWith('/')) {
+          // 相对路径 → 公网完整 URL 或 base64
+          if (domain) {
+            accessibleReferenceImages.push(`${domain}${img}`);
+          } else {
+            try {
+              const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+              const port = process.env.DEPLOY_RUN_PORT || 5000;
+              const resp = await fetch(`${proto}://localhost:${port}${img}`, { signal: AbortSignal.timeout(5000) });
+              const buf = Buffer.from(await resp.arrayBuffer());
+              accessibleReferenceImages.push(`data:image/png;base64,${buf.toString('base64')}`);
+            } catch {
+              accessibleReferenceImages.push(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${img}`);
+            }
+          }
+        } else {
+          accessibleReferenceImages.push(img);
+        }
+      }
+    }
+
     // 获取所有可用的 image 类型 API 提供商和模型
     const allImageProviders = await findAllProvidersForType('image');
     
@@ -277,9 +303,9 @@ export async function POST(request: NextRequest) {
         requestBody.quality = qualityMap[quality] || quality;
       }
 
-      // 添加参考图片
-      if (referenceImages && referenceImages.length > 0 && currentModelConfig.supportsImageToImage) {
-        requestBody.image_urls = referenceImages;
+      // 添加参考图片（使用已转换为公网可访问的 URL）
+      if (accessibleReferenceImages.length > 0 && currentModelConfig.supportsImageToImage) {
+        requestBody.image_urls = accessibleReferenceImages;
         // 图生图 strength 参数：控制输出与参考图的偏离程度（0=完全保留原图，1=完全自由生成）
         if (typeof strength === 'number' && strength > 0 && strength <= 1) {
           requestBody.strength = strength;
@@ -291,7 +317,8 @@ export async function POST(request: NextRequest) {
         prompt: enhancedPrompt.substring(0, 50) + '...',
         size: effectiveSize,
         paramType: currentModelConfig.paramType,
-        hasRefImages: !!(referenceImages && referenceImages.length > 0),
+        hasRefImages: accessibleReferenceImages.length > 0,
+        refImageTypes: accessibleReferenceImages.map(u => u.startsWith('data:') ? 'base64' : u.startsWith('http') ? 'url' : 'other'),
         strength: requestBody.strength || undefined,
       });
 
