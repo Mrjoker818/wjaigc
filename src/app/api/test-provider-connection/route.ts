@@ -1,9 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getApiProvider } from '@/lib/server-api-config';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { baseUrl, apiKey, requestStyle, advancedParams } = body;
+    let { baseUrl, apiKey, requestStyle, advancedParams } = body;
+
+    // Support providerId lookup — if providerId is given, load from server config
+    if (body.providerId && !baseUrl) {
+      const provider = await getApiProvider(body.providerId);
+      if (!provider) {
+        return NextResponse.json({ success: false, error: '未找到该 API 配置' }, { status: 404 });
+      }
+      baseUrl = provider.baseUrl;
+      apiKey = provider.apiKey;
+      requestStyle = provider.requestStyle;
+      advancedParams = provider.advancedParams;
+    }
 
     if (!baseUrl || !apiKey) {
       return NextResponse.json({ success: false, error: '缺少 Base URL 或 API Key' }, { status: 400 });

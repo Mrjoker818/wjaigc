@@ -136,6 +136,11 @@ export async function getApiProviders(): Promise<ApiProvider[]> {
   return (await readConfig()).providers;
 }
 
+export async function getApiProvider(id: string): Promise<ApiProvider | null> {
+  const providers = await getApiProviders();
+  return providers.find(p => p.id === id) || null;
+}
+
 export async function getPublicApiProviders(): Promise<PublicApiProvider[]> {
   return sanitizeProviders(await getApiProviders());
 }

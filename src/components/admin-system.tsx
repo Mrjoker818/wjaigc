@@ -309,7 +309,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
       setTestResult({
         providerId: provider.id,
         success: data.success,
-        message: data.success ? data.message : (data.error || '连接失败'),
+        message: data.success ? (data.info || '连接成功') : (data.error || '连接失败'),
       });
     } catch {
       setTestResult({
@@ -343,7 +343,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
       const data = await response.json();
       setTestNewResult({
         success: data.success,
-        message: data.success ? data.message : (data.error || '连接失败'),
+        message: data.success ? (data.info || '连接成功') : (data.error || '连接失败'),
         modelCount: data.modelCount,
         error: data.error,
       });
