@@ -1501,6 +1501,8 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
           if (!generateData.success) {
             console.error('[ChatImage] Generate API failed:', generateData.error);
           } else if (generateData.taskIds && generateData.taskIds.length > 0) {
+            // 使用服务端实际使用的模型（可能因自动切换而与请求模型不同）
+            const actualModel = generateData.model || getCurrentGenerationModel();
             // Poll for each task
             for (const taskId of generateData.taskIds) {
               const maxPolls = 60;
@@ -1512,7 +1514,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                 const pollRes = await fetch('/api/poll-task', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ taskId }),
+                  body: JSON.stringify({ taskId, model: actualModel }),
                 });
                 const pollData = await pollRes.json();
                 

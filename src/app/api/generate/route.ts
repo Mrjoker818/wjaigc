@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { appendUserJsonl } from '@/lib/server-user-storage';
-import { findProviderForModel, normalizeApiBaseUrl } from '@/lib/server-api-config';
+import { findProviderForModel, normalizeApiBaseUrl, findAllProvidersForType } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 
@@ -102,10 +102,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
     }
 
-    const provider = await findProviderForModel(model, 'image');
-    const serverApiKey = provider?.apiKey || process.env.APIMART_API_KEY;
-    const apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || process.env.APIMART_BASE_URL || 'https://api.apimart.ai');
-    const modelConfig = APIMART_MODEL_CONFIG[model] || {
+    // 获取所有可用的 image 类型 API 提供商和模型
+    const allImageProviders = await findAllProvidersForType('image');
+    
+    // 尝试找到用户指定模型对应的 provider
+    let provider = await findProviderForModel(model, 'image');
+    let serverApiKey = provider?.apiKey || process.env.APIMART_API_KEY;
+    let apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || process.env.APIMART_BASE_URL || 'https://api.apimart.ai');
+    let modelConfig = APIMART_MODEL_CONFIG[model] || {
       name: provider?.displayName || model,
       modelId: model,
       paramType: 'none' as const,
@@ -115,21 +119,58 @@ export async function POST(request: NextRequest) {
       estimatedTime: 30,
     };
 
-    if (false) {
-      return NextResponse.json({
-        success: false,
-        error: `不支持的模型: ${model}`,
-      }, { status: 400 });
+    // 构建备选模型列表（排除当前模型，优先管理员配置的模型）
+    const candidateModels: { modelId: string; apiKey: string; baseUrl: string; providerId: string; displayName: string }[] = [];
+    for (const p of allImageProviders) {
+      for (const m of p.models) {
+        if (m !== model) {
+          candidateModels.push({
+            modelId: m,
+            apiKey: p.provider.apiKey,
+            baseUrl: normalizeApiBaseUrl(p.provider.baseUrl),
+            providerId: p.provider.id || 'unknown',
+            displayName: p.provider.displayName || m,
+          });
+        }
+      }
     }
 
     if (!serverApiKey) {
-      return NextResponse.json({
-        success: false,
-        error: `选择当前模型需要在管理员后台配置可用凭证`,
-        requiresApiKey: true,
-        modelName: modelConfig.name,
-        docsUrl: 'https://docs.apimart.ai/cn',
-      }, { status: 400 });
+      // 没有找到指定模型的凭证，尝试使用第一个可用的备选模型
+      if (candidateModels.length > 0) {
+        const fallback = candidateModels.shift()!;
+        console.log(`指定模型 ${model} 无凭证，自动切换到 ${fallback.modelId}`);
+        serverApiKey = fallback.apiKey;
+        apiBaseUrl = normalizeApiBaseUrl(fallback.baseUrl);
+        modelConfig = APIMART_MODEL_CONFIG[fallback.modelId] || {
+          name: fallback.displayName || fallback.modelId,
+          modelId: fallback.modelId,
+          paramType: 'none' as const,
+          supportedSizes: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+          supportsImageToImage: true,
+          maxN: 4,
+          estimatedTime: 30,
+        };
+        provider = {
+          id: fallback.providerId,
+          name: fallback.displayName,
+          apiKey: fallback.apiKey,
+          baseUrl: fallback.baseUrl,
+          displayName: fallback.displayName,
+          isEnabled: true,
+          type: 'image' as const,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+      } else {
+        return NextResponse.json({
+          success: false,
+          error: `选择当前模型需要在管理员后台配置可用凭证`,
+          requiresApiKey: true,
+          modelName: modelConfig.name,
+          docsUrl: 'https://docs.apimart.ai/cn',
+        }, { status: 400 });
+      }
     }
 
     // 构建增强的 prompt
@@ -201,148 +242,214 @@ export async function POST(request: NextRequest) {
 
     // 验证尺寸是否支持
     const apimartSize = aspectRatio || '1:1';
-    const effectiveSize = modelConfig.supportedSizes.includes(apimartSize) 
-      ? apimartSize 
-      : modelConfig.supportedSizes[0] || '1:1';
     
     // 设置生成数量 - 不受模型maxN限制，因为我们逐个提交任务(n=1)
     const count = outputCount && outputCount >= 1 ? Math.min(outputCount, 10) : 1;
 
-    const taskIds: string[] = [];
+    // 构建提交单个任务的辅助函数（返回 taskId 或抛出可重试错误）
+    const submitSingleTask = async (
+      currentModelConfig: ModelConfig,
+      currentApiKey: string,
+      currentApiBaseUrl: string,
+      currentProviderId: string,
+    ): Promise<{ taskId: string; usedModel: string; usedProviderId: string }> => {
+      const effectiveSize = currentModelConfig.supportedSizes.includes(apimartSize) 
+        ? apimartSize 
+        : currentModelConfig.supportedSizes[0] || '1:1';
 
-    // 提交所有生成任务
-    for (let i = 0; i < count; i++) {
-      try {
-        // 构建请求体 - 根据不同模型的参数类型
-        const requestBody: Record<string, unknown> = {
-          model: modelConfig.modelId,
-          prompt: enhancedPrompt,
-          size: effectiveSize,
-          n: 1,
+      const requestBody: Record<string, unknown> = {
+        model: currentModelConfig.modelId,
+        prompt: enhancedPrompt,
+        size: effectiveSize,
+        n: 1,
+      };
+
+      // 根据模型参数类型添加质量/分辨率参数
+      if (currentModelConfig.paramType === 'resolution' && quality) {
+        requestBody.resolution = quality;
+      } else if (currentModelConfig.paramType === 'quality' && quality) {
+        const qualityMap: Record<string, string> = {
+          '1K': 'low', '2K': 'medium', '4K': 'high',
+          'standard': 'auto', 'high': 'high', 'auto': 'auto',
+          'low': 'low', 'medium': 'medium',
         };
+        requestBody.quality = qualityMap[quality] || quality;
+      }
 
-        // 根据模型参数类型添加质量/分辨率参数
-        if (modelConfig.paramType === 'resolution' && quality) {
-          requestBody.resolution = quality;
-        } else if (modelConfig.paramType === 'quality' && quality) {
-          // GPT-Image系列使用quality参数
-          const qualityMap: Record<string, string> = {
-            '1K': 'low',
-            '2K': 'medium',
-            '4K': 'high',
-            'standard': 'auto',
-            'high': 'high',
-            'auto': 'auto',
-            'low': 'low',
-            'medium': 'medium',
-          };
-          requestBody.quality = qualityMap[quality] || quality;
+      // 添加参考图片
+      if (referenceImages && referenceImages.length > 0 && currentModelConfig.supportsImageToImage) {
+        requestBody.image_urls = referenceImages;
+      }
+
+      console.log('Submitting to APIMart:', {
+        model: currentModelConfig.modelId,
+        prompt: enhancedPrompt.substring(0, 50) + '...',
+        size: effectiveSize,
+        paramType: currentModelConfig.paramType,
+      });
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+      const submitResponse = await fetchWithV1Retry(
+        currentApiBaseUrl,
+        '/images/generations',
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${currentApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+          signal: controller.signal,
         }
+      );
 
-        // 添加参考图片
-        if (referenceImages && referenceImages.length > 0 && modelConfig.supportsImageToImage) {
-          requestBody.image_urls = referenceImages;
+      clearTimeout(timeoutId);
+
+      if (!submitResponse.ok) {
+        const errorText = await submitResponse.text();
+        console.error('APIMart submit error:', submitResponse.status, errorText);
+        
+        let errorMsg = `API 请求失败 (${submitResponse.status})`;
+        let errorCode = '';
+        try {
+          const errorJson = JSON.parse(errorText);
+          if (errorJson.error?.message) {
+            errorMsg = errorJson.error.message;
+          }
+          if (errorJson.error?.code) {
+            errorCode = errorJson.error.code;
+          }
+        } catch { /* ignore */ }
+
+        // "ratio or price is not configured" → 标记为可重试错误，由外层自动切换模型
+        if (errorMsg.includes('ratio or price is not configured') || errorMsg.includes('ratio or price')) {
+          const retryErr = new Error(`当前模型暂不可用`);
+          (retryErr as Error & { retryable?: boolean }).retryable = true;
+          throw retryErr;
         }
-
-        console.log('Submitting to APIMart:', {
-          model: modelConfig.modelId,
-          prompt: enhancedPrompt.substring(0, 50) + '...',
-          size: effectiveSize,
-          paramType: modelConfig.paramType,
-        });
-
-        // 提交图像生成任务 - 带超时保护
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-        const submitResponse = await fetchWithV1Retry(
-          apiBaseUrl,
-          '/images/generations',
-          {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${serverApiKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(requestBody),
-            signal: controller.signal,
-          }
-        );
-
-        clearTimeout(timeoutId);
-
-        if (!submitResponse.ok) {
-          const errorText = await submitResponse.text();
-          console.error('APIMart submit error:', submitResponse.status, errorText);
-          
-          let errorMsg = `API 请求失败 (${submitResponse.status})`;
-          try {
-            const errorJson = JSON.parse(errorText);
-            if (errorJson.error?.message) {
-              errorMsg = errorJson.error.message;
-            }
-          } catch { /* ignore */ }
-
-          // 清理常见 API 错误信息，提供更友好的中文提示
-          if (errorMsg.includes('ratio or price is not configured') || errorMsg.includes('ratio or price')) {
-            throw new Error(`当前模型暂不可用，请切换其他模型或联系管理员配置`);
-          }
-          if (errorMsg.includes('Insufficient balance') || errorMsg.includes('insufficient')) {
-            throw new Error(`API 余额不足，请联系管理员充值`);
-          }
-          if (errorMsg.includes('Rate limit') || errorMsg.includes('rate_limit') || errorMsg.includes('Too many requests')) {
-            throw new Error(`请求过于频繁，请稍后再试`);
-          }
-          if (errorMsg.includes('model not found') || errorMsg.includes('Model not found')) {
-            throw new Error(`模型不存在或已下线，请切换其他模型`);
-          }
-          if (errorMsg.includes('Invalid API key') || errorMsg.includes('invalid api_key')) {
-            throw new Error(`API 密钥无效，请联系管理员检查配置`);
-          }
-          
-          throw new Error(errorMsg);
+        if (errorMsg.includes('model not found') || errorMsg.includes('Model not found') || errorCode === 'model_not_found') {
+          const retryErr = new Error(`模型不存在或已下线`);
+          (retryErr as Error & { retryable?: boolean }).retryable = true;
+          throw retryErr;
         }
-
-        const submitResult = await submitResponse.json();
-        console.log('Submit result:', submitResult);
-
-        // 解析task_id
-        const taskId = submitResult.data?.[0]?.task_id;
-
-        if (!taskId) {
-          console.error('No task_id in response:', submitResult);
-          throw new Error('未获取到任务ID');
+        if (errorMsg.includes('Insufficient balance') || errorMsg.includes('insufficient')) {
+          throw new Error(`API 余额不足，请联系管理员充值`);
         }
+        if (errorMsg.includes('Rate limit') || errorMsg.includes('rate_limit') || errorMsg.includes('Too many requests')) {
+          throw new Error(`请求过于频繁，请稍后再试`);
+        }
+        if (errorMsg.includes('Invalid API key') || errorMsg.includes('invalid api_key')) {
+          throw new Error(`API 密钥无效，请联系管理员检查配置`);
+        }
+        
+        throw new Error(errorMsg);
+      }
 
-        console.log('Got task_id:', taskId);
-        taskIds.push(taskId);
+      const submitResult = await submitResponse.json();
+      console.log('Submit result:', submitResult);
+
+      const taskId = submitResult.data?.[0]?.task_id;
+      if (!taskId) {
+        console.error('No task_id in response:', submitResult);
+        throw new Error('未获取到任务ID');
+      }
+
+      console.log('Got task_id:', taskId);
+      return { taskId, usedModel: currentModelConfig.modelId, usedProviderId: currentProviderId };
+    }
+
+    const taskIds: string[] = [];
+    let usedModelName = modelConfig.name;
+    let usedModelId = modelConfig.modelId;
+    let usedProviderId = provider?.id || 'env';
+
+    // 提交所有生成任务（带自动重试逻辑）
+    for (let i = 0; i < count; i++) {
+      let submitted = false;
+      
+      // 先用当前模型尝试
+      try {
+        const result = await submitSingleTask(modelConfig, serverApiKey, apiBaseUrl, provider?.id || 'env');
+        taskIds.push(result.taskId);
+        usedModelId = result.usedModel;
+        usedProviderId = result.usedProviderId;
         await appendUserJsonl(userId, 'images', {
           type: 'submit',
-          providerId: provider?.id || 'env',
-          model: modelConfig.modelId,
-          taskId,
+          providerId: usedProviderId,
+          model: usedModelId,
+          taskId: result.taskId,
           prompt: enhancedPrompt,
         });
-
+        submitted = true;
       } catch (singleError: unknown) {
         const errMsg = singleError instanceof Error ? singleError.message : String(singleError);
-        console.error(`Task ${i + 1} submit failed:`, errMsg);
+        const isRetryable = singleError instanceof Error && (singleError as Error & { retryable?: boolean }).retryable;
         
-        // 网络超时错误
-        if (errMsg.includes('abort') || errMsg.includes('timeout')) {
-          return NextResponse.json({
-            success: false,
-            error: '提交任务超时，请检查网络后重试',
-            networkError: true,
-          }, { status: 504 });
+        if (isRetryable && candidateModels.length > 0) {
+          // 当前模型不可用，尝试备选模型
+          console.log(`模型 ${modelConfig.modelId} 不可用 (${errMsg})，尝试备选模型...`);
+          
+          for (let ci = 0; ci < candidateModels.length; ci++) {
+            const candidate = candidateModels[ci];
+            const candidateConfig = APIMART_MODEL_CONFIG[candidate.modelId] || {
+              name: candidate.displayName || candidate.modelId,
+              modelId: candidate.modelId,
+              paramType: 'none' as const,
+              supportedSizes: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+              supportsImageToImage: true,
+              maxN: 4,
+              estimatedTime: 30,
+            };
+            
+            try {
+              console.log(`尝试备选模型 ${candidate.modelId} (${ci + 1}/${candidateModels.length})...`);
+              const result = await submitSingleTask(candidateConfig, candidate.apiKey, candidate.baseUrl, candidate.providerId);
+              taskIds.push(result.taskId);
+              usedModelId = result.usedModel;
+              usedModelName = candidateConfig.name;
+              usedProviderId = result.usedProviderId;
+              await appendUserJsonl(userId, 'images', {
+                type: 'submit',
+                providerId: usedProviderId,
+                model: usedModelId,
+                taskId: result.taskId,
+                prompt: enhancedPrompt,
+              });
+              submitted = true;
+              console.log(`备选模型 ${candidate.modelId} 提交成功`);
+              break; // 成功，跳出备选模型循环
+            } catch (candidateError: unknown) {
+              const cErrMsg = candidateError instanceof Error ? candidateError.message : String(candidateError);
+              const cIsRetryable = candidateError instanceof Error && (candidateError as Error & { retryable?: boolean }).retryable;
+              console.log(`备选模型 ${candidate.modelId} 也失败: ${cErrMsg}`);
+              if (cIsRetryable) {
+                continue; // 继续尝试下一个备选模型
+              }
+              // 非可重试错误（余额不足、频率限制等），直接抛出
+              throw candidateError;
+            }
+          }
         }
         
-        if (i === 0) {
-          return NextResponse.json({
-            success: false,
-            error: `${modelConfig.name} 提交失败: ${errMsg}`,
-            modelName: modelConfig.name,
-          }, { status: 500 });
+        if (!submitted) {
+          // 网络超时错误
+          if (errMsg.includes('abort') || errMsg.includes('timeout')) {
+            return NextResponse.json({
+              success: false,
+              error: '提交任务超时，请检查网络后重试',
+              networkError: true,
+            }, { status: 504 });
+          }
+          
+          if (i === 0) {
+            return NextResponse.json({
+              success: false,
+              error: `${usedModelName} 提交失败: ${errMsg}`,
+              modelName: usedModelName,
+            }, { status: 500 });
+          }
         }
       }
     }
@@ -350,8 +457,8 @@ export async function POST(request: NextRequest) {
     if (taskIds.length === 0) {
       return NextResponse.json({
         success: false,
-        error: `${modelConfig.name} 提交任务失败，请稍后重试`,
-        modelName: modelConfig.name,
+        error: `所有可用模型均提交失败，请稍后重试或联系管理员配置`,
+        modelName: usedModelName,
       }, { status: 500 });
     }
 
@@ -360,8 +467,8 @@ export async function POST(request: NextRequest) {
       success: true,
       mode: 'polling',
       taskIds,
-      model: modelConfig.modelId,
-      modelName: modelConfig.name,
+      model: usedModelId,
+      modelName: usedModelName,
       estimatedTime: modelConfig.estimatedTime,
       prompt: enhancedPrompt,
       originalPrompt: prompt,

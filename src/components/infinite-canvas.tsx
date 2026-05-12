@@ -2534,6 +2534,8 @@ export function InfiniteCanvas({
 
       const data = await res.json();
       const taskIds: string[] = data.taskIds || (data.taskId ? [data.taskId] : []);
+      // 使用服务端实际使用的模型（可能因自动切换而与请求模型不同）
+      const actualGenModel = data.model || canvasGenModel || undefined;
 
       if (taskIds.length === 0) {
         throw new Error('未获取到任务ID');
@@ -2548,7 +2550,7 @@ export function InfiniteCanvas({
             const pollRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId, model: canvasGenModel || undefined }),
+              body: JSON.stringify({ taskId, model: actualGenModel }),
             });
             if (!pollRes.ok) continue;
             const pollData = await pollRes.json();
@@ -3494,6 +3496,8 @@ export function InfiniteCanvas({
         }
 
         const taskId = data.taskIds?.[0] || data.taskId || data.id;
+        // 使用服务端实际使用的模型（可能因自动切换而与请求模型不同）
+        const actualModel = data.model || img2imgModel;
         if (!taskId) {
           alert('未获取到任务ID');
           removeProcessingFrame(placeholderId);
@@ -3514,7 +3518,7 @@ export function InfiniteCanvas({
             const pollRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId, model: img2imgModel }),
+              body: JSON.stringify({ taskId, model: actualModel }),
             });
             if (!pollRes.ok) continue;
             const pollData = await pollRes.json();
