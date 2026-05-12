@@ -393,6 +393,47 @@ export function InfiniteCanvas({
     onNavigateToImageComplete?.();
   }, [navigateToImageId]);
 
+  // Auto-center view on newly added images (upload / generate / paste)
+  const prevImageCountRef = useRef(images.length);
+  const prevImageIdsRef = useRef<Set<string>>(new Set(images.map(img => img.id)));
+  useEffect(() => {
+    const currentIds = new Set(images.map(img => img.id));
+    const newImages = images.filter(img => !prevImageIdsRef.current.has(img.id) && !img.isProcessingPlaceholder);
+
+    if (newImages.length > 0) {
+      // Center on the first new image (most recent addition)
+      const targetImg = newImages[0];
+      const canvasEl = canvasRef.current;
+      if (canvasEl) {
+        const canvasW = canvasEl.clientWidth;
+        const canvasH = canvasEl.clientHeight;
+        const imgCenterX = targetImg.x + targetImg.width / 2;
+        const imgCenterY = targetImg.y + targetImg.height / 2;
+
+        // Calculate zoom to fit the image nicely (show image at ~80% of viewport)
+        const fitZoomX = (canvasW * 0.8) / targetImg.width;
+        const fitZoomY = (canvasH * 0.8) / targetImg.height;
+        const fitZoom = Math.min(fitZoomX, fitZoomY, 2); // Cap at 2x zoom
+
+        // Use a reasonable zoom: keep current if it shows the image well, otherwise use fitZoom
+        const newZoom = fitZoom;
+
+        setZoom(newZoom);
+        setViewOffset({
+          x: canvasW / 2 - imgCenterX * newZoom,
+          y: canvasH / 2 - imgCenterY * newZoom,
+        });
+
+        // Select the first new image
+        setSelectedIds(new Set([targetImg.id]));
+        onSelectImage(targetImg);
+      }
+    }
+
+    prevImageIdsRef.current = currentIds;
+    prevImageCountRef.current = images.length;
+  }, [images]);
+
   // Selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [groups, setGroups] = useState<ImageGroup[]>(initialGroups || []);
