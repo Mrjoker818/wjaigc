@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
+import { fetchWithV1Retry } from '@/lib/api-helpers';
 
 export const maxDuration = 60;
 
@@ -178,18 +179,21 @@ export async function POST(request: NextRequest) {
     };
 
     // Build the correct endpoint
-    const endpoint = `${visionBaseUrl.replace(/\/+$/, '')}/chat/completions`;
-    console.log(`[vision-prompt] Calling endpoint: ${endpoint}`);
+    console.log(`[vision-prompt] Calling endpoint with base: ${visionBaseUrl}`);
 
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${visionApiKey}`,
-      },
-      body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(90000),
-    });
+    const response = await fetchWithV1Retry(
+      visionBaseUrl,
+      '/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${visionApiKey}`,
+        },
+        body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(90000),
+      }
+    );
 
     if (!response.ok) {
       const errorText = await response.text();

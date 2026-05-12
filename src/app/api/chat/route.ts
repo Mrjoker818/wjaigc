@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
+import { fetchWithV1Retry } from '@/lib/api-helpers';
 
 export const maxDuration = 60;
 
@@ -49,15 +50,19 @@ export async function POST(request: NextRequest) {
       temperature: 0.7,
     };
 
-    const response = await fetch(`${chatBaseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${chatApiKey}`,
-      },
-      body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(30000),
-    });
+    const response = await fetchWithV1Retry(
+      chatBaseUrl,
+      '/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${chatApiKey}`,
+        },
+        body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(30000),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
+import { fetchWithV1Retry } from '@/lib/api-helpers';
 import sharp from 'sharp';
 import fsSync from 'fs';
 import fs from 'fs/promises';
@@ -138,15 +139,19 @@ async function submitImageTask(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-  const submitResponse = await fetch(`${apiBaseUrl}/images/generations`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(requestBody),
-    signal: controller.signal,
-  });
+  const submitResponse = await fetchWithV1Retry(
+    apiBaseUrl,
+    '/images/generations',
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    }
+  );
 
   clearTimeout(timeoutId);
 

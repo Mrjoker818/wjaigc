@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, getApiProviders } from '@/lib/server-api-config';
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { getSessionUser } from '@/lib/server-auth';
+import { fetchWithV1Retry } from '@/lib/api-helpers';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -86,24 +87,28 @@ export async function POST(request: NextRequest) {
     const systemPrompt = customSystemPrompt || OPTIMIZE_SYSTEM_PROMPT;
     const userMessage = `请优化以下图像生成提示词：\n\n${prompt}`;
 
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: selectedModel,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage },
-        ],
-        temperature: mode === 'simplify' ? 0.4 : 0.7,
-        max_tokens: 1000,
-        stream: false,
-      }),
-      signal: AbortSignal.timeout(60000),
-    });
+    const response = await fetchWithV1Retry(
+      baseUrl,
+      '/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: selectedModel,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userMessage },
+          ],
+          temperature: mode === 'simplify' ? 0.4 : 0.7,
+          max_tokens: 1000,
+          stream: false,
+        }),
+        signal: AbortSignal.timeout(60000),
+      }
+    );
 
     if (!response.ok) {
       const errorText = await response.text();

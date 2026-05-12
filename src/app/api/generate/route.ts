@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
+import { fetchWithV1Retry } from '@/lib/api-helpers';
 
 // 只需要短超时用于提交任务，轮询由前端负责
 export const maxDuration = 30;
@@ -254,15 +255,19 @@ export async function POST(request: NextRequest) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-        const submitResponse = await fetch(`${apiBaseUrl}/images/generations`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${serverApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-          signal: controller.signal,
-        });
+        const submitResponse = await fetchWithV1Retry(
+          apiBaseUrl,
+          '/images/generations',
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${serverApiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestBody),
+            signal: controller.signal,
+          }
+        );
 
         clearTimeout(timeoutId);
 

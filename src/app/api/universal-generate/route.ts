@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
+import { fetchWithV1Retry } from '@/lib/api-helpers';
 
 // 通用API生成路由 - 支持第三方OpenAI兼容API的图像生成
 // 当用户使用非 APIMart 管理的第三方模型时，图像生成请求会被路由到这里
@@ -68,7 +69,7 @@ export async function POST(request: NextRequest) {
     console.log(`[Universal API] 请求: model=${resolvedModel}, baseUrl=${baseUrl}, size=${aspectRatio}`);
 
     // 1. 提交生成任务
-    const submitResponse = await fetch(`${baseUrl}/images/generations`, {
+    const submitResponse = await fetchWithV1Retry(baseUrl, '/images/generations', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
