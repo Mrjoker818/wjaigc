@@ -525,6 +525,32 @@ export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3
   return enabled[0] || null;
 }
 
+/**
+ * Get all enabled providers of a given type with their selected models.
+ * Returns an array of { provider, models[] } sorted by: default first, then by order.
+ * Used by image-edit route to auto-try multiple models.
+ */
+export async function findAllProvidersForType(modelType: ApiKind): Promise<Array<{
+  provider: ApiProvider;
+  models: string[];
+}>> {
+  const providers = await getApiProviders();
+  // For imageEdit, include image-type providers
+  const effectiveType = modelType === 'imageEdit' ? 'image' : modelType;
+  const enabled = providers.filter(p => p.isEnabled && (p.modelType === effectiveType || p.modelType === 'universal'));
+  // Sort: default providers first
+  enabled.sort((a, b) => (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0));
+  return enabled.map(provider => {
+    const selected = provider.selectedModels || [];
+    const discovered = provider.discoveredModels || [];
+    // If admin has explicitly selected models, use only those
+    const models = selected.length > 0
+      ? selected
+      : discovered.map(m => m.id);
+    return { provider, models };
+  }).filter(entry => entry.models.length > 0);
+}
+
 export async function getPublicModels(modelType?: ApiKind): Promise<ModelInfo[]> {
   const providers = await getApiProviders();
   return providers

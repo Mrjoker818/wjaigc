@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findProviderForModel, findProviderForFeature, normalizeApiBaseUrl } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderForFeature, findAllProvidersForType, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import sharp from 'sharp';
@@ -254,6 +254,82 @@ async function chatVisionEditFallback(
   return submitImageTask(apiBaseUrl, apiKey, imageRequestBody);
 }
 
+/**
+ * 自动尝试提交图像任务 - 遍历候选模型直到成功
+ * 遇到 ModelCapabilityError 时自动切换下一个候选模型
+ */
+async function autoTrySubmitImageTask(
+  candidateModels: Array<{ model: string; apiKey: string; apiBaseUrl: string; source: string }>,
+  buildRequestBody: (model: string) => Record<string, unknown>,
+  operation: string,
+): Promise<{ taskId?: string; directUrl?: string; usedModel?: string }> {
+  const errors: string[] = [];
+  
+  for (const candidate of candidateModels) {
+    try {
+      console.log(`[image-edit] ${operation}: Trying model ${candidate.model} (source: ${candidate.source})`);
+      const requestBody = buildRequestBody(candidate.model);
+      const result = await submitImageTask(candidate.apiBaseUrl, candidate.apiKey, requestBody);
+      return { ...result, usedModel: candidate.model };
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      errors.push(`${candidate.model}: ${errMsg}`);
+      console.warn(`[image-edit] ${operation}: Model ${candidate.model} failed: ${errMsg}`);
+      
+      // ModelCapabilityError → 继续尝试下一个模型
+      if (err instanceof ModelCapabilityError) {
+        continue;
+      }
+      // 其他错误（网络/超时等）→ 不继续尝试，直接抛出
+      throw err;
+    }
+  }
+  
+  // 所有候选模型都不支持此操作
+  throw new ModelCapabilityError(
+    `所有 ${candidateModels.length} 个可用模型均不支持${operation}操作。请添加支持图像编辑的模型（如 DALL-E、Flux 等）。\n` +
+    `尝试过的模型: ${errors.map((e, i) => `${i + 1}. ${e}`).join('; ')}`
+  );
+}
+
+/**
+ * 自动尝试所有 LLM 模型做视觉 fallback
+ * 遍历管理员配置的 chat 类型模型，用视觉理解+生成的方式替代图像编辑
+ */
+async function autoTryChatVisionFallback(
+  imageBase64: string,
+  maskBase64: string | null,
+  prompt: string,
+  operation: string,
+): Promise<{ taskId?: string; directUrl?: string; usedModel?: string } | null> {
+  const chatProviders = await findAllProvidersForType('chat');
+  if (chatProviders.length === 0) {
+    console.warn('[image-edit] No chat models available for vision fallback');
+    return null;
+  }
+  
+  for (const entry of chatProviders) {
+    for (const m of entry.models) {
+      try {
+        console.log(`[image-edit] ${operation} vision fallback: Trying ${m}`);
+        const result = await chatVisionEditFallback(
+          normalizeApiBaseUrl(entry.provider.baseUrl), entry.provider.apiKey, m,
+          imageBase64, maskBase64, prompt, operation
+        );
+        if (result) {
+          return { ...result, usedModel: m };
+        }
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn(`[image-edit] ${operation} vision fallback: Model ${m} failed: ${errMsg}`);
+        continue;
+      }
+    }
+  }
+  
+  return null;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body: EditRequest = await request.json();
@@ -277,19 +353,77 @@ export async function POST(request: NextRequest) {
     } = body;
 
     // 放大/擦除/蒙版 均使用管理员系统的 image 类型模型
-    // 查找顺序：精确匹配模型ID(image) → 默认provider(image) → universal → 环境变量兜底
-    const provider = await findProviderForModel(model, 'image')
-      || await findProviderForModel(model, 'universal')
-      || await findProviderForFeature('imageEdit');
-    const apiKey = provider?.apiKey || process.env.APIMART_API_KEY || '';
-    const apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || process.env.APIMART_BASE_URL || 'https://api.apimart.ai');
-
-    if (!apiKey) {
+    // 策略：自动识别管理员配置的所有可用 image 模型，按优先级逐一尝试
+    // 1. 先尝试前端指定的模型（如果匹配到 provider）
+    // 2. 再尝试管理员配置的其他 image 类型 provider 的模型
+    // 3. 最后使用环境变量兜底
+    const allImageProviders = await findAllProvidersForType('image');
+    
+    // 构建候选模型列表：前端指定的模型优先，然后是其他所有可用模型
+    const candidateModels: Array<{ model: string; apiKey: string; apiBaseUrl: string; source: string }> = [];
+    const triedModels = new Set<string>();
+    
+    // 1. 前端指定的模型（如果匹配到 provider）
+    const preferredProvider = await findProviderForModel(model, 'image')
+      || await findProviderForModel(model, 'universal');
+    if (preferredProvider) {
+      candidateModels.push({
+        model,
+        apiKey: preferredProvider.apiKey,
+        apiBaseUrl: normalizeApiBaseUrl(preferredProvider.baseUrl),
+        source: 'preferred',
+      });
+      triedModels.add(model);
+    }
+    
+    // 2. 管理员配置的所有 image 类型 provider 的模型
+    for (const entry of allImageProviders) {
+      for (const m of entry.models) {
+        if (!triedModels.has(m)) {
+          candidateModels.push({
+            model: m,
+            apiKey: entry.provider.apiKey,
+            apiBaseUrl: normalizeApiBaseUrl(entry.provider.baseUrl),
+            source: 'admin-auto',
+          });
+          triedModels.add(m);
+        }
+      }
+    }
+    
+    // 3. 环境变量兜底
+    const envApiKey = process.env.APIMART_API_KEY || '';
+    const envApiBaseUrl = normalizeApiBaseUrl(process.env.APIMART_BASE_URL || 'https://api.apimart.ai');
+    if (envApiKey && candidateModels.length === 0) {
+      candidateModels.push({
+        model,
+        apiKey: envApiKey,
+        apiBaseUrl: envApiBaseUrl,
+        source: 'env-fallback',
+      });
+    }
+    
+    if (candidateModels.length === 0) {
       return NextResponse.json({
         success: false,
         error: '请先在管理员系统配置可用的图像模型（image类型）',
       }, { status: 400 });
     }
+    
+    // 选取第一个候选模型作为初始模型（后续 submitImageTask 失败时会自动尝试下一个）
+    let currentModelIdx = 0;
+    const getCurrentModel = () => candidateModels[currentModelIdx];
+    
+    // 自动尝试下一个候选模型
+    const tryNextModel = (): { model: string; apiKey: string; apiBaseUrl: string } | null => {
+      currentModelIdx++;
+      if (currentModelIdx < candidateModels.length) {
+        const next = candidateModels[currentModelIdx];
+        console.log(`[image-edit] Trying next model: ${next.model} (source: ${next.source})`);
+        return next;
+      }
+      return null;
+    };
 
     // Helper: resolve local/blob/external image URL to base64 data URL
     const resolveImageToBase64 = async (url: string): Promise<string> => {
@@ -329,23 +463,21 @@ export async function POST(request: NextRequest) {
         ? `Pseudo-3D AI photography studio. Reconstruct the reference image as a coherent three-dimensional object/subject and generate a new rendered view with the subject itself rotated ${yawText}. Preserve the same identity, design, materials, labels, colors, proportions, outfit/product details and lighting style. Infer plausible hidden sides instead of warping the flat image. Keep a clean professional studio background, realistic perspective, depth, occlusion, shadows, reflections, and high quality product/character photography. Camera pitch: ${pitchText}. Framing: ${dollyText}. Do not output a flat 2D rotated canvas, do not stretch or skew the original image.`
         : `Pseudo-3D AI photography studio. Keep the subject/object fixed as a real three-dimensional scene and move a virtual camera around it: yaw ${yawText}, pitch ${pitchText}, ${dollyText}. Preserve the same identity, design, materials, labels, colors, proportions and environment mood from the reference. Generate a new photographic view with real perspective, depth, occlusion, shadows, reflections, and inferred unseen geometry. Do not rotate the flat source image; re-render the scene from the requested camera angle.`);
 
-      const requestBody: Record<string, unknown> = {
-        model,
+      const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
+        model: m,
         prompt: multiAnglePrompt,
         size: '1:1',
         n: 1,
         image_urls: [imageUrl],
-      };
-
-      const result = await submitImageTask(apiBaseUrl, apiKey, requestBody);
+      }), '多角度');
       if (result.directUrl) {
-        return NextResponse.json({ success: true, imageUrl: result.directUrl, action });
+        return NextResponse.json({ success: true, imageUrl: result.directUrl, action, usedModel: result.usedModel });
       }
-      return NextResponse.json({ success: true, taskId: result.taskId, action, prompt: multiAnglePrompt });
+      return NextResponse.json({ success: true, taskId: result.taskId, action, prompt: multiAnglePrompt, usedModel: result.usedModel });
     }
 
     if (action === 'upscale') {
-      // 图像放大 - 使用管理员系统配置的 AI 图像模型
+      // 图像放大 - 自动遍历管理员配置的所有可用 image 模型
       const tw = targetWidth || 2048;
       const th = targetHeight || 2048;
 
@@ -372,25 +504,25 @@ export async function POST(request: NextRequest) {
       const effectiveSize = bestRatio;
 
       try {
-        // 先尝试 image_urls 方式（图生图模型）
-        const requestBody: Record<string, unknown> = {
-          model,
+        const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
+          model: m,
           prompt: upscalePrompt,
           size: effectiveSize,
           n: 1,
           image_urls: [imageUrl],
-        };
-        const result = await submitImageTask(apiBaseUrl, apiKey, requestBody);
+        }), '放大');
         if (result.directUrl) {
-          return NextResponse.json({ success: true, imageUrl: result.directUrl, action, engine: 'ai-api' });
+          return NextResponse.json({ success: true, imageUrl: result.directUrl, action, engine: 'ai-api', usedModel: result.usedModel });
         }
-        return NextResponse.json({ success: true, taskId: result.taskId, action, engine: 'ai-api' });
+        return NextResponse.json({ success: true, taskId: result.taskId, action, engine: 'ai-api', usedModel: result.usedModel });
       } catch (imgErr: unknown) {
-        // image_urls 不支持时，回退到视觉模型生成
+        // 所有 image 模型都不支持 image_urls 时，回退到视觉模型生成
         if (imgErr instanceof ModelCapabilityError) {
-          console.log(`[image-edit] upscale: image_urls not supported, trying chat-vision fallback...`);
+          console.log(`[image-edit] upscale: All image models failed, trying chat-vision fallback...`);
+          // 用第一个可用模型做视觉 fallback
+          const fallbackModel = candidateModels[0];
           const fallbackResult = await chatVisionEditFallback(
-            apiBaseUrl, apiKey, model, await resolveImageToBase64(imageUrl), null, upscalePrompt, 'upscale'
+            fallbackModel.apiBaseUrl, fallbackModel.apiKey, fallbackModel.model, await resolveImageToBase64(imageUrl), null, upscalePrompt, 'upscale'
           );
           if (fallbackResult) {
             if ('directUrl' in fallbackResult && fallbackResult.directUrl) {
@@ -398,7 +530,7 @@ export async function POST(request: NextRequest) {
             }
             return NextResponse.json({ success: true, taskId: fallbackResult.taskId, action, engine: 'ai-chat-vision' });
           }
-          return NextResponse.json({ success: false, error: '图像放大失败，当前模型不支持图像编辑，请切换支持图生图的模型或联系管理员配置' }, { status: 500 });
+          return NextResponse.json({ success: false, error: imgErr.message }, { status: 500 });
         }
         throw imgErr;
       }
@@ -406,19 +538,17 @@ export async function POST(request: NextRequest) {
 
     if (action === 'remove_background') {
       const bgSize = aspectRatio ? findClosestAspectRatio(aspectRatio) : '1:1';
-      const requestBody: Record<string, unknown> = {
-        model,
+      const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
+        model: m,
         prompt: 'Remove the background from this image, keep only the main subject with transparent background. Output PNG format.',
         size: bgSize,
         n: 1,
         image_urls: [imageUrl],
-      };
-
-      const result = await submitImageTask(apiBaseUrl, apiKey, requestBody);
+      }), '移除背景');
       if (result.directUrl) {
-        return NextResponse.json({ success: true, imageUrl: result.directUrl, action });
+        return NextResponse.json({ success: true, imageUrl: result.directUrl, action, usedModel: result.usedModel });
       }
-      return NextResponse.json({ success: true, taskId: result.taskId, action });
+      return NextResponse.json({ success: true, taskId: result.taskId, action, usedModel: result.usedModel });
     }
 
     if (action === 'inpaint') {
@@ -547,9 +677,8 @@ export async function POST(request: NextRequest) {
       // 8. 构建蒙版 data URL（标准黑白图，白色=修复区域）
       const maskDataUrl = `data:image/png;base64,${binaryMaskBuffer.toString('base64')}`;
 
-      // 9. 发送 AI 生成请求
+      // 9. 发送 AI 生成请求 - 自动尝试管理员系统中的所有可用图像模型
       const requestBody: Record<string, unknown> = {
-        model,
         prompt: inpaintPrompt,
         negative_prompt: isErase
           ? 'text, watermark, logo, signature, new objects, new people, new animals, low quality, blurry, distorted, deformed'
@@ -561,26 +690,26 @@ export async function POST(request: NextRequest) {
         strength: isErase ? 0.85 : 0.8,
       };
 
-      console.log(`[inpaint] AI API request: model=${model}, size=${effectiveSize}, strength=${isErase ? 0.85 : 0.8}`);
+      console.log(`[inpaint] AI API request: size=${effectiveSize}, strength=${isErase ? 0.85 : 0.8}`);
 
-      let result: { taskId?: string; directUrl?: string };
+      let result: { taskId?: string; directUrl?: string; usedModel?: string };
       try {
-        // 先尝试 image_urls + mask_image 方式（支持图像编辑的模型）
-        result = await submitImageTask(apiBaseUrl, apiKey, requestBody);
-      } catch (imgErr: unknown) {
-        // image_urls / mask_image 不支持时，回退到视觉模型生成
-        if (imgErr instanceof ModelCapabilityError) {
-          console.log(`[inpaint] image_urls not supported, trying chat-vision fallback...`);
-          const fallbackResult = await chatVisionEditFallback(
-            apiBaseUrl, apiKey, model, await resolveImageToBase64(accessibleImageUrl), maskDataUrl || null, inpaintPrompt, 'inpaint'
-          );
-          if (fallbackResult) {
-            result = fallbackResult as { taskId: string; directUrl?: string };
-          } else {
-            return NextResponse.json({ success: false, error: '图像编辑失败，当前模型不支持图像编辑，请切换支持图生图的模型或联系管理员配置' }, { status: 500 });
-          }
+        // 自动尝试管理员系统中的所有可用图像模型
+        result = await autoTrySubmitImageTask(
+          candidateModels,
+          (m: string) => ({ ...requestBody, model: m }),
+          `${editMode === 'erase' ? '擦除' : '蒙版修图'}`,
+        );
+      } catch (autoTryErr: unknown) {
+        // 所有 image 类型模型都失败，回退到视觉模型生成
+        console.log(`[inpaint] All image models failed, trying chat-vision fallback...`);
+        const fallbackResult = await autoTryChatVisionFallback(
+          await resolveImageToBase64(accessibleImageUrl), maskDataUrl || null, inpaintPrompt, 'inpaint'
+        );
+        if (fallbackResult) {
+          result = fallbackResult as { taskId: string; directUrl?: string; usedModel?: string };
         } else {
-          throw imgErr;
+          return NextResponse.json({ success: false, error: '图像编辑失败，当前无可用模型支持图像编辑，请在管理员系统中配置支持图生图的模型' }, { status: 500 });
         }
       }
 
@@ -811,18 +940,18 @@ export async function POST(request: NextRequest) {
       const targetSize = findClosestAspectRatio(targetRatioStr);
 
       // 使用 base64 数据 URL 发送图片（确保外部 API 可访问）+ mask_image
-      const requestBody: Record<string, unknown> = {
-        model,
-        prompt: outpaintPrompt,
-        size: targetSize,
-        n: 1,
-        image_urls: [compositeBase64],
-        mask_image: maskFileBase64,
-      };
-
-      console.log(`[outpaint] Submitting task: ${targetSize}, composite ${compositeUrl.substring(0, 80)}...`);
-
-      const result = await submitImageTask(apiBaseUrl, apiKey, requestBody);
+      const result = await autoTrySubmitImageTask(
+        candidateModels,
+        (modelId: string) => ({
+          model: modelId,
+          prompt: outpaintPrompt,
+          size: targetSize,
+          n: 1,
+          image_urls: [compositeBase64],
+          mask_image: maskFileBase64,
+        }),
+        'outpaint'
+      );
 
       // 清理临时文件（延迟清理，异步任务需要文件存在）
       const cleanupFiles = async () => {
