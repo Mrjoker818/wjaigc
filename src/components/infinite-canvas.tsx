@@ -2752,72 +2752,13 @@ export function InfiniteCanvas({
       '放大中',
       targetW / 2,
       targetH / 2,
-      '正在创建超分辨率任务...'
+      '正在提交放大任务...'
     );
     setIsEditProcessing(true);
     try {
-      // Try local Upscayl NCNN first (true AI super-resolution with Real-ESRGAN)
-      if (upscaylAvailable) {
-        try {
-          updateProcessingFrame(placeholderId, { progress: 8, status: 'Upscayl 本地 AI 放大中...' });
-          // For Upscayl, we need a server-accessible URL
-          // If the image URL is a blob or data URL, we need to upload it first
-          let serverUrl = img.url;
-          if (img.url.startsWith('blob:') || img.url.startsWith('data:')) {
-            // Upload the image to server first
-            try {
-              const imgResp = await fetch(img.url);
-              const imgBlob = await imgResp.blob();
-              const formData = new FormData();
-              formData.append('file', imgBlob, 'upscale-input.png');
-              const uploadResp = await fetch('/api/upload', { method: 'POST', body: formData });
-              const uploadData = await uploadResp.json();
-              if (uploadData.url) {
-                serverUrl = uploadData.url;
-              } else {
-                throw new Error('Upload failed');
-              }
-            } catch (uploadErr) {
-              console.warn('Failed to upload image for Upscayl:', uploadErr);
-              serverUrl = img.url; // Try with original URL as fallback
-            }
-          }
-          
-          const upscaylRes = await fetch('/api/upscayl', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              imageUrl: serverUrl,
-              model: upscaylSelectedModel,
-              scale: upscaleMultiplier,
-            }),
-          });
-          const upscaylData = await upscaylRes.json();
-          if (upscaylData.success && upscaylData.imageUrl) {
-            updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入结果...' });
-            const stableUrl = await toStableImageUrl(upscaylData.imageUrl);
-            completeProcessingFrame(placeholderId, stableUrl, targetW / 2, targetH / 2, {
-              originalWidth: targetW,
-              originalHeight: targetH,
-              modifyPrompt: `${upscaleMultiplier}x Upscayl (${upscaylSelectedModel})`,
-            });
-            setIsEditProcessing(true);
-        updateProcessingFrame(placeholderId, { progress: 30, status: '正在读取源图片...' });
-            setActiveTool('none');
-            return;
-          }
-          // Upscayl failed, fall through to API
-          updateProcessingFrame(placeholderId, { progress: 10, status: 'Upscayl 不可用，切换到 API...' });
-        } catch (e) {
-          console.warn('Upscayl NCNN failed, falling back to API:', e);
-          updateProcessingFrame(placeholderId, { progress: 10, status: '切换到 API 模式...' });
-        }
-      }
-
-      // Fallback: API-based AI upscale
       const apiKey = getApiKey();
       const model = getCurrentModel();
-      updateProcessingFrame(placeholderId, { progress: 12, status: '正在提交到 AI 模型...' });
+      updateProcessingFrame(placeholderId, { progress: 8, status: '正在提交到 AI 模型...' });
       const res = await fetch('/api/image-edit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2861,7 +2802,7 @@ export function InfiniteCanvas({
     }
     setIsEditProcessing(false);
     setActiveTool('none');
-  }, [selectedImageData, upscaleMultiplier, upscaylAvailable, upscaylSelectedModel, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, toStableImageUrl]);
+  }, [selectedImageData, upscaleMultiplier, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, toStableImageUrl]);
 
   // 1b. Upscale trigger - calls handleUpscaleConfirm directly
   const handleOpenUpscale = useCallback(() => {
@@ -3400,103 +3341,67 @@ export function InfiniteCanvas({
       exitEditMode();
 
       try {
-        // 优先尝试本地 IOPaint/LaMa 修复
+        // 使用管理员系统的图像模型进行 AI 修复
         const prompt = currentEditMode === 'mask'
           ? (currentMaskKeyword || currentEditPrompt || '')
           : ''; // 擦除模式：空提示词
 
         let resultUrl: string | null = null;
-        let usedLocalInpaint = false;
 
-        // 1. 尝试本地 IOPaint 修复
-        try {
-          const formData = new FormData();
-          // 将图片URL转为blob
-          const imgResp = await fetch(currentEditImg.url);
-          const imgBlob = await imgResp.blob();
-          formData.append('image', imgBlob, 'image.png');
+        updateProcessingFrame(placeholderId, { progress: 8, status: '正在提交到 AI 模型...' });
 
-          // 将mask base64转为blob
-          const maskResp = await fetch(maskBase64);
-          const maskBlob = await maskResp.blob();
-          formData.append('mask', maskBlob, 'mask.png');
+        const model = getCurrentModel();
+        const res = await fetch('/api/image-edit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'inpaint',
+            imageUrl: currentEditImg.url,
+            maskImage: maskBase64,
+            prompt,
+            aspectRatio: `${currentEditImg.originalWidth || currentEditImg.width}:${currentEditImg.originalHeight || currentEditImg.height}`,
+            model,
+            apiKey,
+          }),
+        });
 
-          if (prompt) formData.append('prompt', prompt);
-
-          const localRes = await fetch('/api/image/inpaint', {
-            method: 'POST',
-            body: formData,
-          });
-          const localData = await localRes.json();
-
-          if (localData.success && localData.imageUrl) {
-            resultUrl = localData.imageUrl;
-            usedLocalInpaint = true;
-            updateProcessingFrame(placeholderId, { progress: 80, status: '本地 LaMa 修复完成，正在载入...' });
-          } else {
-            console.warn('[Inpaint] Local IOPaint not available, falling back to cloud API:', localData.error);
-          }
-        } catch (localErr) {
-          console.warn('[Inpaint] Local IOPaint failed, falling back to cloud API:', localErr);
+        const data = await res.json();
+        if (!data.success) {
+          console.error('Image edit failed:', data.error);
+          removeProcessingFrame(placeholderId);
+          return;
         }
 
-        // 2. 本地不可用时，回退到云端 API
-        if (!usedLocalInpaint) {
-          updateProcessingFrame(placeholderId, { progress: 12, status: '正在使用云端 AI 修复...' });
+        const syncResultUrl: string | undefined = data.imageUrl;
+        const cropInfo = data.cropInfo || null;
 
-          const model = getCurrentModel();
-          const res = await fetch('/api/image-edit', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'inpaint',
-              imageUrl: currentEditImg.url,
-              maskImage: maskBase64,
-              prompt,
-              aspectRatio: `${currentEditImg.originalWidth || currentEditImg.width}:${currentEditImg.originalHeight || currentEditImg.height}`,
-              model,
-              apiKey,
-            }),
+        if (syncResultUrl) {
+          updateProcessingFrame(placeholderId, { progress: 80, status: '正在载入编辑结果...' });
+          resultUrl = syncResultUrl;
+        } else if (data.taskId) {
+          updateProcessingFrame(placeholderId, { progress: 24, status: 'AI 正在重绘选区...' });
+          resultUrl = await pollForResult(data.taskId, apiKey, (progress, status) => {
+            updateProcessingFrame(placeholderId, { progress, status });
           });
+        } else {
+          removeProcessingFrame(placeholderId);
+          return;
+        }
 
-          const data = await res.json();
-          if (!data.success) {
-            console.error('Image edit failed:', data.error);
-            removeProcessingFrame(placeholderId);
-            return;
-          }
-
-          const syncResultUrl: string | undefined = data.imageUrl;
-          const cropInfo = data.cropInfo || null;
-
-          if (syncResultUrl) {
-            updateProcessingFrame(placeholderId, { progress: 80, status: '正在载入编辑结果...' });
-            resultUrl = syncResultUrl;
-          } else if (data.taskId) {
-            updateProcessingFrame(placeholderId, { progress: 24, status: 'AI 正在重绘选区...' });
-            resultUrl = await pollForResult(data.taskId, apiKey, (progress, status) => {
-              updateProcessingFrame(placeholderId, { progress, status });
-            });
-          } else {
-            removeProcessingFrame(placeholderId);
-            return;
-          }
-
-          // 异步结果前端蒙版合成
-          if (resultUrl && !syncResultUrl) {
-            try {
-              const compositeUrl = await compositeInpaintResult(
-                currentEditImg.url,
-                maskBase64,
-                resultUrl,
-                currentEditImg.originalWidth || Math.round(currentEditImg.width),
-                currentEditImg.originalHeight || Math.round(currentEditImg.height),
-                cropInfo
-              );
-              resultUrl = compositeUrl;
-            } catch (compositeErr) {
-              console.error('Composite inpaint failed, using raw result:', compositeErr);
-            }
+        // 异步结果前端蒙版合成
+        if (resultUrl && !syncResultUrl) {
+          try {
+            const compositeUrl = await compositeInpaintResult(
+              currentEditImg.url,
+              maskBase64,
+              resultUrl,
+              currentEditImg.originalWidth || Math.round(currentEditImg.width),
+              currentEditImg.originalHeight || Math.round(currentEditImg.height),
+              cropInfo
+            );
+            resultUrl = compositeUrl;
+          } catch (compositeErr) {
+            console.error('Composite inpaint failed, using raw result:', compositeErr);
           }
         }
 

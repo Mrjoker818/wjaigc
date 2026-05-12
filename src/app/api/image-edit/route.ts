@@ -67,40 +67,6 @@ interface EditRequest {
   providerId?: string;
 }
 
-// Helper: find upscayl binary
-function findUpscaylBin(): string | null {
-  const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
-  const candidates = [
-    path.join(workspacePath, 'bin', 'upscayl-bin'),
-    path.join(workspacePath, 'node_modules/.pnpm/upscayl-node@3.1.1/node_modules/upscayl-node/dist/upscaler/sub-classes/driver/command-upscayl/resources/linux/bin/upscayl-bin'),
-    '/usr/local/bin/upscayl-bin',
-  ];
-  for (const p of candidates) {
-    try {
-      fsSync.accessSync(p, fsSync.constants.X_OK);
-      return p;
-    } catch {}
-  }
-  return null;
-}
-
-// Helper: find upscayl models directory
-function findUpscaylModels(): string | null {
-  const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
-  const candidates = [
-    path.join(workspacePath, 'upscayl-models'),
-    path.join(workspacePath, 'node_modules/.pnpm/upscayl-node@3.1.1/node_modules/upscayl-node/dist/upscaler/sub-classes/model-manager/models'),
-  ];
-  for (const p of candidates) {
-    try {
-      if (fsSync.existsSync(p) && fsSync.readdirSync(p).some(f => f.endsWith('.param'))) {
-        return p;
-      }
-    } catch {}
-  }
-  return null;
-}
-
 // Helper: fetch image as Buffer (supports external URLs, data URLs, and local paths)
 async function fetchImageBuffer(url: string): Promise<Buffer> {
   // data URL
@@ -262,96 +228,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'upscale') {
-      // 图像放大 - 优先使用本地 Upscayl NCNN (Real-ESRGAN)，回退到 AI API
+      // 图像放大 - 使用管理员系统配置的 AI 图像模型
       const tw = targetWidth || 2048;
       const th = targetHeight || 2048;
 
-      // 尝试使用本地 Upscayl NCNN 放大（Real-ESRGAN 真正无损超分辨率）
-      try {
-        const upscaylBinPath = findUpscaylBin();
-        const upscaylModelsPath = findUpscaylModels();
-        if (upscaylBinPath && upscaylModelsPath) {
-          console.log('[image-edit] Using local Upscayl NCNN for upscale');
-          const os = await import('os');
-          const fsModule = await import('fs');
-          const pathModule = await import('path');
-          const { execFileSync } = await import('child_process');
-
-          const tmpDir = fsModule.mkdtempSync(pathModule.join(os.tmpdir(), 'upscayl-edit-'));
-          const inputPath = pathModule.join(tmpDir, 'input.png');
-          const outputPath = pathModule.join(tmpDir, 'output.png');
-
-          try {
-            // 下载图片
-            const imgBuf = await fetchImageBuffer(imageUrl);
-            fsModule.writeFileSync(inputPath, imgBuf);
-
-            // 确定放大倍数
-            const imgMeta = await sharp(imgBuf).metadata();
-            const origW = imgMeta.width || 512;
-            const model = 'realesrgan-x4fast';
-            const scaleVal = (tw >= origW * 4) ? 4 : (tw >= origW * 2) ? 2 : 2;
-
-            // 如果图片太大，先缩小
-            let processInput = inputPath;
-            const MAX_DIM = 2048;
-            if (origW > MAX_DIM || (imgMeta.height || 0) > MAX_DIM) {
-              const ratio = Math.min(MAX_DIM / origW, MAX_DIM / (imgMeta.height || 1));
-              const resPath = pathModule.join(tmpDir, 'input_resized.png');
-              await sharp(imgBuf).resize(Math.round(origW * ratio), Math.round((imgMeta.height || 1) * ratio)).png().toFile(resPath);
-              processInput = resPath;
-            }
-
-            // 执行 upscayl
-            const args = [
-              '-i', processInput,
-              '-o', outputPath,
-              '-m', upscaylModelsPath,
-              '-n', model,
-              '-s', scaleVal.toString(),
-              '-f', 'png',
-              '-c', '90',
-            ];
-            execFileSync(upscaylBinPath, args, { timeout: 300000 });
-
-            if (fsModule.existsSync(outputPath)) {
-              const resultBuf = fsModule.readFileSync(outputPath);
-              const resultMeta = await sharp(resultBuf).metadata();
-
-              // 保存到 public 目录
-              const uploadsDir = pathModule.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'public', 'upscayl');
-              if (!fsModule.existsSync(uploadsDir)) {
-                fsModule.mkdirSync(uploadsDir, { recursive: true });
-              }
-              const outFilename = `upscayl_${Date.now()}_${model}_${scaleVal}x.png`;
-              fsModule.writeFileSync(pathModule.join(uploadsDir, outFilename), resultBuf);
-
-              const baseUrl = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
-              const resultUrl = baseUrl ? `${baseUrl}/upscayl/${outFilename}` : `/upscayl/${outFilename}`;
-
-              try { fsModule.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-
-              return NextResponse.json({
-                success: true,
-                imageUrl: resultUrl,
-                action,
-                engine: 'upscayl-ncnn',
-                originalSize: { width: origW, height: imgMeta.height },
-                upscaledSize: { width: resultMeta.width, height: resultMeta.height },
-                model,
-                scale: scaleVal,
-              });
-            }
-          } catch (upscaylErr) {
-            console.warn('[image-edit] Upscayl NCNN failed, falling back to API:', upscaylErr);
-            try { fsModule.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-          }
-        }
-      } catch (checkErr) {
-        console.warn('[image-edit] Upscayl check failed, falling back to API:', checkErr);
-      }
-
-      // 回退：AI API 超分辨率放大
       const upscalePrompt = prompt || (
         `Ultra-high quality image upscaling. Enhance this image to higher resolution while: ` +
         `1) Adding fine details and textures that are implied but not visible at current resolution; ` +
