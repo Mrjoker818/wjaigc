@@ -625,7 +625,7 @@ export function InfiniteCanvas({
   const [cropHeight, setCropHeight] = useState(0);
 
   // Mask keyword popup
-  const [showMaskKeywordPopup, setShowMaskKeywordPopup] = useState(false);
+
   const [maskKeyword, setMaskKeyword] = useState('');
 
   // Download popup
@@ -949,9 +949,7 @@ export function InfiniteCanvas({
         setIsSpacePressed(true);
       }
       if (e.code === 'Escape') {
-        if (showMaskKeywordPopup) {
-          setShowMaskKeywordPopup(false);
-          return;
+        if (editMode === 'upscale' || editMode === 'erase' || editMode === 'mask') {
         }
         if (editMode !== 'none') {
           setEditMode('none');
@@ -1074,7 +1072,7 @@ export function InfiniteCanvas({
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('paste', handlePaste);
     };
-  }, [selectedIds, images, onImagesChange, selectImage, editMode, showMaskKeywordPopup, onUndo, zoom, viewOffset]);
+  }, [selectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset]);
 
   // Click outside to close menus
   useEffect(() => {
@@ -3670,12 +3668,6 @@ export function InfiniteCanvas({
   }, [editMode, editImageId, images, editStrokes, editPrompt, maskKeyword, expandRatio, expandScale, img2imgKeyword, img2imgStrengths, img2imgActiveCategories, img2imgNegativePrompt, brushSize, zoom, cropRect, onImagesChange, getApiKey, getCurrentModel, renderMaskFromStrokes, pollForResult, exitEditMode, viewOffset, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
 
   // Mask keyword confirm
-  const handleMaskConfirm = useCallback(() => {
-    setShowMaskKeywordPopup(false);
-    // Trigger the actual edit with the keyword
-    handleEditConfirm();
-  }, [handleEditConfirm]);
-
   // Download handlers
   const handleDownloadImage = async (image: CanvasImage, format: string = 'png') => {
     try {
@@ -4743,7 +4735,7 @@ export function InfiniteCanvas({
             <div
               className="fixed inset-0 z-[200] flex items-center justify-center"
               style={{ cursor: 'default' }}
-              onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
+              onMouseDown={(e) => e.stopPropagation()}
               onMouseMove={(e) => e.stopPropagation()}
               onMouseUp={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
@@ -5037,7 +5029,8 @@ export function InfiniteCanvas({
                         max="200"
                         value={brushSize}
                         onChange={(e) => setBrushSize(Number(e.target.value))}
-                        className="w-full h-1 accent-[#d4af37]"
+                        className="w-full h-2 cursor-pointer accent-[#d4af37] rounded-lg"
+                        style={{ minHeight: '20px' }}
                       />
                     </div>
 
@@ -5089,7 +5082,8 @@ export function InfiniteCanvas({
                           value={maskKeyword}
                           onChange={(e) => setMaskKeyword(e.target.value)}
                           placeholder="描述修复内容..."
-                          className={`w-full h-20 px-2.5 py-2 text-xs rounded-xl border resize-none ${
+                          rows={3}
+                          className={`w-full px-2.5 py-2 text-xs rounded-xl border resize-none ${
                             isMonochrome
                               ? 'bg-gray-50 border-gray-200 text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#d4af37]/30'
                               : 'bg-[#0a0a0a] border-[#2a2a2a] text-white placeholder:text-[#555] focus:outline-none focus:ring-2 focus:ring-[#d4af37]/30'
@@ -5111,7 +5105,7 @@ export function InfiniteCanvas({
                             : 'bg-[#d4af37] text-black hover:bg-[#e5c047] active:scale-[0.98]'
                         }`}
                       >
-                        {isEditProcessing ? '处理中...' : '开始修复'}
+                        {isEditProcessing ? '处理中...' : (editMode === 'erase' ? '开始擦除' : '开始修复')}
                       </button>
                     </div>
                   </div>
@@ -5782,47 +5776,7 @@ export function InfiniteCanvas({
           );
         })()}
 
-        {/* ====== MASK KEYWORD POPUP (floating, at image right side) ====== */}
-        {showMaskKeywordPopup && (() => {
-          const editImg = images.find(img => img.id === editImageId);
-          if (!editImg) return null;
-          const panelX = editImg.x * zoom + viewOffset.x + editImg.width * zoom + 12;
-          const panelY = editImg.y * zoom + viewOffset.y;
-          return (
-            <div
-              className="absolute z-[60] pointer-events-auto"
-              style={{ left: panelX, top: panelY }}
-              onMouseDown={(e) => e.stopPropagation()}
-            >
-              <div className={`w-[280px] rounded-2xl border shadow-2xl ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-[#111]/95 border-[#2a2a2a] backdrop-blur-sm'}`}>
-                <div className={`flex items-center justify-between px-3 py-2.5 border-b ${isMonochrome ? 'border-gray-100' : 'border-[#2a2a2a]'}`}>
-                  <div className="flex items-center gap-2">
-                    <Type size={13} className="text-[#d4af37]" />
-                    <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>蒙版关键词</span>
-                  </div>
-                  <button onClick={() => setShowMaskKeywordPopup(false)} className={`p-1 rounded-lg ${isMonochrome ? 'text-gray-400 hover:text-gray-600' : 'text-[#666] hover:text-white'}`}><X size={12} /></button>
-                </div>
-                <div className="px-3 py-2.5">
-                  <p className={`text-xs mb-1.5 ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>描述蒙版区域需要生成的新内容：</p>
-                  <textarea
-                    value={maskKeyword}
-                    onChange={(e) => setMaskKeyword(e.target.value)}
-                    placeholder="例如：将背景替换为夕阳下的海滩..."
-                    className={`w-full h-20 px-2.5 py-2 text-xs rounded-xl border resize-none ${
-                      isMonochrome
-                        ? 'bg-gray-50 border-gray-200 text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#d4af37]/30'
-                        : 'bg-[#0a0a0a] border-[#2a2a2a] text-white placeholder:text-[#555] focus:outline-none focus:ring-2 focus:ring-[#d4af37]/30'
-                    }`}
-                  />
-                </div>
-                <div className={`flex items-center justify-end gap-2 px-3 py-2.5 border-t ${isMonochrome ? 'border-gray-100' : 'border-[#2a2a2a]'}`}>
-                  <button onClick={() => setShowMaskKeywordPopup(false)} className={panelCancelBtnClass}>取消</button>
-                  <button onClick={handleMaskConfirm} className={panelBtnClass}>确认生成</button>
-                </div>
-              </div>
-            </div>
-          );
-        })()}
+
 
         {/* ====== IMAGE TO 3D MODAL ====== */}
         {show3DModal && selectedImageData && (() => {

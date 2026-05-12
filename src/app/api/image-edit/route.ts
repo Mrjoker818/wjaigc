@@ -190,12 +190,20 @@ async function chatVisionEditFallback(
   prompt: string,
   action: string
 ): Promise<{ taskId?: string; directUrl?: string }> {
-  const actionDesc = action === 'upscale'
-    ? '放大并增强这张图片的细节和清晰度，保持画面内容不变'
-    : action === 'inpaint' || action === 'erase'
-    ? prompt || '修复涂抹区域，使其与周围画面自然融合'
-    : prompt;
+  // 构建编辑指令
+  const editInstruction = action === 'upscale'
+    ? '放大并增强这张图片的细节和清晰度，保持画面内容完全不变，只是提高分辨率和清晰度'
+    : action === 'erase'
+    ? prompt || '移除蒙版白色区域标记的内容，用周围的自然背景填充，使修复区域与周围画面完美融合，看不出任何拼接痕迹'
+    : prompt || '在蒙版白色区域根据描述生成内容，与周围画面自然融合';
 
+  const imageDataUrl = imageBase64.startsWith('data:') ? imageBase64 : `data:image/png;base64,${imageBase64}`;
+  const maskDataUrl = maskBase64
+    ? (maskBase64.startsWith('data:') ? maskBase64 : `data:image/png;base64,${maskBase64}`)
+    : null;
+
+  // 策略1: 尝试 chat/completions + 原生图像输出 (如 Gemini 2.5 Flash)
+  // 这些模型可以在对话中直接生成/编辑图像
   const chatRequestBody = {
     model,
     messages: [
@@ -204,21 +212,23 @@ async function chatVisionEditFallback(
         content: [
           {
             type: 'image_url',
-            image_url: { url: imageBase64.startsWith('data:') ? imageBase64 : `data:image/png;base64,${imageBase64}` }
+            image_url: { url: imageDataUrl }
           },
-          ...(maskBase64 ? [{
+          ...(maskDataUrl ? [{
             type: 'image_url',
-            image_url: { url: maskBase64.startsWith('data:') ? maskBase64 : `data:image/png;base64,${maskBase64}` }
+            image_url: { url: maskDataUrl }
           }] : []),
           {
             type: 'text',
-            text: `请根据这张图片${maskBase64 ? '和蒙版（白色区域为需要编辑的部分）' : ''}，生成一张新图片。要求：${actionDesc}。请直接描述你将生成的图片内容，以便用于图像生成。`
+            text: editInstruction + '\n\n请直接生成编辑后的图片，不要用文字描述。'
           }
         ]
       }
     ],
-    max_tokens: 1024,
+    max_tokens: 4096,
   };
+
+  console.log(`[image-edit] chatVision fallback: Trying native image output with ${model}`);
 
   const chatResponse = await fetchWithV1Retry(
     apiBaseUrl,
@@ -230,28 +240,90 @@ async function chatVisionEditFallback(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(chatRequestBody),
-      signal: AbortSignal.timeout(60000),
+      signal: AbortSignal.timeout(120000),
     }
   );
 
-  if (!chatResponse.ok) {
+  if (chatResponse.ok) {
+    const chatResult = await chatResponse.json();
+    const choice = chatResult.choices?.[0];
+    
+    // 检查模型是否直接返回了图像 (Gemini 等模型)
+    if (choice?.message?.content) {
+      const content = choice.message.content;
+      
+      // 情况1: content 是数组 (多模态响应，可能包含图像)
+      if (Array.isArray(content)) {
+        for (const part of content) {
+          if (part.type === 'image_url' && part.image_url?.url) {
+            const imageUrl = part.image_url.url;
+            return { directUrl: imageUrl };
+          }
+          if (part.type === 'image' && part.source?.data) {
+            const b64 = part.source.data;
+            return { directUrl: `data:${part.source.media_type || 'image/png'};base64,${b64}` };
+          }
+        }
+        // 数组中没有图像，提取文本作为增强提示词
+        const textParts = content.filter((p: { type: string }) => p.type === 'text').map((p: { text: string }) => p.text);
+        const enhancedPrompt = textParts.join(' ');
+        if (enhancedPrompt) {
+          return await generateWithEnhancedPrompt(apiBaseUrl, apiKey, model, enhancedPrompt, imageDataUrl, action);
+        }
+      }
+      
+      // 情况2: content 是字符串 (纯文本响应)
+      if (typeof content === 'string' && content.length > 10) {
+        // 视觉模型返回了文本描述，用其作为增强提示词重新生图
+        console.log(`[image-edit] chatVision fallback: Model returned text, using as enhanced prompt`);
+        return await generateWithEnhancedPrompt(apiBaseUrl, apiKey, model, content, imageDataUrl, action);
+      }
+    }
+  } else {
     const errorText = await chatResponse.text();
-    console.error('Chat vision fallback error:', chatResponse.status, errorText);
-    throw new Error(`视觉模型回退也失败，请切换支持图像编辑的模型（如 DALL-E、Flux 等）`);
+    console.warn(`[image-edit] chatVision fallback: Chat request failed: ${chatResponse.status} ${errorText.substring(0, 200)}`);
   }
 
-  const chatResult = await chatResponse.json();
-  const enhancedPrompt = chatResult.choices?.[0]?.message?.content || actionDesc;
+  throw new Error(`视觉模型回退也失败，请切换支持图像编辑的模型（如 Gemini、DALL-E、Flux 等）`);
+}
 
-  // Now use the enhanced prompt to generate an image via text-to-image
+/**
+ * 使用增强提示词 + 原始图片作为参考重新生成
+ */
+async function generateWithEnhancedPrompt(
+  apiBaseUrl: string,
+  apiKey: string,
+  model: string,
+  enhancedPrompt: string,
+  originalImageUrl: string,
+  action: string,
+): Promise<{ taskId?: string; directUrl?: string }> {
   const imageRequestBody: Record<string, unknown> = {
     model,
     prompt: enhancedPrompt,
     n: 1,
     size: '1024x1024',
+    image_urls: [originalImageUrl],
+    // 放大用低强度保持原图内容，擦除/蒙版用中等强度
+    strength: action === 'upscale' ? 0.3 : 0.6,
   };
 
-  return submitImageTask(apiBaseUrl, apiKey, imageRequestBody);
+  try {
+    return await submitImageTask(apiBaseUrl, apiKey, imageRequestBody);
+  } catch (err: unknown) {
+    // 如果带 image_urls 失败，尝试纯文生图
+    if (err instanceof ModelCapabilityError) {
+      console.log(`[image-edit] generateWithEnhancedPrompt: image_urls not supported, trying text-only`);
+      const textOnlyBody: Record<string, unknown> = {
+        model,
+        prompt: enhancedPrompt,
+        n: 1,
+        size: '1024x1024',
+      };
+      return await submitImageTask(apiBaseUrl, apiKey, textOnlyBody);
+    }
+    throw err;
+  }
 }
 
 /**
@@ -482,12 +554,11 @@ export async function POST(request: NextRequest) {
       const th = targetHeight || 2048;
 
       const upscalePrompt = prompt || (
-        `Ultra-high quality image upscaling. Enhance this image to higher resolution while: ` +
-        `1) Adding fine details and textures that are implied but not visible at current resolution; ` +
-        `2) Sharpening edges and improving clarity; ` +
-        `3) Preserving the original composition, colors, style, and content exactly; ` +
-        `4) Making the image look like it was originally created at this higher resolution, not simply resized. ` +
-        `Do not change the subject, layout, or artistic style. The result should be a natural-looking, detailed version of the original.`
+        `Upscale this exact image to higher resolution. ` +
+        `Preserve every detail, color, and composition exactly as is. ` +
+        `Do NOT change the subject, layout, style, or add any new elements. ` +
+        `Only enhance sharpness and detail to match the target resolution. ` +
+        `The result must be identical to the original, just bigger and clearer.`
       );
 
       const g = (a: number, b: number): number => b === 0 ? a : g(b, a % b);
@@ -510,6 +581,7 @@ export async function POST(request: NextRequest) {
           size: effectiveSize,
           n: 1,
           image_urls: [imageUrl],
+          strength: 0.3,
         }), '放大');
         if (result.directUrl) {
           return NextResponse.json({ success: true, imageUrl: result.directUrl, action, engine: 'ai-api', usedModel: result.usedModel });
