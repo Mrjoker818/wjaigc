@@ -2695,9 +2695,11 @@ export function InfiniteCanvas({
           targetWidth: targetW,
           targetHeight: targetH,
           aspectRatio: `${origW}:${origH}`,
-          prompt: `AI super-resolution upscale to ${targetW}x${targetH}. Sharpen and enhance fine details, textures, and edges while preserving the original composition, colors, and style exactly. Make the image look naturally detailed at the higher resolution.`,
           model,
           apiKey,
+          scale: upMultiplier,
+          originalWidth: origW,
+          originalHeight: origH,
         }),
       });
 
@@ -2714,7 +2716,8 @@ export function InfiniteCanvas({
       }
 
       updateProcessingFrame(placeholderId, { progress: 22, status: 'AI 正在放大细节...' });
-      const resultUrl = data.imageUrl || await pollForResult(data.taskId, apiKey, (progress, status) => {
+      const usedModel = data.usedModel || model;
+      const resultUrl = data.imageUrl || await pollForResult(data.taskId, usedModel, (progress, status) => {
         updateProcessingFrame(placeholderId, { progress, status });
       });
       if (resultUrl) {

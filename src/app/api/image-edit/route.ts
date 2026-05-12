@@ -64,6 +64,9 @@ interface EditRequest {
   rotation?: number;
   tilt?: number;
   zoom?: number;
+  originalWidth?: number;
+  originalHeight?: number;
+  scale?: number; // 放大倍率 2/4/8
   model?: string;
   providerId?: string;
 }
@@ -155,8 +158,11 @@ async function submitImageTask(
     if (errorMsg.includes('Rate limit') || errorMsg.includes('rate_limit') || errorMsg.includes('Too many requests')) {
       throw new Error(`请求过于频繁，请稍后再试`);
     }
-    if (errorMsg.includes('model not found') || errorMsg.includes('Model not found')) {
-      throw new Error(`模型不存在或已下线，请切换其他模型`);
+    if (errorMsg.includes('model_not_found') || errorMsg.includes('model not found') || errorMsg.includes('Model not found')) {
+      throw new ModelCapabilityError(`模型不存在或已下线，尝试切换其他模型...`);
+    }
+    if (errorMsg.includes('apimart_error') || errorMsg.includes('try again later')) {
+      throw new ModelCapabilityError(`当前模型暂时不可用，尝试切换其他模型...`);
     }
     if (errorMsg.includes('Invalid API key') || errorMsg.includes('invalid api_key')) {
       throw new Error(`API 密钥无效，请联系管理员检查配置`);
@@ -549,17 +555,29 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'upscale') {
-      // 图像放大 - 自动遍历管理员配置的所有可用 image 模型
+      // 图像放大 - 基于 Clarity Upscaler 方法论
+      // 核心原理: 低 strength (creativity) + 强正向提示词 + 强负向提示词 + 原图作为 image_urls
       const tw = targetWidth || 2048;
       const th = targetHeight || 2048;
+      const scaleVal = body.scale || 2;
 
+      // 动态 strength: 放大倍率越高，需要稍微增加创造力来补细节
+      // 2× → 0.30, 4× → 0.38, 8× → 0.45
+      const upscaleStrength = Math.min(0.3 + (scaleVal - 1) * 0.04, 0.45);
+
+      // 基于 Clarity Upscaler 的提示词策略
       const upscalePrompt = prompt || (
-        `Upscale this exact image to higher resolution. ` +
-        `Preserve every detail, color, and composition exactly as is. ` +
-        `Do NOT change the subject, layout, style, or add any new elements. ` +
-        `Only enhance sharpness and detail to match the target resolution. ` +
-        `The result must be identical to the original, just bigger and clearer.`
+        `masterpiece, best quality, highres, ultra-detailed, ` +
+        `sharp focus, highly detailed textures, intricate details, ` +
+        `crisp lines, enhanced clarity, high definition, ` +
+        `super resolution upscaling of the provided reference image, ` +
+        `preserve the exact same composition, subject, colors, style and mood, ` +
+        `only add finer details and sharper edges at the higher resolution`
       );
+
+      const negativePrompt = `(worst quality, low quality, normal quality:2), blurry, pixelated, noisy, grainy, ` +
+        `distorted, deformed, watermark, text, signature, jpeg artifacts, compression artifacts, ` +
+        `cropped, out of frame, duplicate, error`;
 
       const g = (a: number, b: number): number => b === 0 ? a : g(b, a % b);
       const gcd = g(tw, th);
@@ -574,14 +592,17 @@ export async function POST(request: NextRequest) {
       }
       const effectiveSize = bestRatio;
 
+      console.log(`[image-edit] upscale: target=${tw}x${th}, ratio=${effectiveSize}, strength=${upscaleStrength}, scale=${scaleVal}×`);
+
       try {
         const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
           model: m,
           prompt: upscalePrompt,
+          negative_prompt: negativePrompt,
           size: effectiveSize,
           n: 1,
           image_urls: [imageUrl],
-          strength: 0.3,
+          strength: upscaleStrength,
         }), '放大');
         if (result.directUrl) {
           return NextResponse.json({ success: true, imageUrl: result.directUrl, action, engine: 'ai-api', usedModel: result.usedModel });
@@ -591,16 +612,14 @@ export async function POST(request: NextRequest) {
         // 所有 image 模型都不支持 image_urls 时，回退到视觉模型生成
         if (imgErr instanceof ModelCapabilityError) {
           console.log(`[image-edit] upscale: All image models failed, trying chat-vision fallback...`);
-          // 用第一个可用模型做视觉 fallback
-          const fallbackModel = candidateModels[0];
-          const fallbackResult = await chatVisionEditFallback(
-            fallbackModel.apiBaseUrl, fallbackModel.apiKey, fallbackModel.model, await resolveImageToBase64(imageUrl), null, upscalePrompt, 'upscale'
+          const fallbackResult = await autoTryChatVisionFallback(
+            await resolveImageToBase64(imageUrl), null, upscalePrompt, 'upscale'
           );
           if (fallbackResult) {
             if ('directUrl' in fallbackResult && fallbackResult.directUrl) {
-              return NextResponse.json({ success: true, imageUrl: fallbackResult.directUrl, action, engine: 'ai-chat-vision' });
+              return NextResponse.json({ success: true, imageUrl: fallbackResult.directUrl, action, engine: 'ai-chat-vision', usedModel: fallbackResult.usedModel });
             }
-            return NextResponse.json({ success: true, taskId: fallbackResult.taskId, action, engine: 'ai-chat-vision' });
+            return NextResponse.json({ success: true, taskId: fallbackResult.taskId, action, engine: 'ai-chat-vision', usedModel: fallbackResult.usedModel });
           }
           return NextResponse.json({ success: false, error: imgErr.message }, { status: 500 });
         }
