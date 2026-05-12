@@ -251,9 +251,30 @@ export default function PsdLayerEditor({ imageUrl, prompt = '图片', mode = 'st
           </div>
         )}
 
-        {/* Main content area */}
+        {/* Main content area - three-column layout */}
         <div className="flex-1 flex min-h-0 relative">
-          {/* Canvas area with checkerboard background */}
+          {/* Left sidebar: Layer panel */}
+          {showLayerPanel && (stage === 'editing' || stage === 'exporting') && (
+            <div className="w-56 shrink-0 flex flex-col bg-neutral-900/95 border-r border-neutral-700 overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-700 shrink-0">
+                <span className="text-xs font-medium text-white/80">图层</span>
+                <span className="text-xs text-white/40">{layers.length} 层</span>
+              </div>
+              <div className="flex-1 overflow-y-auto min-h-0">
+                <LayerPanel
+                  layers={layers}
+                  selectedLayerId={selectedLayerId}
+                  onSelectLayer={setSelectedLayerId}
+                  onToggleVisibility={toggleVisibility}
+                  onToggleLock={toggleLock}
+                  onRenameLayer={renameLayer}
+                  onReorderLayers={reorderLayers}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Center: Canvas area with checkerboard background */}
           <div className="flex-1 relative overflow-hidden"
             style={{
               background: `
@@ -317,45 +338,46 @@ export default function PsdLayerEditor({ imageUrl, prompt = '图片', mode = 'st
                 height={canvasHeight}
               />
             )}
+
+            {/* Fallback export toolbar when inspector is hidden */}
+            {!showInspector && (stage === 'editing' || stage === 'exporting') && (
+              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10">
+                <div className="bg-neutral-800/90 rounded-lg border border-neutral-700 px-3 py-2 shadow-xl">
+                  <ExportToolbar
+                    mode={exportMode}
+                    onModeChange={setExportMode}
+                    onExport={handleExport}
+                    isExporting={stage === 'exporting'}
+                    progress={progress}
+                    progressMessage={progressMessage}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Right sidebar: Layer panel + Inspector */}
-          {showLayerPanel && (stage === 'editing' || stage === 'exporting') && (
+          {/* Right sidebar: Properties panel */}
+          {showInspector && (stage === 'editing' || stage === 'exporting') && (
             <div className="w-60 shrink-0 flex flex-col bg-neutral-900/95 border-l border-neutral-700 overflow-hidden">
               <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-700 shrink-0">
-                <span className="text-xs font-medium text-white/80">图层</span>
-                <span className="text-xs text-white/40">{layers.length} 层</span>
+                <span className="text-xs font-medium text-white/80">属性</span>
+                <button onClick={() => setShowInspector(false)} className="text-white/40 hover:text-white/70 transition-colors">
+                  <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+                    <path d="M1 1L13 13M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                </button>
               </div>
               <div className="flex-1 overflow-y-auto min-h-0">
-                <LayerPanel
-                  layers={layers}
-                  selectedLayerId={selectedLayerId}
-                  onSelectLayer={setSelectedLayerId}
-                  onToggleVisibility={toggleVisibility}
-                  onToggleLock={toggleLock}
-                  onRenameLayer={renameLayer}
-                  onReorderLayers={reorderLayers}
-                />
+                {selectedLayer ? (
+                  <LayerInspector layer={selectedLayer} />
+                ) : (
+                  <div className="px-3 py-6 text-center text-xs text-white/30">
+                    选择一个图层查看属性
+                  </div>
+                )}
               </div>
 
-              {/* Inspector (inside right sidebar, below layers) */}
-              {showInspector && selectedLayer && (
-                <div className="border-t border-neutral-700 shrink-0">
-                  <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-700">
-                    <span className="text-xs font-medium text-white/80">属性</span>
-                    <button onClick={() => setShowInspector(false)} className="text-white/40 hover:text-white/70 transition-colors">
-                      <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
-                        <path d="M1 1L13 13M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                      </svg>
-                    </button>
-                  </div>
-                  <div className="max-h-48 overflow-y-auto">
-                    <LayerInspector layer={selectedLayer} />
-                  </div>
-                </div>
-              )}
-
-              {/* Export toolbar */}
+              {/* Export toolbar at bottom of properties panel */}
               <div className="border-t border-neutral-700 p-2 shrink-0">
                 <ExportToolbar
                   mode={exportMode}
