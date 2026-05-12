@@ -81,13 +81,19 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        // 200, 400 (model not found), 422 (validation) all indicate the connection works
+        // 200: OK
+        // 400 (model not found / bad request): connection works
+        // 422 (validation error): connection works
+        // 429 (rate limit): connection works, just throttled
+        // 500+ (server error but responded): API reachable, connection works
+        // Only 401/403 (auth failure) and 404 (wrong endpoint) mean connection is bad
         const data = await response.json().catch(() => null);
+        const isConnectionOk = response.ok || [400, 422, 429].includes(response.status) || response.status >= 500;
         return NextResponse.json({
-          success: response.ok || [400, 422].includes(response.status),
+          success: isConnectionOk,
           status: response.status,
           error: response.ok ? undefined : (data?.error?.message || data?.message || `HTTP ${response.status}`),
-          info: response.ok ? '连接成功' : 'API 可达，但请求有误（模型不存在或参数错误），连接本身正常',
+          info: response.ok ? '连接成功' : (isConnectionOk ? 'API 可达，但请求有误（模型不存在/限流/服务暂时不可用），连接本身正常' : undefined),
         });
       } catch (fetchError) {
         clearTimeout(timeout);
@@ -144,7 +150,7 @@ export async function POST(request: NextRequest) {
             }
 
             return NextResponse.json({
-              success: genResponse.ok || [400, 422].includes(genResponse.status),
+              success: genResponse.ok || [400, 422, 429].includes(genResponse.status) || genResponse.status >= 500,
               status: genResponse.status,
               info: 'API 可达（/models 不可用，但生成端点可达）',
             });
