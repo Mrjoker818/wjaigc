@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findProviderForModel, normalizeApiBaseUrl } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderForFeature, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import sharp from 'sharp';
@@ -54,6 +54,7 @@ interface EditRequest {
   imageUrl: string;
   maskImage?: string; // base64 encoded mask
   prompt?: string;
+  editMode?: 'erase' | 'mask'; // 区分擦除和蒙版模式，用于错误消息
   expandRatio?: string;
   expandScale?: number;
   targetWidth?: number;
@@ -262,6 +263,7 @@ export async function POST(request: NextRequest) {
       imageUrl,
       maskImage,
       prompt,
+      editMode,
       expandRatio,
       expandScale = 1,
       targetWidth,
@@ -274,16 +276,18 @@ export async function POST(request: NextRequest) {
       model = 'gemini-2.5-flash-image-preview',
     } = body;
 
-    const provider = await findProviderForModel(model, 'imageEdit')
-      || await findProviderForModel(model, 'image')
-      || await findProviderForModel(model, 'universal');
+    // 放大/擦除/蒙版 均使用管理员系统的 image 类型模型
+    // 查找顺序：精确匹配模型ID(image) → 默认provider(image) → universal → 环境变量兜底
+    const provider = await findProviderForModel(model, 'image')
+      || await findProviderForModel(model, 'universal')
+      || await findProviderForFeature('imageEdit');
     const apiKey = provider?.apiKey || process.env.APIMART_API_KEY || '';
     const apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || process.env.APIMART_BASE_URL || 'https://api.apimart.ai');
 
     if (!apiKey) {
       return NextResponse.json({
         success: false,
-        error: '请先在管理员系统配置可用的图像编辑模型',
+        error: '请先在管理员系统配置可用的图像模型（image类型）',
       }, { status: 400 });
     }
 
@@ -482,7 +486,8 @@ export async function POST(request: NextRequest) {
         }
       }
       if (maskPixelCount === 0) {
-        return NextResponse.json({ success: false, error: '蒙版区域为空，请重新绘制' }, { status: 400 });
+        const modeLabel = editMode === 'erase' ? '擦除区域为空，请先涂抹要擦除的区域' : '蒙版区域为空，请先涂抹要编辑的区域';
+        return NextResponse.json({ success: false, error: modeLabel }, { status: 400 });
       }
 
       const isErase = !prompt || !prompt.trim();

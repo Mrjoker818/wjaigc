@@ -558,6 +558,9 @@ export function InfiniteCanvas({
   const [upscaylChecking, setUpscaylChecking] = useState(true);
   const [upscalePreset, setUpscalePreset] = useState<'2k' | '4k' | '8k'>('2k');
   const [showUpscalePresetMenu, setShowUpscalePresetMenu] = useState(false);
+  // Actual pixel dimensions of the image being upscaled (loaded from DOM)
+  const [upscaleActualW, setUpscaleActualW] = useState(0);
+  const [upscaleActualH, setUpscaleActualH] = useState(0);
 
   // Check Upscayl NCNN availability on mount
   useEffect(() => {
@@ -689,7 +692,7 @@ export function InfiniteCanvas({
   const isAltErasingRef = useRef(false);
   const brushCursorPosRef = useRef<{ x: number; y: number } | null>(null);
   // Force re-render for brush cursor display
-  const [brushCursorScreenPos, setBrushCursorScreenPos] = useState<{ x: number; y: number } | null>(null);
+
   // Force re-render when strokes change (for SVG overlay)
   const [strokesVersion, setStrokesVersion] = useState(0);
   const [cropRect, setCropRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -1585,7 +1588,6 @@ export function InfiniteCanvas({
     setBoxSelectEnd(null);
     setResizingImage(null);
     setResizeCorner(null);
-    setBrushCursorScreenPos(null);
     brushCursorPosRef.current = null;
     if (dragTarget) {
       setDragTarget(null);
@@ -2303,8 +2305,6 @@ export function InfiniteCanvas({
     // imgWidth/imgHeight are original pixel dimensions passed in
     const origW = imgWidth;
     const origH = imgHeight;
-    const displayW = editImg.width;  // canvas coordinate space dimensions
-    const displayH = editImg.height;
 
     // Create mask at original resolution for maximum precision
     // If original is very large (>2048), downscale to keep mask manageable
@@ -2323,19 +2323,12 @@ export function InfiniteCanvas({
     ctx.fillStyle = 'black';
     ctx.fillRect(0, 0, maskW, maskH);
 
-    // Coordinate transformation: canvas display coords → mask pixels
-    // Step 1: subtract image origin to get coords relative to image top-left
-    // Step 2: scale from display coords to original pixel coords (displayW → origW)
-    // Step 3: apply mask scale (origW → maskW)
-    const coordScaleX = (origW / displayW) * uniformMaskScale;
-    const coordScaleY = (origH / displayH) * uniformMaskScale;
+    // Stroke coordinates from the floating window are already in original image pixel space
+    // (0..origW, 0..origH), so we just need to apply the mask scale factor
+    const maskScale = uniformMaskScale;
 
-    // Brush size: screen pixels → display coords → original pixels → mask pixels
-    // brushSize is in screen pixels, divide by zoom to get display coords
-    // then multiply by (origW/displayW) to get original pixels, then by maskScale
-    const brushInDisplay = brushSize / zoom;
-    const brushInOrig = brushInDisplay * (origW / displayW);
-    const scaledBrushSize = brushInOrig * uniformMaskScale;
+    // Brush size is already in original image pixel space from the floating window
+    const scaledBrushSize = brushSize * maskScale;
 
     // Use smooth interpolation for better mask quality
     ctx.imageSmoothingEnabled = true;
@@ -2351,24 +2344,21 @@ export function InfiniteCanvas({
       const normalPoints = stroke.filter(p => !p.reverse);
 
       if (normalPoints.length === 1) {
-        // Single click - draw a filled circle dot
-        const relX = normalPoints[0].x - editImg.x;
-        const relY = normalPoints[0].y - editImg.y;
-        const px = relX * coordScaleX;
-        const py = relY * coordScaleY;
+        const px = normalPoints[0].x * maskScale;
+        const py = normalPoints[0].y * maskScale;
         ctx.beginPath();
         ctx.arc(px, py, scaledBrushSize / 2, 0, Math.PI * 2);
         ctx.fill();
       } else if (normalPoints.length >= 2) {
         ctx.beginPath();
         ctx.moveTo(
-          (normalPoints[0].x - editImg.x) * coordScaleX,
-          (normalPoints[0].y - editImg.y) * coordScaleY
+          normalPoints[0].x * maskScale,
+          normalPoints[0].y * maskScale
         );
         for (let i = 1; i < normalPoints.length; i++) {
           ctx.lineTo(
-            (normalPoints[i].x - editImg.x) * coordScaleX,
-            (normalPoints[i].y - editImg.y) * coordScaleY
+            normalPoints[i].x * maskScale,
+            normalPoints[i].y * maskScale
           );
         }
         ctx.stroke();
@@ -2382,41 +2372,36 @@ export function InfiniteCanvas({
       const reversePoints = stroke.filter(p => p.reverse);
 
       if (reversePoints.length === 1) {
-        const relX = reversePoints[0].x - editImg.x;
-        const relY = reversePoints[0].y - editImg.y;
-        const px = relX * coordScaleX;
-        const py = relY * coordScaleY;
+        const px = reversePoints[0].x * maskScale;
+        const py = reversePoints[0].y * maskScale;
         ctx.beginPath();
         ctx.arc(px, py, scaledBrushSize / 2, 0, Math.PI * 2);
         ctx.fill();
       } else if (reversePoints.length >= 2) {
         ctx.beginPath();
         ctx.moveTo(
-          (reversePoints[0].x - editImg.x) * coordScaleX,
-          (reversePoints[0].y - editImg.y) * coordScaleY
+          reversePoints[0].x * maskScale,
+          reversePoints[0].y * maskScale
         );
         for (let i = 1; i < reversePoints.length; i++) {
           ctx.lineTo(
-            (reversePoints[i].x - editImg.x) * coordScaleX,
-            (reversePoints[i].y - editImg.y) * coordScaleY
+            reversePoints[i].x * maskScale,
+            reversePoints[i].y * maskScale
           );
         }
         ctx.stroke();
       }
     }
 
-    // Apply Gaussian blur to mask edges for seamless blending (IOPaint sd_mask_blur style)
-    // IOPaint uses sd_mask_blur=8-12 for diffusion models; we use 8px for smooth transitions
-    // This prevents hard edges in the inpainting result
+    // Apply Gaussian blur to mask edges for seamless blending
     try {
       const blurCanvas = document.createElement('canvas');
       blurCanvas.width = maskW;
       blurCanvas.height = maskH;
       const blurCtx = blurCanvas.getContext('2d');
       if (blurCtx) {
-        blurCtx.filter = 'blur(8px)';
+        blurCtx.filter = 'blur(4px)';
         blurCtx.drawImage(canvas, 0, 0);
-        // Redraw blurred result back to original canvas
         ctx.clearRect(0, 0, maskW, maskH);
         ctx.drawImage(blurCanvas, 0, 0);
       }
@@ -2425,7 +2410,7 @@ export function InfiniteCanvas({
     }
 
     return canvas.toDataURL('image/png');
-  }, [editStrokes, brushSize, images, editImageId, zoom]);
+  }, [editStrokes, brushSize, images, editImageId]);
 
   // Poll for task completion
   const pollForResult = useCallback(async (
@@ -2687,9 +2672,9 @@ export function InfiniteCanvas({
     const img = selectedImageData;
     if (!img) return;
 
-    // Calculate target dimensions from preset
-    const origW = img.originalWidth || img.width;
-    const origH = img.originalHeight || img.height;
+    // Use actual pixel dimensions loaded from the image element
+    const origW = upscaleActualW || img.originalWidth || img.width;
+    const origH = upscaleActualH || img.originalHeight || img.height;
     const { w: targetW, h: targetH, multiplier: upMultiplier } = getUpscaleTargetDimensions(origW, origH, upscalePreset);
 
     // If already at or above target resolution, notify and skip
@@ -2769,7 +2754,7 @@ export function InfiniteCanvas({
     }
     setIsEditProcessing(false);
     setActiveTool('none');
-  }, [selectedImageData, upscalePreset, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, toStableImageUrl, getUpscaleTargetDimensions]);
+  }, [selectedImageData, upscalePreset, upscaleActualW, upscaleActualH, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, toStableImageUrl, getUpscaleTargetDimensions]);
 
   // 1b. Upscale trigger - opens floating control bar
   const handleOpenUpscale = useCallback(() => {
@@ -2777,13 +2762,32 @@ export function InfiniteCanvas({
     if (!img) return;
     setEditImageId(img.id);
     setEditMode('upscale');
-    // Calculate default preset based on image size
-    const origW = img.originalWidth || img.width;
-    const origH = img.originalHeight || img.height;
-    const maxDim = Math.max(origW, origH);
-    if (maxDim <= 1080) setUpscalePreset('2k');
-    else if (maxDim <= 2048) setUpscalePreset('4k');
-    else setUpscalePreset('8k');
+    // Load actual pixel dimensions from the image element
+    const imgEl = new Image();
+    imgEl.crossOrigin = 'anonymous';
+    imgEl.onload = () => {
+      const actualW = imgEl.naturalWidth;
+      const actualH = imgEl.naturalHeight;
+      setUpscaleActualW(actualW);
+      setUpscaleActualH(actualH);
+      // Calculate default preset based on actual image size
+      const maxDim = Math.max(actualW, actualH);
+      if (maxDim <= 1080) setUpscalePreset('2k');
+      else if (maxDim <= 2048) setUpscalePreset('4k');
+      else setUpscalePreset('8k');
+    };
+    imgEl.onerror = () => {
+      // Fallback to stored dimensions
+      const origW = img.originalWidth || img.width;
+      const origH = img.originalHeight || img.height;
+      setUpscaleActualW(origW);
+      setUpscaleActualH(origH);
+      const maxDim = Math.max(origW, origH);
+      if (maxDim <= 1080) setUpscalePreset('2k');
+      else if (maxDim <= 2048) setUpscalePreset('4k');
+      else setUpscalePreset('8k');
+    };
+    imgEl.src = img.url;
   }, [selectedImageData]);
 
   // 2. REMOVE BACKGROUND - auto, result to the right
@@ -3243,7 +3247,6 @@ export function InfiniteCanvas({
     isDrawingRef.current = false;
     isAltErasingRef.current = false;
     brushCursorPosRef.current = null;
-    setBrushCursorScreenPos(null);
     setStrokesVersion(v => v + 1);
     currentStrokeRef.current = [];
   }, []);
@@ -3311,6 +3314,8 @@ export function InfiniteCanvas({
         alert('请在图片上绘制需要修改的区域');
         return;
       }
+      // Debug: log mask info
+      console.log(`[handleEditConfirm] mode=${editMode}, editStrokes.length=${editStrokes.length}, maskBase64 length=${maskBase64.length}`);
 
       // 保存当前编辑图片引用和蒙版，然后立即退出编辑模式返回画布
       const currentEditImg = { ...editImg };
@@ -3348,6 +3353,7 @@ export function InfiniteCanvas({
             imageUrl: currentEditImg.url,
             maskImage: maskBase64,
             prompt,
+            editMode: currentEditMode as 'erase' | 'mask',
             aspectRatio: `${currentEditImg.originalWidth || currentEditImg.width}:${currentEditImg.originalHeight || currentEditImg.height}`,
             model,
             apiKey,
@@ -3357,10 +3363,12 @@ export function InfiniteCanvas({
         const data = await res.json();
         if (!data.success) {
           console.error('Image edit failed:', data.error);
+          // 后端已根据 editMode 返回不同错误消息
+          let errorMessage = data.error || '编辑失败';
           updateProcessingFrame(placeholderId, {
             progress: -1,
-            status: `❌ ${data.error || '编辑失败'}`,
-            error: data.error || '编辑失败',
+            status: `❌ ${errorMessage}`,
+            error: errorMessage,
           });
           setTimeout(() => removeProcessingFrame(placeholderId), 5000);
           return;
@@ -3857,7 +3865,7 @@ export function InfiniteCanvas({
             : boxSelectStart
             ? 'cursor-crosshair'
             : (editMode === 'erase' || editMode === 'mask')
-            ? 'cursor-none'
+            ? 'cursor-default'  // 擦除/蒙版使用浮动窗口，主画布保持默认光标
             : editMode !== 'none'
             ? 'cursor-crosshair'
             : isSpacePressed
@@ -4645,8 +4653,8 @@ export function InfiniteCanvas({
           const imgScreenW = editImg.width * zoom;
           const panelX = imgScreenX + imgScreenW / 2;
           const panelY = imgScreenY - 8;
-          const origW = editImg.originalWidth || editImg.width;
-          const origH = editImg.originalHeight || editImg.height;
+          const origW = upscaleActualW || editImg.originalWidth || editImg.width;
+          const origH = upscaleActualH || editImg.originalHeight || editImg.height;
           const targetDim = getUpscaleTargetDimensions(origW, origH, upscalePreset);
 
           return (
@@ -4733,16 +4741,20 @@ export function InfiniteCanvas({
 
           return (
             <div
-              className="fixed inset-0 z-[100] flex items-center justify-center"
-              onMouseDown={(e) => e.stopPropagation()}
+              className="fixed inset-0 z-[200] flex items-center justify-center"
+              style={{ cursor: 'default' }}
+              onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
+              onMouseMove={(e) => e.stopPropagation()}
+              onMouseUp={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
+              onContextMenu={(e) => { e.stopPropagation(); e.preventDefault(); }}
             >
               {/* Backdrop */}
               <div className="absolute inset-0 bg-black/40" onClick={exitEditMode} />
               {/* Window */}
               <div
                 className={`relative rounded-2xl border shadow-2xl overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-300' : 'bg-[#1a1a1a] border-[#2a2a2a]'}`}
-                style={{ width: winW, height: winH }}
+                style={{ width: winW, height: winH, cursor: 'default' }}
               >
                 {/* Title bar */}
                 <div className={`flex items-center justify-between px-4 py-2.5 border-b ${isMonochrome ? 'border-gray-200 bg-white' : 'border-[#2a2a2a] bg-[#111]'}`}>
@@ -4752,7 +4764,7 @@ export function InfiniteCanvas({
                       {isErase ? '擦除' : '蒙版修图'}
                     </span>
                     <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>
-                      涂抹白色区域后点击&apos;开始修复&apos;
+                      涂抹区域后点击&apos;开始修复&apos; · Shift+左键擦除涂抹
                     </span>
                   </div>
                   <button onClick={exitEditMode} className={`p-1 rounded-lg transition-colors ${isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-[#666] hover:text-white hover:bg-[#333]'}`}>
@@ -4764,34 +4776,20 @@ export function InfiniteCanvas({
                   {/* Left: Canvas area with checkered bg */}
                   <div
                     className={`relative overflow-hidden ${isMonochrome ? 'bg-gray-200' : 'bg-[#0d0d0d]'}`}
-                    style={{ width: canvasAreaW }}
-                    onMouseDown={(e) => {
-                      // Canvas panning with middle button or right button
-                      if (e.button === 1 || e.button === 2) {
-                        e.preventDefault();
-                        const startX = e.clientX;
-                        const startY = e.clientY;
-                        const startPan = { ...editCanvasPan };
-                        const onMove = (ev: MouseEvent) => {
-                          setEditCanvasPan({
-                            x: startPan.x + ev.clientX - startX,
-                            y: startPan.y + ev.clientY - startY,
-                          });
-                        };
-                        const onUp = () => {
-                          window.removeEventListener('mousemove', onMove);
-                          window.removeEventListener('mouseup', onUp);
-                        };
-                        window.addEventListener('mousemove', onMove);
-                        window.addEventListener('mouseup', onUp);
+                    style={{ width: canvasAreaW, cursor: 'default' }}
+                    onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                    ref={(el) => {
+                      // Register non-passive wheel handler for proper preventDefault
+                      if (el && !el.dataset.wheelBound) {
+                        el.dataset.wheelBound = '1';
+                        el.addEventListener('wheel', (e: WheelEvent) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                          setEditCanvasZoom(z => Math.max(0.25, Math.min(5, z * delta)));
+                        }, { passive: false });
                       }
                     }}
-                    onWheel={(e) => {
-                      e.preventDefault();
-                      const delta = e.deltaY > 0 ? 0.9 : 1.1;
-                      setEditCanvasZoom(z => Math.max(0.25, Math.min(5, z * delta)));
-                    }}
-                    onContextMenu={(e) => e.preventDefault()}
                   >
                     {/* Checkered background for image */}
                     <div
@@ -4833,7 +4831,7 @@ export function InfiniteCanvas({
                                 <circle
                                   cx={normalPoints[0].x}
                                   cy={normalPoints[0].y}
-                                  r={brushSize / 2 / editCanvasZoom}
+                                  r={brushSize / 2 / fitScale}
                                   fill={isErase ? 'rgba(255,80,80,0.5)' : 'rgba(212,175,55,0.5)'}
                                 />
                               )}
@@ -4842,7 +4840,7 @@ export function InfiniteCanvas({
                                   points={normalPoints.map(p => `${p.x},${p.y}`).join(' ')}
                                   fill="none"
                                   stroke={isErase ? 'rgba(255,80,80,0.5)' : 'rgba(212,175,55,0.5)'}
-                                  strokeWidth={brushSize / editCanvasZoom}
+                                  strokeWidth={brushSize / fitScale}
                                   strokeLinecap="round"
                                   strokeLinejoin="round"
                                 />
@@ -4851,7 +4849,7 @@ export function InfiniteCanvas({
                                 <circle
                                   cx={reversePoints[0].x}
                                   cy={reversePoints[0].y}
-                                  r={brushSize / 2 / editCanvasZoom}
+                                  r={brushSize / 2 / fitScale}
                                   fill="rgba(0,200,100,0.5)"
                                 />
                               )}
@@ -4860,7 +4858,7 @@ export function InfiniteCanvas({
                                   points={reversePoints.map(p => `${p.x},${p.y}`).join(' ')}
                                   fill="none"
                                   stroke="rgba(0,200,100,0.5)"
-                                  strokeWidth={brushSize / editCanvasZoom}
+                                  strokeWidth={brushSize / fitScale}
                                   strokeLinecap="round"
                                   strokeLinejoin="round"
                                   strokeDasharray="4 4"
@@ -4874,7 +4872,7 @@ export function InfiniteCanvas({
                           <circle
                             cx={currentStroke[0].x}
                             cy={currentStroke[0].y}
-                            r={brushSize / 2 / editCanvasZoom}
+                            r={brushSize / 2 / fitScale}
                             fill={currentStroke[0]?.reverse ? 'rgba(0,200,100,0.5)' : (isErase ? 'rgba(255,80,80,0.5)' : 'rgba(212,175,55,0.5)')}
                           />
                         )}
@@ -4883,23 +4881,46 @@ export function InfiniteCanvas({
                             points={currentStroke.map(p => `${p.x},${p.y}`).join(' ')}
                             fill="none"
                             stroke={currentStroke[0]?.reverse ? 'rgba(0,200,100,0.5)' : (isErase ? 'rgba(255,80,80,0.5)' : 'rgba(212,175,55,0.5)')}
-                            strokeWidth={brushSize / editCanvasZoom}
+                            strokeWidth={brushSize / fitScale}
                             strokeLinecap="round"
                             strokeLinejoin="round"
                             strokeDasharray={currentStroke[0]?.reverse ? '4 4' : undefined}
                           />
                         )}
                       </svg>
-                      {/* Drawing layer - captures mouse events for brush */}
+                      {/* Drawing layer - captures mouse events for brush & pan */}
                       <div
                         className="absolute inset-0"
-                        style={{ cursor: editBrushMode === 'eraser' ? 'crosshair' : 'crosshair' }}
+                        style={{ cursor: isDrawingRef.current ? 'crosshair' : 'crosshair' }}
                         onMouseDown={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          // Middle/right button: canvas panning
+                          if (e.button === 1 || e.button === 2) {
+                            const startX = e.clientX;
+                            const startY = e.clientY;
+                            const startPan = { ...editCanvasPan };
+                            const onMove = (ev: MouseEvent) => {
+                              setEditCanvasPan({
+                                x: startPan.x + ev.clientX - startX,
+                                y: startPan.y + ev.clientY - startY,
+                              });
+                            };
+                            const onUp = () => {
+                              window.removeEventListener('mousemove', onMove);
+                              window.removeEventListener('mouseup', onUp);
+                            };
+                            window.addEventListener('mousemove', onMove);
+                            window.addEventListener('mouseup', onUp);
+                            return;
+                          }
+                          // Left button: draw
                           if (e.button !== 0) return;
-                          const rect = (e.target as HTMLElement).getBoundingClientRect();
+                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                           const x = (e.clientX - rect.left) / rect.width * imgOrigW;
                           const y = (e.clientY - rect.top) / rect.height * imgOrigH;
-                          const isReverse = editBrushMode === 'eraser';
+                          // Shift+click = erase (reverse) mode, otherwise use current brush mode
+                          const isReverse = e.shiftKey || editBrushMode === 'eraser';
                           const firstPoint = { x, y, reverse: isReverse };
                           currentStrokeRef.current = [firstPoint];
                           setCurrentStroke([firstPoint]);
@@ -4908,17 +4929,19 @@ export function InfiniteCanvas({
                         }}
                         onMouseMove={(e) => {
                           if (!isDrawingRef.current) return;
+                          e.stopPropagation();
                           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                           const x = (e.clientX - rect.left) / rect.width * imgOrigW;
                           const y = (e.clientY - rect.top) / rect.height * imgOrigH;
-                          const isReverse = editBrushMode === 'eraser';
+                          // Shift held = erase, otherwise use current brush mode
+                          const isReverse = e.shiftKey || editBrushMode === 'eraser';
                           const newPoint = { x, y, reverse: isReverse };
                           // Interpolate for smooth strokes
                           const prevPoints = currentStrokeRef.current;
                           if (prevPoints.length > 0) {
                             const last = prevPoints[prevPoints.length - 1];
                             const dist = Math.sqrt((x - last.x) ** 2 + (y - last.y) ** 2);
-                            const step = Math.max(1, brushSize / editCanvasZoom / 4);
+                            const step = Math.max(1, brushSize / fitScale / 4);
                             if (dist > step) {
                               const n = Math.ceil(dist / step);
                               for (let i = 1; i <= n; i++) {
@@ -4934,7 +4957,8 @@ export function InfiniteCanvas({
                           currentStrokeRef.current.push(newPoint);
                           setCurrentStroke([...currentStrokeRef.current]);
                         }}
-                        onMouseUp={() => {
+                        onMouseUp={(e) => {
+                          e.stopPropagation();
                           if (!isDrawingRef.current) return;
                           isDrawingRef.current = false;
                           const stroke = currentStrokeRef.current;
@@ -4955,16 +4979,17 @@ export function InfiniteCanvas({
                           currentStrokeRef.current = [];
                           setCurrentStroke([]);
                         }}
+                        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
                       />
                     </div>
                     {/* Zoom controls overlay */}
-                    <div className={`absolute bottom-3 left-3 flex items-center gap-1 px-2 py-1 rounded-lg text-xs ${isMonochrome ? 'bg-white/80 text-gray-600' : 'bg-[#111]/80 text-[#999]'}`}>
-                      <button onClick={() => setEditCanvasZoom(z => Math.max(0.25, z / 1.2))} className="p-0.5 hover:text-[#d4af37]"><Minus size={12} /></button>
+                    <div className={`absolute bottom-3 left-3 flex items-center gap-1 px-2 py-1 rounded-lg text-xs ${isMonochrome ? 'bg-white/80 text-gray-600' : 'bg-[#111]/80 text-[#999]'}`} style={{ cursor: 'default' }}>
+                      <button onClick={(e) => { e.stopPropagation(); setEditCanvasZoom(z => Math.max(0.25, z / 1.2)); }} className="p-0.5 hover:text-[#d4af37]"><Minus size={12} /></button>
                       <span className="w-10 text-center tabular-nums">{Math.round(editCanvasZoom * 100)}%</span>
-                      <button onClick={() => setEditCanvasZoom(z => Math.min(5, z * 1.2))} className="p-0.5 hover:text-[#d4af37]"><Plus size={12} /></button>
-                      <button onClick={() => { setEditCanvasZoom(1); setEditCanvasPan({ x: 0, y: 0 }); }} className="p-0.5 hover:text-[#d4af37]"><Maximize2 size={12} /></button>
+                      <button onClick={(e) => { e.stopPropagation(); setEditCanvasZoom(z => Math.min(5, z * 1.2)); }} className="p-0.5 hover:text-[#d4af37]"><Plus size={12} /></button>
+                      <button onClick={(e) => { e.stopPropagation(); setEditCanvasZoom(1); setEditCanvasPan({ x: 0, y: 0 }); }} className="p-0.5 hover:text-[#d4af37]"><Maximize2 size={12} /></button>
                     </div>
-                  </div>
+                    </div>
 
                   {/* Right: Sidebar controls */}
                   <div className={`flex flex-col border-l ${isMonochrome ? 'border-gray-200 bg-white' : 'border-[#2a2a2a] bg-[#111]'}`} style={{ width: sidebarW }}>
