@@ -112,14 +112,23 @@ class ModelCapabilityError extends Error {
 async function submitImageTask(
   apiBaseUrl: string,
   apiKey: string,
-  requestBody: Record<string, unknown>
+  requestBody: Record<string, unknown>,
+  endpoint: '/images/generations' | '/images/edits' = '/images/generations'
 ): Promise<{ taskId?: string; directUrl?: string }> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 60000);
 
+  // Debug: log key params for image-to-image verification
+  const hasImageUrls = !!(requestBody as Record<string, unknown>)?.image_urls;
+  const urls = (requestBody as Record<string, unknown>)?.image_urls as string[] | undefined;
+  const str = (requestBody as Record<string, unknown>)?.strength;
+  const sz = (requestBody as Record<string, unknown>)?.size;
+  const pmt = String((requestBody as Record<string, unknown>)?.prompt || '').substring(0, 80);
+  console.info(`[submitImageTask] API call: endpoint=${endpoint}, hasImageUrls=${hasImageUrls}, urlCount=${urls?.length || 0}, urlType=${urls?.[0]?.substring(0, 30) || 'N/A'}, strength=${str}, size=${sz}, prompt=${pmt}...`);
+
   const submitResponse = await fetchWithV1Retry(
     apiBaseUrl,
-    '/images/generations',
+    endpoint,
     {
       method: 'POST',
       headers: {
@@ -185,151 +194,144 @@ async function submitImageTask(
   return { taskId };
 }
 
-// Helper: use chat-completions with vision model to generate an edited image
-// This fallback is used when the image model doesn't support image_urls/mask_image
-async function chatVisionEditFallback(
-  apiBaseUrl: string,
-  apiKey: string,
-  model: string,
-  imageBase64: string,
-  maskBase64: string | null,
-  prompt: string,
-  action: string
-): Promise<{ taskId?: string; directUrl?: string }> {
-  // 构建编辑指令
-  const editInstruction = action === 'upscale'
-    ? '放大并增强这张图片的细节和清晰度，保持画面内容完全不变，只是提高分辨率和清晰度'
-    : action === 'erase'
-    ? prompt || '移除蒙版白色区域标记的内容，用周围的自然背景填充，使修复区域与周围画面完美融合，看不出任何拼接痕迹'
-    : prompt || '在蒙版白色区域根据描述生成内容，与周围画面自然融合';
-
-  const imageDataUrl = imageBase64.startsWith('data:') ? imageBase64 : `data:image/png;base64,${imageBase64}`;
-  const maskDataUrl = maskBase64
-    ? (maskBase64.startsWith('data:') ? maskBase64 : `data:image/png;base64,${maskBase64}`)
-    : null;
-
-  // 策略1: 尝试 chat/completions + 原生图像输出 (如 Gemini 2.5 Flash)
-  // 这些模型可以在对话中直接生成/编辑图像
-  const chatRequestBody = {
-    model,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'image_url',
-            image_url: { url: imageDataUrl }
-          },
-          ...(maskDataUrl ? [{
-            type: 'image_url',
-            image_url: { url: maskDataUrl }
-          }] : []),
-          {
-            type: 'text',
-            text: editInstruction + '\n\n请直接生成编辑后的图片，不要用文字描述。'
-          }
-        ]
-      }
-    ],
-    max_tokens: 4096,
-  };
-
-  console.log(`[image-edit] chatVision fallback: Trying native image output with ${model}`);
-
-  const chatResponse = await fetchWithV1Retry(
-    apiBaseUrl,
-    '/chat/completions',
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(chatRequestBody),
-      signal: AbortSignal.timeout(120000),
-    }
-  );
-
-  if (chatResponse.ok) {
-    const chatResult = await chatResponse.json();
-    const choice = chatResult.choices?.[0];
+/**
+ * 从文本解析 SSE 格式的 chat/completions 响应
+ * 用于处理 APImart 代理即使 stream:false 也返回 SSE 流的情况
+ */
+function parseSSEChatResponseFromText(text: string): Record<string, unknown> | null {
+  const lines = text.split('\n');
+  
+  let finalContent = '';
+  let model = '';
+  let role = 'assistant';
+  
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed === 'data: [DONE]') continue;
+    if (!trimmed.startsWith('data:') && !trimmed.startsWith('data :')) continue;
     
-    // 检查模型是否直接返回了图像 (Gemini 等模型)
-    if (choice?.message?.content) {
-      const content = choice.message.content;
-      
-      // 情况1: content 是数组 (多模态响应，可能包含图像)
-      if (Array.isArray(content)) {
-        for (const part of content) {
-          if (part.type === 'image_url' && part.image_url?.url) {
-            const imageUrl = part.image_url.url;
-            return { directUrl: imageUrl };
-          }
-          if (part.type === 'image' && part.source?.data) {
-            const b64 = part.source.data;
-            return { directUrl: `data:${part.source.media_type || 'image/png'};base64,${b64}` };
-          }
-        }
-        // 数组中没有图像，提取文本作为增强提示词
-        const textParts = content.filter((p: { type: string }) => p.type === 'text').map((p: { text: string }) => p.text);
-        const enhancedPrompt = textParts.join(' ');
-        if (enhancedPrompt) {
-          return await generateWithEnhancedPrompt(apiBaseUrl, apiKey, model, enhancedPrompt, imageDataUrl, action);
-        }
+    const dataStr = trimmed.startsWith('data: ') ? trimmed.slice(6) : trimmed.startsWith('data :') ? trimmed.slice(6) : trimmed.slice(5);
+    
+    try {
+      const json = JSON.parse(dataStr);
+      // 非流式响应：直接取 message.content
+      if (json.choices?.[0]?.message?.content) {
+        finalContent = typeof json.choices[0].message.content === 'string' 
+          ? json.choices[0].message.content 
+          : JSON.stringify(json.choices[0].message.content);
       }
-      
-      // 情况2: content 是字符串 (纯文本响应)
-      if (typeof content === 'string' && content.length > 10) {
-        // 视觉模型返回了文本描述，用其作为增强提示词重新生图
-        console.log(`[image-edit] chatVision fallback: Model returned text, using as enhanced prompt`);
-        return await generateWithEnhancedPrompt(apiBaseUrl, apiKey, model, content, imageDataUrl, action);
+      // 流式响应：累加 delta.content
+      const delta = json.choices?.[0]?.delta;
+      if (delta?.content) {
+        finalContent += delta.content;
       }
+      if (delta?.role) role = delta.role;
+      if (json.model) model = json.model;
+    } catch {
+      // 忽略无法解析的行
     }
-  } else {
-    const errorText = await chatResponse.text();
-    console.warn(`[image-edit] chatVision fallback: Chat request failed: ${chatResponse.status} ${errorText.substring(0, 200)}`);
   }
-
-  throw new Error(`视觉模型回退也失败，请切换支持图像编辑的模型（如 Gemini、DALL-E、Flux 等）`);
+  
+  if (!finalContent) return null;
+  
+  return {
+    choices: [{
+      message: { content: finalContent, role },
+      finish_reason: 'stop',
+    }],
+    model,
+  } as Record<string, unknown>;
 }
 
-/**
- * 使用增强提示词 + 原始图片作为参考重新生成
- */
-async function generateWithEnhancedPrompt(
-  apiBaseUrl: string,
-  apiKey: string,
-  model: string,
-  enhancedPrompt: string,
-  originalImageUrl: string,
-  action: string,
-): Promise<{ taskId?: string; directUrl?: string }> {
-  const imageRequestBody: Record<string, unknown> = {
-    model,
-    prompt: enhancedPrompt,
-    n: 1,
-    size: '1024x1024',
-    image_urls: [originalImageUrl],
-    // 放大用低强度保持原图内容，擦除/蒙版用中等强度
-    strength: action === 'upscale' ? 0.3 : 0.6,
-  };
-
-  try {
-    return await submitImageTask(apiBaseUrl, apiKey, imageRequestBody);
-  } catch (err: unknown) {
-    // 如果带 image_urls 失败，尝试纯文生图
-    if (err instanceof ModelCapabilityError) {
-      console.log(`[image-edit] generateWithEnhancedPrompt: image_urls not supported, trying text-only`);
-      const textOnlyBody: Record<string, unknown> = {
-        model,
-        prompt: enhancedPrompt,
-        n: 1,
-        size: '1024x1024',
-      };
-      return await submitImageTask(apiBaseUrl, apiKey, textOnlyBody);
-    }
-    throw err;
+// Helper: use chat-completions with vision model to describe an image
+// Returns a text description of the image, or null if all models fail
+async function describeImageWithVision(
+  imageBase64: string,
+  instruction: string,
+): Promise<string | null> {
+  const chatProviders = await findAllProvidersForType('chat');
+  if (chatProviders.length === 0) {
+    console.warn('[image-edit] No chat models available for vision description');
+    return null;
   }
+
+  const imageDataUrl = imageBase64.startsWith('data:') ? imageBase64 : `data:image/png;base64,${imageBase64}`;
+
+  for (const entry of chatProviders) {
+    for (const m of entry.models) {
+      try {
+        console.log(`[image-edit] vision-describe: Trying ${m}`);
+        const chatRequestBody = {
+          model: m,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'image_url', image_url: { url: imageDataUrl } },
+                { type: 'text', text: instruction }
+              ]
+            }
+          ],
+          max_tokens: 2048,
+          stream: false,
+        };
+
+        const chatResponse = await fetchWithV1Retry(
+          normalizeApiBaseUrl(entry.provider.baseUrl),
+          '/chat/completions',
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${entry.provider.apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(chatRequestBody),
+            signal: AbortSignal.timeout(60000),
+          }
+        );
+
+        if (!chatResponse.ok) continue;
+
+        const responseText = await chatResponse.text();
+        let chatResult: Record<string, unknown> | null = null;
+        const trimmedText = responseText.trim();
+
+        if (trimmedText.startsWith('data:') || trimmedText.startsWith('data :')) {
+          chatResult = parseSSEChatResponseFromText(trimmedText);
+        } else {
+          try { chatResult = JSON.parse(trimmedText); } catch { chatResult = parseSSEChatResponseFromText(trimmedText); }
+        }
+
+        if (!chatResult) continue;
+
+        const choice = (chatResult as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0];
+        const content = choice?.message?.content;
+
+        // Extract text content (whether string or array)
+        if (typeof content === 'string' && content.length > 20) {
+          console.log(`[image-edit] vision-describe: ${m} returned ${content.length} chars`);
+          return content;
+        }
+        if (Array.isArray(content)) {
+          const textParts = content
+            .filter((p: { type: string }) => p.type === 'text')
+            .map((p: { text: string }) => p.text)
+            .filter((t: string) => t.length > 10);
+          if (textParts.length > 0) {
+            const joined = textParts.join(' ');
+            console.log(`[image-edit] vision-describe: ${m} returned ${joined.length} chars (array)`);
+            return joined;
+          }
+        }
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn(`[image-edit] vision-describe: ${m} failed: ${errMsg}`);
+        continue;
+      }
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -340,14 +342,15 @@ async function autoTrySubmitImageTask(
   candidateModels: Array<{ model: string; apiKey: string; apiBaseUrl: string; source: string }>,
   buildRequestBody: (model: string) => Record<string, unknown>,
   operation: string,
+  endpoint: '/images/generations' | '/images/edits' = '/images/generations',
 ): Promise<{ taskId?: string; directUrl?: string; usedModel?: string }> {
   const errors: string[] = [];
   
   for (const candidate of candidateModels) {
     try {
-      console.log(`[image-edit] ${operation}: Trying model ${candidate.model} (source: ${candidate.source})`);
+      console.log(`[image-edit] ${operation}: Trying model ${candidate.model} (source: ${candidate.source}, endpoint: ${endpoint})`);
       const requestBody = buildRequestBody(candidate.model);
-      const result = await submitImageTask(candidate.apiBaseUrl, candidate.apiKey, requestBody);
+      const result = await submitImageTask(candidate.apiBaseUrl, candidate.apiKey, requestBody, endpoint);
       return { ...result, usedModel: candidate.model };
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -374,38 +377,68 @@ async function autoTrySubmitImageTask(
  * 自动尝试所有 LLM 模型做视觉 fallback
  * 遍历管理员配置的 chat 类型模型，用视觉理解+生成的方式替代图像编辑
  */
+/**
+ * 自动尝试所有 LLM 模型做视觉描述 + 图像生成 fallback
+ * 用于 inpaint/erase 等操作，当 images/generations 不支持时
+ */
 async function autoTryChatVisionFallback(
   imageBase64: string,
-  maskBase64: string | null,
+  _maskBase64: string | null,
   prompt: string,
   operation: string,
 ): Promise<{ taskId?: string; directUrl?: string; usedModel?: string } | null> {
-  const chatProviders = await findAllProvidersForType('chat');
-  if (chatProviders.length === 0) {
-    console.warn('[image-edit] No chat models available for vision fallback');
+  // Step 1: 用 chat vision 模型描述图片内容
+  const description = await describeImageWithVision(
+    imageBase64,
+    operation === 'erase'
+      ? '请详细描述这张图片的内容，包括主体、背景、风格、色彩、构图等细节。'
+      : prompt || '请详细描述这张图片的内容，包括主体、背景、风格、色彩、构图等细节。'
+  );
+
+  if (!description) {
+    console.warn(`[image-edit] ${operation} vision fallback: No description available`);
     return null;
   }
-  
-  for (const entry of chatProviders) {
+
+  // Step 2: 用描述 + image_urls 作为参考提交 images/generations
+  const imageProviders = await findAllProvidersForType('image');
+  if (imageProviders.length === 0) {
+    console.warn(`[image-edit] ${operation} vision fallback: No image models available`);
+    return null;
+  }
+
+  const imageDataUrl = imageBase64.startsWith('data:') ? imageBase64 : `data:image/png;base64,${imageBase64}`;
+
+  // 构建 candidate models from image providers
+  const candidates: Array<{ model: string; apiKey: string; apiBaseUrl: string; source: string }> = [];
+  for (const entry of imageProviders) {
     for (const m of entry.models) {
-      try {
-        console.log(`[image-edit] ${operation} vision fallback: Trying ${m}`);
-        const result = await chatVisionEditFallback(
-          normalizeApiBaseUrl(entry.provider.baseUrl), entry.provider.apiKey, m,
-          imageBase64, maskBase64, prompt, operation
-        );
-        if (result) {
-          return { ...result, usedModel: m };
-        }
-      } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        console.warn(`[image-edit] ${operation} vision fallback: Model ${m} failed: ${errMsg}`);
-        continue;
-      }
+      candidates.push({
+        model: m,
+        apiKey: entry.provider.apiKey,
+        apiBaseUrl: normalizeApiBaseUrl(entry.provider.baseUrl),
+        source: 'chat-vision-fallback',
+      });
     }
   }
-  
-  return null;
+
+  const enhancedPrompt = operation === 'erase'
+    ? `${description}\n\nRemove the masked area content and fill with natural background. Seamlessly blend the repaired area with surrounding content.`
+    : `${description}\n\n${prompt || ''}`;
+
+  try {
+    const result = await autoTrySubmitImageTask(candidates, (m) => ({
+      model: m,
+      prompt: enhancedPrompt,
+      n: 1,
+      size: '1024x1024',
+      image_urls: [imageDataUrl],
+      strength: 0.6,
+    }), `${operation}(vision-fallback)`);
+    return { ...result, usedModel: result.usedModel };
+  } catch {
+    return null;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -555,72 +588,114 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'upscale') {
-      // 图像放大 - 基于 Clarity Upscaler 方法论
-      // 核心原理: 低 strength (creativity) + 强正向提示词 + 强负向提示词 + 原图作为 image_urls
+      // ============================================================
+      // AI 无损放大 - 两步策略
+      //
+      // 核心问题：images/generations 的 image_urls 只是"参考图"，
+      // 不保证保留原图内容。如果 prompt 不精确描述原图，生成结果
+      // 会偏离原图。
+      //
+      // 策略：Step 1 用 chat vision 模型描述原图内容 →
+      //       Step 2 用描述 + image_urls + 低 strength 提交 images/generations
+      //
+      // 这样 images/generations 既有参考图(image_urls)又有精确描述，
+      // 生成结果会尽可能贴近原图。
+      // ============================================================
+
       const tw = targetWidth || 2048;
       const th = targetHeight || 2048;
       const scaleVal = body.scale || 2;
 
-      // 动态 strength: 放大倍率越高，需要稍微增加创造力来补细节
-      // 2× → 0.30, 4× → 0.38, 8× → 0.45
-      const upscaleStrength = Math.min(0.3 + (scaleVal - 1) * 0.04, 0.45);
+      // 计算目标比例 - 优先使用前端传入的 aspectRatio
+      const effectiveSize = aspectRatio
+        ? findClosestAspectRatio(aspectRatio)
+        : (() => {
+            const g = (a: number, b: number): number => b === 0 ? a : g(b, a % b);
+            const gcdVal = g(tw, th);
+            const supportedRatios = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
+            let bestRatio = supportedRatios[0];
+            let bestDiff = Infinity;
+            const [rw, rh] = [tw / gcdVal, th / gcdVal];
+            for (const sr of supportedRatios) {
+              const [sw, sh] = sr.split(':').map(Number);
+              const diff = Math.abs(rw / rh - sw / sh);
+              if (diff < bestDiff) { bestDiff = diff; bestRatio = sr; }
+            }
+            return bestRatio;
+          })();
 
-      // 基于 Clarity Upscaler 的提示词策略
-      const upscalePrompt = prompt || (
-        `masterpiece, best quality, highres, ultra-detailed, ` +
-        `sharp focus, highly detailed textures, intricate details, ` +
-        `crisp lines, enhanced clarity, high definition, ` +
-        `super resolution upscaling of the provided reference image, ` +
-        `preserve the exact same composition, subject, colors, style and mood, ` +
-        `only add finer details and sharper edges at the higher resolution`
+      // 将图片转为 base64（用于 chat vision 描述）
+      const imageBase64ForVision = await resolveImageToBase64(imageUrl);
+
+      // Step 1: 用 chat vision 模型获取图片精确描述
+      // 这样 prompt 会精确描述原图内容，而非泛泛的"upscale this image"
+      console.log(`[image-edit] upscale: Step 1 - getting image description via vision model`);
+      const visionDescription = await describeImageWithVision(
+        imageBase64ForVision,
+        '请详细描述这张图片的内容、构图、主体、色彩、风格、氛围和所有视觉细节。描述要足够精确，让人仅凭文字就能还原这张图片。请用中英文各描述一次。' +
+        '\n\nDescribe this image in detail: composition, subject, colors, style, mood, and all visual details. Be precise enough that someone could recreate the image from text alone.'
       );
 
-      const negativePrompt = `(worst quality, low quality, normal quality:2), blurry, pixelated, noisy, grainy, ` +
-        `distorted, deformed, watermark, text, signature, jpeg artifacts, compression artifacts, ` +
-        `cropped, out of frame, duplicate, error`;
+      // Step 2: 构建增强 prompt + image_urls + 低 strength
+      const userDescription = prompt || '';
+      let enhancedPrompt: string;
 
-      const g = (a: number, b: number): number => b === 0 ? a : g(b, a % b);
-      const gcd = g(tw, th);
-      const supportedRatios = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
-      let bestRatio = supportedRatios[0];
-      let bestDiff = Infinity;
-      const [rw, rh] = [tw / gcd, th / gcd];
-      for (const sr of supportedRatios) {
-        const [sw, sh] = sr.split(':').map(Number);
-        const diff = Math.abs(rw / rh - sw / sh);
-        if (diff < bestDiff) { bestDiff = diff; bestRatio = sr; }
+      if (visionDescription && visionDescription.length > 30) {
+        // 有视觉描述：用描述增强 prompt
+        console.log(`[image-edit] upscale: Step 2 - using vision description (${visionDescription.length} chars)`);
+        enhancedPrompt = `[IMG2IMG UPSCALE] Create a high-resolution version of the reference image. ` +
+          `The image depicts: ${visionDescription.substring(0, 500)}. ` +
+          (userDescription ? `User context: ${userDescription}. ` : '') +
+          `CRITICAL: Keep the EXACT same composition, subjects, colors, style, mood and artistic choices as the reference image. ` +
+          `Only add finer details, sharper textures and crisper edges. ` +
+          `Do NOT change, replace, add or remove any element. ` +
+          `The output must be a high-resolution version of the SAME image, not a new creation. ` +
+          `masterpiece, best quality, ultra-detailed, 8k uhd, highres`;
+      } else {
+        // 无视觉描述：用用户描述 + 泛化 prompt
+        console.log(`[image-edit] upscale: Step 2 - no vision description, using generic upscale prompt`);
+        enhancedPrompt = (userDescription
+          ? `[IMG2IMG UPSCALE] Create a high-resolution version of the reference image. The image depicts: ${userDescription}. `
+          : `[IMG2IMG UPSCALE] Create a high-resolution version of the reference image. `
+        ) +
+          `CRITICAL: Keep the EXACT same composition, subjects, colors, style, mood and artistic choices. ` +
+          `Only add finer details, sharper textures and crisper edges. Do NOT change any element. ` +
+          `The output must be a high-resolution version of the SAME image, not a new creation. ` +
+          `masterpiece, best quality, ultra-detailed, 8k uhd, highres`;
       }
-      const effectiveSize = bestRatio;
 
-      console.log(`[image-edit] upscale: target=${tw}x${th}, ratio=${effectiveSize}, strength=${upscaleStrength}, scale=${scaleVal}×`);
+      // strength 越低越接近原图；放大需要极低值
+      // 2×: 0.15, 4×: 0.20, 8×: 0.25
+      const upscaleStrength = Math.min(0.10 + scaleVal * 0.025, 0.25);
+
+      console.log(`[image-edit] upscale: target=${tw}x${th}, scale=${scaleVal}×, ratio=${effectiveSize}, strength=${upscaleStrength}`);
+
+      // 确保 image_urls 使用可访问的 URL（APImart 需要能访问到图片）
+      let accessibleImageUrl = imageUrl;
+      if (imageUrl.startsWith('/')) {
+        const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+        accessibleImageUrl = `${domain}${imageUrl}`;
+      } else if (imageUrl.startsWith('blob:')) {
+        // blob URL 无法从服务端访问，使用 base64
+        accessibleImageUrl = imageBase64ForVision;
+      }
 
       try {
         const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
           model: m,
-          prompt: upscalePrompt,
-          negative_prompt: negativePrompt,
+          prompt: enhancedPrompt,
           size: effectiveSize,
           n: 1,
-          image_urls: [imageUrl],
+          image_urls: [accessibleImageUrl],
           strength: upscaleStrength,
+          negative_prompt: '(worst quality, low quality, normal quality:2), blurry, pixelated, different composition, different subject, different style, different colors, new elements, extra objects, missing objects, changed background',
         }), '放大');
         if (result.directUrl) {
-          return NextResponse.json({ success: true, imageUrl: result.directUrl, action, engine: 'ai-api', usedModel: result.usedModel });
+          return NextResponse.json({ success: true, imageUrl: result.directUrl, action, engine: 'ai-upscale-vision-enhanced', usedModel: result.usedModel });
         }
-        return NextResponse.json({ success: true, taskId: result.taskId, action, engine: 'ai-api', usedModel: result.usedModel });
+        return NextResponse.json({ success: true, taskId: result.taskId, action, engine: 'ai-upscale-vision-enhanced', usedModel: result.usedModel });
       } catch (imgErr: unknown) {
-        // 所有 image 模型都不支持 image_urls 时，回退到视觉模型生成
         if (imgErr instanceof ModelCapabilityError) {
-          console.log(`[image-edit] upscale: All image models failed, trying chat-vision fallback...`);
-          const fallbackResult = await autoTryChatVisionFallback(
-            await resolveImageToBase64(imageUrl), null, upscalePrompt, 'upscale'
-          );
-          if (fallbackResult) {
-            if ('directUrl' in fallbackResult && fallbackResult.directUrl) {
-              return NextResponse.json({ success: true, imageUrl: fallbackResult.directUrl, action, engine: 'ai-chat-vision', usedModel: fallbackResult.usedModel });
-            }
-            return NextResponse.json({ success: true, taskId: fallbackResult.taskId, action, engine: 'ai-chat-vision', usedModel: fallbackResult.usedModel });
-          }
           return NextResponse.json({ success: false, error: imgErr.message }, { status: 500 });
         }
         throw imgErr;

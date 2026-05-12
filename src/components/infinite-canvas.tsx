@@ -2692,6 +2692,7 @@ export function InfiniteCanvas({
         body: JSON.stringify({
           action: 'upscale',
           imageUrl: img.url,
+          prompt: img.prompt || img.modifyPrompt || '', // 传图片描述给后端，让AI知道原图内容
           targetWidth: targetW,
           targetHeight: targetH,
           aspectRatio: `${origW}:${origH}`,
