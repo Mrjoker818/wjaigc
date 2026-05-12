@@ -103,6 +103,22 @@ function buildPollConfig(request: PollRequest): PollConfig | undefined {
 
 function splitProviderSelection(selection?: string): { providerId?: string; model?: string } {
   if (!selection) return {};
+
+  // Handle admin-3d::providerId::modelId format
+  if (selection.startsWith('admin-3d::')) {
+    const parts = selection.split('::');
+    if (parts.length >= 3) {
+      return {
+        providerId: parts[1] || undefined,
+        model: parts.slice(2).join('::').trim() || undefined,
+      };
+    }
+    if (parts.length === 2) {
+      return { model: parts[1].trim() || undefined };
+    }
+    return {};
+  }
+
   const [providerId, ...modelParts] = selection.split('::');
   const model = modelParts.join('::').trim();
   return {
@@ -136,7 +152,8 @@ async function resolvePollRequest(body: PollRequest & { providerId?: string }): 
 export async function POST(request: NextRequest) {
   try {
     const body = await resolvePollRequest(await request.json() as PollRequest & { providerId?: string });
-    const sessionUser = await getSessionUser(request);
+    // Verify session (getSessionUser throws on unauthenticated)
+    await getSessionUser(request);
     if (!body) {
       return NextResponse.json({ success: false, error: '请先在管理员系统配置可用的 3D 模型' }, { status: 400 });
     }

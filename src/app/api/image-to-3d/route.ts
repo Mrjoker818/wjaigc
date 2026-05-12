@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
+import { getServerDataRoot } from '@/lib/server-data-root';
+import fsSync from 'fs';
+import path from 'path';
 
 /**
  * Image-to-3D API route
@@ -45,7 +48,54 @@ async function imageUrlToBase64(imageUrl: string): Promise<string | null> {
       if (base64Match) return base64Match[1];
     }
 
-    // Fetch the image and convert to base64
+    // Blob URLs cannot be resolved server-side
+    if (imageUrl.startsWith('blob:')) {
+      console.warn('[image-to-3d] Blob URLs cannot be resolved server-side');
+      return null;
+    }
+
+    // Local path (e.g. /uploads/xxx.png or /api/serve-upload/xxx.png)
+    // Read from filesystem first, then try localhost fetch
+    if (imageUrl.startsWith('/')) {
+      const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
+
+      // Try direct public path
+      const localPath = path.join(workspacePath, 'public', imageUrl);
+      if (fsSync.existsSync(localPath)) {
+        const buffer = fsSync.readFileSync(localPath);
+        return buffer.toString('base64');
+      }
+
+      // /api/serve-upload/filename → search upload directories
+      const serveUploadMatch = imageUrl.match(/^\/api\/serve-upload\/(.+)$/);
+      if (serveUploadMatch) {
+        const filename = serveUploadMatch[1];
+        const dataRoot = getServerDataRoot();
+        const uploadDirs = [
+          path.join(dataRoot, 'uploads'),
+          path.join(workspacePath, 'public', 'uploads'),
+        ];
+        for (const dir of uploadDirs) {
+          const filePath = path.join(dir, filename);
+          if (fsSync.existsSync(filePath)) {
+            const buffer = fsSync.readFileSync(filePath);
+            return buffer.toString('base64');
+          }
+        }
+      }
+
+      // Fallback: fetch from localhost
+      const fullUrl = `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}`;
+      const response = await fetch(fullUrl, { signal: AbortSignal.timeout(10000) });
+      if (response.ok) {
+        const arrayBuffer = await response.arrayBuffer();
+        return Buffer.from(arrayBuffer).toString('base64');
+      }
+      console.warn('[image-to-3d] Failed to fetch local image:', imageUrl);
+      return null;
+    }
+
+    // External URL - fetch and convert
     const response = await fetch(imageUrl, {
       signal: AbortSignal.timeout(15000), // 15s timeout
     });
@@ -60,6 +110,47 @@ async function imageUrlToBase64(imageUrl: string): Promise<string | null> {
     console.warn('[image-to-3d] Could not convert image URL to base64:', err instanceof Error ? err.message : String(err));
     return null;
   }
+}
+
+/**
+ * Resolve a local image URL to a publicly accessible URL or data URL.
+ * External APIs (Meshy, Tripo, etc.) can't access local paths like /uploads/xxx.png,
+ * so we convert them to data URLs or use the server's public domain.
+ */
+async function resolveImageUrlForProvider(imageUrl: string): Promise<string> {
+  // Already accessible formats
+  if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://') || imageUrl.startsWith('data:')) {
+    return imageUrl;
+  }
+
+  // Blob URL - cannot be resolved server-side
+  if (imageUrl.startsWith('blob:')) {
+    console.warn('[image-to-3d] Blob URL cannot be resolved for external API');
+    return imageUrl;
+  }
+
+  // Local path - convert to data URL
+  if (imageUrl.startsWith('/')) {
+    const base64 = await imageUrlToBase64(imageUrl);
+    if (base64) {
+      // Determine MIME type from extension
+      const ext = imageUrl.split('.').pop()?.toLowerCase();
+      const mimeMap: Record<string, string> = {
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+        gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
+      };
+      const mime = mimeMap[ext || ''] || 'image/png';
+      return `data:${mime};base64,${base64}`;
+    }
+
+    // Fallback: try localhost URL
+    const port = process.env.DEPLOY_RUN_PORT || 5000;
+    const localhostUrl = `http://localhost:${port}${imageUrl}`;
+    console.warn('[image-to-3d] Could not convert local image to base64, trying localhost URL:', localhostUrl);
+    return localhostUrl;
+  }
+
+  return imageUrl;
 }
 
 // ==================== Provider Detection ====================
@@ -281,6 +372,23 @@ async function buildRequestBody(request: ImageTo3DRequest): Promise<Record<strin
 
 function splitProviderSelection(selection?: string): { providerId?: string; model?: string } {
   if (!selection) return {};
+
+  // Handle admin-3d::providerId::modelId format (from frontend admin model list)
+  if (selection.startsWith('admin-3d::')) {
+    const parts = selection.split('::');
+    if (parts.length >= 3) {
+      return {
+        providerId: parts[1] || undefined,
+        model: parts.slice(2).join('::').trim() || undefined,
+      };
+    }
+    // Fallback: admin-3d::modelId
+    if (parts.length === 2) {
+      return { model: parts[1].trim() || undefined };
+    }
+    return {};
+  }
+
   const [providerId, ...modelParts] = selection.split('::');
   const model = modelParts.join('::').trim();
   return {
@@ -551,13 +659,17 @@ async function tryExternalRequest(request: ImageTo3DRequest): Promise<{
 export async function POST(request: NextRequest) {
   try {
     const body = await resolveServerProvider(await request.json() as ImageTo3DRequest);
-    const sessionUser = await getSessionUser(request);
+    // Verify session (getSessionUser throws on unauthenticated)
+    await getSessionUser(request);
     if (!body.imageUrl) {
       return NextResponse.json({ success: false, error: 'Missing imageUrl' }, { status: 400 });
     }
     if (body.backend === 'api' && !body.provider?.apiKey) {
       return NextResponse.json({ success: false, error: '请先在管理员系统配置可用的 3D 模型' }, { status: 400 });
     }
+
+    // Resolve local image URLs to accessible format for external APIs
+    body.imageUrl = await resolveImageUrlForProvider(body.imageUrl);
 
     const providerType = detectProviderType(body);
     console.log('[image-to-3d] Request:', JSON.stringify({
