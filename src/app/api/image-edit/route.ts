@@ -97,6 +97,14 @@ async function fetchImageBuffer(url: string): Promise<Buffer> {
 }
 
 // Helper: submit a task to the images/generations API and return taskId or directUrl
+// Custom error for model capability issues (triggers chat-vision fallback)
+class ModelCapabilityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ModelCapabilityError';
+  }
+}
+
 async function submitImageTask(
   apiBaseUrl: string,
   apiKey: string,
@@ -132,13 +140,13 @@ async function submitImageTask(
 
     // 清理常见 API 错误信息，提供更友好的中文提示
     if (errorMsg.includes('ratio or price') || errorMsg.includes('not configured')) {
-      throw new Error(`当前模型不支持此操作，请切换支持图像编辑的模型（如 DALL-E、Flux 等）或联系管理员配置`);
+      throw new ModelCapabilityError(`当前模型不支持此操作，尝试回退到视觉模型...`);
     }
     if (errorMsg.includes('image_urls') || errorMsg.includes('mask_image') || errorMsg.includes('image editing')) {
-      throw new Error(`当前模型不支持图像编辑功能，请切换支持图生图/扩展的模型`);
+      throw new ModelCapabilityError(`当前模型不支持图像编辑功能，尝试回退到视觉模型...`);
     }
     if (errorMsg.includes('must be an URL') || errorMsg.includes('Invalid URL') || errorMsg.includes('data:')) {
-      throw new Error(`当前模型不支持 Base64 图片输入，请切换支持图像编辑的模型`);
+      throw new ModelCapabilityError(`当前模型不支持 Base64 图片输入，尝试回退到视觉模型...`);
     }
     if (errorMsg.includes('Insufficient balance') || errorMsg.includes('insufficient')) {
       throw new Error(`API 余额不足，请联系管理员充值`);
@@ -168,6 +176,81 @@ async function submitImageTask(
   }
 
   return { taskId };
+}
+
+// Helper: use chat-completions with vision model to generate an edited image
+// This fallback is used when the image model doesn't support image_urls/mask_image
+async function chatVisionEditFallback(
+  apiBaseUrl: string,
+  apiKey: string,
+  model: string,
+  imageBase64: string,
+  maskBase64: string | null,
+  prompt: string,
+  action: string
+): Promise<{ taskId?: string; directUrl?: string }> {
+  const actionDesc = action === 'upscale'
+    ? '放大并增强这张图片的细节和清晰度，保持画面内容不变'
+    : action === 'inpaint' || action === 'erase'
+    ? prompt || '修复涂抹区域，使其与周围画面自然融合'
+    : prompt;
+
+  const chatRequestBody = {
+    model,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image_url',
+            image_url: { url: imageBase64.startsWith('data:') ? imageBase64 : `data:image/png;base64,${imageBase64}` }
+          },
+          ...(maskBase64 ? [{
+            type: 'image_url',
+            image_url: { url: maskBase64.startsWith('data:') ? maskBase64 : `data:image/png;base64,${maskBase64}` }
+          }] : []),
+          {
+            type: 'text',
+            text: `请根据这张图片${maskBase64 ? '和蒙版（白色区域为需要编辑的部分）' : ''}，生成一张新图片。要求：${actionDesc}。请直接描述你将生成的图片内容，以便用于图像生成。`
+          }
+        ]
+      }
+    ],
+    max_tokens: 1024,
+  };
+
+  const chatResponse = await fetchWithV1Retry(
+    apiBaseUrl,
+    '/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(chatRequestBody),
+      signal: AbortSignal.timeout(60000),
+    }
+  );
+
+  if (!chatResponse.ok) {
+    const errorText = await chatResponse.text();
+    console.error('Chat vision fallback error:', chatResponse.status, errorText);
+    throw new Error(`视觉模型回退也失败，请切换支持图像编辑的模型（如 DALL-E、Flux 等）`);
+  }
+
+  const chatResult = await chatResponse.json();
+  const enhancedPrompt = chatResult.choices?.[0]?.message?.content || actionDesc;
+
+  // Now use the enhanced prompt to generate an image via text-to-image
+  const imageRequestBody: Record<string, unknown> = {
+    model,
+    prompt: enhancedPrompt,
+    n: 1,
+    size: '1024x1024',
+  };
+
+  return submitImageTask(apiBaseUrl, apiKey, imageRequestBody);
 }
 
 export async function POST(request: NextRequest) {
@@ -203,6 +286,36 @@ export async function POST(request: NextRequest) {
         error: '请先在管理员系统配置可用的图像编辑模型',
       }, { status: 400 });
     }
+
+    // Helper: resolve local/blob/external image URL to base64 data URL
+    const resolveImageToBase64 = async (url: string): Promise<string> => {
+      if (url.startsWith('data:')) return url;
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+        const localPrefix = `${domain}/`;
+        if (url.startsWith(localPrefix)) {
+          const localPath = url.replace(localPrefix, '');
+          const fullPath = `${process.env.COZE_WORKSPACE_PATH || '/workspace/projects'}/public/${localPath}`;
+          const fs = await import('fs/promises');
+          const buf = await fs.readFile(fullPath);
+          const ext = localPath.split('.').pop()?.toLowerCase() || 'png';
+          const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png';
+          return `data:${mime};base64,${buf.toString('base64')}`;
+        }
+        // External URL: fetch it
+        const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
+        const buf = Buffer.from(await res.arrayBuffer());
+        const ct = res.headers.get('content-type') || 'image/png';
+        return `data:${ct};base64,${buf.toString('base64')}`;
+      }
+      // Relative path like /uploads/xxx.png
+      const fs = await import('fs/promises');
+      const fullPath = `${process.env.COZE_WORKSPACE_PATH || '/workspace/projects'}/public${url.startsWith('/') ? url : '/' + url}`;
+      const buf = await fs.readFile(fullPath);
+      const ext = url.split('.').pop()?.toLowerCase() || 'png';
+      const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png';
+      return `data:${mime};base64,${buf.toString('base64')}`;
+    };
 
     if (action === 'multi_angle') {
       const yawText = rotation > 0 ? `${Math.abs(rotation)} degrees to the right` : rotation < 0 ? `${Math.abs(rotation)} degrees to the left` : 'front view';
@@ -254,19 +367,37 @@ export async function POST(request: NextRequest) {
       }
       const effectiveSize = bestRatio;
 
-      const requestBody: Record<string, unknown> = {
-        model,
-        prompt: upscalePrompt,
-        size: effectiveSize,
-        n: 1,
-        image_urls: [imageUrl],
-      };
-
-      const result = await submitImageTask(apiBaseUrl, apiKey, requestBody);
-      if (result.directUrl) {
-        return NextResponse.json({ success: true, imageUrl: result.directUrl, action, engine: 'ai-api' });
+      try {
+        // 先尝试 image_urls 方式（图生图模型）
+        const requestBody: Record<string, unknown> = {
+          model,
+          prompt: upscalePrompt,
+          size: effectiveSize,
+          n: 1,
+          image_urls: [imageUrl],
+        };
+        const result = await submitImageTask(apiBaseUrl, apiKey, requestBody);
+        if (result.directUrl) {
+          return NextResponse.json({ success: true, imageUrl: result.directUrl, action, engine: 'ai-api' });
+        }
+        return NextResponse.json({ success: true, taskId: result.taskId, action, engine: 'ai-api' });
+      } catch (imgErr: unknown) {
+        // image_urls 不支持时，回退到视觉模型生成
+        if (imgErr instanceof ModelCapabilityError) {
+          console.log(`[image-edit] upscale: image_urls not supported, trying chat-vision fallback...`);
+          const fallbackResult = await chatVisionEditFallback(
+            apiBaseUrl, apiKey, model, await resolveImageToBase64(imageUrl), null, upscalePrompt, 'upscale'
+          );
+          if (fallbackResult) {
+            if ('directUrl' in fallbackResult && fallbackResult.directUrl) {
+              return NextResponse.json({ success: true, imageUrl: fallbackResult.directUrl, action, engine: 'ai-chat-vision' });
+            }
+            return NextResponse.json({ success: true, taskId: fallbackResult.taskId, action, engine: 'ai-chat-vision' });
+          }
+          return NextResponse.json({ success: false, error: '图像放大失败，当前模型不支持图像编辑，请切换支持图生图的模型或联系管理员配置' }, { status: 500 });
+        }
+        throw imgErr;
       }
-      return NextResponse.json({ success: true, taskId: result.taskId, action, engine: 'ai-api' });
     }
 
     if (action === 'remove_background') {
@@ -427,7 +558,26 @@ export async function POST(request: NextRequest) {
 
       console.log(`[inpaint] AI API request: model=${model}, size=${effectiveSize}, strength=${isErase ? 0.85 : 0.8}`);
 
-      const result = await submitImageTask(apiBaseUrl, apiKey, requestBody);
+      let result: { taskId?: string; directUrl?: string };
+      try {
+        // 先尝试 image_urls + mask_image 方式（支持图像编辑的模型）
+        result = await submitImageTask(apiBaseUrl, apiKey, requestBody);
+      } catch (imgErr: unknown) {
+        // image_urls / mask_image 不支持时，回退到视觉模型生成
+        if (imgErr instanceof ModelCapabilityError) {
+          console.log(`[inpaint] image_urls not supported, trying chat-vision fallback...`);
+          const fallbackResult = await chatVisionEditFallback(
+            apiBaseUrl, apiKey, model, await resolveImageToBase64(accessibleImageUrl), maskDataUrl || null, inpaintPrompt, 'inpaint'
+          );
+          if (fallbackResult) {
+            result = fallbackResult as { taskId: string; directUrl?: string };
+          } else {
+            return NextResponse.json({ success: false, error: '图像编辑失败，当前模型不支持图像编辑，请切换支持图生图的模型或联系管理员配置' }, { status: 500 });
+          }
+        } else {
+          throw imgErr;
+        }
+      }
 
       // 10. 处理结果
       if (result.directUrl) {

@@ -267,6 +267,7 @@ export interface CanvasImage {
     status: string;
     progress: number;
     sourceUrl?: string;
+    error?: string;
   };
   threeDModelUrl?: string;
   threeDModelUrls?: Record<string, string>;
@@ -2776,7 +2777,12 @@ export function InfiniteCanvas({
 
       const data = await res.json();
       if (!data.success) {
-        alert(data.error || '放大失败');
+        updateProcessingFrame(placeholderId, {
+          progress: -1,
+          status: `❌ ${data.error || '放大失败'}`,
+          error: data.error || '放大失败',
+        });
+        setTimeout(() => removeProcessingFrame(placeholderId), 5000);
         setIsEditProcessing(false);
         return;
       }
@@ -2794,11 +2800,21 @@ export function InfiniteCanvas({
           modifyPrompt: `${upscaleMultiplier}x API 放大`,
         });
       } else {
-        alert('放大超时，请重试');
+        updateProcessingFrame(placeholderId, {
+          progress: -1,
+          status: '❌ 放大超时，请重试',
+          error: '放大超时，请重试',
+        });
+        setTimeout(() => removeProcessingFrame(placeholderId), 5000);
       }
     } catch (e) {
       console.error('Upscale error:', e);
-      alert('操作失败，请重试');
+      updateProcessingFrame(placeholderId, {
+        progress: -1,
+        status: `❌ 操作失败: ${e instanceof Error ? e.message : '请重试'}`,
+        error: e instanceof Error ? e.message : '请重试',
+      });
+      setTimeout(() => removeProcessingFrame(placeholderId), 5000);
     }
     setIsEditProcessing(false);
     setActiveTool('none');
@@ -3368,7 +3384,12 @@ export function InfiniteCanvas({
         const data = await res.json();
         if (!data.success) {
           console.error('Image edit failed:', data.error);
-          removeProcessingFrame(placeholderId);
+          updateProcessingFrame(placeholderId, {
+            progress: -1,
+            status: `❌ ${data.error || '编辑失败'}`,
+            error: data.error || '编辑失败',
+          });
+          setTimeout(() => removeProcessingFrame(placeholderId), 5000);
           return;
         }
 
@@ -3415,11 +3436,21 @@ export function InfiniteCanvas({
             completeProcessingFrame(placeholderId, resultUrl, currentEditImg.width, currentEditImg.height, { originalWidth: currentEditImg.originalWidth || Math.round(currentEditImg.width), originalHeight: currentEditImg.originalHeight || Math.round(currentEditImg.height) });
           }
         } else {
-          removeProcessingFrame(placeholderId);
+          updateProcessingFrame(placeholderId, {
+            progress: -1,
+            status: '❌ 未获取到结果',
+            error: '未获取到结果',
+          });
+          setTimeout(() => removeProcessingFrame(placeholderId), 5000);
         }
       } catch (e) {
         console.error('Edit confirm error:', e);
-        removeProcessingFrame(placeholderId);
+        updateProcessingFrame(placeholderId, {
+          progress: -1,
+          status: `❌ 操作失败: ${e instanceof Error ? e.message : '请重试'}`,
+          error: e instanceof Error ? e.message : '请重试',
+        });
+        setTimeout(() => removeProcessingFrame(placeholderId), 5000);
       }
 
       return;
