@@ -316,7 +316,7 @@ interface InfiniteCanvasProps {
   altRefMarkerIds?: string[];
 }
 
-type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'img2img';
+type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'img2img' | 'upscale';
 type ActiveTool = 'none' | 'upscale' | 'download' | 'multiAngle' | 'to3d';
 type MultiAngleMode = 'image' | 'camera';
 type ThreeDBackend = 'api' | 'local';
@@ -556,6 +556,8 @@ export function InfiniteCanvas({
   const [upscaylModels, setUpscaylModels] = useState<{id: string; name: string; description: string; scale: number}[]>([]);
   const [upscaylSelectedModel, setUpscaylSelectedModel] = useState('realesrgan-x4plus');
   const [upscaylChecking, setUpscaylChecking] = useState(true);
+  const [upscalePreset, setUpscalePreset] = useState<'2k' | '4k' | '8k'>('2k');
+  const [showUpscalePresetMenu, setShowUpscalePresetMenu] = useState(false);
 
   // Check Upscayl NCNN availability on mount
   useEffect(() => {
@@ -677,6 +679,11 @@ export function InfiniteCanvas({
   const [editStrokes, setEditStrokes] = useState<{ x: number; y: number; reverse: boolean }[][]>([]);
   const [currentStroke, setCurrentStroke] = useState<{ x: number; y: number; reverse: boolean }[]>([]);
   const [isEditProcessing, setIsEditProcessing] = useState(false);
+  // Floating window brush tool mode: 'brush' or 'eraser'
+  const [editBrushMode, setEditBrushMode] = useState<'brush' | 'eraser'>('brush');
+  // Floating window canvas zoom/pan
+  const [editCanvasZoom, setEditCanvasZoom] = useState(1);
+  const [editCanvasPan, setEditCanvasPan] = useState({ x: 0, y: 0 });
   // Use refs for frequently-changing mouse state to avoid stale closures in event handlers
   const isDrawingRef = useRef(false);
   const isAltErasingRef = useRef(false);
@@ -1117,38 +1124,13 @@ export function InfiniteCanvas({
   const handleEditMouseDown = useCallback((e: React.MouseEvent) => {
     if (editMode === 'none') return;
     if (e.button !== 0) return; // Only left click
-    // 新的 ImageEditPanel 打开时，不在画布上捕获编辑事件
-
+    // Erase/mask modes now use floating window - don't capture strokes on main canvas
+    if (editMode === 'erase' || editMode === 'mask') return;
 
     const editImg = images.find(i => i.id === editImageId);
     if (!editImg) return;
 
-    if (editMode === 'erase' || editMode === 'mask') {
-      // Finalize any previous in-progress stroke first
-      if (isDrawingRef.current) {
-        const prevStroke = currentStrokeRef.current;
-        if (prevStroke.length > 1) {
-          setEditStrokes(prev => [...prev, prevStroke]);
-        }
-        currentStrokeRef.current = [];
-        setCurrentStroke([]);
-        isDrawingRef.current = false;
-      }
-
-      // Convert to canvas coordinates
-      const canvasPos = screenToCanvas(e.clientX, e.clientY);
-
-      // Check if mouse is within the edit image area (canvas coordinates)
-      if (canvasPos.x >= editImg.x && canvasPos.x <= editImg.x + editImg.width &&
-          canvasPos.y >= editImg.y && canvasPos.y <= editImg.y + editImg.height) {
-        isDrawingRef.current = true;
-        const isReverse = e.altKey || isAltErasingRef.current;
-        const firstPoint = { x: canvasPos.x, y: canvasPos.y, reverse: isReverse };
-        currentStrokeRef.current = [firstPoint];
-        setCurrentStroke([firstPoint]);
-        setStrokesVersion(v => v + 1);
-      }
-    } else if (editMode === 'crop') {
+    if (editMode === 'crop') {
       const canvasRect = canvasRef.current?.getBoundingClientRect();
       if (!canvasRect) return;
       const x = e.clientX - canvasRect.left;
@@ -1199,61 +1181,9 @@ export function InfiniteCanvas({
   }, [editMode, editImageId, images, screenToCanvas, cropRect, zoom, viewOffset]);
 
   const handleEditMouseMove = useCallback((e: React.MouseEvent) => {
-    // 新的 ImageEditPanel 打开时，不在画布上处理编辑事件
+    // Erase/mask modes now use floating window - don't handle strokes on main canvas
     if (editMode === 'erase' || editMode === 'mask') {
-      // Convert to canvas coordinates
-      const canvasPos = screenToCanvas(e.clientX, e.clientY);
-      
-      // Update brush cursor position for rendering
-      brushCursorPosRef.current = { x: canvasPos.x, y: canvasPos.y };
-      // Calculate screen position for the cursor overlay
-      if (!canvasRef.current) return;
-      const rect = canvasRef.current.getBoundingClientRect();
-      setBrushCursorScreenPos({
-        x: canvasPos.x * zoom + viewOffset.x,
-        y: canvasPos.y * zoom + viewOffset.y,
-      });
-
-      // Only draw when mouse button is held down
-      if (!isDrawingRef.current) return;
-
-      const editImg = images.find(i => i.id === editImageId);
-      if (!editImg) return;
-
-      // Clamp to image bounds
-      const clampedX = Math.max(editImg.x, Math.min(canvasPos.x, editImg.x + editImg.width));
-      const clampedY = Math.max(editImg.y, Math.min(canvasPos.y, editImg.y + editImg.height));
-      const isReverse = e.altKey || isAltErasingRef.current;
-      const newPoint = { x: clampedX, y: clampedY, reverse: isReverse };
-
-      // Interpolate points for smoother strokes when mouse moves fast
-      // (prevents gaps in the mask, similar to IOPaint's continuous brush)
-      const prevPoints = currentStrokeRef.current;
-      if (prevPoints.length > 0) {
-        const lastPoint = prevPoints[prevPoints.length - 1];
-        if (lastPoint.reverse === isReverse) {
-          const dx = clampedX - lastPoint.x;
-          const dy = clampedY - lastPoint.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          const step = Math.max(2, (brushSize / zoom) / 4); // step size = brush/4
-          if (dist > step) {
-            const numSteps = Math.ceil(dist / step);
-            for (let i = 1; i < numSteps; i++) {
-              const t = i / numSteps;
-              const interpPoint = {
-                x: lastPoint.x + dx * t,
-                y: lastPoint.y + dy * t,
-                reverse: isReverse,
-              };
-              currentStrokeRef.current.push(interpPoint);
-            }
-          }
-        }
-      }
-
-      currentStrokeRef.current.push(newPoint);
-      setCurrentStroke([...currentStrokeRef.current]);
-      setStrokesVersion(v => v + 1);
+      return;
     } else if (cropDragStart && editMode === 'crop') {
       const canvasRect = canvasRef.current?.getBoundingClientRect();
       if (!canvasRect) return;
@@ -2738,15 +2668,35 @@ export function InfiniteCanvas({
     setUpscaleMultiplier(mult);
   }, []);
 
+  // Compute target dimensions from preset (2K/4K/8K) keeping aspect ratio
+  const getUpscaleTargetDimensions = useCallback((origW: number, origH: number, preset: '2k' | '4k' | '8k') => {
+    // Target long edge: 2K=2048, 4K=4096, 8K=8192
+    const targetLongEdge = preset === '2k' ? 2048 : preset === '4k' ? 4096 : 8192;
+    const currentLongEdge = Math.max(origW, origH);
+    // Only upscale, never downscale
+    if (currentLongEdge >= targetLongEdge) return { w: origW, h: origH, multiplier: 1 };
+    const multiplier = targetLongEdge / currentLongEdge;
+    return {
+      w: Math.round(origW * multiplier),
+      h: Math.round(origH * multiplier),
+      multiplier: Math.round(multiplier * 10) / 10,
+    };
+  }, []);
+
   const handleUpscaleConfirm = useCallback(async () => {
     const img = selectedImageData;
     if (!img) return;
 
-    // Calculate original image dimensions
+    // Calculate target dimensions from preset
     const origW = img.originalWidth || img.width;
     const origH = img.originalHeight || img.height;
-    const targetW = origW * upscaleMultiplier;
-    const targetH = origH * upscaleMultiplier;
+    const { w: targetW, h: targetH, multiplier: upMultiplier } = getUpscaleTargetDimensions(origW, origH, upscalePreset);
+
+    // If already at or above target resolution, notify and skip
+    if (upMultiplier <= 1) {
+      alert('当前图片分辨率已达到或超过所选目标，无需放大');
+      return;
+    }
 
     const placeholderId = createProcessingFrameRightOf(
       img,
@@ -2756,6 +2706,7 @@ export function InfiniteCanvas({
       '正在提交放大任务...'
     );
     setIsEditProcessing(true);
+    exitEditMode();
     try {
       const apiKey = getApiKey();
       const model = getCurrentModel();
@@ -2797,7 +2748,7 @@ export function InfiniteCanvas({
         completeProcessingFrame(placeholderId, stableUrl, targetW / 2, targetH / 2, {
           originalWidth: targetW,
           originalHeight: targetH,
-          modifyPrompt: `${upscaleMultiplier}x API 放大`,
+          modifyPrompt: `${upMultiplier}x HD ${upscalePreset.toUpperCase()} 放大`,
         });
       } else {
         updateProcessingFrame(placeholderId, {
@@ -2818,14 +2769,22 @@ export function InfiniteCanvas({
     }
     setIsEditProcessing(false);
     setActiveTool('none');
-  }, [selectedImageData, upscaleMultiplier, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, toStableImageUrl]);
+  }, [selectedImageData, upscalePreset, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, toStableImageUrl, getUpscaleTargetDimensions]);
 
-  // 1b. Upscale trigger - calls handleUpscaleConfirm directly
+  // 1b. Upscale trigger - opens floating control bar
   const handleOpenUpscale = useCallback(() => {
     const img = selectedImageData;
     if (!img) return;
-    handleUpscaleConfirm();
-  }, [selectedImageData, handleUpscaleConfirm]);
+    setEditImageId(img.id);
+    setEditMode('upscale');
+    // Calculate default preset based on image size
+    const origW = img.originalWidth || img.width;
+    const origH = img.originalHeight || img.height;
+    const maxDim = Math.max(origW, origH);
+    if (maxDim <= 1080) setUpscalePreset('2k');
+    else if (maxDim <= 2048) setUpscalePreset('4k');
+    else setUpscalePreset('8k');
+  }, [selectedImageData]);
 
   // 2. REMOVE BACKGROUND - auto, result to the right
   const handleRemoveBackground = useCallback(async () => {
@@ -3197,22 +3156,32 @@ export function InfiniteCanvas({
     }
   }, [selectedImageData, getThreeDProviders, threeDProviderId, threeDBackend, threeDType, threeDQuality, threeDTexture, threeDFormat, threeDLocalEndpoint, threeDLocalModel, renderEditElementsPreview, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
 
-  // 4. ERASE - canvas inline brush mode
+  // 4. ERASE - floating window mode
   const handleOpenErase = useCallback(() => {
     const img = selectedImageData;
     if (!img) return;
     setEditImageId(img.id);
     setEditMode('erase');
     setEditStrokes([]);
+    setCurrentStroke([]);
+    setEditBrushMode('brush');
+    setEditCanvasZoom(1);
+    setEditCanvasPan({ x: 0, y: 0 });
+    setMaskKeyword('');
   }, [selectedImageData]);
 
-  // 5. MASK - canvas inline brush mode
+  // 5. MASK - floating window mode
   const handleOpenMask = useCallback(() => {
     const img = selectedImageData;
     if (!img) return;
     setEditImageId(img.id);
     setEditMode('mask');
     setEditStrokes([]);
+    setCurrentStroke([]);
+    setEditBrushMode('brush');
+    setEditCanvasZoom(1);
+    setEditCanvasPan({ x: 0, y: 0 });
+    setMaskKeyword('');
   }, [selectedImageData]);
 
   // 6. EXPAND - floating toolbar with ratio presets
@@ -3267,6 +3236,10 @@ export function InfiniteCanvas({
     setCurrentStroke([]);
     setIsEditProcessing(false);
     setCropRect(null);
+    setEditBrushMode('brush');
+    setEditCanvasZoom(1);
+    setEditCanvasPan({ x: 0, y: 0 });
+    setShowUpscalePresetMenu(false);
     isDrawingRef.current = false;
     isAltErasingRef.current = false;
     brushCursorPosRef.current = null;
@@ -4472,75 +4445,7 @@ export function InfiniteCanvas({
                     {image.originalWidth || image.width} × {image.originalHeight || image.height}
                   </span>
                 </div>
-                {/* Edit mode stroke overlay */}
-                {editImageId === image.id && (editMode === 'erase' || editMode === 'mask') && (
-                  <svg className="absolute inset-0 w-full h-full pointer-events-none z-30" viewBox={`0 0 ${image.width} ${image.height}`}>
-                    {editStrokes.map((stroke, si) => {
-                      const normalPoints = stroke.filter(p => !p.reverse);
-                      const reversePoints = stroke.filter(p => p.reverse);
-                      return (
-                        <React.Fragment key={si}>
-                          {normalPoints.length === 1 && (
-                            <circle
-                              cx={normalPoints[0].x - image.x}
-                              cy={normalPoints[0].y - image.y}
-                              r={brushSize / zoom / 2}
-                              fill={editMode === 'erase' ? 'rgba(255,80,80,0.5)' : 'rgba(212,175,55,0.5)'}
-                            />
-                          )}
-                          {normalPoints.length > 1 && (
-                            <polyline
-                              points={normalPoints.map(p => `${p.x - image.x},${p.y - image.y}`).join(' ')}
-                              fill="none"
-                              stroke={editMode === 'erase' ? 'rgba(255,80,80,0.5)' : 'rgba(212,175,55,0.5)'}
-                              strokeWidth={brushSize / zoom}
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          )}
-                          {reversePoints.length === 1 && (
-                            <circle
-                              cx={reversePoints[0].x - image.x}
-                              cy={reversePoints[0].y - image.y}
-                              r={brushSize / zoom / 2}
-                              fill="rgba(0,200,100,0.5)"
-                            />
-                          )}
-                          {reversePoints.length > 1 && (
-                            <polyline
-                              points={reversePoints.map(p => `${p.x - image.x},${p.y - image.y}`).join(' ')}
-                              fill="none"
-                              stroke="rgba(0,200,100,0.5)"
-                              strokeWidth={brushSize / zoom}
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeDasharray="4 4"
-                            />
-                          )}
-                        </React.Fragment>
-                      );
-                    })}
-                    {currentStroke.length === 1 && (
-                      <circle
-                        cx={currentStroke[0].x - image.x}
-                        cy={currentStroke[0].y - image.y}
-                        r={brushSize / zoom / 2}
-                        fill={currentStroke[0]?.reverse ? 'rgba(0,200,100,0.5)' : (editMode === 'erase' ? 'rgba(255,80,80,0.5)' : 'rgba(212,175,55,0.5)')}
-                      />
-                    )}
-                    {currentStroke.length > 1 && (
-                      <polyline
-                        points={currentStroke.map(p => `${p.x - image.x},${p.y - image.y}`).join(' ')}
-                        fill="none"
-                        stroke={currentStroke[0]?.reverse ? 'rgba(0,200,100,0.5)' : (editMode === 'erase' ? 'rgba(255,80,80,0.5)' : 'rgba(212,175,55,0.5)')}
-                        strokeWidth={brushSize / zoom}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeDasharray={currentStroke[0]?.reverse ? '4 4' : undefined}
-                      />
-                    )}
-                  </svg>
-                )}
+                {/* Edit mode stroke overlay - moved to floating window */}
               </div>
             );
           })}
@@ -4679,30 +4584,7 @@ export function InfiniteCanvas({
             <div className="absolute inset-0 z-40 pointer-events-none">
               {/* Dim overlay outside image */}
               <div className="absolute inset-0 bg-black/40" style={{ clipPath: `polygon(0% 0%, 0% 100%, ${screenX}px 100%, ${screenX}px ${screenY}px, ${screenX + screenW}px ${screenY}px, ${screenX + screenW}px ${screenY + screenH}px, ${screenX}px ${screenY + screenH}px, ${screenX}px 100%, 100% 100%, 100% 0%)` }} />
-              {/* Brush cursor for erase/mask modes */}
-              {(editMode === 'erase' || editMode === 'mask') && brushCursorScreenPos && (() => {
-                const cursorScreenX = brushCursorScreenPos.x;
-                const cursorScreenY = brushCursorScreenPos.y;
-                const cursorSize = brushSize;
-                // Only show if cursor is within the image bounds
-                if (cursorScreenX >= screenX - cursorSize / 2 && cursorScreenX <= screenX + screenW + cursorSize / 2 &&
-                    cursorScreenY >= screenY - cursorSize / 2 && cursorScreenY <= screenY + screenH + cursorSize / 2) {
-                  return (
-                    <div
-                      className="absolute rounded-full pointer-events-none"
-                      style={{
-                        left: cursorScreenX - cursorSize / 2,
-                        top: cursorScreenY - cursorSize / 2,
-                        width: cursorSize,
-                        height: cursorSize,
-                        border: `2px solid ${isAltErasingRef.current ? 'rgba(0,200,100,0.8)' : 'rgba(255,255,255,0.8)'}`,
-                        backgroundColor: isAltErasingRef.current ? 'rgba(0,200,100,0.15)' : 'rgba(255,255,255,0.1)',
-                      }}
-                    />
-                  );
-                }
-                return null;
-              })()}
+              {/* Brush cursor for erase/mask modes - moved to floating window */}
               {/* Crop rectangle */}
               {editMode === 'crop' && cropRect && (
                 <div
@@ -4754,8 +4636,468 @@ export function InfiniteCanvas({
           );
         })()}
 
-        {/* ====== EDIT MODE FLOATING TOOLBARS ====== */}
-        {editMode !== 'none' && (() => {
+        {/* ====== UPSCALE FLOATING CONTROL BAR ====== */}
+        {editMode === 'upscale' && (() => {
+          const editImg = images.find(i => i.id === editImageId);
+          if (!editImg) return null;
+          const imgScreenX = editImg.x * zoom + viewOffset.x;
+          const imgScreenY = editImg.y * zoom + viewOffset.y;
+          const imgScreenW = editImg.width * zoom;
+          const panelX = imgScreenX + imgScreenW / 2;
+          const panelY = imgScreenY - 8;
+          const origW = editImg.originalWidth || editImg.width;
+          const origH = editImg.originalHeight || editImg.height;
+          const targetDim = getUpscaleTargetDimensions(origW, origH, upscalePreset);
+
+          return (
+            <div
+              className="absolute z-50 pointer-events-auto"
+              data-toolbar="edit-mode"
+              style={{ left: panelX, top: panelY, transform: 'translate(-50%, -100%)' }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onWheel={(e) => e.stopPropagation()}
+            >
+              <div className={`${panelBaseClass} gap-2`} onMouseDown={(e) => e.stopPropagation()}>
+                <ZoomIn size={14} className="text-[#d4af37]" />
+                <span className={panelLabelClass}>HD 高清放大</span>
+                <div className={panelDividerClass} />
+                {/* Resolution preset dropdown */}
+                <div className="relative">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowUpscalePresetMenu(!showUpscalePresetMenu); }}
+                    className={`px-2.5 py-1 text-xs rounded-md transition-all flex items-center gap-1 font-semibold ${
+                      isMonochrome ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-[#252525] text-[#ccc] hover:bg-[#333]'
+                    }`}
+                  >
+                    {upscalePreset.toUpperCase()}
+                    <ChevronDown size={10} />
+                  </button>
+                  {showUpscalePresetMenu && (
+                    <div className={`absolute top-full left-0 mt-1 py-1 rounded-lg border shadow-xl z-50 min-w-[100px] ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#333]'}`}>
+                      {(['2k', '4k', '8k'] as const).map(p => (
+                        <button key={p} onClick={(e) => { e.stopPropagation(); setUpscalePreset(p); setShowUpscalePresetMenu(false); }} className={`w-full px-3 py-1.5 text-xs text-left flex items-center justify-between hover:bg-[#d4af37]/10 ${upscalePreset === p ? 'text-[#d4af37]' : isMonochrome ? 'text-gray-600' : 'text-[#ccc]'}`}>
+                          <span>{p.toUpperCase()}</span>
+                          {upscalePreset === p && <span className="text-[#d4af37]">✓</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className={panelDividerClass} />
+                {/* Target dimensions */}
+                <span className={`text-xs tabular-nums ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>
+                  W {targetDim.w} H {targetDim.h}
+                </span>
+                <div className={panelDividerClass} />
+                {/* Execute button */}
+                <button
+                  onClick={handleUpscaleConfirm}
+                  disabled={targetDim.multiplier <= 1}
+                  className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${
+                    targetDim.multiplier <= 1
+                      ? 'bg-[#333] text-[#555] cursor-not-allowed'
+                      : 'bg-[#d4af37] text-black hover:bg-[#e5c047] active:scale-95'
+                  }`}
+                  title="开始放大"
+                >
+                  <Sparkles size={14} />
+                </button>
+                <button onClick={exitEditMode} className={panelCancelBtnClass}>取消</button>
+              </div>
+              <div className="text-center mt-1">
+                <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>Esc 退出</span>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ====== ERASE/MASK FLOATING WINDOW ====== */}
+        {(editMode === 'erase' || editMode === 'mask') && (() => {
+          const editImg = images.find(i => i.id === editImageId);
+          if (!editImg) return null;
+          const imgOrigW = editImg.originalWidth || Math.round(editImg.width);
+          const imgOrigH = editImg.originalHeight || Math.round(editImg.height);
+          const isErase = editMode === 'erase';
+          // Window dimensions
+          const winW = Math.min(900, typeof window !== 'undefined' ? window.innerWidth - 80 : 900);
+          const winH = Math.min(600, typeof window !== 'undefined' ? window.innerHeight - 120 : 600);
+          // Canvas area (left) takes ~70% of window
+          const canvasAreaW = Math.round(winW * 0.7);
+          const sidebarW = winW - canvasAreaW;
+          // Calculate image fit in canvas area
+          const fitScale = Math.min((canvasAreaW - 40) / imgOrigW, (winH - 80) / imgOrigH, 1) * editCanvasZoom;
+          const displayW = imgOrigW * fitScale;
+          const displayH = imgOrigH * fitScale;
+          const canvasCenterX = (canvasAreaW - displayW) / 2 + editCanvasPan.x;
+          const canvasCenterY = (winH - displayH) / 2 + editCanvasPan.y;
+
+          return (
+            <div
+              className="fixed inset-0 z-[100] flex items-center justify-center"
+              onMouseDown={(e) => e.stopPropagation()}
+              onWheel={(e) => e.stopPropagation()}
+            >
+              {/* Backdrop */}
+              <div className="absolute inset-0 bg-black/40" onClick={exitEditMode} />
+              {/* Window */}
+              <div
+                className={`relative rounded-2xl border shadow-2xl overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-300' : 'bg-[#1a1a1a] border-[#2a2a2a]'}`}
+                style={{ width: winW, height: winH }}
+              >
+                {/* Title bar */}
+                <div className={`flex items-center justify-between px-4 py-2.5 border-b ${isMonochrome ? 'border-gray-200 bg-white' : 'border-[#2a2a2a] bg-[#111]'}`}>
+                  <div className="flex items-center gap-2">
+                    {isErase ? <Paintbrush size={14} className="text-[#d4af37]" /> : <Wand2 size={14} className="text-[#d4af37]" />}
+                    <span className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>
+                      {isErase ? '擦除' : '蒙版修图'}
+                    </span>
+                    <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>
+                      涂抹白色区域后点击&apos;开始修复&apos;
+                    </span>
+                  </div>
+                  <button onClick={exitEditMode} className={`p-1 rounded-lg transition-colors ${isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-[#666] hover:text-white hover:bg-[#333]'}`}>
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <div className="flex" style={{ height: winH - 44 }}>
+                  {/* Left: Canvas area with checkered bg */}
+                  <div
+                    className={`relative overflow-hidden ${isMonochrome ? 'bg-gray-200' : 'bg-[#0d0d0d]'}`}
+                    style={{ width: canvasAreaW }}
+                    onMouseDown={(e) => {
+                      // Canvas panning with middle button or right button
+                      if (e.button === 1 || e.button === 2) {
+                        e.preventDefault();
+                        const startX = e.clientX;
+                        const startY = e.clientY;
+                        const startPan = { ...editCanvasPan };
+                        const onMove = (ev: MouseEvent) => {
+                          setEditCanvasPan({
+                            x: startPan.x + ev.clientX - startX,
+                            y: startPan.y + ev.clientY - startY,
+                          });
+                        };
+                        const onUp = () => {
+                          window.removeEventListener('mousemove', onMove);
+                          window.removeEventListener('mouseup', onUp);
+                        };
+                        window.addEventListener('mousemove', onMove);
+                        window.addEventListener('mouseup', onUp);
+                      }
+                    }}
+                    onWheel={(e) => {
+                      e.preventDefault();
+                      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                      setEditCanvasZoom(z => Math.max(0.25, Math.min(5, z * delta)));
+                    }}
+                    onContextMenu={(e) => e.preventDefault()}
+                  >
+                    {/* Checkered background for image */}
+                    <div
+                      className="absolute"
+                      style={{
+                        left: canvasCenterX,
+                        top: canvasCenterY,
+                        width: displayW,
+                        height: displayH,
+                        backgroundImage: 'linear-gradient(45deg, #333 25%, transparent 25%, transparent 75%, #333 75%), linear-gradient(45deg, #333 25%, transparent 25%, transparent 75%, #333 75%)',
+                        backgroundSize: '16px 16px',
+                        backgroundPosition: '0 0, 8px 8px',
+                        backgroundColor: '#222',
+                        borderRadius: 4,
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {/* Image */}
+                      <img
+                        src={editImg.url}
+                        alt="edit"
+                        className="w-full h-full object-contain select-none"
+                        draggable={false}
+                        style={{ pointerEvents: 'none' }}
+                      />
+                      {/* Stroke overlay SVG */}
+                      <svg
+                        className="absolute inset-0 w-full h-full"
+                        viewBox={`0 0 ${imgOrigW} ${imgOrigH}`}
+                        style={{ pointerEvents: 'none' }}
+                      >
+                        {/* Render completed strokes */}
+                        {editStrokes.map((stroke, si) => {
+                          const normalPoints = stroke.filter(p => !p.reverse);
+                          const reversePoints = stroke.filter(p => p.reverse);
+                          return (
+                            <React.Fragment key={si}>
+                              {normalPoints.length === 1 && (
+                                <circle
+                                  cx={normalPoints[0].x}
+                                  cy={normalPoints[0].y}
+                                  r={brushSize / 2 / editCanvasZoom}
+                                  fill={isErase ? 'rgba(255,80,80,0.5)' : 'rgba(212,175,55,0.5)'}
+                                />
+                              )}
+                              {normalPoints.length > 1 && (
+                                <polyline
+                                  points={normalPoints.map(p => `${p.x},${p.y}`).join(' ')}
+                                  fill="none"
+                                  stroke={isErase ? 'rgba(255,80,80,0.5)' : 'rgba(212,175,55,0.5)'}
+                                  strokeWidth={brushSize / editCanvasZoom}
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              )}
+                              {reversePoints.length === 1 && (
+                                <circle
+                                  cx={reversePoints[0].x}
+                                  cy={reversePoints[0].y}
+                                  r={brushSize / 2 / editCanvasZoom}
+                                  fill="rgba(0,200,100,0.5)"
+                                />
+                              )}
+                              {reversePoints.length > 1 && (
+                                <polyline
+                                  points={reversePoints.map(p => `${p.x},${p.y}`).join(' ')}
+                                  fill="none"
+                                  stroke="rgba(0,200,100,0.5)"
+                                  strokeWidth={brushSize / editCanvasZoom}
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeDasharray="4 4"
+                                />
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
+                        {/* Current stroke */}
+                        {currentStroke.length === 1 && (
+                          <circle
+                            cx={currentStroke[0].x}
+                            cy={currentStroke[0].y}
+                            r={brushSize / 2 / editCanvasZoom}
+                            fill={currentStroke[0]?.reverse ? 'rgba(0,200,100,0.5)' : (isErase ? 'rgba(255,80,80,0.5)' : 'rgba(212,175,55,0.5)')}
+                          />
+                        )}
+                        {currentStroke.length > 1 && (
+                          <polyline
+                            points={currentStroke.map(p => `${p.x},${p.y}`).join(' ')}
+                            fill="none"
+                            stroke={currentStroke[0]?.reverse ? 'rgba(0,200,100,0.5)' : (isErase ? 'rgba(255,80,80,0.5)' : 'rgba(212,175,55,0.5)')}
+                            strokeWidth={brushSize / editCanvasZoom}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeDasharray={currentStroke[0]?.reverse ? '4 4' : undefined}
+                          />
+                        )}
+                      </svg>
+                      {/* Drawing layer - captures mouse events for brush */}
+                      <div
+                        className="absolute inset-0"
+                        style={{ cursor: editBrushMode === 'eraser' ? 'crosshair' : 'crosshair' }}
+                        onMouseDown={(e) => {
+                          if (e.button !== 0) return;
+                          const rect = (e.target as HTMLElement).getBoundingClientRect();
+                          const x = (e.clientX - rect.left) / rect.width * imgOrigW;
+                          const y = (e.clientY - rect.top) / rect.height * imgOrigH;
+                          const isReverse = editBrushMode === 'eraser';
+                          const firstPoint = { x, y, reverse: isReverse };
+                          currentStrokeRef.current = [firstPoint];
+                          setCurrentStroke([firstPoint]);
+                          isDrawingRef.current = true;
+                          isAltErasingRef.current = isReverse;
+                        }}
+                        onMouseMove={(e) => {
+                          if (!isDrawingRef.current) return;
+                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                          const x = (e.clientX - rect.left) / rect.width * imgOrigW;
+                          const y = (e.clientY - rect.top) / rect.height * imgOrigH;
+                          const isReverse = editBrushMode === 'eraser';
+                          const newPoint = { x, y, reverse: isReverse };
+                          // Interpolate for smooth strokes
+                          const prevPoints = currentStrokeRef.current;
+                          if (prevPoints.length > 0) {
+                            const last = prevPoints[prevPoints.length - 1];
+                            const dist = Math.sqrt((x - last.x) ** 2 + (y - last.y) ** 2);
+                            const step = Math.max(1, brushSize / editCanvasZoom / 4);
+                            if (dist > step) {
+                              const n = Math.ceil(dist / step);
+                              for (let i = 1; i <= n; i++) {
+                                const t = i / n;
+                                currentStrokeRef.current.push({
+                                  x: last.x + (x - last.x) * t,
+                                  y: last.y + (y - last.y) * t,
+                                  reverse: isReverse,
+                                });
+                              }
+                            }
+                          }
+                          currentStrokeRef.current.push(newPoint);
+                          setCurrentStroke([...currentStrokeRef.current]);
+                        }}
+                        onMouseUp={() => {
+                          if (!isDrawingRef.current) return;
+                          isDrawingRef.current = false;
+                          const stroke = currentStrokeRef.current;
+                          if (stroke.length > 0) {
+                            setEditStrokes(prev => [...prev, stroke]);
+                          }
+                          currentStrokeRef.current = [];
+                          setCurrentStroke([]);
+                          setStrokesVersion(v => v + 1);
+                        }}
+                        onMouseLeave={() => {
+                          if (!isDrawingRef.current) return;
+                          isDrawingRef.current = false;
+                          const stroke = currentStrokeRef.current;
+                          if (stroke.length > 0) {
+                            setEditStrokes(prev => [...prev, stroke]);
+                          }
+                          currentStrokeRef.current = [];
+                          setCurrentStroke([]);
+                        }}
+                      />
+                    </div>
+                    {/* Zoom controls overlay */}
+                    <div className={`absolute bottom-3 left-3 flex items-center gap-1 px-2 py-1 rounded-lg text-xs ${isMonochrome ? 'bg-white/80 text-gray-600' : 'bg-[#111]/80 text-[#999]'}`}>
+                      <button onClick={() => setEditCanvasZoom(z => Math.max(0.25, z / 1.2))} className="p-0.5 hover:text-[#d4af37]"><Minus size={12} /></button>
+                      <span className="w-10 text-center tabular-nums">{Math.round(editCanvasZoom * 100)}%</span>
+                      <button onClick={() => setEditCanvasZoom(z => Math.min(5, z * 1.2))} className="p-0.5 hover:text-[#d4af37]"><Plus size={12} /></button>
+                      <button onClick={() => { setEditCanvasZoom(1); setEditCanvasPan({ x: 0, y: 0 }); }} className="p-0.5 hover:text-[#d4af37]"><Maximize2 size={12} /></button>
+                    </div>
+                  </div>
+
+                  {/* Right: Sidebar controls */}
+                  <div className={`flex flex-col border-l ${isMonochrome ? 'border-gray-200 bg-white' : 'border-[#2a2a2a] bg-[#111]'}`} style={{ width: sidebarW }}>
+                    {/* Brush mode toggle */}
+                    <div className="px-3 pt-3 pb-2">
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => setEditBrushMode('brush')}
+                          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs rounded-lg transition-all ${
+                            editBrushMode === 'brush'
+                              ? 'bg-[#d4af37] text-black font-medium'
+                              : isMonochrome
+                                ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                          }`}
+                        >
+                          <Paintbrush size={12} />
+                          画笔
+                        </button>
+                        <button
+                          onClick={() => setEditBrushMode('eraser')}
+                          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs rounded-lg transition-all ${
+                            editBrushMode === 'eraser'
+                              ? 'bg-[#d4af37] text-black font-medium'
+                              : isMonochrome
+                                ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                          }`}
+                        >
+                          <Eraser size={12} />
+                          橡皮擦
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Brush size slider */}
+                    <div className="px-3 py-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className={`text-xs ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>画笔大小</span>
+                        <span className={`text-xs tabular-nums ${isMonochrome ? 'text-gray-600' : 'text-[#ccc]'}`}>{brushSize}px</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="5"
+                        max="200"
+                        value={brushSize}
+                        onChange={(e) => setBrushSize(Number(e.target.value))}
+                        className="w-full h-1 accent-[#d4af37]"
+                      />
+                    </div>
+
+                    {/* Undo/Clear buttons */}
+                    <div className="px-3 py-2 flex gap-2">
+                      <button
+                        onClick={() => {
+                          setEditStrokes(prev => prev.slice(0, -1));
+                          setStrokesVersion(v => v + 1);
+                        }}
+                        disabled={editStrokes.length === 0}
+                        className={`flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs rounded-lg transition-all ${
+                          editStrokes.length === 0
+                            ? 'opacity-40 cursor-not-allowed'
+                            : isMonochrome
+                              ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                              : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                        }`}
+                      >
+                        <RotateCcw size={12} />
+                        撤销
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditStrokes([]);
+                          setCurrentStroke([]);
+                          currentStrokeRef.current = [];
+                          setStrokesVersion(v => v + 1);
+                        }}
+                        disabled={editStrokes.length === 0}
+                        className={`flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs rounded-lg transition-all ${
+                          editStrokes.length === 0
+                            ? 'opacity-40 cursor-not-allowed'
+                            : isMonochrome
+                              ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                              : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                        }`}
+                      >
+                        <Trash2 size={12} />
+                        清空
+                      </button>
+                    </div>
+
+                    {/* Mask prompt (only for mask mode) */}
+                    {!isErase && (
+                      <div className="px-3 py-2">
+                        <span className={`text-xs mb-1 block ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>修复提示词 (可选)</span>
+                        <textarea
+                          value={maskKeyword}
+                          onChange={(e) => setMaskKeyword(e.target.value)}
+                          placeholder="描述修复内容..."
+                          className={`w-full h-20 px-2.5 py-2 text-xs rounded-xl border resize-none ${
+                            isMonochrome
+                              ? 'bg-gray-50 border-gray-200 text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#d4af37]/30'
+                              : 'bg-[#0a0a0a] border-[#2a2a2a] text-white placeholder:text-[#555] focus:outline-none focus:ring-2 focus:ring-[#d4af37]/30'
+                          }`}
+                        />
+                      </div>
+                    )}
+
+                    <div className="flex-1" />
+
+                    {/* Confirm button */}
+                    <div className="px-3 pb-3">
+                      <button
+                        onClick={handleEditConfirm}
+                        disabled={editStrokes.length === 0 || isEditProcessing}
+                        className={`w-full py-2.5 text-sm font-semibold rounded-xl transition-all ${
+                          editStrokes.length === 0 || isEditProcessing
+                            ? 'bg-[#333] text-[#555] cursor-not-allowed'
+                            : 'bg-[#d4af37] text-black hover:bg-[#e5c047] active:scale-[0.98]'
+                        }`}
+                      >
+                        {isEditProcessing ? '处理中...' : '开始修复'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ====== EXPAND/CROP FLOATING TOOLBARS ====== */}
+        {(editMode === 'expand' || editMode === 'crop') && (() => {
           const editImg = images.find(i => i.id === editImageId);
           if (!editImg) return null;
           const imgScreenX = editImg.x * zoom + viewOffset.x;
@@ -4772,57 +5114,6 @@ export function InfiniteCanvas({
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
             >
-              {/* ERASE toolbar — 仅在新的 ImageEditPanel 未打开时显示旧内联工具栏 */}
-              {editMode === 'erase' && (
-                <div className={panelBaseClass} onMouseDown={(e) => e.stopPropagation()}>
-                  <Paintbrush size={14} className="text-[#d4af37]" />
-                  <span className={panelLabelClass}>擦除模式</span>
-                  <div className={panelDividerClass} />
-                  <span className={panelSmallLabelClass}>画笔</span>
-                      <input type="range" min="5" max="200" value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} className="w-20 h-1 accent-[#d4af37]" />
-                      <span className={`text-xs w-6 text-center ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>{brushSize}</span>
-                      <div className={panelDividerClass} />
-                      <span className={panelSmallLabelClass}>Alt 反向</span>
-                  <div className={panelDividerClass} />
-                  <button
-                    onClick={handleEditConfirm}
-                    disabled={editStrokes.length === 0}
-                    className={`${panelBtnClass} ${editStrokes.length === 0 ? 'opacity-40 cursor-not-allowed' : ''}`}
-                  >
-                    确认擦除
-                  </button>
-                  <button onClick={exitEditMode} className={panelCancelBtnClass}>取消</button>
-                </div>
-              )}
-
-              {/* MASK toolbar — 仅在新的 ImageEditPanel 未打开时显示旧内联工具栏 */}
-              {editMode === 'mask' && (
-                <div className={panelBaseClass} onMouseDown={(e) => e.stopPropagation()}>
-                  <Wand2 size={14} className="text-[#d4af37]" />
-                  <span className={panelLabelClass}>蒙版模式</span>
-                  <div className={panelDividerClass} />
-                  <span className={panelSmallLabelClass}>画笔</span>
-                  <input type="range" min="5" max="200" value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} className="w-20 h-1 accent-[#d4af37]" />
-                  <span className={`text-xs w-6 text-center ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>{brushSize}</span>
-                  <div className={panelDividerClass} />
-                  <button
-                    onClick={() => {
-                      if (editStrokes.length === 0) {
-                        alert('请先在图片上绘制蒙版区域');
-                        return;
-                      }
-                      setShowMaskKeywordPopup(true);
-                    }}
-                    disabled={editStrokes.length === 0}
-                    className={`${panelBtnClass} ${editStrokes.length === 0 ? 'opacity-40 cursor-not-allowed' : ''}`}
-                  >
-                    确认
-                  </button>
-                  <button onClick={exitEditMode} className={panelCancelBtnClass}>取消</button>
-                </div>
-              )}
-
-              {/* EXPAND toolbar */}
               {editMode === 'expand' && (
                 <div className={panelBaseClass} style={{ minWidth: 520 }} onMouseDown={(e) => e.stopPropagation()}>
                   <Expand size={14} className="text-[#d4af37]" />
