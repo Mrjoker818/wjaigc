@@ -10,6 +10,8 @@ import {
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
   Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen
 } from 'lucide-react';
+import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory } from '@/lib/canvas-generation-group';
+import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, REFERENCE_CATEGORIES } from '@/lib/canvas-generation-group';
 import type { PsdLayerItem } from '@/types/psdLayer';
 import { toStableImageUrl } from '@/lib/stable-image-url';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
@@ -704,6 +706,10 @@ export function InfiniteCanvas({
   const canvasRef = useRef<HTMLDivElement>(null);
   const uploadFileInputRef = useRef<HTMLInputElement>(null);
   const imagesRef = useRef<CanvasImage[]>(images);
+
+  // 【调整2&3】生成组状态 — Alt+左键参考图组 / Ctrl+左键融图组
+  const [genGroups, setGenGroups] = useState<CanvasGenGroup[]>([]);
+  const genGroupsRef = useRef<CanvasGenGroup[]>(genGroups);
   const multiAngleDragRef = useRef<{
     active: boolean;
     startX: number;
@@ -717,6 +723,23 @@ export function InfiniteCanvas({
   useEffect(() => {
     imagesRef.current = images;
   }, [images]);
+
+  // 同步 genGroups ref
+  useEffect(() => {
+    genGroupsRef.current = genGroups;
+  }, [genGroups]);
+
+  /** Get current image model from localStorage (independent of component state) */
+  const getCurrentModel = useCallback((): { model: string; providerId?: string } => {
+    try {
+      const raw = localStorage.getItem('wujie_selected_model');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return { model: parsed.model || parsed.id || 'gemini-3-pro-image-preview', providerId: parsed.providerId };
+      }
+    } catch {}
+    return { model: 'gemini-3-pro-image-preview' };
+  }, []);
 
   // Sync selectedImage prop
   useEffect(() => {
@@ -1725,6 +1748,376 @@ export function InfiniteCanvas({
     e.target.value = '';
   };
 
+  // ──────────────── 【调整2&3】生成组：Alt/Ctrl+左键 创建参考图/融图组 ────────────────
+
+  /** 创建新生成组 */
+  const createGenGroupLocal = useCallback((firstImage: CanvasImage, groupType: GenGroupType): CanvasGenGroup => {
+    const groupId = `grp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const placeholderId = `ph-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const refImg: GroupRefImage = {
+      imageId: firstImage.id,
+      url: firstImage.url,
+      number: 1,
+      categories: groupType === 'reference' ? ['style' as ReferenceCategory] : [],
+      strengths: groupType === 'reference' ? { style: 50 } : {},
+    };
+    // 计算结果框位置：在第一张图右侧
+    const resultX = firstImage.x + firstImage.width + 80;
+    const resultY = firstImage.y;
+    const { model: currentModel, providerId: currentProviderId } = getCurrentModel();
+    const group: CanvasGenGroup = {
+      id: groupId,
+      type: groupType,
+      status: 'idle',
+      refImages: [refImg],
+      sourceImageIds: [firstImage.id],
+      resultPlaceholder: {
+        x: resultX,
+        y: resultY,
+        width: firstImage.width,
+        height: firstImage.height,
+        aspectRatio: '1:1',
+        imageId: placeholderId,
+      },
+      toolbar: {
+        model: currentModel || '',
+        providerId: currentProviderId,
+        aspectRatio: '1:1',
+        size: '1024x1024',
+        quality: 'standard',
+        outputCount: 1,
+        n: 1,
+        prompt: '',
+        negativePrompt: '',
+      },
+      position: {
+        x: firstImage.x,
+        y: firstImage.y,
+        sourceCenterX: firstImage.x + firstImage.width / 2,
+        sourceCenterY: firstImage.y + firstImage.height / 2,
+        resultX,
+        resultY,
+      },
+      sourceCategories: { [firstImage.id]: groupType === 'reference' ? ['style' as ReferenceCategory] : [] },
+      sourceStrengths: { [firstImage.id]: groupType === 'reference' ? { style: 50 } : {} },
+      resultImageIds: [],
+      createdAt: Date.now(),
+    };
+    return group;
+  }, [getCurrentModel]);
+
+  /** Alt+Click: 追加到参考图组或创建新组 */
+  const handleAltClickAddToGroup = useCallback((image: CanvasImage) => {
+    setGenGroups(prev => {
+      const groupType: GenGroupType = 'reference';
+      // 查找同类型的活跃组（status不是completed的最近组）
+      const activeGroups = prev.filter(g => g.type === groupType && g.status !== 'completed');
+      if (activeGroups.length > 0) {
+        const latestGroup = activeGroups[activeGroups.length - 1];
+        // 最多14张
+        if (latestGroup.refImages.length >= 14) return prev;
+        // 不重复添加
+        if (latestGroup.refImages.some(r => r.imageId === image.id)) return prev;
+        // 追加
+        const newRef: GroupRefImage = {
+          imageId: image.id,
+          url: image.url,
+          number: latestGroup.refImages.length + 1,
+          categories: ['style' as ReferenceCategory],
+          strengths: { style: 50 },
+        };
+        const allRefs = [...latestGroup.refImages, newRef];
+        const refImageObjs = allRefs
+          .map(r => images.find(img => img.id === r.imageId))
+          .filter(Boolean) as CanvasImage[];
+        const avgX = refImageObjs.reduce((s, img) => s + img.x + img.width / 2, 0) / refImageObjs.length;
+        const avgY = refImageObjs.reduce((s, img) => s + img.y + img.height / 2, 0) / refImageObjs.length;
+        return prev.map(g => {
+          if (g.id !== latestGroup.id) return g;
+          return {
+            ...g,
+            refImages: allRefs,
+            sourceImageIds: [...g.sourceImageIds, image.id],
+            sourceCategories: { ...g.sourceCategories, [image.id]: ['style' as ReferenceCategory] },
+            sourceStrengths: { ...g.sourceStrengths, [image.id]: { style: 50 } },
+            position: { ...g.position, sourceCenterX: avgX, sourceCenterY: avgY },
+          };
+        });
+      }
+      // 创建新组
+      const newGroup = createGenGroupLocal(image, groupType);
+      return [...prev, newGroup];
+    });
+  }, [createGenGroupLocal, images]);
+
+  /** Ctrl+Click: 追加到融图组或创建新组 */
+  const handleCtrlClickAddToGroup = useCallback((image: CanvasImage) => {
+    setGenGroups(prev => {
+      const groupType: GenGroupType = 'fusion';
+      const activeGroups = prev.filter(g => g.type === groupType && g.status !== 'completed');
+      if (activeGroups.length > 0) {
+        const latestGroup = activeGroups[activeGroups.length - 1];
+        if (latestGroup.refImages.length >= 14) return prev;
+        if (latestGroup.refImages.some(r => r.imageId === image.id)) return prev;
+        const newRef: GroupRefImage = {
+          imageId: image.id,
+          url: image.url,
+          number: latestGroup.refImages.length + 1,
+          categories: [],
+          strengths: {},
+        };
+        const allRefs = [...latestGroup.refImages, newRef];
+        const refImageObjs = allRefs
+          .map(r => images.find(img => img.id === r.imageId))
+          .filter(Boolean) as CanvasImage[];
+        const avgX = refImageObjs.reduce((s, img) => s + img.x + img.width / 2, 0) / refImageObjs.length;
+        const avgY = refImageObjs.reduce((s, img) => s + img.y + img.height / 2, 0) / refImageObjs.length;
+        return prev.map(g => {
+          if (g.id !== latestGroup.id) return g;
+          return {
+            ...g,
+            refImages: allRefs,
+            sourceImageIds: [...g.sourceImageIds, image.id],
+            position: { ...g.position, sourceCenterX: avgX, sourceCenterY: avgY },
+          };
+        });
+      }
+      const newGroup = createGenGroupLocal(image, groupType);
+      return [...prev, newGroup];
+    });
+  }, [createGenGroupLocal, images]);
+
+  /** 从生成组中移除参考图 */
+  const removeRefFromGroup = useCallback((groupId: string, imageId: string) => {
+    setGenGroups(prev => {
+      return prev.map(g => {
+        if (g.id !== groupId) return g;
+        const newRefs = g.refImages.filter(r => r.imageId !== imageId);
+        // 如果移除后没有参考图了，删除整个组
+        if (newRefs.length === 0) return g; // 返回原组，由调用者决定是否删除
+        // 重新编号
+        const reindexed = newRefs.map((r, i) => ({ ...r, number: i + 1 }));
+        const newSourceIds = g.sourceImageIds.filter(id => id !== imageId);
+        const newCategories = { ...g.sourceCategories };
+        const newStrengths = { ...g.sourceStrengths };
+        delete newCategories[imageId];
+        delete newStrengths[imageId];
+        return { ...g, refImages: reindexed, sourceImageIds: newSourceIds, sourceCategories: newCategories, sourceStrengths: newStrengths };
+      }).filter(g => g.refImages.length > 0);
+    });
+  }, []);
+
+  /** 更新生成组工具栏设置 */
+  const updateGroupToolbar = useCallback((groupId: string, updates: Partial<GenGroupToolbar>) => {
+    setGenGroups(prev => prev.map(g => {
+      if (g.id !== groupId) return g;
+      return { ...g, toolbar: { ...g.toolbar, ...updates } };
+    }));
+  }, []);
+
+  /** 更新参考图类别和强度 */
+  const updateRefImageCategories = useCallback((groupId: string, imageId: string, categories: ReferenceCategory[], strengths: Record<string, number>) => {
+    setGenGroups(prev => prev.map(g => {
+      if (g.id !== groupId) return g;
+      return {
+        ...g,
+        refImages: g.refImages.map(r =>
+          r.imageId === imageId ? { ...r, categories, strengths } : r
+        ),
+      };
+    }));
+  }, []);
+
+  /** 删除生成组 */
+  const deleteGenGroup = useCallback((groupId: string) => {
+    setGenGroups(prev => prev.filter(g => g.id !== groupId));
+  }, []);
+
+  /** 处理生成组的生成请求 */
+  const handleGroupGenerate = useCallback(async (group: CanvasGenGroup) => {
+    const toolbar = group.toolbar;
+    if (!toolbar.prompt.trim()) return;
+
+    // 创建结果占位框
+    const phId = `grp-ph-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const [arW, arH] = toolbar.aspectRatio.split(':').map(Number);
+    const arRatio = (arW || 1) / (arH || 1);
+    const baseSize = 400;
+    const phWidth = arRatio >= 1 ? baseSize : Math.round(baseSize * arRatio);
+    const phHeight = arRatio >= 1 ? Math.round(baseSize / arRatio) : baseSize;
+
+    const phX = group.position.resultX ?? 0;
+    const phY = group.position.resultY ?? 0;
+
+    const placeholder: CanvasImage = {
+      id: phId,
+      url: '',
+      x: phX, y: phY,
+      width: phWidth, height: phHeight,
+      originalWidth: phWidth * 2, originalHeight: phHeight * 2,
+      isProcessingPlaceholder: true,
+      processing: {
+        label: '生成中',
+        status: '准备生成...',
+        progress: 5,
+      },
+      aspectRatio: toolbar.aspectRatio,
+    };
+
+    onImagesChange([...images, placeholder]);
+
+    // 更新组的resultPlaceholder
+    setGenGroups(prev => prev.map(g => {
+      if (g.id !== group.id) return g;
+      return { ...g, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: true, progress: 0 } };
+    }));
+
+    // 构建提示词：参考图类别前缀 + 用户关键词
+    let fullPrompt = toolbar.prompt;
+    if (group.type === 'reference') {
+      const activePrefixes = group.refImages.flatMap(r =>
+        r.categories.map(cat => {
+          const strength = r.strengths[cat] || 50;
+          const prefixMap: Record<string, string> = {
+            style: 'in the style of',
+            composition: 'with the composition of',
+            scene: 'in the scene of',
+            color: 'with the color palette of',
+            subject: 'featuring the subject of',
+            detail: 'with the details of',
+          };
+          return strength > 0 ? `${prefixMap[cat] || cat} [ref${r.number}]` : '';
+        }).filter(Boolean)
+      );
+      if (activePrefixes.length > 0) {
+        fullPrompt = `${activePrefixes.join(', ')}, ${fullPrompt}`;
+      }
+    }
+
+    // 调用生图 API
+    try {
+      const currentModel = getCurrentModel();
+      const compositeKey = localStorage.getItem('currentProviderId') || '';
+      const providerId = compositeKey.includes('::') ? compositeKey.split('::')[0] : compositeKey;
+
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: fullPrompt,
+          negativePrompt: toolbar.negativePrompt,
+          model: currentModel,
+          providerId,
+          aspectRatio: toolbar.aspectRatio,
+          quality: toolbar.quality,
+          n: toolbar.outputCount,
+          imageUrls: group.refImages.map(r => r.url),
+          groupType: group.type,
+        }),
+      });
+      const data = await res.json();
+
+      if (data.mode === 'direct' && data.imageUrls) {
+        // 直接模式：立即显示结果
+        const newImages = data.imageUrls.map((url: string, i: number) => ({
+          id: `grp-result-${Date.now()}-${i}`,
+          url,
+          x: phX + i * (phWidth + 20),
+          y: phY,
+          width: phWidth, height: phHeight,
+          originalWidth: phWidth * 2, originalHeight: phHeight * 2,
+          prompt: toolbar.prompt,
+          aspectRatio: toolbar.aspectRatio,
+        }));
+        // 移除占位框，添加结果图
+        onImagesChange(images.filter(img => img.id !== phId).concat(newImages));
+        // 更新组结果
+        setGenGroups(prev => prev.map(g => {
+          if (g.id !== group.id) return g;
+          return { ...g, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false }, resultImageIds: newImages.map((img: { id: string }) => img.id) };
+        }));
+      } else if (data.taskIds) {
+        // 轮询模式
+        const taskId = data.taskIds[0];
+        let attempts = 0;
+        const maxAttempts = 300;
+        const interval = setInterval(async () => {
+          attempts++;
+          if (attempts > maxAttempts) {
+            clearInterval(interval);
+            onImagesChange(images.filter(img => img.id !== phId));
+            setGenGroups(prev => prev.map(g => {
+              if (g.id !== group.id) return g;
+              return { ...g, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false } };
+            }));
+            return;
+          }
+          try {
+            const pollRes = await fetch('/api/poll-task', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId, model: currentModel, providerId }),
+            });
+            const pollData = await pollRes.json();
+            // 更新进度
+            if (pollData.progress !== undefined) {
+              onImagesChange(imagesRef.current.map(img => {
+                if (img.id !== phId) return img;
+                return { ...img, processing: { ...img.processing!, progress: Math.max(pollData.progress, 5), status: `生成中 ${pollData.progress}%` } };
+              }));
+            }
+            if (pollData.status === 'completed' && pollData.results?.length > 0) {
+              clearInterval(interval);
+              const resultImages = pollData.results.map((url: string, i: number) => ({
+                id: `grp-result-${Date.now()}-${i}`,
+                url,
+                x: phX + i * (phWidth + 20),
+                y: phY,
+                width: phWidth, height: phHeight,
+                originalWidth: phWidth * 2, originalHeight: phHeight * 2,
+                prompt: toolbar.prompt,
+                aspectRatio: toolbar.aspectRatio,
+              }));
+              const currentImages = imagesRef.current;
+              onImagesChange(currentImages.filter(img => img.id !== phId).concat(resultImages));
+              setGenGroups(prev => prev.map(g => {
+                if (g.id !== group.id) return g;
+                return { ...g, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false }, resultImageIds: resultImages.map((ri: { id: string }) => ri.id) };
+              }));
+            } else if (pollData.status === 'failed') {
+              clearInterval(interval);
+              const currentImages = imagesRef.current;
+              onImagesChange(currentImages.filter(img => img.id !== phId));
+              setGenGroups(prev => prev.map(g => {
+                if (g.id !== group.id) return g;
+                return { ...g, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false } };
+              }));
+            }
+          } catch {
+            // 轮询错误，继续
+          }
+        }, 2000);
+      }
+    } catch (error) {
+      // 网络错误，移除占位框
+      onImagesChange(images.filter(img => img.id !== phId));
+      setGenGroups(prev => prev.map(g => {
+        if (g.id !== group.id) return g;
+        return { ...g, resultPlaceholderId: undefined };
+      }));
+    }
+  }, [images, getCurrentModel, onImagesChange]);
+
+  // handleGenGroupGenerate: 通过groupId查找组并调用handleGroupGenerate
+  const handleGenGroupGenerate = useCallback((groupId: string) => {
+    const group = genGroupsRef.current.find(g => g.id === groupId);
+    if (group) {
+      handleGroupGenerate(group);
+    }
+  }, [handleGroupGenerate]);
+
+  // ──────────────── 【调整2&3 结束】────────────────
+
   const createProcessingFrameRightOf = useCallback((
     sourceImage: CanvasImage,
     label: string,
@@ -2155,25 +2548,6 @@ export function InfiniteCanvas({
   const getApiKey = useCallback((): string => {
     // API Key 由服务端管理，前端不再传递 API Key
     return 'server-managed';
-  }, []);
-
-  // Get current model name from localStorage
-  const getCurrentModel = useCallback((): string => {
-    if (typeof window === 'undefined') return 'gemini-2.5-flash-image-preview';
-    try {
-      const currentUserId = localStorage.getItem('unbounded_ai_current_user');
-      if (!currentUserId) return 'gemini-2.5-flash-image-preview';
-      const stored = localStorage.getItem('unbounded_ai_user_data');
-      if (!stored) return 'gemini-2.5-flash-image-preview';
-      const data = JSON.parse(stored);
-      const userData = data.userData?.[currentUserId];
-      if (!userData?.selectedModel) return 'gemini-2.5-flash-image-preview';
-      // 从复合键 providerId::modelId 中拆解出纯 modelId
-      const selectedModel = userData.selectedModel as string;
-      return selectedModel.includes('::') ? selectedModel.split('::').pop()! : selectedModel;
-    } catch {
-      return 'gemini-2.5-flash-image-preview';
-    }
   }, []);
 
   // 获取当前选择的 providerId（从复合键中拆解）
@@ -4391,21 +4765,14 @@ export function InfiniteCanvas({
                   if (image.isProcessingPlaceholder) return;
                   if (editMode !== 'none') return;
                   if (e.altKey) {
-                    // Alt+Click: mark as numbered reference for creative prompt
-                    onAltMarkReference?.(image);
+                    // 【调整2】Alt+Click: 创建/追加参考图组
+                    handleAltClickAddToGroup(image);
                     return;
                   }
                   if (e.ctrlKey || e.metaKey) {
-                    setSelectedIds(prev => {
-                      const next = new Set(prev);
-                      if (next.has(image.id)) {
-                        next.delete(image.id);
-                      } else {
-                        next.add(image.id);
-                      }
-                      return next;
-                    });
-                    onReferenceSelect?.(image);
+                    // 【调整3】Ctrl+Click: 创建/追加融图组
+                    handleCtrlClickAddToGroup(image);
+                    return;
                   } else {
                     setSelectedIds(new Set([image.id]));
                     selectImage(image.id);
@@ -4694,6 +5061,290 @@ export function InfiniteCanvas({
               </>
             );
           })()}
+
+          {/* ====== Generation Groups (Alt/Ctrl reference groups) ====== */}
+          {genGroups.length > 0 && genGroups.map(group => {
+            const srcImages = group.sourceImageIds
+              .map((id, idx) => {
+                const img = images.find(i => i.id === id);
+                return img ? { ...img, refNumber: idx + 1 } : null;
+              })
+              .filter(Boolean) as (CanvasImage & { refNumber: number })[];
+
+            if (srcImages.length === 0) return null;
+
+            // Result placeholder position
+            const resultX = group.resultPlaceholder.x;
+            const resultY = group.resultPlaceholder.y;
+            const resultW = group.resultPlaceholder.width;
+            const resultH = group.resultPlaceholder.height;
+            const resultCenterX = resultX + resultW / 2;
+            const resultCenterY = resultY + resultH / 2;
+
+            // Category colors
+            const CATEGORY_COLORS: Record<string, string> = {
+              style: '#e85d75', composition: '#4ecdc4', scene: '#45b7d1',
+              color: '#f7dc6f', subject: '#bb8fce', detail: '#82e0aa',
+            };
+
+            return (
+              <div key={`gen-group-${group.id}`}>
+                {/* SVG connection lines */}
+                <svg
+                  style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 15 }}
+                >
+                  {srcImages.map(img => {
+                    const imgCenterX = img.x + img.width / 2;
+                    const imgCenterY = img.y + img.height / 2;
+                    const midX = (imgCenterX + resultCenterX) / 2;
+
+                    // Determine line color from the image's categories
+                    const imgCategory = group.sourceCategories[img.id]?.[0] || 'style';
+                    const lineColor = CATEGORY_COLORS[imgCategory] || '#d4af37';
+
+                    return (
+                      <g key={`gen-line-${img.id}`}>
+                        {/* Animated dashed line */}
+                        <path
+                          d={`M ${imgCenterX} ${imgCenterY} C ${midX} ${imgCenterY}, ${midX} ${resultCenterY}, ${resultCenterX} ${resultCenterY}`}
+                          fill="none"
+                          stroke={lineColor}
+                          strokeWidth={2 / zoom}
+                          strokeDasharray={`${6 / zoom} ${4 / zoom}`}
+                          opacity={0.7}
+                        >
+                          <animate attributeName="stroke-dashoffset" from="0" to={`${-20 / zoom}`} dur="1.5s" repeatCount="indefinite" />
+                        </path>
+                        {/* Arrow head */}
+                        <polygon
+                          points={`${resultCenterX},${resultCenterY} ${resultCenterX - 8 / zoom},${resultCenterY - 5 / zoom} ${resultCenterX - 8 / zoom},${resultCenterY + 5 / zoom}`}
+                          fill={lineColor}
+                          opacity={0.7}
+                        />
+                        {/* Number label */}
+                        <circle
+                          cx={imgCenterX + (resultCenterX - imgCenterX) * 0.3}
+                          cy={imgCenterY + (resultCenterY - imgCenterY) * 0.3}
+                          r={10 / zoom}
+                          fill={lineColor}
+                          opacity={0.85}
+                        />
+                        <text
+                          x={imgCenterX + (resultCenterX - imgCenterX) * 0.3}
+                          y={imgCenterY + (resultCenterY - imgCenterY) * 0.3}
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fill="white"
+                          fontSize={10 / zoom}
+                          fontWeight="bold"
+                        >
+                          {img.refNumber}
+                        </text>
+                      </g>
+                    );
+                  })}
+                </svg>
+
+                {/* Result placeholder frame */}
+                <div
+                  className="absolute pointer-events-auto"
+                  style={{
+                    left: resultX,
+                    top: resultY,
+                    width: resultW,
+                    zIndex: 25,
+                  }}
+                >
+                  {/* Image area */}
+                  <div
+                    className="w-full border-2 border-dashed rounded-lg flex flex-col items-center justify-center gap-2 overflow-hidden"
+                    style={{
+                      height: resultH,
+                      borderColor: group.type === 'fusion' ? '#4ecdc4/60' : '#d4af37/60',
+                      background: group.type === 'fusion' ? 'rgba(78,205,196,0.05)' : 'rgba(212,175,55,0.05)',
+                    }}
+                  >
+                    {group.resultPlaceholder.isProcessing ? (
+                      <>
+                        <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin"
+                          style={{ borderColor: group.type === 'fusion' ? '#4ecdc4' : '#d4af37', borderTopColor: 'transparent' }} />
+                        <span className="text-xs font-medium" style={{ color: group.type === 'fusion' ? '#4ecdc4/80' : '#d4af37/80' }}>
+                          生成中 {group.resultPlaceholder.progress ? `${Math.round(group.resultPlaceholder.progress)}%` : ''}
+                        </span>
+                      </>
+                    ) : group.resultPlaceholder.resultUrl ? (
+                      <img src={group.resultPlaceholder.resultUrl} className="w-full h-full object-contain" alt="result" />
+                    ) : (
+                      <>
+                        <div className="w-4 h-4 rotate-45 border"
+                          style={{ borderColor: group.type === 'fusion' ? '#4ecdc4/30' : '#d4af37/30', margin: '4px' }} />
+                        <span className="text-xs font-medium" style={{ color: group.type === 'fusion' ? '#4ecdc4/60' : '#d4af37/60' }}>
+                          {group.type === 'fusion' ? '融图输出' : '参考图输出'}
+                        </span>
+                        <span className="text-xs" style={{ color: group.type === 'fusion' ? '#4ecdc4/40' : '#d4af37/40' }}>
+                          {srcImages.map(r => `#${r.refNumber}`).join(' + ')} →
+                        </span>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Category settings for each source image */}
+                  {srcImages.map(img => {
+                    const categories = group.sourceCategories[img.id] || ['style'];
+                    const strengths = group.sourceStrengths[img.id] || { style: 50 };
+                    return (
+                      <div key={`cat-${img.id}`}
+                        className={`flex items-center gap-1 mt-1 px-2 py-1 rounded-lg text-xs ${isMonochrome ? 'bg-white/90 border border-gray-200' : 'bg-[#1a1a1a]/95 border border-[#333]'}`}
+                      >
+                        <span className="text-[#888] font-medium">#{img.refNumber}</span>
+                        {(['style', 'composition', 'scene', 'color', 'subject', 'detail'] as ReferenceCategory[]).map(cat => {
+                          const isActive = categories.includes(cat);
+                          const catColor = CATEGORY_COLORS[cat] || '#888';
+                          return (
+                            <button
+                              key={cat}
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-all ${isActive ? 'text-white' : 'text-[#666] opacity-40 hover:opacity-70'}`}
+                              style={isActive ? { backgroundColor: catColor } : {}}
+                              onClick={() => {
+                                setGenGroups(prev => prev.map(g => {
+                                  if (g.id !== group.id) return g;
+                                  const newCats = { ...g.sourceCategories };
+                                  const currentCats: ReferenceCategory[] = newCats[img.id] || ['style'];
+                                  newCats[img.id] = currentCats.includes(cat)
+                                    ? currentCats.filter(c => c !== cat)
+                                    : [...currentCats, cat];
+                                  if (newCats[img.id].length === 0) newCats[img.id] = ['style'];
+                                  return { ...g, sourceCategories: newCats };
+                                }));
+                              }}
+                            >
+                              {cat === 'style' ? '风格' : cat === 'composition' ? '构图' : cat === 'scene' ? '场景' : cat === 'color' ? '色彩' : cat === 'subject' ? '主体' : '细节'}
+                            </button>
+                          );
+                        })}
+                        {/* Strength slider */}
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={strengths[categories[0]] || 50}
+                          className="w-12 h-1 accent-[#d4af37]"
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setGenGroups(prev => prev.map(g => {
+                              if (g.id !== group.id) return g;
+                              const newStr = { ...g.sourceStrengths };
+                              const catStrengths = { ...(newStr[img.id] || {}) };
+                              categories.forEach(c => { catStrengths[c] = val; });
+                              newStr[img.id] = catStrengths;
+                              return { ...g, sourceStrengths: newStr };
+                            }));
+                          }}
+                        />
+                        <span className="text-[#888] w-6 text-right">{strengths[categories[0]] || 50}%</span>
+                      </div>
+                    );
+                  })}
+
+                  {/* Toolbar */}
+                  <div className={`flex flex-col gap-1 mt-1 px-2 py-2 rounded-lg ${isMonochrome ? 'bg-white/90 border border-gray-200' : 'bg-[#1a1a1a]/95 border border-[#333]'}`}>
+                    {/* Row 1: Model + Aspect ratio + Quality */}
+                    <div className="flex items-center gap-1">
+                      <select
+                        className={`flex-1 text-xs px-1.5 py-1 rounded border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#252525] border-[#444] text-[#ccc]'}`}
+                        value={group.toolbar.model}
+                        onChange={(e) => {
+                          setGenGroups(prev => prev.map(g =>
+                            g.id === group.id ? { ...g, toolbar: { ...g.toolbar, model: e.target.value } } : g
+                          ));
+                        }}
+                      >
+                        <option value="">选择模型</option>
+                        {canvasGenModels.map(m => (
+                          <option key={m.id} value={m.id}>{m.providerName}</option>
+                        ))}
+                      </select>
+                      <select
+                        className={`text-xs px-1.5 py-1 rounded border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#252525] border-[#444] text-[#ccc]'}`}
+                        value={group.toolbar.aspectRatio}
+                        onChange={(e) => {
+                          setGenGroups(prev => prev.map(g =>
+                            g.id === group.id ? { ...g, toolbar: { ...g.toolbar, aspectRatio: e.target.value } } : g
+                          ));
+                        }}
+                      >
+                        {['1:1','4:3','3:4','16:9','9:16','3:2','2:3','21:9'].map(r => (
+                          <option key={r} value={r}>{r}</option>
+                        ))}
+                      </select>
+                      <select
+                        className={`text-xs px-1.5 py-1 rounded border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#252525] border-[#444] text-[#ccc]'}`}
+                        value={group.toolbar.quality}
+                        onChange={(e) => {
+                          setGenGroups(prev => prev.map(g =>
+                            g.id === group.id ? { ...g, toolbar: { ...g.toolbar, quality: e.target.value } } : g
+                          ));
+                        }}
+                      >
+                        <option value="standard">标准</option>
+                        <option value="hd">高清</option>
+                      </select>
+                      <select
+                        className={`text-xs px-1.5 py-1 rounded border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#252525] border-[#444] text-[#ccc]'}`}
+                        value={group.toolbar.n}
+                        onChange={(e) => {
+                          setGenGroups(prev => prev.map(g =>
+                            g.id === group.id ? { ...g, toolbar: { ...g.toolbar, n: Number(e.target.value) } } : g
+                          ));
+                        }}
+                      >
+                        {[1,2,3,4].map(n => (
+                          <option key={n} value={n}>{n}张</option>
+                        ))}
+                      </select>
+                    </div>
+                    {/* Row 2: Prompt input + Generate button */}
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        className={`flex-1 text-xs px-2 py-1 rounded border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#252525] border-[#444] text-[#ccc]'} placeholder:text-[#666]`}
+                        placeholder="输入关键词..."
+                        value={group.toolbar.prompt}
+                        onChange={(e) => {
+                          setGenGroups(prev => prev.map(g =>
+                            g.id === group.id ? { ...g, toolbar: { ...g.toolbar, prompt: e.target.value } } : g
+                          ));
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleGenGroupGenerate(group.id);
+                          }
+                        }}
+                      />
+                      <button
+                        className="px-3 py-1 rounded-lg text-xs font-bold text-black transition-all hover:brightness-110 active:scale-95"
+                        style={{ background: group.type === 'fusion' ? 'linear-gradient(135deg, #4ecdc4, #45b7d1)' : 'linear-gradient(135deg, #d4af37, #f0d060)' }}
+                        onClick={() => handleGenGroupGenerate(group.id)}
+                        disabled={group.resultPlaceholder.isProcessing}
+                      >
+                        {group.resultPlaceholder.isProcessing ? '生成中...' : '生成'}
+                      </button>
+                      <button
+                        className={`px-2 py-1 rounded-lg text-xs ${isMonochrome ? 'text-gray-400 hover:text-gray-600' : 'text-[#888] hover:text-[#d4af37]'}`}
+                        onClick={() => {
+                          setGenGroups(prev => prev.filter(g => g.id !== group.id));
+                        }}
+                        title="取消"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         {boxSelectStart && boxSelectEnd && (
