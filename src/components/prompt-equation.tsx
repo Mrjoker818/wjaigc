@@ -111,7 +111,15 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
             });
             const data = await res.json();
             if (data.success && data.optimized) {
-                setOptimizedText(data.optimized.trim());
+                // 清理思考过程，只保留优化后的关键词
+                let cleaned = data.optimized.trim();
+                cleaned = cleaned
+                    .replace(/<think[\s\S]*?<\/think>/gi, '')
+                    .replace(/<thinking[\s\S]*?<\/thinking>/gi, '')
+                    .replace(/【中文】[\s\S]*$/i, '')
+                    .replace(/【English】\s*/i, '')
+                    .trim();
+                setOptimizedText(cleaned);
                 setUseOptimized(false);
                 setOriginalText(resultText || textToOptimize);
             } else {

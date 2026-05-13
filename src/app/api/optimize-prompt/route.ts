@@ -15,15 +15,10 @@ const OPTIMIZE_SYSTEM_PROMPT = `You are a professional AI image prompt optimizer
 Rules:
 1. Preserve the user's original intent.
 2. Add concrete visual details: lighting, color, material, composition, camera, atmosphere.
-3. Output both English and Chinese.
-4. Keep the result production-ready and directly usable.
-
-Output format:
-【English】
-Optimized English prompt
-
-【中文】
-优化后的中文提示词`;
+3. Output ONLY the optimized prompt text in English, nothing else.
+4. Do NOT include any thinking process, explanation, reasoning, or analysis.
+5. Do NOT include Chinese translation or any formatting markers like 【】.
+6. Output should be a single paragraph of English prompt text, ready to use directly for image generation.`;
 
 function splitProviderModel(model?: string, providerId?: string) {
   if (model && model.includes('::')) {

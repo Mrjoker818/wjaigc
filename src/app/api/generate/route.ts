@@ -75,9 +75,9 @@ const APIMART_MODEL_CONFIG: Record<string, ModelConfig> = {
     name: 'GPT-Image 2',
     modelId: 'gpt-image-2-official',
     paramType: 'quality',
-    supportedSizes: ['1:1', '3:2', '2:3'],
+    supportedSizes: ['1:1', '3:2', '2:3', '16:9', '9:16'],
     supportsImageToImage: true,
-    maxN: 4,
+    maxN: 10,
     estimatedTime: 120, // GPT-Image 2 high质量极慢，可达180+秒
   },
 };

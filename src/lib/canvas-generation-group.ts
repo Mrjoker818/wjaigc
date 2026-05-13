@@ -104,7 +104,7 @@ export interface CanvasGenGroup {
   isCollapsed?: boolean;
 
   // 展开的参考图类别设置 (imageId → boolean)
-  expandedRefImages?: Record<string, boolean>;
+  expandedRefImages?: Record<string, boolean>; // deprecated, kept for backward compat
 
   // 创建时间
   createdAt: number;
@@ -125,8 +125,9 @@ export const MODEL_ASPECT_RATIOS: Record<string, string[]> = {
     'gemini-3-pro-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
     'gemini-3.1-flash-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
     'doubao-seedance-4-5': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', '9:21'],
-    'gpt-image-2-official': ['1:1', '3:2', '2:3'],
-    'gpt-image-2': ['1:1', '3:2', '2:3'],
+    // GPT Image 2 — 官方支持的尺寸比例 (含2K/4K)
+    'gpt-image-2-official': ['1:1', '3:2', '2:3', '16:9', '9:16'],
+    'gpt-image-2': ['1:1', '3:2', '2:3', '16:9', '9:16'],
 };
 
 /** 各模型支持的质量/分辨率档位（按官方API文档配置） */
@@ -184,28 +185,28 @@ export const QUALITY_TO_SIZE: Record<string, Record<string, string>> = {
         '2K': '2048',
         '4K': '4096'
     },
-    // GPT-Image 系列
+    // GPT-Image 系列 — quality独立于size，这里仅显示参考分辨率
     'gpt-image-2-official': {
-        'auto': '1024',
-        'low': '1024 低细节',
-        'medium': '1024 中细节',
-        'high': '1024 高细节'
+        'auto': 'auto',
+        'low': '1024',
+        'medium': '1536',
+        'high': '2048'
     },
     'gpt-image-2': {
-        'auto': '1024',
-        'low': '1024 低细节',
-        'medium': '1024 中细节',
-        'high': '1024 高细节'
+        'auto': 'auto',
+        'low': '1024',
+        'medium': '1536',
+        'high': '2048'
     },
 };
 
-/** 画面比例到默认像素尺寸的映射 */
+/** 画面比例到默认像素尺寸的映射（GPT-Image-2 官方尺寸） */
 export const ASPECT_RATIO_TO_PIXELS: Record<string, string> = {
     '1:1': '1024×1024',
-    '4:3': '1024×768',
-    '3:4': '768×1024',
-    '16:9': '1792×1024',
-    '9:16': '1024×1792',
+    '4:3': '1536×1024',
+    '3:4': '1024×1536',
+    '16:9': '2048×1152',
+    '9:16': '1152×2048',
     '3:2': '1536×1024',
     '2:3': '1024×1536',
     '21:9': '2048×878',

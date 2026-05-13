@@ -2360,7 +2360,18 @@ export function InfiniteCanvas({
       if (!res.ok) throw new Error('优化失败');
       const data = await res.json();
       if (data.optimized || data.optimizedPrompt) {
-        const optimizedPrompt = data.optimized || data.optimizedPrompt;
+        let optimizedPrompt = data.optimized || data.optimizedPrompt;
+        // 清理思考过程：移除 <think/> 标签内容、【中文】段等
+        optimizedPrompt = optimizedPrompt
+          .replace(/<think[\s\S]*?<\/think>/gi, '')  // 移除 <think...</think >
+          .replace(/<thinking[\s\S]*?<\/thinking>/gi, '')  // 移除 <thinking...</thinking >
+          .replace(/【中文】[\s\S]*$/i, '')  // 移除【中文】及之后内容
+          .replace(/【English】\s*/i, '')  // 移除【English】标记
+          .replace(/^[\s\S]*?(?=[A-Z][a-z])/m, (match: string) => { // 如果开头有非英文内容，截取到第一个英文单词
+            const idx = match.search(/[A-Z][a-z]/);
+            return idx > 0 ? match.substring(idx) : match;
+          })
+          .trim();
         setGenGroups(prev => prev.map(g => {
           if (g.id !== groupId) return g;
           return { ...g, toolbar: { ...g.toolbar, prompt: optimizedPrompt } };
@@ -5727,7 +5738,9 @@ export function InfiniteCanvas({
               { x: resultX, y: resultY, w: resultFrameW, h: resultH + toolbarH }
             ];
             const containerPad = 24;
-            const containerMinX = Math.min(...allBounds.map(b => b.x)) - containerPad;
+            // 参考图组左侧需要额外空间显示类别标签
+            const leftPad = isRef ? 60 : containerPad;
+            const containerMinX = Math.min(...allBounds.map(b => b.x)) - leftPad;
             const containerMinY = Math.min(...allBounds.map(b => b.y)) - containerPad - 40;
             const containerMaxX = Math.max(...allBounds.map(b => b.x + b.w)) + containerPad;
             const containerMaxY = Math.max(...allBounds.map(b => b.y + b.h)) + containerPad;
@@ -5852,78 +5865,59 @@ export function InfiniteCanvas({
                   </g>
                 </svg>
 
-                {/* Source image labels (R1, R2, ...) overlaid on each source image */}
+                {/* Source image labels (R1, R2, ...) with left-side category tags */}
                 {srcImages.map(img => (
                   <div
                     key={`ref-label-${img.id}`}
-                    className="absolute flex flex-col gap-1"
+                    className="absolute flex flex-row-reverse gap-1"
                     style={{
                       left: img.x + dragDx - containerMinX,
-                      top: img.y - 28 + dragDy - containerMinY,
+                      top: img.y + dragDy - containerMinY,
+                      height: img.height,
                       zIndex: 26,
                     }}
                   >
-                    {/* Label row */}
-                    <div
-                      className="flex items-center gap-1.5 px-2 py-1 rounded-lg pointer-events-auto"
-                      style={{
-                        background: isRef ? 'rgba(212,175,55,0.9)' : 'rgba(78,205,196,0.9)',
-                      }}
-                      onMouseDown={(e) => e.stopPropagation()}
-                    >
-                      <span className="text-xs font-bold text-black">
-                        R{img.refNumber}
-                      </span>
-                      {isRef && (
-                        <button
-                          className="w-4 h-4 flex items-center justify-center rounded-full text-black/60 hover:text-black hover:bg-black/10 transition-colors text-[10px] font-bold"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setGenGroups(prev => prev.map(g => {
-                              if (g.id !== group.id) return g;
-                              const newExpanded = { ...g.expandedRefImages };
-                              newExpanded[img.id] = !newExpanded[img.id];
-                              return { ...g, expandedRefImages: newExpanded };
-                            }));
-                          }}
-                          title="设置参考类别"
-                        >
-                          ▼
-                        </button>
-                      )}
-                      <button
-                        className="w-4 h-4 flex items-center justify-center rounded-full text-black/60 hover:text-black hover:bg-black/10 transition-colors text-xs font-bold"
-                        onClick={(e) => { e.stopPropagation(); removeRefFromGroup(group.id, img.id); }}
-                        title="移除此参考图"
-                      >
-                        x
-                      </button>
-                    </div>
-                    {/* Per-image category settings (reference group only) */}
-                    {isRef && group.expandedRefImages?.[img.id] && (
+                    {/* Image area - label overlay */}
+                    <div className="relative" style={{ width: img.width, height: img.height }}>
+                      {/* Label badge at top-left of image */}
                       <div
-                        className="rounded-lg p-2 space-y-1.5 min-w-[180px] shadow-lg border pointer-events-auto"
+                        className="absolute top-0 left-0 flex items-center gap-1.5 px-2 py-1 rounded-lg pointer-events-auto"
                         style={{
-                          background: isMonochrome ? '#fff' : '#1a1a1a',
-                          borderColor: isMonochrome ? '#e5e7eb' : '#333',
+                          background: isRef ? 'rgba(212,175,55,0.9)' : 'rgba(78,205,196,0.9)',
                         }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                      >
+                        <span className="text-xs font-bold text-black">
+                          R{img.refNumber}
+                        </span>
+                        <button
+                          className="w-4 h-4 flex items-center justify-center rounded-full text-black/60 hover:text-black hover:bg-black/10 transition-colors text-xs font-bold"
+                          onClick={(e) => { e.stopPropagation(); removeRefFromGroup(group.id, img.id); }}
+                          title="移除此参考图"
+                        >
+                          x
+                        </button>
+                      </div>
+                    </div>
+                    {/* Per-image category tags (reference group only) - LEFT side of image */}
+                    {isRef && (
+                      <div
+                        className="flex flex-col gap-0.5 py-1 pointer-events-auto justify-center"
+                        style={{ minWidth: 52 }}
                         onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <div className="text-[10px] font-medium" style={{ color: accentColor }}>
-                          R{img.refNumber} 参考类别
-                        </div>
                         {REFERENCE_CATEGORIES.map(cat => {
                           const imgCats = group.sourceCategories[img.id] || [];
                           const isSelected = imgCats.includes(cat);
                           const strength = group.sourceStrengths[img.id]?.[cat] ?? 70;
                           return (
-                            <div key={cat} className="flex items-center gap-1.5">
+                            <div key={cat} className="flex flex-col gap-0">
                               <button
-                                className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-all ${
+                                className={`px-1 py-0.5 rounded text-[9px] font-medium transition-all text-left leading-tight ${
                                   isSelected
                                     ? (isMonochrome ? 'bg-amber-100 text-amber-800' : 'bg-[#d4af37]/20 text-[#d4af37]')
-                                    : (isMonochrome ? 'bg-gray-100 text-gray-400' : 'bg-[#252525] text-[#666]')
+                                    : (isMonochrome ? 'bg-gray-100 text-gray-400' : 'bg-[#252525] text-[#555]')
                                 }`}
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -5945,41 +5939,33 @@ export function InfiniteCanvas({
                                     return { ...g, sourceCategories: newCats, sourceStrengths: newStr };
                                   }));
                                 }}
+                                title={`${REFERENCE_CATEGORY_LABELS[cat]}${isSelected ? ` (${strength}%)` : ''}`}
                               >
-                                <span className={`w-2.5 h-2.5 rounded-sm border flex items-center justify-center text-[8px] ${
-                                  isSelected
-                                    ? 'border-current bg-current/20'
-                                    : (isMonochrome ? 'border-gray-300' : 'border-[#555]')
-                                }`}>
-                                  {isSelected && '✓'}
-                                </span>
                                 {REFERENCE_CATEGORY_LABELS[cat]}
                               </button>
                               {isSelected && (
-                                <>
-                                  <input
-                                    type="range"
-                                    min={0}
-                                    max={100}
-                                    value={strength}
-                                    className="flex-1 h-0.5 appearance-none rounded-full cursor-pointer"
-                                    style={{
-                                      accentColor,
-                                      background: `linear-gradient(to right, ${accentColor} ${strength}%, ${isMonochrome ? '#e5e7eb' : '#444'} ${strength}%)`
-                                    }}
-                                    onChange={(e) => {
-                                      const val = Number(e.target.value);
-                                      setGenGroups(prev => prev.map(g => {
-                                        if (g.id !== group.id) return g;
-                                        const newStr = { ...g.sourceStrengths };
-                                        newStr[img.id] = { ...(newStr[img.id] || {}), [cat]: val };
-                                        return { ...g, sourceStrengths: newStr };
-                                      }));
-                                    }}
-                                    onClick={(e) => e.stopPropagation()}
-                                  />
-                                  <span className="text-[10px] w-6 text-right" style={{ color: isMonochrome ? '#666' : '#999' }}>{strength}%</span>
-                                </>
+                                <input
+                                  type="range"
+                                  min={0}
+                                  max={100}
+                                  value={strength}
+                                  className="w-full h-0.5 appearance-none rounded-full cursor-pointer"
+                                  style={{
+                                    accentColor,
+                                    background: `linear-gradient(to right, ${accentColor} ${strength}%, ${isMonochrome ? '#e5e7eb' : '#444'} ${strength}%)`
+                                  }}
+                                  onChange={(e) => {
+                                    const val = Number(e.target.value);
+                                    setGenGroups(prev => prev.map(g => {
+                                      if (g.id !== group.id) return g;
+                                      const newStr = { ...g.sourceStrengths };
+                                      newStr[img.id] = { ...(newStr[img.id] || {}), [cat]: val };
+                                      return { ...g, sourceStrengths: newStr };
+                                    }));
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  title={`${REFERENCE_CATEGORY_LABELS[cat]}: ${strength}%`}
+                                />
                               )}
                             </div>
                           );

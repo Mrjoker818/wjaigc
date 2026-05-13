@@ -1459,14 +1459,15 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
               const optData = await optRes.json();
               console.log('[ChatImage] Optimize response:', JSON.stringify(optData).substring(0, 200));
               if (optData.optimized) {
-                // Extract English section from the optimized result
-                const engMatch = optData.optimized.match(/【English】\s*([\s\S]+?)(?:【中文】|$)/);
-                if (engMatch && engMatch[1]) {
-                  optimizedPrompt = engMatch[1].trim();
-                } else {
-                  // Use the whole optimized text if no section markers
-                  optimizedPrompt = optData.optimized.trim();
-                }
+                // 清理思考过程，只保留优化后的关键词
+                let cleaned = optData.optimized.trim();
+                cleaned = cleaned
+                  .replace(/<think[\s\S]*?<\/think>/gi, '')
+                  .replace(/<thinking[\s\S]*?<\/thinking>/gi, '')
+                  .replace(/【中文】[\s\S]*$/i, '')
+                  .replace(/【English】\s*/i, '')
+                  .trim();
+                optimizedPrompt = cleaned;
                 console.log('[ChatImage] Optimized prompt:', optimizedPrompt.substring(0, 100) + '...');
               }
             }
