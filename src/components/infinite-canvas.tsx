@@ -711,6 +711,13 @@ export function InfiniteCanvas({
   const [genGroups, setGenGroups] = useState<CanvasGenGroup[]>([]);
   const genGroupsRef = useRef<CanvasGenGroup[]>(genGroups);
   const [optimizingGroupId, setOptimizingGroupId] = useState<string | null>(null);
+  // GenGroup 拖动状态
+  const [genGroupDragTarget, setGenGroupDragTarget] = useState<string | null>(null);
+  const [genGroupDragStart, setGenGroupDragStart] = useState({ x: 0, y: 0 });
+  const [genGroupDragOffset, setGenGroupDragOffset] = useState({ x: 0, y: 0 });
+  const genGroupDragReadyRef = useRef(false);
+  const genGroupDragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [hoveredGenGroupId, setHoveredGenGroupId] = useState<string | null>(null);
   const multiAngleDragRef = useRef<{
     active: boolean;
     startX: number;
@@ -1488,6 +1495,36 @@ export function InfiniteCanvas({
       const offsetX = canvasPos.x - dragStart.x;
       const offsetY = canvasPos.y - dragStart.y;
       setDragOffset({ x: offsetX, y: offsetY });
+
+      // ── Hover detection: check if dragged image is over a GenGroup container ──
+      let hoveredGroup: string | null = null;
+      if (imageDragReadyRef.current && dragTarget) {
+        const draggedImg = images.find(i => i.id === dragTarget);
+        if (draggedImg) {
+          const imgCX = draggedImg.x + offsetX + draggedImg.width / 2;
+          const imgCY = draggedImg.y + offsetY + draggedImg.height / 2;
+          for (const gGroup of genGroupsRef.current) {
+            const srcImgs = gGroup.sourceImageIds
+              .map(sid => images.find(i => i.id === sid))
+              .filter(Boolean) as CanvasImage[];
+            if (srcImgs.length === 0) continue;
+            const allBounds = [
+              ...srcImgs.map(si => ({ x: si.x, y: si.y, w: si.width, h: si.height })),
+              { x: gGroup.resultPlaceholder.x, y: gGroup.resultPlaceholder.y, w: gGroup.resultPlaceholder.width, h: gGroup.resultPlaceholder.height + 200 },
+            ];
+            const cPad = 24;
+            const cMinX = Math.min(...allBounds.map(b => b.x)) - cPad;
+            const cMinY = Math.min(...allBounds.map(b => b.y)) - cPad - 40;
+            const cMaxX = Math.max(...allBounds.map(b => b.x + b.w)) + cPad;
+            const cMaxY = Math.max(...allBounds.map(b => b.y + b.h)) + cPad;
+            if (imgCX >= cMinX && imgCX <= cMaxX && imgCY >= cMinY && imgCY <= cMaxY) {
+              hoveredGroup = gGroup.id;
+              break;
+            }
+          }
+        }
+      }
+      setHoveredGenGroupId(hoveredGroup);
     }
 
     // Group drag: only allow after long press (groupDragReadyRef)
@@ -1496,7 +1533,14 @@ export function InfiniteCanvas({
       const offsetY = canvasPos.y - groupDragStart.y;
       setGroupDragOffset({ x: offsetX, y: offsetY });
     }
-  }, [editMode, isPanning, isMiddlePanning, panStart, boxSelectStart, isLongPressing, resizingImage, resizeCorner, images, dragTarget, dragStart, resizeStart, screenToCanvas, onImagesChange, handleEditMouseMove, groupDragTarget, groupDragStart]);
+
+    // GenGroup drag: only allow after long press (genGroupDragReadyRef)
+    if (genGroupDragTarget && genGroupDragReadyRef.current) {
+      const offsetX = canvasPos.x - genGroupDragStart.x;
+      const offsetY = canvasPos.y - genGroupDragStart.y;
+      setGenGroupDragOffset({ x: offsetX, y: offsetY });
+    }
+  }, [editMode, isPanning, isMiddlePanning, panStart, boxSelectStart, isLongPressing, resizingImage, resizeCorner, images, dragTarget, dragStart, resizeStart, screenToCanvas, onImagesChange, handleEditMouseMove, groupDragTarget, groupDragStart, genGroupDragTarget, genGroupDragStart]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     if (editMode !== 'none') {
@@ -1560,15 +1604,72 @@ export function InfiniteCanvas({
 
     if (dragTarget) {
       if (imageDragReadyRef.current && (dragOffset.x !== 0 || dragOffset.y !== 0)) {
-        onImagesChange(images.map(img => {
+        const updatedImages = images.map(img => {
           if (selectedIds.has(img.id)) {
             return { ...img, x: img.x + dragOffset.x, y: img.y + dragOffset.y };
           }
           return img;
-        }));
+        });
+        onImagesChange(updatedImages);
+
+        // ── Drag-in/Drag-out detection for GenGroups ──
+        // For each dragged image, check if it landed inside a GenGroup container
+        for (const imgId of selectedIds) {
+          const draggedImg = updatedImages.find(i => i.id === imgId);
+          if (!draggedImg) continue;
+          const imgCX = draggedImg.x + draggedImg.width / 2;
+          const imgCY = draggedImg.y + draggedImg.height / 2;
+
+          for (const gGroup of genGroupsRef.current) {
+            const srcImgs = gGroup.sourceImageIds
+              .map(sid => images.find(i => i.id === sid))
+              .filter(Boolean) as CanvasImage[];
+            if (srcImgs.length === 0) continue;
+
+            // Calculate container bounds (same logic as render)
+            const allBounds = [
+              ...srcImgs.map(si => ({ x: si.x, y: si.y, w: si.width, h: si.height })),
+              { x: gGroup.resultPlaceholder.x, y: gGroup.resultPlaceholder.y, w: gGroup.resultPlaceholder.width, h: gGroup.resultPlaceholder.height + 200 },
+            ];
+            const cPad = 24;
+            const cMinX = Math.min(...allBounds.map(b => b.x)) - cPad;
+            const cMinY = Math.min(...allBounds.map(b => b.y)) - cPad - 40;
+            const cMaxX = Math.max(...allBounds.map(b => b.x + b.w)) + cPad;
+            const cMaxY = Math.max(...allBounds.map(b => b.y + b.h)) + cPad;
+
+            const isInside = imgCX >= cMinX && imgCX <= cMaxX && imgCY >= cMinY && imgCY <= cMaxY;
+
+            if (isInside && !gGroup.sourceImageIds.includes(imgId)) {
+              // ── Drag IN: add image to this group as reference ──
+              if (gGroup.sourceImageIds.length < 14) {
+                const nextNum = gGroup.refImages.length + 1;
+                setGenGroups(prev => prev.map(g => {
+                  if (g.id !== gGroup.id) return g;
+                  return {
+                    ...g,
+                    sourceImageIds: [...g.sourceImageIds, imgId],
+                    refImages: [...g.refImages, {
+                      imageId: imgId,
+                      url: draggedImg.url,
+                      number: nextNum,
+                      categories: [],
+                      strengths: {},
+                    }],
+                    sourceCategories: { ...g.sourceCategories, [imgId]: [] },
+                    sourceStrengths: { ...g.sourceStrengths, [imgId]: {} },
+                  };
+                }));
+              }
+            } else if (!isInside && gGroup.sourceImageIds.includes(imgId)) {
+              // ── Drag OUT: remove image from this group ──
+              removeRefFromGroup(gGroup.id, imgId);
+            }
+          }
+        }
       }
       setDragTarget(null);
       setDragOffset({ x: 0, y: 0 });
+      setHoveredGenGroupId(null);
       imageDragReadyRef.current = false;
     }
 
@@ -1592,8 +1693,53 @@ export function InfiniteCanvas({
       groupDragTimerRef.current = null;
     }
 
+    // GenGroup drag finish
+    if (genGroupDragTarget) {
+      if (genGroupDragReadyRef.current && (genGroupDragOffset.x !== 0 || genGroupDragOffset.y !== 0)) {
+        const dx = genGroupDragOffset.x;
+        const dy = genGroupDragOffset.y;
+        // Move all reference images in the gen group
+        const updatedImages = images.map(img => {
+          const ref = genGroupsRef.current.find(g => g.id === genGroupDragTarget)?.sourceImageIds.includes(img.id);
+          if (ref) return { ...img, x: img.x + dx, y: img.y + dy };
+          return img;
+        });
+        onImagesChange(updatedImages);
+        // Move the gen group's resultPlaceholder position
+        setGenGroups(prev => prev.map(g => {
+          if (g.id === genGroupDragTarget) {
+            return {
+              ...g,
+              position: {
+                ...g.position,
+                x: g.position.x + dx,
+                y: g.position.y + dy,
+                sourceCenterX: (g.position.sourceCenterX ?? 0) + dx,
+                sourceCenterY: (g.position.sourceCenterY ?? 0) + dy,
+                resultX: (g.position.resultX ?? g.resultPlaceholder.x) + dx,
+                resultY: (g.position.resultY ?? g.resultPlaceholder.y) + dy,
+              },
+              resultPlaceholder: {
+                ...g.resultPlaceholder,
+                x: g.resultPlaceholder.x + dx,
+                y: g.resultPlaceholder.y + dy,
+              },
+            };
+          }
+          return g;
+        }));
+      }
+      setGenGroupDragTarget(null);
+      setGenGroupDragOffset({ x: 0, y: 0 });
+      genGroupDragReadyRef.current = false;
+    }
+    if (genGroupDragTimerRef.current) {
+      clearTimeout(genGroupDragTimerRef.current);
+      genGroupDragTimerRef.current = null;
+    }
+
     mouseDownOnImageRef.current = false;
-  }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp, groupDragTarget, groupDragOffset]);
+  }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp, groupDragTarget, groupDragOffset, genGroupDragTarget, genGroupDragOffset]);
 
   const handleMouseLeave = useCallback(() => {
     if (editMode !== 'none') {
@@ -1751,6 +1897,68 @@ export function InfiniteCanvas({
 
   // ──────────────── 【调整2&3】生成组：Alt/Ctrl+左键 创建参考图/融图组 ────────────────
 
+  /** Find a position that doesn't overlap with existing images */
+  const findNonOverlappingPosition = useCallback((startX: number, startY: number, width: number, height: number, excludeIds: string[]): { x: number; y: number } => {
+    const pad = 40;
+    const step = 100;
+    // Check if a rect overlaps with any existing image
+    const rectOverlaps = (rx: number, ry: number, rw: number, rh: number): boolean => {
+      for (const img of imagesRef.current) {
+        if (excludeIds.includes(img.id)) continue;
+        if (rx < img.x + img.width + pad && rx + rw + pad > img.x &&
+            ry < img.y + img.height + pad && ry + rh + pad > img.y) {
+          return true;
+        }
+      }
+      // Also check existing gen group result placeholders
+      for (const g of genGroupsRef.current) {
+        const rp = g.resultPlaceholder;
+        if (rx < rp.x + rp.width + pad && rx + rw + pad > rp.x &&
+            ry < rp.y + rp.height + pad && ry + rh + pad > rp.y) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    // Try original position first
+    if (!rectOverlaps(startX, startY, width, height)) {
+      return { x: startX, y: startY };
+    }
+
+    // Spiral search for a free position
+    const maxRadius = 5000;
+    for (let radius = step; radius < maxRadius; radius += step) {
+      // Check positions in a spiral pattern: right, down, left, up
+      const positions = [
+        { x: startX + radius, y: startY },
+        { x: startX, y: startY + radius },
+        { x: startX - radius, y: startY },
+        { x: startX, y: startY - radius },
+      ];
+      for (const pos of positions) {
+        if (!rectOverlaps(pos.x, pos.y, width, height)) {
+          return pos;
+        }
+      }
+      // Diagonal positions
+      const diagPositions = [
+        { x: startX + radius, y: startY + radius },
+        { x: startX + radius, y: startY - radius },
+        { x: startX - radius, y: startY + radius },
+        { x: startX - radius, y: startY - radius },
+      ];
+      for (const pos of diagPositions) {
+        if (!rectOverlaps(pos.x, pos.y, width, height)) {
+          return pos;
+        }
+      }
+    }
+
+    // Fallback: place far to the right
+    return { x: startX + 2000, y: startY };
+  }, []);
+
   /** 创建新生成组 */
   const createGenGroupLocal = useCallback((firstImage: CanvasImage, groupType: GenGroupType): CanvasGenGroup => {
     const groupId = `grp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1762,9 +1970,12 @@ export function InfiniteCanvas({
       categories: [],
       strengths: {},
     };
-    // 计算结果框位置：在第一张图右侧
-    const resultX = firstImage.x + firstImage.width + 80;
-    const resultY = firstImage.y;
+    // 计算结果框位置：先尝试第一张图右侧，然后自动避让
+    const defaultResultX = firstImage.x + firstImage.width + 80;
+    const defaultResultY = firstImage.y;
+    const resultW = firstImage.width;
+    const resultH = firstImage.height;
+    const resultPos = findNonOverlappingPosition(defaultResultX, defaultResultY, resultW, resultH, [firstImage.id]);
     const { model: currentModel, providerId: currentProviderId } = getCurrentModel();
     const group: CanvasGenGroup = {
       id: groupId,
@@ -1773,10 +1984,10 @@ export function InfiniteCanvas({
       refImages: [refImg],
       sourceImageIds: [firstImage.id],
       resultPlaceholder: {
-        x: resultX,
-        y: resultY,
-        width: firstImage.width,
-        height: firstImage.height,
+        x: resultPos.x,
+        y: resultPos.y,
+        width: resultW,
+        height: resultH,
         aspectRatio: '1:1',
         imageId: placeholderId,
       },
@@ -1796,8 +2007,8 @@ export function InfiniteCanvas({
         y: firstImage.y,
         sourceCenterX: firstImage.x + firstImage.width / 2,
         sourceCenterY: firstImage.y + firstImage.height / 2,
-        resultX,
-        resultY,
+        resultX: resultPos.x,
+        resultY: resultPos.y,
       },
       sourceCategories: { [firstImage.id]: [] },
       sourceStrengths: { [firstImage.id]: {} },
@@ -1805,7 +2016,7 @@ export function InfiniteCanvas({
       createdAt: Date.now(),
     };
     return group;
-  }, [getCurrentModel]);
+  }, [getCurrentModel, findNonOverlappingPosition]);
 
   /** Alt+Click: 追加到参考图组或创建新组 */
   const handleAltClickAddToGroup = useCallback((image: CanvasImage) => {
@@ -5110,19 +5321,28 @@ export function InfiniteCanvas({
             const accentBorder = isRef ? 'rgba(212,175,55,0.35)' : 'rgba(78,205,196,0.35)';
             const accentBorderStrong = isRef ? 'rgba(212,175,55,0.6)' : 'rgba(78,205,196,0.6)';
 
-            // Result placeholder position
-            const resultX = group.resultPlaceholder.x;
-            const resultY = group.resultPlaceholder.y;
+            // Drag offset for this group
+            const isThisGroupDragging = genGroupDragTarget === group.id;
+            const isHoveredForDrop = hoveredGenGroupId === group.id;
+            const dragDx = isThisGroupDragging ? genGroupDragOffset.x : 0;
+            const dragDy = isThisGroupDragging ? genGroupDragOffset.y : 0;
+
+            // Result placeholder position (apply drag offset)
+            const resultX = group.resultPlaceholder.x + dragDx;
+            const resultY = group.resultPlaceholder.y + dragDy;
             const resultW = group.resultPlaceholder.width;
             const resultH = group.resultPlaceholder.height;
             const resultCenterX = resultX + resultW / 2;
             const resultCenterY = resultY + resultH / 2;
 
-            // Container bounds: include all source images + result placeholder + toolbar
-            const allBounds = [...srcImages.map(img => ({ x: img.x, y: img.y, w: img.width, h: img.height })), { x: resultX, y: resultY, w: resultW, h: resultH + 200 /* approximate toolbar height */ }];
+            // Container bounds: include all source images + result placeholder + toolbar (apply drag offset)
+            const allBounds = [
+              ...srcImages.map(img => ({ x: img.x + dragDx, y: img.y + dragDy, w: img.width, h: img.height })),
+              { x: resultX, y: resultY, w: resultW, h: resultH + 200 }
+            ];
             const containerPad = 24;
             const containerMinX = Math.min(...allBounds.map(b => b.x)) - containerPad;
-            const containerMinY = Math.min(...allBounds.map(b => b.y)) - containerPad - 40; // extra top for title bar
+            const containerMinY = Math.min(...allBounds.map(b => b.y)) - containerPad - 40;
             const containerMaxX = Math.max(...allBounds.map(b => b.x + b.w)) + containerPad;
             const containerMaxY = Math.max(...allBounds.map(b => b.y + b.h)) + containerPad;
             const containerW = containerMaxX - containerMinX;
@@ -5142,15 +5362,31 @@ export function InfiniteCanvas({
                     top: containerMinY,
                     width: containerW,
                     height: containerH,
-                    background: accentBg,
-                    border: `2px solid ${accentBorder}`,
+                    background: isHoveredForDrop ? (isRef ? 'rgba(212,175,55,0.12)' : 'rgba(78,205,196,0.12)') : accentBg,
+                    border: `2px solid ${isThisGroupDragging ? accentColor : isHoveredForDrop ? accentColor : accentBorder}`,
                     zIndex: 12,
+                    transition: isThisGroupDragging ? 'none' : 'border-color 0.2s, background 0.2s',
+                    boxShadow: isHoveredForDrop ? `0 0 20px ${accentColor}40` : 'none',
                   }}
                 >
-                  {/* Title bar */}
+                  {/* Title bar — draggable */}
                   <div
-                    className="flex items-center justify-between px-4 py-1.5 rounded-t-2xl"
+                    className="flex items-center justify-between px-4 py-1.5 rounded-t-2xl pointer-events-auto cursor-grab active:cursor-grabbing select-none"
                     style={{ background: accentBgStrong, borderBottom: `1px solid ${accentBorder}` }}
+                    onMouseDown={(e) => {
+                      if (e.button !== 0) return;
+                      e.stopPropagation();
+                      e.preventDefault();
+                      // Start gen group drag (with long-press gate)
+                      setGenGroupDragTarget(group.id);
+                      const canvasPos = screenToCanvas(e.clientX, e.clientY);
+                      setGenGroupDragStart(canvasPos);
+                      setGenGroupDragOffset({ x: 0, y: 0 });
+                      genGroupDragReadyRef.current = false;
+                      genGroupDragTimerRef.current = setTimeout(() => {
+                        genGroupDragReadyRef.current = true;
+                      }, 200);
+                    }}
                   >
                     <div className="flex items-center gap-2">
                       <div className="w-2.5 h-2.5 rounded-full" style={{ background: accentColor }} />
@@ -5161,6 +5397,9 @@ export function InfiniteCanvas({
                         {srcImages.length} 张参考图
                       </span>
                     </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs" style={{ color: `${accentColor}66` }}>长按拖动</span>
+                    </div>
                   </div>
                 </div>
 
@@ -5169,8 +5408,8 @@ export function InfiniteCanvas({
                   style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 15 }}
                 >
                   {srcImages.map(img => {
-                    const imgCenterX = img.x + img.width / 2;
-                    const imgCenterY = img.y + img.height / 2;
+                    const imgCenterX = img.x + img.width / 2 + dragDx;
+                    const imgCenterY = img.y + img.height / 2 + dragDy;
                     const midX = (imgCenterX + resultCenterX) / 2;
 
                     return (
@@ -5222,8 +5461,8 @@ export function InfiniteCanvas({
                     key={`ref-label-${img.id}`}
                     className="absolute pointer-events-none flex items-center gap-1.5 px-2 py-1 rounded-lg"
                     style={{
-                      left: img.x,
-                      top: img.y - 28,
+                      left: img.x + dragDx,
+                      top: img.y - 28 + dragDy,
                       background: isRef ? 'rgba(212,175,55,0.9)' : 'rgba(78,205,196,0.9)',
                       zIndex: 26,
                     }}
