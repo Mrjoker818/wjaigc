@@ -4703,11 +4703,111 @@ export function InfiniteCanvas({
 
   const imageContextMenuItems = selectedIds.size > 1 ? [
     { label: '创建组', shortcut: '', action: () => { handleCreateGroup(); } },
-    { label: '对齐-左', action: () => { const minX = Math.min(...[...selectedIds].map(id => images.find(i => i.id === id)?.x || 0)); onImagesChange(images.map(i => selectedIds.has(i.id) ? { ...i, x: minX } : i)); } },
-    { label: '对齐-右', action: () => { const ids = [...selectedIds]; const maxX = Math.max(...ids.map(id => { const img = images.find(i => i.id === id); return img ? img.x + img.width : 0; })); onImagesChange(images.map(i => { if (!selectedIds.has(i.id)) return i; const img = images.find(ii => ii.id === i.id); return img ? { ...i, x: maxX - img.width } : i; })); } },
-    { label: '对齐-上', action: () => { const minY = Math.min(...[...selectedIds].map(id => images.find(i => i.id === id)?.y || 0)); onImagesChange(images.map(i => selectedIds.has(i.id) ? { ...i, y: minY } : i)); } },
-    { label: '对齐-下', action: () => { const ids = [...selectedIds]; const maxY = Math.max(...ids.map(id => { const img = images.find(i => i.id === id); return img ? img.y + img.height : 0; })); onImagesChange(images.map(i => { if (!selectedIds.has(i.id)) return i; const img = images.find(ii => ii.id === i.id); return img ? { ...i, y: maxY - img.height } : i; })); } },
-    { label: '等间距', action: () => {} },
+    { label: '对齐-左', action: () => {
+      const selImgs = images.filter(i => selectedIds.has(i.id));
+      if (selImgs.length < 2) return;
+      const minX = Math.min(...selImgs.map(i => i.x));
+      onImagesChange(images.map(i => selectedIds.has(i.id) ? { ...i, x: minX } : i));
+    } },
+    { label: '对齐-右', action: () => {
+      const selImgs = images.filter(i => selectedIds.has(i.id));
+      if (selImgs.length < 2) return;
+      const maxRight = Math.max(...selImgs.map(i => i.x + i.width));
+      onImagesChange(images.map(i => selectedIds.has(i.id) ? { ...i, x: maxRight - i.width } : i));
+    } },
+    { label: '对齐-上', action: () => {
+      const selImgs = images.filter(i => selectedIds.has(i.id));
+      if (selImgs.length < 2) return;
+      const minY = Math.min(...selImgs.map(i => i.y));
+      onImagesChange(images.map(i => selectedIds.has(i.id) ? { ...i, y: minY } : i));
+    } },
+    { label: '对齐-下', action: () => {
+      const selImgs = images.filter(i => selectedIds.has(i.id));
+      if (selImgs.length < 2) return;
+      const maxBottom = Math.max(...selImgs.map(i => i.y + i.height));
+      onImagesChange(images.map(i => selectedIds.has(i.id) ? { ...i, y: maxBottom - i.height } : i));
+    } },
+    { label: '水平居中', action: () => {
+      const selImgs = images.filter(i => selectedIds.has(i.id));
+      if (selImgs.length < 2) return;
+      const center = (Math.min(...selImgs.map(i => i.x)) + Math.max(...selImgs.map(i => i.x + i.width))) / 2;
+      onImagesChange(images.map(i => selectedIds.has(i.id) ? { ...i, x: center - i.width / 2 } : i));
+    } },
+    { label: '垂直居中', action: () => {
+      const selImgs = images.filter(i => selectedIds.has(i.id));
+      if (selImgs.length < 2) return;
+      const center = (Math.min(...selImgs.map(i => i.y)) + Math.max(...selImgs.map(i => i.y + i.height))) / 2;
+      onImagesChange(images.map(i => selectedIds.has(i.id) ? { ...i, y: center - i.height / 2 } : i));
+    } },
+    { label: '水平等间距', action: () => {
+      const selImgs = images.filter(i => selectedIds.has(i.id));
+      if (selImgs.length < 3) return;
+      const sorted = [...selImgs].sort((a, b) => a.x - b.x);
+      const leftMost = sorted[0].x;
+      const rightMost = sorted[sorted.length - 1].x + sorted[sorted.length - 1].width;
+      const totalWidth = sorted.reduce((s, i) => s + i.width, 0);
+      const gap = (rightMost - leftMost - totalWidth) / (sorted.length - 1);
+      let curX = leftMost;
+      const updates = new Map(sorted.map(img => [img.id, curX + (img === sorted[0] ? 0 : (curX = curX + img.width + gap - img.width, curX - img.width + gap))]));
+      // Recalculate properly
+      let cx = leftMost;
+      const xMap = new Map<string, number>();
+      for (const img of sorted) {
+        xMap.set(img.id, cx);
+        cx += img.width + gap;
+      }
+      onImagesChange(images.map(i => selectedIds.has(i.id) && xMap.has(i.id) ? { ...i, x: xMap.get(i.id)! } : i));
+    } },
+    { label: '垂直等间距', action: () => {
+      const selImgs = images.filter(i => selectedIds.has(i.id));
+      if (selImgs.length < 3) return;
+      const sorted = [...selImgs].sort((a, b) => a.y - b.y);
+      const topMost = sorted[0].y;
+      const bottomMost = sorted[sorted.length - 1].y + sorted[sorted.length - 1].height;
+      const totalHeight = sorted.reduce((s, i) => s + i.height, 0);
+      const gap = (bottomMost - topMost - totalHeight) / (sorted.length - 1);
+      let cy = topMost;
+      const yMap = new Map<string, number>();
+      for (const img of sorted) {
+        yMap.set(img.id, cy);
+        cy += img.height + gap;
+      }
+      onImagesChange(images.map(i => selectedIds.has(i.id) && yMap.has(i.id) ? { ...i, y: yMap.get(i.id)! } : i));
+    } },
+    { label: '一键排版', action: () => {
+      const selImgs = images.filter(i => selectedIds.has(i.id));
+      if (selImgs.length < 2) return;
+      // Waterfall/masonry layout - like Pinterest/Huaban
+      const COL_WIDTH = 280; // Column width in canvas pixels
+      const GAP = 16; // Gap between columns and rows
+      const NUM_COLS = Math.max(2, Math.min(5, Math.ceil(Math.sqrt(selImgs.length))));
+      // Initialize column heights
+      const colHeights: number[] = new Array(NUM_COLS).fill(0);
+      // Find the starting position (top-left of bounding box)
+      const startX = Math.min(...selImgs.map(i => i.x));
+      const startY = Math.min(...selImgs.map(i => i.y));
+      // Assign each image to the shortest column
+      const posMap = new Map<string, { x: number; y: number; width: number; height: number }>();
+      // Sort images by height descending for better masonry packing
+      const sorted = [...selImgs].sort((a, b) => b.height - a.height);
+      for (const img of sorted) {
+        // Scale image to fit column width while maintaining aspect ratio
+        const scale = COL_WIDTH / img.width;
+        const newWidth = COL_WIDTH;
+        const newHeight = Math.round(img.height * scale);
+        // Find shortest column
+        const minColIdx = colHeights.indexOf(Math.min(...colHeights));
+        const x = startX + minColIdx * (COL_WIDTH + GAP);
+        const y = startY + colHeights[minColIdx];
+        posMap.set(img.id, { x, y, width: newWidth, height: newHeight });
+        colHeights[minColIdx] += newHeight + GAP;
+      }
+      onImagesChange(images.map(i => {
+        if (!selectedIds.has(i.id) || !posMap.has(i.id)) return i;
+        const pos = posMap.get(i.id)!;
+        return { ...i, x: pos.x, y: pos.y, width: pos.width, height: pos.height };
+      }));
+    } },
   ] : [
     { label: '复制', shortcut: 'Ctrl+C', action: () => { const img = selectedImageData; if (img) handleCopyImage(img); } },
     { label: '下载', action: () => { handleOpenDownload(); } },
