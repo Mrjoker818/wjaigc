@@ -489,7 +489,7 @@ export function GenerationPanel(
             const providers = universalApiManager.getProviders();
             const imageModels: {id: string, providerId: string, providerName: string, is3DProvider?: boolean, displayLabel?: string}[] = [];
             providers.forEach(p => {
-                if ((p.modelType?.includes('image') || p.modelType?.includes('3d') || (!p.modelType && p.type === 'image')) && p.isEnabled) {
+                if ((p.modelType?.includes('image') || p.modelType?.includes('3d') || p.modelType === 'general' || p.type === 'general' || (!p.modelType && (p.type === 'image' || p.type === 'universal'))) && p.isEnabled) {
                     const is3D = p.modelType?.includes('3d') && !p.modelType?.includes('image');
 
                     // 只使用用户手动选择的模型列表，不自动发现全部模型
@@ -1430,7 +1430,7 @@ export function GenerationPanel(
                         const providers = universalApiManager.getProviders();
                         const imageModels: {id: string, providerId: string, providerName: string, is3DProvider?: boolean, displayLabel?: string}[] = [];
                         providers.forEach(p => {
-                            if ((p.modelType?.includes('image') || p.modelType?.includes('3d') || (!p.modelType && (p.type === 'image' || p.type === 'universal'))) && p.isEnabled) {
+                            if ((p.modelType?.includes('image') || p.modelType?.includes('3d') || p.modelType === 'general' || p.type === 'general' || (!p.modelType && (p.type === 'image' || p.type === 'universal'))) && p.isEnabled) {
                                 const is3D = p.modelType?.includes('3d') && !p.modelType?.includes('image');
                                 if (p.selectedModels && p.selectedModels.length > 0) {
                                     p.selectedModels.forEach(mId => {

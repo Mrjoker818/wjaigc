@@ -1989,7 +1989,7 @@ export function InfiniteCanvas({
           const userModels: {id: string, providerId: string, providerName: string}[] = [];
           for (const p of providers) {
             if (!p.isEnabled) continue;
-            if (p.modelType?.includes('image') || (!p.modelType && p.type === 'universal')) {
+            if (p.modelType?.includes('image') || p.modelType === 'general' || p.type === 'general' || (!p.modelType && p.type === 'universal')) {
               const displayName = p.displayName || p.name;
               if (p.selectedModels && p.selectedModels.length > 0) {
                 for (const m of p.selectedModels) {
@@ -2033,7 +2033,7 @@ export function InfiniteCanvas({
           const providers = JSON.parse(stored) as Array<{ id: string; name: string; displayName?: string; baseUrl: string; apiKey: string; isEnabled: boolean; modelType?: string; type?: string; selectedModel?: string; selectedModels?: string[]; providerPreset?: string; advancedParams?: Record<string, string> }>;
           for (const p of providers) {
             if (!p.isEnabled) continue;
-            if (!(p.modelType?.includes('3d') || (!p.modelType && p.type === 'universal'))) continue;
+            if (!(p.modelType?.includes('3d') || p.modelType === 'general' || p.type === 'general' || (!p.modelType && p.type === 'universal'))) continue;
             const displayName = p.displayName || p.name;
             if (p.selectedModels && p.selectedModels.length > 0) {
               for (const model of p.selectedModels) {

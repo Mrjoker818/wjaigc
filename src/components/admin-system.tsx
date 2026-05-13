@@ -12,11 +12,12 @@ interface AdminSystemProps {
   onClose: () => void;
 }
 
-type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer';
+type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer';
 type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'imageEdit' | 'vectorize' | 'layer';
 type AdminProvider = ApiProvider & { apiKeyPreview?: string };
 
 const apiKindLabels: Record<ApiKind, string> = {
+  general: '通用模型',
   image: '图像模型',
   chat: 'LLM 模型',
   '3d': '3D 模型',
@@ -25,6 +26,7 @@ const apiKindLabels: Record<ApiKind, string> = {
 };
 
 const apiKindDescriptions: Record<ApiKind, string> = {
+  general: '选择此类型后自动识别并显示当前API的所有模型，不按类型过滤',
   image: '支持自动识别模型，管理员选择后对接到图像生成功能',
   chat: '支持自动识别模型，管理员选择后对接到AI聊天功能',
   '3d': '支持自动识别模型，管理员选择后对接到一键转3D功能',
@@ -257,7 +259,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
         apiKey: apiKey.trim(),
         modelType: apiKind,
         selectedModels: models,
-        requestStyle: apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' ? 'chat-completions' : 'images-generations',
+        requestStyle: apiKind === 'general' ? 'auto' : apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' ? 'chat-completions' : 'images-generations',
         advancedParams: advancedParams.filter(p => p.key.trim()),
       }),
     });
@@ -531,8 +533,11 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                     <p className={`text-xs mt-1 ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>{apiKindDescriptions[apiKind]}</p>
                   </div>
                   <button onClick={() => void handleDiscoverModels()} disabled={isDiscovering} className={`w-full h-9 rounded-lg text-sm font-semibold ${isGold ? 'bg-[#1a1a1a] text-[#d4af37] border border-[#2a2a2a]' : 'bg-gray-100 text-gray-700 border border-gray-200'}`}>
-                    {isDiscovering ? '识别模型中...' : (apiKind === 'vectorize' ? '识别矢量化模型' : apiKind === 'layer' ? '识别分层模型' : '自动识别模型')}
+                    {isDiscovering ? '识别模型中...' : (apiKind === 'general' ? '识别所有模型' : apiKind === 'vectorize' ? '识别矢量化模型' : apiKind === 'layer' ? '识别分层模型' : '自动识别模型')}
                   </button>
+                  {apiKind === 'general' && !isDiscovering && discoveredModels.length === 0 && (
+                    <p className={`text-xs ${isGold ? 'text-[#777]' : 'text-gray-500'}`}>选择此类型后将显示当前API接口的所有可用模型，不按类型过滤</p>
+                  )}
                   {apiKind === 'vectorize' && !isDiscovering && discoveredModels.length === 0 && (
                     <p className={`text-xs ${isGold ? 'text-[#777]' : 'text-gray-500'}`}>系统将自动匹配名称中包含 vectorize / vector / svg / tracer 的模型</p>
                   )}
@@ -706,7 +711,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="text-sm font-semibold">{provider.displayName || provider.name}</p>
-                          <span className={`text-xs px-2 py-0.5 rounded ${isGold ? 'bg-[#222] text-[#aaa]' : 'bg-gray-200 text-gray-600'}`}>{apiKindLabels[provider.modelType as ApiKind] || (provider.modelType === 'imageEdit' ? '图像处理' : provider.modelType === 'universal' ? '通用' : provider.modelType)}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded ${isGold ? 'bg-[#222] text-[#aaa]' : 'bg-gray-200 text-gray-600'}`}>{apiKindLabels[provider.modelType as ApiKind] || (provider.modelType === 'imageEdit' ? '图像处理' : provider.modelType === 'universal' ? '通用' : provider.modelType === 'general' ? '通用模型' : provider.modelType)}</span>
                           {provider.isEnabled && (
                             <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/15 text-green-500">启用</span>
                           )}

@@ -249,7 +249,7 @@ export function ThirdPartyModelDialog({
   };
 
   const currentProviders = providers.filter(p => 
-    p.modelType === activeTab || p.type === 'universal' || p.type === activeTab
+    p.modelType === activeTab || p.type === 'universal' || p.type === 'general' || p.modelType === 'general' || p.type === activeTab
   );
 
   // 按搜索过滤模型

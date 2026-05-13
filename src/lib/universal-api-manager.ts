@@ -228,15 +228,15 @@ export class UniversalApiManager {
   }
 
   getImageProviders(): ApiProvider[] {
-    return this.providers.filter(p => p.isEnabled && (p.modelType === 'image' || p.type === 'image' || p.type === 'universal'));
+    return this.providers.filter(p => p.isEnabled && (p.modelType === 'image' || p.type === 'image' || p.type === 'universal' || p.type === 'general' || p.modelType === 'general'));
   }
 
   getChatProviders(): ApiProvider[] {
-    return this.providers.filter(p => p.isEnabled && (p.modelType === 'chat' || p.type === 'chat' || p.type === 'universal'));
+    return this.providers.filter(p => p.isEnabled && (p.modelType === 'chat' || p.type === 'chat' || p.type === 'universal' || p.type === 'general' || p.modelType === 'general'));
   }
 
   get3DProviders(): ApiProvider[] {
-    return this.providers.filter(p => p.isEnabled && (p.modelType === '3d' || p.type === 'universal'));
+    return this.providers.filter(p => p.isEnabled && (p.modelType === '3d' || p.type === 'universal' || p.type === 'general' || p.modelType === 'general'));
   }
 
   getEnabledProviders(): ApiProvider[] {

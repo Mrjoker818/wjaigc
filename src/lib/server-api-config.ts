@@ -22,7 +22,7 @@ export function normalizeApiBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '');
 }
 
-type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'imageEdit' | 'universal';
+type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'imageEdit' | 'universal' | 'general';
 
 interface StoredApiConfig {
   providers: ApiProvider[];
@@ -76,7 +76,7 @@ function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 
   if (provider.modelType === 'vectorize') return 'vectorize';
   if (provider.modelType === 'layer') return 'layer';
   // Legacy types map to image
-  if (provider.modelType === 'imageEdit' || provider.modelType === 'universal') return 'image';
+  if (provider.modelType === 'imageEdit' || provider.modelType === 'universal' || provider.modelType === 'general') return 'image';
   return 'image';
 }
 
@@ -235,7 +235,7 @@ export async function discoverModelsForCredentials(
     baseUrl,
     apiKey,
     isEnabled: true,
-    type: modelType === 'chat' ? 'chat' : modelType === 'vectorize' ? 'vectorize' : modelType === 'layer' ? 'layer' : modelType === '3d' ? '3d' : modelType === 'imageEdit' ? 'imageEdit' : 'image',
+    type: modelType === 'chat' ? 'chat' : modelType === 'vectorize' ? 'vectorize' : modelType === 'layer' ? 'layer' : modelType === '3d' ? '3d' : modelType === 'imageEdit' ? 'imageEdit' : (modelType === 'universal' || modelType === 'general') ? 'universal' : 'image',
     modelType,
     createdAt: startedAt,
     updatedAt: startedAt,
@@ -265,6 +265,7 @@ export async function discoverModelsForCredentials(
       .map((m: Record<string, unknown>) => formatModel(m, probeProvider))
       .filter((m: ModelInfo) => m.id && (
         modelType === 'universal' ||
+        modelType === 'general' ||
         modelType === 'imageEdit' ||
         // For vectorize/layer: show all models (admin may need to pick from all available)
         // The inferModelType already assigns the right type, so matching works
@@ -374,7 +375,7 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
     baseUrl: normalizeBaseUrl(input.baseUrl),
     apiKey: input.apiKey.trim(),
     isEnabled: true,
-    type: input.modelType === 'chat' ? 'chat' : input.modelType === 'vectorize' ? 'vectorize' : input.modelType === 'layer' ? 'layer' : input.modelType === '3d' ? '3d' : input.modelType === 'imageEdit' ? 'imageEdit' : 'image',
+    type: input.modelType === 'chat' ? 'chat' : input.modelType === 'vectorize' ? 'vectorize' : input.modelType === 'layer' ? 'layer' : input.modelType === '3d' ? '3d' : input.modelType === 'imageEdit' ? 'imageEdit' : (input.modelType === 'universal' || input.modelType === 'general') ? 'universal' : 'image',
     modelType: input.modelType,
     requestStyle: input.requestStyle === 'auto' ? 'auto' : (input.requestStyle || (input.modelType === 'chat' ? 'chat-completions' : 'images-generations')),
     selectedModels: input.selectedModels || [],
@@ -485,19 +486,21 @@ export async function refreshApiProvider(providerId: string): Promise<ApiProvide
 export async function findProviderForModel(modelId: string, modelType?: ApiKind): Promise<ApiProvider | null> {
   const providers = await getApiProviders();
   const enabled = providers.filter(provider => provider.isEnabled);
+  const isFlexibleType = !modelType || modelType === 'universal' || modelType === 'general';
+  const matchesType = (p: ApiProvider) => isFlexibleType || p.modelType === modelType || p.modelType === 'universal' || p.modelType === 'general';
   const exact = enabled.find(provider =>
-    (!modelType || modelType === 'universal' || provider.modelType === modelType || provider.modelType === 'universal') &&
+    matchesType(provider) &&
     (provider.selectedModels || []).includes(modelId),
   );
   if (exact) return exact;
 
   const byDefault = enabled.find(provider =>
-    (!modelType || modelType === 'universal' || provider.modelType === modelType || provider.modelType === 'universal') &&
+    matchesType(provider) &&
     provider.isDefault,
   );
   if (byDefault) return byDefault;
 
-  return enabled.find(provider => !modelType || provider.modelType === modelType || provider.modelType === 'universal') || null;
+  return enabled.find(provider => matchesType(provider)) || null;
 }
 
 /** 根据功能类型查找对应的 API 提供商（矢量化/分层/3D/聊天等） */
@@ -537,7 +540,7 @@ export async function findAllProvidersForType(modelType: ApiKind): Promise<Array
   const providers = await getApiProviders();
   // For imageEdit, include image-type providers
   const effectiveType = modelType === 'imageEdit' ? 'image' : modelType;
-  const enabled = providers.filter(p => p.isEnabled && (p.modelType === effectiveType || p.modelType === 'universal'));
+  const enabled = providers.filter(p => p.isEnabled && (p.modelType === effectiveType || p.modelType === 'universal' || p.modelType === 'general'));
   // Sort: default providers first
   enabled.sort((a, b) => (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0));
   return enabled.map(provider => {
@@ -554,7 +557,7 @@ export async function findAllProvidersForType(modelType: ApiKind): Promise<Array
 export async function getPublicModels(modelType?: ApiKind): Promise<ModelInfo[]> {
   const providers = await getApiProviders();
   return providers
-    .filter(provider => provider.isEnabled && (!modelType || modelType === 'universal' || provider.modelType === modelType || provider.modelType === 'universal'))
+    .filter(provider => provider.isEnabled && (!modelType || modelType === 'universal' || modelType === 'general' || provider.modelType === modelType || provider.modelType === 'universal' || provider.modelType === 'general'))
     .flatMap(provider => {
       const selected = new Set(provider.selectedModels || []);
       const discovered = provider.discoveredModels || [];
