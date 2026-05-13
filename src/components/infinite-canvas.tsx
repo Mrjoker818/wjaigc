@@ -1017,6 +1017,32 @@ export function InfiniteCanvas({
         }
         return;
       }
+      // Ctrl+Q: Masonry layout for selected images
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyQ') {
+        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
+        e.preventDefault();
+        if (selectedIds.size > 1) {
+          const selImgs = images.filter(i => selectedIds.has(i.id));
+          const COL_WIDTH = 280;
+          const GAP = 16;
+          const numCols = Math.min(5, Math.max(2, Math.ceil(Math.sqrt(selImgs.length))));
+          const colHeights = new Array(numCols).fill(0);
+          const updated = images.map(img => {
+            if (!selectedIds.has(img.id)) return img;
+            const scale = COL_WIDTH / img.width;
+            const newW = COL_WIDTH;
+            const newH = Math.round(img.height * scale);
+            const minCol = colHeights.indexOf(Math.min(...colHeights));
+            const newX = minCol * (COL_WIDTH + GAP);
+            const newY = colHeights[minCol];
+            colHeights[minCol] += newH + GAP;
+            return { ...img, x: newX, y: newY, width: newW, height: newH };
+          });
+          onImagesChange(updated);
+        }
+        return;
+      }
       if (e.code === 'Space' && !e.repeat) {
         // Don't capture Space when user is typing in an input/textarea
         const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
@@ -1923,8 +1949,14 @@ export function InfiniteCanvas({
 
     if (hitId) {
       if (!selectedIds.has(hitId)) {
-        setSelectedIds(new Set([hitId]));
-        selectImage(hitId);
+        // If multi-select is active, add the clicked image to selection instead of replacing
+        if (selectedIds.size > 1) {
+          setSelectedIds(new Set([...selectedIds, hitId]));
+          selectImage(hitId);
+        } else {
+          setSelectedIds(new Set([hitId]));
+          selectImage(hitId);
+        }
       }
       setContextMenuPos({ x: e.clientX, y: e.clientY });
       setShowContextMenu(true);
@@ -4854,7 +4886,7 @@ export function InfiniteCanvas({
       }
       onImagesChange(images.map(i => selectedIds.has(i.id) && yMap.has(i.id) ? { ...i, y: yMap.get(i.id)! } : i));
     } },
-    { label: '一键排版', action: () => {
+    { label: '一键排版 Ctrl+Q', action: () => {
       const selImgs = images.filter(i => selectedIds.has(i.id));
       if (selImgs.length < 2) return;
       // Waterfall/masonry layout - like Pinterest/Huaban
@@ -5721,6 +5753,7 @@ export function InfiniteCanvas({
                         genGroupDragReadyRef.current = true;
                       }, 200);
                     }}
+                    onContextMenu={(e) => { e.stopPropagation(); e.preventDefault(); }}
                   >
                     <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing">
                       <div className="w-2.5 h-2.5 rounded-full" style={{ background: accentColor }} />
