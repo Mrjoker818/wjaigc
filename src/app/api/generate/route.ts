@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { appendUserJsonl } from '@/lib/server-user-storage';
-import { findProviderForModel, normalizeApiBaseUrl, findAllProvidersForType } from '@/lib/server-api-config';
+import { findProviderForModel, normalizeApiBaseUrl, findAllProvidersForType, findProviderById } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 
@@ -95,6 +95,7 @@ export async function POST(request: NextRequest) {
       quality = '1K',
       userId: requestUserId,
       strength,
+      providerId,
     } = await request.json();
     const sessionUser = await getSessionUser(request);
     const userId = (sessionUser?.id || "anonymous") || requestUserId;
@@ -147,8 +148,9 @@ export async function POST(request: NextRequest) {
     // 获取所有可用的 image 类型 API 提供商和模型
     const allImageProviders = await findAllProvidersForType('image');
     
-    // 尝试找到用户指定模型对应的 provider
-    let provider = await findProviderForModel(model, 'image');
+    // 尝试找到用户指定模型对应的 provider（优先使用 providerId 精确匹配）
+    let provider = providerId ? await findProviderById(providerId) : null;
+    if (!provider) provider = await findProviderForModel(model, 'image');
     let serverApiKey = provider?.apiKey || process.env.APIMART_API_KEY;
     let apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || process.env.APIMART_BASE_URL || 'https://api.apimart.ai');
     let modelConfig = APIMART_MODEL_CONFIG[model] || {

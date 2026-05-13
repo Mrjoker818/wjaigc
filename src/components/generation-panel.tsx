@@ -393,19 +393,22 @@ export function GenerationPanel(
     }, []);
 
     // 通知父组件当前模型变化（API Key由服务端管理，无需传递）
+    // 传递纯 modelId（从复合键 providerId::modelId 中拆解）
     useEffect(() => {
-        onModelChange?.(model);
+        const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
+        onModelChange?.(pureModelId);
     }, [model, onModelChange]);
 
     // 获取当前模型支持的比例
+    const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
     const getSupportedAspectRatios = useCallback(() => {
-        return MODEL_ASPECT_RATIOS[model] || ['1:1', '4:3', '3:4'];
-    }, [model]);
+        return MODEL_ASPECT_RATIOS[pureModelId] || ['1:1', '4:3', '3:4'];
+    }, [pureModelId]);
 
     // 获取当前模型支持的质量
     const getSupportedQualities = useCallback(() => {
-        return MODEL_QUALITIES[model] || ['standard'];
-    }, [model]);
+        return MODEL_QUALITIES[pureModelId] || ['standard'];
+    }, [pureModelId]);
 
     // 尺寸映射
     const ratioToSize: Record<string, string> = {
@@ -670,12 +673,21 @@ export function GenerationPanel(
                     }
                 }
                 if (serverModels.length > 0) {
-                    setDiscoveredModels(prev => {
-                        // 用 id+providerId 组合去重，避免不同 provider 的同名模型被丢弃
-                        const existingKeys = new Set(prev.map(m => `${m.id}::${m.providerId}`));
-                        const newModels = serverModels.filter(m => !existingKeys.has(`${m.id}::${m.providerId}`));
-                        if (newModels.length === 0) return prev;
-                        return [...prev, ...newModels];
+                    // 完整替换模型列表，确保管理员更新后自动同步
+                    setDiscoveredModels(serverModels);
+                    // 如果当前没有选中模型，自动选中第一个
+                    setModel(prev => {
+                        if (!prev && serverModels.length > 0) {
+                            return `${serverModels[0].id}::${serverModels[0].providerId}`;
+                        }
+                        // 检查当前选中的模型是否还存在
+                        if (prev) {
+                            const exists = serverModels.some(m => `${m.id}::${m.providerId}` === prev);
+                            if (!exists && serverModels.length > 0) {
+                                return `${serverModels[0].id}::${serverModels[0].providerId}`;
+                            }
+                        }
+                        return prev;
                     });
                 }
             }
@@ -688,7 +700,17 @@ export function GenerationPanel(
         loadServerModels();
         // 定时刷新模型列表（每30秒），确保管理员更新后自动同步
         const interval = setInterval(loadServerModels, 30000);
-        return () => clearInterval(interval);
+        // 页面重新可见时刷新模型列表（用户可能刚从管理面板切回）
+        const handleVisibility = () => {
+            if (document.visibilityState === 'visible') {
+                loadServerModels();
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibility);
+        return () => {
+            clearInterval(interval);
+            document.removeEventListener('visibilitychange', handleVisibility);
+        };
     }, [loadServerModels]);
 
     const handleAddUniversalApi = async () => {
@@ -856,8 +878,9 @@ export function GenerationPanel(
                     <select
                         value={model}
                         onChange={(e) => {
-                            setModel(e.target.value);
-                            // Save selected model to localStorage for canvas tools
+                            const compositeKey = e.target.value;
+                            setModel(compositeKey);
+                            // Save selected model (composite key) to localStorage for canvas tools
                             try {
                               const currentUserId = localStorage.getItem('unbounded_ai_current_user');
                               if (currentUserId) {
@@ -865,17 +888,19 @@ export function GenerationPanel(
                                 const data = stored ? JSON.parse(stored) : { userData: {} };
                                 if (!data.userData) data.userData = {};
                                 if (!data.userData[currentUserId]) data.userData[currentUserId] = {};
-                                data.userData[currentUserId].selectedModel = e.target.value;
+                                data.userData[currentUserId].selectedModel = compositeKey;
                                 localStorage.setItem('unbounded_ai_user_data', JSON.stringify(data));
                               }
                             } catch (err) {
                               console.error('Failed to save selected model:', err);
                             }
-                            const supportedRatios = MODEL_ASPECT_RATIOS[e.target.value] || ['1:1'];
+                            // Extract pure modelId for ratio/quality lookup
+                            const pureModelId = compositeKey.includes('::') ? compositeKey.split('::').pop()! : compositeKey;
+                            const supportedRatios = MODEL_ASPECT_RATIOS[pureModelId] || ['1:1'];
                             if (!supportedRatios.includes(aspectRatio)) {
                                 setAspectRatio(supportedRatios[0]);
                             }
-                            const supportedQualities = MODEL_QUALITIES[e.target.value] || ['standard'];
+                            const supportedQualities = MODEL_QUALITIES[pureModelId] || ['standard'];
                             if (!supportedQualities.includes(quality)) {
                                 setQuality(supportedQualities[0]);
                             }
@@ -896,18 +921,25 @@ export function GenerationPanel(
                                 const label = has3D ? `${providerName} (3D)` : providerName;
                                 return (
                                 <optgroup key={providerName} label={label}>
-                                    {models.map(dm => (
-                                        <option key={dm.id} value={dm.id}>
+                                    {models.map(dm => {
+                                        // Use composite key (modelId::providerId) to distinguish same-name models from different providers
+                                        const compositeValue = `${dm.providerId}::${dm.id}`;
+                                        return (
+                                        <option key={compositeValue} value={compositeValue}>
                                             {dm.is3DProvider ? `[3D] ${dm.displayLabel || getModelDisplayName(dm.id)}` : getModelDisplayName(dm.id)}
                                         </option>
-                                    ))}
+                                        );
+                                    })}
                                 </optgroup>
                             );
                             });
                         })()}
                     </select>
                     {(() => {
-                        const discoveredModel = discoveredModels.find(dm => dm.id === model);
+                        const discoveredModel = discoveredModels.find(dm => {
+                            const compositeKey = `${dm.providerId}::${dm.id}`;
+                            return compositeKey === model || dm.id === model;
+                        });
                         if (discoveredModel) return <p className={`text-xs mt-0.5 ${mc ? 'text-gray-400' : 'text-[#666]'}`}>{discoveredModel.is3DProvider ? `${discoveredModel.displayLabel || getModelDisplayName(discoveredModel.id)} · 来自 ${discoveredModel.providerName}` : `${getModelDisplayName(discoveredModel.id)} · 来自 ${discoveredModel.providerName}`}</p>;
                         return null;
                     })()}

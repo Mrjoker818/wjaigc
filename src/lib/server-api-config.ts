@@ -547,6 +547,12 @@ export async function findProviderForModel(modelId: string, modelType?: ApiKind)
   return enabled.find(provider => matchesType(provider)) || null;
 }
 
+/** 根据 providerId 直接查找 API 提供商 */
+export async function findProviderById(providerId: string): Promise<ApiProvider | null> {
+  const providers = await getApiProviders();
+  return providers.find(p => p.id === providerId && p.isEnabled) || null;
+}
+
 /** 根据功能类型查找对应的 API 提供商（矢量化/分层/3D/聊天等） */
 export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3d' | 'imageEdit' | 'chat'): Promise<ApiProvider | null> {
   const kindMap: Record<string, ApiKind> = {

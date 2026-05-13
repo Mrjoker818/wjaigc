@@ -1980,6 +1980,12 @@ export function InfiniteCanvas({
       } catch { /* silent */ }
     };
     loadImageModels();
+
+    // Auto-refresh when page becomes visible (admin may have updated models)
+    const handleVisibility = () => { if (document.visibilityState === 'visible') loadImageModels(); };
+    document.addEventListener('visibilitychange', handleVisibility);
+    const timer = setInterval(loadImageModels, 60000);
+    return () => { document.removeEventListener('visibilitychange', handleVisibility); clearInterval(timer); };
   }, []);
 
   const getThreeDProviders = useCallback((): Array<{ id: string; name: string; baseUrl: string; apiKey: string; model?: string; providerPreset?: string; advancedParams?: Record<string, string> }> => {
@@ -2163,9 +2169,33 @@ export function InfiniteCanvas({
       const data = JSON.parse(stored);
       const userData = data.userData?.[currentUserId];
       if (!userData?.selectedModel) return 'gemini-2.5-flash-image-preview';
-      return userData.selectedModel;
+      // 从复合键 providerId::modelId 中拆解出纯 modelId
+      const selectedModel = userData.selectedModel as string;
+      return selectedModel.includes('::') ? selectedModel.split('::').pop()! : selectedModel;
     } catch {
       return 'gemini-2.5-flash-image-preview';
+    }
+  }, []);
+
+  // 获取当前选择的 providerId（从复合键中拆解）
+  const getCurrentProviderId = useCallback((): string | null => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const currentUserId = localStorage.getItem('unbounded_ai_current_user');
+      if (!currentUserId) return null;
+      const stored = localStorage.getItem('unbounded_ai_user_data');
+      if (!stored) return null;
+      const data = JSON.parse(stored);
+      const userData = data.userData?.[currentUserId];
+      if (!userData?.selectedModel) return null;
+      // 从复合键 providerId::modelId 中拆解出 providerId
+      const selectedModel = userData.selectedModel as string;
+      if (selectedModel.includes('::')) {
+        return selectedModel.split('::')[0] || null;
+      }
+      return null;
+    } catch {
+      return null;
     }
   }, []);
 
@@ -2409,7 +2439,7 @@ export function InfiniteCanvas({
         const res = await fetch('/api/poll-task', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ taskId, model: currentModel }),
+          body: JSON.stringify({ taskId, model: currentModel, providerId: getCurrentProviderId() }),
         });
         const data = await res.json();
         if (data.status === 'completed' && data.imageUrl) {
@@ -2468,7 +2498,7 @@ export function InfiniteCanvas({
     setCanvasGenRefImages([]);
     // Auto-select first model if none selected
     if (!canvasGenModel && canvasGenModels.length > 0) {
-      setCanvasGenModel(canvasGenModels[0].id);
+      setCanvasGenModel(`${canvasGenModels[0].providerId}::${canvasGenModels[0].id}`);
     }
   }, [showCanvasGenerator, canvasGenFrameId, images, zoom, viewOffset, onImagesChange, canvasGenModel, canvasGenModels]);
 
@@ -2493,7 +2523,8 @@ export function InfiniteCanvas({
         body: JSON.stringify({
           prompt: canvasGenPrompt,
           negativePrompt: canvasGenNegativePrompt || undefined,
-          model: canvasGenModel || undefined,
+          model: canvasGenModel?.includes('::') ? canvasGenModel.split('::')[0] : canvasGenModel || undefined,
+          providerId: canvasGenModel?.includes('::') ? canvasGenModel.split('::')[1] : undefined,
           aspectRatio: canvasGenAspectRatio,
           quality: canvasGenQuality,
           n: canvasGenCount,
@@ -2509,7 +2540,7 @@ export function InfiniteCanvas({
       const data = await res.json();
       const taskIds: string[] = data.taskIds || (data.taskId ? [data.taskId] : []);
       // 使用服务端实际使用的模型（可能因自动切换而与请求模型不同）
-      const actualGenModel = data.model || canvasGenModel || undefined;
+      const actualGenModel = data.model || (canvasGenModel?.includes('::') ? canvasGenModel.split('::')[0] : canvasGenModel) || undefined;
 
       if (taskIds.length === 0) {
         throw new Error('未获取到任务ID');
@@ -2672,6 +2703,7 @@ export function InfiniteCanvas({
           aspectRatio: `${origW}:${origH}`,
           model,
           apiKey,
+          providerId: getCurrentProviderId(),
           scale: upMultiplier,
           originalWidth: origW,
           originalHeight: origH,
@@ -2784,6 +2816,7 @@ export function InfiniteCanvas({
           aspectRatio: `${img.originalWidth || img.width}:${img.originalHeight || img.height}`,
           model,
           apiKey,
+          providerId: getCurrentProviderId(),
         }),
       });
 
@@ -2934,6 +2967,7 @@ export function InfiniteCanvas({
           zoom: multiAngleZoom,
           model,
           apiKey,
+          providerId: getCurrentProviderId(),
         }),
       });
       const data = await res.json();
@@ -3325,6 +3359,7 @@ export function InfiniteCanvas({
             aspectRatio: `${currentEditImg.originalWidth || currentEditImg.width}:${currentEditImg.originalHeight || currentEditImg.height}`,
             model,
             apiKey,
+            providerId: getCurrentProviderId(),
           }),
         });
 
@@ -3407,6 +3442,7 @@ export function InfiniteCanvas({
 
     if (editMode === 'img2img') {
       const img2imgModel = getCurrentModel();
+      const img2imgProviderId = getCurrentProviderId();
 
       // 图生图提示词构建：明确告诉模型参考原图的哪些方面 + 用关键词作为新内容
       const categoryEnMap: Record<string, string> = {
@@ -3494,6 +3530,7 @@ export function InfiniteCanvas({
           body: JSON.stringify({
             prompt: fullPrompt,
             model: img2imgModel,
+            providerId: img2imgProviderId || undefined,
             aspectRatio: (() => {
               const ow = editImg.originalWidth || Math.round(editImg.width);
               const oh = editImg.originalHeight || Math.round(editImg.height);
@@ -3636,6 +3673,7 @@ export function InfiniteCanvas({
             prompt: editPrompt || undefined,
             model,
             apiKey,
+            providerId: getCurrentProviderId(),
           }),
         });
 
@@ -6256,9 +6294,10 @@ export function InfiniteCanvas({
                     }`}
                   >
                     {canvasGenModels.length === 0 && <option value="">暂无可用模型</option>}
-                    {canvasGenModels.map(m => (
-                      <option key={m.id} value={m.id}>{m.id}{m.providerName ? ` (${m.providerName})` : ''}</option>
-                    ))}
+                    {canvasGenModels.map(m => {
+                      const compositeKey = `${m.id}::${m.providerId}`;
+                      return <option key={compositeKey} value={compositeKey}>{m.id}{m.providerName ? ` (${m.providerName})` : ''}</option>;
+                    })}
                   </select>
                 </div>
 

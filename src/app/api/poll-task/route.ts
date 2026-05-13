@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { appendUserJsonl } from '@/lib/server-user-storage';
-import { findProviderForModel, normalizeApiBaseUrl } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 
 export const dynamic = 'force-dynamic';
@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 // 轮询 APImart 任务状态 - 由前端调用
 export async function POST(request: NextRequest) {
   try {
-    const { taskId, model, userId: requestUserId } = await request.json();
+    const { taskId, model, userId: requestUserId, providerId } = await request.json();
     const sessionUser = await getSessionUser(request);
     const userId = (sessionUser?.id || "anonymous") || requestUserId;
 
@@ -19,7 +19,8 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const provider = await findProviderForModel(model || '', 'imageEdit')
+    const provider = providerId ? await findProviderById(providerId)
+      : await findProviderForModel(model || '', 'imageEdit')
       || await findProviderForModel(model || '', 'image')
       || await findProviderForModel(model || '', 'universal');
     const apiKey = provider?.apiKey || process.env.APIMART_API_KEY;

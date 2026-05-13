@@ -1023,7 +1023,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
           if (data.models && Array.isArray(data.models)) {
             for (const m of data.models) {
               models.push({
-                id: m.id || m.name,
+                id: m.providerId ? `${m.providerId}::${m.id || m.name}` : (m.id || m.name),
                 name: getModelDisplayName(m.name || m.id),
                 provider: providerMap.get(m.providerId) || m.providerId || '',
                 providerId: m.providerId || '',
@@ -1048,7 +1048,17 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
     loadServerModels();
     // 定时刷新模型列表（每30秒），确保管理员更新后自动同步
     const interval = setInterval(loadServerModels, 30000);
-    return () => clearInterval(interval);
+    // 页面重新可见时刷新模型列表（用户可能刚从管理面板切回）
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadServerModels();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [loadServerModels]);
 
   // 初始化对话列表

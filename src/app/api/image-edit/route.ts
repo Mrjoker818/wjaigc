@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findProviderForModel, findProviderForFeature, findAllProvidersForType, normalizeApiBaseUrl } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderById, findProviderForFeature, findAllProvidersForType, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import sharp from 'sharp';
@@ -768,18 +768,34 @@ export async function POST(request: NextRequest) {
       tilt = 0,
       zoom = 1,
       model = 'gemini-2.5-flash-image-preview',
+      providerId,
     } = body;
 
     // 放大/擦除/蒙版 均使用管理员系统的 image 类型模型
     // 策略：自动识别管理员配置的所有可用 image 模型，按优先级逐一尝试
-    // 1. 先尝试前端指定的模型（如果匹配到 provider）
+    // 0. 先尝试前端指定的 provider（如果提供了 providerId）
+    // 1. 再尝试前端指定的模型（如果匹配到 provider）
     // 2. 再尝试管理员配置的其他 image 类型 provider 的模型
     // 3. 最后使用环境变量兜底
-    const allImageProviders = await findAllProvidersForType('image');
-    
     // 构建候选模型列表：前端指定的模型优先，然后是其他所有可用模型
     const candidateModels: Array<{ model: string; apiKey: string; apiBaseUrl: string; source: string }> = [];
     const triedModels = new Set<string>();
+    
+    const allImageProviders = await findAllProvidersForType('image');
+    
+    // 0. 优先使用前端指定的 providerId
+    if (providerId) {
+      const specifiedProvider = await findProviderById(providerId);
+      if (specifiedProvider) {
+        candidateModels.push({
+          model,
+          apiKey: specifiedProvider.apiKey,
+          apiBaseUrl: normalizeApiBaseUrl(specifiedProvider.baseUrl),
+          source: 'specified-provider',
+        });
+        triedModels.add(model);
+      }
+    }
     
     // 1. 前端指定的模型（如果匹配到 provider）
     const preferredProvider = await findProviderForModel(model, 'image')
