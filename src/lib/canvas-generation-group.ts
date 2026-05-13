@@ -137,6 +137,94 @@ export function createGroupRefImage(
   };
 }
 
+/** 根据宽高比和模型尺寸配置计算实际像素尺寸 */
+export function calculateActualPixels(
+  aspectRatio: string,
+  quality: string = 'standard',
+  modelId?: string
+): string {
+  // 模型默认像素尺寸映射（根据各模型官方API文档配置）
+  const MODEL_PIXEL_SIZES: Record<string, Record<string, Record<string, string>>> = {
+    // GPT Image 2 — 官方支持的尺寸
+    'gpt-image-2': {
+      '1:1': { 'standard': '1024×1024', 'low': '1024×1024', 'medium': '1024×1024', 'high': '1024×1024' },
+      '3:2': { 'standard': '1536×1024', 'low': '1536×1024', 'medium': '1536×1024', 'high': '1536×1024' },
+      '2:3': { 'standard': '1024×1536', 'low': '1024×1536', 'medium': '1024×1536', 'high': '1024×1536' },
+    },
+    // Gemini 系列
+    'gemini-2.5-flash-image-preview': {
+      '1:1': { 'standard': '1024×1024', '1K': '1024×1024' },
+      '4:3': { 'standard': '1024×768', '1K': '1024×768' },
+      '3:4': { 'standard': '768×1024', '1K': '768×1024' },
+      '16:9': { 'standard': '1792×1024', '1K': '1792×1024' },
+      '9:16': { 'standard': '1024×1792', '1K': '1024×1792' },
+      '3:2': { 'standard': '1536×1024', '1K': '1536×1024' },
+      '2:3': { 'standard': '1024×1536', '1K': '1024×1536' },
+    },
+    'gemini-3-pro-image-preview': {
+      '1:1': { 'standard': '1024×1024', '1K': '1024×1024', 'high': '2048×2048', '2K': '2048×2048' },
+      '4:3': { 'standard': '1024×768', '1K': '1024×768', 'high': '2048×1536', '2K': '2048×1536' },
+      '3:4': { 'standard': '768×1024', '1K': '768×1024', 'high': '1536×2048', '2K': '1536×2048' },
+      '16:9': { 'standard': '1792×1024', '1K': '1792×1024', 'high': '2048×1152', '2K': '2048×1152' },
+      '9:16': { 'standard': '1024×1792', '1K': '1024×1792', 'high': '1152×2048', '2K': '1152×2048' },
+      '3:2': { 'standard': '1536×1024', '1K': '1536×1024', 'high': '2048×1365', '2K': '2048×1365' },
+      '2:3': { 'standard': '1024×1536', '1K': '1024×1536', 'high': '1365×2048', '2K': '1365×2048' },
+    },
+    'gemini-3.1-flash-image-preview': {
+      '1:1': { 'standard': '1024×1024', '1K': '1024×1024', 'high': '2048×2048', '2K': '2048×2048', 'ultra': '4096×4096', '4K': '4096×4096' },
+      '4:3': { 'standard': '1024×768', '1K': '1024×768', 'high': '2048×1536', '2K': '2048×1536', 'ultra': '3840×2880', '4K': '3840×2880' },
+      '3:4': { 'standard': '768×1024', '1K': '768×1024', 'high': '1536×2048', '2K': '1536×2048', 'ultra': '2880×3840', '4K': '2880×3840' },
+      '16:9': { 'standard': '1792×1024', '1K': '1792×1024', 'high': '2048×1152', '2K': '2048×1152', 'ultra': '3840×2160', '4K': '3840×2160' },
+      '9:16': { 'standard': '1024×1792', '1K': '1024×1792', 'high': '1152×2048', '2K': '1152×2048', 'ultra': '2160×3840', '4K': '2160×3840' },
+      '3:2': { 'standard': '1536×1024', '1K': '1536×1024', 'high': '2048×1365', '2K': '2048×1365', 'ultra': '3840×2560', '4K': '3840×2560' },
+      '2:3': { 'standard': '1024×1536', '1K': '1024×1536', 'high': '1365×2048', '2K': '1365×2048', 'ultra': '2560×3840', '4K': '2560×3840' },
+    },
+    // Seedance 系列
+    'doubao-seedance-4-5': {
+      '1:1': { 'standard': '2048×2048', '2K': '2048×2048', 'ultra': '4096×4096', '4K': '4096×4096' },
+      '4:3': { 'standard': '2048×1536', '2K': '2048×1536', 'ultra': '3840×2880', '4K': '3840×2880' },
+      '3:4': { 'standard': '1536×2048', '2K': '1536×2048', 'ultra': '2880×3840', '4K': '2880×3840' },
+      '16:9': { 'standard': '2048×1152', '2K': '2048×1152', 'ultra': '3840×2160', '4K': '3840×2160' },
+      '9:16': { 'standard': '1152×2048', '2K': '1152×2048', 'ultra': '2160×3840', '4K': '2160×3840' },
+    },
+  };
+
+  // 尝试精确匹配模型ID
+  const lowerModel = (modelId || '').toLowerCase();
+  let matchedKey: string | undefined;
+  for (const key of Object.keys(MODEL_PIXEL_SIZES)) {
+    if (lowerModel.includes(key)) {
+      matchedKey = key;
+      break;
+    }
+  }
+
+  if (matchedKey) {
+    const modelSizes = MODEL_PIXEL_SIZES[matchedKey];
+    const ratioSizes = modelSizes[aspectRatio];
+    if (ratioSizes) {
+      const qualityKey = quality || 'standard';
+      // 尝试精确匹配质量
+      if (ratioSizes[qualityKey]) return ratioSizes[qualityKey];
+      // 回退到 standard
+      if (ratioSizes['standard']) return ratioSizes['standard'];
+      // 任意一个
+      return Object.values(ratioSizes)[0];
+    }
+  }
+
+  // 默认回退：根据比例计算
+  const ratioMap: Record<string, [number, number]> = {
+    '1:1': [1, 1], '4:3': [4, 3], '3:4': [3, 4],
+    '16:9': [16, 9], '9:16': [9, 16], '3:2': [3, 2], '2:3': [2, 3],
+  };
+  const [rw, rh] = ratioMap[aspectRatio] || [1, 1];
+  const base = 1024;
+  const w = rw >= rh ? base : Math.round(base * rw / rh);
+  const h = rw >= rh ? Math.round(base * rh / rw) : base;
+  return `${w}×${h}`;
+}
+
 /** 根据宽高比字符串计算像素尺寸 */
 export function aspectRatioToDimensions(
   aspectRatio: string,

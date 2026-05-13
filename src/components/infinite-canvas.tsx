@@ -11,7 +11,8 @@ import {
   Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen
 } from 'lucide-react';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory } from '@/lib/canvas-generation-group';
-import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, REFERENCE_CATEGORIES } from '@/lib/canvas-generation-group';
+import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES } from '@/lib/canvas-generation-group';
+import { getModelDisplayName } from '@/lib/model-name-map';
 import type { PsdLayerItem } from '@/types/psdLayer';
 import { toStableImageUrl } from '@/lib/stable-image-url';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
@@ -2192,38 +2193,42 @@ export function InfiniteCanvas({
     const toolbar = group.toolbar;
     if (!toolbar.prompt.trim()) return;
 
-    // 创建结果占位框
-    const phId = `grp-ph-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    // 计算结果框尺寸（根据用户选择的比例和模型尺寸）
     const [arW, arH] = toolbar.aspectRatio.split(':').map(Number);
     const arRatio = (arW || 1) / (arH || 1);
-    const baseSize = 400;
-    const phWidth = arRatio >= 1 ? baseSize : Math.round(baseSize * arRatio);
-    const phHeight = arRatio >= 1 ? Math.round(baseSize / arRatio) : baseSize;
+    // 根据工具栏中的尺寸设置计算结果框的显示尺寸
+    let displayBaseSize = 400;
+    if (toolbar.size) {
+      const [sw, sh] = toolbar.size.split('x').map(Number);
+      const maxEdge = Math.max(sw, sh);
+      // 根据实际像素尺寸缩放显示大小
+      if (maxEdge <= 512) displayBaseSize = 200;
+      else if (maxEdge <= 1024) displayBaseSize = 300;
+      else if (maxEdge <= 1792) displayBaseSize = 400;
+      else if (maxEdge <= 2048) displayBaseSize = 450;
+      else displayBaseSize = 500;
+    }
+    const phWidth = arRatio >= 1 ? displayBaseSize : Math.round(displayBaseSize * arRatio);
+    const phHeight = arRatio >= 1 ? Math.round(displayBaseSize / arRatio) : displayBaseSize;
 
     const phX = group.position.resultX ?? 0;
     const phY = group.position.resultY ?? 0;
 
-    const placeholder: CanvasImage = {
-      id: phId,
-      url: '',
-      x: phX, y: phY,
-      width: phWidth, height: phHeight,
-      originalWidth: phWidth * 2, originalHeight: phHeight * 2,
-      isProcessingPlaceholder: true,
-      processing: {
-        label: '生成中',
-        status: '准备生成...',
-        progress: 5,
-      },
-      aspectRatio: toolbar.aspectRatio,
-    };
-
-    onImagesChange([...images, placeholder]);
-
-    // 更新组的resultPlaceholder
+    // 更新组的resultPlaceholder尺寸和进度状态（不创建单独的画布占位图片）
     setGenGroups(prev => prev.map(g => {
       if (g.id !== group.id) return g;
-      return { ...g, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: true, progress: 0 } };
+      return {
+        ...g,
+        status: 'generating' as const,
+        resultPlaceholder: {
+          ...g.resultPlaceholder,
+          x: phX, y: phY,
+          width: phWidth, height: phHeight,
+          aspectRatio: toolbar.aspectRatio,
+          isProcessing: true,
+          progress: 5,
+        },
+      };
     }));
 
     // 构建提示词：参考图组不再添加类别前缀，用户用自然语言描述如何参考
@@ -2269,12 +2274,12 @@ export function InfiniteCanvas({
           prompt: toolbar.prompt,
           aspectRatio: toolbar.aspectRatio,
         }));
-        // 移除占位框，添加结果图
-        onImagesChange(images.filter(img => img.id !== phId).concat(newImages));
+        // 添加结果图到画布
+        onImagesChange([...imagesRef.current, ...newImages]);
         // 更新组结果
         setGenGroups(prev => prev.map(g => {
           if (g.id !== group.id) return g;
-          return { ...g, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false }, resultImageIds: newImages.map((img: { id: string }) => img.id) };
+          return { ...g, status: 'completed' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 100, resultUrl: newImages[0]?.url }, resultImageIds: newImages.map((img: { id: string }) => img.id) };
         }));
       } else if (data.taskIds) {
         // 轮询模式
@@ -2285,10 +2290,9 @@ export function InfiniteCanvas({
           attempts++;
           if (attempts > maxAttempts) {
             clearInterval(interval);
-            onImagesChange(images.filter(img => img.id !== phId));
             setGenGroups(prev => prev.map(g => {
               if (g.id !== group.id) return g;
-              return { ...g, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false } };
+              return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0 } };
             }));
             return;
           }
@@ -2299,11 +2303,11 @@ export function InfiniteCanvas({
               body: JSON.stringify({ taskId, model: currentModel, providerId }),
             });
             const pollData = await pollRes.json();
-            // 更新进度
+            // 更新组内进度
             if (pollData.progress !== undefined) {
-              onImagesChange(imagesRef.current.map(img => {
-                if (img.id !== phId) return img;
-                return { ...img, processing: { ...img.processing!, progress: Math.max(pollData.progress, 5), status: `生成中 ${pollData.progress}%` } };
+              setGenGroups(prev => prev.map(g => {
+                if (g.id !== group.id) return g;
+                return { ...g, resultPlaceholder: { ...g.resultPlaceholder, progress: Math.max(pollData.progress, 5) } };
               }));
             }
             if (pollData.status === 'completed' && pollData.results?.length > 0) {
@@ -2318,19 +2322,16 @@ export function InfiniteCanvas({
                 prompt: toolbar.prompt,
                 aspectRatio: toolbar.aspectRatio,
               }));
-              const currentImages = imagesRef.current;
-              onImagesChange(currentImages.filter(img => img.id !== phId).concat(resultImages));
+              onImagesChange([...imagesRef.current, ...resultImages]);
               setGenGroups(prev => prev.map(g => {
                 if (g.id !== group.id) return g;
-                return { ...g, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false }, resultImageIds: resultImages.map((ri: { id: string }) => ri.id) };
+                return { ...g, status: 'completed' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 100, resultUrl: resultImages[0]?.url }, resultImageIds: resultImages.map((ri: { id: string }) => ri.id) };
               }));
             } else if (pollData.status === 'failed') {
               clearInterval(interval);
-              const currentImages = imagesRef.current;
-              onImagesChange(currentImages.filter(img => img.id !== phId));
               setGenGroups(prev => prev.map(g => {
                 if (g.id !== group.id) return g;
-                return { ...g, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false } };
+                return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0 } };
               }));
             }
           } catch {
@@ -2339,14 +2340,13 @@ export function InfiniteCanvas({
         }, 2000);
       }
     } catch (error) {
-      // 网络错误，移除占位框
-      onImagesChange(images.filter(img => img.id !== phId));
+      // 网络错误，重置组状态
       setGenGroups(prev => prev.map(g => {
         if (g.id !== group.id) return g;
-        return { ...g, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false } };
+        return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0 } };
       }));
     }
-  }, [images, getCurrentModel, onImagesChange]);
+  }, [getCurrentModel, onImagesChange]);
 
   // handleGenGroupGenerate: 通过groupId查找组并调用handleGroupGenerate
   const handleGenGroupGenerate = useCallback((groupId: string) => {
@@ -5350,7 +5350,7 @@ export function InfiniteCanvas({
 
             // Find current model display name
             const currentModelObj = canvasGenModels.find(m => m.id === group.toolbar.model);
-            const modelDisplayName = currentModelObj ? `${currentModelObj.providerName} · ${currentModelObj.id}` : (group.toolbar.model || '选择模型');
+            const modelDisplayName = currentModelObj ? `${getModelDisplayName(currentModelObj.id)} · 来自 ${currentModelObj.providerName}` : (group.toolbar.model ? getModelDisplayName(group.toolbar.model) : '选择模型');
 
             return (
               <div key={`gen-group-${group.id}`}>
@@ -5518,6 +5518,9 @@ export function InfiniteCanvas({
                         </span>
                         <span className="text-xs font-medium" style={{ color: `${accentColor}77` }}>
                           {srcImages.map(r => `R${r.refNumber}`).join(' + ')} →
+                        </span>
+                        <span className="text-xs" style={{ color: `${accentColor}66` }}>
+                          {group.toolbar.aspectRatio} {calculateActualPixels(group.toolbar.aspectRatio, group.toolbar.quality, group.toolbar.model)}
                         </span>
                       </>
                     )}

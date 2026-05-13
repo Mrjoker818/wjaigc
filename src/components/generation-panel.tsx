@@ -223,13 +223,16 @@ const getQuickTags = (category: string, designType: string): string[] => {
     return [...COMMON_QUICK_TAGS, ...categoryTags, ...designTags];
 };
 
-// 每个模型支持的画面比例（按APIMart官方文档配置）
+// 每个模型支持的画面比例（按各模型官方API文档配置）
 const MODEL_ASPECT_RATIOS: Record<string, string[]> = {
     'gemini-2.5-flash-image-preview': ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
     'gemini-3-pro-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
     'gemini-3.1-flash-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
     'doubao-seedance-4-5': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', '9:21'],
+    // GPT Image 2 — 官方支持 1:1 / 3:2(横版) / 2:3(竖版) 三种比例
+    // "gpt-image-2-official" 是 APImart 的键名，"gpt-image-2" 是 token link 等中转站的键名
     'gpt-image-2-official': ['1:1', '3:2', '2:3'],
+    'gpt-image-2': ['1:1', '3:2', '2:3'],
 };
 
 // 画面比例到像素尺寸的映射
@@ -275,6 +278,12 @@ const QUALITY_TO_SIZE: Record<string, Record<string, string>> = {
         'standard': '1024',
         'high': '1792'
     },
+    'gpt-image-2': {
+        'auto': '1024',
+        'low': '1024',
+        'medium': '1024',
+        'high': '1024'
+    },
 };
 
 // 每个模型支持的质量/分辨率档位（按APIMart官方文档配置，已通过API验证）
@@ -288,11 +297,33 @@ const MODEL_QUALITIES: Record<string, string[]> = {
     'doubao-seedance-4-5': ['2K', '4K'],
     // GPT-Image 系列 - quality类型
     'gpt-image-2-official': ['auto', 'low', 'medium', 'high'],
+    'gpt-image-2': ['auto', 'low', 'medium', 'high'],
 };
 
 // 模型列表仅从管理员/用户配置的服务器端加载，无内置默认模型
 
 // 风格预设现在通过 getStylePresets(designType) 动态获取
+
+/** 模糊匹配模型配置键名 — 支持纯 modelId 匹配到带后缀的配置 */
+function findModelConfig<T>(map: Record<string, T>, modelId: string): T | undefined {
+    // 1. 精确匹配
+    if (map[modelId] !== undefined) return map[modelId];
+    // 2. 模型ID包含配置键（如 "gpt-image-2" 匹配 "gpt-image-2-official"）
+    const lowerId = modelId.toLowerCase();
+    for (const key of Object.keys(map)) {
+        if (lowerId.includes(key) || key.includes(lowerId)) {
+            return map[key];
+        }
+    }
+    // 3. 前缀匹配（如 "gpt-image-2" 匹配 "gpt-image"）
+    for (const key of Object.keys(map)) {
+        const shortKey = key.split('-').slice(0, -1).join('-');
+        if (shortKey && (lowerId.startsWith(shortKey) || key.startsWith(lowerId.split('-').slice(0, -1).join('-')))) {
+            return map[key];
+        }
+    }
+    return undefined;
+}
 
 export function GenerationPanel(
     {
@@ -429,12 +460,12 @@ export function GenerationPanel(
     // 获取当前模型支持的比例
     const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
     const getSupportedAspectRatios = useCallback(() => {
-        return MODEL_ASPECT_RATIOS[pureModelId] || ['1:1', '4:3', '3:4'];
+        return findModelConfig(MODEL_ASPECT_RATIOS, pureModelId) || ['1:1', '4:3', '3:4'];
     }, [pureModelId]);
 
     // 获取当前模型支持的质量
     const getSupportedQualities = useCallback(() => {
-        return MODEL_QUALITIES[pureModelId] || ['standard'];
+        return findModelConfig(MODEL_QUALITIES, pureModelId) || ['standard'];
     }, [pureModelId]);
 
     // 尺寸映射
@@ -945,11 +976,11 @@ export function GenerationPanel(
                             }
                             // Extract pure modelId for ratio/quality lookup
                             const pureModelId = compositeKey.includes('::') ? compositeKey.split('::').pop()! : compositeKey;
-                            const supportedRatios = MODEL_ASPECT_RATIOS[pureModelId] || ['1:1'];
+                            const supportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, pureModelId) || ['1:1'];
                             if (!supportedRatios.includes(aspectRatio)) {
                                 setAspectRatio(supportedRatios[0]);
                             }
-                            const supportedQualities = MODEL_QUALITIES[pureModelId] || ['standard'];
+                            const supportedQualities = findModelConfig(MODEL_QUALITIES, pureModelId) || ['standard'];
                             if (!supportedQualities.includes(quality)) {
                                 setQuality(supportedQualities[0]);
                             }
@@ -1419,7 +1450,7 @@ export function GenerationPanel(
                                              q === 'ultra' ? '超清' : q}
                                         </span>
                                         <span className="text-xs opacity-40 mt-0.5">
-                                            {QUALITY_TO_SIZE[model]?.[q] || ''}
+                                            {findModelConfig(QUALITY_TO_SIZE, model)?.[q] || ''}
                                         </span>
                                     </div>
                                 </button>
