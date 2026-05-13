@@ -75,8 +75,9 @@ function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 
   if (provider.modelType === '3d') return '3d';
   if (provider.modelType === 'vectorize') return 'vectorize';
   if (provider.modelType === 'layer') return 'layer';
-  // Legacy types map to image
-  if (provider.modelType === 'imageEdit' || provider.modelType === 'universal' || provider.modelType === 'general') return 'image';
+  // General/universal: default to 'chat' since most models are chat
+  // Individual model types from inferModelType override this in getPublicModels
+  if (provider.modelType === 'imageEdit' || provider.modelType === 'universal' || provider.modelType === 'general') return 'chat';
   return 'image';
 }
 
@@ -88,17 +89,52 @@ function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 've
   if (id.includes('qwen-image-layered') || id.includes('layer') || id.includes('segment') || id.includes('sam') || id.includes('detection') || id.includes('yolo')) return 'layer';
   // 3D模型关键词匹配
   if (id.includes('3d') || id.includes('tripo') || id.includes('meshy') || id.includes('hunyuan')) return '3d';
-  // 图像模型关键词匹配
+  // 图像模型关键词匹配 — 必须在 chat 之前检查，因为有些模型名同时包含 gpt+image
   if (
     id.includes('image') ||
     id.includes('dall-e') ||
+    id.includes('dalle') ||
     id.includes('flux') ||
     id.includes('stable') ||
-    id.includes('sd') ||
+    id.includes('sdxl') ||
     id.includes('midjourney') ||
     id.includes('imagen') ||
-    id.includes('seedream')
+    id.includes('seedream') ||
+    id.includes('ideogram') ||
+    id.includes('recraft') ||
+    id.includes('playground') ||
+    id.includes('kandinsky') ||
+    id.includes('pixart') ||
+    id.includes('deepfloyd') ||
+    id.includes('wuerstchen') ||
+    id.includes('openjourney') ||
+    id.includes('dreamshaper') ||
+    id.includes('realistic-vision') ||
+    id.includes('deliberate') ||
+    id.includes('anything-v') ||
+    id.includes('counterfeit') ||
+    id.includes('meinamix') ||
+    id.includes('novelai') ||
+    id.includes('nai-diffusion') ||
+    id.includes('cogview') ||
+    id.includes('cogvideox') ||
+    id.includes('minimax-image') ||
+    id.includes('minimax-video')
   ) return 'image';
+  // Embedding/rerank 模型 — 既不是 chat 也不是 image，归类为 chat（对话面板不显示）
+  // 但这些模型不应该出现在图像面板，所以先匹配它们并归入 chat
+  if (
+    id.includes('embed') ||
+    id.includes('rerank') ||
+    id.includes('retrieval') ||
+    id.includes('moderation') ||
+    id.includes('tts') ||
+    id.includes('stt') ||
+    id.includes('whisper') ||
+    id.includes('speech') ||
+    id.includes('audio') ||
+    id.includes('transcrib')
+  ) return 'chat';
   // LLM模型关键词匹配
   if (
     id.includes('gpt') ||
@@ -107,7 +143,17 @@ function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 've
     id.includes('qwen') ||
     id.includes('deepseek') ||
     id.includes('llama') ||
-    id.includes('glm')
+    id.includes('glm') ||
+    id.includes('mistral') ||
+    id.includes('codestral') ||
+    id.includes('yi-') ||
+    id.includes('chatglm') ||
+    id.includes('command') ||
+    id.includes('phi') ||
+    id.includes('grok') ||
+    id.includes('o1') ||
+    id.includes('o3') ||
+    id.includes('o4')
   ) return 'chat';
   return fallback;
 }
@@ -264,16 +310,14 @@ export async function discoverModelsForCredentials(
     const models = rawModels
       .map((m: Record<string, unknown>) => formatModel(m, probeProvider))
       .filter((m: ModelInfo) => m.id && (
+        // For general/universal/vectorize/layer: show all models (admin picks what they need)
         modelType === 'universal' ||
         modelType === 'general' ||
-        modelType === 'imageEdit' ||
-        // For vectorize/layer: show all models (admin may need to pick from all available)
-        // The inferModelType already assigns the right type, so matching works
-        m.type === modelType ||
-        (modelType === 'image' && m.type === 'image') ||
-        // Allow cross-type matches so admins can see all models from the provider
         modelType === 'vectorize' ||
-        modelType === 'layer'
+        modelType === 'layer' ||
+        modelType === 'imageEdit' ||
+        // For image/chat/3d: also show other types so admin can pick cross-type models
+        m.type === modelType
       ));
 
     return { success: true, models, message: `Found ${models.length} models`, latencyMs };
@@ -550,14 +594,29 @@ export async function findAllProvidersForType(modelType: ApiKind): Promise<Array
     const models = selected.length > 0
       ? selected
       : discovered.map(m => m.id);
-    return { provider, models };
+    // Filter models by the requested type when provider is general/universal
+    // This prevents chat models from being used for image operations
+    const isGeneral = provider.modelType === 'universal' || provider.modelType === 'general';
+    const filteredModels = isGeneral
+      ? models.filter(modelId => {
+          const discoveredModel = discovered.find(m => m.id === modelId);
+          const modelType = discoveredModel?.type || inferModelType(modelId, modelTypeForProvider(provider));
+          return modelType === effectiveType;
+        })
+      : models;
+    return { provider, models: filteredModels };
   }).filter(entry => entry.models.length > 0);
 }
 
 export async function getPublicModels(modelType?: ApiKind): Promise<ModelInfo[]> {
   const providers = await getApiProviders();
+  // Determine which provider types should be included for the requested modelType
+  // - Exact type match: provider.modelType === modelType
+  // - General/universal providers: include their models, but filter by model-level type
+  const isGeneralQuery = !modelType || modelType === 'universal' || modelType === 'general';
+
   return providers
-    .filter(provider => provider.isEnabled && (!modelType || modelType === 'universal' || modelType === 'general' || provider.modelType === modelType || provider.modelType === 'universal' || provider.modelType === 'general'))
+    .filter(provider => provider.isEnabled && (isGeneralQuery || provider.modelType === modelType || provider.modelType === 'universal' || provider.modelType === 'general'))
     .flatMap(provider => {
       const selected = new Set(provider.selectedModels || []);
       const discovered = provider.discoveredModels || [];
@@ -583,5 +642,11 @@ export async function getPublicModels(modelType?: ApiKind): Promise<ModelInfo[]>
         const name = displayName !== model.id ? displayName : (model.name || displayName);
         return { ...model, providerId: provider.id, name };
       });
+    })
+    // Filter by model-level type for non-general queries
+    // This prevents image models from appearing in chat panel and vice versa
+    .filter(model => {
+      if (isGeneralQuery) return true;
+      return model.type === modelType;
     });
 }
