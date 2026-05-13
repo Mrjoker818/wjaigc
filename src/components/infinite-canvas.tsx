@@ -2539,6 +2539,61 @@ export function InfiniteCanvas({
       }
 
       const data = await res.json();
+
+      // === 直接返回模式：非apimart的OpenAI兼容API直接返回图片 ===
+      if (data.success && data.mode === 'direct') {
+        const { imageUrls } = data;
+        const savedUrls: string[] = [];
+        for (const imageUrl of imageUrls) {
+          let savedUrl = imageUrl;
+          try {
+            const saveRes = await fetch('/api/save-image', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ imageUrl }),
+            });
+            if (saveRes.ok) {
+              const saveData = await saveRes.json();
+              if (saveData.success && saveData.savedUrl) savedUrl = saveData.savedUrl;
+            }
+          } catch {}
+          savedUrls.push(savedUrl);
+        }
+        // Replace the processing frame with the actual images
+        const newImages: CanvasImage[] = [];
+        for (let i = 0; i < savedUrls.length; i++) {
+          if (i === 0 && canvasGenFrameId) {
+            // Replace the placeholder frame with the first result
+            onImagesChange(images.map(img => {
+              if (img.id === canvasGenFrameId) {
+                return { ...img, url: savedUrls[i], isProcessingPlaceholder: false, processing: undefined, prompt: canvasGenPrompt };
+              }
+              return img;
+            }));
+          } else {
+            // Add additional images next to the frame
+            const pos = canvasGenFramePos || { x: 100, y: 100 };
+            newImages.push({
+              id: `canvas-gen-${Date.now()}-${i}`,
+              url: savedUrls[i],
+              x: pos.x + (i * 320),
+              y: pos.y,
+              width: 300,
+              height: 300,
+              prompt: canvasGenPrompt,
+            });
+          }
+        }
+        if (newImages.length > 0) {
+          setTimeout(() => {
+            onImagesChange([...images, ...newImages]);
+          }, 100);
+        }
+        setCanvasGenGenerating(false);
+        setShowCanvasGenerator(false);
+        return;
+      }
+
       const taskIds: string[] = data.taskIds || (data.taskId ? [data.taskId] : []);
       // 使用服务端实际使用的模型（可能因自动切换而与请求模型不同）
       const actualGenModel = data.model || (canvasGenModel?.includes('::') ? canvasGenModel.split('::')[0] : canvasGenModel) || undefined;
@@ -3550,6 +3605,35 @@ export function InfiniteCanvas({
         if (!res.ok) {
           alert(data.error || '图生图提交失败');
           removeProcessingFrame(placeholderId);
+          return;
+        }
+
+        // === 直接返回模式：非apimart的OpenAI兼容API直接返回图片 ===
+        if (data.success && data.mode === 'direct') {
+          const { imageUrls } = data;
+          for (const imageUrl of imageUrls) {
+            let savedUrl = imageUrl;
+            try {
+              const saveRes = await fetch('/api/save-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ imageUrl }),
+              });
+              if (saveRes.ok) {
+                const saveData = await saveRes.json();
+                if (saveData.success && saveData.savedUrl) savedUrl = saveData.savedUrl;
+              }
+            } catch {}
+            // 直接返回图片模式 — 加载图片获取尺寸后完成
+            const img = new window.Image();
+            img.onload = () => {
+              completeProcessingFrame(placeholderId, savedUrl, img.naturalWidth, img.naturalHeight, { prompt: fullPrompt });
+            };
+            img.onerror = () => {
+              completeProcessingFrame(placeholderId, savedUrl, 1024, 1024, { prompt: fullPrompt });
+            };
+            img.src = savedUrl;
+          }
           return;
         }
 

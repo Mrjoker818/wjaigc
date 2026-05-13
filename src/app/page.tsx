@@ -468,6 +468,61 @@ function CanvasApp() {
       
       const data = await response.json();
 
+      // === 直接返回模式：非apimart的OpenAI兼容API直接返回图片URL ===
+      if (data.success && data.mode === 'direct') {
+        const { imageUrls, model, prompt: enhancedPrompt, originalPrompt, category, style } = data;
+        setGenerationProgress({ current: outputCount, total: outputCount });
+        
+        const newImages: CanvasImage[] = [];
+        for (let i = 0; i < imageUrls.length; i++) {
+          const imageUrl = imageUrls[i];
+          let savedUrl = imageUrl;
+          try {
+            const saveRes = await fetch('/api/save-image', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ imageUrl }),
+            });
+            if (saveRes.ok) {
+              const saveData = await saveRes.json();
+              if (saveData.success && saveData.savedUrl) savedUrl = saveData.savedUrl;
+            }
+          } catch {}
+          
+          let imgW = 1024, imgH = 1024;
+          if (params.size?.includes('x')) {
+            const [sw, sh] = params.size.split('x');
+            imgW = parseInt(sw) || 1024;
+            imgH = parseInt(sh) || 1024;
+          }
+          newImages.push({
+            id: `gen-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`,
+            url: savedUrl,
+            prompt: enhancedPrompt || originalPrompt || params.prompt,
+            model: model,
+            quality: params.quality,
+            aspectRatio: params.aspectRatio,
+            stylePreset: style,
+            category: category,
+            size: params.size,
+            x: 0, y: 0,
+            width: imgW * 0.5, height: imgH * 0.5,
+            originalWidth: imgW, originalHeight: imgH,
+            createdAt: Date.now(),
+          });
+        }
+        
+        setImages(prev => [...prev, ...newImages]);
+        setGenerationProgress({ current: outputCount, total: outputCount });
+        
+        toast.success('生成完成', {
+          description: `${data.modelName || model} 已生成 ${imageUrls.length} 张图片`,
+          className: 'bg-[#141414] border border-[#d4af37]/30 text-white',
+          duration: 3000,
+        });
+        return;
+      }
+
       // === 新模式：前端轮询 ===
       if (data.success && data.mode === 'polling') {
         const { taskIds, estimatedTime, prompt: enhancedPrompt, originalPrompt, category, style } = data;

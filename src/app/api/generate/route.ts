@@ -312,7 +312,7 @@ export async function POST(request: NextRequest) {
       currentApiKey: string,
       currentApiBaseUrl: string,
       currentProviderId: string,
-    ): Promise<{ taskId: string; usedModel: string; usedProviderId: string }> => {
+    ): Promise<{ taskId: string; usedModel: string; usedProviderId: string; directImageUrl?: string }> => {
       let effectiveSize = currentModelConfig.supportedSizes.includes(apimartSize) 
         ? apimartSize 
         : currentModelConfig.supportedSizes[0] || '1:1';
@@ -422,10 +422,25 @@ export async function POST(request: NextRequest) {
       const submitResult = await submitResponse.json();
       console.log('Submit result:', submitResult);
 
+      // 检查是否为直接返回图片的响应（OpenAI 兼容格式：data[].url 或 data[].b64_json）
+      const directImageUrl = submitResult.data?.[0]?.url;
+      const directB64 = submitResult.data?.[0]?.b64_json;
+
+      if (directImageUrl || directB64) {
+        console.log('Direct image response (no polling needed)');
+        return {
+          taskId: `direct_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          usedModel: currentModelConfig.modelId,
+          usedProviderId: currentProviderId,
+          directImageUrl: directImageUrl || `data:image/png;base64,${directB64}`,
+        };
+      }
+
+      // 检查异步任务格式（apimart 格式：data[].task_id）
       const taskId = submitResult.data?.[0]?.task_id;
       if (!taskId) {
-        console.error('No task_id in response:', submitResult);
-        throw new Error('未获取到任务ID');
+        console.error('No task_id or direct image in response:', submitResult);
+        throw new Error('未获取到任务ID或图片数据');
       }
 
       console.log('Got task_id:', taskId);
@@ -433,6 +448,7 @@ export async function POST(request: NextRequest) {
     }
 
     const taskIds: string[] = [];
+    const directImageUrls: string[] = [];
     let usedModelName = modelConfig.name;
     let usedModelId = modelConfig.modelId;
     let usedProviderId = provider?.id || 'env';
@@ -444,7 +460,11 @@ export async function POST(request: NextRequest) {
       // 先用当前模型尝试
       try {
         const result = await submitSingleTask(modelConfig, serverApiKey, apiBaseUrl, provider?.id || 'env');
-        taskIds.push(result.taskId);
+        if (result.directImageUrl) {
+          directImageUrls.push(result.directImageUrl);
+        } else if (result.taskId) {
+          taskIds.push(result.taskId);
+        }
         usedModelId = result.usedModel;
         usedProviderId = result.usedProviderId;
         await appendUserJsonl(userId, 'images', {
@@ -478,7 +498,11 @@ export async function POST(request: NextRequest) {
             try {
               console.log(`尝试备选模型 ${candidate.modelId} (${ci + 1}/${candidateModels.length})...`);
               const result = await submitSingleTask(candidateConfig, candidate.apiKey, candidate.baseUrl, candidate.providerId);
-              taskIds.push(result.taskId);
+              if (result.directImageUrl) {
+                directImageUrls.push(result.directImageUrl);
+              } else if (result.taskId) {
+                taskIds.push(result.taskId);
+              }
               usedModelId = result.usedModel;
               usedModelName = candidateConfig.name;
               usedProviderId = result.usedProviderId;
@@ -486,7 +510,7 @@ export async function POST(request: NextRequest) {
                 type: 'submit',
                 providerId: usedProviderId,
                 model: usedModelId,
-                taskId: result.taskId,
+                taskId: result.taskId || 'direct',
                 prompt: enhancedPrompt,
               });
               submitted = true;
@@ -526,12 +550,28 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (taskIds.length === 0) {
+    if (taskIds.length === 0 && directImageUrls.length === 0) {
       return NextResponse.json({
         success: false,
         error: `所有可用模型均提交失败，请稍后重试或联系管理员配置`,
         modelName: usedModelName,
       }, { status: 500 });
+    }
+
+    // 如果有直接返回的图片URL（非apimart的OpenAI兼容API），直接返回结果
+    if (directImageUrls.length > 0) {
+      return NextResponse.json({
+        success: true,
+        mode: 'direct',
+        imageUrls: directImageUrls,
+        model: usedModelId,
+        modelName: usedModelName,
+        prompt: enhancedPrompt,
+        originalPrompt: prompt,
+        category: imageCategory,
+        style: stylePreset,
+        count: directImageUrls.length,
+      });
     }
 
     // 返回task_ids给前端，由前端负责轮询
