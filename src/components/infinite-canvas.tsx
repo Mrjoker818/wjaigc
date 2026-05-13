@@ -5901,7 +5901,7 @@ export function InfiniteCanvas({
                     {/* Per-image category tags (reference group only) - BELOW image */}
                     {isRef && (
                       <div
-                        className="flex flex-wrap gap-1 pt-1 pointer-events-auto"
+                        className="flex flex-wrap items-center gap-0.5 pt-1.5 pointer-events-auto"
                         style={{ width: img.width }}
                         onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => e.stopPropagation()}
@@ -5910,47 +5910,61 @@ export function InfiniteCanvas({
                           const isSelected = imgCats.includes(cat);
                           const strength = group.sourceStrengths[img.id]?.[cat] ?? 70;
                           return (
-                            <div key={cat} className="flex items-center gap-1">
-                              <button
-                                className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-all leading-tight ${
+                            <div
+                              key={cat}
+                              className={`flex items-center rounded-full transition-all cursor-pointer select-none ${
+                                isSelected
+                                  ? 'gap-1.5 pl-2 pr-1.5 py-0.5'
+                                  : 'px-2 py-0.5'
+                              }`}
+                              style={{
+                                background: isSelected
+                                  ? (isMonochrome ? 'rgba(212,175,55,0.15)' : 'rgba(212,175,55,0.12)')
+                                  : (isMonochrome ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.05)'),
+                                border: isSelected
+                                  ? `1px solid ${isMonochrome ? 'rgba(212,175,55,0.4)' : 'rgba(212,175,55,0.3)'}`
+                                  : `1px solid ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)'}`,
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setGenGroups(prev => prev.map(g => {
+                                  if (g.id !== group.id) return g;
+                                  const newCats = { ...g.sourceCategories };
+                                  const newStr = { ...g.sourceStrengths };
+                                  const cats = [...(newCats[img.id] || [])];
+                                  const str = { ...(newStr[img.id] || {}) };
+                                  if (isSelected) {
+                                    const idx = cats.indexOf(cat);
+                                    if (idx >= 0) cats.splice(idx, 1);
+                                  } else {
+                                    if (!cats.includes(cat)) cats.push(cat);
+                                    if (!str[cat]) str[cat] = 70;
+                                  }
+                                  newCats[img.id] = cats;
+                                  newStr[img.id] = str;
+                                  return { ...g, sourceCategories: newCats, sourceStrengths: newStr };
+                                }));
+                              }}
+                            >
+                              <span
+                                className={`text-[10px] font-medium leading-tight whitespace-nowrap ${
                                   isSelected
-                                    ? (isMonochrome ? 'bg-amber-100 text-amber-800' : 'bg-[#d4af37]/20 text-[#d4af37]')
-                                    : (isMonochrome ? 'bg-gray-100 text-gray-400' : 'bg-[#252525] text-[#555]')
+                                    ? (isMonochrome ? 'text-amber-700' : 'text-[#d4af37]')
+                                    : (isMonochrome ? 'text-gray-400' : 'text-white/30')
                                 }`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setGenGroups(prev => prev.map(g => {
-                                    if (g.id !== group.id) return g;
-                                    const newCats = { ...g.sourceCategories };
-                                    const newStr = { ...g.sourceStrengths };
-                                    const cats = [...(newCats[img.id] || [])];
-                                    const str = { ...(newStr[img.id] || {}) };
-                                    if (isSelected) {
-                                      const idx = cats.indexOf(cat);
-                                      if (idx >= 0) cats.splice(idx, 1);
-                                    } else {
-                                      if (!cats.includes(cat)) cats.push(cat);
-                                      if (!str[cat]) str[cat] = 70;
-                                    }
-                                    newCats[img.id] = cats;
-                                    newStr[img.id] = str;
-                                    return { ...g, sourceCategories: newCats, sourceStrengths: newStr };
-                                  }));
-                                }}
-                                title={`${REFERENCE_CATEGORY_LABELS[cat]}${isSelected ? ` (${strength}%)` : ''}`}
                               >
                                 {REFERENCE_CATEGORY_LABELS[cat]}
-                              </button>
+                              </span>
                               {isSelected && (
                                 <input
                                   type="range"
                                   min={0}
                                   max={100}
                                   value={strength}
-                                  className="w-10 h-0.5 appearance-none rounded-full cursor-pointer"
+                                  className="w-8 h-0.5 appearance-none rounded-full cursor-pointer"
                                   style={{
                                     accentColor,
-                                    background: `linear-gradient(to right, ${accentColor} ${strength}%, ${isMonochrome ? '#e5e7eb' : '#444'} ${strength}%)`
+                                    background: `linear-gradient(to right, ${accentColor} ${strength}%, ${isMonochrome ? '#ddd' : '#333'} ${strength}%)`,
                                   }}
                                   onChange={(e) => {
                                     const val = Number(e.target.value);
