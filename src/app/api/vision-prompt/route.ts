@@ -55,6 +55,7 @@ Keep zh.prompt and en.prompt highly detailed, richly descriptive, and directly u
 
 /**
  * Convert image URL to base64 data URI for API accessibility
+ * Handles: data URIs, absolute URLs, and relative paths (/uploads/xxx.png)
  */
 async function imageUrlToBase64(imageUrl: string): Promise<string> {
   // Already a data URI
@@ -62,6 +63,99 @@ async function imageUrlToBase64(imageUrl: string): Promise<string> {
     return imageUrl;
   }
 
+  // Relative path (e.g., /uploads/xxx.png) — read from local filesystem
+  if (imageUrl.startsWith('/')) {
+    const fsSync = await import('fs');
+    const path = await import('path');
+    const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
+
+    // 1. Try local public directory
+    const localPath = path.join(workspacePath, 'public', imageUrl);
+    if (fsSync.existsSync(localPath)) {
+      const buffer = fsSync.readFileSync(localPath);
+      const ext = path.extname(localPath).toLowerCase();
+      const mimeMap: Record<string, string> = {
+        '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+        '.webp': 'image/webp', '.gif': 'image/gif', '.svg': 'image/svg+xml',
+      };
+      const contentType = mimeMap[ext] || 'image/png';
+      return `data:${contentType};base64,${buffer.toString('base64')}`;
+    }
+
+    // 2. Try persistent data directory (PROD)
+    if (process.env.COZE_PROJECT_ENV === 'PROD') {
+      try {
+        const { getServerDataRoot } = await import('@/lib/server-data-root');
+        const dataRoot = await getServerDataRoot();
+        const persistentPath = path.join(dataRoot, imageUrl.replace(/^\//, ''));
+        if (fsSync.existsSync(persistentPath)) {
+          const buffer = fsSync.readFileSync(persistentPath);
+          const ext = path.extname(persistentPath).toLowerCase();
+          const mimeMap: Record<string, string> = {
+            '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+            '.webp': 'image/webp', '.gif': 'image/gif',
+          };
+          const contentType = mimeMap[ext] || 'image/png';
+          return `data:${contentType};base64,${buffer.toString('base64')}`;
+        }
+      } catch {}
+    }
+
+    // 3. Try S3 object storage fallback
+    try {
+      const { isS3Available, downloadImageFromS3 } = await import('@/lib/s3-storage');
+      if (isS3Available()) {
+        const filename = imageUrl.replace(/^\/api\/serve-upload\//, '').replace(/^\//, '');
+        for (const prefix of ['images/', 'uploads/']) {
+          const s3Key = `${prefix}${filename}`;
+          const s3Buffer = await downloadImageFromS3(s3Key);
+          if (s3Buffer) {
+            const ext = filename.split('.').pop()?.toLowerCase() || 'png';
+            const mimeMap: Record<string, string> = {
+              'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+              'webp': 'image/webp', 'gif': 'image/gif',
+            };
+            const contentType = mimeMap[ext] || 'image/png';
+            return `data:${contentType};base64,${s3Buffer.toString('base64')}`;
+          }
+        }
+      }
+    } catch {}
+
+    // 4. Try source URL mapping (re-download from original external URL)
+    try {
+      const filename = imageUrl.replace(/^\/api\/serve-upload\//, '').replace(/^\//, '');
+      const { getImageSourceUrl } = await import('@/lib/image-source-map');
+      const sourceUrl = await getImageSourceUrl(filename);
+      if (sourceUrl) {
+        console.log(`[vision-prompt] Re-downloading from source: ${sourceUrl.substring(0, 80)}...`);
+        const srcRes = await fetch(sourceUrl, { signal: AbortSignal.timeout(30000) });
+        if (srcRes.ok) {
+          const arrayBuffer = await srcRes.arrayBuffer();
+          const contentType = srcRes.headers.get('content-type') || 'image/png';
+          const base64 = Buffer.from(arrayBuffer).toString('base64');
+          return `data:${contentType};base64,${base64}`;
+        }
+      }
+    } catch {}
+
+    // 5. Last resort: try localhost fetch
+    try {
+      const absoluteUrl = `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}`;
+      const response = await fetch(absoluteUrl, { signal: AbortSignal.timeout(10000) });
+      if (response.ok) {
+        const contentType = response.headers.get('content-type') || 'image/png';
+        const arrayBuffer = await response.arrayBuffer();
+        const base64 = Buffer.from(arrayBuffer).toString('base64');
+        return `data:${contentType};base64,${base64}`;
+      }
+    } catch {}
+
+    console.error('[vision-prompt] Failed to resolve relative image path:', imageUrl);
+    throw new Error(`无法解析图片路径: ${imageUrl}`);
+  }
+
+  // Absolute URL — fetch from remote
   try {
     const response = await fetch(imageUrl, {
       signal: AbortSignal.timeout(15000),
@@ -69,7 +163,7 @@ async function imageUrlToBase64(imageUrl: string): Promise<string> {
 
     if (!response.ok) {
       console.warn('[vision-prompt] Failed to fetch image for base64 conversion:', response.status);
-      return imageUrl; // Fallback to original URL
+      throw new Error(`获取图片失败: HTTP ${response.status}`);
     }
 
     const contentType = response.headers.get('content-type') || 'image/png';
@@ -77,8 +171,8 @@ async function imageUrlToBase64(imageUrl: string): Promise<string> {
     const base64 = Buffer.from(arrayBuffer).toString('base64');
     return `data:${contentType};base64,${base64}`;
   } catch (err) {
-    console.warn('[vision-prompt] Failed to convert image to base64:', err);
-    return imageUrl; // Fallback to original URL
+    console.error('[vision-prompt] Failed to convert image to base64:', err);
+    throw new Error(`图片转换失败: ${err instanceof Error ? err.message : '未知错误'}`);
   }
 }
 
