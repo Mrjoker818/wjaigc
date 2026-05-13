@@ -71,12 +71,27 @@ export async function POST(request: NextRequest) {
       apiKey = provider.apiKey;
       baseUrl = normalizeChatBaseUrl(provider.baseUrl);
       selectedModel = selectedModel || provider.selectedModels?.[0] || DEFAULT_MODEL;
-    } else {
+    } else if (selectedModel && selectedModel !== DEFAULT_MODEL) {
+      // 客户端指定了模型，尝试查找对应 provider
       const provider = await findProviderForModel(selectedModel, 'chat');
       if (provider?.apiKey) {
         resolvedProviderId = provider.id;
         apiKey = provider.apiKey;
         baseUrl = normalizeChatBaseUrl(provider.baseUrl);
+      }
+    }
+
+    // 如果仍未找到 API key，自动查找第一个可用的 chat 类型 provider
+    if (!apiKey) {
+      const allProviders = await getApiProviders();
+      const chatProvider = allProviders.find(p =>
+        p.isEnabled && (p.type === 'chat' || p.modelType === 'chat') && p.apiKey
+      );
+      if (chatProvider) {
+        resolvedProviderId = chatProvider.id;
+        apiKey = chatProvider.apiKey;
+        baseUrl = normalizeChatBaseUrl(chatProvider.baseUrl);
+        selectedModel = chatProvider.selectedModels?.[0] || chatProvider.selectedModel || DEFAULT_MODEL;
       }
     }
 

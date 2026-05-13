@@ -2347,33 +2347,13 @@ export function InfiniteCanvas({
     if (!group || !group.toolbar.prompt.trim()) return;
     setOptimizingGroupId(groupId);
     try {
-      // 获取当前LLM模型 - 从用户数据中读取
-      let llmModel = 'gemini-2.5-flash-preview';
-      let providerId = '';
-      try {
-        const currentUserId = localStorage.getItem('unbounded_ai_current_user');
-        const raw = localStorage.getItem('unbounded_ai_user_data');
-        if (raw && currentUserId) {
-          const data = JSON.parse(raw);
-          const selectedModel = data?.userData?.[currentUserId]?.selectedModel;
-          if (selectedModel) {
-            if (selectedModel.includes('::')) {
-              const [pid, ...rest] = selectedModel.split('::');
-              providerId = pid;
-              llmModel = rest.join('::');
-            } else {
-              llmModel = selectedModel;
-            }
-          }
-        }
-      } catch { /* use default */ }
+      // 不传 model/providerId，让服务端自动查找可用的 LLM (chat) 模型
+      // 之前从 localStorage 读取的 selectedModel 是图像模型，不是聊天模型
       const res = await fetch('/api/optimize-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: group.toolbar.prompt,
-          model: llmModel,
-          providerId,
           mode: 'enhance',
         }),
       });
@@ -8182,26 +8162,8 @@ export function InfiniteCanvas({
                           if (!hcg.toolbar.prompt.trim()) return;
                           setOptimizingGroupId(`hex-${hcg.id}`);
                           try {
-                            // 获取当前LLM模型 - 从用户数据中读取
-                            let llmModel = 'gemini-2.5-flash-preview', providerId = '';
-                            try {
-                              const currentUserId = localStorage.getItem('unbounded_ai_current_user');
-                              const raw = localStorage.getItem('unbounded_ai_user_data');
-                              if (raw && currentUserId) {
-                                const data = JSON.parse(raw);
-                                const selectedModel = data?.userData?.[currentUserId]?.selectedModel;
-                                if (selectedModel) {
-                                  if (selectedModel.includes('::')) {
-                                    const [pid, ...rest] = selectedModel.split('::');
-                                    providerId = pid;
-                                    llmModel = rest.join('::');
-                                  } else {
-                                    llmModel = selectedModel;
-                                  }
-                                }
-                              }
-                            } catch {}
-                            const res = await fetch('/api/optimize-prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: hcg.toolbar.prompt, model: llmModel, providerId, mode: 'enhance' }) });
+                            // 不传 model/providerId，让服务端自动查找可用的 LLM (chat) 模型
+                            const res = await fetch('/api/optimize-prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: hcg.toolbar.prompt, mode: 'enhance' }) });
                             const data = await res.json();
                             if (data.optimized || data.optimizedPrompt) {
                               const optimizedPrompt = data.optimized || data.optimizedPrompt;

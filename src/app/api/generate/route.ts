@@ -328,8 +328,8 @@ export async function POST(request: NextRequest) {
       }
 
       // 添加参考图片（使用已转换为公网可访问的 URL）
-      const hasImage = accessibleReferenceImages.length > 0 && currentModelConfig.supportsImageToImage;
-      if (hasImage) {
+      const hasRefImages = accessibleReferenceImages.length > 0 && currentModelConfig.supportsImageToImage;
+      if (hasRefImages) {
         requestBody.image_urls = accessibleReferenceImages;
         // 图生图 strength 参数：控制输出与参考图的偏离程度（0=完全保留原图，1=完全自由生成）
         if (typeof strength === 'number' && strength > 0 && strength <= 1) {
@@ -337,9 +337,11 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // 使用兼容性层自动调整请求（size格式、端点选择、input_fidelity等）
+      // 使用兼容性层自动调整请求（size格式、端点选择等）
+      // 注意: generate 路由始终使用 /images/generations 端点，参考图通过 image_urls 传递
+      // /images/edits 端点仅用于 image-edit 路由（需要 image 文件上传）
       const { body: adjustedBody, endpoint } = adjustRequestForProfile(requestBody, profile, {
-        hasImage,
+        hasImage: false, // 始终使用 defaultEndpoint (/images/generations)
       });
 
       console.log('Submitting image task:', {
@@ -348,7 +350,7 @@ export async function POST(request: NextRequest) {
         size: adjustedBody.size,
         endpoint,
         profile: profile.id,
-        hasRefImages: hasImage,
+        hasRefImages: hasRefImages,
         refImageTypes: accessibleReferenceImages.map(u => u.startsWith('data:') ? 'base64' : u.startsWith('http') ? 'url' : 'other'),
         strength: adjustedBody.strength || undefined,
       });
@@ -360,38 +362,16 @@ export async function POST(request: NextRequest) {
       const timeoutMs = isDirectMode ? 600000 : 30000; // 直接模式600s(兼容token link等慢速API), 异步模式30s
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-      // 构建 fetch 请求选项 - 根据兼容性层决定使用 JSON 还是 multipart/form-data
-      const useMultipart = hasImage && endpoint === '/images/edits' && profile.editEncoding === 'multipart-only';
+      // 构建 fetch 请求选项 - generate 路由始终使用 JSON 编码
+      // (multipart/form-data 仅用于 image-edit 路由的 /images/edits 端点)
       let fetchHeaders: Record<string, string> = {
         'Authorization': `Bearer ${currentApiKey}`,
+        'Content-Type': 'application/json',
       };
       let fetchBody: string | FormData;
 
-      if (useMultipart) {
-        // multipart/form-data 编码 - 用于 /images/edits 端点的图生图
-        const formData = new FormData();
-        for (const [key, value] of Object.entries(adjustedBody)) {
-          if (value !== undefined && value !== null) {
-            if (key === 'image_urls' || key === 'image') {
-              // 图片URL数组：保持JSON字符串格式，API代理通常期望这种格式
-              formData.append(key, JSON.stringify(value));
-            } else if (Array.isArray(value)) {
-              // 其他数组值：每个元素作为单独的字段
-              for (const item of value) {
-                formData.append(key, typeof item === 'object' ? JSON.stringify(item) : String(item));
-              }
-            } else {
-              formData.append(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
-            }
-          }
-        }
-        fetchBody = formData;
-        // 不设置 Content-Type，让浏览器自动设置 multipart boundary
-      } else {
-        // JSON 编码 - 默认方式
-        fetchHeaders['Content-Type'] = 'application/json';
-        fetchBody = JSON.stringify(adjustedBody);
-      }
+      // JSON 编码 - 参考图片通过 image_urls 字段传递
+      fetchBody = JSON.stringify(adjustedBody);
 
       const submitResponse = await fetchWithV1Retry(
         currentApiBaseUrl,
