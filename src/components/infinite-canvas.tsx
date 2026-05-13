@@ -5736,7 +5736,7 @@ export function InfiniteCanvas({
             const containerPad = 24;
             // 参考图组下方需要额外空间显示类别标签
             const leftPad = containerPad;
-            const bottomPad = isRef ? 36 : containerPad;
+            const bottomPad = isRef ? 130 : containerPad;
             const containerMinX = Math.min(...allBounds.map(b => b.x)) - containerPad;
             const containerMinY = Math.min(...allBounds.map(b => b.y)) - containerPad - 40;
             const containerMaxX = Math.max(...allBounds.map(b => b.x + b.w)) + containerPad;
@@ -5898,73 +5898,70 @@ export function InfiniteCanvas({
                         </button>
                       </div>
                     </div>
-                    {/* Per-image category tags (reference group only) - BELOW image */}
+                    {/* Per-image category sliders (reference group only) - BELOW image */}
                     {isRef && (
                       <div
-                        className="flex flex-wrap items-center gap-0.5 pt-1.5 pointer-events-auto"
+                        className="flex flex-col gap-1.5 pt-2 pointer-events-auto"
                         style={{ width: img.width }}
                         onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => e.stopPropagation()}
                       >
                         {REFERENCE_CATEGORIES.map(cat => {
                           const isSelected = imgCats.includes(cat);
-                          const strength = group.sourceStrengths[img.id]?.[cat] ?? 70;
+                          const strength = group.sourceStrengths[img.id]?.[cat] ?? 50;
                           return (
                             <div
                               key={cat}
-                              className={`flex items-center rounded-full transition-all cursor-pointer select-none ${
-                                isSelected
-                                  ? 'gap-1.5 pl-2 pr-1.5 py-0.5'
-                                  : 'px-2 py-0.5'
-                              }`}
-                              style={{
-                                background: isSelected
-                                  ? (isMonochrome ? 'rgba(212,175,55,0.15)' : 'rgba(212,175,55,0.12)')
-                                  : (isMonochrome ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.05)'),
-                                border: isSelected
-                                  ? `1px solid ${isMonochrome ? 'rgba(212,175,55,0.4)' : 'rgba(212,175,55,0.3)'}`
-                                  : `1px solid ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)'}`,
-                              }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setGenGroups(prev => prev.map(g => {
-                                  if (g.id !== group.id) return g;
-                                  const newCats = { ...g.sourceCategories };
-                                  const newStr = { ...g.sourceStrengths };
-                                  const cats = [...(newCats[img.id] || [])];
-                                  const str = { ...(newStr[img.id] || {}) };
-                                  if (isSelected) {
-                                    const idx = cats.indexOf(cat);
-                                    if (idx >= 0) cats.splice(idx, 1);
-                                  } else {
-                                    if (!cats.includes(cat)) cats.push(cat);
-                                    if (!str[cat]) str[cat] = 70;
-                                  }
-                                  newCats[img.id] = cats;
-                                  newStr[img.id] = str;
-                                  return { ...g, sourceCategories: newCats, sourceStrengths: newStr };
-                                }));
-                              }}
+                              className="flex items-center gap-2"
                             >
-                              <span
-                                className={`text-[10px] font-medium leading-tight whitespace-nowrap ${
-                                  isSelected
-                                    ? (isMonochrome ? 'text-amber-700' : 'text-[#d4af37]')
-                                    : (isMonochrome ? 'text-gray-400' : 'text-white/30')
+                              {/* Category pill tag */}
+                              <div
+                                className={`flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-bold text-center select-none cursor-pointer transition-all ${
+                                  isSelected ? '' : 'opacity-40'
                                 }`}
+                                style={{
+                                  width: 36,
+                                  border: `1.5px solid ${isSelected ? accentColor : (isMonochrome ? '#888' : '#555')}`,
+                                  background: isSelected
+                                    ? 'rgba(212,175,55,0.12)'
+                                    : (isMonochrome ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.05)'),
+                                  color: isSelected ? accentColor : (isMonochrome ? '#888' : '#777'),
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setGenGroups(prev => prev.map(g => {
+                                    if (g.id !== group.id) return g;
+                                    const newCats = { ...g.sourceCategories };
+                                    const newStr = { ...g.sourceStrengths };
+                                    const cats = [...(newCats[img.id] || [])];
+                                    const str = { ...(newStr[img.id] || {}) };
+                                    if (isSelected) {
+                                      const idx = cats.indexOf(cat);
+                                      if (idx >= 0) cats.splice(idx, 1);
+                                    } else {
+                                      if (!cats.includes(cat)) cats.push(cat);
+                                      if (!str[cat]) str[cat] = 50;
+                                    }
+                                    newCats[img.id] = cats;
+                                    newStr[img.id] = str;
+                                    return { ...g, sourceCategories: newCats, sourceStrengths: newStr };
+                                  }));
+                                }}
                               >
                                 {REFERENCE_CATEGORY_LABELS[cat]}
-                              </span>
-                              {isSelected && (
+                              </div>
+                              {/* Slider track */}
+                              <div className="flex-1 relative h-3 flex items-center">
                                 <input
                                   type="range"
                                   min={0}
                                   max={100}
                                   value={strength}
-                                  className="w-8 h-0.5 appearance-none rounded-full cursor-pointer"
+                                  className="w-full h-1 appearance-none rounded-full cursor-pointer"
                                   style={{
                                     accentColor,
-                                    background: `linear-gradient(to right, ${accentColor} ${strength}%, ${isMonochrome ? '#ddd' : '#333'} ${strength}%)`,
+                                    background: `linear-gradient(to right, ${accentColor} ${strength}%, ${isMonochrome ? '#ccc' : '#333'} ${strength}%)`,
+                                    opacity: isSelected ? 1 : 0.35,
                                   }}
                                   onChange={(e) => {
                                     const val = Number(e.target.value);
@@ -5972,13 +5969,28 @@ export function InfiniteCanvas({
                                       if (g.id !== group.id) return g;
                                       const newStr = { ...g.sourceStrengths };
                                       newStr[img.id] = { ...(newStr[img.id] || {}), [cat]: val };
-                                      return { ...g, sourceStrengths: newStr };
+                                      // Auto-select category when dragging slider
+                                      const newCats = { ...g.sourceCategories };
+                                      const cats = [...(newCats[img.id] || [])];
+                                      if (!cats.includes(cat)) cats.push(cat);
+                                      newCats[img.id] = cats;
+                                      return { ...g, sourceCategories: newCats, sourceStrengths: newStr };
                                     }));
                                   }}
                                   onClick={(e) => e.stopPropagation()}
                                   title={`${REFERENCE_CATEGORY_LABELS[cat]}: ${strength}%`}
                                 />
-                              )}
+                              </div>
+                              {/* Percentage label */}
+                              <span
+                                className="flex-shrink-0 text-[10px] font-medium w-7 text-right tabular-nums"
+                                style={{
+                                  color: isSelected ? accentColor : (isMonochrome ? '#888' : '#555'),
+                                  opacity: isSelected ? 1 : 0.5,
+                                }}
+                              >
+                                {strength}%
+                              </span>
                             </div>
                           );
                         })}
