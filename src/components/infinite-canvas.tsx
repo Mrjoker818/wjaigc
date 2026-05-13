@@ -710,6 +710,7 @@ export function InfiniteCanvas({
   // 【调整2&3】生成组状态 — Alt+左键参考图组 / Ctrl+左键融图组
   const [genGroups, setGenGroups] = useState<CanvasGenGroup[]>([]);
   const genGroupsRef = useRef<CanvasGenGroup[]>(genGroups);
+  const [optimizingGroupId, setOptimizingGroupId] = useState<string | null>(null);
   const multiAngleDragRef = useRef<{
     active: boolean;
     startX: number;
@@ -1758,8 +1759,8 @@ export function InfiniteCanvas({
       imageId: firstImage.id,
       url: firstImage.url,
       number: 1,
-      categories: groupType === 'reference' ? ['style' as ReferenceCategory] : [],
-      strengths: groupType === 'reference' ? { style: 50 } : {},
+      categories: [],
+      strengths: {},
     };
     // 计算结果框位置：在第一张图右侧
     const resultX = firstImage.x + firstImage.width + 80;
@@ -1798,8 +1799,8 @@ export function InfiniteCanvas({
         resultX,
         resultY,
       },
-      sourceCategories: { [firstImage.id]: groupType === 'reference' ? ['style' as ReferenceCategory] : [] },
-      sourceStrengths: { [firstImage.id]: groupType === 'reference' ? { style: 50 } : {} },
+      sourceCategories: { [firstImage.id]: [] },
+      sourceStrengths: { [firstImage.id]: {} },
       resultImageIds: [],
       createdAt: Date.now(),
     };
@@ -1823,8 +1824,8 @@ export function InfiniteCanvas({
           imageId: image.id,
           url: image.url,
           number: latestGroup.refImages.length + 1,
-          categories: ['style' as ReferenceCategory],
-          strengths: { style: 50 },
+          categories: [],
+          strengths: {},
         };
         const allRefs = [...latestGroup.refImages, newRef];
         const refImageObjs = allRefs
@@ -1838,8 +1839,8 @@ export function InfiniteCanvas({
             ...g,
             refImages: allRefs,
             sourceImageIds: [...g.sourceImageIds, image.id],
-            sourceCategories: { ...g.sourceCategories, [image.id]: ['style' as ReferenceCategory] },
-            sourceStrengths: { ...g.sourceStrengths, [image.id]: { style: 50 } },
+            sourceCategories: { ...g.sourceCategories, [image.id]: [] },
+            sourceStrengths: { ...g.sourceStrengths, [image.id]: {} },
             position: { ...g.position, sourceCenterX: avgX, sourceCenterY: avgY },
           };
         });
@@ -1933,6 +1934,48 @@ export function InfiniteCanvas({
     setGenGroups(prev => prev.filter(g => g.id !== groupId));
   }, []);
 
+  /** 优化组提示词 — 调用当前LLM模型 */
+  const handleOptimizeGroupPrompt = useCallback(async (groupId: string) => {
+    const group = genGroupsRef.current.find(g => g.id === groupId);
+    if (!group || !group.toolbar.prompt.trim()) return;
+    setOptimizingGroupId(groupId);
+    try {
+      // 获取当前LLM模型
+      const llmModelRaw = localStorage.getItem('wujie_selected_chat_model');
+      let llmModel = 'gemini-3-flash-preview';
+      let providerId = '';
+      if (llmModelRaw) {
+        try {
+          const parsed = JSON.parse(llmModelRaw);
+          llmModel = parsed.model || parsed.id || llmModel;
+          providerId = parsed.providerId || '';
+        } catch { /* use default */ }
+      }
+      const res = await fetch('/api/optimize-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: group.toolbar.prompt,
+          model: llmModel,
+          providerId,
+          mode: 'enhance',
+        }),
+      });
+      if (!res.ok) throw new Error('优化失败');
+      const data = await res.json();
+      if (data.optimizedPrompt) {
+        setGenGroups(prev => prev.map(g => {
+          if (g.id !== groupId) return g;
+          return { ...g, toolbar: { ...g.toolbar, prompt: data.optimizedPrompt } };
+        }));
+      }
+    } catch (error) {
+      console.error('提示词优化失败:', error);
+    } finally {
+      setOptimizingGroupId(null);
+    }
+  }, []);
+
   /** 处理生成组的生成请求 */
   const handleGroupGenerate = useCallback(async (group: CanvasGenGroup) => {
     const toolbar = group.toolbar;
@@ -1972,26 +2015,12 @@ export function InfiniteCanvas({
       return { ...g, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: true, progress: 0 } };
     }));
 
-    // 构建提示词：参考图类别前缀 + 用户关键词
+    // 构建提示词：参考图组不再添加类别前缀，用户用自然语言描述如何参考
     let fullPrompt = toolbar.prompt;
-    if (group.type === 'reference') {
-      const activePrefixes = group.refImages.flatMap(r =>
-        r.categories.map(cat => {
-          const strength = r.strengths[cat] || 50;
-          const prefixMap: Record<string, string> = {
-            style: 'in the style of',
-            composition: 'with the composition of',
-            scene: 'in the scene of',
-            color: 'with the color palette of',
-            subject: 'featuring the subject of',
-            detail: 'with the details of',
-          };
-          return strength > 0 ? `${prefixMap[cat] || cat} [ref${r.number}]` : '';
-        }).filter(Boolean)
-      );
-      if (activePrefixes.length > 0) {
-        fullPrompt = `${activePrefixes.join(', ')}, ${fullPrompt}`;
-      }
+    if (group.type === 'reference' && group.refImages.length > 0) {
+      // 参考图组：在用户prompt前加上参考图编号标识，让AI知道有哪些参考图
+      const refNotes = group.refImages.map(r => `[ref${r.number}]`).join(' ');
+      fullPrompt = `${refNotes} ${fullPrompt}`;
     }
 
     // 调用生图 API
@@ -2103,7 +2132,7 @@ export function InfiniteCanvas({
       onImagesChange(images.filter(img => img.id !== phId));
       setGenGroups(prev => prev.map(g => {
         if (g.id !== group.id) return g;
-        return { ...g, resultPlaceholderId: undefined };
+        return { ...g, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false } };
       }));
     }
   }, [images, getCurrentModel, onImagesChange]);
@@ -5073,6 +5102,14 @@ export function InfiniteCanvas({
 
             if (srcImages.length === 0) return null;
 
+            // Accent colors
+            const isRef = group.type === 'reference';
+            const accentColor = isRef ? '#d4af37' : '#4ecdc4';
+            const accentBg = isRef ? 'rgba(212,175,55,0.06)' : 'rgba(78,205,196,0.06)';
+            const accentBgStrong = isRef ? 'rgba(212,175,55,0.12)' : 'rgba(78,205,196,0.12)';
+            const accentBorder = isRef ? 'rgba(212,175,55,0.35)' : 'rgba(78,205,196,0.35)';
+            const accentBorderStrong = isRef ? 'rgba(212,175,55,0.6)' : 'rgba(78,205,196,0.6)';
+
             // Result placeholder position
             const resultX = group.resultPlaceholder.x;
             const resultY = group.resultPlaceholder.y;
@@ -5081,14 +5118,52 @@ export function InfiniteCanvas({
             const resultCenterX = resultX + resultW / 2;
             const resultCenterY = resultY + resultH / 2;
 
-            // Category colors
-            const CATEGORY_COLORS: Record<string, string> = {
-              style: '#e85d75', composition: '#4ecdc4', scene: '#45b7d1',
-              color: '#f7dc6f', subject: '#bb8fce', detail: '#82e0aa',
-            };
+            // Container bounds: include all source images + result placeholder + toolbar
+            const allBounds = [...srcImages.map(img => ({ x: img.x, y: img.y, w: img.width, h: img.height })), { x: resultX, y: resultY, w: resultW, h: resultH + 200 /* approximate toolbar height */ }];
+            const containerPad = 24;
+            const containerMinX = Math.min(...allBounds.map(b => b.x)) - containerPad;
+            const containerMinY = Math.min(...allBounds.map(b => b.y)) - containerPad - 40; // extra top for title bar
+            const containerMaxX = Math.max(...allBounds.map(b => b.x + b.w)) + containerPad;
+            const containerMaxY = Math.max(...allBounds.map(b => b.y + b.h)) + containerPad;
+            const containerW = containerMaxX - containerMinX;
+            const containerH = containerMaxY - containerMinY;
+
+            // Find current model display name
+            const currentModelObj = canvasGenModels.find(m => m.id === group.toolbar.model);
+            const modelDisplayName = currentModelObj ? `${currentModelObj.providerName} · ${currentModelObj.id}` : (group.toolbar.model || '选择模型');
 
             return (
               <div key={`gen-group-${group.id}`}>
+                {/* Container frame — visible border around the entire group */}
+                <div
+                  className="absolute pointer-events-none rounded-2xl"
+                  style={{
+                    left: containerMinX,
+                    top: containerMinY,
+                    width: containerW,
+                    height: containerH,
+                    background: accentBg,
+                    border: `2px solid ${accentBorder}`,
+                    zIndex: 12,
+                  }}
+                >
+                  {/* Title bar */}
+                  <div
+                    className="flex items-center justify-between px-4 py-1.5 rounded-t-2xl"
+                    style={{ background: accentBgStrong, borderBottom: `1px solid ${accentBorder}` }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-2.5 h-2.5 rounded-full" style={{ background: accentColor }} />
+                      <span className="text-sm font-semibold" style={{ color: accentColor }}>
+                        {isRef ? '参考图组' : '融图组'}
+                      </span>
+                      <span className="text-xs font-medium" style={{ color: `${accentColor}88` }}>
+                        {srcImages.length} 张参考图
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
                 {/* SVG connection lines */}
                 <svg
                   style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 15 }}
@@ -5098,36 +5173,32 @@ export function InfiniteCanvas({
                     const imgCenterY = img.y + img.height / 2;
                     const midX = (imgCenterX + resultCenterX) / 2;
 
-                    // Determine line color from the image's categories
-                    const imgCategory = group.sourceCategories[img.id]?.[0] || 'style';
-                    const lineColor = CATEGORY_COLORS[imgCategory] || '#d4af37';
-
                     return (
                       <g key={`gen-line-${img.id}`}>
                         {/* Animated dashed line */}
                         <path
                           d={`M ${imgCenterX} ${imgCenterY} C ${midX} ${imgCenterY}, ${midX} ${resultCenterY}, ${resultCenterX} ${resultCenterY}`}
                           fill="none"
-                          stroke={lineColor}
-                          strokeWidth={2 / zoom}
-                          strokeDasharray={`${6 / zoom} ${4 / zoom}`}
-                          opacity={0.7}
+                          stroke={accentColor}
+                          strokeWidth={2.5 / zoom}
+                          strokeDasharray={`${8 / zoom} ${5 / zoom}`}
+                          opacity={0.6}
                         >
-                          <animate attributeName="stroke-dashoffset" from="0" to={`${-20 / zoom}`} dur="1.5s" repeatCount="indefinite" />
+                          <animate attributeName="stroke-dashoffset" from="0" to={`${-26 / zoom}`} dur="2s" repeatCount="indefinite" />
                         </path>
                         {/* Arrow head */}
                         <polygon
-                          points={`${resultCenterX},${resultCenterY} ${resultCenterX - 8 / zoom},${resultCenterY - 5 / zoom} ${resultCenterX - 8 / zoom},${resultCenterY + 5 / zoom}`}
-                          fill={lineColor}
-                          opacity={0.7}
+                          points={`${resultCenterX},${resultCenterY} ${resultCenterX - 10 / zoom},${resultCenterY - 6 / zoom} ${resultCenterX - 10 / zoom},${resultCenterY + 6 / zoom}`}
+                          fill={accentColor}
+                          opacity={0.6}
                         />
-                        {/* Number label */}
+                        {/* Number label circle */}
                         <circle
                           cx={imgCenterX + (resultCenterX - imgCenterX) * 0.3}
                           cy={imgCenterY + (resultCenterY - imgCenterY) * 0.3}
-                          r={10 / zoom}
-                          fill={lineColor}
-                          opacity={0.85}
+                          r={14 / zoom}
+                          fill={accentColor}
+                          opacity={0.9}
                         />
                         <text
                           x={imgCenterX + (resultCenterX - imgCenterX) * 0.3}
@@ -5135,40 +5206,65 @@ export function InfiniteCanvas({
                           textAnchor="middle"
                           dominantBaseline="central"
                           fill="white"
-                          fontSize={10 / zoom}
+                          fontSize={12 / zoom}
                           fontWeight="bold"
                         >
-                          {img.refNumber}
+                          R{img.refNumber}
                         </text>
                       </g>
                     );
                   })}
                 </svg>
 
-                {/* Result placeholder frame */}
+                {/* Source image labels (R1, R2, ...) overlaid on each source image */}
+                {srcImages.map(img => (
+                  <div
+                    key={`ref-label-${img.id}`}
+                    className="absolute pointer-events-none flex items-center gap-1.5 px-2 py-1 rounded-lg"
+                    style={{
+                      left: img.x,
+                      top: img.y - 28,
+                      background: isRef ? 'rgba(212,175,55,0.9)' : 'rgba(78,205,196,0.9)',
+                      zIndex: 26,
+                    }}
+                  >
+                    <span className="text-xs font-bold text-black">
+                      R{img.refNumber}
+                    </span>
+                    <button
+                      className="w-4 h-4 flex items-center justify-center rounded-full text-black/60 hover:text-black hover:bg-black/10 transition-colors pointer-events-auto text-xs font-bold"
+                      onClick={(e) => { e.stopPropagation(); removeRefFromGroup(group.id, img.id); }}
+                      title="移除此参考图"
+                    >
+                      x
+                    </button>
+                  </div>
+                ))}
+
+                {/* Result placeholder frame + Toolbar */}
                 <div
                   className="absolute pointer-events-auto"
                   style={{
                     left: resultX,
                     top: resultY,
-                    width: resultW,
+                    width: Math.max(resultW, 420),
                     zIndex: 25,
                   }}
                 >
                   {/* Image area */}
                   <div
-                    className="w-full border-2 border-dashed rounded-lg flex flex-col items-center justify-center gap-2 overflow-hidden"
+                    className="w-full rounded-xl flex flex-col items-center justify-center gap-3 overflow-hidden"
                     style={{
                       height: resultH,
-                      borderColor: group.type === 'fusion' ? '#4ecdc4/60' : '#d4af37/60',
-                      background: group.type === 'fusion' ? 'rgba(78,205,196,0.05)' : 'rgba(212,175,55,0.05)',
+                      border: `2px dashed ${accentBorderStrong}`,
+                      background: accentBg,
                     }}
                   >
                     {group.resultPlaceholder.isProcessing ? (
                       <>
-                        <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin"
-                          style={{ borderColor: group.type === 'fusion' ? '#4ecdc4' : '#d4af37', borderTopColor: 'transparent' }} />
-                        <span className="text-xs font-medium" style={{ color: group.type === 'fusion' ? '#4ecdc4/80' : '#d4af37/80' }}>
+                        <div className="w-8 h-8 border-3 border-t-transparent rounded-full animate-spin"
+                          style={{ borderColor: accentColor, borderTopColor: 'transparent', borderWidth: '3px' }} />
+                        <span className="text-sm font-semibold" style={{ color: accentColor }}>
                           生成中 {group.resultPlaceholder.progress ? `${Math.round(group.resultPlaceholder.progress)}%` : ''}
                         </span>
                       </>
@@ -5176,82 +5272,32 @@ export function InfiniteCanvas({
                       <img src={group.resultPlaceholder.resultUrl} className="w-full h-full object-contain" alt="result" />
                     ) : (
                       <>
-                        <div className="w-4 h-4 rotate-45 border"
-                          style={{ borderColor: group.type === 'fusion' ? '#4ecdc4/30' : '#d4af37/30', margin: '4px' }} />
-                        <span className="text-xs font-medium" style={{ color: group.type === 'fusion' ? '#4ecdc4/60' : '#d4af37/60' }}>
-                          {group.type === 'fusion' ? '融图输出' : '参考图输出'}
+                        <div className="w-6 h-6 rotate-45 rounded-sm"
+                          style={{ border: `2px solid ${accentBorderStrong}`, margin: '4px' }} />
+                        <span className="text-sm font-semibold" style={{ color: `${accentColor}99` }}>
+                          {isRef ? '参考图输出' : '融图输出'}
                         </span>
-                        <span className="text-xs" style={{ color: group.type === 'fusion' ? '#4ecdc4/40' : '#d4af37/40' }}>
-                          {srcImages.map(r => `#${r.refNumber}`).join(' + ')} →
+                        <span className="text-xs font-medium" style={{ color: `${accentColor}77` }}>
+                          {srcImages.map(r => `R${r.refNumber}`).join(' + ')} →
                         </span>
                       </>
                     )}
                   </div>
 
-                  {/* Category settings for each source image */}
-                  {srcImages.map(img => {
-                    const categories = group.sourceCategories[img.id] || ['style'];
-                    const strengths = group.sourceStrengths[img.id] || { style: 50 };
-                    return (
-                      <div key={`cat-${img.id}`}
-                        className={`flex items-center gap-1 mt-1 px-2 py-1 rounded-lg text-xs ${isMonochrome ? 'bg-white/90 border border-gray-200' : 'bg-[#1a1a1a]/95 border border-[#333]'}`}
-                      >
-                        <span className="text-[#888] font-medium">#{img.refNumber}</span>
-                        {(['style', 'composition', 'scene', 'color', 'subject', 'detail'] as ReferenceCategory[]).map(cat => {
-                          const isActive = categories.includes(cat);
-                          const catColor = CATEGORY_COLORS[cat] || '#888';
-                          return (
-                            <button
-                              key={cat}
-                              className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-all ${isActive ? 'text-white' : 'text-[#666] opacity-40 hover:opacity-70'}`}
-                              style={isActive ? { backgroundColor: catColor } : {}}
-                              onClick={() => {
-                                setGenGroups(prev => prev.map(g => {
-                                  if (g.id !== group.id) return g;
-                                  const newCats = { ...g.sourceCategories };
-                                  const currentCats: ReferenceCategory[] = newCats[img.id] || ['style'];
-                                  newCats[img.id] = currentCats.includes(cat)
-                                    ? currentCats.filter(c => c !== cat)
-                                    : [...currentCats, cat];
-                                  if (newCats[img.id].length === 0) newCats[img.id] = ['style'];
-                                  return { ...g, sourceCategories: newCats };
-                                }));
-                              }}
-                            >
-                              {cat === 'style' ? '风格' : cat === 'composition' ? '构图' : cat === 'scene' ? '场景' : cat === 'color' ? '色彩' : cat === 'subject' ? '主体' : '细节'}
-                            </button>
-                          );
-                        })}
-                        {/* Strength slider */}
-                        <input
-                          type="range"
-                          min={0}
-                          max={100}
-                          value={strengths[categories[0]] || 50}
-                          className="w-12 h-1 accent-[#d4af37]"
-                          onChange={(e) => {
-                            const val = Number(e.target.value);
-                            setGenGroups(prev => prev.map(g => {
-                              if (g.id !== group.id) return g;
-                              const newStr = { ...g.sourceStrengths };
-                              const catStrengths = { ...(newStr[img.id] || {}) };
-                              categories.forEach(c => { catStrengths[c] = val; });
-                              newStr[img.id] = catStrengths;
-                              return { ...g, sourceStrengths: newStr };
-                            }));
-                          }}
-                        />
-                        <span className="text-[#888] w-6 text-right">{strengths[categories[0]] || 50}%</span>
-                      </div>
-                    );
-                  })}
-
-                  {/* Toolbar */}
-                  <div className={`flex flex-col gap-1 mt-1 px-2 py-2 rounded-lg ${isMonochrome ? 'bg-white/90 border border-gray-200' : 'bg-[#1a1a1a]/95 border border-[#333]'}`}>
-                    {/* Row 1: Model + Aspect ratio + Quality */}
-                    <div className="flex items-center gap-1">
+                  {/* Toolbar — redesigned with larger fonts and better UX */}
+                  <div
+                    className="flex flex-col gap-2 mt-2 px-3 py-3 rounded-xl"
+                    style={{
+                      background: isMonochrome ? 'rgba(255,255,255,0.95)' : 'rgba(26,26,26,0.96)',
+                      border: isMonochrome ? '1px solid rgba(200,200,200,0.5)' : `1px solid ${accentBorder}`,
+                      backdropFilter: 'blur(8px)',
+                    }}
+                  >
+                    {/* Row 1: Model selector */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium shrink-0" style={{ color: `${accentColor}cc` }}>模型</span>
                       <select
-                        className={`flex-1 text-xs px-1.5 py-1 rounded border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#252525] border-[#444] text-[#ccc]'}`}
+                        className={`flex-1 text-sm px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#1f1f1f] border-[#444] text-[#ddd]'}`}
                         value={group.toolbar.model}
                         onChange={(e) => {
                           setGenGroups(prev => prev.map(g =>
@@ -5259,13 +5305,17 @@ export function InfiniteCanvas({
                           ));
                         }}
                       >
-                        <option value="">选择模型</option>
+                        <option value="">{modelDisplayName}</option>
                         {canvasGenModels.map(m => (
-                          <option key={m.id} value={m.id}>{m.providerName}</option>
+                          <option key={m.id} value={m.id}>{m.providerName} · {m.id}</option>
                         ))}
                       </select>
+                    </div>
+
+                    {/* Row 2: Aspect ratio + Quality + Count */}
+                    <div className="flex items-center gap-2">
                       <select
-                        className={`text-xs px-1.5 py-1 rounded border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#252525] border-[#444] text-[#ccc]'}`}
+                        className={`flex-1 text-sm px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#1f1f1f] border-[#444] text-[#ddd]'}`}
                         value={group.toolbar.aspectRatio}
                         onChange={(e) => {
                           setGenGroups(prev => prev.map(g =>
@@ -5278,7 +5328,7 @@ export function InfiniteCanvas({
                         ))}
                       </select>
                       <select
-                        className={`text-xs px-1.5 py-1 rounded border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#252525] border-[#444] text-[#ccc]'}`}
+                        className={`text-sm px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#1f1f1f] border-[#444] text-[#ddd]'}`}
                         value={group.toolbar.quality}
                         onChange={(e) => {
                           setGenGroups(prev => prev.map(g =>
@@ -5290,11 +5340,12 @@ export function InfiniteCanvas({
                         <option value="hd">高清</option>
                       </select>
                       <select
-                        className={`text-xs px-1.5 py-1 rounded border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#252525] border-[#444] text-[#ccc]'}`}
-                        value={group.toolbar.n}
+                        className={`text-sm px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#1f1f1f] border-[#444] text-[#ddd]'}`}
+                        value={group.toolbar.outputCount || group.toolbar.n || 1}
                         onChange={(e) => {
+                          const val = Number(e.target.value);
                           setGenGroups(prev => prev.map(g =>
-                            g.id === group.id ? { ...g, toolbar: { ...g.toolbar, n: Number(e.target.value) } } : g
+                            g.id === group.id ? { ...g, toolbar: { ...g.toolbar, outputCount: val, n: val } } : g
                           ));
                         }}
                       >
@@ -5303,41 +5354,62 @@ export function InfiniteCanvas({
                         ))}
                       </select>
                     </div>
-                    {/* Row 2: Prompt input + Generate button */}
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="text"
-                        className={`flex-1 text-xs px-2 py-1 rounded border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#252525] border-[#444] text-[#ccc]'} placeholder:text-[#666]`}
-                        placeholder="输入关键词..."
+
+                    {/* Row 3: Prompt textarea with resize handle */}
+                    <div className="relative">
+                      <textarea
+                        className={`w-full text-sm px-3 py-2 pr-10 rounded-lg border resize-y min-h-[60px] max-h-[160px] ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700 placeholder:text-gray-400 focus:ring-amber-400/30' : 'bg-[#1f1f1f] border-[#444] text-[#ddd] placeholder:text-[#666] focus:ring-[#d4af37]/30'} focus:outline-none focus:ring-2 transition-all`}
+                        placeholder={isRef ? '描述你想要生成的图片，用自然语言说明如何参考以上图片...' : '描述你想要融合生成的图片效果...'}
                         value={group.toolbar.prompt}
+                        rows={2}
                         onChange={(e) => {
                           setGenGroups(prev => prev.map(g =>
                             g.id === group.id ? { ...g, toolbar: { ...g.toolbar, prompt: e.target.value } } : g
                           ));
                         }}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
+                          if (e.key === 'Enter' && !e.shiftKey) {
                             e.preventDefault();
                             handleGenGroupGenerate(group.id);
                           }
                         }}
                       />
+                      {/* Resize handle indicator (bottom-right) */}
+                      <div className="absolute bottom-1 right-1 w-4 h-4 opacity-30 pointer-events-none"
+                        style={{ color: accentColor }}>
+                        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M14 14H10L14 10V14ZM14 14H12L14 12V14ZM14 6L6 14H8L14 8V6Z" /></svg>
+                      </div>
+                    </div>
+
+                    {/* Row 4: Optimize + Generate + Cancel */}
+                    <div className="flex items-center gap-2">
                       <button
-                        className="px-3 py-1 rounded-lg text-xs font-bold text-black transition-all hover:brightness-110 active:scale-95"
-                        style={{ background: group.type === 'fusion' ? 'linear-gradient(135deg, #4ecdc4, #45b7d1)' : 'linear-gradient(135deg, #d4af37, #f0d060)' }}
+                        className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${isMonochrome ? 'bg-gray-100 hover:bg-gray-200 text-gray-600' : 'bg-[#252525] hover:bg-[#333] text-[#aaa]'}`}
+                        onClick={() => handleOptimizeGroupPrompt(group.id)}
+                        disabled={optimizingGroupId === group.id || !group.toolbar.prompt.trim()}
+                        title="调用AI优化提示词"
+                      >
+                        {optimizingGroupId === group.id ? (
+                          <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: accentColor, borderTopColor: 'transparent' }} />
+                        ) : (
+                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                        )}
+                        <span>{optimizingGroupId === group.id ? '优化中' : '优化'}</span>
+                      </button>
+                      <button
+                        className="flex-1 py-2.5 rounded-lg text-sm font-bold text-black transition-all hover:brightness-110 active:scale-[0.98]"
+                        style={{ background: isRef ? 'linear-gradient(135deg, #d4af37, #f0d060)' : 'linear-gradient(135deg, #4ecdc4, #45b7d1)' }}
                         onClick={() => handleGenGroupGenerate(group.id)}
-                        disabled={group.resultPlaceholder.isProcessing}
+                        disabled={group.resultPlaceholder.isProcessing || !group.toolbar.prompt.trim()}
                       >
                         {group.resultPlaceholder.isProcessing ? '生成中...' : '生成'}
                       </button>
                       <button
-                        className={`px-2 py-1 rounded-lg text-xs ${isMonochrome ? 'text-gray-400 hover:text-gray-600' : 'text-[#888] hover:text-[#d4af37]'}`}
-                        onClick={() => {
-                          setGenGroups(prev => prev.filter(g => g.id !== group.id));
-                        }}
-                        title="取消"
+                        className={`px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${isMonochrome ? 'bg-gray-100 hover:bg-gray-200 text-gray-500' : 'bg-[#252525] hover:bg-[#333] text-[#888]'}`}
+                        onClick={() => deleteGenGroup(group.id)}
+                        title="取消并删除组"
                       >
-                        ✕
+                        取消
                       </button>
                     </div>
                   </div>
