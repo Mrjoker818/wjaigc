@@ -290,6 +290,22 @@ export async function POST(request: NextRequest) {
     // 设置生成数量 - 不受模型maxN限制，因为我们逐个提交任务(n=1)
     const count = outputCount && outputCount >= 1 ? Math.min(outputCount, 10) : 1;
 
+    // 宽高比转像素尺寸映射（OpenAI /images/generations 标准格式）
+    const ASPECT_RATIO_TO_PIXELS: Record<string, string> = {
+      '1:1': '1024x1024',
+      '4:3': '1536x1024',
+      '3:2': '1536x1024',
+      '16:9': '1536x1024',
+      '21:9': '1536x1024',
+      '3:4': '1024x1536',
+      '2:3': '1024x1536',
+      '9:16': '1024x1536',
+    };
+
+    // 判断 provider 是否为 apimart（apimart 支持 1:1 等比例格式，其他需要像素格式）
+    const isApimartProvider = (baseUrl: string) =>
+      baseUrl.includes('apimart.ai');
+
     // 构建提交单个任务的辅助函数（返回 taskId 或抛出可重试错误）
     const submitSingleTask = async (
       currentModelConfig: ModelConfig,
@@ -297,9 +313,14 @@ export async function POST(request: NextRequest) {
       currentApiBaseUrl: string,
       currentProviderId: string,
     ): Promise<{ taskId: string; usedModel: string; usedProviderId: string }> => {
-      const effectiveSize = currentModelConfig.supportedSizes.includes(apimartSize) 
+      let effectiveSize = currentModelConfig.supportedSizes.includes(apimartSize) 
         ? apimartSize 
         : currentModelConfig.supportedSizes[0] || '1:1';
+
+      // 非 apimart 提供商需要将比例格式转换为 OpenAI 标准像素格式
+      if (!isApimartProvider(currentApiBaseUrl) && ASPECT_RATIO_TO_PIXELS[effectiveSize]) {
+        effectiveSize = ASPECT_RATIO_TO_PIXELS[effectiveSize];
+      }
 
       const requestBody: Record<string, unknown> = {
         model: currentModelConfig.modelId,

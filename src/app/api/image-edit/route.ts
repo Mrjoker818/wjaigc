@@ -161,6 +161,27 @@ async function submitImageTask(
   requestBody: Record<string, unknown>,
   endpoint: '/images/generations' | '/images/edits' = '/images/generations'
 ): Promise<{ taskId?: string; directUrl?: string }> {
+  // Convert aspect ratio format (e.g. "1:1", "16:9") to pixel size format (e.g. "1024x1024", "1536x1024")
+  // OpenAI-compatible APIs require pixel format; only apimart.ai accepts aspect ratio format
+  if (requestBody.size && typeof requestBody.size === 'string') {
+    const sizeStr = requestBody.size as string;
+    if (sizeStr.includes(':')) {
+      const [w, h] = sizeStr.split(':').map(Number);
+      if (w && h) {
+        const MAX = 2048;
+        let pxW: number, pxH: number;
+        if (w >= h) {
+          pxW = MAX;
+          pxH = Math.round((MAX * h) / w / 64) * 64;
+        } else {
+          pxH = MAX;
+          pxW = Math.round((MAX * w) / h / 64) * 64;
+        }
+        requestBody = { ...requestBody, size: `${pxW}x${pxH}` };
+      }
+    }
+  }
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 60000);
 
