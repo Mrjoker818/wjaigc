@@ -85,7 +85,7 @@ function MultiAngleSpherePreview({
 
     const imgData = imgDataRef.current;
     const yaw = (rotation / 90) * Math.PI * 0.5;  // -PI/2 to PI/2
-    const pitch = (tilt / 60) * Math.PI * 0.5;    // normalized by max tilt (60°)
+    const pitch = -(tilt / 60) * Math.PI * 0.5;   // negated: positive tilt = looking up (仰视)
     const camDist = 2.5 / (zoom === 0 ? 0.7 : zoom === 2 ? 1.5 : 1.0);  // 特写=0.7, 标准=1.0, 广角=1.5
 
     if (!imgData) {
@@ -225,7 +225,7 @@ function MultiAngleSpherePreview({
       <div className={`absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full text-xs ${isMonochrome ? 'bg-white/80 text-gray-500 border border-gray-200' : 'bg-black/60 text-[#aaa] border border-white/10'}`}>
         {Math.abs(rotation) < 10 && Math.abs(tilt) < 10 ? '正面' :
          rotation > 60 ? '左侧' : rotation < -60 ? '右侧' :
-         tilt > 25 ? '俯视' : tilt < -25 ? '仰视' : '斜视'}
+         tilt > 25 ? '仰视' : tilt < -25 ? '俯视' : '斜视'}
       </div>
     </div>
   );
@@ -769,7 +769,7 @@ export function InfiniteCanvas({
       const dx = event.clientX - drag.startX;
       const dy = event.clientY - drag.startY;
       setMultiAngleRotation(Math.round(clampMultiAngleValue(drag.startRotation + dx * 0.55, -90, 90)));
-      setMultiAngleTilt(Math.round(clampMultiAngleValue(drag.startTilt - dy * 0.55, -30, 60)));
+      setMultiAngleTilt(Math.round(clampMultiAngleValue(drag.startTilt + dy * 0.55, -30, 60)));
     };
     const handleUp = () => {
       multiAngleDragRef.current = null;
@@ -5588,7 +5588,7 @@ export function InfiniteCanvas({
                           width: '110px',
                           height: '110px',
                           transformStyle: 'preserve-3d',
-                          transform: `rotateX(${-multiAngleTilt * 0.8}deg) rotateY(${multiAngleRotation * 1.2}deg)`,
+                          transform: `rotateX(${multiAngleTilt * 0.8}deg) rotateY(${multiAngleRotation * 1.2}deg)`,
                           transition: isMultiAngleDragging ? 'none' : 'transform 0.15s ease-out',
                         }}
                       >
@@ -5621,7 +5621,7 @@ export function InfiniteCanvas({
                       <div className={`absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full text-xs ${isMonochrome ? 'bg-white/80 text-gray-500 border border-gray-200' : 'bg-black/60 text-[#aaa] border border-white/10'}`}>
                         {Math.abs(multiAngleRotation) < 10 && Math.abs(multiAngleTilt) < 10 ? '正面' :
                          multiAngleRotation > 45 ? '左侧' : multiAngleRotation < -45 ? '右侧' :
-                         multiAngleTilt > 35 ? '俯视' : multiAngleTilt < -15 ? '仰视' : '斜视'}
+                         multiAngleTilt > 35 ? '仰视' : multiAngleTilt < -15 ? '俯视' : '斜视'}
                       </div>
                     </div>
                   ) : (

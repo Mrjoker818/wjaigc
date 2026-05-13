@@ -996,7 +996,7 @@ export async function POST(request: NextRequest) {
       // Build angle description text
       // rotation: -90 to 90 (yaw), tilt: -30 to 60 (pitch), zoom: 0=特写 1=标准 2=广角
       const yawText = rotation > 0 ? `${Math.abs(rotation)} degrees to the right` : rotation < 0 ? `${Math.abs(rotation)} degrees to the left` : 'front view';
-      const pitchText = tilt > 0 ? `${Math.abs(tilt)} degrees high angle looking down` : tilt < 0 ? `${Math.abs(tilt)} degrees low angle looking up` : 'level camera height';
+      const pitchText = tilt > 0 ? `${Math.abs(tilt)} degrees low angle looking up` : tilt < 0 ? `${Math.abs(tilt)} degrees high angle looking down` : 'level camera height';
       const zoomIdx = typeof zoom === 'number' ? zoom : 1;
       const dollyText = zoomIdx === 0 ? 'close-up shot, tight framing, subject fills the frame' : zoomIdx === 2 ? 'wide-angle shot, pulled back camera, shows more environment and context' : 'standard medium framing';
 
