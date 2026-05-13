@@ -2214,8 +2214,14 @@ export function InfiniteCanvas({
 
   /** 删除生成组 */
   const deleteGenGroup = useCallback((groupId: string) => {
+    const group = genGroupsRef.current.find(g => g.id === groupId);
+    // Remove result images from canvas images array
+    if (group?.resultImageIds && group.resultImageIds.length > 0) {
+      const resultIds = new Set(group.resultImageIds);
+      onImagesChange(imagesRef.current.filter(img => !resultIds.has(img.id)));
+    }
     setGenGroups(prev => prev.filter(g => g.id !== groupId));
-  }, []);
+  }, [onImagesChange]);
 
   /** 创建六面体组 */
   const handleCreateHexCube = useCallback(() => {
@@ -2390,7 +2396,23 @@ export function InfiniteCanvas({
 
       if (data.mode === 'direct' && data.imageUrls) {
         // 直接模式：立即显示结果
-        const newImages = data.imageUrls.map((url: string, i: number) => ({
+        // Save images to get persistent URLs, then add to canvas images for persistence
+        const savedUrls: string[] = [];
+        for (const url of data.imageUrls as string[]) {
+          try {
+            const saveRes = await fetch('/api/save-image', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ imageUrl: url }),
+            });
+            const saveData = await saveRes.json();
+            savedUrls.push(saveData.savedUrl || saveData.localUrl || url);
+          } catch {
+            savedUrls.push(url);
+          }
+        }
+        // Add result images to canvas images array for persistence (they'll be hidden on canvas, shown in result frame)
+        const newImages = savedUrls.map((url: string, i: number) => ({
           id: `grp-result-${Date.now()}-${i}`,
           url,
           x: phX + i * (phWidth + 20),
@@ -2400,12 +2422,11 @@ export function InfiniteCanvas({
           prompt: toolbar.prompt,
           aspectRatio: toolbar.aspectRatio,
         }));
-        // 添加结果图到画布
         onImagesChange([...imagesRef.current, ...newImages]);
-        // 更新组结果
+        // Update group result
         setGenGroups(prev => prev.map(g => {
           if (g.id !== group.id) return g;
-          return { ...g, status: 'completed' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 100, resultUrl: newImages[0]?.url, resultImageIds: newImages.map((img: { id: string }) => img.id) } };
+          return { ...g, status: 'completed' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 100, resultUrl: savedUrls[0] }, resultImageIds: newImages.map((img: { id: string }) => img.id) };
         }));
       } else if (data.error) {
         // API返回错误
@@ -2452,7 +2473,23 @@ export function InfiniteCanvas({
                 resultUrls.push(pollData.imageUrl);
               }
               if (resultUrls.length > 0) {
-                const resultImages = resultUrls.map((url: string, i: number) => ({
+                // Save images to get persistent URLs
+                const savedUrls: string[] = [];
+                for (const url of resultUrls) {
+                  try {
+                    const saveRes = await fetch('/api/save-image', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ imageUrl: url }),
+                    });
+                    const saveData = await saveRes.json();
+                    savedUrls.push(saveData.savedUrl || saveData.localUrl || url);
+                  } catch {
+                    savedUrls.push(url);
+                  }
+                }
+                // Add result images to canvas images array for persistence (hidden on canvas, shown in result frame)
+                const resultImages = savedUrls.map((url: string, i: number) => ({
                   id: `grp-result-${Date.now()}-${i}`,
                   url,
                   x: phX + i * (phWidth + 20),
@@ -2463,9 +2500,10 @@ export function InfiniteCanvas({
                   aspectRatio: toolbar.aspectRatio,
                 }));
                 onImagesChange([...imagesRef.current, ...resultImages]);
+                // Update group result
                 setGenGroups(prev => prev.map(g => {
                   if (g.id !== group.id) return g;
-                  return { ...g, status: 'completed' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 100, resultUrl: resultImages[0]?.url, resultImageIds: resultImages.map((img: { id: string }) => img.id) } };
+                  return { ...g, status: 'completed' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 100, resultUrl: savedUrls[0] }, resultImageIds: resultImages.map((img: { id: string }) => img.id) };
                 }));
               } else {
                 // 完成 but 没有图片URL
@@ -5231,6 +5269,8 @@ export function InfiniteCanvas({
             // Hide images belonging to collapsed gen groups (reference/fusion groups)
             const collapsedGenGroup = genGroups.find(g => g.isCollapsed && (g.refImages.some(r => r.imageId === image.id) || (g.resultImageIds && g.resultImageIds.includes(image.id))));
             const isInCollapsedGenGroup = !!collapsedGenGroup;
+            // Hide result images on canvas (they're shown in the result frame instead)
+            const isGenGroupResultImage = genGroups.some(g => g.resultImageIds && g.resultImageIds.includes(image.id));
             // Apply group drag offset to images in the dragged group
             const isGroupDragging = groupDragTarget && image.groupId === groupDragTarget;
             // Apply genGroup drag offset to images belonging to the dragged gen group
@@ -5245,7 +5285,7 @@ export function InfiniteCanvas({
                   top: image.y + (isDragging ? dragOffset.y : 0) + (isGroupDragging ? groupDragOffset.y : 0) + (isInDraggedGenGroup ? genGroupDragOffset.y : 0),
                   width: image.width,
                   height: image.height,
-                  display: (isGroupCollapsed || isInCollapsedGenGroup) ? 'none' : undefined,
+                  display: (isGroupCollapsed || isInCollapsedGenGroup || isGenGroupResultImage) ? 'none' : undefined,
                 }}
                 onMouseEnter={() => {
                   if (visionPromptEnabled && editMode === 'none') {
@@ -5584,9 +5624,12 @@ export function InfiniteCanvas({
             const resultCenterY = resultY + resultH / 2;
 
             // Container bounds: include all source images + result placeholder + toolbar (apply drag offset)
+            const resultFrameW = Math.max(resultW, 420);
+            const hasResult = !!group.resultPlaceholder.resultUrl;
+            const toolbarH = hasResult ? 0 : 350; // toolbar hidden when result exists
             const allBounds = [
               ...srcBounds,
-              { x: resultX, y: resultY, w: resultW, h: resultH + 200 }
+              { x: resultX, y: resultY, w: resultFrameW, h: resultH + toolbarH }
             ];
             const containerPad = 24;
             const containerMinX = Math.min(...allBounds.map(b => b.x)) - containerPad;
@@ -5855,19 +5898,30 @@ export function InfiniteCanvas({
                   style={{
                     left: resultX - containerMinX,
                     top: resultY - containerMinY,
-                    width: Math.max(resultW, 420),
+                    width: resultFrameW,
                     zIndex: 25,
                   }}
                 >
                   {/* Image area */}
                   <div
-                    className="w-full rounded-xl flex flex-col items-center justify-center gap-3 overflow-hidden"
+                    className={`w-full rounded-xl flex flex-col items-center justify-center gap-3 overflow-hidden relative ${group.resultPlaceholder.resultUrl ? '' : ''}`}
                     style={{
                       height: resultH,
-                      border: `2px dashed ${accentBorderStrong}`,
-                      background: accentBg,
+                      border: group.resultPlaceholder.resultUrl
+                        ? `2px solid ${accentColor}60`
+                        : `2px dashed ${accentBorderStrong}`,
+                      background: group.resultPlaceholder.resultUrl ? 'transparent' : accentBg,
                     }}
                   >
+                    {/* 'new' tag when result exists */}
+                    {group.resultPlaceholder.resultUrl && (
+                      <div
+                        className="absolute top-2 left-2 px-2 py-0.5 rounded-md text-xs font-bold z-10"
+                        style={{ background: accentColor, color: '#000' }}
+                      >
+                        NEW
+                      </div>
+                    )}
                     {group.resultPlaceholder.isProcessing ? (
                       <>
                         <div className="w-8 h-8 border-3 border-t-transparent rounded-full animate-spin"
@@ -5901,7 +5955,12 @@ export function InfiniteCanvas({
                         </span>
                       </>
                     ) : group.resultPlaceholder.resultUrl ? (
-                      <img src={group.resultPlaceholder.resultUrl} className="w-full h-full object-contain" alt="result" />
+                      <img
+                        src={group.resultPlaceholder.resultUrl}
+                        className="w-full h-full object-cover rounded-[10px]"
+                        alt="result"
+                        draggable={false}
+                      />
                     ) : (
                       <>
                         <div className="w-6 h-6 rotate-45 rounded-sm"
@@ -5919,7 +5978,8 @@ export function InfiniteCanvas({
                     )}
                   </div>
 
-                  {/* Toolbar — redesigned with larger fonts and better UX */}
+                  {/* Toolbar — hidden when result exists, only show generating/idle toolbar */}
+                  {!group.resultPlaceholder.resultUrl && (
                   <div
                     className="flex flex-col gap-2 mt-2 px-3 py-3 rounded-xl"
                     style={{
@@ -6081,6 +6141,7 @@ export function InfiniteCanvas({
                       </button>
                     </div>
                   </div>
+                  )}
                 </div>
                 </div>
                 )}
