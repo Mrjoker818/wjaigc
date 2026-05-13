@@ -3,6 +3,7 @@ import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, normalizeApiBaseUrl, findAllProvidersForType, findProviderById } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, type ApiCompatProfile } from '@/lib/api-compatibility';
 
 // 只需要短超时用于提交任务，轮询由前端负责
 export const maxDuration = 30;
@@ -164,7 +165,7 @@ export async function POST(request: NextRequest) {
     };
 
     // 构建备选模型列表（排除当前模型，优先管理员配置的模型）
-    const candidateModels: { modelId: string; apiKey: string; baseUrl: string; providerId: string; displayName: string }[] = [];
+    const candidateModels: { modelId: string; apiKey: string; baseUrl: string; providerId: string; displayName: string; advancedParams?: Record<string, string> }[] = [];
     for (const p of allImageProviders) {
       for (const m of p.models) {
         if (m !== model) {
@@ -174,6 +175,7 @@ export async function POST(request: NextRequest) {
             baseUrl: normalizeApiBaseUrl(p.provider.baseUrl),
             providerId: p.provider.id || 'unknown',
             displayName: p.provider.displayName || m,
+            advancedParams: p.provider.advancedParams,
           });
         }
       }
@@ -290,37 +292,20 @@ export async function POST(request: NextRequest) {
     // 设置生成数量 - 不受模型maxN限制，因为我们逐个提交任务(n=1)
     const count = outputCount && outputCount >= 1 ? Math.min(outputCount, 10) : 1;
 
-    // 宽高比转像素尺寸映射（OpenAI /images/generations 标准格式）
-    const ASPECT_RATIO_TO_PIXELS: Record<string, string> = {
-      '1:1': '1024x1024',
-      '4:3': '1536x1024',
-      '3:2': '1536x1024',
-      '16:9': '1536x1024',
-      '21:9': '1536x1024',
-      '3:4': '1024x1536',
-      '2:3': '1024x1536',
-      '9:16': '1024x1536',
-    };
-
-    // 判断 provider 是否为 apimart（apimart 支持 1:1 等比例格式，其他需要像素格式）
-    const isApimartProvider = (baseUrl: string) =>
-      baseUrl.includes('apimart.ai');
-
     // 构建提交单个任务的辅助函数（返回 taskId 或抛出可重试错误）
     const submitSingleTask = async (
       currentModelConfig: ModelConfig,
       currentApiKey: string,
       currentApiBaseUrl: string,
       currentProviderId: string,
+      currentProvider?: { baseUrl?: string; requestStyle?: string; advancedParams?: Record<string, string> } | null,
     ): Promise<{ taskId: string; usedModel: string; usedProviderId: string; directImageUrl?: string }> => {
+      // 解析兼容性档案
+      const profile: ApiCompatProfile = resolveCompatProfile(currentProvider);
+
       let effectiveSize = currentModelConfig.supportedSizes.includes(apimartSize) 
         ? apimartSize 
         : currentModelConfig.supportedSizes[0] || '1:1';
-
-      // 非 apimart 提供商需要将比例格式转换为 OpenAI 标准像素格式
-      if (!isApimartProvider(currentApiBaseUrl) && ASPECT_RATIO_TO_PIXELS[effectiveSize]) {
-        effectiveSize = ASPECT_RATIO_TO_PIXELS[effectiveSize];
-      }
 
       const requestBody: Record<string, unknown> = {
         model: currentModelConfig.modelId,
@@ -342,7 +327,8 @@ export async function POST(request: NextRequest) {
       }
 
       // 添加参考图片（使用已转换为公网可访问的 URL）
-      if (accessibleReferenceImages.length > 0 && currentModelConfig.supportsImageToImage) {
+      const hasImage = accessibleReferenceImages.length > 0 && currentModelConfig.supportsImageToImage;
+      if (hasImage) {
         requestBody.image_urls = accessibleReferenceImages;
         // 图生图 strength 参数：控制输出与参考图的偏离程度（0=完全保留原图，1=完全自由生成）
         if (typeof strength === 'number' && strength > 0 && strength <= 1) {
@@ -350,14 +336,20 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      console.log('Submitting to APIMart:', {
+      // 使用兼容性层自动调整请求（size格式、端点选择、input_fidelity等）
+      const { body: adjustedBody, endpoint } = adjustRequestForProfile(requestBody, profile, {
+        hasImage,
+      });
+
+      console.log('Submitting image task:', {
         model: currentModelConfig.modelId,
         prompt: enhancedPrompt.substring(0, 50) + '...',
-        size: effectiveSize,
-        paramType: currentModelConfig.paramType,
-        hasRefImages: accessibleReferenceImages.length > 0,
+        size: adjustedBody.size,
+        endpoint,
+        profile: profile.id,
+        hasRefImages: hasImage,
         refImageTypes: accessibleReferenceImages.map(u => u.startsWith('data:') ? 'base64' : u.startsWith('http') ? 'url' : 'other'),
-        strength: requestBody.strength || undefined,
+        strength: adjustedBody.strength || undefined,
       });
 
       const controller = new AbortController();
@@ -365,14 +357,14 @@ export async function POST(request: NextRequest) {
 
       const submitResponse = await fetchWithV1Retry(
         currentApiBaseUrl,
-        '/images/generations',
+        endpoint,
         {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${currentApiKey}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(requestBody),
+          body: JSON.stringify(adjustedBody),
           signal: controller.signal,
         }
       );
@@ -420,31 +412,29 @@ export async function POST(request: NextRequest) {
       }
 
       const submitResult = await submitResponse.json();
-      console.log('Submit result:', submitResult);
 
-      // 检查是否为直接返回图片的响应（OpenAI 兼容格式：data[].url 或 data[].b64_json）
-      const directImageUrl = submitResult.data?.[0]?.url;
-      const directB64 = submitResult.data?.[0]?.b64_json;
+      // 使用兼容性层解析响应（自动识别直接返回 vs 异步轮询）
+      const parsed = parseResponseForProfile(submitResult as Record<string, unknown>, profile);
 
-      if (directImageUrl || directB64) {
-        console.log('Direct image response (no polling needed)');
+      if (parsed.mode === 'direct' && parsed.directImageUrls.length > 0) {
+        console.log('Direct image response (no polling needed), profile:', profile.id);
         return {
           taskId: `direct_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           usedModel: currentModelConfig.modelId,
           usedProviderId: currentProviderId,
-          directImageUrl: directImageUrl || `data:image/png;base64,${directB64}`,
+          directImageUrl: parsed.directImageUrls[0],
         };
       }
 
-      // 检查异步任务格式（apimart 格式：data[].task_id）
-      const taskId = submitResult.data?.[0]?.task_id;
-      if (!taskId) {
-        console.error('No task_id or direct image in response:', submitResult);
-        throw new Error('未获取到任务ID或图片数据');
+      // 异步任务格式
+      if (parsed.taskIds.length > 0) {
+        const taskId = parsed.taskIds[0];
+        console.log('Got task_id:', taskId, 'profile:', profile.id);
+        return { taskId, usedModel: currentModelConfig.modelId, usedProviderId: currentProviderId };
       }
 
-      console.log('Got task_id:', taskId);
-      return { taskId, usedModel: currentModelConfig.modelId, usedProviderId: currentProviderId };
+      console.error('No task_id or direct image in response:', submitResult);
+      throw new Error('未获取到任务ID或图片数据');
     }
 
     const taskIds: string[] = [];
@@ -459,7 +449,7 @@ export async function POST(request: NextRequest) {
       
       // 先用当前模型尝试
       try {
-        const result = await submitSingleTask(modelConfig, serverApiKey, apiBaseUrl, provider?.id || 'env');
+        const result = await submitSingleTask(modelConfig, serverApiKey, apiBaseUrl, provider?.id || 'env', provider);
         if (result.directImageUrl) {
           directImageUrls.push(result.directImageUrl);
         } else if (result.taskId) {
@@ -497,7 +487,7 @@ export async function POST(request: NextRequest) {
             
             try {
               console.log(`尝试备选模型 ${candidate.modelId} (${ci + 1}/${candidateModels.length})...`);
-              const result = await submitSingleTask(candidateConfig, candidate.apiKey, candidate.baseUrl, candidate.providerId);
+              const result = await submitSingleTask(candidateConfig, candidate.apiKey, candidate.baseUrl, candidate.providerId, { baseUrl: candidate.baseUrl, advancedParams: candidate.advancedParams });
               if (result.directImageUrl) {
                 directImageUrls.push(result.directImageUrl);
               } else if (result.taskId) {

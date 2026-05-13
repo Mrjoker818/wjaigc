@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
 
 // 通用API生成路由 - 支持第三方OpenAI兼容API的图像生成
 // 当用户使用非 APIMart 管理的第三方模型时，图像生成请求会被路由到这里
@@ -48,28 +49,31 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // 构建请求体 - OpenAI兼容格式
-    const requestBody: Record<string, unknown> = {
-      model,
+    // 解析兼容性配置
+    const profile = resolveCompatProfile(provider);
+
+    // 构建请求体 - 先构建原始请求，再用兼容性层调整
+    const rawBody: Record<string, unknown> = {
+      model: resolvedModel,
       prompt,
       size: aspectRatio,
       n,
     };
-
-    // 如果有质量参数
     if (quality && quality !== 'standard') {
-      requestBody.quality = quality;
+      rawBody.quality = quality;
     }
-
-    // 如果有参考图片（图生图）
     if (referenceImageUrl) {
-      requestBody.image_urls = [referenceImageUrl];
+      rawBody.image_urls = [referenceImageUrl];
     }
 
-    console.log(`[Universal API] 请求: model=${resolvedModel}, baseUrl=${baseUrl}, size=${aspectRatio}`);
+    const { body: requestBody, endpoint } = adjustRequestForProfile(rawBody, profile, {
+      hasImage: !!referenceImageUrl,
+    });
+
+    console.log(`[Universal API] 请求: model=${resolvedModel}, baseUrl=${baseUrl}, endpoint=${endpoint}, profile=${profile.id}`);
 
     // 1. 提交生成任务
-    const submitResponse = await fetchWithV1Retry(baseUrl, '/images/generations', {
+    const submitResponse = await fetchWithV1Retry(baseUrl, endpoint, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
@@ -98,26 +102,25 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // 处理异步任务模式（APImart兼容格式）
-    const taskData = Array.isArray(submitData.data) ? submitData.data[0] : submitData.data;
-    const taskId = taskData?.task_id;
+    // 使用兼容性层解析响应
+    const parsed = parseResponseForProfile(submitData as Record<string, unknown>, profile);
+
+    if (parsed.mode === 'direct' && parsed.directImageUrls.length > 0) {
+      // 直接模式：API 返回了图片数据
+      const images = parsed.directImageUrls.map((url: string, idx: number) => ({
+        id: `${resolvedModel}-${Date.now()}-${idx}`,
+        url,
+        prompt,
+        originalPrompt: prompt,
+        model: resolvedModel,
+      }));
+      return NextResponse.json({ success: true, images });
+    }
+
+    // 异步任务模式
+    const taskId = parsed.taskIds.length > 0 ? parsed.taskIds[0] : undefined;
 
     if (!taskId) {
-      // 可能是同步返回（标准OpenAI格式）
-      if (submitData.data && Array.isArray(submitData.data)) {
-        const images = submitData.data.map((item: Record<string, unknown>, idx: number) => ({
-          id: `${resolvedModel}-${Date.now()}-${idx}`,
-          url: item.url || (item.b64_json ? `data:image/png;base64,${item.b64_json}` : ''),
-          prompt,
-          originalPrompt: prompt,
-          model: resolvedModel,
-        })).filter((img: { url: string }) => img.url);
-
-        if (images.length > 0) {
-          return NextResponse.json({ success: true, images });
-        }
-      }
-
       return NextResponse.json({
         success: false,
         error: '未能获取任务ID或图片数据',

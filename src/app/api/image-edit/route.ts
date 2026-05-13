@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderById, findProviderForFeature, findAllProvidersForType, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, type ApiCompatProfile, type ImageEndpoint } from '@/lib/api-compatibility';
 import sharp from 'sharp';
 import fsSync from 'fs';
 import fs from 'fs/promises';
@@ -159,53 +160,47 @@ async function submitImageTask(
   apiBaseUrl: string,
   apiKey: string,
   requestBody: Record<string, unknown>,
-  endpoint: '/images/generations' | '/images/edits' = '/images/generations'
+  endpoint: '/images/generations' | '/images/edits' = '/images/generations',
+  providerInfo?: { baseUrl?: string; requestStyle?: string; advancedParams?: Record<string, string> } | null,
 ): Promise<{ taskId?: string; directUrl?: string }> {
-  // Convert aspect ratio format (e.g. "1:1", "16:9") to pixel size format (e.g. "1024x1024", "1536x1024")
-  // OpenAI-compatible APIs require pixel format; only apimart.ai accepts aspect ratio format
-  if (requestBody.size && typeof requestBody.size === 'string') {
-    const sizeStr = requestBody.size as string;
-    if (sizeStr.includes(':')) {
-      const [w, h] = sizeStr.split(':').map(Number);
-      if (w && h) {
-        const MAX = 2048;
-        let pxW: number, pxH: number;
-        if (w >= h) {
-          pxW = MAX;
-          pxH = Math.round((MAX * h) / w / 64) * 64;
-        } else {
-          pxH = MAX;
-          pxW = Math.round((MAX * w) / h / 64) * 64;
-        }
-        requestBody = { ...requestBody, size: `${pxW}x${pxH}` };
-      }
-    }
-  }
+  // 解析兼容性档案
+  const profile = resolveCompatProfile(providerInfo);
+
+  // 使用兼容性层调整请求（size格式、端点选择、input_fidelity等）
+  const hasImageField = !!requestBody.image;
+  const { body: adjustedBody, endpoint: resolvedEndpoint } = adjustRequestForProfile(
+    requestBody,
+    profile,
+    { hasImage: hasImageField, isEditEndpoint: endpoint === '/images/edits' },
+  );
+
+  // 如果兼容性层建议使用不同的端点，优先使用
+  const effectiveEndpoint = resolvedEndpoint;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 60000);
 
   // Debug: log key params for image-to-image verification
-  const hasImageUrls = !!(requestBody as Record<string, unknown>)?.image_urls;
-  const urls = (requestBody as Record<string, unknown>)?.image_urls as string[] | undefined;
-  const str = (requestBody as Record<string, unknown>)?.strength;
-  const sz = (requestBody as Record<string, unknown>)?.size;
-  const pmt = String((requestBody as Record<string, unknown>)?.prompt || '').substring(0, 80);
-  const hasImageField = !!(requestBody as Record<string, unknown>)?.image;
-  const inputFidelity = (requestBody as Record<string, unknown>)?.input_fidelity;
-  console.info(`[submitImageTask] API call: endpoint=${endpoint}, hasImageUrls=${hasImageUrls}, hasImage=${hasImageField}, inputFidelity=${inputFidelity}, urlCount=${urls?.length || 0}, urlType=${urls?.[0]?.substring(0, 30) || 'N/A'}, strength=${str}, size=${sz}, prompt=${pmt}...`);
+  const hasImageUrls = !!adjustedBody.image_urls;
+  const urls = adjustedBody.image_urls as string[] | undefined;
+  const str = adjustedBody.strength;
+  const sz = adjustedBody.size;
+  const pmt = String(adjustedBody.prompt || '').substring(0, 80);
+  const hasImg = !!adjustedBody.image;
+  const inputFidelity = adjustedBody.input_fidelity;
+  console.info(`[submitImageTask] API call: endpoint=${effectiveEndpoint}, profile=${profile.id}, hasImageUrls=${hasImageUrls}, hasImage=${hasImg}, inputFidelity=${inputFidelity}, urlCount=${urls?.length || 0}, urlType=${urls?.[0]?.substring(0, 30) || 'N/A'}, strength=${str}, size=${sz}, prompt=${pmt}...`);
 
   // For /images/edits endpoint, try JSON first (most proxies accept it), then fallback to multipart form
   let submitResponse: Response;
 
-  if (endpoint === '/images/edits' && hasImageField) {
+  if (effectiveEndpoint === '/images/edits' && hasImg) {
     // Strategy: Try JSON first (most API proxies support JSON for edits)
     // If it fails with form-related error, retry with multipart form data
-    const jsonBody = { ...requestBody };
+    const jsonBody = { ...adjustedBody };
 
     submitResponse = await fetchWithV1Retry(
       apiBaseUrl,
-      endpoint,
+      effectiveEndpoint,
       {
         method: 'POST',
         headers: {
@@ -232,7 +227,7 @@ async function submitImageTask(
         console.info(`[submitImageTask] JSON failed for edits endpoint, retrying with multipart form data...`);
         // Build multipart form data
         const formData = new FormData();
-        for (const [key, value] of Object.entries(requestBody)) {
+        for (const [key, value] of Object.entries(adjustedBody)) {
           if (value === undefined || value === null) continue;
           if (key === 'image') {
             // image field: could be base64 data URL or plain base64
@@ -266,7 +261,7 @@ async function submitImageTask(
 
         submitResponse = await fetchWithV1Retry(
           apiBaseUrl,
-          endpoint,
+          effectiveEndpoint,
           {
             method: 'POST',
             headers: {
@@ -286,14 +281,14 @@ async function submitImageTask(
     // Standard JSON request for /images/generations
     submitResponse = await fetchWithV1Retry(
       apiBaseUrl,
-      endpoint,
+      effectiveEndpoint,
       {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify(adjustedBody),
         signal: controller.signal,
       }
     );
@@ -339,18 +334,19 @@ async function submitImageTask(
     throw new Error(errorMsg);
   }
 
-  const submitResult = await submitResponse.json();
-  const taskId = submitResult.data?.[0]?.task_id;
+  // 使用兼容性层解析响应
+  const submitResult = await submitResponse.json() as Record<string, unknown>;
+  const parsed = parseResponseForProfile(submitResult, profile);
 
-  if (!taskId) {
-    const directUrl = submitResult.data?.[0]?.url;
-    if (directUrl) {
-      return { directUrl };
-    }
-    throw new Error('未获取到任务ID');
+  if (parsed.mode === 'direct' && parsed.directImageUrls.length > 0) {
+    return { directUrl: parsed.directImageUrls[0] };
   }
 
-  return { taskId };
+  if (parsed.taskIds.length > 0) {
+    return { taskId: parsed.taskIds[0] };
+  }
+
+  throw new Error('未获取到任务ID或图片数据');
 }
 
 /**
@@ -498,7 +494,7 @@ async function describeImageWithVision(
  * 遇到 ModelCapabilityError 时自动切换下一个候选模型
  */
 async function autoTrySubmitImageTask(
-  candidateModels: Array<{ model: string; apiKey: string; apiBaseUrl: string; source: string }>,
+  candidateModels: Array<{ model: string; apiKey: string; apiBaseUrl: string; source: string; advancedParams?: Record<string, string> }>,
   buildRequestBody: (model: string) => Record<string, unknown>,
   operation: string,
   endpoint: '/images/generations' | '/images/edits' = '/images/generations',
@@ -509,7 +505,10 @@ async function autoTrySubmitImageTask(
     try {
       console.log(`[image-edit] ${operation}: Trying model ${candidate.model} (source: ${candidate.source}, endpoint: ${endpoint})`);
       const requestBody = buildRequestBody(candidate.model);
-      const result = await submitImageTask(candidate.apiBaseUrl, candidate.apiKey, requestBody, endpoint);
+      const result = await submitImageTask(candidate.apiBaseUrl, candidate.apiKey, requestBody, endpoint, {
+        baseUrl: candidate.apiBaseUrl,
+        advancedParams: candidate.advancedParams,
+      });
       return { ...result, usedModel: candidate.model };
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -891,7 +890,7 @@ export async function POST(request: NextRequest) {
     // 2. 再尝试管理员配置的其他 image 类型 provider 的模型
     // 3. 最后使用环境变量兜底
     // 构建候选模型列表：前端指定的模型优先，然后是其他所有可用模型
-    const candidateModels: Array<{ model: string; apiKey: string; apiBaseUrl: string; source: string }> = [];
+    const candidateModels: Array<{ model: string; apiKey: string; apiBaseUrl: string; source: string; advancedParams?: Record<string, string> }> = [];
     const triedModels = new Set<string>();
     
     const allImageProviders = await findAllProvidersForType('image');
@@ -905,6 +904,7 @@ export async function POST(request: NextRequest) {
           apiKey: specifiedProvider.apiKey,
           apiBaseUrl: normalizeApiBaseUrl(specifiedProvider.baseUrl),
           source: 'specified-provider',
+          advancedParams: specifiedProvider.advancedParams,
         });
         triedModels.add(model);
       }
@@ -919,6 +919,7 @@ export async function POST(request: NextRequest) {
         apiKey: preferredProvider.apiKey,
         apiBaseUrl: normalizeApiBaseUrl(preferredProvider.baseUrl),
         source: 'preferred',
+        advancedParams: preferredProvider.advancedParams,
       });
       triedModels.add(model);
     }
@@ -932,6 +933,7 @@ export async function POST(request: NextRequest) {
             apiKey: entry.provider.apiKey,
             apiBaseUrl: normalizeApiBaseUrl(entry.provider.baseUrl),
             source: 'admin-auto',
+            advancedParams: entry.provider.advancedParams,
           });
           triedModels.add(m);
         }

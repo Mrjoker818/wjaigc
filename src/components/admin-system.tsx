@@ -57,6 +57,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
   const [apiBaseUrl, setApiBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [apiModel, setApiModel] = useState('');
+  const [compatProfile, setCompatProfile] = useState('auto');
   const [apiKind, setApiKind] = useState<ApiKind>('image');
   const [discoveredModels, setDiscoveredModels] = useState<ModelInfo[]>([]);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
@@ -260,15 +261,18 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
         modelType: apiKind,
         selectedModels: models,
         requestStyle: apiKind === 'general' ? 'auto' : apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' ? 'chat-completions' : 'images-generations',
-        advancedParams: advancedParams.filter(p => p.key.trim()),
+        advancedParams: [
+          ...advancedParams.filter(p => p.key.trim()),
+          ...(compatProfile !== 'auto' ? [{ key: 'compatProfile', value: compatProfile }] : []),
+        ],
       }),
     });
     setApiName('');
     setApiBaseUrl('');
     setApiKey('');
     setApiModel('');
+    setCompatProfile('auto');
     setDiscoveredModels([]);
-    setSelectedModels([]);
     setEditingProviderId(null);
     setAdvancedParams([]);
     setShowAdvancedParams(false);
@@ -283,6 +287,9 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     setApiBaseUrl(provider.baseUrl);
     setApiKey(''); // Don't prefill the key for security
     setApiKind((provider.modelType || 'image') as ApiKind);
+    // Load the provider's compatProfile from advancedParams
+    const savedProfile = provider.advancedParams?.compatProfile || 'auto';
+    setCompatProfile(['apimart', 'openai', 'openai-async', 'auto'].includes(savedProfile) ? savedProfile : 'auto');
     // Load the provider's models into discovered models
     const providerModels = provider.discoveredModels || [];
     if (providerModels.length > 0) {
@@ -306,7 +313,12 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     updates.modelType = apiKind;
     if (models) updates.selectedModels = models;
     const filteredParams = advancedParams.filter(p => p.key.trim());
-    if (filteredParams.length > 0) updates.advancedParams = filteredParams;
+    // Inject compatProfile into advancedParams if not 'auto'
+    const paramsWithCompat = [
+      ...filteredParams.filter(p => p.key !== 'compatProfile'),
+      ...(compatProfile !== 'auto' ? [{ key: 'compatProfile', value: compatProfile }] : []),
+    ];
+    if (paramsWithCompat.length > 0) updates.advancedParams = paramsWithCompat;
 
     await fetch('/api/admin/apis', {
       method: 'POST',
@@ -319,6 +331,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     setApiBaseUrl('');
     setApiKey('');
     setApiModel('');
+    setCompatProfile('auto');
     setDiscoveredModels([]);
     setSelectedModels([]);
     setAdvancedParams([]);
@@ -612,6 +625,24 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                   <div>
                     <label className={labelClass} htmlFor="admin-api-model">默认模型 ID（可选）</label>
                     <input id="admin-api-model" className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="未自动识别时填写" value={apiModel} onChange={e => setApiModel(e.target.value)} />
+                  </div>
+                  {/* API 兼容性配置 */}
+                  <div>
+                    <label className={labelClass} htmlFor="admin-compat-profile">API 兼容模式</label>
+                    <select
+                      id="admin-compat-profile"
+                      className={`w-full h-10 px-3 rounded-lg border text-sm ${isGold ? 'bg-[#111] border-[#2a2a2a] text-[#ccc]' : 'bg-white border-gray-200 text-gray-800'}`}
+                      value={compatProfile}
+                      onChange={e => setCompatProfile(e.target.value)}
+                    >
+                      <option value="auto">自动检测 — 根据API地址和响应自动适配</option>
+                      <option value="apimart">APImart (异步轮询) — 支持宽高比，返回task_id</option>
+                      <option value="openai">OpenAI 兼容 (直接返回) — 需像素尺寸，直接返回图片</option>
+                      <option value="openai-async">OpenAI 兼容 (异步轮询) — 需像素尺寸，返回task_id</option>
+                    </select>
+                    <p className={`mt-1 text-xs ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>
+                      添加新API时选择兼容模式可避免格式不匹配问题
+                    </p>
                   </div>
                   {/* 高级参数 */}
                   <div>

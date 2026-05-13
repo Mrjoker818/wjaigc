@@ -20,7 +20,7 @@ export interface ApiProvider {
   // 新增：选定的模型ID（支持多选）
   selectedModel?: string;
   selectedModels?: string[];
-  // 新增：高级参数
+  // 新增：高级参数（含 compatProfile 兼容性档案: 'apimart'|'openai'|'openai-async'|'auto'）
   advancedParams?: Record<string, string>;
   // 新增：是否为中转站
   isRelay?: boolean;
