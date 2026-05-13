@@ -1187,8 +1187,17 @@ export function InfiniteCanvas({
 
   // Hit test
   const hitTestImage = useCallback((canvasX: number, canvasY: number): string | null => {
+    // Collect IDs of gen group result images (they are hidden on canvas, skip them in hit test)
+    const genGroupResultIds = new Set<string>();
+    for (const g of genGroupsRef.current) {
+      if (g.resultImageIds) {
+        for (const rid of g.resultImageIds) genGroupResultIds.add(rid);
+      }
+    }
     for (let i = images.length - 1; i >= 0; i--) {
       const img = images[i];
+      // Skip gen group result images (they are rendered inside the result frame, not on canvas)
+      if (genGroupResultIds.has(img.id)) continue;
       if (canvasX >= img.x && canvasX <= img.x + img.width &&
           canvasY >= img.y && canvasY <= img.y + img.height) {
         return img.id;
@@ -1631,7 +1640,12 @@ export function InfiniteCanvas({
           const bottom = Math.max(boxSelectStart.y, boxSelectEnd.y) - rect.top;
 
           const selected = new Set<string>();
+          // Collect gen group result image IDs to exclude from selection (they're hidden on canvas)
+          const genGroupResultIds = new Set<string>();
+          genGroups.forEach(g => { if (g.resultImageIds) g.resultImageIds.forEach(id => genGroupResultIds.add(id)); });
           images.forEach(img => {
+            // Skip hidden gen group result images
+            if (genGroupResultIds.has(img.id)) return;
             const imgScreenLeft = img.x * zoom + viewOffset.x;
             const imgScreenTop = img.y * zoom + viewOffset.y;
             const imgScreenRight = (img.x + img.width) * zoom + viewOffset.x;
@@ -2215,13 +2229,17 @@ export function InfiniteCanvas({
   /** 删除生成组 */
   const deleteGenGroup = useCallback((groupId: string) => {
     const group = genGroupsRef.current.find(g => g.id === groupId);
-    // Remove result images from canvas images array
+    // When closing the group, result images stay on canvas as independent editable images
+    // Only remove the group container and connection lines, not the images
+    // Mark result images as no longer part of any group so they show on canvas
     if (group?.resultImageIds && group.resultImageIds.length > 0) {
-      const resultIds = new Set(group.resultImageIds);
-      onImagesChange(imagesRef.current.filter(img => !resultIds.has(img.id)));
+      // Result images are already in the images array; they were hidden because
+      // isGenGroupResultImage matched. Removing the group will automatically
+      // un-hide them since the genGroups state no longer contains this group.
+      // No need to modify images array.
     }
     setGenGroups(prev => prev.filter(g => g.id !== groupId));
-  }, [onImagesChange]);
+  }, []);
 
   /** 创建六面体组 */
   const handleCreateHexCube = useCallback(() => {
@@ -2264,17 +2282,26 @@ export function InfiniteCanvas({
     if (!group || !group.toolbar.prompt.trim()) return;
     setOptimizingGroupId(groupId);
     try {
-      // 获取当前LLM模型
-      const llmModelRaw = localStorage.getItem('wujie_selected_chat_model');
-      let llmModel = 'gemini-3-flash-preview';
+      // 获取当前LLM模型 - 从用户数据中读取
+      let llmModel = 'gemini-2.5-flash-preview';
       let providerId = '';
-      if (llmModelRaw) {
-        try {
-          const parsed = JSON.parse(llmModelRaw);
-          llmModel = parsed.model || parsed.id || llmModel;
-          providerId = parsed.providerId || '';
-        } catch { /* use default */ }
-      }
+      try {
+        const currentUserId = localStorage.getItem('unbounded_ai_current_user');
+        const raw = localStorage.getItem('unbounded_ai_user_data');
+        if (raw && currentUserId) {
+          const data = JSON.parse(raw);
+          const selectedModel = data?.userData?.[currentUserId]?.selectedModel;
+          if (selectedModel) {
+            if (selectedModel.includes('::')) {
+              const [pid, ...rest] = selectedModel.split('::');
+              providerId = pid;
+              llmModel = rest.join('::');
+            } else {
+              llmModel = selectedModel;
+            }
+          }
+        }
+      } catch { /* use default */ }
       const res = await fetch('/api/optimize-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2287,10 +2314,11 @@ export function InfiniteCanvas({
       });
       if (!res.ok) throw new Error('优化失败');
       const data = await res.json();
-      if (data.optimizedPrompt) {
+      if (data.optimized || data.optimizedPrompt) {
+        const optimizedPrompt = data.optimized || data.optimizedPrompt;
         setGenGroups(prev => prev.map(g => {
           if (g.id !== groupId) return g;
-          return { ...g, toolbar: { ...g.toolbar, prompt: data.optimizedPrompt } };
+          return { ...g, toolbar: { ...g.toolbar, prompt: optimizedPrompt } };
         }));
       }
     } catch (error) {
@@ -5652,11 +5680,12 @@ export function InfiniteCanvas({
                     left: containerMinX,
                     top: containerMinY,
                     width: containerW,
-                    height: containerH,
+                    height: group.isCollapsed ? 40 : containerH,
                     background: isHoveredForDrop ? (isRef ? 'rgba(212,175,55,0.12)' : 'rgba(78,205,196,0.12)') : accentBg,
                     border: `2px solid ${isThisGroupDragging ? accentColor : isHoveredForDrop ? accentColor : accentBorder}`,
                     zIndex: 12,
-                    transition: isThisGroupDragging ? 'none' : 'border-color 0.2s, background 0.2s',
+                    overflow: 'hidden',
+                    transition: isThisGroupDragging ? 'none' : 'height 0.3s ease, border-color 0.2s, background 0.2s',
                     boxShadow: isHoveredForDrop ? `0 0 20px ${accentColor}40` : 'none',
                   }}
                 >
@@ -8041,13 +8070,30 @@ export function InfiniteCanvas({
                           if (!hcg.toolbar.prompt.trim()) return;
                           setOptimizingGroupId(`hex-${hcg.id}`);
                           try {
-                            const llmModelRaw = localStorage.getItem('wujie_selected_chat_model');
-                            let llmModel = 'gemini-3-flash-preview', providerId = '';
-                            if (llmModelRaw) { try { const p = JSON.parse(llmModelRaw); llmModel = p.model || p.id || llmModel; providerId = p.providerId || ''; } catch {} }
+                            // 获取当前LLM模型 - 从用户数据中读取
+                            let llmModel = 'gemini-2.5-flash-preview', providerId = '';
+                            try {
+                              const currentUserId = localStorage.getItem('unbounded_ai_current_user');
+                              const raw = localStorage.getItem('unbounded_ai_user_data');
+                              if (raw && currentUserId) {
+                                const data = JSON.parse(raw);
+                                const selectedModel = data?.userData?.[currentUserId]?.selectedModel;
+                                if (selectedModel) {
+                                  if (selectedModel.includes('::')) {
+                                    const [pid, ...rest] = selectedModel.split('::');
+                                    providerId = pid;
+                                    llmModel = rest.join('::');
+                                  } else {
+                                    llmModel = selectedModel;
+                                  }
+                                }
+                              }
+                            } catch {}
                             const res = await fetch('/api/optimize-prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: hcg.toolbar.prompt, model: llmModel, providerId, mode: 'enhance' }) });
                             const data = await res.json();
-                            if (data.optimizedPrompt) {
-                              setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, prompt: data.optimizedPrompt } } : g));
+                            if (data.optimized || data.optimizedPrompt) {
+                              const optimizedPrompt = data.optimized || data.optimizedPrompt;
+                              setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, prompt: optimizedPrompt } } : g));
                             }
                           } catch (err) { console.error('优化失败:', err); }
                           setOptimizingGroupId(null);
