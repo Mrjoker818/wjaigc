@@ -1871,6 +1871,26 @@ function CanvasApp() {
             } catch {}
           }}
           initialGroups={initialGroups}
+          onForceSave={() => {
+            try {
+              if (currentProject?.id && images.length > 0) {
+                const mgr = UserManagerCore.getInstance();
+                const persistable = images.map(img => ({
+                  id: img.id,
+                  url: img.url.startsWith('data:') || img.url.startsWith('blob:') ? '' : img.url,
+                  x: img.x, y: img.y,
+                  width: img.width, height: img.height,
+                  originalWidth: img.originalWidth || img.width,
+                  originalHeight: img.originalHeight || img.height,
+                  rotation: 0, zIndex: 0,
+                  createdAt: img.createdAt || Date.now(),
+                  prompt: img.prompt || '',
+                  ...(img.groupId ? { groupId: img.groupId } : {}),
+                }));
+                mgr.updateProject(currentProject.id, { canvasImages: persistable });
+              }
+            } catch {}
+          }}
         />
       </div>
 

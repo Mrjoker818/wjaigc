@@ -318,6 +318,8 @@ interface InfiniteCanvasProps {
   onAltMarkReference?: (image: CanvasImage) => void;
   /** IDs of images currently marked as Alt references */
   altRefMarkerIds?: string[];
+  /** Force save canvas data to localStorage + server */
+  onForceSave?: () => void;
 }
 
 type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'img2img' | 'upscale';
@@ -365,6 +367,7 @@ export function InfiniteCanvas({
   initialGroups,
   onAltMarkReference,
   altRefMarkerIds = [],
+  onForceSave,
 }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
@@ -1147,13 +1150,19 @@ export function InfiniteCanvas({
           }
           // Offset each pasted image slightly so they don't stack
           const offsetIdx = newImages.length * 30;
+          // Calculate display size (max 500px on longest edge)
+          const maxEdge = 500;
+          const displayW = 400;
+          const displayH = 300;
           newImages.push({
             id: `paste-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
             url,
             x: cx + offsetIdx,
             y: cy + offsetIdx,
-            width: 400,
-            height: 300,
+            width: displayW,
+            height: displayH,
+            originalWidth: displayW,
+            originalHeight: displayH,
           });
         } catch {
           // Skip failed uploads
@@ -1163,6 +1172,23 @@ export function InfiniteCanvas({
       if (newImages.length > 0) {
         onImagesChange([...images, ...newImages]);
         setSelectedIds(new Set(newImages.map(img => img.id)));
+        // Load natural dimensions for pasted images and update
+        newImages.forEach(img => {
+          const tempImg = new Image();
+          tempImg.onload = () => {
+            const natW = tempImg.naturalWidth;
+            const natH = tempImg.naturalHeight;
+            const maxEdge = 500;
+            const scale = Math.min(maxEdge / natW, maxEdge / natH, 1);
+            const dispW = Math.round(natW * scale);
+            const dispH = Math.round(natH * scale);
+            const updated = images.map(i =>
+              i.id === img.id ? { ...i, width: dispW, height: dispH, originalWidth: natW, originalHeight: natH } : i
+            );
+            onImagesChange(updated);
+          };
+          tempImg.src = img.url;
+        });
       }
     };
 
@@ -3812,6 +3838,8 @@ export function InfiniteCanvas({
         const svgUrl = URL.createObjectURL(svgBlob);
         const engineLabel = data.engine === 'raster-svg-wrapper' ? '容器模式' : (data.engine || '矢量');
         completeProcessingFrame(placeholderId, svgUrl, img.width, img.height, {
+          originalWidth: img.originalWidth || Math.round(img.width),
+          originalHeight: img.originalHeight || Math.round(img.height),
           modifyPrompt: `矢量化 SVG (${engineLabel})`,
         });
         if (data.warnings && data.warnings.length > 0) {
@@ -3828,6 +3856,8 @@ export function InfiniteCanvas({
           const svgBlob = new Blob([result.svgString], { type: 'image/svg+xml;charset=utf-8' });
           const svgUrl = URL.createObjectURL(svgBlob);
           completeProcessingFrame(placeholderId, svgUrl, img.width, img.height, {
+            originalWidth: img.originalWidth || Math.round(img.width),
+            originalHeight: img.originalHeight || Math.round(img.height),
             modifyPrompt: `矢量化 SVG (${result.quality?.label || '本地'})`,
           });
         } else {
@@ -3850,6 +3880,8 @@ export function InfiniteCanvas({
 </svg>`;
           const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
           completeProcessingFrame(placeholderId, svgUrl, img.width, img.height, {
+            originalWidth: img.originalWidth || Math.round(img.width),
+            originalHeight: img.originalHeight || Math.round(img.height),
             modifyPrompt: '栅格化 (SVG)',
           });
         }
@@ -4502,10 +4534,16 @@ export function InfiniteCanvas({
             // 直接返回图片模式 — 加载图片获取尺寸后完成
             const img = new window.Image();
             img.onload = () => {
-              completeProcessingFrame(placeholderId, savedUrl, img.naturalWidth, img.naturalHeight, { prompt: fullPrompt });
+              const natW = img.naturalWidth || 1024;
+              const natH = img.naturalHeight || 1024;
+              const maxDisplaySide = 420;
+              const displayScale = Math.min(maxDisplaySide / natW, maxDisplaySide / natH, 1);
+              const displayW = Math.round(natW * displayScale);
+              const displayH = Math.round(natH * displayScale);
+              completeProcessingFrame(placeholderId, savedUrl, displayW, displayH, { prompt: fullPrompt, originalWidth: natW, originalHeight: natH });
             };
             img.onerror = () => {
-              completeProcessingFrame(placeholderId, savedUrl, 1024, 1024, { prompt: fullPrompt });
+              completeProcessingFrame(placeholderId, savedUrl, 420, 420, { prompt: fullPrompt, originalWidth: 1024, originalHeight: 1024 });
             };
             img.src = savedUrl;
           }
@@ -4813,43 +4851,49 @@ export function InfiniteCanvas({
     { label: '缩放至100%', shortcut: 'Ctrl+0', action: () => { setZoom(1); setViewOffset({ x: 0, y: 0 }); } },
   ];
 
+  // Helper to save image changes and force persist
+  const applyImageChanges = (newImages: typeof images) => {
+    onImagesChange(newImages);
+    onForceSave?.();
+  };
+
   const imageContextMenuItems = selectedIds.size > 1 ? [
     { label: '创建组', shortcut: '', action: () => { handleCreateGroup(); } },
     { label: '对齐-左', action: () => {
       const selImgs = images.filter(i => selectedIds.has(i.id));
       if (selImgs.length < 2) return;
       const minX = Math.min(...selImgs.map(i => i.x));
-      onImagesChange(images.map(i => selectedIds.has(i.id) ? { ...i, x: minX } : i));
+      applyImageChanges(images.map(i => selectedIds.has(i.id) ? { ...i, x: minX } : i));
     } },
     { label: '对齐-右', action: () => {
       const selImgs = images.filter(i => selectedIds.has(i.id));
       if (selImgs.length < 2) return;
       const maxRight = Math.max(...selImgs.map(i => i.x + i.width));
-      onImagesChange(images.map(i => selectedIds.has(i.id) ? { ...i, x: maxRight - i.width } : i));
+      applyImageChanges(images.map(i => selectedIds.has(i.id) ? { ...i, x: maxRight - i.width } : i));
     } },
     { label: '对齐-上', action: () => {
       const selImgs = images.filter(i => selectedIds.has(i.id));
       if (selImgs.length < 2) return;
       const minY = Math.min(...selImgs.map(i => i.y));
-      onImagesChange(images.map(i => selectedIds.has(i.id) ? { ...i, y: minY } : i));
+      applyImageChanges(images.map(i => selectedIds.has(i.id) ? { ...i, y: minY } : i));
     } },
     { label: '对齐-下', action: () => {
       const selImgs = images.filter(i => selectedIds.has(i.id));
       if (selImgs.length < 2) return;
       const maxBottom = Math.max(...selImgs.map(i => i.y + i.height));
-      onImagesChange(images.map(i => selectedIds.has(i.id) ? { ...i, y: maxBottom - i.height } : i));
+      applyImageChanges(images.map(i => selectedIds.has(i.id) ? { ...i, y: maxBottom - i.height } : i));
     } },
     { label: '水平居中', action: () => {
       const selImgs = images.filter(i => selectedIds.has(i.id));
       if (selImgs.length < 2) return;
       const center = (Math.min(...selImgs.map(i => i.x)) + Math.max(...selImgs.map(i => i.x + i.width))) / 2;
-      onImagesChange(images.map(i => selectedIds.has(i.id) ? { ...i, x: center - i.width / 2 } : i));
+      applyImageChanges(images.map(i => selectedIds.has(i.id) ? { ...i, x: center - i.width / 2 } : i));
     } },
     { label: '垂直居中', action: () => {
       const selImgs = images.filter(i => selectedIds.has(i.id));
       if (selImgs.length < 2) return;
       const center = (Math.min(...selImgs.map(i => i.y)) + Math.max(...selImgs.map(i => i.y + i.height))) / 2;
-      onImagesChange(images.map(i => selectedIds.has(i.id) ? { ...i, y: center - i.height / 2 } : i));
+      applyImageChanges(images.map(i => selectedIds.has(i.id) ? { ...i, y: center - i.height / 2 } : i));
     } },
     { label: '水平等间距', action: () => {
       const selImgs = images.filter(i => selectedIds.has(i.id));
@@ -4859,16 +4903,13 @@ export function InfiniteCanvas({
       const rightMost = sorted[sorted.length - 1].x + sorted[sorted.length - 1].width;
       const totalWidth = sorted.reduce((s, i) => s + i.width, 0);
       const gap = (rightMost - leftMost - totalWidth) / (sorted.length - 1);
-      let curX = leftMost;
-      const updates = new Map(sorted.map(img => [img.id, curX + (img === sorted[0] ? 0 : (curX = curX + img.width + gap - img.width, curX - img.width + gap))]));
-      // Recalculate properly
       let cx = leftMost;
       const xMap = new Map<string, number>();
       for (const img of sorted) {
         xMap.set(img.id, cx);
         cx += img.width + gap;
       }
-      onImagesChange(images.map(i => selectedIds.has(i.id) && xMap.has(i.id) ? { ...i, x: xMap.get(i.id)! } : i));
+      applyImageChanges(images.map(i => selectedIds.has(i.id) && xMap.has(i.id) ? { ...i, x: xMap.get(i.id)! } : i));
     } },
     { label: '垂直等间距', action: () => {
       const selImgs = images.filter(i => selectedIds.has(i.id));
@@ -4884,7 +4925,7 @@ export function InfiniteCanvas({
         yMap.set(img.id, cy);
         cy += img.height + gap;
       }
-      onImagesChange(images.map(i => selectedIds.has(i.id) && yMap.has(i.id) ? { ...i, y: yMap.get(i.id)! } : i));
+      applyImageChanges(images.map(i => selectedIds.has(i.id) && yMap.has(i.id) ? { ...i, y: yMap.get(i.id)! } : i));
     } },
     { label: '一键排版 Ctrl+Q', action: () => {
       const selImgs = images.filter(i => selectedIds.has(i.id));
@@ -4914,7 +4955,7 @@ export function InfiniteCanvas({
         posMap.set(img.id, { x, y, width: newWidth, height: newHeight });
         colHeights[minColIdx] += newHeight + GAP;
       }
-      onImagesChange(images.map(i => {
+      applyImageChanges(images.map(i => {
         if (!selectedIds.has(i.id) || !posMap.has(i.id)) return i;
         const pos = posMap.get(i.id)!;
         return { ...i, x: pos.x, y: pos.y, width: pos.width, height: pos.height };
