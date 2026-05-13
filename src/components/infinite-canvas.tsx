@@ -2378,6 +2378,16 @@ export function InfiniteCanvas({
       });
       const data = await res.json();
 
+      // 检查 API 错误
+      if (data.error) {
+        console.error('[GroupGenerate] API error:', data.error);
+        setGenGroups(prev => prev.map(g => {
+          if (g.id !== group.id) return g;
+          return { ...g, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, errorMsg: String(data.error).substring(0, 100) } };
+        }));
+        return;
+      }
+
       if (data.mode === 'direct' && data.imageUrls) {
         // 直接模式：立即显示结果
         const newImages = data.imageUrls.map((url: string, i: number) => ({
@@ -2432,23 +2442,39 @@ export function InfiniteCanvas({
                 return { ...g, resultPlaceholder: { ...g.resultPlaceholder, progress: Math.max(pollData.progress, 5) } };
               }));
             }
-            if (pollData.status === 'completed' && pollData.results?.length > 0) {
+            if (['completed', 'succeeded', 'success', 'done'].includes(pollData.status)) {
               clearInterval(interval);
-              const resultImages = pollData.results.map((url: string, i: number) => ({
-                id: `grp-result-${Date.now()}-${i}`,
-                url,
-                x: phX + i * (phWidth + 20),
-                y: phY,
-                width: phWidth, height: phHeight,
-                originalWidth: phWidth * 2, originalHeight: phHeight * 2,
-                prompt: toolbar.prompt,
-                aspectRatio: toolbar.aspectRatio,
-              }));
-              onImagesChange([...imagesRef.current, ...resultImages]);
-              setGenGroups(prev => prev.map(g => {
-                if (g.id !== group.id) return g;
-                return { ...g, status: 'completed' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 100, resultUrl: resultImages[0]?.url } };
-              }));
+              // poll-task 返回 imageUrl (单图) 或 results (多图)
+              const resultUrls: string[] = [];
+              if (pollData.results && Array.isArray(pollData.results) && pollData.results.length > 0) {
+                resultUrls.push(...pollData.results);
+              } else if (pollData.imageUrl) {
+                resultUrls.push(pollData.imageUrl);
+              }
+              if (resultUrls.length > 0) {
+                const resultImages = resultUrls.map((url: string, i: number) => ({
+                  id: `grp-result-${Date.now()}-${i}`,
+                  url,
+                  x: phX + i * (phWidth + 20),
+                  y: phY,
+                  width: phWidth, height: phHeight,
+                  originalWidth: phWidth * 2, originalHeight: phHeight * 2,
+                  prompt: toolbar.prompt,
+                  aspectRatio: toolbar.aspectRatio,
+                }));
+                onImagesChange([...imagesRef.current, ...resultImages]);
+                setGenGroups(prev => prev.map(g => {
+                  if (g.id !== group.id) return g;
+                  return { ...g, status: 'completed' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 100, resultUrl: resultImages[0]?.url, resultImageIds: resultImages.map((img: { id: string }) => img.id) } };
+                }));
+              } else {
+                // 完成 but 没有图片URL
+                const errMsg = pollData.error || '生成完成但未返回图片，请重试';
+                setGenGroups(prev => prev.map(g => {
+                  if (g.id !== group.id) return g;
+                  return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: errMsg } };
+                }));
+              }
             } else if (pollData.status === 'failed') {
               clearInterval(interval);
               const errMsg = pollData.error || '生成失败，请检查模型和API配置';
@@ -5359,20 +5385,28 @@ export function InfiniteCanvas({
                   }}
                 >
                   {refImages.map((img) => {
-                    const imgCenterX = img.x + img.width / 2;
-                    const imgCenterY = img.y + img.height / 2;
-                    const midX = (imgCenterX + outputCenterX) / 2;
+                    // Source point: right edge center of reference image
+                    const srcX = img.x + img.width;
+                    const srcY = img.y + img.height / 2;
+                    // Target point: left edge center of output frame
+                    const tgtX = outputX;
+                    const tgtY = outputY + outputFrameHeight / 2;
+                    const midX = (srcX + tgtX) / 2;
 
                     return (
                       <g key={`fusion-line-${img.id}`}>
                         <path
-                          d={`M ${imgCenterX} ${imgCenterY} C ${midX} ${imgCenterY}, ${midX} ${outputCenterY}, ${outputCenterX} ${outputCenterY}`}
+                          d={`M ${srcX} ${srcY} C ${midX} ${srcY}, ${midX} ${tgtY}, ${tgtX} ${tgtY}`}
                           fill="none"
                           stroke="#d4af37"
                           strokeWidth={2 / zoom}
                           strokeDasharray={`${6 / zoom} ${4 / zoom}`}
                           opacity={0.7}
                         />
+                        {/* Source connection dot */}
+                        <circle cx={srcX} cy={srcY} r={3.5 / zoom} fill="#d4af37" opacity={0.8} />
+                        {/* Target connection dot */}
+                        <circle cx={tgtX} cy={tgtY} r={3.5 / zoom} fill="#d4af37" opacity={0.8} />
                       </g>
                     );
                   })}
@@ -5547,15 +5581,19 @@ export function InfiniteCanvas({
                 >
                   <g transform={`translate(${-containerMinX}, ${-containerMinY})`}>
                   {srcImages.map(img => {
-                    const imgCenterX = img.x + img.width / 2 + dragDx;
-                    const imgCenterY = img.y + img.height / 2 + dragDy;
-                    const midX = (imgCenterX + resultCenterX) / 2;
+                    // Source point: right edge center of source image
+                    const srcX = img.x + img.width + dragDx;
+                    const srcY = img.y + img.height / 2 + dragDy;
+                    // Target point: left edge center of result frame
+                    const tgtX = resultX;
+                    const tgtY = resultY + resultH / 2;
+                    const midX = (srcX + tgtX) / 2;
 
                     return (
                       <g key={`gen-line-${img.id}`}>
                         {/* Animated dashed line */}
                         <path
-                          d={`M ${imgCenterX} ${imgCenterY} C ${midX} ${imgCenterY}, ${midX} ${resultCenterY}, ${resultCenterX} ${resultCenterY}`}
+                          d={`M ${srcX} ${srcY} C ${midX} ${srcY}, ${midX} ${tgtY}, ${tgtX} ${tgtY}`}
                           fill="none"
                           stroke={accentColor}
                           strokeWidth={2.5 / zoom}
@@ -5564,6 +5602,10 @@ export function InfiniteCanvas({
                         >
                           <animate attributeName="stroke-dashoffset" from="0" to={`${-26 / zoom}`} dur="2s" repeatCount="indefinite" />
                         </path>
+                        {/* Source connection dot (right edge of source image) */}
+                        <circle cx={srcX} cy={srcY} r={4 / zoom} fill={accentColor} opacity={0.8} />
+                        {/* Target connection dot (left edge of result frame) */}
+                        <circle cx={tgtX} cy={tgtY} r={4 / zoom} fill={accentColor} opacity={0.8} />
                       </g>
                     );
                   })}

@@ -61,16 +61,19 @@ export async function POST(request: NextRequest) {
       const taskData = statusResult.data;
       const taskStatus = taskData?.status;
 
-      // 返回完整状态信息给前端
+      const completedStatuses = ['completed', 'succeeded', 'success', 'done'];
+      const normalizedStatus = completedStatuses.includes(taskStatus) ? 'completed' : taskStatus;
+
+      // 返回完整状态信息给前端（标准化 completed 状态）
       const result: Record<string, unknown> = {
         success: true,
-        status: taskStatus,
+        status: normalizedStatus,
         progress: taskData?.progress || 0,
         estimatedTime: taskData?.estimated_time,
         actualTime: taskData?.actual_time,
       };
 
-      if (taskStatus === 'completed') {
+      if (completedStatuses.includes(taskStatus)) {
         // 提取图片URL
         const images = taskData?.result?.images;
         if (images && images.length > 0) {
