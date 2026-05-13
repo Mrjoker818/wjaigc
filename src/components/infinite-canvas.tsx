@@ -2063,6 +2063,13 @@ export function InfiniteCanvas({
     const resultH = firstImage.height;
     const resultPos = findNonOverlappingPosition(defaultResultX, defaultResultY, resultW, resultH, [firstImage.id]);
     const { model: currentModel, providerId: currentProviderId } = getCurrentModel();
+    // 根据当前模型获取支持的参数
+    const initSupportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, currentModel) || DEFAULT_ASPECT_RATIOS;
+    const initSupportedQualities = findModelConfig(MODEL_QUALITIES, currentModel) || DEFAULT_QUALITIES;
+    const initQualitySizeMap = findModelConfig(QUALITY_TO_SIZE, currentModel);
+    const initAspectRatio = initSupportedRatios.includes('1:1') ? '1:1' : initSupportedRatios[0];
+    const initQuality = initSupportedQualities[0] || '1K';
+    const initSize = initQualitySizeMap?.[initQuality] || '';
     const group: CanvasGenGroup = {
       id: groupId,
       type: groupType,
@@ -2074,15 +2081,15 @@ export function InfiniteCanvas({
         y: resultPos.y,
         width: resultW,
         height: resultH,
-        aspectRatio: '1:1',
+        aspectRatio: initAspectRatio,
         imageId: placeholderId,
       },
       toolbar: {
         model: currentModel || '',
         providerId: currentProviderId,
-        aspectRatio: '1:1',
-        size: '1024x1024',
-        quality: 'standard',
+        aspectRatio: initAspectRatio,
+        size: initSize,
+        quality: initQuality,
         outputCount: 1,
         n: 1,
         prompt: '',
@@ -2390,10 +2397,17 @@ export function InfiniteCanvas({
       fullPrompt = `${refNotes} ${fullPrompt}`;
     }
 
-    // 调用生图 API
+    // 调用生图 API（始终使用工具栏中选择的模型和 providerId）
     try {
-      const model = toolbar.model || getCurrentModel();
-      const providerId = toolbar.providerId || (localStorage.getItem('currentProviderId') || '').split('::')[0];
+      const model = toolbar.model;
+      const providerId = toolbar.providerId;
+      if (!model) {
+        setGenGroups(prev => prev.map(g => {
+          if (g.id !== group.id) return g;
+          return { ...g, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: '请先选择模型' } };
+        }));
+        return;
+      }
 
       const res = await fetch('/api/generate', {
         method: 'POST',
@@ -6044,8 +6058,15 @@ export function InfiniteCanvas({
                                 className={`w-full text-left text-sm px-3 py-2 flex items-center gap-2 transition-colors ${isSelected ? (isMonochrome ? 'bg-amber-50 text-amber-800' : 'bg-[#d4af37]/15 text-[#d4af37]') : (isMonochrome ? 'hover:bg-gray-100 text-gray-700' : 'hover:bg-[#2a2a2a] text-[#ccc]')}`}
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  // 获取新模型支持的参数，重置质量和比例
+                                  const newSupportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, m.id) || DEFAULT_ASPECT_RATIOS;
+                                  const newSupportedQualities = findModelConfig(MODEL_QUALITIES, m.id) || DEFAULT_QUALITIES;
+                                  const newQualitySizeMap = findModelConfig(QUALITY_TO_SIZE, m.id);
+                                  const newAspectRatio = newSupportedRatios.includes('1:1') ? '1:1' : newSupportedRatios[0];
+                                  const newQuality = newSupportedQualities[0];
+                                  const newSize = newQualitySizeMap?.[newQuality] || '';
                                   setGenGroups(prev => prev.map(g =>
-                                    g.id === group.id ? { ...g, toolbar: { ...g.toolbar, model: m.id, providerId: m.providerId, providerName: m.providerName } } : g
+                                    g.id === group.id ? { ...g, toolbar: { ...g.toolbar, model: m.id, providerId: m.providerId, providerName: m.providerName, aspectRatio: newAspectRatio, quality: newQuality, size: newSize } } : g
                                   ));
                                   setOpenModelDropdownGroupId(null);
                                 }}
@@ -6070,8 +6091,9 @@ export function InfiniteCanvas({
                         className={`flex-1 text-sm px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#1f1f1f] border-[#444] text-[#ddd]'}`}
                         value={group.toolbar.aspectRatio}
                         onChange={(e) => {
+                          const newAr = e.target.value;
                           setGenGroups(prev => prev.map(g =>
-                            g.id === group.id ? { ...g, toolbar: { ...g.toolbar, aspectRatio: e.target.value } } : g
+                            g.id === group.id ? { ...g, toolbar: { ...g.toolbar, aspectRatio: newAr } } : g
                           ));
                         }}
                       >
@@ -6083,8 +6105,11 @@ export function InfiniteCanvas({
                         className={`text-sm px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#1f1f1f] border-[#444] text-[#ddd]'}`}
                         value={group.toolbar.quality}
                         onChange={(e) => {
+                          const newQ = e.target.value;
+                          const qSizeMap = findModelConfig(QUALITY_TO_SIZE, group.toolbar.model);
+                          const newSize = qSizeMap?.[newQ] || '';
                           setGenGroups(prev => prev.map(g =>
-                            g.id === group.id ? { ...g, toolbar: { ...g.toolbar, quality: e.target.value } } : g
+                            g.id === group.id ? { ...g, toolbar: { ...g.toolbar, quality: newQ, size: newSize } } : g
                           ));
                         }}
                       >
@@ -8000,7 +8025,14 @@ export function InfiniteCanvas({
                                 onMouseEnter={(e) => { (e.target as HTMLElement).style.background = isMonochrome ? '#f3f4f6' : '#252525'; }}
                                 onMouseLeave={(e) => { (e.target as HTMLElement).style.background = hcg.toolbar.model === m.id && hcg.toolbar.providerId === m.providerId ? (isMonochrome ? '#dbeafe' : 'rgba(212,175,55,0.2)') : 'transparent'; }}
                                 onClick={() => {
-                                  setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, model: m.id, providerId: m.providerId, providerName: m.providerName } } : g));
+                                  // 获取新模型支持的参数，重置质量和比例
+                                  const newSupportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, m.id) || DEFAULT_ASPECT_RATIOS;
+                                  const newSupportedQualities = findModelConfig(MODEL_QUALITIES, m.id) || DEFAULT_QUALITIES;
+                                  const newQualitySizeMap = findModelConfig(QUALITY_TO_SIZE, m.id);
+                                  const newAspectRatio = newSupportedRatios.includes('1:1') ? '1:1' : newSupportedRatios[0];
+                                  const newQuality = newSupportedQualities[0];
+                                  const newSize = newQualitySizeMap?.[newQuality] || '';
+                                  setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, model: m.id, providerId: m.providerId, providerName: m.providerName, aspectRatio: newAspectRatio, quality: newQuality, size: newSize } } : g));
                                   setOpenModelDropdownGroupId(null);
                                 }}
                               >
