@@ -539,8 +539,8 @@ function CanvasApp() {
           return baseInterval;
         };
 
-        // 最大轮询时间：预估时间 * 3 + 30秒（兜底），最少60秒，最多300秒
-        const maxPollTime = Math.min(300, Math.max(60, estimatedTime * 3 + 30)) * 1000;
+        // 最大轮询时间：预估时间 * 3 + 30秒（兜底），最少60秒，最多600秒（兼容token link等慢速API）
+        const maxPollTime = Math.min(600, Math.max(60, estimatedTime * 3 + 30)) * 1000;
         const pollStartTime = Date.now();
 
         const completedImages: Array<{ id: string; url: string; prompt: string; model?: string; quality?: string; aspectRatio?: string; stylePreset?: string; category?: string; size?: string; sourceUrl?: string }> = [];        let consecutiveErrors = 0;

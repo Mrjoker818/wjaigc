@@ -2421,7 +2421,7 @@ export function InfiniteCanvas({
   ): Promise<string | null> => {
     // apiKeyOrModel was previously apiKey, now we pass the model name for server-side key lookup
     const currentModel = getCurrentModel();
-    const maxAttempts = 60;
+    const maxAttempts = 150; // 150次 × 动态间隔 ≈ 600秒，兼容token link等慢速API
     const getEditPollInterval = (attempt: number) => {
       if (attempt <= 2) return 800;
       if (attempt <= 5) return 1000;
@@ -2604,7 +2604,7 @@ export function InfiniteCanvas({
 
       // Poll for results
       const pollForResult = async (taskId: string): Promise<string | null> => {
-        const maxAttempts = 120;
+        const maxAttempts = 300; // 300次 × 2秒 = 600秒，兼容token link等慢速API
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
           await new Promise(r => setTimeout(r, 2000));
           try {
@@ -3136,7 +3136,7 @@ export function InfiniteCanvas({
       if (data.taskId) {
         // Async task - need to poll for result
         updateProcessingFrame(placeholderId, { progress: 25, status: '3D 任务已提交，等待 AI 生成...' });
-        const maxAttempts = 120; // 最多轮询120次（10分钟）
+        const maxAttempts = 300; // 最多轮询300次（600秒，兼容token link等慢速API）
         for (let i = 0; i < maxAttempts; i++) {
           // 动态更新进度和状态
           const elapsed = (i + 1) * 5;

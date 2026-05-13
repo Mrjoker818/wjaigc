@@ -7,7 +7,7 @@ import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile,
 
 // 直接模式（OpenAI兼容API如tokln.com返回图片需60-120秒）
 // 异步模式（apimart返回task_id只需几秒）两者共存，取较大值
-export const maxDuration = 120;
+export const maxDuration = 600; // 10分钟 - token link等API生图最久可达600s
 export const dynamic = 'force-dynamic';
 
 // APIMart 模型配置 - 所有模型已通过实际API验证测试
@@ -357,7 +357,7 @@ export async function POST(request: NextRequest) {
       // 异步模式(apimart)只返回task_id，几秒即可
       const isDirectMode = profile.responseMode === 'direct';
       const controller = new AbortController();
-      const timeoutMs = isDirectMode ? 120000 : 30000;
+      const timeoutMs = isDirectMode ? 600000 : 30000; // 直接模式600s(兼容token link等慢速API), 异步模式30s
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
       const submitResponse = await fetchWithV1Retry(

@@ -45,7 +45,7 @@ function parseRatio(ratio: string): [number, number] {
 }
 
 // 图像编辑 API - 支持放大、擦除、蒙版修复、扩图、移除背景
-export const maxDuration = 120;
+export const maxDuration = 600; // 10分钟 - token link等API生图最久可达600s
 export const dynamic = 'force-dynamic';
 
 type EditAction = 'inpaint' | 'outpaint' | 'remove_background' | 'upscale' | 'multi_angle';
@@ -179,7 +179,7 @@ async function submitImageTask(
 
   const controller = new AbortController();
   const isDirectMode = profile.responseMode === 'direct';
-  const timeoutMs = isDirectMode ? 120000 : 60000;
+  const timeoutMs = isDirectMode ? 600000 : 60000; // 直接模式600s(兼容token link等慢速API), 异步模式60s
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   // Debug: log key params for image-to-image verification

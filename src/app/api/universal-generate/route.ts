@@ -6,7 +6,7 @@ import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile 
 
 // 通用API生成路由 - 支持第三方OpenAI兼容API的图像生成
 // 当用户使用非 APIMart 管理的第三方模型时，图像生成请求会被路由到这里
-export const maxDuration = 120;
+export const maxDuration = 600; // 10分钟 - token link等API生图最久可达600s
 export const dynamic = 'force-dynamic';
 
 interface UniversalGenerateRequest {

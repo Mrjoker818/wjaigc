@@ -72,8 +72,8 @@ export async function fetchWithV1Retry(
       const retryOptions: RequestInit = { ...options };
       if (options.signal && options.signal instanceof AbortSignal) {
         // Create a fresh timeout signal for the retry
-        // Direct mode APIs (like tokln.com GPT Image 2) need 120s+ to generate images
-        const remainingMs = 120000; // Long timeout for image generation APIs
+        // Direct mode APIs (like tokln.com GPT Image 2) need up to 600s to generate images
+        const remainingMs = 600000; // 10分钟 - 兼容token link等慢速API
         retryOptions.signal = AbortSignal.timeout(remainingMs);
       }
       const retryResponse = await fetch(retryUrl, retryOptions);
