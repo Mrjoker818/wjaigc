@@ -1459,13 +1459,13 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
               const optData = await optRes.json();
               console.log('[ChatImage] Optimize response:', JSON.stringify(optData).substring(0, 200));
               if (optData.optimized) {
-                // 清理思考过程，只保留优化后的关键词
+                // 清理思考过程，保留中英文双语关键词
                 let cleaned = optData.optimized.trim();
                 cleaned = cleaned
                   .replace(/<think[\s\S]*?<\/think>/gi, '')
                   .replace(/<thinking[\s\S]*?<\/thinking>/gi, '')
-                  .replace(/【中文】[\s\S]*$/i, '')
-                  .replace(/【English】\s*/i, '')
+                  .replace(/【[^】]*】/g, '')
+                  .replace(/\*\*[^*]*\*\*/g, '')
                   .trim();
                 optimizedPrompt = cleaned;
                 console.log('[ChatImage] Optimized prompt:', optimizedPrompt.substring(0, 100) + '...');
@@ -1673,27 +1673,32 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
       
       const result = data.optimized || '';
       
+      // 清理思考过程标签
+      let cleaned = result
+        .replace(/<think[\s\S]*?<\/think>/gi, '')
+        .replace(/<thinking[\s\S]*?<\/thinking>/gi, '')
+        .replace(/\*\*[^*]*\*\*/g, '')
+        .trim();
+      
       // 解析中英文 - 增强版
       let enPart = '';
       let cnPart = '';
-      const enMatch = result.match(/【English】\s*([\s\S]*?)(?=【中文】|$)/);
-      const cnMatch = result.match(/【中文】\s*([\s\S]*?)$/);
+      const enMatch = cleaned.match(/【English】\s*([\s\S]*?)(?=【中文】|$)/);
+      const cnMatch = cleaned.match(/【中文】\s*([\s\S]*?)$/);
       if (enMatch) enPart = enMatch[1].trim();
       if (cnMatch) cnPart = cnMatch[1].trim();
       
       // 如果没有找到中文部分，尝试其他格式
       if (!cnPart && enPart) {
-        // 可能模型用了其他格式输出中文
-        const altCnMatch = result.match(/[Cc]hinese[：:]\s*([\s\S]*?)$/);
+        const altCnMatch = cleaned.match(/[Cc]hinese[：:]\s*([\s\S]*?)$/);
         if (altCnMatch) cnPart = altCnMatch[1].trim();
       }
       
       if (!enPart && !cnPart) {
-        // 如果完全没解析出标记，整段作为英文
-        enPart = result;
+        // 如果完全没解析出标记，整段作为结果
+        enPart = cleaned;
         cnPart = '';
       } else if (enPart && !cnPart) {
-        // 有英文但没中文 - cnPart留空，让UI提示用户
         cnPart = '';
       }
 

@@ -116,8 +116,8 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                 cleaned = cleaned
                     .replace(/<think[\s\S]*?<\/think>/gi, '')
                     .replace(/<thinking[\s\S]*?<\/thinking>/gi, '')
-                    .replace(/【中文】[\s\S]*$/i, '')
-                    .replace(/【English】\s*/i, '')
+                    .replace(/【[^】]*】/g, '')
+                    .replace(/\*\*[^*]*\*\*/g, '')
                     .trim();
                 setOptimizedText(cleaned);
                 setUseOptimized(false);

@@ -2361,16 +2361,12 @@ export function InfiniteCanvas({
       const data = await res.json();
       if (data.optimized || data.optimizedPrompt) {
         let optimizedPrompt = data.optimized || data.optimizedPrompt;
-        // 清理思考过程：移除 <think/> 标签内容、【中文】段等
+        // 清理思考过程：移除 <think/> 标签内容，保留中英文双语关键词
         optimizedPrompt = optimizedPrompt
           .replace(/<think[\s\S]*?<\/think>/gi, '')  // 移除 <think...</think >
           .replace(/<thinking[\s\S]*?<\/thinking>/gi, '')  // 移除 <thinking...</thinking >
-          .replace(/【中文】[\s\S]*$/i, '')  // 移除【中文】及之后内容
-          .replace(/【English】\s*/i, '')  // 移除【English】标记
-          .replace(/^[\s\S]*?(?=[A-Z][a-z])/m, (match: string) => { // 如果开头有非英文内容，截取到第一个英文单词
-            const idx = match.search(/[A-Z][a-z]/);
-            return idx > 0 ? match.substring(idx) : match;
-          })
+          .replace(/【[^】]*】/g, '')  // 移除【】标记
+          .replace(/\*\*[^*]*\*\*/g, '')  // 移除**加粗**标记
           .trim();
         setGenGroups(prev => prev.map(g => {
           if (g.id !== groupId) return g;
@@ -5738,12 +5734,13 @@ export function InfiniteCanvas({
               { x: resultX, y: resultY, w: resultFrameW, h: resultH + toolbarH }
             ];
             const containerPad = 24;
-            // 参考图组左侧需要额外空间显示类别标签（图片外左侧）
-            const leftPad = isRef ? 80 : containerPad;
-            const containerMinX = Math.min(...allBounds.map(b => b.x)) - leftPad;
+            // 参考图组下方需要额外空间显示类别标签
+            const leftPad = containerPad;
+            const bottomPad = isRef ? 36 : containerPad;
+            const containerMinX = Math.min(...allBounds.map(b => b.x)) - containerPad;
             const containerMinY = Math.min(...allBounds.map(b => b.y)) - containerPad - 40;
             const containerMaxX = Math.max(...allBounds.map(b => b.x + b.w)) + containerPad;
-            const containerMaxY = Math.max(...allBounds.map(b => b.y + b.h)) + containerPad;
+            const containerMaxY = Math.max(...allBounds.map(b => b.y + b.h)) + bottomPad;
             const containerW = containerMaxX - containerMinX;
             const containerH = containerMaxY - containerMinY;
 
@@ -5865,28 +5862,47 @@ export function InfiniteCanvas({
                   </g>
                 </svg>
 
-                {/* Source image labels (R1, R2, ...) with left-side category tags */}
+                {/* Source image labels (R1, R2, ...) with bottom category tags */}
                 {srcImages.map(img => {
                   const imgCats = isRef ? (group.sourceCategories[img.id] || []) : [];
                   const hasAnyCat = imgCats.length > 0;
-                  // Category tags width: 52px, only for reference groups
-                  const catColW = (isRef && hasAnyCat) ? 56 : 0;
                   return (
                   <div
                     key={`ref-label-${img.id}`}
-                    className="absolute flex flex-row gap-1"
+                    className="absolute flex flex-col"
                     style={{
-                      left: img.x + dragDx - containerMinX - catColW,
+                      left: img.x + dragDx - containerMinX,
                       top: img.y + dragDy - containerMinY,
-                      height: img.height,
                       zIndex: 26,
                     }}
                   >
-                    {/* Per-image category tags (reference group only) - LEFT side of image, OUTSIDE image area */}
-                    {isRef && hasAnyCat && (
+                    {/* Image area - label overlay */}
+                    <div className="relative" style={{ width: img.width, height: img.height }}>
+                      {/* Label badge at top-left of image */}
                       <div
-                        className="flex flex-col gap-0.5 py-1 pointer-events-auto justify-center"
-                        style={{ minWidth: 52 }}
+                        className="absolute top-0 left-0 flex items-center gap-1.5 px-2 py-1 rounded-lg pointer-events-auto"
+                        style={{
+                          background: isRef ? 'rgba(212,175,55,0.9)' : 'rgba(78,205,196,0.9)',
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                      >
+                        <span className="text-xs font-bold text-black">
+                          R{img.refNumber}
+                        </span>
+                        <button
+                          className="w-4 h-4 flex items-center justify-center rounded-full text-black/60 hover:text-black hover:bg-black/10 transition-colors text-xs font-bold"
+                          onClick={(e) => { e.stopPropagation(); removeRefFromGroup(group.id, img.id); }}
+                          title="移除此参考图"
+                        >
+                          x
+                        </button>
+                      </div>
+                    </div>
+                    {/* Per-image category tags (reference group only) - BELOW image */}
+                    {isRef && (
+                      <div
+                        className="flex flex-wrap gap-1 pt-1 pointer-events-auto"
+                        style={{ width: img.width }}
                         onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => e.stopPropagation()}
                       >
@@ -5894,9 +5910,9 @@ export function InfiniteCanvas({
                           const isSelected = imgCats.includes(cat);
                           const strength = group.sourceStrengths[img.id]?.[cat] ?? 70;
                           return (
-                            <div key={cat} className="flex flex-col gap-0">
+                            <div key={cat} className="flex items-center gap-1">
                               <button
-                                className={`px-1 py-0.5 rounded text-[9px] font-medium transition-all text-left leading-tight ${
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-all leading-tight ${
                                   isSelected
                                     ? (isMonochrome ? 'bg-amber-100 text-amber-800' : 'bg-[#d4af37]/20 text-[#d4af37]')
                                     : (isMonochrome ? 'bg-gray-100 text-gray-400' : 'bg-[#252525] text-[#555]')
@@ -5931,7 +5947,7 @@ export function InfiniteCanvas({
                                   min={0}
                                   max={100}
                                   value={strength}
-                                  className="w-full h-0.5 appearance-none rounded-full cursor-pointer"
+                                  className="w-10 h-0.5 appearance-none rounded-full cursor-pointer"
                                   style={{
                                     accentColor,
                                     background: `linear-gradient(to right, ${accentColor} ${strength}%, ${isMonochrome ? '#e5e7eb' : '#444'} ${strength}%)`
@@ -5954,28 +5970,6 @@ export function InfiniteCanvas({
                         })}
                       </div>
                     )}
-                    {/* Image area - label overlay */}
-                    <div className="relative" style={{ width: img.width, height: img.height }}>
-                      {/* Label badge at top-left of image */}
-                      <div
-                        className="absolute top-0 left-0 flex items-center gap-1.5 px-2 py-1 rounded-lg pointer-events-auto"
-                        style={{
-                          background: isRef ? 'rgba(212,175,55,0.9)' : 'rgba(78,205,196,0.9)',
-                        }}
-                        onMouseDown={(e) => e.stopPropagation()}
-                      >
-                        <span className="text-xs font-bold text-black">
-                          R{img.refNumber}
-                        </span>
-                        <button
-                          className="w-4 h-4 flex items-center justify-center rounded-full text-black/60 hover:text-black hover:bg-black/10 transition-colors text-xs font-bold"
-                          onClick={(e) => { e.stopPropagation(); removeRefFromGroup(group.id, img.id); }}
-                          title="移除此参考图"
-                        >
-                          x
-                        </button>
-                      </div>
-                    </div>
                   </div>
                   );
                 })}
@@ -8157,7 +8151,14 @@ export function InfiniteCanvas({
                             const res = await fetch('/api/optimize-prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: hcg.toolbar.prompt, mode: 'enhance' }) });
                             const data = await res.json();
                             if (data.optimized || data.optimizedPrompt) {
-                              const optimizedPrompt = data.optimized || data.optimizedPrompt;
+                              let optimizedPrompt = data.optimized || data.optimizedPrompt;
+                              // 清理思考过程，保留中英文双语关键词
+                              optimizedPrompt = optimizedPrompt
+                                .replace(/<think[\s\S]*?<\/think>/gi, '')
+                                .replace(/<thinking[\s\S]*?<\/thinking>/gi, '')
+                                .replace(/【[^】]*】/g, '')
+                                .replace(/\*\*[^*]*\*\*/g, '')
+                                .trim();
                               setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, prompt: optimizedPrompt } } : g));
                             }
                           } catch (err) { console.error('优化失败:', err); }
