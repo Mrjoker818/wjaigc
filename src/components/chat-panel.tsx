@@ -1007,62 +1007,49 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
   // 从服务器加载可用聊天模型
-  useEffect(() => {
-    const loadServerModels = async () => {
+  const loadServerModels = useCallback(async () => {
       try {
         const res = await fetch('/api/models?type=chat');
         if (res.ok) {
           const data = await res.json();
-          if (data.providers && Array.isArray(data.providers) || data.models && Array.isArray(data.models)) {
-            const models: {id: string; name: string; provider: string; providerId: string; description?: string; isDefault?: boolean}[] = [];
-            // 从 providers[].models 读取
-            if (data.providers && Array.isArray(data.providers)) {
-              for (const provider of data.providers) {
-                if (provider.models && Array.isArray(provider.models)) {
-                  for (const m of provider.models) {
-                    models.push({
-                      id: m.id || m.name,
-                      name: getModelDisplayName(m.name || m.id),
-                      provider: provider.name || provider.displayName,
-                      providerId: provider.id,
-                      description: m.description,
-                      isDefault: m.isDefault,
-                    });
-                  }
-                }
-              }
+          const models: {id: string; name: string; provider: string; providerId: string; description?: string; isDefault?: boolean}[] = [];
+          const providerMap = new Map<string, string>();
+          if (data.providers && Array.isArray(data.providers)) {
+            for (const p of data.providers) {
+              providerMap.set(p.id, p.name || p.displayName || '');
             }
-            // 也从顶层 models 数组读取（管理员配置的模型）
-            if (data.models && Array.isArray(data.models)) {
-              const existingIds = new Set(models.map(m => m.id));
-              for (const m of data.models) {
-                if (!existingIds.has(m.id || m.name)) {
-                  const provider = data.providers?.find((p: {id: string}) => p.id === m.providerId);
-                  models.push({
-                    id: m.id || m.name,
-                    name: getModelDisplayName(m.name || m.id),
-                    provider: provider?.name || provider?.displayName || '',
-                    providerId: m.providerId || '',
-                    description: m.description,
-                    isDefault: m.isDefault,
-                  });
-                }
-              }
+          }
+          // 优先从顶层 models 数组读取（已由服务端按 selectedModels + type 过滤）
+          if (data.models && Array.isArray(data.models)) {
+            for (const m of data.models) {
+              models.push({
+                id: m.id || m.name,
+                name: getModelDisplayName(m.name || m.id),
+                provider: providerMap.get(m.providerId) || m.providerId || '',
+                providerId: m.providerId || '',
+                description: m.description,
+                isDefault: m.isDefault,
+              });
             }
-            setDiscoveredChatModels(models);
-            // 如果有默认模型，自动选中
-            const defaultModel = models.find((m: {isDefault?: boolean}) => m.isDefault);
-            if (defaultModel && !model) {
-              setModel(defaultModel.id);
-            }
+          }
+          setDiscoveredChatModels(models);
+          // 如果有默认模型，自动选中
+          const defaultModel = models.find((m: {isDefault?: boolean}) => m.isDefault);
+          if (defaultModel && !model) {
+            setModel(defaultModel.id);
           }
         }
       } catch {
         // 静默失败
       }
-    };
+    }, [model]);
+
+  useEffect(() => {
     loadServerModels();
-  }, []);
+    // 定时刷新模型列表（每30秒），确保管理员更新后自动同步
+    const interval = setInterval(loadServerModels, 30000);
+    return () => clearInterval(interval);
+  }, [loadServerModels]);
 
   // 初始化对话列表
   useEffect(() => {

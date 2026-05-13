@@ -644,61 +644,52 @@ export function GenerationPanel(
     };
 
     // 从服务器加载管理员配置的图像模型
-    useEffect(() => {
-        const loadServerModels = async () => {
-            try {
-                const res = await fetch('/api/models?type=image');
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data.providers && Array.isArray(data.providers)) {
-                        const serverModels: {id: string, providerId: string, providerName: string, is3DProvider?: boolean, displayLabel?: string}[] = [];
-                        // 从 providers.models 读取
-                        for (const provider of data.providers) {
-                            if (provider.models && Array.isArray(provider.models)) {
-                                for (const m of provider.models) {
-                                    const is3D = m.id?.toLowerCase().includes('3d') || m.name?.toLowerCase().includes('3d');
-                                    serverModels.push({
-                                        id: m.id || m.name,
-                                        providerId: provider.id,
-                                        providerName: provider.name || provider.displayName,
-                                        is3DProvider: is3D,
-                                        displayLabel: is3D ? get3DModelLabel(m.id || m.name) : undefined,
-                                    });
-                                }
-                            }
-                        }
-                        // 也从顶层 models 数组读取（管理员配置的精选模型）
-                        if (data.models && Array.isArray(data.models)) {
-                            for (const m of data.models) {
-                                const is3D = m.id?.toLowerCase().includes('3d') || m.name?.toLowerCase().includes('3d');
-                                const existingIds = new Set(serverModels.map(sm => sm.id));
-                                if (!existingIds.has(m.id || m.name)) {
-                                    const provider = data.providers?.find((p: {id: string}) => p.id === m.providerId);
-                                    serverModels.push({
-                                        id: m.id || m.name,
-                                        providerId: m.providerId || '',
-                                        providerName: provider?.name || provider?.displayName || '',
-                                        is3DProvider: is3D,
-                                        displayLabel: is3D ? get3DModelLabel(m.id || m.name) : undefined,
-                                    });
-                                }
-                            }
-                        }
-                        if (serverModels.length > 0) {
-                            setDiscoveredModels(prev => {
-                                const existingIds = new Set(prev.map(m => m.id));
-                                const newModels = serverModels.filter(m => !existingIds.has(m.id));
-                                return [...prev, ...newModels];
-                            });
-                        }
+    const loadServerModels = useCallback(async () => {
+        try {
+            const res = await fetch('/api/models?type=image');
+            if (res.ok) {
+                const data = await res.json();
+                const serverModels: {id: string, providerId: string, providerName: string, is3DProvider?: boolean, displayLabel?: string}[] = [];
+                const providerMap = new Map<string, string>();
+                if (data.providers && Array.isArray(data.providers)) {
+                    for (const p of data.providers) {
+                        providerMap.set(p.id, p.name || p.displayName || '');
                     }
                 }
-            } catch {
-                // 静默失败
+                // 优先从顶层 models 数组读取（已由服务端按 selectedModels + type 过滤）
+                if (data.models && Array.isArray(data.models)) {
+                    for (const m of data.models) {
+                        const is3D = m.id?.toLowerCase().includes('3d') || m.name?.toLowerCase().includes('3d');
+                        serverModels.push({
+                            id: m.id || m.name,
+                            providerId: m.providerId || '',
+                            providerName: providerMap.get(m.providerId) || m.providerId || '',
+                            is3DProvider: is3D,
+                            displayLabel: is3D ? get3DModelLabel(m.id || m.name) : undefined,
+                        });
+                    }
+                }
+                if (serverModels.length > 0) {
+                    setDiscoveredModels(prev => {
+                        // 用 id+providerId 组合去重，避免不同 provider 的同名模型被丢弃
+                        const existingKeys = new Set(prev.map(m => `${m.id}::${m.providerId}`));
+                        const newModels = serverModels.filter(m => !existingKeys.has(`${m.id}::${m.providerId}`));
+                        if (newModels.length === 0) return prev;
+                        return [...prev, ...newModels];
+                    });
+                }
             }
-        };
-        loadServerModels();
+        } catch {
+            // 静默失败
+        }
     }, []);
+
+    useEffect(() => {
+        loadServerModels();
+        // 定时刷新模型列表（每30秒），确保管理员更新后自动同步
+        const interval = setInterval(loadServerModels, 30000);
+        return () => clearInterval(interval);
+    }, [loadServerModels]);
 
     const handleAddUniversalApi = async () => {
         if (!universalApiManager || !universalApiName.trim() || !universalApiUrl.trim() || !universalApiKey.trim()) {

@@ -1895,43 +1895,27 @@ export function InfiniteCanvas({
         if (res.ok) {
           const data = await res.json();
           const models: Array<{ id: string; name: string; baseUrl: string; apiKey: string; model?: string; providerPreset?: string; providerName: string; advancedParams?: Record<string, string> }> = [];
-          // 从 providers[].models 读取
+          const providerMap = new Map<string, {name: string; baseUrl: string; apiKey: string; providerPreset?: string; advancedParams?: Record<string, string>}>();
           if (data.providers && Array.isArray(data.providers)) {
-            for (const provider of data.providers) {
-              if (provider.models && Array.isArray(provider.models)) {
-                for (const m of provider.models) {
-                  models.push({
-                    id: `admin-3d::${provider.id}::${m.id || m.name}`,
-                    name: provider.name || provider.displayName || '管理员',
-                    baseUrl: provider.baseUrl,
-                    apiKey: provider.apiKey,
-                    model: m.id || m.name,
-                    providerPreset: provider.providerPreset || '',
-                    providerName: provider.name || provider.displayName || '管理员',
-                    advancedParams: provider.advancedParams,
-                  });
-                }
-              }
+            for (const p of data.providers) {
+              providerMap.set(p.id, { name: p.name || p.displayName || '管理员', baseUrl: p.baseUrl, apiKey: p.apiKey, providerPreset: p.providerPreset, advancedParams: p.advancedParams });
             }
           }
-          // 也从顶层 models 数组读取（管理员配置的3D模型）
+          // 从顶层 models 数组读取（已由服务端按 selectedModels + type 过滤）
           if (data.models && Array.isArray(data.models)) {
-            const existingIds = new Set(models.map(m => m.id));
             for (const m of data.models) {
+              const pInfo = providerMap.get(m.providerId);
               const modelId = `admin-3d::${m.providerId}::${m.id || m.name}`;
-              if (!existingIds.has(modelId)) {
-                const provider = data.providers?.find((p: {id: string}) => p.id === m.providerId);
-                models.push({
-                  id: modelId,
-                  name: provider?.name || provider?.displayName || '管理员',
-                  baseUrl: provider?.baseUrl || '',
-                  apiKey: provider?.apiKey || '',
-                  model: m.id || m.name,
-                  providerPreset: provider?.providerPreset || '',
-                  providerName: provider?.name || provider?.displayName || '管理员',
-                  advancedParams: provider?.advancedParams,
-                });
-              }
+              models.push({
+                id: modelId,
+                name: pInfo?.name || '管理员',
+                baseUrl: pInfo?.baseUrl || '',
+                apiKey: pInfo?.apiKey || '',
+                model: m.id || m.name,
+                providerPreset: pInfo?.providerPreset || '',
+                providerName: pInfo?.name || '管理员',
+                advancedParams: pInfo?.advancedParams,
+              });
             }
           }
           setAdmin3DModels(models);
@@ -1951,31 +1935,20 @@ export function InfiniteCanvas({
         if (res.ok) {
           const data = await res.json();
           const models: {id: string, providerId: string, providerName: string}[] = [];
-          // 从 providers[].models 读取
+          const providerMap = new Map<string, string>();
           if (data.providers && Array.isArray(data.providers)) {
-            for (const provider of data.providers) {
-              if (provider.models && Array.isArray(provider.models)) {
-                for (const m of provider.models) {
-                  models.push({
-                    id: m.id || m.name,
-                    providerId: provider.id,
-                    providerName: provider.name || provider.displayName,
-                  });
-                }
-              }
+            for (const p of data.providers) {
+              providerMap.set(p.id, p.name || p.displayName || '');
             }
           }
-          // 也从顶层 models 数组读取
+          // 从顶层 models 数组读取（已由服务端按 selectedModels + type 过滤）
           if (data.models && Array.isArray(data.models)) {
-            const existingIds = new Set(models.map(m => m.id));
             for (const m of data.models) {
-              if (!existingIds.has(m.id || m.name)) {
-                models.push({
-                  id: m.id || m.name,
-                  providerId: m.providerId,
-                  providerName: m.providerName,
-                });
-              }
+              models.push({
+                id: m.id || m.name,
+                providerId: m.providerId || '',
+                providerName: providerMap.get(m.providerId) || m.providerId || '',
+              });
             }
           }
           setCanvasGenModels(models);
