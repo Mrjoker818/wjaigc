@@ -5077,6 +5077,9 @@ export function InfiniteCanvas({
             const isDragging = dragTarget && selectedIds.has(image.id);
             // Hide images belonging to collapsed groups
             const isGroupCollapsed = image.groupId ? (groups.find(g => g.id === image.groupId)?.collapsed ?? false) : false;
+            // Hide images belonging to collapsed gen groups (reference/fusion groups)
+            const collapsedGenGroup = genGroups.find(g => g.isCollapsed && (g.refImages.some(r => r.imageId === image.id) || (g.resultImageIds && g.resultImageIds.includes(image.id))));
+            const isInCollapsedGenGroup = !!collapsedGenGroup;
             // Apply group drag offset to images in the dragged group
             const isGroupDragging = groupDragTarget && image.groupId === groupDragTarget;
             return (
@@ -5088,7 +5091,7 @@ export function InfiniteCanvas({
                   top: image.y + (isDragging ? dragOffset.y : 0) + (isGroupDragging ? groupDragOffset.y : 0),
                   width: image.width,
                   height: image.height,
-                  display: isGroupCollapsed ? 'none' : undefined,
+                  display: (isGroupCollapsed || isInCollapsedGenGroup) ? 'none' : undefined,
                 }}
                 onMouseEnter={() => {
                   if (visionPromptEnabled && editMode === 'none') {
@@ -5572,17 +5575,6 @@ export function InfiniteCanvas({
                           fill={accentColor}
                           opacity={0.9}
                         />
-                        <text
-                          x={imgCenterX + (resultCenterX - imgCenterX) * 0.3}
-                          y={imgCenterY + (resultCenterY - imgCenterY) * 0.3}
-                          textAnchor="middle"
-                          dominantBaseline="central"
-                          fill="white"
-                          fontSize={12 / zoom}
-                          fontWeight="bold"
-                        >
-                          R{img.refNumber}
-                        </text>
                       </g>
                     );
                   })}
@@ -7315,7 +7307,7 @@ export function InfiniteCanvas({
               onWheel={(e) => e.stopPropagation()}
             >
               <div
-                className="rounded-2xl overflow-hidden"
+                className="rounded-2xl"
                 style={{
                   background: isMonochrome ? 'rgba(255,255,255,0.97)' : 'rgba(20,20,20,0.96)',
                   border: `2px solid ${isThisGroupDragging ? '#d4af37' : isMonochrome ? '#e5e7eb' : '#333'}`,
@@ -7627,7 +7619,7 @@ export function InfiniteCanvas({
                           <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
                         </button>
                         {openModelDropdownGroupId === `hex-${hcg.id}` && (
-                          <div className="absolute top-full left-0 mt-1 rounded-lg overflow-hidden z-50 max-h-48 overflow-y-auto" style={{ background: isMonochrome ? '#fff' : '#1a1a1a', border: `1px solid ${isMonochrome ? '#e5e7eb' : '#333'}`, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
+                          <div className="absolute top-full left-0 mt-1 rounded-lg overflow-hidden z-50 max-h-64 overflow-y-auto" style={{ background: isMonochrome ? '#fff' : '#1a1a1a', border: `1px solid ${isMonochrome ? '#e5e7eb' : '#333'}`, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
                             {models.map(m => (
                               <div
                                 key={`${m.providerId}-${m.id}`}
