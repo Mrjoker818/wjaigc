@@ -83,15 +83,37 @@ async function fetchImageBuffer(url: string): Promise<Buffer> {
   if (url.startsWith('blob:')) {
     throw new Error('Blob URLs cannot be processed server-side');
   }
-  // local path
+  // local path (e.g., /api/serve-upload/xxx, /uploads/xxx)
   if (url.startsWith('/')) {
     const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
+    // 1. Try local public directory
     const localPath = path.join(workspacePath, 'public', url);
     if (fsSync.existsSync(localPath)) return fsSync.readFileSync(localPath);
-    // Try localhost fetch
-    const fullUrl = `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${url}`;
-    const res = await fetch(fullUrl, { signal: AbortSignal.timeout(10000) });
+    // 2. Try persistent data directory (PROD)
+    if (process.env.COZE_PROJECT_ENV === 'PROD') {
+      const { getServerDataRoot } = await import('@/lib/server-data-root');
+      const dataRoot = await getServerDataRoot();
+      const persistentPath = path.join(dataRoot, url.replace(/^\//, ''));
+      if (fsSync.existsSync(persistentPath)) return fsSync.readFileSync(persistentPath);
+    }
+    // 3. Try S3 object storage fallback
+    const { isS3Available, downloadImageFromS3 } = await import('@/lib/s3-storage');
+    if (isS3Available()) {
+      const s3Key = url.replace(/^\/api\/serve-upload\//, 'uploads/').replace(/^\//, 'uploads/');
+      const s3Buffer = await downloadImageFromS3(s3Key);
+      if (s3Buffer) return s3Buffer;
+    }
+    // 4. Try localhost fetch (serve-upload API)
+    const port = process.env.DEPLOY_RUN_PORT || 5000;
+    const res = await fetch(`http://localhost:${port}${url}`, { signal: AbortSignal.timeout(10000) });
     if (res.ok) return Buffer.from(await res.arrayBuffer());
+    // 5. Try current domain fetch
+    const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT;
+    if (domain) {
+      const fullUrl = `${domain}${url}`;
+      const domainRes = await fetch(fullUrl, { signal: AbortSignal.timeout(10000) });
+      if (domainRes.ok) return Buffer.from(await domainRes.arrayBuffer());
+    }
     throw new Error(`Cannot access local image: ${url}`);
   }
   // external URL

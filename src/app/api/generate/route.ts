@@ -110,9 +110,24 @@ export async function POST(request: NextRequest) {
       for (const img of referenceImages) {
         if (img.startsWith('/')) {
           // 相对路径 → 公网完整 URL 或 base64
-          if (domain) {
+          let resolved = false;
+          // 优先尝试从 S3 对象存储获取
+          if (img.startsWith('/api/serve-upload/')) {
+            const filename = img.replace('/api/serve-upload/', '');
+            try {
+              const { getS3ImageUrl } = await import('@/lib/s3-storage');
+              const s3Url = await getS3ImageUrl(filename);
+              if (s3Url) {
+                accessibleReferenceImages.push(s3Url);
+                resolved = true;
+              }
+            } catch { /* S3 not available, try other methods */ }
+          }
+          if (!resolved && domain) {
             accessibleReferenceImages.push(`${domain}${img}`);
-          } else {
+            resolved = true;
+          }
+          if (!resolved) {
             try {
               const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
               const port = process.env.DEPLOY_RUN_PORT || 5000;

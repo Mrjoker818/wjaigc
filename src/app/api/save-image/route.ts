@@ -3,6 +3,7 @@ import { writeFile, mkdir, copyFile, readdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { getServerDataRoot } from '@/lib/server-data-root';
+import { uploadImageToS3, isS3Available } from '@/lib/s3-storage';
 
 /**
  * 将 base64 data URL 或远程图片 URL 保存到持久化目录，
@@ -66,11 +67,21 @@ export async function POST(request: NextRequest) {
         try { await copyFile(filePath, path.join(publicDir, filename)); } catch { /* ignore */ }
       }
 
+      // 上传到 S3 对象存储（持久化，重部署不丢失）
+      let s3Key: string | null = null;
+      if (isS3Available()) {
+        s3Key = await uploadImageToS3(buffer, filename, `image/${mimeType}`);
+        if (s3Key) {
+          console.log(`[save-image] S3 backup: ${s3Key}`);
+        }
+      }
+
       return NextResponse.json({
         success: true,
         url: `${webPath}/${filename}`,
         filename,
         size: buffer.length,
+        s3Key,
       });
     }
 
@@ -112,11 +123,21 @@ export async function POST(request: NextRequest) {
           try { await copyFile(filePath, path.join(publicDir, filename)); } catch { /* ignore */ }
         }
 
+        // 上传到 S3 对象存储（持久化，重部署不丢失）
+        let s3Key: string | null = null;
+        if (isS3Available()) {
+          s3Key = await uploadImageToS3(buffer, filename, contentType);
+          if (s3Key) {
+            console.log(`[save-image] S3 backup: ${s3Key}`);
+          }
+        }
+
         return NextResponse.json({
           success: true,
           url: `${webPath}/${filename}`,
           filename,
           size: buffer.length,
+          s3Key,
         });
       } catch (fetchError) {
         clearTimeout(timeoutId);
