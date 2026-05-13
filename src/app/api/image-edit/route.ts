@@ -170,21 +170,113 @@ async function submitImageTask(
   const str = (requestBody as Record<string, unknown>)?.strength;
   const sz = (requestBody as Record<string, unknown>)?.size;
   const pmt = String((requestBody as Record<string, unknown>)?.prompt || '').substring(0, 80);
-  console.info(`[submitImageTask] API call: endpoint=${endpoint}, hasImageUrls=${hasImageUrls}, urlCount=${urls?.length || 0}, urlType=${urls?.[0]?.substring(0, 30) || 'N/A'}, strength=${str}, size=${sz}, prompt=${pmt}...`);
+  const hasImageField = !!(requestBody as Record<string, unknown>)?.image;
+  const inputFidelity = (requestBody as Record<string, unknown>)?.input_fidelity;
+  console.info(`[submitImageTask] API call: endpoint=${endpoint}, hasImageUrls=${hasImageUrls}, hasImage=${hasImageField}, inputFidelity=${inputFidelity}, urlCount=${urls?.length || 0}, urlType=${urls?.[0]?.substring(0, 30) || 'N/A'}, strength=${str}, size=${sz}, prompt=${pmt}...`);
 
-  const submitResponse = await fetchWithV1Retry(
-    apiBaseUrl,
-    endpoint,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-      signal: controller.signal,
+  // For /images/edits endpoint, try JSON first (most proxies accept it), then fallback to multipart form
+  let submitResponse: Response;
+
+  if (endpoint === '/images/edits' && hasImageField) {
+    // Strategy: Try JSON first (most API proxies support JSON for edits)
+    // If it fails with form-related error, retry with multipart form data
+    const jsonBody = { ...requestBody };
+
+    submitResponse = await fetchWithV1Retry(
+      apiBaseUrl,
+      endpoint,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(jsonBody),
+        signal: controller.signal,
+      }
+    );
+
+    // If JSON request fails with form-related errors, try multipart form data
+    if (!submitResponse.ok) {
+      const errorText = await submitResponse.text();
+      const needsMultipart = errorText.includes('multipart') ||
+        errorText.includes('form-data') ||
+        errorText.includes('Content-Type') ||
+        errorText.includes('expected multipart') ||
+        errorText.includes('no file') ||
+        errorText.includes('file required') ||
+        errorText.includes('Missing image');
+
+      if (needsMultipart) {
+        console.info(`[submitImageTask] JSON failed for edits endpoint, retrying with multipart form data...`);
+        // Build multipart form data
+        const formData = new FormData();
+        for (const [key, value] of Object.entries(requestBody)) {
+          if (value === undefined || value === null) continue;
+          if (key === 'image') {
+            // image field: could be base64 data URL or plain base64
+            const imgVal = String(value);
+            if (imgVal.startsWith('data:')) {
+              // data:image/png;base64,xxxxx
+              const match = imgVal.match(/^data:([^;]+);base64,(.+)$/);
+              if (match) {
+                const mimeType = match[1];
+                const base64Data = match[2];
+                const binaryData = Buffer.from(base64Data, 'base64');
+                const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
+                const file = new File([binaryData], `image.${ext}`, { type: mimeType });
+                formData.append('image', file);
+              }
+            } else {
+              // Plain base64
+              const binaryData = Buffer.from(imgVal, 'base64');
+              const file = new File([binaryData], 'image.png', { type: 'image/png' });
+              formData.append('image', file);
+            }
+          } else if (Array.isArray(value)) {
+            // Arrays like image[] for multi-image edits
+            for (const item of value) {
+              formData.append(key, String(item));
+            }
+          } else {
+            formData.append(key, String(value));
+          }
+        }
+
+        submitResponse = await fetchWithV1Retry(
+          apiBaseUrl,
+          endpoint,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+            },
+            body: formData,
+            signal: controller.signal,
+          }
+        );
+      } else {
+        // Not a form-related error, re-create the response for error handling below
+        // We already have the error text, create a synthetic response
+        submitResponse = new Response(errorText, { status: submitResponse.status, headers: submitResponse.headers });
+      }
     }
-  );
+  } else {
+    // Standard JSON request for /images/generations
+    submitResponse = await fetchWithV1Retry(
+      apiBaseUrl,
+      endpoint,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      }
+    );
+  }
 
   clearTimeout(timeoutId);
 
@@ -890,30 +982,74 @@ export async function POST(request: NextRequest) {
     };
 
     if (action === 'multi_angle') {
+      // ============================================================
+      // 多角度旋转 (Multi-Angle Rotation)
+      //
+      // 参考 Lovart.ai 的多角度功能实现方式:
+      // 核心策略: 使用 /images/edits 端点 + input_fidelity: 'high'
+      // - /images/edits 会把输入图片视为"要编辑的源图"而非"风格参考"
+      // - input_fidelity: 'high' 让 AI 最大程度保留原图内容(identity/材质/细节)
+      // - AI 推断隐藏侧面, 重新渲染指定角度的视图
+      // 如果 /images/edits 不可用, 回退到 /images/generations + image_urls
+      // ============================================================
+
+      // Build angle description text
       const yawText = rotation > 0 ? `${Math.abs(rotation)} degrees to the right` : rotation < 0 ? `${Math.abs(rotation)} degrees to the left` : 'front view';
       const pitchText = tilt > 0 ? `${Math.abs(tilt)} degrees high angle looking down` : tilt < 0 ? `${Math.abs(tilt)} degrees low angle looking up` : 'level camera height';
       const dollyText = zoom > 1.08 ? 'closer camera, tighter framing' : zoom < 0.92 ? 'pulled back camera, wider framing' : 'medium framing';
+
+      // Build optimized prompt for multi-angle rotation
+      // Key: The prompt must clearly convey "re-render from a different 3D angle" not "rotate the 2D image"
       const multiAnglePrompt = prompt || (angleMode === 'image'
-        ? `Pseudo-3D AI photography studio. Reconstruct the reference image as a coherent three-dimensional object/subject and generate a new rendered view with the subject itself rotated ${yawText}. Preserve the same identity, design, materials, labels, colors, proportions, outfit/product details and lighting style. Infer plausible hidden sides instead of warping the flat image. Keep a clean professional studio background, realistic perspective, depth, occlusion, shadows, reflections, and high quality product/character photography. Camera pitch: ${pitchText}. Framing: ${dollyText}. Do not output a flat 2D rotated canvas, do not stretch or skew the original image.`
-        : `Pseudo-3D AI photography studio. Keep the subject/object fixed as a real three-dimensional scene and move a virtual camera around it: yaw ${yawText}, pitch ${pitchText}, ${dollyText}. Preserve the same identity, design, materials, labels, colors, proportions and environment mood from the reference. Generate a new photographic view with real perspective, depth, occlusion, shadows, reflections, and inferred unseen geometry. Do not rotate the flat source image; re-render the scene from the requested camera angle.`);
+        ? `Edit this image to show the subject as if it has been physically rotated ${yawText} in 3D space, viewed from ${pitchText}, with ${dollyText}. This is a 3D rotation of the subject itself, NOT a 2D canvas rotation. The subject is a real 3D object — reconstruct its unseen sides based on context and generate a photorealistic view from the new angle. Strictly preserve: the same identity, face, clothing, product, design, materials, labels, text, colors, proportions, and lighting style. Infer plausible hidden geometry and details for the newly visible sides. The result should look like a professional studio photograph of the same object from a different angle, with realistic perspective, depth, occlusion, and shadows. Do NOT simply rotate or warp the flat source image.`
+        : `Edit this image as if moving a virtual camera around the scene: camera orbits to yaw ${yawText}, pitch ${pitchText}, ${dollyText}. The scene and subject remain fixed in place. Re-render the entire scene from this new camera position, preserving all subjects, objects, materials, colors, environment, and mood. Infer unseen geometry and surfaces based on the visible context. The result should look like a real photograph taken from the new camera position, with correct perspective, depth, occlusion, shadows, and reflections. Do NOT rotate the 2D image canvas.`);
 
       // Resolve image to base64 for maximum content preservation
       const multiAngleBase64 = await resolveImageToBase64(imageUrl);
 
-      const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
-        model: m,
-        prompt: multiAnglePrompt,
-        size: '1:1',
-        n: 1,
-        image: multiAngleBase64 ? `data:image/png;base64,${multiAngleBase64}` : undefined,
-        image_urls: [imageUrl],
-        input_fidelity: 'high',
-        strength: 0.65,
-      }), '多角度');
-      if (result.directUrl) {
-        return NextResponse.json({ success: true, imageUrl: result.directUrl, action, usedModel: result.usedModel });
+      // Strategy 1: Try /images/edits endpoint with input_fidelity: 'high'
+      // This is the correct approach for "edit this image from a different angle"
+      let result: { taskId?: string; directUrl?: string; usedModel?: string } | null = null;
+      let usedEndpoint: '/images/edits' | '/images/generations' = '/images/edits';
+
+      try {
+        if (multiAngleBase64) {
+          result = await autoTrySubmitImageTask(candidateModels, (m) => ({
+            model: m,
+            prompt: multiAnglePrompt,
+            size: '1:1',
+            n: 1,
+            image: `data:image/png;base64,${multiAngleBase64}`,
+            input_fidelity: 'high',
+          }), '多角度(edits)', '/images/edits');
+          console.info(`[multi-angle] Successfully used /images/edits endpoint`);
+        } else {
+          // No base64 available, skip edits and go straight to generations
+          throw new ModelCapabilityError('No base64 image available for edits endpoint');
+        }
+      } catch (editsErr: unknown) {
+        // Strategy 2: Fallback to /images/generations with image_urls
+        // This treats the image as a reference rather than an edit source,
+        // but is better than failing completely
+        const editsErrMsg = editsErr instanceof Error ? editsErr.message : String(editsErr);
+        console.warn(`[multi-angle] /images/edits failed: ${editsErrMsg}, falling back to /images/generations`);
+        usedEndpoint = '/images/generations';
+
+        result = await autoTrySubmitImageTask(candidateModels, (m) => ({
+          model: m,
+          prompt: multiAnglePrompt,
+          size: '1:1',
+          n: 1,
+          image_urls: [imageUrl],
+          ...(multiAngleBase64 ? { image: `data:image/png;base64,${multiAngleBase64}` } : {}),
+          input_fidelity: 'high',
+        }), '多角度(generations)');
       }
-      return NextResponse.json({ success: true, taskId: result.taskId, action, prompt: multiAnglePrompt, usedModel: result.usedModel });
+
+      if (result?.directUrl) {
+        return NextResponse.json({ success: true, imageUrl: result.directUrl, action, usedModel: result.usedModel, endpoint: usedEndpoint });
+      }
+      return NextResponse.json({ success: true, taskId: result?.taskId, action, prompt: multiAnglePrompt, usedModel: result?.usedModel, endpoint: usedEndpoint });
     }
 
     if (action === 'upscale') {
