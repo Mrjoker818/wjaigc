@@ -2516,14 +2516,16 @@ export function InfiniteCanvas({
     }
 
     try {
+      const canvasGenPureModel = canvasGenModel?.includes('::') ? canvasGenModel.split('::')[1] : canvasGenModel || undefined;
+      const canvasGenProviderId = canvasGenModel?.includes('::') ? canvasGenModel.split('::')[0] : undefined;
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: canvasGenPrompt,
           negativePrompt: canvasGenNegativePrompt || undefined,
-          model: canvasGenModel?.includes('::') ? canvasGenModel.split('::')[0] : canvasGenModel || undefined,
-          providerId: canvasGenModel?.includes('::') ? canvasGenModel.split('::')[1] : undefined,
+          model: canvasGenPureModel,
+          providerId: canvasGenProviderId,
           aspectRatio: canvasGenAspectRatio,
           quality: canvasGenQuality,
           n: canvasGenCount,
@@ -2554,7 +2556,7 @@ export function InfiniteCanvas({
             const pollRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId, model: actualGenModel }),
+              body: JSON.stringify({ taskId, model: actualGenModel, providerId: canvasGenProviderId }),
             });
             if (!pollRes.ok) continue;
             const pollData = await pollRes.json();
@@ -3574,7 +3576,7 @@ export function InfiniteCanvas({
             const pollRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId, model: actualModel }),
+              body: JSON.stringify({ taskId, model: actualModel, providerId: img2imgProviderId || undefined }),
             });
             if (!pollRes.ok) continue;
             const pollData = await pollRes.json();
@@ -6302,7 +6304,7 @@ export function InfiniteCanvas({
                   >
                     {canvasGenModels.length === 0 && <option value="">暂无可用模型</option>}
                     {canvasGenModels.map(m => {
-                      const compositeKey = `${m.id}::${m.providerId}`;
+                      const compositeKey = `${m.providerId}::${m.id}`;
                       return <option key={compositeKey} value={compositeKey}>{m.id}{m.providerName ? ` (${m.providerName})` : ''}</option>;
                     })}
                   </select>

@@ -20,6 +20,7 @@ export interface GenerationParams {
     stylePreset: string;
     outputCount: number;
     model: string;
+    providerId?: string;  // 服务端API提供商ID，从复合键 providerId::modelId 中拆解
     quality?: string;
     apiKey?: string;
     estimatedTime?: number;
@@ -468,6 +469,10 @@ export function GenerationPanel(
         // Check if model is from a universal provider
         const universalModel = discoveredModels.find(m => m.id === model);
         
+        // 从复合键 providerId::modelId 中拆解出纯 modelId 和 providerId
+        const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
+        const compositeProviderId = model.includes('::') ? model.split('::')[0] : undefined;
+        
         onGenerate({
             prompt: fullPrompt,
             size: ratioToSize[aspectRatio] || "1024x1024",
@@ -479,7 +484,8 @@ export function GenerationPanel(
             stylePreset,
             outputCount,
             quality,
-            model,
+            model: pureModelId,
+            providerId: compositeProviderId,
             referenceCategories: Object.fromEntries(
                 Object.entries(referenceSelectedCategories).map(([k, v]) => [k, Array.from(v)])
             ),

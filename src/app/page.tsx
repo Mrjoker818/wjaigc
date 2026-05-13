@@ -517,7 +517,7 @@ function CanvasApp() {
               const pollResponse = await fetch('/api/poll-task', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ taskId: currentTaskId, model: params.model, userId: currentUser?.id }),
+                body: JSON.stringify({ taskId: currentTaskId, model: params.model, providerId: params.providerId, userId: currentUser?.id }),
               });
 
               const pollData = await pollResponse.json();
@@ -1097,7 +1097,7 @@ function CanvasApp() {
               const pollResponse = await fetch('/api/poll-task', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ taskId: currentTaskId, model: params.model, userId: currentUser?.id }),
+                body: JSON.stringify({ taskId: currentTaskId, model: params.model, providerId: params.providerId, userId: currentUser?.id }),
               });
 
               const pollData = await pollResponse.json();
