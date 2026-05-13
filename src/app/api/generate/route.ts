@@ -360,16 +360,46 @@ export async function POST(request: NextRequest) {
       const timeoutMs = isDirectMode ? 600000 : 30000; // 直接模式600s(兼容token link等慢速API), 异步模式30s
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
+      // 构建 fetch 请求选项 - 根据兼容性层决定使用 JSON 还是 multipart/form-data
+      const useMultipart = hasImage && endpoint === '/images/edits' && profile.editEncoding === 'multipart-only';
+      let fetchHeaders: Record<string, string> = {
+        'Authorization': `Bearer ${currentApiKey}`,
+      };
+      let fetchBody: string | FormData;
+
+      if (useMultipart) {
+        // multipart/form-data 编码 - 用于 /images/edits 端点的图生图
+        const formData = new FormData();
+        for (const [key, value] of Object.entries(adjustedBody)) {
+          if (value !== undefined && value !== null) {
+            if (key === 'image_urls' || key === 'image') {
+              // 图片URL数组：保持JSON字符串格式，API代理通常期望这种格式
+              formData.append(key, JSON.stringify(value));
+            } else if (Array.isArray(value)) {
+              // 其他数组值：每个元素作为单独的字段
+              for (const item of value) {
+                formData.append(key, typeof item === 'object' ? JSON.stringify(item) : String(item));
+              }
+            } else {
+              formData.append(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
+            }
+          }
+        }
+        fetchBody = formData;
+        // 不设置 Content-Type，让浏览器自动设置 multipart boundary
+      } else {
+        // JSON 编码 - 默认方式
+        fetchHeaders['Content-Type'] = 'application/json';
+        fetchBody = JSON.stringify(adjustedBody);
+      }
+
       const submitResponse = await fetchWithV1Retry(
         currentApiBaseUrl,
         endpoint,
         {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${currentApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(adjustedBody),
+          headers: fetchHeaders,
+          body: fetchBody,
           signal: controller.signal,
         }
       );

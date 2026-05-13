@@ -104,7 +104,7 @@ export const PROFILE_OPENAI: ApiCompatProfile = {
   sizeFormat: 'pixel',
   defaultEndpoint: '/images/generations',
   editEndpoint: '/images/edits',
-  editEncoding: 'json-first',
+  editEncoding: 'multipart-only',
   supportsInputFidelity: true,
 };
 
@@ -121,7 +121,7 @@ export const PROFILE_OPENAI_ASYNC: ApiCompatProfile = {
   sizeFormat: 'pixel',
   defaultEndpoint: '/images/generations',
   editEndpoint: '/images/edits',
-  editEncoding: 'json-first',
+  editEncoding: 'multipart-only',
   supportsInputFidelity: true,
 };
 
@@ -136,7 +136,7 @@ export const PROFILE_AUTO: ApiCompatProfile = {
   sizeFormat: 'pixel',          // safe default: convert to pixel format
   defaultEndpoint: '/images/generations',
   editEndpoint: '/images/edits',
-  editEncoding: 'json-first',
+  editEncoding: 'multipart-only',
   supportsInputFidelity: true,
 };
 
