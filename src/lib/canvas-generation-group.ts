@@ -61,6 +61,8 @@ export interface ResultPlaceholder {
   isProcessing?: boolean;  // 是否正在生成
   progress?: number;       // 生成进度 0-100
   resultUrl?: string;      // 生成完成后的图片URL
+  startedAt?: number;      // 生成开始时间戳(ms)
+  errorMsg?: string;       // 错误信息
 }
 
 // 生图组 — 画布上的一个视觉组合
@@ -100,6 +102,9 @@ export interface CanvasGenGroup {
 
   // 折叠状态
   isCollapsed?: boolean;
+
+  // 展开的参考图类别设置 (imageId → boolean)
+  expandedRefImages?: Record<string, boolean>;
 
   // 创建时间
   createdAt: number;

@@ -713,6 +713,14 @@ export function InfiniteCanvas({
   const genGroupsRef = useRef<CanvasGenGroup[]>(genGroups);
   const [optimizingGroupId, setOptimizingGroupId] = useState<string | null>(null);
   const [openModelDropdownGroupId, setOpenModelDropdownGroupId] = useState<string | null>(null);
+  const [genGroupTick, setGenGroupTick] = useState(0);
+  // Tick timer for gen group elapsed time display
+  useEffect(() => {
+    const hasProcessing = genGroups.some(g => g.resultPlaceholder.isProcessing);
+    if (!hasProcessing) return;
+    const timer = setInterval(() => setGenGroupTick(t => t + 1), 1000);
+    return () => clearInterval(timer);
+  }, [genGroups.some(g => g.resultPlaceholder.isProcessing)]);
   // GenGroup 拖动状态
   const [genGroupDragTarget, setGenGroupDragTarget] = useState<string | null>(null);
   const [genGroupDragStart, setGenGroupDragStart] = useState({ x: 0, y: 0 });
@@ -2325,6 +2333,8 @@ export function InfiniteCanvas({
           aspectRatio: toolbar.aspectRatio,
           isProcessing: true,
           progress: 5,
+          startedAt: Date.now(),
+          errorMsg: undefined,
         },
       };
     }));
@@ -2361,9 +2371,9 @@ export function InfiniteCanvas({
           providerId,
           aspectRatio: toolbar.aspectRatio,
           quality: toolbar.quality,
-          n: toolbar.outputCount,
-          imageUrls: group.refImages.map(r => r.url),
-          groupType: group.type,
+          outputCount: toolbar.outputCount,
+          referenceImages: group.refImages.map(r => r.url),
+          referenceMode: group.type === 'fusion' ? 'fusion' : 'reference',
         }),
       });
       const data = await res.json();
@@ -2385,7 +2395,13 @@ export function InfiniteCanvas({
         // 更新组结果
         setGenGroups(prev => prev.map(g => {
           if (g.id !== group.id) return g;
-          return { ...g, status: 'completed' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 100, resultUrl: newImages[0]?.url }, resultImageIds: newImages.map((img: { id: string }) => img.id) };
+          return { ...g, status: 'completed' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 100, resultUrl: newImages[0]?.url, resultImageIds: newImages.map((img: { id: string }) => img.id) } };
+        }));
+      } else if (data.error) {
+        // API返回错误
+        setGenGroups(prev => prev.map(g => {
+          if (g.id !== group.id) return g;
+          return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: data.error } };
         }));
       } else if (data.taskIds) {
         // 轮询模式
@@ -2398,7 +2414,7 @@ export function InfiniteCanvas({
             clearInterval(interval);
             setGenGroups(prev => prev.map(g => {
               if (g.id !== group.id) return g;
-              return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0 } };
+              return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: '生成超时，请重试' } };
             }));
             return;
           }
@@ -2431,13 +2447,14 @@ export function InfiniteCanvas({
               onImagesChange([...imagesRef.current, ...resultImages]);
               setGenGroups(prev => prev.map(g => {
                 if (g.id !== group.id) return g;
-                return { ...g, status: 'completed' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 100, resultUrl: resultImages[0]?.url }, resultImageIds: resultImages.map((ri: { id: string }) => ri.id) };
+                return { ...g, status: 'completed' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 100, resultUrl: resultImages[0]?.url } };
               }));
             } else if (pollData.status === 'failed') {
               clearInterval(interval);
+              const errMsg = pollData.error || '生成失败，请检查模型和API配置';
               setGenGroups(prev => prev.map(g => {
                 if (g.id !== group.id) return g;
-                return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0 } };
+                return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: errMsg } };
               }));
             }
           } catch {
@@ -5090,13 +5107,16 @@ export function InfiniteCanvas({
             const isInCollapsedGenGroup = !!collapsedGenGroup;
             // Apply group drag offset to images in the dragged group
             const isGroupDragging = groupDragTarget && image.groupId === groupDragTarget;
+            // Apply genGroup drag offset to images belonging to the dragged gen group
+            const draggedGenGroup = genGroupDragTarget ? genGroups.find(g => g.id === genGroupDragTarget) : null;
+            const isInDraggedGenGroup = !!draggedGenGroup && (draggedGenGroup.refImages.some(r => r.imageId === image.id) || (draggedGenGroup.resultImageIds && draggedGenGroup.resultImageIds.includes(image.id)));
             return (
               <div
                 key={image.id}
                 className={`absolute group z-10 ${isSelected ? 'z-20' : ''} ${editMode !== 'none' && editImageId !== image.id ? 'opacity-30' : ''}`}
                 style={{
-                  left: image.x + (isDragging ? dragOffset.x : 0) + (isGroupDragging ? groupDragOffset.x : 0),
-                  top: image.y + (isDragging ? dragOffset.y : 0) + (isGroupDragging ? groupDragOffset.y : 0),
+                  left: image.x + (isDragging ? dragOffset.x : 0) + (isGroupDragging ? groupDragOffset.x : 0) + (isInDraggedGenGroup ? genGroupDragOffset.x : 0),
+                  top: image.y + (isDragging ? dragOffset.y : 0) + (isGroupDragging ? groupDragOffset.y : 0) + (isInDraggedGenGroup ? genGroupDragOffset.y : 0),
                   width: image.width,
                   height: image.height,
                   display: (isGroupCollapsed || isInCollapsedGenGroup) ? 'none' : undefined,
@@ -5554,24 +5574,136 @@ export function InfiniteCanvas({
                 {srcImages.map(img => (
                   <div
                     key={`ref-label-${img.id}`}
-                    className="absolute pointer-events-none flex items-center gap-1.5 px-2 py-1 rounded-lg"
+                    className="absolute flex flex-col gap-1"
                     style={{
                       left: img.x + dragDx - containerMinX,
                       top: img.y - 28 + dragDy - containerMinY,
-                      background: isRef ? 'rgba(212,175,55,0.9)' : 'rgba(78,205,196,0.9)',
                       zIndex: 26,
                     }}
                   >
-                    <span className="text-xs font-bold text-black">
-                      R{img.refNumber}
-                    </span>
-                    <button
-                      className="w-4 h-4 flex items-center justify-center rounded-full text-black/60 hover:text-black hover:bg-black/10 transition-colors pointer-events-auto text-xs font-bold"
-                      onClick={(e) => { e.stopPropagation(); removeRefFromGroup(group.id, img.id); }}
-                      title="移除此参考图"
+                    {/* Label row */}
+                    <div
+                      className="flex items-center gap-1.5 px-2 py-1 rounded-lg pointer-events-auto"
+                      style={{
+                        background: isRef ? 'rgba(212,175,55,0.9)' : 'rgba(78,205,196,0.9)',
+                      }}
+                      onMouseDown={(e) => e.stopPropagation()}
                     >
-                      x
-                    </button>
+                      <span className="text-xs font-bold text-black">
+                        R{img.refNumber}
+                      </span>
+                      {isRef && (
+                        <button
+                          className="w-4 h-4 flex items-center justify-center rounded-full text-black/60 hover:text-black hover:bg-black/10 transition-colors text-[10px] font-bold"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setGenGroups(prev => prev.map(g => {
+                              if (g.id !== group.id) return g;
+                              const newExpanded = { ...g.expandedRefImages };
+                              newExpanded[img.id] = !newExpanded[img.id];
+                              return { ...g, expandedRefImages: newExpanded };
+                            }));
+                          }}
+                          title="设置参考类别"
+                        >
+                          ▼
+                        </button>
+                      )}
+                      <button
+                        className="w-4 h-4 flex items-center justify-center rounded-full text-black/60 hover:text-black hover:bg-black/10 transition-colors text-xs font-bold"
+                        onClick={(e) => { e.stopPropagation(); removeRefFromGroup(group.id, img.id); }}
+                        title="移除此参考图"
+                      >
+                        x
+                      </button>
+                    </div>
+                    {/* Per-image category settings (reference group only) */}
+                    {isRef && group.expandedRefImages?.[img.id] && (
+                      <div
+                        className="rounded-lg p-2 space-y-1.5 min-w-[180px] shadow-lg border pointer-events-auto"
+                        style={{
+                          background: isMonochrome ? '#fff' : '#1a1a1a',
+                          borderColor: isMonochrome ? '#e5e7eb' : '#333',
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="text-[10px] font-medium" style={{ color: accentColor }}>
+                          R{img.refNumber} 参考类别
+                        </div>
+                        {REFERENCE_CATEGORIES.map(cat => {
+                          const imgCats = group.sourceCategories[img.id] || [];
+                          const isSelected = imgCats.includes(cat);
+                          const strength = group.sourceStrengths[img.id]?.[cat] ?? 70;
+                          return (
+                            <div key={cat} className="flex items-center gap-1.5">
+                              <button
+                                className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-all ${
+                                  isSelected
+                                    ? (isMonochrome ? 'bg-amber-100 text-amber-800' : 'bg-[#d4af37]/20 text-[#d4af37]')
+                                    : (isMonochrome ? 'bg-gray-100 text-gray-400' : 'bg-[#252525] text-[#666]')
+                                }`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setGenGroups(prev => prev.map(g => {
+                                    if (g.id !== group.id) return g;
+                                    const newCats = { ...g.sourceCategories };
+                                    const newStr = { ...g.sourceStrengths };
+                                    const cats = [...(newCats[img.id] || [])];
+                                    const str = { ...(newStr[img.id] || {}) };
+                                    if (isSelected) {
+                                      const idx = cats.indexOf(cat);
+                                      if (idx >= 0) cats.splice(idx, 1);
+                                    } else {
+                                      if (!cats.includes(cat)) cats.push(cat);
+                                      if (!str[cat]) str[cat] = 70;
+                                    }
+                                    newCats[img.id] = cats;
+                                    newStr[img.id] = str;
+                                    return { ...g, sourceCategories: newCats, sourceStrengths: newStr };
+                                  }));
+                                }}
+                              >
+                                <span className={`w-2.5 h-2.5 rounded-sm border flex items-center justify-center text-[8px] ${
+                                  isSelected
+                                    ? 'border-current bg-current/20'
+                                    : (isMonochrome ? 'border-gray-300' : 'border-[#555]')
+                                }`}>
+                                  {isSelected && '✓'}
+                                </span>
+                                {REFERENCE_CATEGORY_LABELS[cat]}
+                              </button>
+                              {isSelected && (
+                                <>
+                                  <input
+                                    type="range"
+                                    min={0}
+                                    max={100}
+                                    value={strength}
+                                    className="flex-1 h-0.5 appearance-none rounded-full cursor-pointer"
+                                    style={{
+                                      accentColor,
+                                      background: `linear-gradient(to right, ${accentColor} ${strength}%, ${isMonochrome ? '#e5e7eb' : '#444'} ${strength}%)`
+                                    }}
+                                    onChange={(e) => {
+                                      const val = Number(e.target.value);
+                                      setGenGroups(prev => prev.map(g => {
+                                        if (g.id !== group.id) return g;
+                                        const newStr = { ...g.sourceStrengths };
+                                        newStr[img.id] = { ...(newStr[img.id] || {}), [cat]: val };
+                                        return { ...g, sourceStrengths: newStr };
+                                      }));
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                  <span className="text-[10px] w-6 text-right" style={{ color: isMonochrome ? '#666' : '#999' }}>{strength}%</span>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 ))}
 
@@ -5599,7 +5731,31 @@ export function InfiniteCanvas({
                         <div className="w-8 h-8 border-3 border-t-transparent rounded-full animate-spin"
                           style={{ borderColor: accentColor, borderTopColor: 'transparent', borderWidth: '3px' }} />
                         <span className="text-sm font-semibold" style={{ color: accentColor }}>
-                          生成中 {group.resultPlaceholder.progress ? `${Math.round(group.resultPlaceholder.progress)}%` : ''}
+                          生成中 {group.resultPlaceholder.progress ? `${Math.round(group.resultPlaceholder.progress)}%` : '0%'}
+                        </span>
+                        {group.resultPlaceholder.startedAt && (
+                          <span className="text-xs" style={{ color: `${accentColor}88` }}>
+                            {(() => {
+                              void genGroupTick; // trigger re-render
+                              const elapsed = Math.floor((Date.now() - group.resultPlaceholder.startedAt!) / 1000);
+                              const min = Math.floor(elapsed / 60);
+                              const sec = elapsed % 60;
+                              return min > 0 ? `${min}分${sec}秒` : `${sec}秒`;
+                            })()}
+                          </span>
+                        )}
+                        {/* Progress bar */}
+                        <div className="w-3/4 h-1.5 rounded-full overflow-hidden" style={{ background: `${accentColor}22` }}>
+                          <div className="h-full rounded-full transition-all duration-300" style={{ width: `${group.resultPlaceholder.progress || 0}%`, background: accentColor }} />
+                        </div>
+                      </>
+                    ) : group.resultPlaceholder.errorMsg ? (
+                      <>
+                        <div className="w-6 h-6 flex items-center justify-center rounded-full" style={{ background: 'rgba(239,68,68,0.2)' }}>
+                          <span className="text-red-400 text-xs font-bold">!</span>
+                        </div>
+                        <span className="text-xs text-red-400 text-center px-2 max-w-full line-clamp-2">
+                          {group.resultPlaceholder.errorMsg}
                         </span>
                       </>
                     ) : group.resultPlaceholder.resultUrl ? (
@@ -5723,93 +5879,7 @@ export function InfiniteCanvas({
                     );
                     })()}
 
-                    {/* Row 2.5: 6-category reference settings (reference group only) */}
-                    {isRef && (
-                      <div className="space-y-2">
-                        <div className="text-xs font-medium" style={{ color: accentColor }}>参考类别</div>
-                        {REFERENCE_CATEGORIES.map(cat => {
-                          const allSelected = group.refImages.every(ref =>
-                            (group.sourceCategories[ref.imageId] || []).includes(cat)
-                          );
-                          const avgStrength = group.refImages.length > 0
-                            ? Math.round(group.refImages.reduce((sum, ref) => {
-                                const s = group.sourceStrengths[ref.imageId]?.[cat] ?? 70;
-                                return sum + s;
-                              }, 0) / group.refImages.length)
-                            : 70;
-                          return (
-                            <div key={cat} className="flex items-center gap-2">
-                              <button
-                                className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all ${
-                                  allSelected
-                                    ? (isMonochrome ? 'bg-amber-100 text-amber-800' : 'bg-[#d4af37]/20 text-[#d4af37]')
-                                    : (isMonochrome ? 'bg-gray-100 text-gray-400' : 'bg-[#252525] text-[#666]')
-                                }`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setGenGroups(prev => prev.map(g => {
-                                    if (g.id !== group.id) return g;
-                                    const newCats = { ...g.sourceCategories };
-                                    const newStr = { ...g.sourceStrengths };
-                                    g.refImages.forEach(ref => {
-                                      const imgCats = [...(newCats[ref.imageId] || [])];
-                                      const imgStr = { ...(newStr[ref.imageId] || {}) };
-                                      if (allSelected) {
-                                        const idx = imgCats.indexOf(cat);
-                                        if (idx >= 0) imgCats.splice(idx, 1);
-                                      } else {
-                                        if (!imgCats.includes(cat)) imgCats.push(cat);
-                                        if (!imgStr[cat]) imgStr[cat] = 70;
-                                      }
-                                      newCats[ref.imageId] = imgCats;
-                                      newStr[ref.imageId] = imgStr;
-                                    });
-                                    return { ...g, sourceCategories: newCats, sourceStrengths: newStr };
-                                  }));
-                                }}
-                              >
-                                <span className={`w-3 h-3 rounded-sm border flex items-center justify-center text-[10px] ${
-                                  allSelected
-                                    ? 'border-current bg-current/20'
-                                    : (isMonochrome ? 'border-gray-300' : 'border-[#555]')
-                                }`}>
-                                  {allSelected && '✓'}
-                                </span>
-                                {REFERENCE_CATEGORY_LABELS[cat]}
-                              </button>
-                              {allSelected && (
-                                <div className="flex items-center gap-1 flex-1">
-                                  <input
-                                    type="range"
-                                    min={0}
-                                    max={100}
-                                    value={avgStrength}
-                                    className="flex-1 h-1 appearance-none rounded-full cursor-pointer"
-                                    style={{
-                                      accentColor,
-                                      background: `linear-gradient(to right, ${accentColor} ${avgStrength}%, ${isMonochrome ? '#e5e7eb' : '#444'} ${avgStrength}%)`
-                                    }}
-                                    onChange={(e) => {
-                                      const val = Number(e.target.value);
-                                      setGenGroups(prev => prev.map(g => {
-                                        if (g.id !== group.id) return g;
-                                        const newStr = { ...g.sourceStrengths };
-                                        g.refImages.forEach(ref => {
-                                          newStr[ref.imageId] = { ...(newStr[ref.imageId] || {}), [cat]: val };
-                                        });
-                                        return { ...g, sourceStrengths: newStr };
-                                      }));
-                                    }}
-                                    onClick={(e) => e.stopPropagation()}
-                                  />
-                                  <span className="text-xs w-8 text-right" style={{ color: isMonochrome ? '#666' : '#999' }}>{avgStrength}%</span>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
+                    {/* Row 2.5: Per-image reference category settings are now shown on each image label */}
 
                     {/* Row 3: Prompt textarea with resize handle */}
                     <div className="relative">
