@@ -62,10 +62,16 @@ export async function GET(
 
     // 3. S3 对象存储回退（文件系统找不到时，从 S3 下载）
     if (isS3Available()) {
-      const s3Key = `uploads/${filename}`;
-      const s3Buffer = await downloadImageFromS3(s3Key);
+      // Try both 'images/' and 'uploads/' prefixes for S3 key
+      let s3Buffer: Buffer | null = null;
+      for (const prefix of ['images/', 'uploads/']) {
+        s3Buffer = await downloadImageFromS3(`${prefix}${filename}`);
+        if (s3Buffer) {
+          console.log(`[serve-upload] S3 fallback: ${prefix}${filename} (${(s3Buffer.length / 1024).toFixed(0)}KB)`);
+          break;
+        }
+      }
       if (s3Buffer) {
-        console.log(`[serve-upload] S3 fallback: ${s3Key} (${(s3Buffer.length / 1024).toFixed(0)}KB)`);
 
         // 回写本地缓存（异步，不阻塞响应）
         const localDir = process.env.COZE_PROJECT_ENV === 'PROD'

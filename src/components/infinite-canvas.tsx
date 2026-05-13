@@ -260,6 +260,7 @@ export interface CanvasImage {
   category?: string;
   size?: string;
   createdAt?: number;
+  sourceUrl?: string;
   isProcessingPlaceholder?: boolean;
   groupId?: string;
   processing?: {

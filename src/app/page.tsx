@@ -280,6 +280,7 @@ function CanvasApp() {
         const mgr = UserManagerCore.getInstance();
         // 先将 data:/blob: URL 持久化到服务器
         const urlMapping: Record<string, string> = {};
+        const sourceUrlMapping: Record<string, string> = {};
         const nonPersistentUrls = images.filter(img =>
           img.url.startsWith('data:') || img.url.startsWith('blob:')
         );
@@ -302,7 +303,7 @@ function CanvasApp() {
               const saveResp = await fetch('/api/save-image', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ imageUrl: urlToSave, userId: currentUser?.id }),
+                body: JSON.stringify({ imageUrl: urlToSave, userId: currentUser?.id, sourceUrl: img.url }),
               });
               const saveData = await saveResp.json();
               if (saveData.success && saveData.url) {
@@ -314,12 +315,13 @@ function CanvasApp() {
           for (const result of saveResults) {
             if (result.status === 'fulfilled' && result.value) {
               urlMapping[result.value.original] = result.value.persisted;
+              sourceUrlMapping[result.value.original] = result.value.original;
             }
           }
           // 更新 images 状态中的非持久化 URL
           if (Object.keys(urlMapping).length > 0) {
             setImages(prev => prev.map(img =>
-              urlMapping[img.url] ? { ...img, url: urlMapping[img.url] } : img
+              urlMapping[img.url] ? { ...img, url: urlMapping[img.url], sourceUrl: img.sourceUrl || sourceUrlMapping[img.url] || img.url } : img
             ));
           }
         }
@@ -486,7 +488,7 @@ function CanvasApp() {
         const maxPollTime = Math.min(300, Math.max(60, estimatedTime * 3 + 30)) * 1000;
         const pollStartTime = Date.now();
 
-        const completedImages: Array<{ id: string; url: string; prompt: string; model?: string; quality?: string; aspectRatio?: string; stylePreset?: string; category?: string; size?: string }> = [];        let consecutiveErrors = 0;
+        const completedImages: Array<{ id: string; url: string; prompt: string; model?: string; quality?: string; aspectRatio?: string; stylePreset?: string; category?: string; size?: string; sourceUrl?: string }> = [];        let consecutiveErrors = 0;
 
         for (let taskIdx = 0; taskIdx < taskIds.length; taskIdx++) {
           const currentTaskId = taskIds[taskIdx];
@@ -552,6 +554,7 @@ function CanvasApp() {
                   stylePreset: params.stylePreset,
                   category: params.imageCategory || params.productCategory,
                   size: params.size,
+                  sourceUrl: imageUrl,
                 });
                 taskCompleted = true;
                 consecutiveErrors = 0;
@@ -609,11 +612,12 @@ function CanvasApp() {
                 const saveResp = await fetch('/api/save-image', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ imageUrl: completedImages[i].url, userId: currentUser?.id }),
+                  body: JSON.stringify({ imageUrl: completedImages[i].url, userId: currentUser?.id, sourceUrl: completedImages[i].sourceUrl }),
                 });
                 const saveData = await saveResp.json();
                 if (saveData.success && saveData.url) {
                   completedImages[i].url = saveData.url;
+                  completedImages[i].sourceUrl = completedImages[i].sourceUrl || saveData.sourceUrl;
                 }
               } catch { /* save failed, keep data URL */ }
             }
@@ -671,17 +675,18 @@ function CanvasApp() {
       // === 旧模式兼容：直接返回结果 - 自动排列布局 ===
       } else if (data.success && data.images) {
         // 持久化 data: URL
-        for (const img of data.images as Array<{ url: string }>) {
+        for (const img of data.images as Array<{ url: string; sourceUrl?: string }>) {
           if (img.url.startsWith('data:')) {
             try {
               const saveResp = await fetch('/api/save-image', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ imageUrl: img.url, userId: currentUser?.id }),
+                body: JSON.stringify({ imageUrl: img.url, userId: currentUser?.id, sourceUrl: img.sourceUrl }),
               });
               const saveData = await saveResp.json();
               if (saveData.success && saveData.url) {
                 img.url = saveData.url;
+                img.sourceUrl = img.sourceUrl || saveData.sourceUrl;
               }
             } catch { /* save failed, keep data URL */ }
           }
@@ -1066,7 +1071,7 @@ function CanvasApp() {
         const maxPollTime = Math.min(300, Math.max(60, estimatedTime * 3 + 30)) * 1000;
         const pollStartTime = Date.now();
 
-        const completedImages: Array<{ id: string; url: string; prompt: string; model?: string; quality?: string; aspectRatio?: string; stylePreset?: string; category?: string; size?: string }> = [];        let consecutiveErrors = 0;
+        const completedImages: Array<{ id: string; url: string; prompt: string; model?: string; quality?: string; aspectRatio?: string; stylePreset?: string; category?: string; size?: string; sourceUrl?: string }> = [];        let consecutiveErrors = 0;
 
         for (let taskIdx = 0; taskIdx < taskIds.length; taskIdx++) {
           const currentTaskId = taskIds[taskIdx];
@@ -1118,6 +1123,7 @@ function CanvasApp() {
                   stylePreset: params.stylePreset,
                   category: params.imageCategory || params.productCategory,
                   size: params.size,
+                  sourceUrl: imageUrl,
                 });
                 taskCompleted = true;
                 consecutiveErrors = 0;
@@ -2013,6 +2019,7 @@ function CanvasApp() {
                 const mgr = UserManagerCore.getInstance();
                 // 同步持久化 data:/blob: URL
                 const urlMapping: Record<string, string> = {};
+                const sourceUrlMapping: Record<string, string> = {};
                 const nonPersistent = images.filter(img => img.url.startsWith('data:') || img.url.startsWith('blob:'));
                 if (nonPersistent.length > 0) {
                   const results = await Promise.allSettled(nonPersistent.map(async (img) => {
@@ -2031,7 +2038,7 @@ function CanvasApp() {
                     const saveResp = await fetch('/api/save-image', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ imageUrl: urlToSave, userId: currentUser?.id }),
+                      body: JSON.stringify({ imageUrl: urlToSave, userId: currentUser?.id, sourceUrl: img.url }),
                     });
                     const saveData = await saveResp.json();
                     if (saveData.success && saveData.url) return { original: img.url, persisted: saveData.url };
@@ -2122,7 +2129,7 @@ function CanvasApp() {
                     const saveResp = await fetch('/api/save-image', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ imageUrl: urlToSave, userId: currentUser?.id }),
+                      body: JSON.stringify({ imageUrl: urlToSave, userId: currentUser?.id, sourceUrl: img.url }),
                     });
                     const saveData = await saveResp.json();
                     if (saveData.success && saveData.url) return { original: img.url, persisted: saveData.url };

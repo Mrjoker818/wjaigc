@@ -96,25 +96,49 @@ async function fetchImageBuffer(url: string): Promise<Buffer> {
       const persistentPath = path.join(dataRoot, url.replace(/^\//, ''));
       if (fsSync.existsSync(persistentPath)) return fsSync.readFileSync(persistentPath);
     }
-    // 3. Try S3 object storage fallback
+    // 3. Try S3 object storage fallback (try both 'images/' and 'uploads/' prefixes)
     const { isS3Available, downloadImageFromS3 } = await import('@/lib/s3-storage');
     if (isS3Available()) {
-      const s3Key = url.replace(/^\/api\/serve-upload\//, 'uploads/').replace(/^\//, 'uploads/');
-      const s3Buffer = await downloadImageFromS3(s3Key);
-      if (s3Buffer) return s3Buffer;
+      for (const prefix of ['images/', 'uploads/']) {
+        const s3Key = `${prefix}${url.replace(/^\/api\/serve-upload\//, '').replace(/^\//, '')}`;
+        const s3Buffer = await downloadImageFromS3(s3Key);
+        if (s3Buffer) return s3Buffer;
+      }
     }
-    // 4. Try localhost fetch (serve-upload API)
+    // 4. Try source URL mapping (re-download from original external URL)
+    const filename = url.replace(/^\/api\/serve-upload\//, '').replace(/^\//, '');
+    const { getImageSourceUrl } = await import('@/lib/image-source-map');
+    const sourceUrl = await getImageSourceUrl(filename);
+    if (sourceUrl) {
+      console.log(`[image-edit] Re-downloading from source: ${sourceUrl.substring(0, 80)}...`);
+      try {
+        const srcRes = await fetch(sourceUrl, { signal: AbortSignal.timeout(30000) });
+        if (srcRes.ok) {
+          const buffer = Buffer.from(await srcRes.arrayBuffer());
+          // Re-save to local for future use
+          try {
+            const { getServerDataRoot } = await import('@/lib/server-data-root');
+            const dataRoot = await getServerDataRoot();
+            const dir = path.join(dataRoot, 'api', 'serve-upload');
+            await fs.mkdir(dir, { recursive: true });
+            await fs.writeFile(path.join(dir, filename), buffer);
+          } catch { /* ignore save failure */ }
+          return buffer;
+        }
+      } catch { /* ignore re-download failure */ }
+    }
+    // 5. Try localhost fetch (serve-upload API)
     const port = process.env.DEPLOY_RUN_PORT || 5000;
     const res = await fetch(`http://localhost:${port}${url}`, { signal: AbortSignal.timeout(10000) });
     if (res.ok) return Buffer.from(await res.arrayBuffer());
-    // 5. Try current domain fetch
+    // 6. Try current domain fetch
     const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT;
     if (domain) {
       const fullUrl = `${domain}${url}`;
       const domainRes = await fetch(fullUrl, { signal: AbortSignal.timeout(10000) });
       if (domainRes.ok) return Buffer.from(await domainRes.arrayBuffer());
     }
-    throw new Error(`Cannot access local image: ${url}`);
+    throw new Error(`无法获取原始图片：文件已过期或不存在，请重新生成图片`);
   }
   // external URL
   const res = await fetch(url, { signal: AbortSignal.timeout(30000) });

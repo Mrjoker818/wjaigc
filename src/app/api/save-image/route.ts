@@ -4,6 +4,7 @@ import { existsSync } from 'fs';
 import path from 'path';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { uploadImageToS3, isS3Available } from '@/lib/s3-storage';
+import { saveImageDataMapping, getImageSourceUrl } from '@/lib/image-source-map';
 
 /**
  * 将 base64 data URL 或远程图片 URL 保存到持久化目录，
@@ -132,9 +133,13 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        // 记录 sourceUrl 映射（用于本地+S3 都丢失时重新下载）
+        await saveImageDataMapping(filename, imageUrl);
+
         return NextResponse.json({
           success: true,
           url: `${webPath}/${filename}`,
+          sourceUrl: imageUrl,
           filename,
           size: buffer.length,
           s3Key,

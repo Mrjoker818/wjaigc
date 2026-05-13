@@ -73,6 +73,8 @@ export interface CanvasImage {
   category?: string;
   size?: string;
   groupId?: string;
+  // 原始图片 URL（外部 CDN 地址），用于本地文件丢失时重新下载
+  sourceUrl?: string;
 }
 
 export interface ApiKey {
