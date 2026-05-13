@@ -1046,9 +1046,8 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
 
   useEffect(() => {
     loadServerModels();
-    // 定时刷新模型列表（每30秒），确保管理员更新后自动同步
-    const interval = setInterval(loadServerModels, 30000);
     // 页面重新可见时刷新模型列表（用户可能刚从管理面板切回）
+    // 不使用定时刷新，避免刷新时重置用户当前选择的模型
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         loadServerModels();
@@ -1056,7 +1055,6 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => {
-      clearInterval(interval);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [loadServerModels]);

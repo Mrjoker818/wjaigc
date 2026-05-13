@@ -1984,8 +1984,7 @@ export function InfiniteCanvas({
     // Auto-refresh when page becomes visible (admin may have updated models)
     const handleVisibility = () => { if (document.visibilityState === 'visible') loadImageModels(); };
     document.addEventListener('visibilitychange', handleVisibility);
-    const timer = setInterval(loadImageModels, 60000);
-    return () => { document.removeEventListener('visibilitychange', handleVisibility); clearInterval(timer); };
+    return () => { document.removeEventListener('visibilitychange', handleVisibility); };
   }, []);
 
   const getThreeDProviders = useCallback((): Array<{ id: string; name: string; baseUrl: string; apiKey: string; model?: string; providerPreset?: string; advancedParams?: Record<string, string> }> => {

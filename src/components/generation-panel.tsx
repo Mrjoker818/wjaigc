@@ -392,6 +392,32 @@ export function GenerationPanel(
         }
     }, []);
 
+    // Load initial model selection from localStorage
+    const [pendingModelMigration, setPendingModelMigration] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (typeof window !== 'undefined' && !model) {
+            try {
+                const currentUserId = localStorage.getItem('unbounded_ai_current_user');
+                if (currentUserId) {
+                    const stored = localStorage.getItem('unbounded_ai_user_data');
+                    if (stored) {
+                        const data = JSON.parse(stored);
+                        const saved = data?.userData?.[currentUserId]?.selectedModel;
+                        if (saved) {
+                            if (!saved.includes('::')) {
+                                // 旧版纯 modelId，需等 discoveredModels 加载后迁移为复合键
+                                setPendingModelMigration(saved);
+                            } else {
+                                setModel(saved);
+                            }
+                        }
+                    }
+                }
+            } catch {}
+        }
+    }, []);
+
     // 通知父组件当前模型变化（API Key由服务端管理，无需传递）
     // 传递纯 modelId（从复合键 providerId::modelId 中拆解）
     useEffect(() => {
@@ -625,6 +651,31 @@ export function GenerationPanel(
     // 万能API相关函数
     const [discoveredModels, setDiscoveredModels] = useState<{id: string, providerId: string, providerName: string, is3DProvider?: boolean, displayLabel?: string}[]>([]);
 
+    // 迁移旧版纯 modelId → 复合键 providerId::modelId
+    useEffect(() => {
+        if (pendingModelMigration && discoveredModels.length > 0) {
+            const match = discoveredModels.find(dm => dm.id === pendingModelMigration);
+            if (match) {
+                const compositeKey = `${match.providerId}::${match.id}`;
+                setModel(compositeKey);
+                try {
+                    const currentUserId = localStorage.getItem('unbounded_ai_current_user');
+                    if (currentUserId) {
+                        const stored = localStorage.getItem('unbounded_ai_user_data');
+                        if (stored) {
+                            const data = JSON.parse(stored);
+                            if (data?.userData?.[currentUserId]) {
+                                data.userData[currentUserId].selectedModel = compositeKey;
+                                localStorage.setItem('unbounded_ai_user_data', JSON.stringify(data));
+                            }
+                        }
+                    }
+                } catch {}
+            }
+            setPendingModelMigration(null);
+        }
+    }, [pendingModelMigration, discoveredModels]);
+
     // 3D模型名称友好标签映射
     const get3DModelLabel = (modelId: string): string => {
         const m = modelId.toLowerCase();
@@ -675,18 +726,13 @@ export function GenerationPanel(
                 if (serverModels.length > 0) {
                     // 完整替换模型列表，确保管理员更新后自动同步
                     setDiscoveredModels(serverModels);
-                    // 如果当前没有选中模型，自动选中第一个
+                    // 仅在未选中模型时自动选择第一个；刷新列表时不改变当前选择
                     setModel(prev => {
                         if (!prev && serverModels.length > 0) {
-                            return `${serverModels[0].id}::${serverModels[0].providerId}`;
+                            return `${serverModels[0].providerId}::${serverModels[0].id}`;
                         }
-                        // 检查当前选中的模型是否还存在
-                        if (prev) {
-                            const exists = serverModels.some(m => `${m.id}::${m.providerId}` === prev);
-                            if (!exists && serverModels.length > 0) {
-                                return `${serverModels[0].id}::${serverModels[0].providerId}`;
-                            }
-                        }
+                        // 刷新时保持当前选择不变，即使模型已不存在于列表中
+                        // 用户可手动切换到其他模型
                         return prev;
                     });
                 }
@@ -698,8 +744,6 @@ export function GenerationPanel(
 
     useEffect(() => {
         loadServerModels();
-        // 定时刷新模型列表（每30秒），确保管理员更新后自动同步
-        const interval = setInterval(loadServerModels, 30000);
         // 页面重新可见时刷新模型列表（用户可能刚从管理面板切回）
         const handleVisibility = () => {
             if (document.visibilityState === 'visible') {
@@ -708,7 +752,6 @@ export function GenerationPanel(
         };
         document.addEventListener('visibilitychange', handleVisibility);
         return () => {
-            clearInterval(interval);
             document.removeEventListener('visibilitychange', handleVisibility);
         };
     }, [loadServerModels]);

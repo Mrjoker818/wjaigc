@@ -897,12 +897,18 @@ export async function POST(request: NextRequest) {
         ? `Pseudo-3D AI photography studio. Reconstruct the reference image as a coherent three-dimensional object/subject and generate a new rendered view with the subject itself rotated ${yawText}. Preserve the same identity, design, materials, labels, colors, proportions, outfit/product details and lighting style. Infer plausible hidden sides instead of warping the flat image. Keep a clean professional studio background, realistic perspective, depth, occlusion, shadows, reflections, and high quality product/character photography. Camera pitch: ${pitchText}. Framing: ${dollyText}. Do not output a flat 2D rotated canvas, do not stretch or skew the original image.`
         : `Pseudo-3D AI photography studio. Keep the subject/object fixed as a real three-dimensional scene and move a virtual camera around it: yaw ${yawText}, pitch ${pitchText}, ${dollyText}. Preserve the same identity, design, materials, labels, colors, proportions and environment mood from the reference. Generate a new photographic view with real perspective, depth, occlusion, shadows, reflections, and inferred unseen geometry. Do not rotate the flat source image; re-render the scene from the requested camera angle.`);
 
+      // Resolve image to base64 for maximum content preservation
+      const multiAngleBase64 = await resolveImageToBase64(imageUrl);
+
       const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
         model: m,
         prompt: multiAnglePrompt,
         size: '1:1',
         n: 1,
+        image: multiAngleBase64 ? `data:image/png;base64,${multiAngleBase64}` : undefined,
         image_urls: [imageUrl],
+        input_fidelity: 'high',
+        strength: 0.65,
       }), '多角度');
       if (result.directUrl) {
         return NextResponse.json({ success: true, imageUrl: result.directUrl, action, usedModel: result.usedModel });
