@@ -10,8 +10,8 @@ import {
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
   Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen
 } from 'lucide-react';
-import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory } from '@/lib/canvas-generation-group';
-import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES } from '@/lib/canvas-generation-group';
+import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
+import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS } from '@/lib/canvas-generation-group';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import type { PsdLayerItem } from '@/types/psdLayer';
 import { toStableImageUrl } from '@/lib/stable-image-url';
@@ -712,12 +712,21 @@ export function InfiniteCanvas({
   const [genGroups, setGenGroups] = useState<CanvasGenGroup[]>([]);
   const genGroupsRef = useRef<CanvasGenGroup[]>(genGroups);
   const [optimizingGroupId, setOptimizingGroupId] = useState<string | null>(null);
+  const [openModelDropdownGroupId, setOpenModelDropdownGroupId] = useState<string | null>(null);
   // GenGroup 拖动状态
   const [genGroupDragTarget, setGenGroupDragTarget] = useState<string | null>(null);
   const [genGroupDragStart, setGenGroupDragStart] = useState({ x: 0, y: 0 });
   const [genGroupDragOffset, setGenGroupDragOffset] = useState({ x: 0, y: 0 });
   const genGroupDragReadyRef = useRef(false);
   const genGroupDragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // HexCube 六面体组状态
+  const [hexCubeGroups, setHexCubeGroups] = useState<HexCubeGroup[]>([]);
+  const hexCubeGroupsRef = useRef<HexCubeGroup[]>(hexCubeGroups);
+  const [hexCubeDragTarget, setHexCubeDragTarget] = useState<string | null>(null);
+  const [hexCubeDragStart, setHexCubeDragStart] = useState({ x: 0, y: 0 });
+  const [hexCubeDragOffset, setHexCubeDragOffset] = useState({ x: 0, y: 0 });
+  const hexCubeDragReadyRef = useRef(false);
+  const hexCubeDragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hoveredGenGroupId, setHoveredGenGroupId] = useState<string | null>(null);
   const multiAngleDragRef = useRef<{
     active: boolean;
@@ -1346,6 +1355,9 @@ export function InfiniteCanvas({
 
   // Mouse handlers
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    // Close any open model dropdown
+    setOpenModelDropdownGroupId(null);
+
     if (editMode !== 'none') {
       handleEditMouseDown(e);
       return;
@@ -1541,7 +1553,13 @@ export function InfiniteCanvas({
       const offsetY = canvasPos.y - genGroupDragStart.y;
       setGenGroupDragOffset({ x: offsetX, y: offsetY });
     }
-  }, [editMode, isPanning, isMiddlePanning, panStart, boxSelectStart, isLongPressing, resizingImage, resizeCorner, images, dragTarget, dragStart, resizeStart, screenToCanvas, onImagesChange, handleEditMouseMove, groupDragTarget, groupDragStart, genGroupDragTarget, genGroupDragStart]);
+    // HexCube drag
+    if (hexCubeDragTarget && hexCubeDragReadyRef.current) {
+      const offsetX = canvasPos.x - hexCubeDragStart.x;
+      const offsetY = canvasPos.y - hexCubeDragStart.y;
+      setHexCubeDragOffset({ x: offsetX, y: offsetY });
+    }
+  }, [editMode, isPanning, isMiddlePanning, panStart, boxSelectStart, isLongPressing, resizingImage, resizeCorner, images, dragTarget, dragStart, resizeStart, screenToCanvas, onImagesChange, handleEditMouseMove, groupDragTarget, groupDragStart, genGroupDragTarget, genGroupDragStart, hexCubeDragTarget, hexCubeDragStart]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     if (editMode !== 'none') {
@@ -1739,8 +1757,27 @@ export function InfiniteCanvas({
       genGroupDragTimerRef.current = null;
     }
 
+    // HexCube drag end
+    if (hexCubeDragTarget && hexCubeDragReadyRef.current && hexCubeDragOffset.x !== 0 && hexCubeDragOffset.y !== 0) {
+      setHexCubeGroups(prev => prev.map(g => {
+        if (g.id === hexCubeDragTarget) {
+          return { ...g, position: { x: g.position.x + hexCubeDragOffset.x, y: g.position.y + hexCubeDragOffset.y } };
+        }
+        return g;
+      }));
+    }
+    if (hexCubeDragTarget) {
+      setHexCubeDragTarget(null);
+      setHexCubeDragOffset({ x: 0, y: 0 });
+      hexCubeDragReadyRef.current = false;
+    }
+    if (hexCubeDragTimerRef.current) {
+      clearTimeout(hexCubeDragTimerRef.current);
+      hexCubeDragTimerRef.current = null;
+    }
+
     mouseDownOnImageRef.current = false;
-  }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp, groupDragTarget, groupDragOffset, genGroupDragTarget, genGroupDragOffset]);
+  }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp, groupDragTarget, groupDragOffset, genGroupDragTarget, genGroupDragOffset, hexCubeDragTarget, hexCubeDragOffset]);
 
   const handleMouseLeave = useCallback(() => {
     if (editMode !== 'none') {
@@ -2144,6 +2181,41 @@ export function InfiniteCanvas({
   /** 删除生成组 */
   const deleteGenGroup = useCallback((groupId: string) => {
     setGenGroups(prev => prev.filter(g => g.id !== groupId));
+  }, []);
+
+  /** 创建六面体组 */
+  const handleCreateHexCube = useCallback(() => {
+    // 在视口中心创建
+    const vpX = (typeof window !== 'undefined' ? window.innerWidth / 2 : 500);
+    const vpY = (typeof window !== 'undefined' ? window.innerHeight / 2 : 400);
+    // 计算画布坐标：将屏幕中心映射到画布坐标
+    const cx = (vpX - viewOffset.x) / zoom;
+    const cy = (vpY - viewOffset.y) / zoom;
+    const group = createHexCubeGroup({ x: cx - 250, y: cy - 200 });
+    // 设置当前模型
+    const currentModelInfo = getCurrentModel();
+    group.toolbar.model = currentModelInfo.model;
+    group.toolbar.providerId = currentModelInfo.providerId || '';
+    // 从 canvasGenModels 查找 providerName
+    const currentModelObj = canvasGenModels.find(m => m.id === currentModelInfo.model && m.providerId === currentModelInfo.providerId);
+    group.toolbar.providerName = currentModelObj?.providerName || '';
+    setHexCubeGroups(prev => [...prev, group]);
+  }, [canvasGenModels]);
+
+  /** 删除六面体组 */
+  const deleteHexCubeGroup = useCallback((groupId: string) => {
+    setHexCubeGroups(prev => prev.filter(g => g.id !== groupId));
+  }, []);
+
+  /** 更新六面体面图片 */
+  const updateHexCubeFace = useCallback((groupId: string, face: CubeFace, imageUrl: string | null, imageId: string | null) => {
+    setHexCubeGroups(prev => prev.map(g => {
+      if (g.id !== groupId) return g;
+      return {
+        ...g,
+        faces: g.faces.map(f => f.face === face ? { ...f, imageUrl, imageId } : f),
+      };
+    }));
   }, []);
 
   /** 优化组提示词 — 调用当前LLM模型 */
@@ -5369,15 +5441,15 @@ export function InfiniteCanvas({
                     boxShadow: isHoveredForDrop ? `0 0 20px ${accentColor}40` : 'none',
                   }}
                 >
-                  {/* Title bar — draggable */}
+                  {/* Title bar — draggable + collapse/close */}
                   <div
-                    className="flex items-center justify-between px-4 py-1.5 rounded-t-2xl pointer-events-auto cursor-grab active:cursor-grabbing select-none"
-                    style={{ background: accentBgStrong, borderBottom: `1px solid ${accentBorder}` }}
+                    className="flex items-center justify-between px-4 py-1.5 rounded-t-2xl pointer-events-auto select-none"
+                    style={{ background: accentBgStrong, borderBottom: group.isCollapsed ? 'none' : `1px solid ${accentBorder}` }}
                     onMouseDown={(e) => {
                       if (e.button !== 0) return;
+                      if ((e.target as HTMLElement).closest('button')) return;
                       e.stopPropagation();
                       e.preventDefault();
-                      // Start gen group drag (with long-press gate)
                       setGenGroupDragTarget(group.id);
                       const canvasPos = screenToCanvas(e.clientX, e.clientY);
                       setGenGroupDragStart(canvasPos);
@@ -5388,7 +5460,7 @@ export function InfiniteCanvas({
                       }, 200);
                     }}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing">
                       <div className="w-2.5 h-2.5 rounded-full" style={{ background: accentColor }} />
                       <span className="text-sm font-semibold" style={{ color: accentColor }}>
                         {isRef ? '参考图组' : '融图组'}
@@ -5398,11 +5470,35 @@ export function InfiniteCanvas({
                       </span>
                     </div>
                     <div className="flex items-center gap-1">
-                      <span className="text-xs" style={{ color: `${accentColor}66` }}>长按拖动</span>
+                      <button
+                        className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setGenGroups(prev => prev.map(g =>
+                            g.id === group.id ? { ...g, isCollapsed: !g.isCollapsed } : g
+                          ));
+                        }}
+                        title={group.isCollapsed ? '展开' : '折叠'}
+                      >
+                        <svg className="w-4 h-4 transition-transform" style={{ color: accentColor, transform: group.isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="6 9 12 15 18 9" />
+                        </svg>
+                      </button>
+                      <button
+                        className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-red-500/20 transition-colors"
+                        onClick={(e) => { e.stopPropagation(); deleteGenGroup(group.id); }}
+                        title="关闭组"
+                      >
+                        <svg className="w-3.5 h-3.5" style={{ color: '#ef4444' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                      </button>
                     </div>
                   </div>
-                </div>
 
+                  {/* Content (hidden when collapsed) */}
+                  {!group.isCollapsed && (
+                <div className="contents">
                 {/* SVG connection lines */}
                 <svg
                   style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 15 }}
@@ -5535,23 +5631,46 @@ export function InfiniteCanvas({
                       backdropFilter: 'blur(8px)',
                     }}
                   >
-                    {/* Row 1: Model selector */}
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium shrink-0" style={{ color: `${accentColor}cc` }}>模型</span>
-                      <select
-                        className={`flex-1 text-sm px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#1f1f1f] border-[#444] text-[#ddd]'}`}
-                        value={group.toolbar.model}
-                        onChange={(e) => {
-                          setGenGroups(prev => prev.map(g =>
-                            g.id === group.id ? { ...g, toolbar: { ...g.toolbar, model: e.target.value } } : g
-                          ));
+                    {/* Row 1: Model selector — custom dropdown with highlight */}
+                    <div className="relative">
+                      <span className="text-xs font-medium shrink-0 mb-1 block" style={{ color: `${accentColor}cc` }}>模型</span>
+                      <button
+                        className={`w-full text-left text-sm px-2.5 py-1.5 rounded-lg border flex items-center justify-between ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#1f1f1f] border-[#444] text-[#ddd]'}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenModelDropdownGroupId(prev => prev === group.id ? null : group.id);
                         }}
                       >
-                        <option value="">{modelDisplayName}</option>
-                        {canvasGenModels.map(m => (
-                          <option key={m.id} value={m.id}>{m.providerName} · {m.id}</option>
-                        ))}
-                      </select>
+                        <span className="truncate">{modelDisplayName}</span>
+                        <svg className="w-3.5 h-3.5 shrink-0 ml-1 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
+                      </button>
+                      {/* Custom dropdown */}
+                      {openModelDropdownGroupId === group.id && (
+                        <div
+                          className="absolute left-0 right-0 top-full mt-1 rounded-lg shadow-xl overflow-hidden z-50 max-h-64 overflow-y-auto"
+                          style={{ background: isMonochrome ? '#fff' : '#1a1a1a', border: isMonochrome ? '1px solid #ddd' : '1px solid #444' }}
+                        >
+                          {canvasGenModels.map(m => {
+                            const isSelected = group.toolbar.model === m.id;
+                            return (
+                              <button
+                                key={m.id}
+                                className={`w-full text-left text-sm px-3 py-2 flex items-center gap-2 transition-colors ${isSelected ? (isMonochrome ? 'bg-amber-50 text-amber-800' : 'bg-[#d4af37]/15 text-[#d4af37]') : (isMonochrome ? 'hover:bg-gray-100 text-gray-700' : 'hover:bg-[#2a2a2a] text-[#ccc]')}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setGenGroups(prev => prev.map(g =>
+                                    g.id === group.id ? { ...g, toolbar: { ...g.toolbar, model: m.id, providerId: m.providerId, providerName: m.providerName } } : g
+                                  ));
+                                  setOpenModelDropdownGroupId(null);
+                                }}
+                              >
+                                {isSelected && <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>}
+                                <span className="truncate">{getModelDisplayName(m.id)} · 来自 {m.providerName}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
 
                     {/* Row 2: Aspect ratio + Quality + Count */}
@@ -5656,10 +5775,506 @@ export function InfiniteCanvas({
                     </div>
                   </div>
                 </div>
+                </div>
+                )}
+                </div>
               </div>
             );
           })}
         </div>
+
+        {/* HexCube 六面体组渲染 */}
+        {hexCubeGroups.map(hcg => {
+          const dragDx = hexCubeDragTarget === hcg.id ? hexCubeDragOffset.x : 0;
+          const dragDy = hexCubeDragTarget === hcg.id ? hexCubeDragOffset.y : 0;
+          const posX = hcg.position.x + dragDx;
+          const posY = hcg.position.y + dragDy;
+          const isThisGroupDragging = hexCubeDragTarget === hcg.id;
+
+          // 展开图格子大小
+          const cellSize = 90;
+          const cellGap = 4;
+          // 展开图布局 (3列2行): top|left|front | right|bottom|back
+          const layoutCols = 3;
+          const layoutRows = 2;
+          const netW = layoutCols * cellSize + (layoutCols - 1) * cellGap;
+          const netH = layoutRows * cellSize + (layoutRows - 1) * cellGap;
+
+          // 3D预览框大小
+          const previewSize = 180;
+          const previewGap = 24;
+          const totalW = netW + previewGap + previewSize;
+          const maxH = Math.max(netH, previewSize);
+
+          // 当前模型信息
+          const currentModel = getCurrentModel();
+          const models = canvasGenModels;
+
+          return (
+            <div
+              key={`hexcube-${hcg.id}`}
+              className="absolute"
+              style={{
+                left: posX,
+                top: posY,
+                zIndex: isThisGroupDragging ? 60 : 25,
+                pointerEvents: 'auto',
+              }}
+            >
+              <div
+                className="rounded-2xl overflow-hidden"
+                style={{
+                  background: isMonochrome ? 'rgba(255,255,255,0.97)' : 'rgba(20,20,20,0.96)',
+                  border: `2px solid ${isThisGroupDragging ? '#d4af37' : isMonochrome ? '#e5e7eb' : '#333'}`,
+                  boxShadow: isThisGroupDragging ? '0 0 24px rgba(212,175,55,0.3)' : '0 8px 32px rgba(0,0,0,0.4)',
+                  minWidth: totalW + 32,
+                }}
+              >
+                {/* Title bar */}
+                <div
+                  className="flex items-center justify-between px-4 py-2 select-none cursor-grab active:cursor-grabbing"
+                  style={{
+                    background: isMonochrome ? '#f3f4f6' : '#1a1a1a',
+                    borderBottom: `1px solid ${isMonochrome ? '#e5e7eb' : '#333'}`,
+                  }}
+                  onMouseDown={(e) => {
+                    if (e.button !== 0) return;
+                    if ((e.target as HTMLElement).closest('button')) return;
+                    e.stopPropagation();
+                    e.preventDefault();
+                    setHexCubeDragTarget(hcg.id);
+                    const canvasPos = screenToCanvas(e.clientX, e.clientY);
+                    setHexCubeDragStart(canvasPos);
+                    setHexCubeDragOffset({ x: 0, y: 0 });
+                    hexCubeDragReadyRef.current = false;
+                    hexCubeDragTimerRef.current = setTimeout(() => {
+                      hexCubeDragReadyRef.current = true;
+                    }, 200);
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="#d4af37" strokeWidth="2">
+                      <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                      <path d="M2 17l10 5 10-5" />
+                      <path d="M2 12l10 5 10-5" />
+                    </svg>
+                    <span className="text-sm font-semibold" style={{ color: '#d4af37' }}>六面体</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, isCollapsed: !g.isCollapsed } : g));
+                      }}
+                      title={hcg.isCollapsed ? '展开' : '折叠'}
+                    >
+                      <svg className="w-4 h-4 transition-transform" style={{ color: '#d4af37', transform: hcg.isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
+                    </button>
+                    <button
+                      className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-red-500/20 transition-colors"
+                      onClick={(e) => { e.stopPropagation(); deleteHexCubeGroup(hcg.id); }}
+                      title="关闭"
+                    >
+                      <svg className="w-3.5 h-3.5" style={{ color: '#ef4444' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                {!hcg.isCollapsed && (
+                <div className="p-4">
+                  {/* 上排: 展开图 + 3D预览 */}
+                  <div className="flex items-start gap-6">
+                    {/* 展开图 */}
+                    <div>
+                      <div className="text-xs font-medium mb-2" style={{ color: isMonochrome ? '#6b7280' : '#888' }}>产品六面展开图</div>
+                      <div
+                        className="grid gap-1"
+                        style={{
+                          gridTemplateColumns: `repeat(${layoutCols}, ${cellSize}px)`,
+                          gridTemplateRows: `repeat(${layoutRows}, ${cellSize}px)`,
+                        }}
+                      >
+                        {CUBE_FACE_ORDER.map(face => {
+                          const faceData = hcg.faces.find(f => f.face === face);
+                          const label = CUBE_FACE_LABELS[face];
+                          return (
+                            <div
+                              key={face}
+                              className="relative rounded-lg overflow-hidden flex items-center justify-center cursor-pointer transition-all hover:ring-2 hover:ring-[#d4af37]/50"
+                              style={{
+                                background: isMonochrome ? '#f9fafb' : '#252525',
+                                border: `1px dashed ${isMonochrome ? '#d1d5db' : '#444'}`,
+                                width: cellSize,
+                                height: cellSize,
+                              }}
+                              onClick={() => {
+                                // 触发文件上传
+                                const input = document.createElement('input');
+                                input.type = 'file';
+                                input.accept = 'image/*';
+                                input.onchange = async (e) => {
+                                  const file = (e.target as HTMLInputElement).files?.[0];
+                                  if (!file) return;
+                                  const formData = new FormData();
+                                  formData.append('file', file);
+                                  try {
+                                    const res = await fetch('/api/save-image', { method: 'POST', body: formData });
+                                    const data = await res.json();
+                                    if (data.url) {
+                                      updateHexCubeFace(hcg.id, face, data.url, null);
+                                    }
+                                  } catch (err) {
+                                    console.error('上传失败:', err);
+                                  }
+                                };
+                                input.click();
+                              }}
+                            >
+                              {faceData?.imageUrl ? (
+                                <img src={faceData.imageUrl} alt={label} className="w-full h-full object-cover" />
+                              ) : (
+                                <div className="flex flex-col items-center gap-1">
+                                  <svg className="w-5 h-5" style={{ color: isMonochrome ? '#9ca3af' : '#555' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                    <path d="M12 5v14M5 12h14" />
+                                  </svg>
+                                  <span className="text-xs font-medium" style={{ color: isMonochrome ? '#9ca3af' : '#555' }}>{label}</span>
+                                </div>
+                              )}
+                              {/* 面标签 */}
+                              <div className="absolute top-1 left-1 px-1 py-0.5 rounded text-[10px] font-bold" style={{ background: 'rgba(212,175,55,0.9)', color: '#000' }}>{label}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* 3D 立方体 SVG 预览 */}
+                    <div>
+                      <div className="text-xs font-medium mb-2" style={{ color: isMonochrome ? '#6b7280' : '#888' }}>3D 预览</div>
+                      <div
+                        className="rounded-xl flex items-center justify-center overflow-hidden"
+                        style={{
+                          width: previewSize,
+                          height: previewSize,
+                          background: isMonochrome ? '#f3f4f6' : '#1a1a1a',
+                          border: `1px solid ${isMonochrome ? '#e5e7eb' : '#333'}`,
+                        }}
+                      >
+                        <svg width={previewSize - 20} height={previewSize - 20} viewBox="0 0 200 200">
+                          {/* 简易3D立方体SVG，基于rotationY和tiltX */}
+                          {(() => {
+                            const ry = hcg.toolbar.rotationY * Math.PI / 180;
+                            const tx = hcg.toolbar.tiltX * Math.PI / 180;
+                            const cx = 100, cy = 100, size = 55;
+                            // 8个顶点 (2D投影)
+                            const cosRy = Math.cos(ry), sinRy = Math.sin(ry);
+                            const cosTx = Math.cos(tx), sinTx = Math.sin(tx);
+                            const pts3d = [
+                              [-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1],
+                              [-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1],
+                            ].map(([x,y,z]) => {
+                              // 绕Y轴旋转
+                              let rx = x * cosRy + z * sinRy;
+                              let rz = -x * sinRy + z * cosRy;
+                              // 绕X轴旋转
+                              let ry2 = y * cosTx - rz * sinTx;
+                              let rz2 = y * sinTx + rz * cosTx;
+                              return [rx * size, ry2 * size, rz2 * size];
+                            });
+                            // 投影
+                            const proj = pts3d.map(([x,y,z]) => [cx + x, cy + y - z * 0.3]);
+                            // 6个面
+                            const faceIndices: [CubeFace, number[]][] = [
+                              ['front', [4,5,1,0]],
+                              ['back', [7,6,2,3]],
+                              ['left', [0,3,7,4]],
+                              ['right', [1,2,6,5]],
+                              ['top', [3,2,1,0]],
+                              ['bottom', [4,5,6,7]],
+                            ];
+                            // 按z排序（画家算法）
+                            const faceZ = faceIndices.map(([face, indices]) => {
+                              const avgZ = indices.reduce((s, i) => s + pts3d[i][2], 0) / 4;
+                              return { face, indices, avgZ };
+                            });
+                            faceZ.sort((a, b) => a.avgZ - b.avgZ);
+                            // 渲染
+                            return faceZ.map(({ face, indices }) => {
+                              const faceData = hcg.faces.find(f => f.face === face);
+                              const points = indices.map(i => proj[i].join(',')).join(' ');
+                              const fill = faceData?.imageUrl
+                                ? `url(#hexcube-img-${hcg.id}-${face})`
+                                : isMonochrome ? '#e5e7eb' : '#2a2a2a';
+                              return (
+                                <g key={face}>
+                                  {faceData?.imageUrl && (
+                                    <defs>
+                                      <pattern id={`hexcube-img-${hcg.id}-${face}`} patternUnits="objectBoundingBox" width="1" height="1">
+                                        <image href={faceData.imageUrl} x="0" y="0" width="1" height="1" preserveAspectRatio="xMidYMid slice" />
+                                      </pattern>
+                                    </defs>
+                                  )}
+                                  <polygon
+                                    points={points}
+                                    fill={fill}
+                                    stroke={isMonochrome ? '#9ca3af' : '#555'}
+                                    strokeWidth="1"
+                                  />
+                                  <text
+                                    x={indices.reduce((s, i) => s + proj[i][0], 0) / 4}
+                                    y={indices.reduce((s, i) => s + proj[i][1], 0) / 4 + 4}
+                                    textAnchor="middle"
+                                    fill={faceData?.imageUrl ? '#fff' : (isMonochrome ? '#6b7280' : '#888')}
+                                    fontSize="11"
+                                    fontWeight="bold"
+                                  >{CUBE_FACE_LABELS[face]}</text>
+                                </g>
+                              );
+                            });
+                          })()}
+                        </svg>
+                      </div>
+                      {/* 旋转/倾斜控制 */}
+                      <div className="flex items-center gap-3 mt-2">
+                        <div className="flex items-center gap-1 flex-1">
+                          <span className="text-[10px]" style={{ color: isMonochrome ? '#6b7280' : '#666' }}>旋转</span>
+                          <input
+                            type="range" min={0} max={360} step={5}
+                            value={hcg.toolbar.rotationY}
+                            className="flex-1 h-1 accent-[#d4af37]"
+                            onChange={(e) => {
+                              setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, rotationY: parseInt(e.target.value) } } : g));
+                            }}
+                          />
+                          <span className="text-[10px] w-7 text-right" style={{ color: isMonochrome ? '#6b7280' : '#666' }}>{hcg.toolbar.rotationY}°</span>
+                        </div>
+                        <div className="flex items-center gap-1 flex-1">
+                          <span className="text-[10px]" style={{ color: isMonochrome ? '#6b7280' : '#666' }}>倾斜</span>
+                          <input
+                            type="range" min={-60} max={60} step={5}
+                            value={hcg.toolbar.tiltX}
+                            className="flex-1 h-1 accent-[#d4af37]"
+                            onChange={(e) => {
+                              setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, tiltX: parseInt(e.target.value) } } : g));
+                            }}
+                          />
+                          <span className="text-[10px] w-7 text-right" style={{ color: isMonochrome ? '#6b7280' : '#666' }}>{hcg.toolbar.tiltX}°</span>
+                        </div>
+                      </div>
+                      {/* 缩放 */}
+                      <div className="flex items-center gap-1 mt-1.5">
+                        <span className="text-[10px]" style={{ color: isMonochrome ? '#6b7280' : '#666' }}>缩放</span>
+                        <div className="flex gap-1 ml-1">
+                          {(['close-up', 'standard', 'wide'] as ZoomLevel[]).map(z => (
+                            <button
+                              key={z}
+                              className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all ${hcg.toolbar.zoom === z ? 'bg-[#d4af37] text-black' : isMonochrome ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-[#252525] text-[#888] hover:bg-[#333]'}`}
+                              onClick={() => setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, zoom: z } } : g))}
+                            >{ZOOM_LEVEL_LABELS[z]}</button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 工具栏: 模型/比例/质量/数量/提示词/优化/生成 */}
+                  <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${isMonochrome ? '#e5e7eb' : '#333'}` }}>
+                    <div className="flex flex-wrap items-center gap-2 mb-2">
+                      {/* 模型选择 */}
+                      <div className="relative">
+                        <button
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-all"
+                          style={{ background: isMonochrome ? '#f3f4f6' : '#252525', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : '#444'}` }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenModelDropdownGroupId(openModelDropdownGroupId === `hex-${hcg.id}` ? null : `hex-${hcg.id}`);
+                          }}
+                        >
+                          {hcg.toolbar.model ? `${getModelDisplayName(hcg.toolbar.model)}` : '选择模型'}
+                          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
+                        </button>
+                        {openModelDropdownGroupId === `hex-${hcg.id}` && (
+                          <div className="absolute top-full left-0 mt-1 rounded-lg overflow-hidden z-50 max-h-48 overflow-y-auto" style={{ background: isMonochrome ? '#fff' : '#1a1a1a', border: `1px solid ${isMonochrome ? '#e5e7eb' : '#333'}`, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
+                            {models.map(m => (
+                              <div
+                                key={`${m.providerId}-${m.id}`}
+                                className="px-3 py-2 text-xs cursor-pointer transition-colors flex items-center justify-between"
+                                style={{
+                                  background: hcg.toolbar.model === m.id && hcg.toolbar.providerId === m.providerId
+                                    ? (isMonochrome ? '#dbeafe' : 'rgba(212,175,55,0.2)')
+                                    : 'transparent',
+                                  color: isMonochrome ? '#374151' : '#ccc',
+                                }}
+                                onMouseEnter={(e) => { (e.target as HTMLElement).style.background = isMonochrome ? '#f3f4f6' : '#252525'; }}
+                                onMouseLeave={(e) => { (e.target as HTMLElement).style.background = hcg.toolbar.model === m.id && hcg.toolbar.providerId === m.providerId ? (isMonochrome ? '#dbeafe' : 'rgba(212,175,55,0.2)') : 'transparent'; }}
+                                onClick={() => {
+                                  setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, model: m.id, providerId: m.providerId, providerName: m.providerName } } : g));
+                                  setOpenModelDropdownGroupId(null);
+                                }}
+                              >
+                                <span>{getModelDisplayName(m.id)} · 来自 {m.providerName}</span>
+                                {hcg.toolbar.model === m.id && hcg.toolbar.providerId === m.providerId && (
+                                  <svg className="w-3 h-3 flex-shrink-0" viewBox="0 0 24 24" fill="#d4af37" stroke="none"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      {/* 比例 */}
+                      <select
+                        className="px-2 py-1.5 rounded-lg text-xs"
+                        style={{ background: isMonochrome ? '#f3f4f6' : '#252525', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : '#444'}` }}
+                        value={hcg.toolbar.aspectRatio}
+                        onChange={(e) => setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, aspectRatio: e.target.value } } : g))}
+                      >
+                        {['1:1', '4:3', '3:4', '3:2', '2:3', '16:9', '9:16'].map(r => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                      {/* 质量 */}
+                      <select
+                        className="px-2 py-1.5 rounded-lg text-xs"
+                        style={{ background: isMonochrome ? '#f3f4f6' : '#252525', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : '#444'}` }}
+                        value={hcg.toolbar.quality}
+                        onChange={(e) => setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, quality: e.target.value } } : g))}
+                      >
+                        {['auto', 'low', 'medium', 'high', 'standard'].map(q => <option key={q} value={q}>{q === 'auto' ? '自动' : q === 'low' ? '低' : q === 'medium' ? '中' : q === 'high' ? '高' : '标准'}</option>)}
+                      </select>
+                      {/* 数量 */}
+                      <select
+                        className="px-2 py-1.5 rounded-lg text-xs"
+                        style={{ background: isMonochrome ? '#f3f4f6' : '#252525', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : '#444'}` }}
+                        value={hcg.toolbar.outputCount}
+                        onChange={(e) => setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, outputCount: parseInt(e.target.value) } } : g))}
+                      >
+                        {[1,2,3,4].map(n => <option key={n} value={n}>{n}张</option>)}
+                      </select>
+                    </div>
+                    {/* 提示词 */}
+                    <div className="relative">
+                      <textarea
+                        className="w-full rounded-lg px-3 py-2.5 text-sm resize-y"
+                        style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', color: isMonochrome ? '#111' : '#eee', border: `1px solid ${isMonochrome ? '#d1d5db' : '#444'}`, minHeight: 60, maxHeight: 160 }}
+                        placeholder="描述你想要生成的产品效果..."
+                        value={hcg.toolbar.prompt}
+                        onChange={(e) => setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, prompt: e.target.value } } : g))}
+                      />
+                      {/* 拖动手柄 */}
+                      <div className="absolute right-1.5 bottom-1 cursor-ns-resize" style={{ color: isMonochrome ? '#9ca3af' : '#555' }}>
+                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
+                      </div>
+                    </div>
+                    {/* 操作按钮 */}
+                    <div className="flex items-center gap-2 mt-2">
+                      <button
+                        className="px-3 py-2 rounded-lg text-xs font-medium transition-all"
+                        style={{ background: isMonochrome ? '#f3f4f6' : '#252525', color: isMonochrome ? '#6b7280' : '#888', border: `1px solid ${isMonochrome ? '#d1d5db' : '#444'}` }}
+                        onClick={async () => {
+                          if (!hcg.toolbar.prompt.trim()) return;
+                          setOptimizingGroupId(`hex-${hcg.id}`);
+                          try {
+                            const llmModelRaw = localStorage.getItem('wujie_selected_chat_model');
+                            let llmModel = 'gemini-3-flash-preview', providerId = '';
+                            if (llmModelRaw) { try { const p = JSON.parse(llmModelRaw); llmModel = p.model || p.id || llmModel; providerId = p.providerId || ''; } catch {} }
+                            const res = await fetch('/api/optimize-prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: hcg.toolbar.prompt, model: llmModel, providerId, mode: 'enhance' }) });
+                            const data = await res.json();
+                            if (data.optimizedPrompt) {
+                              setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, prompt: data.optimizedPrompt } } : g));
+                            }
+                          } catch (err) { console.error('优化失败:', err); }
+                          setOptimizingGroupId(null);
+                        }}
+                        disabled={!hcg.toolbar.prompt.trim()}
+                      >
+                        {optimizingGroupId === `hex-${hcg.id}` ? '优化中...' : '一键优化'}
+                      </button>
+                      <button
+                        className="flex-1 py-2.5 rounded-lg text-sm font-bold text-black transition-all hover:brightness-110 active:scale-[0.98]"
+                        style={{ background: 'linear-gradient(135deg, #d4af37, #f0d060)' }}
+                        onClick={async () => {
+                          if (!hcg.toolbar.model || !hcg.toolbar.prompt.trim()) return;
+                          // 构建包含六面参考信息的prompt
+                          const faceDescriptions = hcg.faces
+                            .filter(f => f.imageUrl)
+                            .map(f => `[${CUBE_FACE_LABELS[f.face]}面]`)
+                            .join(' ');
+                          const fullPrompt = `${faceDescriptions} ${hcg.toolbar.prompt}`;
+                          // 设置生成状态
+                          setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'generating', progress: 10 } : g));
+                          try {
+                            const res = await fetch('/api/generate', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                prompt: fullPrompt,
+                                model: hcg.toolbar.model,
+                                providerId: hcg.toolbar.providerId,
+                                aspectRatio: hcg.toolbar.aspectRatio,
+                                quality: hcg.toolbar.quality,
+                                n: hcg.toolbar.outputCount,
+                                referenceImageUrls: hcg.faces.filter(f => f.imageUrl).map(f => f.imageUrl!),
+                              }),
+                            });
+                            const data = await res.json();
+                            if (data.taskId || data.taskIds) {
+                              // 轮询
+                              const taskId = data.taskId || data.taskIds?.[0];
+                              if (taskId) {
+                                let attempts = 0;
+                                const maxAttempts = 300;
+                                const poll = async () => {
+                                  if (attempts >= maxAttempts) return;
+                                  attempts++;
+                                  try {
+                                    const pollRes = await fetch('/api/poll-task', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ taskId, model: hcg.toolbar.model, providerId: hcg.toolbar.providerId }),
+                                    });
+                                    const pollData = await pollRes.json();
+                                    if (pollData.status === 'completed' && pollData.imageUrl) {
+                                      // 添加结果图到画布
+                                      if (onAddImages) onAddImages([pollData.imageUrl]);
+                                      setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'completed', resultImageUrl: pollData.imageUrl, progress: 100 } : g));
+                                      return;
+                                    } else if (pollData.status === 'failed') {
+                                      setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'idle', progress: 0 } : g));
+                                      return;
+                                    }
+                                    setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, progress: Math.min(90, 10 + attempts * 2) } : g));
+                                    setTimeout(poll, 2000);
+                                  } catch { setTimeout(poll, 3000); }
+                                };
+                                poll();
+                              }
+                            } else if (data.imageUrl) {
+                              // 直接返回
+                              if (onAddImages) onAddImages([data.imageUrl]);
+                              setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'completed', resultImageUrl: data.imageUrl, progress: 100 } : g));
+                            } else {
+                              setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'idle', progress: 0 } : g));
+                            }
+                          } catch (err) {
+                            console.error('生成失败:', err);
+                            setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'idle', progress: 0 } : g));
+                          }
+                        }}
+                        disabled={hcg.status === 'generating' || !hcg.toolbar.model || !hcg.toolbar.prompt.trim()}
+                      >
+                        {hcg.status === 'generating' ? `生成中 ${hcg.progress}%` : '生成'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
 
         {boxSelectStart && boxSelectEnd && (
           <div
@@ -7593,6 +8208,24 @@ export function InfiniteCanvas({
         >
           <Layers className="h-4 w-4" />
           <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-gray-900 text-white' : 'bg-black/90 text-white'}`}>图层</span>
+        </button>
+
+        {/* HexCube 六面体 */}
+        <button
+          onClick={handleCreateHexCube}
+          className={`p-2 rounded-xl transition-all relative group ${
+            isMonochrome
+              ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              : 'text-[#888] hover:text-white hover:bg-white/10'
+          }`}
+          title="六面体"
+        >
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5z" />
+            <path d="M2 17l10 5 10-5" />
+            <path d="M2 12l10 5 10-5" />
+          </svg>
+          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-gray-900 text-white' : 'bg-black/90 text-white'}`}>六面体</span>
         </button>
 
         <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#2a2a2a]'}`} />

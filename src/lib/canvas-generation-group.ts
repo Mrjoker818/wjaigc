@@ -98,6 +98,9 @@ export interface CanvasGenGroup {
   // 生成结果（完成后）
   resultImageIds?: string[];
 
+  // 折叠状态
+  isCollapsed?: boolean;
+
   // 创建时间
   createdAt: number;
 }
@@ -336,6 +339,110 @@ export function createGenGroup(
     },
     sourceCategories: sourceCategories || defaultCategories,
     sourceStrengths: sourceStrengths || defaultStrengths,
+    createdAt: Date.now(),
+  };
+}
+
+// ==================== HexCube 六面体展开图类型 ====================
+
+/** 六面体面枚举 */
+export type CubeFace = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
+
+/** 面的中文标签 */
+export const CUBE_FACE_LABELS: Record<CubeFace, string> = {
+  front: '前',
+  back: '后',
+  left: '左',
+  right: '右',
+  top: '上',
+  bottom: '下',
+};
+
+/** 面的顺序（展开图布局顺序：上左中右下后） */
+export const CUBE_FACE_ORDER: CubeFace[] = ['top', 'left', 'front', 'right', 'bottom', 'back'];
+
+/** 缩放类型 */
+export type ZoomLevel = 'close-up' | 'standard' | 'wide';
+
+/** 缩放类型中文标签 */
+export const ZOOM_LEVEL_LABELS: Record<ZoomLevel, string> = {
+  'close-up': '特写',
+  'standard': '标准',
+  'wide': '广角',
+};
+
+/** 六面体面数据 */
+export interface HexCubeFaceData {
+  face: CubeFace;
+  imageUrl: string | null;    // 上传的产品图URL
+  imageId: string | null;     // 画布图片ID
+}
+
+/** 六面体3D预览工具栏 */
+export interface HexCubeToolbar {
+  rotationY: number;          // 旋转角度 (0-360)
+  tiltX: number;              // 倾斜角度 (-90 to 90)
+  zoom: ZoomLevel;            // 缩放
+  model: string;              // 模型ID
+  providerId: string;         // API提供商ID
+  providerName: string;       // 提供商名称
+  aspectRatio: string;        // 比例
+  quality: string;            // 质量
+  outputCount: number;        // 出图数量
+  prompt: string;             // 提示词
+}
+
+/** 六面体组状态 */
+export type HexCubeStatus = 'idle' | 'generating' | 'completed';
+
+/** 六面体组 */
+export interface HexCubeGroup {
+  id: string;
+  faces: HexCubeFaceData[];    // 6个面的数据
+  resultImageUrl: string | null; // 生成的3D结果图URL
+  resultImageId: string | null;  // 画布上的结果图ID
+  toolbar: HexCubeToolbar;
+  status: HexCubeStatus;
+  isCollapsed: boolean;
+  position: { x: number; y: number }; // 组在画布上的位置
+  progress: number;            // 生成进度 0-100
+  createdAt: number;
+}
+
+/** 生成六面体组ID */
+export function generateHexCubeId(): string {
+  return `hexcube-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+}
+
+/** 创建默认六面体组 */
+export function createHexCubeGroup(position: { x: number; y: number }): HexCubeGroup {
+  const faces: HexCubeFaceData[] = CUBE_FACE_ORDER.map(face => ({
+    face,
+    imageUrl: null,
+    imageId: null,
+  }));
+
+  return {
+    id: generateHexCubeId(),
+    faces,
+    resultImageUrl: null,
+    resultImageId: null,
+    toolbar: {
+      rotationY: 0,
+      tiltX: 0,
+      zoom: 'standard',
+      model: '',
+      providerId: '',
+      providerName: '',
+      aspectRatio: '1:1',
+      quality: 'standard',
+      outputCount: 1,
+      prompt: '',
+    },
+    status: 'idle',
+    isCollapsed: false,
+    position,
+    progress: 0,
     createdAt: Date.now(),
   };
 }
