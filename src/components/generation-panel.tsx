@@ -386,22 +386,25 @@ export function GenerationPanel(
         return findModelConfig(MODEL_QUALITIES, pureModelId) || ['standard'];
     }, [pureModelId]);
 
-    // 尺寸映射
-    const ratioToSize: Record<string, string> = {
-        "1:1": "1024x1024",
-        "4:3": "1366x1024",
-        "3:4": "1024x1366",
-        "16:9": "1820x1024",
-        "9:16": "1024x1820",
-        "3:2": "1536x1024",
-        "2:3": "1024x1536",
-        "1536x1024": "1536x1024",
-        "1024x1536": "1024x1536",
-        "256x256": "256x256",
-        "512x512": "512x512",
-        "1792x1024": "1792x1024",
-        "1024x1792": "1024x1792"
-    };
+    // 尺寸映射 — 使用共享的 ASPECT_RATIO_TO_PIXELS 或回退到通用映射
+    const getModelSize = useCallback((ratio: string): string => {
+        // 优先使用共享的像素映射
+        if (ASPECT_RATIO_TO_PIXELS[ratio]) return ASPECT_RATIO_TO_PIXELS[ratio];
+        // 通用回退
+        const fallback: Record<string, string> = {
+            "1:1": "1024x1024", "4:3": "1536x1024", "3:4": "1024x1536",
+            "16:9": "2048x1152", "9:16": "1152x2048", "3:2": "1536x1024",
+            "2:3": "1024x1536", "21:9": "2048x878", "9:21": "878x2048",
+        };
+        return fallback[ratio] || "1024x1024";
+    }, []);
+
+    // 质量对应的尺寸提示
+    const getQualitySizeHint = useCallback((q: string): string => {
+        const qMap = findModelConfig(QUALITY_TO_SIZE, pureModelId);
+        if (qMap && qMap[q]) return qMap[q];
+        return q;
+    }, [pureModelId]);
 
     // 生成
     const handleGenerate = () => {
@@ -424,7 +427,7 @@ export function GenerationPanel(
         
         onGenerate({
             prompt: fullPrompt,
-            size: ratioToSize[aspectRatio] || "1024x1024",
+            size: getModelSize(aspectRatio) || "1024x1024",
             referenceImages,
             referenceMode: 'style',
             imageCategory: 'general',
@@ -893,15 +896,13 @@ export function GenerationPanel(
                               console.error('Failed to save selected model:', err);
                             }
                             // Extract pure modelId for ratio/quality lookup
-                            const pureModelId = compositeKey.includes('::') ? compositeKey.split('::').pop()! : compositeKey;
-                            const supportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, pureModelId) || ['1:1'];
-                            if (!supportedRatios.includes(aspectRatio)) {
-                                setAspectRatio(supportedRatios[0]);
-                            }
-                            const supportedQualities = findModelConfig(MODEL_QUALITIES, pureModelId) || ['standard'];
-                            if (!supportedQualities.includes(quality)) {
-                                setQuality(supportedQualities[0]);
-                            }
+                            const newPureModelId = compositeKey.includes('::') ? compositeKey.split('::').pop()! : compositeKey;
+                            const supportedRatios = sharedFindModelConfig(SHARED_MODEL_ASPECT_RATIOS, newPureModelId) || ['1:1'];
+                            // 始终重置到新模型的第一个比例
+                            setAspectRatio(supportedRatios[0]);
+                            const supportedQualities = sharedFindModelConfig(SHARED_MODEL_QUALITIES, newPureModelId) || ['standard'];
+                            // 始终重置到新模型的第一个质量
+                            setQuality(supportedQualities[0]);
                         }}
                         className={`${inputStl} appearance-none cursor-pointer`}
                     >
@@ -1321,7 +1322,7 @@ export function GenerationPanel(
                                 key={ratio}
                                 onClick={() => setAspectRatio(ratio)}
                                 className={`${gridBtnBase} ${aspectRatio === ratio ? gridBtnOn : gridBtnOff}`}
-                                title={ASPECT_RATIO_TO_PIXELS[ratio] || ratio}
+                                title={getModelSize(ratio)}
                             >
                                 <div className="flex flex-col items-center leading-none gap-0.5">
                                     <div
@@ -1363,12 +1364,15 @@ export function GenerationPanel(
                                     <div className="flex flex-col items-center leading-none">
                                         <span className="text-xs">
                                             {q === 'auto' ? '自动' : 
+                                             q === 'low' ? '快速' : 
+                                             q === 'medium' ? '中等' : 
                                              q === 'standard' ? '标准' : 
                                              q === 'high' ? '高清' : 
+                                             q === 'hd' ? '高清' : 
                                              q === 'ultra' ? '超清' : q}
                                         </span>
                                         <span className="text-xs opacity-40 mt-0.5">
-                                            {findModelConfig(QUALITY_TO_SIZE, model)?.[q] || ''}
+                                            {getQualitySizeHint(q)}
                                         </span>
                                     </div>
                                 </button>

@@ -125,9 +125,17 @@ export const MODEL_ASPECT_RATIOS: Record<string, string[]> = {
     'gemini-3-pro-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
     'gemini-3.1-flash-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
     'doubao-seedance-4-5': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', '9:21'],
-    // GPT Image 2 — 官方支持的尺寸比例 (含2K/4K)
+    // GPT Image 2 — 官方支持的尺寸比例
     'gpt-image-2-official': ['1:1', '3:2', '2:3', '16:9', '9:16'],
     'gpt-image-2': ['1:1', '3:2', '2:3', '16:9', '9:16'],
+    // DALL-E 3
+    'dall-e-3': ['1:1', '16:9', '9:16'],
+    // Stable Diffusion 系列 - 支持多种比例
+    'stable-diffusion': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    'sd-xl': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    'sd-3': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    // Flux 系列
+    'flux': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
 };
 
 /** 各模型支持的质量/分辨率档位（按官方API文档配置） */
@@ -141,6 +149,8 @@ export const MODEL_QUALITIES: Record<string, string[]> = {
     // GPT-Image 系列 - quality类型
     'gpt-image-2-official': ['auto', 'low', 'medium', 'high'],
     'gpt-image-2': ['auto', 'low', 'medium', 'high'],
+    // DALL-E 3 - quality类型
+    'dall-e-3': ['standard', 'hd'],
 };
 
 /** 质量档位到显示名称的映射 */
@@ -200,21 +210,21 @@ export const QUALITY_TO_SIZE: Record<string, Record<string, string>> = {
     },
 };
 
-/** 画面比例到默认像素尺寸的映射（GPT-Image-2 官方尺寸） */
+/** 画面比例到默认像素尺寸的映射 */
 export const ASPECT_RATIO_TO_PIXELS: Record<string, string> = {
-    '1:1': '1024×1024',
-    '4:3': '1536×1024',
-    '3:4': '1024×1536',
-    '16:9': '2048×1152',
-    '9:16': '1152×2048',
-    '3:2': '1536×1024',
-    '2:3': '1024×1536',
-    '21:9': '2048×878',
-    '9:21': '878×2048',
-    '2:1': '2048×1024',
-    '1:2': '1024×2048',
-    '4:5': '1024×1280',
-    '5:4': '1280×1024',
+    '1:1': '1024x1024',
+    '4:3': '1536x1024',
+    '3:4': '1024x1536',
+    '16:9': '2048x1152',
+    '9:16': '1152x2048',
+    '3:2': '1536x1024',
+    '2:3': '1024x1536',
+    '21:9': '2048x878',
+    '9:21': '878x2048',
+    '2:1': '2048x1024',
+    '1:2': '1024x2048',
+    '4:5': '1024x1280',
+    '5:4': '1280x1024',
 };
 
 /** 默认画面比例列表 */
@@ -227,12 +237,21 @@ export const DEFAULT_QUALITIES = ['standard', 'hd'];
 export function findModelConfig<T>(map: Record<string, T>, modelId: string): T | undefined {
     // 1. 精确匹配
     if (map[modelId] !== undefined) return map[modelId];
-    // 2. 模型ID包含配置键（如 "gpt-image-2" 匹配 "gpt-image-2-official"）
     const lowerId = modelId.toLowerCase();
+    // 2. 优先长键匹配（如 "gpt-image-2" 匹配 "gpt-image-2-official" 优先于 "gpt-image"）
+    const matches: Array<{ key: string; len: number }> = [];
     for (const key of Object.keys(map)) {
-        if (lowerId.includes(key) || key.includes(lowerId)) {
-            return map[key];
+        const lowerKey = key.toLowerCase();
+        if (lowerId === lowerKey) {
+            matches.push({ key, len: key.length });
+        } else if (lowerId.includes(lowerKey) || lowerKey.includes(lowerId)) {
+            matches.push({ key, len: key.length });
         }
+    }
+    if (matches.length > 0) {
+        // 返回最长匹配（更精确）
+        matches.sort((a, b) => b.len - a.len);
+        return map[matches[0].key];
     }
     // 3. 前缀匹配（如 "gpt-image-2" 匹配 "gpt-image"）
     for (const key of Object.keys(map)) {

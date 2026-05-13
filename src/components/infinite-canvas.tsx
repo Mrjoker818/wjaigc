@@ -5738,8 +5738,8 @@ export function InfiniteCanvas({
               { x: resultX, y: resultY, w: resultFrameW, h: resultH + toolbarH }
             ];
             const containerPad = 24;
-            // 参考图组左侧需要额外空间显示类别标签
-            const leftPad = isRef ? 60 : containerPad;
+            // 参考图组左侧需要额外空间显示类别标签（图片外左侧）
+            const leftPad = isRef ? 80 : containerPad;
             const containerMinX = Math.min(...allBounds.map(b => b.x)) - leftPad;
             const containerMinY = Math.min(...allBounds.map(b => b.y)) - containerPad - 40;
             const containerMaxX = Math.max(...allBounds.map(b => b.x + b.w)) + containerPad;
@@ -5866,41 +5866,24 @@ export function InfiniteCanvas({
                 </svg>
 
                 {/* Source image labels (R1, R2, ...) with left-side category tags */}
-                {srcImages.map(img => (
+                {srcImages.map(img => {
+                  const imgCats = isRef ? (group.sourceCategories[img.id] || []) : [];
+                  const hasAnyCat = imgCats.length > 0;
+                  // Category tags width: 52px, only for reference groups
+                  const catColW = (isRef && hasAnyCat) ? 56 : 0;
+                  return (
                   <div
                     key={`ref-label-${img.id}`}
-                    className="absolute flex flex-row-reverse gap-1"
+                    className="absolute flex flex-row gap-1"
                     style={{
-                      left: img.x + dragDx - containerMinX,
+                      left: img.x + dragDx - containerMinX - catColW,
                       top: img.y + dragDy - containerMinY,
                       height: img.height,
                       zIndex: 26,
                     }}
                   >
-                    {/* Image area - label overlay */}
-                    <div className="relative" style={{ width: img.width, height: img.height }}>
-                      {/* Label badge at top-left of image */}
-                      <div
-                        className="absolute top-0 left-0 flex items-center gap-1.5 px-2 py-1 rounded-lg pointer-events-auto"
-                        style={{
-                          background: isRef ? 'rgba(212,175,55,0.9)' : 'rgba(78,205,196,0.9)',
-                        }}
-                        onMouseDown={(e) => e.stopPropagation()}
-                      >
-                        <span className="text-xs font-bold text-black">
-                          R{img.refNumber}
-                        </span>
-                        <button
-                          className="w-4 h-4 flex items-center justify-center rounded-full text-black/60 hover:text-black hover:bg-black/10 transition-colors text-xs font-bold"
-                          onClick={(e) => { e.stopPropagation(); removeRefFromGroup(group.id, img.id); }}
-                          title="移除此参考图"
-                        >
-                          x
-                        </button>
-                      </div>
-                    </div>
-                    {/* Per-image category tags (reference group only) - LEFT side of image */}
-                    {isRef && (
+                    {/* Per-image category tags (reference group only) - LEFT side of image, OUTSIDE image area */}
+                    {isRef && hasAnyCat && (
                       <div
                         className="flex flex-col gap-0.5 py-1 pointer-events-auto justify-center"
                         style={{ minWidth: 52 }}
@@ -5908,7 +5891,6 @@ export function InfiniteCanvas({
                         onClick={(e) => e.stopPropagation()}
                       >
                         {REFERENCE_CATEGORIES.map(cat => {
-                          const imgCats = group.sourceCategories[img.id] || [];
                           const isSelected = imgCats.includes(cat);
                           const strength = group.sourceStrengths[img.id]?.[cat] ?? 70;
                           return (
@@ -5972,8 +5954,31 @@ export function InfiniteCanvas({
                         })}
                       </div>
                     )}
+                    {/* Image area - label overlay */}
+                    <div className="relative" style={{ width: img.width, height: img.height }}>
+                      {/* Label badge at top-left of image */}
+                      <div
+                        className="absolute top-0 left-0 flex items-center gap-1.5 px-2 py-1 rounded-lg pointer-events-auto"
+                        style={{
+                          background: isRef ? 'rgba(212,175,55,0.9)' : 'rgba(78,205,196,0.9)',
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                      >
+                        <span className="text-xs font-bold text-black">
+                          R{img.refNumber}
+                        </span>
+                        <button
+                          className="w-4 h-4 flex items-center justify-center rounded-full text-black/60 hover:text-black hover:bg-black/10 transition-colors text-xs font-bold"
+                          onClick={(e) => { e.stopPropagation(); removeRefFromGroup(group.id, img.id); }}
+                          title="移除此参考图"
+                        >
+                          x
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                ))}
+                  );
+                })}
 
                 {/* Result placeholder frame + Toolbar */}
                 <div
