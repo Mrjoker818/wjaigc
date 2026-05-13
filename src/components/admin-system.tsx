@@ -215,6 +215,11 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
         body: JSON.stringify({ action: 'discover', baseUrl: apiBaseUrl.trim(), apiKey: apiKey.trim(), modelType: apiKind }),
       });
       const data = await response.json();
+      if (!data.success && data.error) {
+        setTestNewResult({ success: false, message: data.error });
+        setDiscoveredModels([]);
+        return;
+      }
       const models = data.models || [];
       setDiscoveredModels(models);
       setModelSearchQuery('');
@@ -243,6 +248,10 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
         }
       }
       // 图像/LLM/3D模型：默认不选择，管理员手动选择
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '识别模型失败';
+      setTestNewResult({ success: false, message: msg.includes('JSON') ? 'API 返回了非 JSON 响应，请检查 Base URL 是否正确' : msg });
+      setDiscoveredModels([]);
     } finally {
       setIsDiscovering(false);
     }

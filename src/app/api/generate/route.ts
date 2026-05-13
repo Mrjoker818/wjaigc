@@ -5,8 +5,9 @@ import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, type ApiCompatProfile } from '@/lib/api-compatibility';
 
-// 只需要短超时用于提交任务，轮询由前端负责
-export const maxDuration = 30;
+// 直接模式（OpenAI兼容API如tokln.com返回图片需60-120秒）
+// 异步模式（apimart返回task_id只需几秒）两者共存，取较大值
+export const maxDuration = 120;
 export const dynamic = 'force-dynamic';
 
 // APIMart 模型配置 - 所有模型已通过实际API验证测试
@@ -352,8 +353,12 @@ export async function POST(request: NextRequest) {
         strength: adjustedBody.strength || undefined,
       });
 
+      // 直接模式(OpenAI兼容API)生成本身在此调用内完成，需较长超时
+      // 异步模式(apimart)只返回task_id，几秒即可
+      const isDirectMode = profile.responseMode === 'direct';
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const timeoutMs = isDirectMode ? 120000 : 30000;
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
       const submitResponse = await fetchWithV1Retry(
         currentApiBaseUrl,

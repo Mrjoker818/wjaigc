@@ -40,26 +40,25 @@ export async function POST(request: NextRequest) {
 
     // Determine the test endpoint based on requestStyle
     const style = requestStyle || 'images-generations';
-    let testUrl: string;
+    let testUrl: string | undefined;
 
     if (style === 'chat-completions') {
-      testUrl = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
-      // Send a minimal chat request
-      const testBody = {
-        model: 'test',
-        messages: [{ role: 'user', content: 'hi' }],
-        max_tokens: 1,
-        stream: false,
-      };
+      const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
 
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10000);
+      const timeout = setTimeout(() => controller.abort(), 15000);
 
       try {
-        const response = await fetch(testUrl, {
+        // Use fetchWithV1Retry to handle APIs that need /v1 prefix
+        const response = await fetchWithV1Retry(cleanBaseUrl, '/chat/completions', {
           method: 'POST',
           headers,
-          body: JSON.stringify(testBody),
+          body: JSON.stringify({
+            model: 'test',
+            messages: [{ role: 'user', content: 'hi' }],
+            max_tokens: 1,
+            stream: false,
+          }),
           signal: controller.signal,
         });
         clearTimeout(timeout);
@@ -161,6 +160,15 @@ export async function POST(request: NextRequest) {
         }
 
         const data = await response.json().catch(() => null);
+
+        // If response is not JSON (e.g. HTML error page), API endpoint is wrong
+        if (data === null) {
+          return NextResponse.json({
+            success: false,
+            error: 'API 返回了非 JSON 响应，请检查 Base URL 是否正确',
+          });
+        }
+
         const modelCount = Array.isArray(data?.data) ? data.data.length : undefined;
 
         return NextResponse.json({

@@ -302,10 +302,23 @@ export async function discoverModelsForCredentials(
 
     const latencyMs = Date.now() - startedAt;
     if (!response.ok) {
-      return { success: false, models: [], message: `${response.status} ${response.statusText}`, latencyMs };
+      // Some API gateways return HTML error pages even for /v1/ paths
+      // Try to parse JSON error, otherwise return a readable error
+      try {
+        const errorData = await response.json();
+        const errorMsg = errorData?.error?.message || errorData?.message || `${response.status} ${response.statusText}`;
+        return { success: false, models: [], message: errorMsg, latencyMs };
+      } catch {
+        return { success: false, models: [], message: `HTTP ${response.status}: API 返回了非 JSON 响应，请检查 Base URL 是否正确`, latencyMs };
+      }
     }
 
-    const data = await response.json();
+    let data: Record<string, unknown>;
+    try {
+      data = await response.json();
+    } catch {
+      return { success: false, models: [], message: 'API 返回了非 JSON 响应，请检查 Base URL 是否正确（可能需要添加 /v1 路径）', latencyMs };
+    }
     const rawModels = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
     const models = rawModels
       .map((m: Record<string, unknown>) => formatModel(m, probeProvider))

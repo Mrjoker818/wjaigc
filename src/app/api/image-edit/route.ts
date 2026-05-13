@@ -178,7 +178,9 @@ async function submitImageTask(
   const effectiveEndpoint = resolvedEndpoint;
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000);
+  const isDirectMode = profile.responseMode === 'direct';
+  const timeoutMs = isDirectMode ? 120000 : 60000;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   // Debug: log key params for image-to-image verification
   const hasImageUrls = !!adjustedBody.image_urls;
