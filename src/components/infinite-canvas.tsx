@@ -85,8 +85,8 @@ function MultiAngleSpherePreview({
 
     const imgData = imgDataRef.current;
     const yaw = (rotation / 90) * Math.PI * 0.5;  // -PI/2 to PI/2
-    const pitch = (tilt / 45) * Math.PI * 0.5;    // -PI/2 to PI/2
-    const camDist = 2.5 / zoom;
+    const pitch = (tilt / 60) * Math.PI * 0.5;    // normalized by max tilt (60°)
+    const camDist = 2.5 / (zoom === 0 ? 0.7 : zoom === 2 ? 1.5 : 1.0);  // 特写=0.7, 标准=1.0, 广角=1.5
 
     if (!imgData) {
       // Draw placeholder sphere
@@ -592,7 +592,7 @@ export function InfiniteCanvas({
   const [multiAngleMode, setMultiAngleMode] = useState<MultiAngleMode>('image');
   const [multiAngleRotation, setMultiAngleRotation] = useState(0);
   const [multiAngleTilt, setMultiAngleTilt] = useState(0);
-  const [multiAngleZoom, setMultiAngleZoom] = useState(1);
+  const [multiAngleZoom, setMultiAngleZoom] = useState(1); // 0=特写, 1=标准, 2=广角
   const [isMultiAngleProcessing, setIsMultiAngleProcessing] = useState(false);
   const [isMultiAngleDragging, setIsMultiAngleDragging] = useState(false);
 
@@ -769,7 +769,7 @@ export function InfiniteCanvas({
       const dx = event.clientX - drag.startX;
       const dy = event.clientY - drag.startY;
       setMultiAngleRotation(Math.round(clampMultiAngleValue(drag.startRotation + dx * 0.55, -90, 90)));
-      setMultiAngleTilt(Math.round(clampMultiAngleValue(drag.startTilt - dy * 0.45, -45, 45)));
+      setMultiAngleTilt(Math.round(clampMultiAngleValue(drag.startTilt - dy * 0.55, -30, 60)));
     };
     const handleUp = () => {
       multiAngleDragRef.current = null;
@@ -2987,7 +2987,7 @@ export function InfiniteCanvas({
       completeProcessingFrame(placeholderId, stableUrl, img.width, img.height, {
         originalWidth: img.originalWidth || Math.round(img.width),
         originalHeight: img.originalHeight || Math.round(img.height),
-        modifyPrompt: `AI伪3D摄影棚 / ${multiAngleMode === 'image' ? '主体转角' : '摄像机位'} / yaw ${multiAngleRotation} / pitch ${multiAngleTilt} / dolly ${multiAngleZoom.toFixed(2)}`,
+        modifyPrompt: `AI伪3D摄影棚 / ${multiAngleMode === 'image' ? '主体转角' : '摄像机位'} / yaw ${multiAngleRotation}° / pitch ${multiAngleTilt}° / ${['特写', '标准', '广角'][multiAngleZoom]}`,
       });
       setActiveTool('none');
     } catch (e) {
@@ -5588,7 +5588,7 @@ export function InfiniteCanvas({
                           width: '110px',
                           height: '110px',
                           transformStyle: 'preserve-3d',
-                          transform: `rotateX(${-multiAngleTilt * 0.6}deg) rotateY(${multiAngleRotation * 1.2}deg)`,
+                          transform: `rotateX(${-multiAngleTilt * 0.8}deg) rotateY(${multiAngleRotation * 1.2}deg)`,
                           transition: isMultiAngleDragging ? 'none' : 'transform 0.15s ease-out',
                         }}
                       >
@@ -5620,8 +5620,8 @@ export function InfiniteCanvas({
                       {/* Perspective hint label */}
                       <div className={`absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full text-xs ${isMonochrome ? 'bg-white/80 text-gray-500 border border-gray-200' : 'bg-black/60 text-[#aaa] border border-white/10'}`}>
                         {Math.abs(multiAngleRotation) < 10 && Math.abs(multiAngleTilt) < 10 ? '正面' :
-                         multiAngleRotation > 60 ? '左侧' : multiAngleRotation < -60 ? '右侧' :
-                         multiAngleTilt > 25 ? '俯视' : multiAngleTilt < -25 ? '仰视' : '斜视'}
+                         multiAngleRotation > 45 ? '左侧' : multiAngleRotation < -45 ? '右侧' :
+                         multiAngleTilt > 35 ? '俯视' : multiAngleTilt < -15 ? '仰视' : '斜视'}
                       </div>
                     </div>
                   ) : (
@@ -5643,13 +5643,13 @@ export function InfiniteCanvas({
                 </div>
 
                 {([
-                  { label: multiAngleMode === 'camera' ? '旋转' : '旋转', value: multiAngleRotation, min: -90, max: 90, step: 1, onChange: setMultiAngleRotation },
-                  { label: multiAngleMode === 'camera' ? '俯仰' : '倾斜', value: multiAngleTilt, min: -45, max: 45, step: 1, onChange: setMultiAngleTilt },
+                  { label: '旋转', value: multiAngleRotation, min: -90, max: 90, step: 1, onChange: setMultiAngleRotation },
+                  { label: multiAngleMode === 'camera' ? '俯仰' : '倾斜', value: multiAngleTilt, min: -30, max: 60, step: 1, onChange: setMultiAngleTilt },
                 ]).map(item => (
                   <div key={item.label} className="space-y-1">
                     <div className="flex items-center justify-between">
                       <span className={panelLabelClass}>{item.label}</span>
-                      <span className={panelSmallLabelClass}>{item.value}</span>
+                      <span className={panelSmallLabelClass}>{item.value}°</span>
                     </div>
                     <input
                       type="range"
@@ -5666,17 +5666,25 @@ export function InfiniteCanvas({
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
                     <span className={panelLabelClass}>{multiAngleMode === 'camera' ? '推进' : '缩放'}</span>
-                    <span className={panelSmallLabelClass}>{multiAngleZoom < 0.9 ? '远' : multiAngleZoom > 1.1 ? '近' : '中等'}</span>
+                    <span className={panelSmallLabelClass}>{['特写', '标准', '广角'][multiAngleZoom]}</span>
                   </div>
-                  <input
-                    type="range"
-                    min={0.6}
-                    max={1.5}
-                    step={0.01}
-                    value={multiAngleZoom}
-                    onChange={(e) => setMultiAngleZoom(Number(e.target.value))}
-                    className="w-full accent-[#d4af37]"
-                  />
+                  <div className="flex items-center gap-1">
+                    {(['特写', '标准', '广角'] as const).map((label, idx) => (
+                      <button
+                        key={label}
+                        onClick={() => setMultiAngleZoom(idx)}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                          multiAngleZoom === idx
+                            ? 'bg-[#d4af37] text-black'
+                            : isMonochrome
+                              ? 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                              : 'bg-[#1a1a1a] text-[#888] hover:bg-[#222]'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="flex gap-2 pt-1">
