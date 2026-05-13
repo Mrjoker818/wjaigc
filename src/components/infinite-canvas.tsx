@@ -11,7 +11,7 @@ import {
   Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen
 } from 'lucide-react';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
-import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS } from '@/lib/canvas-generation-group';
+import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import type { PsdLayerItem } from '@/types/psdLayer';
 import { toStableImageUrl } from '@/lib/stable-image-url';
@@ -2329,19 +2329,27 @@ export function InfiniteCanvas({
       };
     }));
 
-    // 构建提示词：参考图组不再添加类别前缀，用户用自然语言描述如何参考
+    // 构建提示词
     let fullPrompt = toolbar.prompt;
     if (group.type === 'reference' && group.refImages.length > 0) {
-      // 参考图组：在用户prompt前加上参考图编号标识，让AI知道有哪些参考图
-      const refNotes = group.refImages.map(r => `[ref${r.number}]`).join(' ');
+      // 参考图组：加上参考图编号 + 类别说明
+      const refNotes = group.refImages.map(r => {
+        const cats = group.sourceCategories[r.imageId] || [];
+        const strengths = group.sourceStrengths[r.imageId] || {};
+        const catDesc = cats.map(c => {
+          const label = REFERENCE_CATEGORY_LABELS[c] || c;
+          const s = strengths[c];
+          return s ? `${label}(${s}%)` : label;
+        }).join(', ');
+        return catDesc ? `[ref${r.number}: ${catDesc}]` : `[ref${r.number}]`;
+      }).join(' ');
       fullPrompt = `${refNotes} ${fullPrompt}`;
     }
 
     // 调用生图 API
     try {
-      const currentModel = getCurrentModel();
-      const compositeKey = localStorage.getItem('currentProviderId') || '';
-      const providerId = compositeKey.includes('::') ? compositeKey.split('::')[0] : compositeKey;
+      const model = toolbar.model || getCurrentModel();
+      const providerId = toolbar.providerId || (localStorage.getItem('currentProviderId') || '').split('::')[0];
 
       const res = await fetch('/api/generate', {
         method: 'POST',
@@ -2349,7 +2357,7 @@ export function InfiniteCanvas({
         body: JSON.stringify({
           prompt: fullPrompt,
           negativePrompt: toolbar.negativePrompt,
-          model: currentModel,
+          model,
           providerId,
           aspectRatio: toolbar.aspectRatio,
           quality: toolbar.quality,
@@ -2398,7 +2406,7 @@ export function InfiniteCanvas({
             const pollRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId, model: currentModel, providerId }),
+              body: JSON.stringify({ taskId, model, providerId }),
             });
             const pollData = await pollRes.json();
             // 更新组内进度
@@ -5345,31 +5353,6 @@ export function InfiniteCanvas({
                           strokeDasharray={`${6 / zoom} ${4 / zoom}`}
                           opacity={0.7}
                         />
-                        {/* Arrow head at output end */}
-                        <polygon
-                          points={`${outputCenterX},${outputCenterY} ${outputCenterX - 8 / zoom},${outputCenterY - 5 / zoom} ${outputCenterX - 8 / zoom},${outputCenterY + 5 / zoom}`}
-                          fill="#d4af37"
-                          opacity={0.7}
-                        />
-                        {/* Number label on line */}
-                        <circle
-                          cx={imgCenterX + (outputCenterX - imgCenterX) * 0.3}
-                          cy={imgCenterY + (outputCenterY - imgCenterY) * 0.3}
-                          r={10 / zoom}
-                          fill="#d4af37"
-                          opacity={0.85}
-                        />
-                        <text
-                          x={imgCenterX + (outputCenterX - imgCenterX) * 0.3}
-                          y={imgCenterY + (outputCenterY - imgCenterY) * 0.3}
-                          textAnchor="middle"
-                          dominantBaseline="central"
-                          fill="#000"
-                          fontSize={11 / zoom}
-                          fontWeight="bold"
-                        >
-                          {img.refNumber}
-                        </text>
                       </g>
                     );
                   })}
@@ -5561,20 +5544,6 @@ export function InfiniteCanvas({
                         >
                           <animate attributeName="stroke-dashoffset" from="0" to={`${-26 / zoom}`} dur="2s" repeatCount="indefinite" />
                         </path>
-                        {/* Arrow head */}
-                        <polygon
-                          points={`${resultCenterX},${resultCenterY} ${resultCenterX - 10 / zoom},${resultCenterY - 6 / zoom} ${resultCenterX - 10 / zoom},${resultCenterY + 6 / zoom}`}
-                          fill={accentColor}
-                          opacity={0.6}
-                        />
-                        {/* Number label circle */}
-                        <circle
-                          cx={imgCenterX + (resultCenterX - imgCenterX) * 0.3}
-                          cy={imgCenterY + (resultCenterY - imgCenterY) * 0.3}
-                          r={14 / zoom}
-                          fill={accentColor}
-                          opacity={0.9}
-                        />
                       </g>
                     );
                   })}
@@ -5704,6 +5673,11 @@ export function InfiniteCanvas({
                     </div>
 
                     {/* Row 2: Aspect ratio + Quality + Count */}
+                    {(() => {
+                      const supportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, group.toolbar.model) || DEFAULT_ASPECT_RATIOS;
+                      const supportedQualities = findModelConfig(MODEL_QUALITIES, group.toolbar.model) || DEFAULT_QUALITIES;
+                      const qualitySizeMap = findModelConfig(QUALITY_TO_SIZE, group.toolbar.model);
+                      return (
                     <div className="flex items-center gap-2">
                       <select
                         className={`flex-1 text-sm px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#1f1f1f] border-[#444] text-[#ddd]'}`}
@@ -5714,8 +5688,8 @@ export function InfiniteCanvas({
                           ));
                         }}
                       >
-                        {['1:1','4:3','3:4','16:9','9:16','3:2','2:3','21:9'].map(r => (
-                          <option key={r} value={r}>{r}</option>
+                        {supportedRatios.map(r => (
+                          <option key={r} value={r}>{r} {ASPECT_RATIO_TO_PIXELS[r] ? `(${ASPECT_RATIO_TO_PIXELS[r]})` : ''}</option>
                         ))}
                       </select>
                       <select
@@ -5727,8 +5701,9 @@ export function InfiniteCanvas({
                           ));
                         }}
                       >
-                        <option value="standard">标准</option>
-                        <option value="hd">高清</option>
+                        {supportedQualities.map(q => (
+                          <option key={q} value={q}>{QUALITY_DISPLAY_NAMES[q] || q} {qualitySizeMap?.[q] ? `(${qualitySizeMap[q]})` : ''}</option>
+                        ))}
                       </select>
                       <select
                         className={`text-sm px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#1f1f1f] border-[#444] text-[#ddd]'}`}
@@ -5745,6 +5720,96 @@ export function InfiniteCanvas({
                         ))}
                       </select>
                     </div>
+                    );
+                    })()}
+
+                    {/* Row 2.5: 6-category reference settings (reference group only) */}
+                    {isRef && (
+                      <div className="space-y-2">
+                        <div className="text-xs font-medium" style={{ color: accentColor }}>参考类别</div>
+                        {REFERENCE_CATEGORIES.map(cat => {
+                          const allSelected = group.refImages.every(ref =>
+                            (group.sourceCategories[ref.imageId] || []).includes(cat)
+                          );
+                          const avgStrength = group.refImages.length > 0
+                            ? Math.round(group.refImages.reduce((sum, ref) => {
+                                const s = group.sourceStrengths[ref.imageId]?.[cat] ?? 70;
+                                return sum + s;
+                              }, 0) / group.refImages.length)
+                            : 70;
+                          return (
+                            <div key={cat} className="flex items-center gap-2">
+                              <button
+                                className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all ${
+                                  allSelected
+                                    ? (isMonochrome ? 'bg-amber-100 text-amber-800' : 'bg-[#d4af37]/20 text-[#d4af37]')
+                                    : (isMonochrome ? 'bg-gray-100 text-gray-400' : 'bg-[#252525] text-[#666]')
+                                }`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setGenGroups(prev => prev.map(g => {
+                                    if (g.id !== group.id) return g;
+                                    const newCats = { ...g.sourceCategories };
+                                    const newStr = { ...g.sourceStrengths };
+                                    g.refImages.forEach(ref => {
+                                      const imgCats = [...(newCats[ref.imageId] || [])];
+                                      const imgStr = { ...(newStr[ref.imageId] || {}) };
+                                      if (allSelected) {
+                                        const idx = imgCats.indexOf(cat);
+                                        if (idx >= 0) imgCats.splice(idx, 1);
+                                      } else {
+                                        if (!imgCats.includes(cat)) imgCats.push(cat);
+                                        if (!imgStr[cat]) imgStr[cat] = 70;
+                                      }
+                                      newCats[ref.imageId] = imgCats;
+                                      newStr[ref.imageId] = imgStr;
+                                    });
+                                    return { ...g, sourceCategories: newCats, sourceStrengths: newStr };
+                                  }));
+                                }}
+                              >
+                                <span className={`w-3 h-3 rounded-sm border flex items-center justify-center text-[10px] ${
+                                  allSelected
+                                    ? 'border-current bg-current/20'
+                                    : (isMonochrome ? 'border-gray-300' : 'border-[#555]')
+                                }`}>
+                                  {allSelected && '✓'}
+                                </span>
+                                {REFERENCE_CATEGORY_LABELS[cat]}
+                              </button>
+                              {allSelected && (
+                                <div className="flex items-center gap-1 flex-1">
+                                  <input
+                                    type="range"
+                                    min={0}
+                                    max={100}
+                                    value={avgStrength}
+                                    className="flex-1 h-1 appearance-none rounded-full cursor-pointer"
+                                    style={{
+                                      accentColor,
+                                      background: `linear-gradient(to right, ${accentColor} ${avgStrength}%, ${isMonochrome ? '#e5e7eb' : '#444'} ${avgStrength}%)`
+                                    }}
+                                    onChange={(e) => {
+                                      const val = Number(e.target.value);
+                                      setGenGroups(prev => prev.map(g => {
+                                        if (g.id !== group.id) return g;
+                                        const newStr = { ...g.sourceStrengths };
+                                        g.refImages.forEach(ref => {
+                                          newStr[ref.imageId] = { ...(newStr[ref.imageId] || {}), [cat]: val };
+                                        });
+                                        return { ...g, sourceStrengths: newStr };
+                                      }));
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                  <span className="text-xs w-8 text-right" style={{ color: isMonochrome ? '#666' : '#999' }}>{avgStrength}%</span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
 
                     {/* Row 3: Prompt textarea with resize handle */}
                     <div className="relative">
@@ -7320,7 +7385,7 @@ export function InfiniteCanvas({
               >
                 {/* Title bar */}
                 <div
-                  className="flex items-center justify-between px-4 py-2 select-none cursor-grab active:cursor-grabbing"
+                  className="flex items-center justify-between px-4 py-2 select-none cursor-grab active:cursor-grabbing rounded-t-2xl"
                   style={{
                     background: isMonochrome ? '#f3f4f6' : '#1a1a1a',
                     borderBottom: `1px solid ${isMonochrome ? '#e5e7eb' : '#333'}`,
@@ -7647,13 +7712,18 @@ export function InfiniteCanvas({
                         )}
                       </div>
                       {/* 比例 */}
+                      {(() => {
+                        const hcgRatios = findModelConfig(MODEL_ASPECT_RATIOS, hcg.toolbar.model) || DEFAULT_ASPECT_RATIOS;
+                        const hcgQualities = findModelConfig(MODEL_QUALITIES, hcg.toolbar.model) || DEFAULT_QUALITIES;
+                        const hcgQualitySizeMap = findModelConfig(QUALITY_TO_SIZE, hcg.toolbar.model);
+                        return (<>
                       <select
                         className="px-2 py-1.5 rounded-lg text-xs"
                         style={{ background: isMonochrome ? '#f3f4f6' : '#252525', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : '#444'}` }}
                         value={hcg.toolbar.aspectRatio}
                         onChange={(e) => setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, aspectRatio: e.target.value } } : g))}
                       >
-                        {['1:1', '4:3', '3:4', '3:2', '2:3', '16:9', '9:16'].map(r => <option key={r} value={r}>{r}</option>)}
+                        {hcgRatios.map(r => <option key={r} value={r}>{r} {ASPECT_RATIO_TO_PIXELS[r] ? `(${ASPECT_RATIO_TO_PIXELS[r]})` : ''}</option>)}
                       </select>
                       {/* 质量 */}
                       <select
@@ -7662,8 +7732,10 @@ export function InfiniteCanvas({
                         value={hcg.toolbar.quality}
                         onChange={(e) => setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, quality: e.target.value } } : g))}
                       >
-                        {['auto', 'low', 'medium', 'high', 'standard'].map(q => <option key={q} value={q}>{q === 'auto' ? '自动' : q === 'low' ? '低' : q === 'medium' ? '中' : q === 'high' ? '高' : '标准'}</option>)}
+                        {hcgQualities.map(q => <option key={q} value={q}>{QUALITY_DISPLAY_NAMES[q] || q} {hcgQualitySizeMap?.[q] ? `(${hcgQualitySizeMap[q]})` : ''}</option>)}
                       </select>
+                      </>);
+                      })()}
                       {/* 数量 */}
                       <select
                         className="px-2 py-1.5 rounded-lg text-xs"

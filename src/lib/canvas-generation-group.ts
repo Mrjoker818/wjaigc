@@ -112,6 +112,132 @@ export interface ConnectionLine {
   toFrameId: string;         // 结果框对应的placeholder图片ID
 }
 
+// ============ 模型配置映射（共享） ============
+
+/** 各模型支持的画面比例（按官方API文档配置） */
+export const MODEL_ASPECT_RATIOS: Record<string, string[]> = {
+    'gemini-2.5-flash-image-preview': ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
+    'gemini-3-pro-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    'gemini-3.1-flash-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    'doubao-seedance-4-5': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', '9:21'],
+    'gpt-image-2-official': ['1:1', '3:2', '2:3'],
+    'gpt-image-2': ['1:1', '3:2', '2:3'],
+};
+
+/** 各模型支持的质量/分辨率档位（按官方API文档配置） */
+export const MODEL_QUALITIES: Record<string, string[]> = {
+    // Gemini 系列 - resolution类型
+    'gemini-2.5-flash-image-preview': ['1K'],
+    'gemini-3-pro-image-preview': ['1K', '2K'],
+    'gemini-3.1-flash-image-preview': ['1K', '2K', '4K'],
+    // Seedream 系列 - resolution类型
+    'doubao-seedance-4-5': ['2K', '4K'],
+    // GPT-Image 系列 - quality类型
+    'gpt-image-2-official': ['auto', 'low', 'medium', 'high'],
+    'gpt-image-2': ['auto', 'low', 'medium', 'high'],
+};
+
+/** 质量档位到显示名称的映射 */
+export const QUALITY_DISPLAY_NAMES: Record<string, string> = {
+    'auto': '自动',
+    'low': '低',
+    'medium': '中',
+    'high': '高',
+    'standard': '标准',
+    'hd': '高清',
+    '1K': '1K',
+    '2K': '2K',
+    '4K': '4K',
+};
+
+/** 各模型质量/分辨率对应的实际像素尺寸 */
+export const QUALITY_TO_SIZE: Record<string, Record<string, string>> = {
+    // DALL-E 系列
+    'dall-e-3': {
+        'standard': '1024px',
+        'hd': '1024px 细节增强'
+    },
+    // Gemini 系列
+    'gemini-2.5-flash-image-preview': {
+        'standard': '1024',
+        '1K': '1024'
+    },
+    'gemini-3-pro-image-preview': {
+        'standard': '1024',
+        '1K': '1024',
+        '2K': '2048'
+    },
+    'gemini-3.1-flash-image-preview': {
+        'standard': '1024',
+        '1K': '1024',
+        '2K': '2048',
+        '4K': '4096'
+    },
+    // Seedream 系列
+    'doubao-seedance-4-5': {
+        'standard': '2K',
+        '2K': '2048',
+        '4K': '4096'
+    },
+    // GPT-Image 系列
+    'gpt-image-2-official': {
+        'auto': '1024',
+        'low': '1024 低细节',
+        'medium': '1024 中细节',
+        'high': '1024 高细节'
+    },
+    'gpt-image-2': {
+        'auto': '1024',
+        'low': '1024 低细节',
+        'medium': '1024 中细节',
+        'high': '1024 高细节'
+    },
+};
+
+/** 画面比例到默认像素尺寸的映射 */
+export const ASPECT_RATIO_TO_PIXELS: Record<string, string> = {
+    '1:1': '1024×1024',
+    '4:3': '1024×768',
+    '3:4': '768×1024',
+    '16:9': '1792×1024',
+    '9:16': '1024×1792',
+    '3:2': '1536×1024',
+    '2:3': '1024×1536',
+    '21:9': '2048×878',
+    '9:21': '878×2048',
+    '2:1': '2048×1024',
+    '1:2': '1024×2048',
+    '4:5': '1024×1280',
+    '5:4': '1280×1024',
+};
+
+/** 默认画面比例列表 */
+export const DEFAULT_ASPECT_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
+
+/** 默认质量列表 */
+export const DEFAULT_QUALITIES = ['standard', 'hd'];
+
+/** 模糊匹配模型配置键名 — 支持纯 modelId 匹配到带后缀的配置 */
+export function findModelConfig<T>(map: Record<string, T>, modelId: string): T | undefined {
+    // 1. 精确匹配
+    if (map[modelId] !== undefined) return map[modelId];
+    // 2. 模型ID包含配置键（如 "gpt-image-2" 匹配 "gpt-image-2-official"）
+    const lowerId = modelId.toLowerCase();
+    for (const key of Object.keys(map)) {
+        if (lowerId.includes(key) || key.includes(lowerId)) {
+            return map[key];
+        }
+    }
+    // 3. 前缀匹配（如 "gpt-image-2" 匹配 "gpt-image"）
+    for (const key of Object.keys(map)) {
+        const shortKey = key.split('-').slice(0, -1).join('-');
+        if (shortKey && (lowerId.startsWith(shortKey) || key.startsWith(lowerId.split('-').slice(0, -1).join('-')))) {
+            return map[key];
+        }
+    }
+    return undefined;
+}
+
 // ============ 工具函数 ============
 
 let _groupCounter = 0;
