@@ -5730,7 +5730,7 @@ export function InfiniteCanvas({
                     background: isHoveredForDrop ? (isRef ? 'rgba(212,175,55,0.12)' : 'rgba(78,205,196,0.12)') : accentBg,
                     border: `2px solid ${isThisGroupDragging ? accentColor : isHoveredForDrop ? accentColor : accentBorder}`,
                     zIndex: 12,
-                    overflow: 'hidden',
+                    overflow: (group.isCollapsed || openModelDropdownGroupId !== group.id) ? 'hidden' : 'visible',
                     transition: isThisGroupDragging ? 'none' : 'height 0.3s ease, border-color 0.2s, background 0.2s',
                     boxShadow: isHoveredForDrop ? `0 0 20px ${accentColor}40` : 'none',
                   }}
@@ -6063,12 +6063,14 @@ export function InfiniteCanvas({
                       border: isMonochrome ? '1px solid rgba(200,200,200,0.5)' : `1px solid ${accentBorder}`,
                       backdropFilter: 'blur(8px)',
                     }}
+                    onMouseDown={(e) => e.stopPropagation()}
                   >
                     {/* Row 1: Model selector — custom dropdown with highlight */}
                     <div className="relative">
                       <span className="text-xs font-medium shrink-0 mb-1 block" style={{ color: `${accentColor}cc` }}>模型</span>
                       <button
                         className={`w-full text-left text-sm px-2.5 py-1.5 rounded-lg border flex items-center justify-between ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#1f1f1f] border-[#444] text-[#ddd]'}`}
+                        onMouseDown={(e) => { e.stopPropagation(); }}
                         onClick={(e) => {
                           e.stopPropagation();
                           setOpenModelDropdownGroupId(prev => prev === group.id ? null : group.id);
@@ -6082,13 +6084,17 @@ export function InfiniteCanvas({
                         <div
                           className="absolute left-0 right-0 top-full mt-1 rounded-lg shadow-xl overflow-hidden z-50 max-h-64 overflow-y-auto"
                           style={{ background: isMonochrome ? '#fff' : '#1a1a1a', border: isMonochrome ? '1px solid #ddd' : '1px solid #444' }}
+                          onMouseDown={(e) => e.stopPropagation()}
                         >
-                          {canvasGenModels.map(m => {
-                            const isSelected = group.toolbar.model === m.id;
+                          {canvasGenModels.map((m, mi) => {
+                            const isSelected = group.toolbar.model === m.id && group.toolbar.providerId === m.providerId;
                             return (
                               <button
-                                key={m.id}
+                                key={`${m.providerId}::${m.id}::${mi}`}
                                 className={`w-full text-left text-sm px-3 py-2 flex items-center gap-2 transition-colors ${isSelected ? (isMonochrome ? 'bg-amber-50 text-amber-800' : 'bg-[#d4af37]/15 text-[#d4af37]') : (isMonochrome ? 'hover:bg-gray-100 text-gray-700' : 'hover:bg-[#2a2a2a] text-[#ccc]')}`}
+                                onMouseDown={(e) => {
+                                  e.stopPropagation();
+                                }}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   // 获取新模型支持的参数，重置质量和比例
