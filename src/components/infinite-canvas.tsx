@@ -4662,23 +4662,57 @@ export function InfiniteCanvas({
         updateProcessingFrame(placeholderId, { progress: 8, status: '正在提交到 AI 模型...' });
 
         const modelInfo = getCurrentModel();
-        const res = await fetch('/api/image-edit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'inpaint',
-            imageUrl: currentEditImg.url,
-            maskImage: maskBase64,
-            prompt,
-            editMode: currentEditMode as 'erase' | 'mask',
-            aspectRatio: `${currentEditImg.originalWidth || currentEditImg.width}:${currentEditImg.originalHeight || currentEditImg.height}`,
-            model: modelInfo.model,
-            apiKey,
-            providerId: modelInfo.providerId || getCurrentProviderId(),
-          }),
-        });
+        const requestBody = {
+          action: 'inpaint',
+          imageUrl: currentEditImg.url,
+          maskImage: maskBase64,
+          prompt,
+          editMode: currentEditMode as 'erase' | 'mask',
+          aspectRatio: `${currentEditImg.originalWidth || currentEditImg.width || 1}:${currentEditImg.originalHeight || currentEditImg.height || 1}`,
+          model: modelInfo.model,
+          apiKey,
+          providerId: modelInfo.providerId || getCurrentProviderId(),
+        };
 
-        const data = await res.json();
+        const bodyStr = JSON.stringify(requestBody);
+        // 日志：记录请求体大小以便排查 "Failed to fetch" 问题
+        console.log('[inpaint] bodySize:', Math.round(bodyStr.length / 1024) + 'KB', 'urlType:', currentEditImg.url?.substring(0, 20));
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 180000); // 3分钟超时
+
+        let res: Response;
+        try {
+          res = await fetch('/api/image-edit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: bodyStr,
+            signal: controller.signal,
+          });
+        } catch (fetchErr: unknown) {
+          clearTimeout(timeoutId);
+          const err = fetchErr as Error;
+          console.error('[inpaint] fetch failed:', err.name, err.message, 'bodySize:', Math.round(bodyStr.length / 1024) + 'KB');
+          if (err.name === 'AbortError') {
+            throw new Error('请求超时，服务器响应时间过长，请重试');
+          }
+          throw new Error(`网络请求失败 (${err.message})，请检查网络连接后重试`);
+        }
+        clearTimeout(timeoutId);
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          console.error('[inpaint] HTTP error:', res.status, text.substring(0, 200));
+          throw new Error(`服务器错误 (${res.status})，请稍后重试`);
+        }
+
+        let data: any;
+        try {
+          data = await res.json();
+        } catch {
+          console.error('[inpaint] JSON parse failed, response starts with:', (await res.text().catch(() => '')).substring(0, 100));
+          throw new Error('服务器返回了非预期格式，请稍后重试');
+        }
         if (!data.success) {
           console.error('Image edit failed:', data.error);
           // 后端已根据 editMode 返回不同错误消息
