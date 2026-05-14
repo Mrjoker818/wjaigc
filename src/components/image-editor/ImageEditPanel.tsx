@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { X, Undo2, Trash2, Brush, Eraser, Loader2, Sparkles } from 'lucide-react';
 import MaskBrushCanvas, { type MaskBrushCanvasRef } from './MaskBrushCanvas';
 
@@ -18,35 +18,8 @@ export default function ImageEditPanel({ imageUrl, mode, onClose, onSuccess }: I
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [imageSize, setImageSize] = useState({ width: 800, height: 600 });
-  const [healthStatus, setHealthStatus] = useState<{ iopaintAvailable: boolean } | null>(null);
   const maskRef = useRef<MaskBrushCanvasRef>(null);
 
-  // 检测 IOPaint 服务状态并自动启动
-  useEffect(() => {
-    fetch('/api/image/health')
-      .then(r => r.json())
-      .then(async (data) => {
-        const iopaintAvailable = data.iopaint?.available ?? false;
-        if (!iopaintAvailable) {
-          // 尝试自动启动服务
-          try {
-            await fetch('/api/image/start-services', { method: 'POST' });
-            // 重新检测
-            const recheck = await fetch('/api/image/health').then(r => r.json());
-            setHealthStatus({ iopaintAvailable: recheck.iopaint?.available ?? false });
-          } catch {
-            setHealthStatus({ iopaintAvailable: false });
-          }
-        } else {
-          setHealthStatus({ iopaintAvailable: true });
-        }
-      })
-      .catch(() => {
-        setHealthStatus({ iopaintAvailable: false });
-      });
-  }, []);
-
-  // 获取图片尺寸
   useEffect(() => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -56,7 +29,6 @@ export default function ImageEditPanel({ imageUrl, mode, onClose, onSuccess }: I
     img.src = imageUrl;
   }, [imageUrl]);
 
-  // 开始修复
   const handleRepair = useCallback(async () => {
     if (!maskRef.current) return;
     setIsProcessing(true);
@@ -72,6 +44,7 @@ export default function ImageEditPanel({ imageUrl, mode, onClose, onSuccess }: I
           imageUrl,
           maskDataUrl,
           prompt: mode === 'mask' && prompt.trim() ? prompt.trim() : undefined,
+          editMode: mode,
         }),
       });
 
@@ -94,12 +67,11 @@ export default function ImageEditPanel({ imageUrl, mode, onClose, onSuccess }: I
   return (
     <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div className="bg-[#1a1a1a] border border-[#d4af37]/30 rounded-xl shadow-2xl w-[90vw] max-w-[1100px] h-[80vh] overflow-hidden flex flex-col">
-        {/* 标题栏 */}
         <div className="flex items-center justify-between px-6 py-3 border-b border-[#d4af37]/20 shrink-0">
           <div className="flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-[#d4af37]" />
             <h3 className="text-lg font-semibold text-white">{modeLabel}</h3>
-            <span className="text-xs text-gray-500 ml-2">涂抹白色区域后点击"开始修复"</span>
+            <span className="text-xs text-gray-500 ml-2">涂抹白色区域后开始修复</span>
           </div>
           <button
             onClick={onClose}
@@ -109,9 +81,7 @@ export default function ImageEditPanel({ imageUrl, mode, onClose, onSuccess }: I
           </button>
         </div>
 
-        {/* 主体区 */}
         <div className="flex-1 flex overflow-hidden min-h-0">
-          {/* 左侧画布 */}
           <div className="flex-1 p-4 min-w-0">
             <MaskBrushCanvas
               ref={maskRef}
@@ -123,19 +93,7 @@ export default function ImageEditPanel({ imageUrl, mode, onClose, onSuccess }: I
             />
           </div>
 
-          {/* 右侧工具栏 */}
           <div className="w-64 border-l border-[#d4af37]/20 p-4 space-y-4 overflow-y-auto shrink-0">
-            {/* IOPaint 状态 */}
-            {healthStatus && !healthStatus.iopaintAvailable && (
-              <div className="bg-yellow-900/30 border border-yellow-600/40 rounded-lg p-3 text-xs text-yellow-300">
-                本地 LaMa 修图服务未启动，请先启动 IOPaint：
-                <code className="block mt-1 bg-black/30 p-1 rounded text-[10px] break-all">
-                  iopaint start --model=lama --device=cpu --port=8080
-                </code>
-              </div>
-            )}
-
-            {/* 画笔工具 */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">画笔模式</label>
               <div className="flex gap-2">
@@ -164,7 +122,6 @@ export default function ImageEditPanel({ imageUrl, mode, onClose, onSuccess }: I
               </div>
             </div>
 
-            {/* 画笔大小 */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
                 画笔大小: {brushSize}px
@@ -179,7 +136,6 @@ export default function ImageEditPanel({ imageUrl, mode, onClose, onSuccess }: I
               />
             </div>
 
-            {/* 操作按钮 */}
             <div className="flex gap-2">
               <button
                 onClick={() => maskRef.current?.undo()}
@@ -197,30 +153,27 @@ export default function ImageEditPanel({ imageUrl, mode, onClose, onSuccess }: I
               </button>
             </div>
 
-            {/* 提示词（蒙版模式） */}
             {mode === 'mask' && (
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">修复提示词（可选）</label>
+                <label className="block text-sm font-medium text-gray-300 mb-2">修复提示词</label>
                 <textarea
                   value={prompt}
                   onChange={e => setPrompt(e.target.value)}
-                  placeholder="描述修复内容..."
+                  placeholder="描述要生成或替换的内容..."
                   className="w-full bg-[#2a2a2a] border border-[#d4af37]/20 text-white rounded-lg px-3 py-2 text-sm resize-none h-20 focus:outline-none focus:ring-2 focus:ring-[#d4af37]/40 placeholder:text-gray-500"
                 />
               </div>
             )}
 
-            {/* 错误信息 */}
             {error && (
               <div className="bg-red-900/30 border border-red-600/40 rounded-lg p-3 text-xs text-red-300">
                 {error}
               </div>
             )}
 
-            {/* 开始修复 */}
             <button
               onClick={handleRepair}
-              disabled={isProcessing || (healthStatus !== null && !healthStatus.iopaintAvailable)}
+              disabled={isProcessing}
               className="w-full py-3 bg-[#d4af37] text-black text-sm font-semibold rounded-lg hover:bg-[#e5c349] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {isProcessing ? (
