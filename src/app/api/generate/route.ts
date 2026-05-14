@@ -425,10 +425,18 @@ export async function POST(request: NextRequest) {
           throw new Error(errorMsg);
         }
 
-        const submitResult = await resp.json();
+        // 解析响应 — 防止 API 返回 HTML 页面（如 404/502 错误页）导致 JSON 解析失败
+        const responseText = await resp.text();
+        let submitResult: Record<string, unknown>;
+        try {
+          submitResult = JSON.parse(responseText);
+        } catch (parseErr) {
+          console.error('[generate] API returned non-JSON response, first 200 chars:', responseText.substring(0, 200));
+          throw new Error('API 返回了非 JSON 响应（可能是端点不存在或服务器错误），请检查 API 地址配置');
+        }
 
         // 使用兼容性层解析响应（自动识别直接返回 vs 异步轮询）
-        const parsed = parseResponseForProfile(submitResult as Record<string, unknown>, profile);
+        const parsed = parseResponseForProfile(submitResult, profile);
 
         if (parsed.mode === 'direct' && parsed.directImageUrls.length > 0) {
           console.log('Direct image response (no polling needed), profile:', profile.id);

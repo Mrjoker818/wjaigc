@@ -342,8 +342,15 @@ async function submitImageTask(
     throw new Error(errorMsg);
   }
 
-  // 使用兼容性层解析响应
-  const submitResult = await submitResponse.json() as Record<string, unknown>;
+  // 解析响应 — 防止 API 返回 HTML 页面导致 JSON 解析失败
+  const responseText = await submitResponse.text();
+  let submitResult: Record<string, unknown>;
+  try {
+    submitResult = JSON.parse(responseText) as Record<string, unknown>;
+  } catch {
+    console.error('[image-edit] API returned non-JSON response, first 200 chars:', responseText.substring(0, 200));
+    throw new Error('API 返回了非 JSON 响应（可能是端点不存在），请检查 API 地址配置');
+  }
   const parsed = parseResponseForProfile(submitResult, profile);
 
   if (parsed.mode === 'direct' && parsed.directImageUrls.length > 0) {
@@ -836,26 +843,37 @@ async function pollTaskUntilComplete(
 
       if (!pollRes.ok) continue;
 
-      const pollData = await pollRes.json();
-      const taskData = pollData.data;
+      // 防止 API 返回 HTML 页面导致 JSON 解析失败
+      const pollText = await pollRes.text();
+      let pollData: Record<string, unknown>;
+      try {
+        pollData = JSON.parse(pollText) as Record<string, unknown>;
+      } catch {
+        console.error('[image-edit poll] Non-JSON response, first 200 chars:', pollText.substring(0, 200));
+        continue; // 跳过这次轮询，下次重试
+      }
+      const taskData = pollData.data as Record<string, unknown> | undefined;
+      const taskResult = taskData?.result as Record<string, unknown> | undefined;
       const status = taskData?.status;
 
       if (status === 'completed') {
         // 从 result.images 提取图片 URL
-        const images = taskData?.result?.images;
+        const images = taskResult?.images as Array<Record<string, unknown>> | undefined;
         if (images && images.length > 0) {
           const rawUrl = images[0].url || images[0].image_url || images[0].src;
           const imageUrl = Array.isArray(rawUrl) ? rawUrl[0] : rawUrl;
-          if (imageUrl) return imageUrl;
+          if (imageUrl) return imageUrl as string;
         }
         // 兜底：b64_json
-        if (taskData?.result?.b64_json) {
-          return `data:image/png;base64,${taskData.result.b64_json}`;
+        const b64Json = taskResult?.b64_json as string | undefined;
+        if (b64Json) {
+          return `data:image/png;base64,${b64Json}`;
         }
         throw new Error(`Tile task ${taskId} completed but no image URL found`);
       }
       if (status === 'failed') {
-        const failReason = taskData?.error?.message || 'unknown';
+        const taskError = taskData?.error as Record<string, unknown> | undefined;
+        const failReason = (taskError?.message as string) || 'unknown';
         throw new Error(`Tile task ${taskId} failed: ${failReason}`);
       }
       if (status === 'cancelled') {
