@@ -2397,11 +2397,7 @@ export function InfiniteCanvas({
   /** 处理生成组的生成请求 */
   const handleGroupGenerate = useCallback(async (group: CanvasGenGroup) => {
     const toolbar = group.toolbar;
-    console.log('[handleGroupGenerate] called, groupId:', group.id, 'type:', group.type, 'model:', toolbar.model, 'prompt:', toolbar.prompt?.substring(0, 50), 'refImages:', group.refImages.length);
-    if (!toolbar.prompt.trim()) {
-      console.log('[handleGroupGenerate] prompt is empty, returning');
-      return;
-    }
+    if (!toolbar.prompt.trim()) return;
 
     // 计算结果框尺寸（根据用户选择的比例和模型尺寸）
     const [arW, arH] = toolbar.aspectRatio.split(':').map(Number);
@@ -2508,12 +2504,43 @@ export function InfiniteCanvas({
     try {
       const model = toolbar.model;
       const providerId = toolbar.providerId;
-      console.log('[handleGroupGenerate] attempting API call, model:', model, 'providerId:', providerId);
       if (!model) {
-        console.log('[handleGroupGenerate] model is empty, showing error');
         setGenGroups(prev => prev.map(g => {
           if (g.id !== group.id) return g;
           return { ...g, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: '请先选择模型' } };
+        }));
+        return;
+      }
+
+      // 将 data: URL 参考图先上传到服务器，避免请求体过大 (base64 图片会触发 413 Request Entity Too Large)
+      const rawRefUrls = group.refImages.map(r => r.url);
+      const referenceImages: string[] = [];
+      for (const url of rawRefUrls) {
+        if (url.startsWith('data:')) {
+          try {
+            const saveRes = await fetch('/api/save-image', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ imageUrl: url }),
+            });
+            const saveData = await saveRes.json();
+            if (saveData.success && saveData.imageUrl) {
+              referenceImages.push(saveData.imageUrl);
+            } else {
+              console.warn('[handleGroupGenerate] Failed to save data URL, skipping:', saveData.error);
+            }
+          } catch (e) {
+            console.warn('[handleGroupGenerate] Failed to upload data URL reference image:', e);
+          }
+        } else {
+          referenceImages.push(url);
+        }
+      }
+
+      if (referenceImages.length === 0 && rawRefUrls.length > 0) {
+        setGenGroups(prev => prev.map(g => {
+          if (g.id !== group.id) return g;
+          return { ...g, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, errorMsg: '参考图上传失败，请重试' } };
         }));
         return;
       }
@@ -2529,14 +2556,26 @@ export function InfiniteCanvas({
           aspectRatio: toolbar.aspectRatio,
           quality: toolbar.quality,
           outputCount: toolbar.outputCount,
-          referenceImages: group.refImages.map(r => r.url),
+          referenceImages,
           referenceMode: group.type === 'fusion' ? 'fusion' : 'reference',
           ...(calculatedStrength != null && calculatedStrength > 0 ? { strength: calculatedStrength } : {}),
         }),
       });
-      const data = await res.json();
-      console.log('[handleGroupGenerate] API response:', data.success, 'mode:', data.mode, 'error:', data.error, 'taskIds:', data.taskIds);
 
+      // 安全解析响应：优先尝试 JSON，回退到纯文本
+      let data: any;
+      const responseText = await res.text();
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        console.error('[GroupGenerate] Non-JSON response:', res.status, responseText.substring(0, 200));
+        const errMsg = res.status === 413 ? '请求体过大，请减少参考图数量或缩小图片尺寸' : `服务器错误 (${res.status}): ${responseText.substring(0, 80)}`;
+        setGenGroups(prev => prev.map(g => {
+          if (g.id !== group.id) return g;
+          return { ...g, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, errorMsg: errMsg } };
+        }));
+        return;
+      }
       // 检查 API 错误
       if (data.error) {
         console.error('[GroupGenerate] API error:', data.error);
@@ -2724,10 +2763,9 @@ export function InfiniteCanvas({
     const group = genGroupsRef.current.find(g => g.id === groupId);
     console.log('[handleGenGroupGenerate] groupId:', groupId, 'group found:', !!group, 'total groups:', genGroupsRef.current.length);
     if (group) {
-      console.log('[handleGenGroupGenerate] group toolbar:', JSON.stringify(group.toolbar).substring(0, 200));
       handleGroupGenerate(group);
     } else {
-      console.error('[handleGenGroupGenerate] group not found in ref! Current groups:', genGroupsRef.current.map(g => g.id));
+      console.error('[handleGenGroupGenerate] group not found in ref!');
     }
   }, [handleGroupGenerate]);
 
@@ -4591,12 +4629,34 @@ export function InfiniteCanvas({
             })(),
             quality: 'standard',
             count: 1,
-            referenceImages: [editImg.url],
+            referenceImages: editImg.url.startsWith('data:') ? [] : [editImg.url],
+            // data URL 图过大，改用 imageUrl 字段让后端自行下载
+            ...(editImg.url.startsWith('data:') ? { imageUrl: await (async () => {
+              try {
+                const saveRes = await fetch('/api/save-image', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ imageUrl: editImg.url }),
+                });
+                const saveData = await saveRes.json();
+                return saveData.success && saveData.imageUrl ? saveData.imageUrl : editImg.url;
+              } catch { return editImg.url; }
+            })() } : {}),
             strength: img2imgStrength,
           }),
         });
 
-        const data = await res.json();
+        let data: Record<string, any>;
+        try {
+          const resText = await res.text();
+          try { data = JSON.parse(resText); } catch {
+            throw new Error(res.status === 413 ? '请求体过大，请减少参考图' : `服务器错误 (${res.status}): ${resText.substring(0, 80)}`);
+          }
+        } catch (parseErr) {
+          alert(String(parseErr instanceof Error ? parseErr.message : parseErr));
+          removeProcessingFrame(placeholderId);
+          return;
+        }
         if (!res.ok) {
           alert(data.error || '图生图提交失败');
           removeProcessingFrame(placeholderId);
