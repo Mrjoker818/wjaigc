@@ -2427,19 +2427,62 @@ export function InfiniteCanvas({
 
     // 构建提示词
     let fullPrompt = toolbar.prompt;
+    let calculatedStrength: number | undefined;
+
     if (group.type === 'reference' && group.refImages.length > 0) {
-      // 参考图组：加上参考图编号 + 类别说明
-      const refNotes = group.refImages.map(r => {
+      // 参考图组：构建英文提示词，明确告诉模型保留参考图的哪些方面
+      const categoryEnMap: Record<string, string> = {
+        '风格': 'artistic style and visual aesthetics',
+        '构图': 'composition and layout structure',
+        '场景': 'scene and environment setting',
+        '色彩': 'color palette and tone',
+        '主体': 'main subject and focal point',
+        '细节': 'fine details and textures',
+      };
+
+      // 收集所有激活的类别及其最大强度
+      const activeCats: { en: string; strength: number }[] = [];
+      for (const r of group.refImages) {
         const cats = group.sourceCategories[r.imageId] || [];
         const strengths = group.sourceStrengths[r.imageId] || {};
-        const catDesc = cats.map(c => {
-          const label = REFERENCE_CATEGORY_LABELS[c] || c;
-          const s = strengths[c];
-          return s ? `${label}(${s}%)` : label;
-        }).join(', ');
-        return catDesc ? `[ref${r.number}: ${catDesc}]` : `[ref${r.number}]`;
-      }).join(' ');
-      fullPrompt = `${refNotes} ${fullPrompt}`;
+        for (const c of cats) {
+          const s = strengths[c] || 50;
+          const en = categoryEnMap[c] || c;
+          if (s > 0 && !activeCats.find(a => a.en === en)) {
+            activeCats.push({ en, strength: s });
+          }
+        }
+      }
+
+      // 构建 prompt
+      if (activeCats.length > 0) {
+        const preserveParts = activeCats.filter(a => a.strength > 0).map(a => a.en).join(', ');
+        const preserveRatio = activeCats.reduce((sum, a) => sum + a.strength, 0) / (activeCats.length * 100);
+        const img2imgStrength = Math.round((0.25 + preserveRatio * 0.6) * 100) / 100;
+        calculatedStrength = img2imgStrength;
+
+        const keyword = fullPrompt.trim();
+        if (keyword) {
+          fullPrompt = `[ref] Preserve the ${preserveParts} from the reference image(s). Then, freely reimagine and create: ${keyword}`;
+        } else {
+          fullPrompt = `[ref] Preserve the ${preserveParts} from the reference image(s), and create a new variation inspired by these aspects.`;
+        }
+      } else {
+        // 无激活类别，仅作为参考图
+        const keyword = fullPrompt.trim();
+        if (keyword) {
+          fullPrompt = `[ref] Using the reference image(s) as visual context, create: ${keyword}`;
+        }
+      }
+    } else if (group.type === 'fusion' && group.refImages.length > 0) {
+      // 融图组：融合多张参考图
+      calculatedStrength = 0.65;
+      const keyword = fullPrompt.trim();
+      if (keyword) {
+        fullPrompt = `[fusion] Seamlessly blend and fuse elements from the reference images, then create: ${keyword}`;
+      } else {
+        fullPrompt = `[fusion] Seamlessly blend and fuse elements from the reference images into a cohesive new image.`;
+      }
     }
 
     // 调用生图 API（始终使用工具栏中选择的模型和 providerId）
@@ -2467,6 +2510,7 @@ export function InfiniteCanvas({
           outputCount: toolbar.outputCount,
           referenceImages: group.refImages.map(r => r.url),
           referenceMode: group.type === 'fusion' ? 'fusion' : 'reference',
+          ...(calculatedStrength != null && calculatedStrength > 0 ? { strength: calculatedStrength } : {}),
         }),
       });
       const data = await res.json();
