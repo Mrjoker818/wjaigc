@@ -338,13 +338,35 @@ export async function POST(request: NextRequest) {
         if (typeof strength === 'number' && strength > 0 && strength <= 1) {
           requestBody.strength = strength;
         }
+        // 对于 /images/edits 端点，需要同时提供 image 字段（base64 格式）
+        // /images/edits 将 image 视为必须编辑的源图（AI 无法忽略），而 image_urls 是可选参考
+        const firstRefImage = accessibleReferenceImages[0];
+        if (firstRefImage) {
+          if (firstRefImage.startsWith('data:')) {
+            // 已经是 base64 data URL，直接使用
+            requestBody.image = firstRefImage;
+          } else if (firstRefImage.startsWith('http')) {
+            // 外部 URL，需要下载为 base64（/images/edits 不接受 URL 格式的 image）
+            try {
+              const imgResp = await fetch(firstRefImage, { signal: AbortSignal.timeout(15000) });
+              if (imgResp.ok) {
+                const imgBuf = Buffer.from(await imgResp.arrayBuffer());
+                const contentType = imgResp.headers.get('content-type') || 'image/png';
+                requestBody.image = `data:${contentType};base64,${imgBuf.toString('base64')}`;
+              }
+            } catch (imgErr) {
+              console.warn('Failed to download reference image for edits endpoint:', imgErr);
+            }
+          }
+        }
       }
 
       // 使用兼容性层自动调整请求（size格式、端点选择等）
-      // 注意: generate 路由始终使用 /images/generations 端点，参考图通过 image_urls 传递
-      // /images/edits 端点仅用于 image-edit 路由（需要 image 文件上传）
+      // 当有参考图时，使用 editEndpoint (/images/edits) — AI 必须将图片作为主要编辑输入
+      // 无参考图时，使用 defaultEndpoint (/images/generations) — 纯文本生图
+      // APImart 的 editEndpoint 也是 /images/generations，所以不影响 apimart 逻辑
       const { body: adjustedBody, endpoint } = adjustRequestForProfile(requestBody, profile, {
-        hasImage: false, // 始终使用 defaultEndpoint (/images/generations)
+        hasImage: hasRefImages, // 有参考图时使用 editEndpoint，确保 AI 精准识别图片
       });
 
       console.log('Submitting image task:', {
@@ -354,6 +376,8 @@ export async function POST(request: NextRequest) {
         endpoint,
         profile: profile.id,
         hasRefImages: hasRefImages,
+        hasImageField: !!adjustedBody.image,
+        inputFidelity: adjustedBody.input_fidelity,
         refImageTypes: accessibleReferenceImages.map(u => u.startsWith('data:') ? 'base64' : u.startsWith('http') ? 'url' : 'other'),
         strength: adjustedBody.strength || undefined,
       });
@@ -365,95 +389,192 @@ export async function POST(request: NextRequest) {
       const timeoutMs = isDirectMode ? 600000 : 30000; // 直接模式600s(兼容token link等慢速API), 异步模式30s
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-      // 构建 fetch 请求选项 - generate 路由始终使用 JSON 编码
-      // (multipart/form-data 仅用于 image-edit 路由的 /images/edits 端点)
-      let fetchHeaders: Record<string, string> = {
-        'Authorization': `Bearer ${currentApiKey}`,
-        'Content-Type': 'application/json',
+      // 构建 fetch 请求 - 支持两种编码:
+      // 1. JSON 编码 - image_urls 传递参考图（适用于 /images/generations 和支持 JSON 的 edits 代理）
+      // 2. multipart/form-data - image 字段上传文件（适用于原生 /images/edits 端点）
+      const isEditsEndpoint = endpoint === '/images/edits';
+      const hasImageField = !!adjustedBody.image;
+
+      // 辅助函数：解析提交响应
+      const parseSubmitResponse = async (resp: Response): Promise<{ taskId: string; usedModel: string; usedProviderId: string; directImageUrl?: string }> => {
+        if (!resp.ok) {
+          const errorText = await resp.text();
+          console.error('APIMart submit error:', resp.status, errorText);
+          
+          let errorMsg = `API 请求失败 (${resp.status})`;
+          let errorCode = '';
+          try {
+            const errorJson = JSON.parse(errorText);
+            if (errorJson.error?.message) {
+              errorMsg = errorJson.error.message;
+            }
+            if (errorJson.error?.code) {
+              errorCode = errorJson.error.code;
+            }
+          } catch { /* ignore */ }
+
+          // "ratio or price is not configured" → 标记为可重试错误，由外层自动切换模型
+          if (errorMsg.includes('ratio or price is not configured') || errorMsg.includes('ratio or price')) {
+            const retryErr = new Error(`当前模型暂不可用`);
+            (retryErr as Error & { retryable?: boolean }).retryable = true;
+            throw retryErr;
+          }
+          if (errorMsg.includes('model not found') || errorMsg.includes('Model not found') || errorCode === 'model_not_found') {
+            const retryErr = new Error(`模型不存在或已下线`);
+            (retryErr as Error & { retryable?: boolean }).retryable = true;
+            throw retryErr;
+          }
+          if (errorMsg.includes('Insufficient balance') || errorMsg.includes('insufficient')) {
+            throw new Error(`API 余额不足，请联系管理员充值`);
+          }
+          if (errorMsg.includes('Rate limit') || errorMsg.includes('rate_limit') || errorMsg.includes('Too many requests')) {
+            throw new Error(`请求过于频繁，请稍后再试`);
+          }
+          if (errorMsg.includes('Invalid API key') || errorMsg.includes('invalid api_key')) {
+            throw new Error(`API 密钥无效，请联系管理员检查配置`);
+          }
+          
+          throw new Error(errorMsg);
+        }
+
+        const submitResult = await resp.json();
+
+        // 使用兼容性层解析响应（自动识别直接返回 vs 异步轮询）
+        const parsed = parseResponseForProfile(submitResult as Record<string, unknown>, profile);
+
+        if (parsed.mode === 'direct' && parsed.directImageUrls.length > 0) {
+          console.log('Direct image response (no polling needed), profile:', profile.id);
+          return {
+            taskId: `direct_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            usedModel: currentModelConfig.modelId,
+            usedProviderId: currentProviderId,
+            directImageUrl: parsed.directImageUrls[0],
+          };
+        }
+
+        // 异步任务格式
+        if (parsed.taskIds.length > 0) {
+          const taskId = parsed.taskIds[0];
+          console.log('Got task_id:', taskId, 'profile:', profile.id);
+          return { taskId, usedModel: currentModelConfig.modelId, usedProviderId: currentProviderId };
+        }
+
+        console.error('No task_id or direct image in response:', submitResult);
+        throw new Error('未获取到任务ID或图片数据');
       };
-      let fetchBody: string | FormData;
 
-      // JSON 编码 - 参考图片通过 image_urls 字段传递
-      fetchBody = JSON.stringify(adjustedBody);
-
-      const submitResponse = await fetchWithV1Retry(
-        currentApiBaseUrl,
-        endpoint,
-        {
-          method: 'POST',
-          headers: fetchHeaders,
-          body: fetchBody,
-          signal: controller.signal,
-        }
-      );
-
-      clearTimeout(timeoutId);
-
-      if (!submitResponse.ok) {
-        const errorText = await submitResponse.text();
-        console.error('APIMart submit error:', submitResponse.status, errorText);
-        
-        let errorMsg = `API 请求失败 (${submitResponse.status})`;
-        let errorCode = '';
-        try {
-          const errorJson = JSON.parse(errorText);
-          if (errorJson.error?.message) {
-            errorMsg = errorJson.error.message;
+      // 辅助函数：构建 multipart/form-data
+      const buildMultipartBody = (): FormData => {
+        const formData = new FormData();
+        for (const [key, value] of Object.entries(adjustedBody)) {
+          if (value === undefined || value === null) continue;
+          if (key === 'image') {
+            // image 字段: base64 data URL 转换为 File 对象
+            const imgVal = String(value);
+            if (imgVal.startsWith('data:')) {
+              const match = imgVal.match(/^data:([^;]+);base64,(.+)$/);
+              if (match) {
+                const mimeType = match[1];
+                const base64Data = match[2];
+                const binaryData = Buffer.from(base64Data, 'base64');
+                const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
+                const file = new File([binaryData], `image.${ext}`, { type: mimeType });
+                formData.append('image', file);
+              }
+            } else {
+              // Plain base64
+              const binaryData = Buffer.from(imgVal, 'base64');
+              const file = new File([binaryData], 'image.png', { type: 'image/png' });
+              formData.append('image', file);
+            }
+          } else if (Array.isArray(value)) {
+            for (const item of value) {
+              formData.append(key, String(item));
+            }
+          } else {
+            formData.append(key, String(value));
           }
-          if (errorJson.error?.code) {
-            errorCode = errorJson.error.code;
+        }
+        return formData;
+      };
+
+      let submitResponse: Response;
+
+      if (isEditsEndpoint && hasImageField) {
+        // /images/edits + image 字段：先尝试 JSON（大多数代理支持），失败后降级到 multipart
+        submitResponse = await fetchWithV1Retry(
+          currentApiBaseUrl,
+          endpoint,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${currentApiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(adjustedBody),
+            signal: controller.signal,
           }
-        } catch { /* ignore */ }
+        );
 
-        // "ratio or price is not configured" → 标记为可重试错误，由外层自动切换模型
-        if (errorMsg.includes('ratio or price is not configured') || errorMsg.includes('ratio or price')) {
-          const retryErr = new Error(`当前模型暂不可用`);
-          (retryErr as Error & { retryable?: boolean }).retryable = true;
-          throw retryErr;
+        // 如果 JSON 请求失败且错误与 form-data 相关，用 multipart 重试
+        if (!submitResponse.ok) {
+          const errorText = await submitResponse.text();
+          const needsMultipart = errorText.includes('multipart') ||
+            errorText.includes('form-data') ||
+            errorText.includes('Content-Type') ||
+            errorText.includes('expected multipart') ||
+            errorText.includes('no file') ||
+            errorText.includes('file required') ||
+            errorText.includes('Missing image');
+
+          if (needsMultipart) {
+            console.info('[generate] JSON failed for edits endpoint, retrying with multipart form data...');
+            clearTimeout(timeoutId);
+
+            const multipartController = new AbortController();
+            const multipartTimeoutId = setTimeout(() => multipartController.abort(), timeoutMs);
+
+            submitResponse = await fetchWithV1Retry(
+              currentApiBaseUrl,
+              endpoint,
+              {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${currentApiKey}`,
+                },
+                body: buildMultipartBody(),
+                signal: multipartController.signal,
+              }
+            );
+
+            clearTimeout(multipartTimeoutId);
+          } else {
+            clearTimeout(timeoutId);
+          }
+        } else {
+          clearTimeout(timeoutId);
         }
-        if (errorMsg.includes('model not found') || errorMsg.includes('Model not found') || errorCode === 'model_not_found') {
-          const retryErr = new Error(`模型不存在或已下线`);
-          (retryErr as Error & { retryable?: boolean }).retryable = true;
-          throw retryErr;
-        }
-        if (errorMsg.includes('Insufficient balance') || errorMsg.includes('insufficient')) {
-          throw new Error(`API 余额不足，请联系管理员充值`);
-        }
-        if (errorMsg.includes('Rate limit') || errorMsg.includes('rate_limit') || errorMsg.includes('Too many requests')) {
-          throw new Error(`请求过于频繁，请稍后再试`);
-        }
-        if (errorMsg.includes('Invalid API key') || errorMsg.includes('invalid api_key')) {
-          throw new Error(`API 密钥无效，请联系管理员检查配置`);
-        }
-        
-        throw new Error(errorMsg);
+      } else {
+        // /images/generations 或无 image 字段：标准 JSON 编码
+        submitResponse = await fetchWithV1Retry(
+          currentApiBaseUrl,
+          endpoint,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${currentApiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(adjustedBody),
+            signal: controller.signal,
+          }
+        );
+
+        clearTimeout(timeoutId);
       }
 
-      const submitResult = await submitResponse.json();
-
-      // 使用兼容性层解析响应（自动识别直接返回 vs 异步轮询）
-      const parsed = parseResponseForProfile(submitResult as Record<string, unknown>, profile);
-
-      if (parsed.mode === 'direct' && parsed.directImageUrls.length > 0) {
-        console.log('Direct image response (no polling needed), profile:', profile.id);
-        return {
-          taskId: `direct_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          usedModel: currentModelConfig.modelId,
-          usedProviderId: currentProviderId,
-          directImageUrl: parsed.directImageUrls[0],
-        };
-      }
-
-      // 异步任务格式
-      if (parsed.taskIds.length > 0) {
-        const taskId = parsed.taskIds[0];
-        console.log('Got task_id:', taskId, 'profile:', profile.id);
-        return { taskId, usedModel: currentModelConfig.modelId, usedProviderId: currentProviderId };
-      }
-
-      console.error('No task_id or direct image in response:', submitResult);
-      throw new Error('未获取到任务ID或图片数据');
-    }
+      return parseSubmitResponse(submitResponse);
+    };
 
     const taskIds: string[] = [];
     const directImageUrls: string[] = [];
