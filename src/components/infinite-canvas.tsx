@@ -6818,227 +6818,245 @@ export function InfiniteCanvas({
           if (!editImg) return null;
           const imgOrigW = editImg.originalWidth || Math.round(editImg.width);
           const imgOrigH = editImg.originalHeight || Math.round(editImg.height);
+          const pos = getToolbarPosition();
 
           const svgTraceModes = [
-            { key: 'color' as const, label: '彩色矢量化', icon: <Palette size={14} />, desc: 'Sharp + VTracer', color: '#d4af37' },
-            { key: 'bw' as const, label: '黑白描摹', icon: <Contrast size={14} />, desc: 'ImageMagick + Potrace', color: '#9ca3af' },
-            { key: 'compress' as const, label: '图片压缩', icon: <Minimize2 size={14} />, desc: 'Sharp', color: '#60a5fa' },
-            { key: 'thumbnail' as const, label: '缩略图生成', icon: <Frame size={14} />, desc: 'Sharp', color: '#34d399' },
+            { key: 'color' as const, label: '彩色矢量化', icon: <Palette size={14} />, desc: 'Sharp + VTracer', accent: '#d4af37' },
+            { key: 'bw' as const, label: '黑白描摹', icon: <Contrast size={14} />, desc: 'ImageMagick + Potrace', accent: '#9ca3af' },
+            { key: 'compress' as const, label: '图片压缩', icon: <Minimize2 size={14} />, desc: 'Sharp', accent: '#60a5fa' },
+            { key: 'thumbnail' as const, label: '缩略图生成', icon: <Frame size={14} />, desc: 'Sharp', accent: '#34d399' },
           ];
+          const activeAccent = svgTraceModes.find(m => m.key === svgTraceMode)?.accent || '#d4af37';
 
           return (
-            <div className={panelBaseClass} style={{ minWidth: 340 }}>
-              {/* Title bar */}
-              <div className="flex items-center justify-between mb-3">
-                <span className={`text-sm font-semibold ${isMonochrome ? 'text-gray-800' : 'text-[#d4af37]'}`}>
-                  SVG智能描摹
-                </span>
-                <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>Esc 退出</span>
-              </div>
-
-              {/* Mode selector */}
-              <div className="grid grid-cols-2 gap-1.5 mb-3">
-                {svgTraceModes.map(m => (
-                  <button
-                    key={m.key}
-                    onClick={() => setSvgTraceMode(m.key)}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all text-left ${
-                      svgTraceMode === m.key
-                        ? isMonochrome
-                          ? 'border-[#d4af37] bg-[#d4af37]/10 text-[#d4af37]'
-                          : 'border-[#d4af37] bg-[#d4af37]/10 text-[#d4af37]'
-                        : isMonochrome
-                          ? 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
-                          : 'border-[#333] bg-[#1a1a1a] text-[#999] hover:border-[#444]'
-                    }`}
-                  >
-                    <span style={{ color: svgTraceMode === m.key ? m.color : undefined }}>{m.icon}</span>
-                    <div className="flex flex-col">
-                      <span className="text-xs font-medium leading-tight">{m.label}</span>
-                      <span className={`text-[10px] leading-tight ${isMonochrome ? 'text-gray-400' : 'text-[#555]'}`}>{m.desc}</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              {/* Source image info */}
-              <div className={`flex items-center gap-2 px-2 py-1.5 rounded-md mb-3 text-xs ${isMonochrome ? 'bg-gray-50 text-gray-500' : 'bg-[#111] text-[#666]'}`}>
-                <ImageIcon size={12} />
-                <span>原图 {imgOrigW}×{imgOrigH}</span>
-              </div>
-
-              {/* Mode-specific options */}
-              {svgTraceMode === 'color' && (
-                <div className="space-y-2 mb-3">
-                  <div className="flex items-center justify-between">
-                    <label className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#aaa]'}`}>颜色精度</label>
-                    <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-gray-800' : 'text-[#d4af37]'}`}>{svgTraceColorPrecision}bit</span>
-                  </div>
-                  <input type="range" min={2} max={8} step={1} value={svgTraceColorPrecision}
-                    onChange={e => setSvgTraceColorPrecision(Number(e.target.value))}
-                    className="w-full h-1 accent-[#d4af37] cursor-pointer" />
-                  <div className="flex items-center justify-between">
-                    <label className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#aaa]'}`}>去斑</label>
-                    <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-gray-800' : 'text-[#d4af37]'}`}>{svgTraceFilterSpeckle}px</span>
-                  </div>
-                  <input type="range" min={0} max={20} step={1} value={svgTraceFilterSpeckle}
-                    onChange={e => setSvgTraceFilterSpeckle(Number(e.target.value))}
-                    className="w-full h-1 accent-[#d4af37] cursor-pointer" />
-                  <div className="flex items-center justify-between">
-                    <label className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#aaa]'}`}>角点阈值</label>
-                    <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-gray-800' : 'text-[#d4af37]'}`}>{svgTraceCornerThreshold}</span>
-                  </div>
-                  <input type="range" min={0} max={5} step={0.5} value={svgTraceCornerThreshold}
-                    onChange={e => setSvgTraceCornerThreshold(Number(e.target.value))}
-                    className="w-full h-1 accent-[#d4af37] cursor-pointer" />
-                  <div className="flex items-center justify-between">
-                    <label className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#aaa]'}`}>长度阈值</label>
-                    <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-gray-800' : 'text-[#d4af37]'}`}>{svgTraceLengthThreshold}</span>
-                  </div>
-                  <input type="range" min={1} max={20} step={1} value={svgTraceLengthThreshold}
-                    onChange={e => setSvgTraceLengthThreshold(Number(e.target.value))}
-                    className="w-full h-1 accent-[#d4af37] cursor-pointer" />
+            <div
+              className="absolute z-50 pointer-events-auto"
+              data-toolbar="svg-trace"
+              style={{ left: pos.x, top: pos.y, transform: 'translate(-50%, -100%)' }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onWheel={(e) => e.stopPropagation()}
+            >
+              <div
+                className="flex flex-col items-stretch gap-2.5 p-3 min-w-[280px] max-w-[320px] rounded-xl border shadow-2xl"
+                style={{ background: '#1a1a1a', borderColor: `${activeAccent}40`, borderWidth: '1px' }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                {/* Header */}
+                <div className="flex items-center gap-2">
+                  <PenTool size={14} style={{ color: activeAccent }} />
+                  <span className="text-xs font-semibold" style={{ color: activeAccent }}>SVG智能描摹</span>
+                  <span className="text-xs ml-auto text-gray-500">Esc 退出</span>
                 </div>
-              )}
 
-              {svgTraceMode === 'bw' && (
-                <div className="space-y-2 mb-3">
-                  <div className="flex items-center justify-between">
-                    <label className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#aaa]'}`}>二值化阈值</label>
-                    <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-gray-800' : 'text-[#d4af37]'}`}>{svgTraceBwThreshold}%</span>
-                  </div>
-                  <input type="range" min={10} max={90} step={5} value={svgTraceBwThreshold}
-                    onChange={e => setSvgTraceBwThreshold(Number(e.target.value))}
-                    className="w-full h-1 accent-[#9ca3af] cursor-pointer" />
-                  <div className="flex items-center gap-2">
+                {/* Mode selector */}
+                <div className="grid grid-cols-2 gap-1.5">
+                  {svgTraceModes.map(m => (
                     <button
-                      onClick={() => setSvgTraceBwInvert(!svgTraceBwInvert)}
-                      className={`px-2.5 py-1 rounded text-xs border transition-all ${
-                        svgTraceBwInvert
-                          ? isMonochrome ? 'border-gray-600 bg-gray-100 text-gray-800' : 'border-[#555] bg-[#333] text-[#ccc]'
-                          : isMonochrome ? 'border-gray-200 bg-white text-gray-400' : 'border-[#333] bg-[#1a1a1a] text-[#555]'
-                      }`}
+                      key={m.key}
+                      onClick={(e) => { e.stopPropagation(); setSvgTraceMode(m.key); }}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border transition-all text-left"
+                      style={{
+                        background: svgTraceMode === m.key ? `${m.accent}15` : '#111',
+                        borderColor: svgTraceMode === m.key ? m.accent : '#333',
+                        color: svgTraceMode === m.key ? m.accent : '#777',
+                      }}
                     >
-                      反色输出
+                      <span style={{ color: svgTraceMode === m.key ? m.accent : '#555' }}>{m.icon}</span>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-[11px] font-medium leading-tight truncate">{m.label}</span>
+                        <span className="text-[9px] leading-tight text-gray-600 truncate">{m.desc}</span>
+                      </div>
                     </button>
-                    <span className={`text-[10px] ${isMonochrome ? 'text-gray-400' : 'text-[#555]'}`}>
-                      {svgTraceBwInvert ? '白底黑线→黑底白线' : '黑线白底'}
-                    </span>
-                  </div>
+                  ))}
                 </div>
-              )}
 
-              {svgTraceMode === 'compress' && (
-                <div className="space-y-2 mb-3">
-                  <div className="flex items-center justify-between">
-                    <label className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#aaa]'}`}>压缩质量</label>
-                    <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-gray-800' : 'text-[#60a5fa]'}`}>{svgTraceCompressQuality}%</span>
-                  </div>
-                  <input type="range" min={10} max={100} step={5} value={svgTraceCompressQuality}
-                    onChange={e => setSvgTraceCompressQuality(Number(e.target.value))}
-                    className="w-full h-1 accent-[#60a5fa] cursor-pointer" />
-                  <div className="flex items-center gap-1.5">
-                    {(['webp', 'jpeg', 'png'] as const).map(fmt => (
-                      <button key={fmt}
-                        onClick={() => setSvgTraceCompressFormat(fmt)}
-                        className={`px-2.5 py-1 rounded text-xs border transition-all uppercase ${
-                          svgTraceCompressFormat === fmt
-                            ? isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-600' : 'border-[#60a5fa] bg-[#60a5fa]/10 text-[#60a5fa]'
-                            : isMonochrome ? 'border-gray-200 bg-white text-gray-400' : 'border-[#333] bg-[#1a1a1a] text-[#555]'
-                        }`}
-                      >
-                        {fmt}
-                      </button>
-                    ))}
-                  </div>
+                {/* Source image info */}
+                <div className="flex items-center gap-2 px-2 py-1.5 rounded-md text-xs" style={{ background: '#111', color: '#555' }}>
+                  <ImageIcon size={12} />
+                  <span>原图 {imgOrigW}×{imgOrigH}</span>
                 </div>
-              )}
 
-              {svgTraceMode === 'thumbnail' && (
-                <div className="space-y-2 mb-3">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#aaa]'}`}>宽度</label>
-                      <input type="number" min={16} max={4096} value={svgTraceThumbWidth}
-                        onChange={e => setSvgTraceThumbWidth(Math.max(16, Number(e.target.value)))}
-                        className={`w-full mt-1 px-2 py-1 rounded text-xs tabular-nums border ${
-                          isMonochrome ? 'bg-white border-gray-200 text-gray-800' : 'bg-[#111] border-[#333] text-[#ccc]'
-                        }`} />
+                {/* Mode-specific options */}
+                {svgTraceMode === 'color' && (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-[#aaa]">颜色精度</label>
+                      <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceColorPrecision}bit</span>
                     </div>
-                    <div>
-                      <label className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#aaa]'}`}>高度</label>
-                      <input type="number" min={16} max={4096} value={svgTraceThumbHeight}
-                        onChange={e => setSvgTraceThumbHeight(Math.max(16, Number(e.target.value)))}
-                        className={`w-full mt-1 px-2 py-1 rounded text-xs tabular-nums border ${
-                          isMonochrome ? 'bg-white border-gray-200 text-gray-800' : 'bg-[#111] border-[#333] text-[#ccc]'
-                        }`} />
+                    <input type="range" min={2} max={8} step={1} value={svgTraceColorPrecision}
+                      onChange={e => setSvgTraceColorPrecision(Number(e.target.value))}
+                      onClick={e => e.stopPropagation()}
+                      className="w-full h-1 accent-[#d4af37] cursor-pointer" />
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-[#aaa]">去斑</label>
+                      <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceFilterSpeckle}px</span>
                     </div>
+                    <input type="range" min={0} max={20} step={1} value={svgTraceFilterSpeckle}
+                      onChange={e => setSvgTraceFilterSpeckle(Number(e.target.value))}
+                      onClick={e => e.stopPropagation()}
+                      className="w-full h-1 accent-[#d4af37] cursor-pointer" />
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-[#aaa]">角点阈值</label>
+                      <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceCornerThreshold}</span>
+                    </div>
+                    <input type="range" min={0} max={5} step={0.5} value={svgTraceCornerThreshold}
+                      onChange={e => setSvgTraceCornerThreshold(Number(e.target.value))}
+                      onClick={e => e.stopPropagation()}
+                      className="w-full h-1 accent-[#d4af37] cursor-pointer" />
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-[#aaa]">长度阈值</label>
+                      <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceLengthThreshold}</span>
+                    </div>
+                    <input type="range" min={1} max={20} step={1} value={svgTraceLengthThreshold}
+                      onChange={e => setSvgTraceLengthThreshold(Number(e.target.value))}
+                      onClick={e => e.stopPropagation()}
+                      className="w-full h-1 accent-[#d4af37] cursor-pointer" />
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    {(['cover', 'contain', 'fill', 'inside'] as const).map(fit => (
-                      <button key={fit}
-                        onClick={() => setSvgTraceThumbFit(fit)}
-                        className={`px-2 py-1 rounded text-xs border transition-all ${
-                          svgTraceThumbFit === fit
-                            ? isMonochrome ? 'border-emerald-400 bg-emerald-50 text-emerald-600' : 'border-[#34d399] bg-[#34d399]/10 text-[#34d399]'
-                            : isMonochrome ? 'border-gray-200 bg-white text-gray-400' : 'border-[#333] bg-[#1a1a1a] text-[#555]'
-                        }`}
-                      >
-                        {fit === 'cover' ? '覆盖' : fit === 'contain' ? '包含' : fit === 'fill' ? '填充' : '适应'}
-                      </button>
-                    ))}
-                  </div>
-                  {/* Quick size presets */}
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {[
-                      { label: '128', w: 128, h: 128 },
-                      { label: '256', w: 256, h: 256 },
-                      { label: '512', w: 512, h: 512 },
-                      { label: '1024', w: 1024, h: 1024 },
-                      { label: '同比例', w: 0, h: 0 },
-                    ].map(p => (
-                      <button key={p.label}
-                        onClick={() => {
-                          if (p.w === 0) {
-                            const scale = Math.min(256 / imgOrigW, 256 / imgOrigH, 1);
-                            setSvgTraceThumbWidth(Math.round(imgOrigW * scale));
-                            setSvgTraceThumbHeight(Math.round(imgOrigH * scale));
-                          } else {
-                            setSvgTraceThumbWidth(p.w);
-                            setSvgTraceThumbHeight(p.h);
-                          }
+                )}
+
+                {svgTraceMode === 'bw' && (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-[#aaa]">二值化阈值</label>
+                      <span className="text-xs tabular-nums font-mono text-[#9ca3af]">{svgTraceBwThreshold}%</span>
+                    </div>
+                    <input type="range" min={10} max={90} step={5} value={svgTraceBwThreshold}
+                      onChange={e => setSvgTraceBwThreshold(Number(e.target.value))}
+                      onClick={e => e.stopPropagation()}
+                      className="w-full h-1 accent-[#9ca3af] cursor-pointer" />
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setSvgTraceBwInvert(!svgTraceBwInvert); }}
+                        className="px-2.5 py-1 rounded text-xs border transition-all"
+                        style={{
+                          background: svgTraceBwInvert ? '#333' : '#111',
+                          borderColor: svgTraceBwInvert ? '#555' : '#333',
+                          color: svgTraceBwInvert ? '#ccc' : '#555',
                         }}
-                        className={`px-2 py-0.5 rounded text-[10px] border transition-all ${
-                          isMonochrome ? 'border-gray-200 bg-white text-gray-500 hover:border-gray-300' : 'border-[#333] bg-[#111] text-[#666] hover:border-[#444]'
-                        }`}
                       >
-                        {p.label}
+                        反色输出
                       </button>
-                    ))}
+                      <span className="text-[10px] text-gray-600">
+                        {svgTraceBwInvert ? '白底黑线→黑底白线' : '黑线白底'}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Action buttons */}
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleSvgTraceConfirm}
-                  disabled={isEditProcessing}
-                  className={`flex-1 py-2 rounded-lg text-xs font-semibold transition-all ${
-                    isEditProcessing
-                      ? 'bg-[#333] text-[#555] cursor-not-allowed'
-                      : svgTraceMode === 'color'
-                        ? 'bg-[#d4af37] text-black hover:bg-[#e5c047] active:scale-[0.98]'
-                        : svgTraceMode === 'bw'
-                          ? isMonochrome ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-[#555] text-white hover:bg-[#666]'
-                          : svgTraceMode === 'compress'
-                            ? 'bg-[#60a5fa] text-black hover:bg-[#93bbfd] active:scale-[0.98]'
-                            : 'bg-[#34d399] text-black hover:bg-[#6ee7b7] active:scale-[0.98]'
-                  }`}
-                >
-                  {isEditProcessing ? '处理中...' : svgTraceModes.find(m => m.key === svgTraceMode)?.label || '开始'}
-                </button>
-                <button onClick={exitEditMode} className={panelCancelBtnClass}>取消</button>
+                {svgTraceMode === 'compress' && (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-[#aaa]">压缩质量</label>
+                      <span className="text-xs tabular-nums font-mono text-[#60a5fa]">{svgTraceCompressQuality}%</span>
+                    </div>
+                    <input type="range" min={10} max={100} step={5} value={svgTraceCompressQuality}
+                      onChange={e => setSvgTraceCompressQuality(Number(e.target.value))}
+                      onClick={e => e.stopPropagation()}
+                      className="w-full h-1 accent-[#60a5fa] cursor-pointer" />
+                    <div className="flex items-center gap-1.5">
+                      {(['webp', 'jpeg', 'png'] as const).map(fmt => (
+                        <button key={fmt}
+                          onClick={(e) => { e.stopPropagation(); setSvgTraceCompressFormat(fmt); }}
+                          className="px-2.5 py-1 rounded text-xs border transition-all uppercase"
+                          style={{
+                            background: svgTraceCompressFormat === fmt ? '#60a5fa15' : '#111',
+                            borderColor: svgTraceCompressFormat === fmt ? '#60a5fa' : '#333',
+                            color: svgTraceCompressFormat === fmt ? '#60a5fa' : '#555',
+                          }}
+                        >
+                          {fmt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {svgTraceMode === 'thumbnail' && (
+                  <div className="flex flex-col gap-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-xs text-[#aaa]">宽度</label>
+                        <input type="number" min={16} max={4096} value={svgTraceThumbWidth}
+                          onChange={e => setSvgTraceThumbWidth(Math.max(16, Number(e.target.value)))}
+                          onClick={e => e.stopPropagation()}
+                          className="w-full mt-1 px-2 py-1 rounded text-xs tabular-nums border bg-[#111] border-[#333] text-[#ccc]" />
+                      </div>
+                      <div>
+                        <label className="text-xs text-[#aaa]">高度</label>
+                        <input type="number" min={16} max={4096} value={svgTraceThumbHeight}
+                          onChange={e => setSvgTraceThumbHeight(Math.max(16, Number(e.target.value)))}
+                          onClick={e => e.stopPropagation()}
+                          className="w-full mt-1 px-2 py-1 rounded text-xs tabular-nums border bg-[#111] border-[#333] text-[#ccc]" />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {(['cover', 'contain', 'fill', 'inside'] as const).map(fit => (
+                        <button key={fit}
+                          onClick={(e) => { e.stopPropagation(); setSvgTraceThumbFit(fit); }}
+                          className="px-2 py-1 rounded text-xs border transition-all"
+                          style={{
+                            background: svgTraceThumbFit === fit ? '#34d39915' : '#111',
+                            borderColor: svgTraceThumbFit === fit ? '#34d399' : '#333',
+                            color: svgTraceThumbFit === fit ? '#34d399' : '#555',
+                          }}
+                        >
+                          {fit === 'cover' ? '覆盖' : fit === 'contain' ? '包含' : fit === 'fill' ? '填充' : '适应'}
+                        </button>
+                      ))}
+                    </div>
+                    {/* Quick size presets */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {[
+                        { label: '128', w: 128, h: 128 },
+                        { label: '256', w: 256, h: 256 },
+                        { label: '512', w: 512, h: 512 },
+                        { label: '1024', w: 1024, h: 1024 },
+                        { label: '同比例', w: 0, h: 0 },
+                      ].map(p => (
+                        <button key={p.label}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (p.w === 0) {
+                              const scale = Math.min(256 / imgOrigW, 256 / imgOrigH, 1);
+                              setSvgTraceThumbWidth(Math.round(imgOrigW * scale));
+                              setSvgTraceThumbHeight(Math.round(imgOrigH * scale));
+                            } else {
+                              setSvgTraceThumbWidth(p.w);
+                              setSvgTraceThumbHeight(p.h);
+                            }
+                          }}
+                          className="px-2 py-0.5 rounded text-[10px] border transition-all"
+                          style={{ borderColor: '#333', background: '#111', color: '#666' }}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Action buttons */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleSvgTraceConfirm(); }}
+                    disabled={isEditProcessing}
+                    className="flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-[0.98]"
+                    style={{
+                      background: isEditProcessing ? '#333' : activeAccent,
+                      color: isEditProcessing ? '#555' : '#000',
+                      cursor: isEditProcessing ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {isEditProcessing ? '处理中...' : svgTraceModes.find(m => m.key === svgTraceMode)?.label || '开始'}
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); exitEditMode(); }}
+                    className="px-3 py-1.5 rounded-lg text-xs border transition-all"
+                    style={{ background: '#252520', color: '#999', borderColor: '#444' }}
+                  >
+                    取消
+                  </button>
+                </div>
               </div>
             </div>
           );
