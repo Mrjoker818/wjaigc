@@ -3056,8 +3056,8 @@ export function InfiniteCanvas({
             }
           }
           setCanvasGenModels(prev => {
-            const existingIds = new Set(prev.map(m => m.id));
-            const newOnes = userModels.filter(m => !existingIds.has(m.id));
+            const existingKeys = new Set(prev.map(m => `${m.providerId}::${m.id}`));
+            const newOnes = userModels.filter(m => !existingKeys.has(`${m.providerId}::${m.id}`));
             return [...prev, ...newOnes];
           });
         }
@@ -6076,7 +6076,7 @@ export function InfiniteCanvas({
             const containerH = containerMaxY - containerMinY;
 
             // Find current model display name
-            const currentModelObj = canvasGenModels.find(m => m.id === group.toolbar.model);
+            const currentModelObj = canvasGenModels.find(m => m.id === group.toolbar.model && m.providerId === (group.toolbar.providerId || ''));
             const modelDisplayName = currentModelObj ? `${getModelDisplayName(currentModelObj.id)} · 来自 ${currentModelObj.providerName}` : (group.toolbar.model ? getModelDisplayName(group.toolbar.model) : '选择模型');
 
             return (
@@ -8684,7 +8684,10 @@ export function InfiniteCanvas({
                             setOpenModelDropdownGroupId(openModelDropdownGroupId === `hex-${hcg.id}` ? null : `hex-${hcg.id}`);
                           }}
                         >
-                          {hcg.toolbar.model ? `${getModelDisplayName(hcg.toolbar.model)}` : '选择模型'}
+                          {(() => {
+                            const hcgModelObj = models.find(m => m.id === hcg.toolbar.model && m.providerId === (hcg.toolbar.providerId || ''));
+                            return hcgModelObj ? `${getModelDisplayName(hcgModelObj.id)} · 来自 ${hcgModelObj.providerName}` : (hcg.toolbar.model ? getModelDisplayName(hcg.toolbar.model) : '选择模型');
+                          })()}
                           <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
                         </button>
                         {openModelDropdownGroupId === `hex-${hcg.id}` && (
