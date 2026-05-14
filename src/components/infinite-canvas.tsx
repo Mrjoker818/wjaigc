@@ -2445,46 +2445,79 @@ export function InfiniteCanvas({
     let calculatedStrength: number | undefined;
 
     if (group.type === 'reference' && group.refImages.length > 0) {
-      // 参考图组：构建英文提示词，明确告诉模型保留参考图的哪些方面
+      // 参考图组：与图生图一致的6类别参考逻辑
       const categoryEnMap: Record<string, string> = {
-        '风格': 'artistic style and visual aesthetics',
-        '构图': 'composition and layout structure',
-        '场景': 'scene and environment setting',
-        '色彩': 'color palette and tone',
-        '主体': 'main subject and focal point',
-        '细节': 'fine details and textures',
+        'style': 'artistic style and visual aesthetics',
+        'composition': 'composition and layout structure',
+        'scene': 'scene and environment setting',
+        'color': 'color palette and tone',
+        'subject': 'main subject and focal point',
+        'detail': 'fine details and textures',
       };
 
-      // 收集所有激活的类别及其最大强度
-      const activeCats: { en: string; strength: number }[] = [];
+      // 收集所有激活的类别及其最大强度（跨多张参考图取最大值）
+      const catStrengthMap: Record<string, number> = {};
       for (const r of group.refImages) {
         const cats = group.sourceCategories[r.imageId] || [];
         const strengths = group.sourceStrengths[r.imageId] || {};
         for (const c of cats) {
           const s = strengths[c] || 50;
-          const en = categoryEnMap[c] || c;
-          if (s > 0 && !activeCats.find(a => a.en === en)) {
-            activeCats.push({ en, strength: s });
+          if (s > 0) {
+            catStrengthMap[c] = Math.max(catStrengthMap[c] || 0, s);
           }
         }
       }
 
-      // 构建 prompt
-      if (activeCats.length > 0) {
-        const preserveParts = activeCats.filter(a => a.strength > 0).map(a => a.en).join(', ');
-        const preserveRatio = activeCats.reduce((sum, a) => sum + a.strength, 0) / (activeCats.length * 100);
-        const img2imgStrength = Math.round((0.25 + preserveRatio * 0.6) * 100) / 100;
-        calculatedStrength = img2imgStrength;
+      const activeKeys = Object.keys(catStrengthMap);
+      const keyword = fullPrompt.trim();
 
-        const keyword = fullPrompt.trim();
+      if (activeKeys.length > 0) {
+        // 收集保留方面（强度>0 表示要保留参考图的该方面）
+        const preserveAspects = activeKeys
+          .map(cat => {
+            const s = catStrengthMap[cat];
+            const desc = categoryEnMap[cat] || cat;
+            if (s >= 80) return `strictly preserve the ${desc} of the reference image(s)`;
+            if (s >= 50) return `maintain the ${desc} of the reference image(s)`;
+            if (s >= 20) return `subtly reference the ${desc} of the reference image(s)`;
+            return `lightly hint at the ${desc} of the reference image(s)`;
+          });
+
+        // 收集未激活的类别（可以自由改变）
+        const freeAspects = Object.keys(categoryEnMap)
+          .filter(cat => !catStrengthMap[cat] || catStrengthMap[cat] === 0)
+          .map(cat => categoryEnMap[cat]);
+
+        // 构建完整提示词
         if (keyword) {
-          fullPrompt = `[ref] Preserve the ${preserveParts} from the reference image(s). Then, freely reimagine and create: ${keyword}`;
+          fullPrompt = `Create an image of: ${keyword}.`;
+          if (preserveAspects.length > 0) {
+            fullPrompt += ` While creating this new image, ${preserveAspects.join(', ')}.`;
+          }
+          if (freeAspects.length > 0) {
+            fullPrompt += ` Feel free to reimagine the ${freeAspects.join(', ')}.`;
+          }
         } else {
-          fullPrompt = `[ref] Preserve the ${preserveParts} from the reference image(s), and create a new variation inspired by these aspects.`;
+          fullPrompt = 'Generate a creative variation of the reference image(s).';
+          if (preserveAspects.length > 0) {
+            fullPrompt += ` Keep the ${preserveAspects.join(', ')}.`;
+          }
+          if (freeAspects.length > 0) {
+            fullPrompt += ` Creatively transform the ${freeAspects.join(', ')}.`;
+          }
         }
+
+        // 显式告诉模型使用参考图
+        fullPrompt = `[ref] Use the provided reference image(s) as the base. ${fullPrompt}`;
+
+        // strength 计算：保留方面多/强 → strength 低（更接近原图）
+        const totalPreserveScore = activeKeys.reduce((sum, cat) => sum + catStrengthMap[cat], 0);
+        const maxScore = activeKeys.length * 100;
+        const preserveRatio = totalPreserveScore / maxScore;
+        // 0.25 (完全自由) ~ 0.85 (高度保留)
+        calculatedStrength = Math.round((0.85 - preserveRatio * 0.6) * 100) / 100;
       } else {
         // 无激活类别，仅作为参考图
-        const keyword = fullPrompt.trim();
         if (keyword) {
           fullPrompt = `[ref] Using the reference image(s) as visual context, create: ${keyword}`;
         }
