@@ -30,6 +30,7 @@ src/
 │       ├── vision-prompt/route.ts  # 图片识词 API (SSE流+JSON双模式)
 │       ├── poll-3d-task/route.ts   # 3D 模型任务轮询 API
 │       ├── segment-elements/route.ts  # 元素分层 API (支持管理员配置的分层模型)
+│       ├── edit/route.ts             # 语言修图 API (OpenAI images.edit，自然语言描述修改图片)
 │       ├── upscayl/route.ts        # [旧] 无损放大 API (向后兼容)
 │       ├── image/
 │       │   ├── health/route.ts     # 本地图像工具健康检测 API
@@ -44,6 +45,7 @@ src/
 │   ├── infinite-canvas.tsx         # 无限画布组件
 │   ├── chat-panel.tsx              # AI 聊天面板
 │   ├── image-preview.tsx           # 图片预览组件
+│   ├── image-editor.tsx             # 语言修图编辑器组件 (自然语言描述修改图片)
 │   ├── model-viewer-3d.tsx         # 3D 模型预览组件
 │   ├── image-editor/
 │   │   ├── ImageEditPanel.tsx      # 擦除/蒙版修图浮窗面板 (黑金UI)
@@ -211,6 +213,33 @@ scripts/
   - GET `/api/image/health` - 健康检测
 - **配置**: 通过环境变量控制 (LOCAL_AI_ENABLED, IOPAINT_BASE_URL, UPSCAYL_MODELS_DIR 等)
 - **启动脚本**: `scripts/start-iopaint-lama.sh`
+
+### 11. 语言修图 (image-editor.tsx + api/edit)
+
+基于自然语言描述的图片编辑功能，使用 OpenAI images.edit API，用户无需手动绘制蒙版，只需描述想要的修改即可。
+
+- **入口**:
+  - 无限画布右键菜单"语言修图"
+  - 无限画布底部工具栏"语言修图"按钮
+  - 图片预览浮窗"语言修图"按钮
+- **ImageEditor 组件**:
+  - 黑金配色浮动面板，显示原始图片预览
+  - 自然语言输入框描述修改意图
+  - 尺寸选择 (1024/1536/2048)
+  - 透明背景选项
+  - 加载/保存状态管理
+- **API 接口**:
+  - POST `/api/edit` - 语言修图 (multipart form: image + prompt + size + background)
+  - 使用 openai SDK 调用 images.edit
+  - 支持 base64 和 URL 格式图片输入
+  - 自动查找服务器端配置的图像模型 API
+- **选择模式**:
+  - 点击"语言修图"后进入选择模式 (langEditMode='selecting')
+  - 顶部显示提示横幅"点击图片进行语言修图"
+  - 点击图片后打开编辑器，ESC取消选择
+- **结果处理**:
+  - 编辑完成后替换原图（URL和prompt更新）
+  - 编辑结果自动保存到画布
 
 ## 构建和测试命令
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Download, Copy, X, ZoomIn, ZoomOut, Check, FileImage, FileCode, Loader2, FileJson, Box, Eye, RotateCcw } from 'lucide-react';
+import { Download, Copy, X, ZoomIn, ZoomOut, Check, FileImage, FileCode, Loader2, FileJson, Box, Eye, RotateCcw, Pencil } from 'lucide-react';
 import { exportAsPSD } from '@/lib/psd-export';
 import { downloadSVG } from '@/lib/svg-export';
 import type { CanvasImage } from './infinite-canvas';
@@ -13,9 +13,10 @@ interface ImagePreviewProps {
   image: CanvasImage | null;
   onClose: () => void;
   themeStyle?: 'gold' | 'monochrome';
+  onEditImage?: (image: CanvasImage) => void;
 }
 
-export function ImagePreview({ image, onClose, themeStyle = 'gold' }: ImagePreviewProps) {
+export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage }: ImagePreviewProps) {
   const [zoom, setZoom] = useState(1);
   const [copied, setCopied] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -450,6 +451,16 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold' }: ImagePrevi
               {copied ? <Check className={`h-3 w-3 ${accentColor}`} /> : <Copy className="h-3 w-3" />}
               {copied ? '已复制' : '复制链接'}
             </button>
+
+            {onEditImage && image && (
+              <button
+                onClick={() => onEditImage(image)}
+                className={`flex items-center gap-1 px-2.5 py-1 text-xs ${isMonochrome ? 'text-yellow-700 hover:bg-yellow-50' : 'text-[#d4af37] hover:bg-[#d4af37]/10'} rounded-lg transition-all`}
+              >
+                <Pencil className="h-3 w-3" />
+                语言修图
+              </button>
+            )}
 
             <div className={`h-4 w-px ${borderColor}`} />
 
