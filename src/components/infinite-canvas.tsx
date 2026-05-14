@@ -2397,7 +2397,11 @@ export function InfiniteCanvas({
   /** 处理生成组的生成请求 */
   const handleGroupGenerate = useCallback(async (group: CanvasGenGroup) => {
     const toolbar = group.toolbar;
-    if (!toolbar.prompt.trim()) return;
+    console.log('[handleGroupGenerate] called, groupId:', group.id, 'type:', group.type, 'model:', toolbar.model, 'prompt:', toolbar.prompt?.substring(0, 50), 'refImages:', group.refImages.length);
+    if (!toolbar.prompt.trim()) {
+      console.log('[handleGroupGenerate] prompt is empty, returning');
+      return;
+    }
 
     // 计算结果框尺寸（根据用户选择的比例和模型尺寸）
     const [arW, arH] = toolbar.aspectRatio.split(':').map(Number);
@@ -2504,7 +2508,9 @@ export function InfiniteCanvas({
     try {
       const model = toolbar.model;
       const providerId = toolbar.providerId;
+      console.log('[handleGroupGenerate] attempting API call, model:', model, 'providerId:', providerId);
       if (!model) {
+        console.log('[handleGroupGenerate] model is empty, showing error');
         setGenGroups(prev => prev.map(g => {
           if (g.id !== group.id) return g;
           return { ...g, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: '请先选择模型' } };
@@ -2529,6 +2535,7 @@ export function InfiniteCanvas({
         }),
       });
       const data = await res.json();
+      console.log('[handleGroupGenerate] API response:', data.success, 'mode:', data.mode, 'error:', data.error, 'taskIds:', data.taskIds);
 
       // 检查 API 错误
       if (data.error) {
@@ -2563,8 +2570,8 @@ export function InfiniteCanvas({
         const srcRightEdge = srcImgs.length > 0 ? Math.max(...srcImgs.map(img => img.x + img.width)) : 0;
         const srcCenterY = srcImgs.length > 0 ? srcImgs.reduce((s, img) => s + img.y + img.height / 2, 0) / srcImgs.length : 0;
         const resultFrameRight = srcRightEdge + 80 + Math.max(phWidth, 420);
-        // Parse actual pixel dimensions from toolbar size string (e.g. "1536x1024")
-        const actualSize = toolbar.size ? toolbar.size.split('x').map(Number) : [phWidth, phHeight];
+        // Parse actual pixel dimensions from toolbar size string (e.g. "1536×1024")
+        const actualSize = toolbar.size ? toolbar.size.replace(/×/g, 'x').split('x').map(Number) : [phWidth, phHeight];
         const actualW = actualSize[0] || phWidth;
         const actualH = actualSize[1] || phHeight;
         const newImages = savedUrls.map((url: string, i: number) => ({
@@ -2655,8 +2662,8 @@ export function InfiniteCanvas({
                 const srcRightEdge = srcImgs.length > 0 ? Math.max(...srcImgs.map(img => img.x + img.width)) : 0;
                 const srcCenterY = srcImgs.length > 0 ? srcImgs.reduce((s, img) => s + img.y + img.height / 2, 0) / srcImgs.length : 0;
                 const resultFrameRight = srcRightEdge + 80 + Math.max(phWidth, 420);
-                // Parse actual pixel dimensions from toolbar size string (e.g. "1536x1024")
-                const actualSize = toolbar.size ? toolbar.size.split('x').map(Number) : [phWidth, phHeight];
+                // Parse actual pixel dimensions from toolbar size string (e.g. "1536×1024")
+                const actualSize = toolbar.size ? toolbar.size.replace(/×/g, 'x').split('x').map(Number) : [phWidth, phHeight];
                 const actualW = actualSize[0] || phWidth;
                 const actualH = actualSize[1] || phHeight;
                 const resultImages = savedUrls.map((url: string, i: number) => ({
@@ -2704,9 +2711,10 @@ export function InfiniteCanvas({
       }
     } catch (error) {
       // 网络错误，重置组状态
+      console.error('[handleGroupGenerate] error:', error);
       setGenGroups(prev => prev.map(g => {
         if (g.id !== group.id) return g;
-        return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0 } };
+        return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: `生成失败: ${error instanceof Error ? error.message : String(error)}` } };
       }));
     }
   }, [getCurrentModel, onImagesChange]);
@@ -2714,8 +2722,12 @@ export function InfiniteCanvas({
   // handleGenGroupGenerate: 通过groupId查找组并调用handleGroupGenerate
   const handleGenGroupGenerate = useCallback((groupId: string) => {
     const group = genGroupsRef.current.find(g => g.id === groupId);
+    console.log('[handleGenGroupGenerate] groupId:', groupId, 'group found:', !!group, 'total groups:', genGroupsRef.current.length);
     if (group) {
+      console.log('[handleGenGroupGenerate] group toolbar:', JSON.stringify(group.toolbar).substring(0, 200));
       handleGroupGenerate(group);
+    } else {
+      console.error('[handleGenGroupGenerate] group not found in ref! Current groups:', genGroupsRef.current.map(g => g.id));
     }
   }, [handleGroupGenerate]);
 

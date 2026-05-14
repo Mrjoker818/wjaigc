@@ -538,8 +538,8 @@ function CanvasApp() {
           } catch {}
 
           let imgW = 1024, imgH = 1024;
-          if (params.size?.includes('x')) {
-            const [sw, sh] = params.size.split('x');
+          if (params.size?.includes('x') || params.size?.includes('×')) {
+            const [sw, sh] = params.size.replace(/×/g, 'x').split('x');
             imgW = parseInt(sw) || 1024;
             imgH = parseInt(sh) || 1024;
           }
@@ -754,8 +754,8 @@ function CanvasApp() {
           const getDisplaySize = (size: string) => {
             let originalWidth = 1024;
             let originalHeight = 1024;
-            if (size && size.includes('x')) {
-              const parts = size.split('x');
+            if (size && (size.includes('x') || size.includes('×'))) {
+              const parts = size.replace(/×/g, 'x').split('x');
               originalWidth = parseInt(parts[0]) || 1024;
               originalHeight = parseInt(parts[1]) || 1024;
             }
@@ -845,8 +845,8 @@ function CanvasApp() {
         const getDisplaySize = (size: string) => {
           let originalWidth = 1024;
           let originalHeight = 1024;
-          if (size && size.includes('x')) {
-            const parts = size.split('x');
+          if (size && (size.includes('x') || size.includes('×'))) {
+            const parts = size.replace(/×/g, 'x').split('x');
             originalWidth = parseInt(parts[0]) || 1024;
             originalHeight = parseInt(parts[1]) || 1024;
           }
