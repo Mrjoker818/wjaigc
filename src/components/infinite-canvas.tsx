@@ -5901,27 +5901,35 @@ export function InfiniteCanvas({
                     {/* Per-image category sliders (reference group only) - BELOW image */}
                     {isRef && (
                       <div
-                        className="pointer-events-auto"
-                        style={{ width: img.width }}
+                        className="pointer-events-auto mt-1 rounded-lg px-2 py-1.5"
+                        style={{
+                          background: isMonochrome ? 'rgba(255,255,255,0.92)' : 'rgba(26,26,26,0.92)',
+                          border: isMonochrome ? '1px solid rgba(200,200,200,0.45)' : `1px solid ${accentBorder}`,
+                          backdropFilter: 'blur(8px)',
+                        }}
                         onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <div className="flex flex-wrap gap-x-2 gap-y-1">
+                        <div className="flex flex-wrap gap-x-3 gap-y-1">
                           {REFERENCE_CATEGORIES.map(cat => {
                             const isSelected = imgCats.includes(cat);
                             const strength = group.sourceStrengths[img.id]?.[cat] ?? 50;
                             return (
-                              <div key={cat} className="flex items-center gap-1 group/cat">
+                              <div key={cat} className="flex items-center gap-1.5">
                                 <div
-                                  className={`flex-shrink-0 rounded-md text-[9px] font-bold text-center select-none cursor-pointer transition-all leading-[20px] px-1.5`}
+                                  className="flex-shrink-0 rounded text-[10px] font-semibold text-center select-none cursor-pointer transition-all leading-[18px] px-1.5"
                                   style={{
-                                    border: `1.5px solid ${isSelected ? accentColor : 'rgba(255,255,255,0.08)'}`,
+                                    border: `1px solid ${isSelected
+                                      ? accentColor
+                                      : isMonochrome ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.1)'}`,
                                     background: isSelected
-                                      ? `linear-gradient(135deg, rgba(212,175,55,0.2), rgba(212,175,55,0.06))`
-                                      : 'rgba(255,255,255,0.03)',
-                                    color: isSelected ? accentColor : 'rgba(255,255,255,0.3)',
-                                    boxShadow: isSelected ? `0 0 8px rgba(212,175,55,0.12), inset 0 1px 0 rgba(255,255,255,0.06)` : 'none',
-                                    letterSpacing: '0.03em',
+                                      ? isMonochrome
+                                        ? `rgba(212,175,55,0.12)`
+                                        : `rgba(212,175,55,0.15)`
+                                      : isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.04)',
+                                    color: isSelected
+                                      ? accentColor
+                                      : isMonochrome ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.35)',
                                   }}
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -5951,11 +5959,11 @@ export function InfiniteCanvas({
                                   min={0}
                                   max={100}
                                   value={strength}
-                                  className="w-[36px] h-[3px] appearance-none rounded-full cursor-pointer"
+                                  className="w-[40px] h-[4px] appearance-none rounded-full cursor-pointer"
                                   style={{
                                     accentColor,
-                                    background: `linear-gradient(to right, ${isSelected ? accentColor : '#555'} ${strength}%, rgba(255,255,255,0.06) ${strength}%)`,
-                                    opacity: isSelected ? 1 : 0.3,
+                                    background: `linear-gradient(to right, ${isSelected ? accentColor : isMonochrome ? '#bbb' : '#555'} ${strength}%, ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)'} ${strength}%)`,
+                                    opacity: isSelected ? 1 : 0.4,
                                     transition: 'opacity 0.2s',
                                   }}
                                   onChange={(e) => {
@@ -5974,9 +5982,11 @@ export function InfiniteCanvas({
                                   onClick={(e) => e.stopPropagation()}
                                 />
                                 <span
-                                  className="text-[8px] font-semibold tabular-nums w-6 text-right"
+                                  className="text-[9px] font-semibold tabular-nums w-7 text-right"
                                   style={{
-                                    color: isSelected ? accentColor : 'rgba(255,255,255,0.18)',
+                                    color: isSelected
+                                      ? accentColor
+                                      : isMonochrome ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.2)',
                                   }}
                                 >
                                   {strength}%
