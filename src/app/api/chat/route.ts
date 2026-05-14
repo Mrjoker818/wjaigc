@@ -31,9 +31,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '未找到对应的模型提供商' }, { status: 400 });
       }
     } else {
-      // 默认使用 APIMart
+      // 默认查找管理员配置的提供商
       const provider = await findProviderForModel(model, 'chat');
-      chatApiKey = provider?.apiKey || process.env.APIMART_API_KEY || '';
+      chatApiKey = provider?.apiKey || '';
       if (provider?.baseUrl) {
         chatBaseUrl = provider.baseUrl.replace(/\/+$/, '');
       }

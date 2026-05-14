@@ -645,7 +645,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                       onChange={e => setCompatProfile(e.target.value)}
                     >
                       <option value="auto">自动检测 — 根据API地址和响应自动适配</option>
-                      <option value="apimart">APImart (异步轮询) — 支持宽高比，返回task_id</option>
+                      <option value="apimart">异步轮询 (宽高比) — 支持宽高比格式，返回task_id需轮询</option>
                       <option value="openai">OpenAI 兼容 (直接返回) — 需像素尺寸，直接返回图片</option>
                       <option value="openai-async">OpenAI 兼容 (异步轮询) — 需像素尺寸，返回task_id</option>
                     </select>

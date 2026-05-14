@@ -3635,7 +3635,7 @@ export function InfiniteCanvas({
 
       const data = await res.json();
 
-      // === 直接返回模式：非apimart的OpenAI兼容API直接返回图片 ===
+      // === 直接返回模式：API 直接返回图片 ===
       if (data.success && data.mode === 'direct') {
         const { imageUrls } = data;
         const savedUrls: string[] = [];
@@ -4871,7 +4871,7 @@ export function InfiniteCanvas({
           return;
         }
 
-        // === 直接返回模式：非apimart的OpenAI兼容API直接返回图片 ===
+        // === 直接返回模式：API 直接返回图片 ===
         if (data.success && data.mode === 'direct') {
           const { imageUrls } = data;
           for (const imageUrl of imageUrls) {

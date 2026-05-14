@@ -203,8 +203,8 @@ export async function POST(request: NextRequest) {
     const resolvedProviderId = providerId || (model?.includes('::') ? model.split('::')[0] : undefined);
 
     // Resolve API key and base URL from server-side provider config only
-    let visionApiKey = process.env.APIMART_API_KEY || '';
-    let visionBaseUrl = 'https://api.apimart.ai/v1';
+    let visionApiKey = '';
+    let visionBaseUrl = '';
     let visionModel = resolvedModel;
     let resolvedProviderPreset = providerPreset;
 

@@ -2,15 +2,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
+import { resolveCompatProfile, buildPollUrl, type ApiCompatProfile } from '@/lib/api-compatibility';
 
 export const dynamic = 'force-dynamic';
 
-// 轮询 APImart 任务状态 - 由前端调用
+// 轮询异步任务状态 - 由前端调用
+// 通用化设计：支持不同提供商的任务状态查询格式
 export async function POST(request: NextRequest) {
   try {
     const { taskId, model: rawModel, userId: requestUserId, providerId } = await request.json();
     // 防御性处理：确保 model 是字符串（前端可能误传对象）
-    const model = typeof rawModel === 'string' ? rawModel : (rawModel as any)?.model || String(rawModel || '');
+    const model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');
     const sessionUser = await getSessionUser(request);
     const userId = (sessionUser?.id || "anonymous") || requestUserId;
 
@@ -25,10 +27,24 @@ export async function POST(request: NextRequest) {
       : await findProviderForModel(model || '', 'imageEdit')
       || await findProviderForModel(model || '', 'image')
       || await findProviderForModel(model || '', 'universal');
-    const apiKey = provider?.apiKey || process.env.APIMART_API_KEY;
-    const apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || 'https://api.apimart.ai');
-    if (!apiKey) {
-      return NextResponse.json({ success: false, error: 'No admin API key is configured for image polling' }, { status: 400 });
+    const apiKey = provider?.apiKey;
+    const apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || '');
+    if (!apiKey || !apiBaseUrl) {
+      return NextResponse.json({ success: false, error: 'No API provider configured for image polling' }, { status: 400 });
+    }
+
+    // 解析兼容性档案 - 确定轮询 URL 格式
+    const profile: ApiCompatProfile = resolveCompatProfile(provider);
+    const pollUrl = buildPollUrl(apiBaseUrl, taskId, profile);
+
+    if (!pollUrl) {
+      // 该提供商不支持轮询（直接返回模式），不应该到这里
+      return NextResponse.json({
+        success: false,
+        status: 'error',
+        error: '该 API 提供商不支持异步轮询',
+        retryable: false,
+      }, { status: 400 });
     }
 
     // 带超时的fetch
@@ -36,15 +52,12 @@ export async function POST(request: NextRequest) {
     const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     try {
-      const statusResponse = await fetch(
-        `${apiBaseUrl}/tasks/${taskId}?language=zh`,
-        {
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-          },
-          signal: controller.signal,
-        }
-      );
+      const statusResponse = await fetch(pollUrl, {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        signal: controller.signal,
+      });
 
       clearTimeout(timeoutId);
 
@@ -76,7 +89,7 @@ export async function POST(request: NextRequest) {
       };
 
       if (completedStatuses.includes(taskStatus)) {
-        // 提取图片URL
+        // 提取图片URL - 通用格式兼容
         const images = taskData?.result?.images;
         if (images && images.length > 0) {
           const firstImage = images[0];
@@ -97,7 +110,7 @@ export async function POST(request: NextRequest) {
           const errorDetail = taskData?.error?.message || '';
           result.error = errorDetail || '模型返回了文本而不是生成图像，请尝试重新措辞提示';
           result.success = false;
-          result.retryable = true; // 允许前端重试
+          result.retryable = true;
         }
       } else if (taskStatus === 'failed') {
         const rawError = taskData?.error?.message || '图像生成任务失败';

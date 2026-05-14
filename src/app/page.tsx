@@ -517,7 +517,7 @@ function CanvasApp() {
       
       const data = await response.json();
 
-      // === 直接返回模式：非apimart的OpenAI兼容API直接返回图片URL ===
+      // === 直接返回模式：API 直接返回图片URL ===
       if (data.success && data.mode === 'direct') {
         const { imageUrls, model, prompt: enhancedPrompt, originalPrompt, category, style } = data;
         setGenerationProgress({ current: outputCount, total: outputCount });
@@ -1661,7 +1661,7 @@ function CanvasApp() {
 
         providerPreset = currentChatModelInfo.providerPreset;
       } else {
-        // Built-in model (uses apimart)
+        // Server-managed model
         visionModel = currentChatModelInfo.model;
       }
     }

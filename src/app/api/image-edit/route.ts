@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderById, findProviderForFeature, findAllProvidersForType, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, convertAspectRatioToSize, type ApiCompatProfile, type ImageEndpoint } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, convertAspectRatioToSize, buildPollUrl, type ApiCompatProfile, type ImageEndpoint } from '@/lib/api-compatibility';
 import { saveImageFile } from '@/lib/server-data-root';
 import sharp from 'sharp';
 import fsSync from 'fs';
@@ -332,7 +332,7 @@ async function submitImageTask(
     if (errorMsg.includes('model_not_found') || errorMsg.includes('model not found') || errorMsg.includes('Model not found')) {
       throw new ModelCapabilityError(`模型不存在或已下线，尝试切换其他模型...`);
     }
-    if (errorMsg.includes('apimart_error') || errorMsg.includes('try again later')) {
+    if (errorMsg.includes('_error') || errorMsg.includes('try again later')) {
       throw new ModelCapabilityError(`当前模型暂时不可用，尝试切换其他模型...`);
     }
     if (errorMsg.includes('Invalid API key') || errorMsg.includes('invalid api_key')) {
@@ -359,7 +359,7 @@ async function submitImageTask(
 
 /**
  * 从文本解析 SSE 格式的 chat/completions 响应
- * 用于处理 APImart 代理即使 stream:false 也返回 SSE 流的情况
+ * 用于处理某些 API 代理即使 stream:false 也返回 SSE 流的情况
  */
 function parseSSEChatResponseFromText(text: string): Record<string, unknown> | null {
   const lines = text.split('\n');
@@ -797,28 +797,32 @@ async function mergeTiles(
 
 /**
  * 轮询单个任务直到完成，返回图片 URL
- * 使用 APImart 的 GET /tasks/{taskId} 接口查询状态
+ * 使用提供商的任务状态查询接口（兼容性档案决定轮询路径）
  */
 async function pollTaskUntilComplete(
   taskId: string,
   apiKey: string,
   apiBaseUrl: string,
+  profile: ApiCompatProfile,
   maxAttempts: number = 80,
   intervalMs: number = 3000,
 ): Promise<string> {
+  // 使用兼容性档案确定轮询 URL
+  const pollUrl = buildPollUrl(apiBaseUrl, taskId, profile);
+  if (!pollUrl) {
+    throw new Error(`Provider does not support polling for task ${taskId}`);
+  }
+
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     await new Promise(r => setTimeout(r, intervalMs));
 
     try {
-      const pollRes = await fetch(
-        `${apiBaseUrl}/tasks/${taskId}?language=zh`,
-        {
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-          },
-          signal: AbortSignal.timeout(15000),
-        }
-      );
+      const pollRes = await fetch(pollUrl, {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        signal: AbortSignal.timeout(15000),
+      });
 
       if (!pollRes.ok) continue;
 
@@ -954,7 +958,7 @@ export async function POST(request: NextRequest) {
     
     // 3. 环境变量兜底
     const envApiKey = process.env.APIMART_API_KEY || '';
-    const envApiBaseUrl = normalizeApiBaseUrl(process.env.APIMART_BASE_URL || 'https://api.apimart.ai');
+    const envApiBaseUrl = normalizeApiBaseUrl(process.env.APIMART_BASE_URL || '');
     if (envApiKey && candidateModels.length === 0) {
       candidateModels.push({
         model: modelStr,

@@ -569,7 +569,7 @@ export class UserManager {
   }
 
   // API Key 相关方法
-  addApiKey(name: string, provider: 'apimart' | 'gemini' | 'custom', key: string, baseUrl?: string): ApiKey {
+  addApiKey(name: string, provider: 'apimart' | 'gemini' | 'custom' | 'openai' | 'openai-async' | 'async-poll' | 'direct', key: string, baseUrl?: string): ApiKey {
     const userData = this.getCurrentUserData();
     if (!userData?.user) {
       throw new Error('No user found');

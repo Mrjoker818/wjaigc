@@ -756,9 +756,9 @@ export function GenerationPanel(
                 const existingKeys = userMgr.getApiKeys();
                 // 检查是否已存在相同key的密钥
                 if (!existingKeys.some(k => k.key === universalApiKey)) {
-                    const providerType: 'apimart' | 'gemini' | 'custom' = 
-                        universalApiUrl.includes('apimart') ? 'apimart' :
-                        universalApiUrl.includes('gemini') || universalApiUrl.includes('google') ? 'gemini' : 'custom';
+                    const providerType: 'async-poll' | 'direct' | 'custom' = 
+                        universalApiUrl.includes('apimart') ? 'async-poll' :
+                        universalApiUrl.includes('gemini') || universalApiUrl.includes('google') ? 'direct' : 'custom';
                     userMgr.addApiKey(universalApiName, providerType, universalApiKey, universalApiUrl);
                 }
             } catch (e) {

@@ -7,7 +7,7 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
-const DEFAULT_BASE_URL = 'https://api.apimart.ai/v1';
+const DEFAULT_BASE_URL = '';
 const DEFAULT_MODEL = 'gemini-3-flash-preview';
 
 const OPTIMIZE_SYSTEM_PROMPT = `You are a professional AI image prompt optimizer. Transform a simple user image description into a high quality generation prompt.
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
 
     const resolved = splitProviderModel(model, providerId);
     let selectedModel = resolved.model;
-    let apiKey = process.env.APIMART_API_KEY || '';
+    let apiKey = '';
     let baseUrl = DEFAULT_BASE_URL;
     let resolvedProviderId = resolved.providerId;
 

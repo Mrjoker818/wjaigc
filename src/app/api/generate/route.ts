@@ -6,15 +6,19 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, type ApiCompatProfile } from '@/lib/api-compatibility';
 
-// 直接模式（OpenAI兼容API如tokln.com返回图片需60-120秒）
-// 异步模式（apimart返回task_id只需几秒）两者共存，取较大值
-export const maxDuration = 600; // 10分钟 - token link等API生图最久可达600s
+// 直接模式（OpenAI兼容API返回图片需60-120秒）
+// 异步模式（返回task_id只需几秒）两者共存，取较大值
+export const maxDuration = 600; // 10分钟 - 部分API生图最久可达600s
 export const dynamic = 'force-dynamic';
 
-// APIMart 模型配置 - 所有模型已通过实际API验证测试
-// 测试日期: 2026-04-30
-// 所有模型均使用统一端点: POST /images/generations (baseUrl由用户提供，如包含/v1则为 /v1/images/generations)
-// 轮询由前端通过 /api/poll-task 完成，避免服务器超时
+// ---------------------------------------------------------------------------
+// 动态模型配置 - 不再硬编码任何特定提供商的模型信息
+// ---------------------------------------------------------------------------
+
+/**
+ * 模型能力配置 - 由 API 兼容层和提供商信息动态推断
+ * 不再硬编码特定提供商的模型列表，任何管理员添加的 API 都可自动适配
+ */
 interface ModelConfig {
   name: string;
   modelId: string;
@@ -30,58 +34,60 @@ interface ModelConfig {
   estimatedTime: number;
 }
 
-const APIMART_MODEL_CONFIG: Record<string, ModelConfig> = {
-  // === Gemini 系列 (Google) ===
-  'gemini-2.5-flash-image-preview': {
-    name: 'Gemini 2.5 Flash',
-    modelId: 'gemini-2.5-flash-image-preview',
-    paramType: 'resolution',
-    supportedSizes: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
-    supportsImageToImage: true,
-    maxN: 4,
-    estimatedTime: 15, // Flash模型最快，通常10-20秒
-  },
-  'gemini-3-pro-image-preview': {
-    name: 'Gemini 3 Pro',
-    modelId: 'gemini-3-pro-image-preview',
-    paramType: 'resolution',
-    supportedSizes: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
-    supportsImageToImage: true,
-    maxN: 4,
-    estimatedTime: 90, // Pro模型较慢，4K可达90秒
-  },
-  'gemini-3.1-flash-image-preview': {
-    name: 'Gemini 3.1 Flash',
-    modelId: 'gemini-3.1-flash-image-preview',
-    paramType: 'resolution',
-    supportedSizes: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
-    supportsImageToImage: true,
-    maxN: 4,
-    estimatedTime: 65, // 3.1 Flash中等速度，4K约60秒
-  },
+// 通用支持的尺寸列表
+const COMMON_SIZES = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
 
-  // === Seedream (豆包/字节) ===
-  'doubao-seedance-4-5': {
-    name: 'Seedream 4.5',
-    modelId: 'doubao-seedance-4-5',
-    paramType: 'resolution',
-    supportedSizes: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', '9:21'],
-    supportsImageToImage: true,
-    maxN: 1,
-    estimatedTime: 20, // 豆包较快，通常15-25秒
-  },
+/**
+ * 根据模型ID和兼容性档案动态推断模型配置
+ * - 不依赖任何硬编码的模型列表
+ * - 根据模型名称关键词智能推断能力
+ * - 所有管理员添加的 API 都可自动适配
+ */
+function inferModelConfig(modelId: string, profile: ApiCompatProfile, providerName?: string): ModelConfig {
+  const id = (modelId || '').toLowerCase();
 
-  // === GPT-Image (OpenAI) ===
-  'gpt-image-2-official': {
-    name: 'GPT-Image 2',
-    modelId: 'gpt-image-2-official',
-    paramType: 'quality',
-    supportedSizes: ['1:1', '3:2', '2:3', '16:9', '9:16'],
-    supportsImageToImage: true,
-    maxN: 10,
-    estimatedTime: 120, // GPT-Image 2 high质量极慢，可达180+秒
-  },
-};
+  // 根据模型名称关键词推断参数类型
+  let paramType: ModelConfig['paramType'] = 'none';
+  if (id.includes('gpt-image') || id.includes('dall-e')) {
+    paramType = 'quality';
+  } else if (id.includes('gemini') || id.includes('seedream') || id.includes('doubao') || id.includes('flux')) {
+    paramType = 'resolution';
+  }
+
+  // 根据模型名称推断是否支持图生图
+  // 大多数现代图像模型都支持图生图，只有极少数纯文生图模型不支持
+  const supportsImageToImage = !id.includes('text-only') && !id.includes('txt2img-only');
+
+  // 根据模型名称推断预估时间
+  let estimatedTime = 30; // 默认30秒
+  if (id.includes('flash')) {
+    estimatedTime = 15;
+  } else if (id.includes('pro') || id.includes('gpt-image')) {
+    estimatedTime = 90;
+  } else if (id.includes('flux') && id.includes('schnell')) {
+    estimatedTime = 10;
+  } else if (id.includes('flux') && id.includes('dev')) {
+    estimatedTime = 30;
+  } else if (id.includes('dall-e-3') || id.includes('dall-e-4')) {
+    estimatedTime = 60;
+  }
+
+  // 根据兼容性档案调整
+  if (profile.responseMode === 'direct') {
+    // 直接返回模式的API通常需要更长的单次请求时间
+    estimatedTime = Math.max(estimatedTime, 60);
+  }
+
+  return {
+    name: providerName || modelId,
+    modelId,
+    paramType,
+    supportedSizes: COMMON_SIZES,
+    supportsImageToImage,
+    maxN: 4,
+    estimatedTime,
+  };
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -101,33 +107,61 @@ export async function POST(request: NextRequest) {
       providerId,
     } = await request.json();
     // 防御性处理：确保 model 是字符串（前端可能误传对象）
-    const model = typeof rawModel === 'string' ? rawModel : (rawModel as any)?.model || String(rawModel);
+    const model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');
+
     const sessionUser = await getSessionUser(request);
     const userId = (sessionUser?.id || "anonymous") || requestUserId;
 
-    if (!prompt) {
-      return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
-    }
-
-    // 转换参考图片 URL 为公网可访问格式（APImart 无法访问本地路径）
-    let accessibleReferenceImages: string[] = [];
-    if (referenceImages && referenceImages.length > 0) {
+    // 解析参考图片 URL（转换为 API 可访问的格式）
+    const accessibleReferenceImages: string[] = [];
+    if (referenceImages && Array.isArray(referenceImages)) {
       const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT;
-      for (const img of referenceImages) {
-        if (img.startsWith('/')) {
-          // 相对路径 → 公网完整 URL 或 base64
+      for (const rawImg of referenceImages) {
+        // 支持字符串格式和 {url, strength} 对象格式
+        const img = typeof rawImg === 'string' ? rawImg : (rawImg as { url?: string })?.url || String(rawImg);
+        if (img && typeof img === 'string' && img.trim()) {
           let resolved = false;
-          // 优先尝试从 S3 对象存储获取
-          if (img.startsWith('/api/serve-upload/')) {
-            const filename = img.replace('/api/serve-upload/', '');
-            try {
-              const { getS3ImageUrl } = await import('@/lib/s3-storage');
-              const s3Url = await getS3ImageUrl(filename);
-              if (s3Url) {
-                accessibleReferenceImages.push(s3Url);
+          // 相对路径 → 公网 URL
+          if (img.startsWith('/')) {
+            if (domain) {
+              accessibleReferenceImages.push(`https://${domain}${img}`);
+              resolved = true;
+            } else {
+              // 开发环境：转为 base64（API 无法访问 localhost）
+              try {
+                const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+                const port = process.env.DEPLOY_RUN_PORT || 5000;
+                const resp = await fetch(`${proto}://localhost:${port}${img}`, { signal: AbortSignal.timeout(5000) });
+                const buf = Buffer.from(await resp.arrayBuffer());
+                accessibleReferenceImages.push(`data:image/png;base64,${buf.toString('base64')}`);
                 resolved = true;
+              } catch { /* fallback below */ }
+            }
+          }
+          // data: URL → 尝试保存为服务器文件（避免 413 错误）
+          if (!resolved && img.startsWith('data:') && img.length > 500_000) {
+            try {
+              const saveResp = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/save-image`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ imageData: img }),
+              });
+              if (saveResp.ok) {
+                const saveData = await saveResp.json();
+                if (saveData.url) {
+                  if (domain) {
+                    accessibleReferenceImages.push(`https://${domain}${saveData.url}`);
+                  } else {
+                    accessibleReferenceImages.push(saveData.url);
+                  }
+                  resolved = true;
+                }
               }
             } catch { /* S3 not available, try other methods */ }
+          }
+          if (!resolved && img.startsWith('http')) {
+            accessibleReferenceImages.push(img);
+            resolved = true;
           }
           if (!resolved && domain) {
             accessibleReferenceImages.push(`${domain}${img}`);
@@ -144,8 +178,6 @@ export async function POST(request: NextRequest) {
               accessibleReferenceImages.push(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${img}`);
             }
           }
-        } else {
-          accessibleReferenceImages.push(img);
         }
       }
     }
@@ -156,17 +188,12 @@ export async function POST(request: NextRequest) {
     // 尝试找到用户指定模型对应的 provider（优先使用 providerId 精确匹配）
     let provider = providerId ? await findProviderById(providerId) : null;
     if (!provider) provider = await findProviderForModel(model, 'image');
-    let serverApiKey = provider?.apiKey || process.env.APIMART_API_KEY;
-    let apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || process.env.APIMART_BASE_URL || 'https://api.apimart.ai');
-    let modelConfig = APIMART_MODEL_CONFIG[model] || {
-      name: provider?.displayName || model,
-      modelId: model,
-      paramType: 'none' as const,
-      supportedSizes: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
-      supportsImageToImage: true,
-      maxN: 4,
-      estimatedTime: 30,
-    };
+    let serverApiKey = provider?.apiKey;
+    let apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || '');
+    
+    // 解析兼容性档案 - 决定 API 调用方式
+    const initialProfile = resolveCompatProfile(provider);
+    let modelConfig = inferModelConfig(model, initialProfile, provider?.displayName);
 
     // 构建备选模型列表（排除当前模型，优先管理员配置的模型）
     const candidateModels: { modelId: string; apiKey: string; baseUrl: string; providerId: string; displayName: string; advancedParams?: Record<string, string> }[] = [];
@@ -185,22 +212,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (!serverApiKey) {
+    if (!serverApiKey || !apiBaseUrl) {
       // 没有找到指定模型的凭证，尝试使用第一个可用的备选模型
       if (candidateModels.length > 0) {
         const fallback = candidateModels.shift()!;
         console.log(`指定模型 ${model} 无凭证，自动切换到 ${fallback.modelId}`);
         serverApiKey = fallback.apiKey;
         apiBaseUrl = normalizeApiBaseUrl(fallback.baseUrl);
-        modelConfig = APIMART_MODEL_CONFIG[fallback.modelId] || {
-          name: fallback.displayName || fallback.modelId,
-          modelId: fallback.modelId,
-          paramType: 'none' as const,
-          supportedSizes: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
-          supportsImageToImage: true,
-          maxN: 4,
-          estimatedTime: 30,
-        };
+        const fallbackProfile = resolveCompatProfile({ baseUrl: fallback.baseUrl, advancedParams: fallback.advancedParams });
+        modelConfig = inferModelConfig(fallback.modelId, fallbackProfile, fallback.displayName);
         provider = {
           id: fallback.providerId,
           name: fallback.displayName,
@@ -218,7 +238,6 @@ export async function POST(request: NextRequest) {
           error: `选择当前模型需要在管理员后台配置可用凭证`,
           requiresApiKey: true,
           modelName: modelConfig.name,
-          docsUrl: 'https://docs.apimart.ai/cn',
         }, { status: 400 });
       }
     }
@@ -227,46 +246,25 @@ export async function POST(request: NextRequest) {
     let enhancedPrompt = prompt;
     
     const categoryHints: Record<string, string> = {
-      'poster': '海报风格，高对比度，视觉冲击力强',
-      'logo': 'Logo设计，简洁有力，易于识别',
-      'detail_page': '电商详情页，清晰展示产品细节',
-      'ip_character': 'IP形象，活泼可爱，辨识度高',
-      'display': '展陈设计，空间感强，氛围营造',
-      'social': '社交媒体配图，适合传播分享',
-      'ui': 'UI界面设计，现代简洁',
-      'comic': '插画风格，叙事性强',
-      'infographic': '信息图表，数据可视化',
-      'menu': '菜单设计，排版美观',
-      'packaging': '包装设计，立体感强',
-      'photo': '写实摄影，质感真实',
-      'banner': 'Banner广告，简洁醒目',
+      'general': '通用场景',
+      'portrait': '人物肖像，面部细节精细',
+      'landscape': '风景摄影，自然光影',
+      'architecture': '建筑摄影，透视精准',
+      'product': '产品摄影，商业级质感',
+      'food': '美食摄影，色彩诱人',
+      'fashion': '时尚摄影，杂志质感',
+      'animal': '动物摄影，生动自然',
     };
     
-    if (categoryHints[imageCategory]) {
-      enhancedPrompt = `${categoryHints[imageCategory]}，${enhancedPrompt}`;
+    if (imageCategory && categoryHints[imageCategory] && imageCategory !== 'general') {
+      enhancedPrompt = `${enhancedPrompt}, ${categoryHints[imageCategory]}`;
     }
-
-    const productKeywords: Record<string, string[]> = {
-      'baijiu': ['白酒', '中国白酒', '传统酿造', '金色', '红色', '大气'],
-      'beer': ['啤酒', '精酿啤酒', '清爽', '泡沫', '年轻活力'],
-      'foreign_wine': ['红酒', '葡萄酒', '浪漫', '优雅', '紫红色'],
-      'liquor': ['威士忌', '烈酒', '成熟', '琥珀色', '绅士'],
-      'cocktail': ['鸡尾酒', '调酒', '缤纷色彩', '时尚', '派对'],
-      'tea': ['茶', '茶叶', '禅意', '清新', '传统文化'],
-      'coffee': ['咖啡', '精品咖啡', '温暖', '小资', '文艺'],
-      'food': ['美食', '佳肴', '食欲', '精致摆盘', '热气腾腾'],
-      'cosmetics': ['化妆品', '美妆', '精致', '优雅', '粉色'],
-      'electronics': ['电子产品', '科技', '智能', '未来', '质感'],
-      'fashion': ['时尚', '服装', '潮流', '个性', '高级'],
-    };
     
-    if (productCategory !== 'none' && productKeywords[productCategory]) {
-      const keywords = productKeywords[productCategory].join('，');
-      enhancedPrompt = `${enhancedPrompt}，${keywords}`;
+    if (productCategory && productCategory.trim()) {
+      enhancedPrompt = `${enhancedPrompt}, product category: ${productCategory}`;
     }
-
+    
     const styleHints: Record<string, string> = {
-      'realistic': '写实风格，照片级逼真',
       'photography': '摄影质感，专业相机拍摄效果',
       '3d_render': '3D渲染效果，CG质感',
       'anime': '动漫风格，二次元',
@@ -291,7 +289,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 验证尺寸是否支持
-    const apimartSize = aspectRatio || '1:1';
+    const requestedSize = aspectRatio || '1:1';
     
     // 设置生成数量 - 不受模型maxN限制，因为我们逐个提交任务(n=1)
     const count = outputCount && outputCount >= 1 ? Math.min(outputCount, 10) : 1;
@@ -304,11 +302,11 @@ export async function POST(request: NextRequest) {
       currentProviderId: string,
       currentProvider?: { baseUrl?: string; requestStyle?: string; advancedParams?: Record<string, string> } | null,
     ): Promise<{ taskId: string; usedModel: string; usedProviderId: string; directImageUrl?: string }> => {
-      // 解析兼容性档案
+      // 解析兼容性档案 - 由提供商配置决定 API 调用方式
       const profile: ApiCompatProfile = resolveCompatProfile(currentProvider);
 
-      let effectiveSize = currentModelConfig.supportedSizes.includes(apimartSize) 
-        ? apimartSize 
+      let effectiveSize = currentModelConfig.supportedSizes.includes(requestedSize) 
+        ? requestedSize 
         : currentModelConfig.supportedSizes[0] || '1:1';
 
       const requestBody: Record<string, unknown> = {
@@ -330,15 +328,16 @@ export async function POST(request: NextRequest) {
         requestBody.quality = qualityMap[quality] || quality;
       }
 
-      // 添加参考图片（使用已转换为公网可访问的 URL）
+      // 添加参考图片
       const hasRefImages = accessibleReferenceImages.length > 0 && currentModelConfig.supportsImageToImage;
       if (hasRefImages) {
+        // 始终提供 image_urls（大多数 API 代理支持此字段传递参考图 URL）
         requestBody.image_urls = accessibleReferenceImages;
-        // 图生图 strength 参数：控制输出与参考图的偏离程度（0=完全保留原图，1=完全自由生成）
+        // 图生图 strength 参数
         if (typeof strength === 'number' && strength > 0 && strength <= 1) {
           requestBody.strength = strength;
         }
-        // 对于 /images/edits 端点，需要同时提供 image 字段（base64 格式）
+        // 为 /images/edits 端点同时提供 image 字段（base64 格式）
         // /images/edits 将 image 视为必须编辑的源图（AI 无法忽略），而 image_urls 是可选参考
         const firstRefImage = accessibleReferenceImages[0];
         if (firstRefImage) {
@@ -346,7 +345,7 @@ export async function POST(request: NextRequest) {
             // 已经是 base64 data URL，直接使用
             requestBody.image = firstRefImage;
           } else if (firstRefImage.startsWith('http')) {
-            // 外部 URL，需要下载为 base64（/images/edits 不接受 URL 格式的 image）
+            // 外部 URL，需要下载为 base64
             try {
               const imgResp = await fetch(firstRefImage, { signal: AbortSignal.timeout(15000) });
               if (imgResp.ok) {
@@ -362,11 +361,8 @@ export async function POST(request: NextRequest) {
       }
 
       // 使用兼容性层自动调整请求（size格式、端点选择等）
-      // 当有参考图时，使用 editEndpoint (/images/edits) — AI 必须将图片作为主要编辑输入
-      // 无参考图时，使用 defaultEndpoint (/images/generations) — 纯文本生图
-      // APImart 的 editEndpoint 也是 /images/generations，所以不影响 apimart 逻辑
       const { body: adjustedBody, endpoint } = adjustRequestForProfile(requestBody, profile, {
-        hasImage: hasRefImages, // 有参考图时使用 editEndpoint，确保 AI 精准识别图片
+        hasImage: hasRefImages,
       });
 
       console.log('Submitting image task:', {
@@ -375,23 +371,20 @@ export async function POST(request: NextRequest) {
         size: adjustedBody.size,
         endpoint,
         profile: profile.id,
-        hasRefImages: hasRefImages,
+        hasRefImages,
         hasImageField: !!adjustedBody.image,
         inputFidelity: adjustedBody.input_fidelity,
         refImageTypes: accessibleReferenceImages.map(u => u.startsWith('data:') ? 'base64' : u.startsWith('http') ? 'url' : 'other'),
         strength: adjustedBody.strength || undefined,
       });
 
-      // 直接模式(OpenAI兼容API)生成本身在此调用内完成，需较长超时
-      // 异步模式(apimart)只返回task_id，几秒即可
+      // 根据兼容性档案确定超时时间
       const isDirectMode = profile.responseMode === 'direct';
       const controller = new AbortController();
-      const timeoutMs = isDirectMode ? 600000 : 30000; // 直接模式600s(兼容token link等慢速API), 异步模式30s
+      const timeoutMs = isDirectMode ? 600000 : 30000;
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-      // 构建 fetch 请求 - 支持两种编码:
-      // 1. JSON 编码 - image_urls 传递参考图（适用于 /images/generations 和支持 JSON 的 edits 代理）
-      // 2. multipart/form-data - image 字段上传文件（适用于原生 /images/edits 端点）
+      // 构建提交请求 - 通用策略，适配所有 API 提供商
       const isEditsEndpoint = endpoint === '/images/edits';
       const hasImageField = !!adjustedBody.image;
 
@@ -399,7 +392,7 @@ export async function POST(request: NextRequest) {
       const parseSubmitResponse = async (resp: Response): Promise<{ taskId: string; usedModel: string; usedProviderId: string; directImageUrl?: string }> => {
         if (!resp.ok) {
           const errorText = await resp.text();
-          console.error('APIMart submit error:', resp.status, errorText);
+          console.error('API submit error:', resp.status, errorText);
           
           let errorMsg = `API 请求失败 (${resp.status})`;
           let errorCode = '';
@@ -413,24 +406,19 @@ export async function POST(request: NextRequest) {
             }
           } catch { /* ignore */ }
 
-          // "ratio or price is not configured" → 标记为可重试错误，由外层自动切换模型
-          if (errorMsg.includes('ratio or price is not configured') || errorMsg.includes('ratio or price')) {
+          // 通用可重试错误检测 - 不针对特定提供商
+          if (errorMsg.includes('ratio or price') || errorMsg.includes('not configured') || errorMsg.includes('model_not_found') || errorMsg.includes('model not found') || errorCode === 'model_not_found') {
             const retryErr = new Error(`当前模型暂不可用`);
             (retryErr as Error & { retryable?: boolean }).retryable = true;
             throw retryErr;
           }
-          if (errorMsg.includes('model not found') || errorMsg.includes('Model not found') || errorCode === 'model_not_found') {
-            const retryErr = new Error(`模型不存在或已下线`);
-            (retryErr as Error & { retryable?: boolean }).retryable = true;
-            throw retryErr;
-          }
-          if (errorMsg.includes('Insufficient balance') || errorMsg.includes('insufficient')) {
+          if (errorMsg.includes('Insufficient balance') || errorMsg.includes('insufficient') || errorMsg.includes('余额')) {
             throw new Error(`API 余额不足，请联系管理员充值`);
           }
           if (errorMsg.includes('Rate limit') || errorMsg.includes('rate_limit') || errorMsg.includes('Too many requests')) {
             throw new Error(`请求过于频繁，请稍后再试`);
           }
-          if (errorMsg.includes('Invalid API key') || errorMsg.includes('invalid api_key')) {
+          if (errorMsg.includes('Invalid API key') || errorMsg.includes('invalid api_key') || errorMsg.includes('Incorrect API key')) {
             throw new Error(`API 密钥无效，请联系管理员检查配置`);
           }
           
@@ -469,7 +457,6 @@ export async function POST(request: NextRequest) {
         for (const [key, value] of Object.entries(adjustedBody)) {
           if (value === undefined || value === null) continue;
           if (key === 'image') {
-            // image 字段: base64 data URL 转换为 File 对象
             const imgVal = String(value);
             if (imgVal.startsWith('data:')) {
               const match = imgVal.match(/^data:([^;]+);base64,(.+)$/);
@@ -482,7 +469,6 @@ export async function POST(request: NextRequest) {
                 formData.append('image', file);
               }
             } else {
-              // Plain base64
               const binaryData = Buffer.from(imgVal, 'base64');
               const file = new File([binaryData], 'image.png', { type: 'image/png' });
               formData.append('image', file);
@@ -501,7 +487,7 @@ export async function POST(request: NextRequest) {
       let submitResponse: Response;
 
       if (isEditsEndpoint && hasImageField) {
-        // /images/edits + image 字段：先尝试 JSON（大多数代理支持），失败后降级到 multipart
+        // /images/edits + image 字段：先尝试 JSON（兼容更多代理），失败后降级到 multipart
         submitResponse = await fetchWithV1Retry(
           currentApiBaseUrl,
           endpoint,
@@ -516,7 +502,6 @@ export async function POST(request: NextRequest) {
           }
         );
 
-        // 如果 JSON 请求失败且错误与 form-data 相关，用 multipart 重试
         if (!submitResponse.ok) {
           const errorText = await submitResponse.text();
           const needsMultipart = errorText.includes('multipart') ||
@@ -609,20 +594,12 @@ export async function POST(request: NextRequest) {
         const isRetryable = singleError instanceof Error && (singleError as Error & { retryable?: boolean }).retryable;
         
         if (isRetryable && candidateModels.length > 0) {
-          // 当前模型不可用，尝试备选模型
           console.log(`模型 ${modelConfig.modelId} 不可用 (${errMsg})，尝试备选模型...`);
           
           for (let ci = 0; ci < candidateModels.length; ci++) {
             const candidate = candidateModels[ci];
-            const candidateConfig = APIMART_MODEL_CONFIG[candidate.modelId] || {
-              name: candidate.displayName || candidate.modelId,
-              modelId: candidate.modelId,
-              paramType: 'none' as const,
-              supportedSizes: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
-              supportsImageToImage: true,
-              maxN: 4,
-              estimatedTime: 30,
-            };
+            const candidateProfile = resolveCompatProfile({ baseUrl: candidate.baseUrl, advancedParams: candidate.advancedParams });
+            const candidateConfig = inferModelConfig(candidate.modelId, candidateProfile, candidate.displayName);
             
             try {
               console.log(`尝试备选模型 ${candidate.modelId} (${ci + 1}/${candidateModels.length})...`);
@@ -644,22 +621,20 @@ export async function POST(request: NextRequest) {
               });
               submitted = true;
               console.log(`备选模型 ${candidate.modelId} 提交成功`);
-              break; // 成功，跳出备选模型循环
+              break;
             } catch (candidateError: unknown) {
               const cErrMsg = candidateError instanceof Error ? candidateError.message : String(candidateError);
               const cIsRetryable = candidateError instanceof Error && (candidateError as Error & { retryable?: boolean }).retryable;
               console.log(`备选模型 ${candidate.modelId} 也失败: ${cErrMsg}`);
               if (cIsRetryable) {
-                continue; // 继续尝试下一个备选模型
+                continue;
               }
-              // 非可重试错误（余额不足、频率限制等），直接抛出
               throw candidateError;
             }
           }
         }
         
         if (!submitted) {
-          // 网络超时错误
           if (errMsg.includes('abort') || errMsg.includes('timeout')) {
             return NextResponse.json({
               success: false,
@@ -687,7 +662,7 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
 
-    // 如果有直接返回的图片URL（非apimart的OpenAI兼容API），直接返回结果
+    // 如果有直接返回的图片URL，直接返回结果
     if (directImageUrls.length > 0) {
       return NextResponse.json({
         success: true,
@@ -718,9 +693,9 @@ export async function POST(request: NextRequest) {
       count: taskIds.length,
     });
 
-  } catch (apimartError: unknown) {
-    const errMsg = apimartError instanceof Error ? apimartError.message : String(apimartError);
-    console.error('APIMart API error:', errMsg);
+  } catch (apiError: unknown) {
+    const errMsg = apiError instanceof Error ? apiError.message : String(apiError);
+    console.error('Image generation API error:', errMsg);
     
     if (errMsg.includes('abort') || errMsg.includes('timeout')) {
       return NextResponse.json({
@@ -735,7 +710,7 @@ export async function POST(request: NextRequest) {
         errMsg.includes('ENOTFOUND')) {
       return NextResponse.json({
         success: false,
-        error: '网络连接失败：无法访问 APIMart API。请检查网络连接。',
+        error: '网络连接失败：无法访问图像生成 API。请检查网络连接或管理员配置。',
         networkError: true,
       }, { status: 503 });
     }
@@ -757,7 +732,7 @@ export async function POST(request: NextRequest) {
     if (errMsg.includes('402') || errMsg.includes('insufficient') || errMsg.includes('余额')) {
       return NextResponse.json({
         success: false,
-        error: 'APIMart 账户余额不足，请充值后再试',
+        error: 'API 账户余额不足，请联系管理员充值',
       }, { status: 402 });
     }
 

@@ -8,7 +8,7 @@
 - **框架**: Next.js 16 (App Router)
 - **UI**: React 19 + shadcn/ui + Tailwind CSS 4
 - **语言**: TypeScript 5
-- **AI 集成**: apimart.ai API (兼容 OpenAI 格式) + Google Gemini
+- **AI 集成**: 通用 API 兼容层（支持 OpenAI / Gemini / 任意兼容格式 API）
 - **图像生成**: DALL-E 3、Midjourney、Stable Diffusion 等多种模型
 - **特色功能**: 无限画布、图生图、Layer Graph 设计工程、PSD/SVG 导出、3D 模型预览、本地图像编辑(upscayl/IOPaint)、Ctrl+Z 撤回
 
@@ -65,6 +65,7 @@ src/
 │   ├── psd-export.ts               # PSD 导出功能
 │   ├── svg-export.ts               # SVG 矢量化导出
 │   ├── config.ts                   # 配置文件
+│   ├── api-compatibility.ts        # API 兼容层（通用多提供商适配，自动推断请求格式）
 │   └── image-tools/
 │       ├── config.ts               # 本地图像工具配置 (环境变量/目录/超时)
 │       ├── file.ts                 # 文件工具 (读取/缩放/保存/清理)
@@ -139,7 +140,7 @@ scripts/
   7. 任务完成后替换processing frame为结果图片
 
 ### 3. 图像生成 (generation-panel.tsx)
-- **模型支持**: 按 apimart.ai 图像模型列表配置
+- **模型支持**: 管理员动态配置，支持任意 OpenAI 兼容 API 提供商
 - **产品品类**: 通用、人物、风景、建筑等预设场景
 - **高级设置**:
   - 画面比例：带对应比例图形预览（矩形宽高按比例计算，直观展示比例样式）
@@ -149,7 +150,7 @@ scripts/
 - **风格切换**: 支持黑白配色+彩色图标风格
 
 ### 4. AI 聊天 (chat-panel.tsx)
-- **模型**: Google Gemini (通过 apimart.ai)
+- **模型**: 支持管理员配置的任意 LLM 模型（Gemini/GPT 等）
 - **特性**: Agent 联网思考模式，支持图像理解
 - **提示词优化**: 内置提示词优化功能，支持增强/扩展/精简三种模式
   - 使用聊天区 Gemini 模型进行优化
@@ -180,7 +181,7 @@ scripts/
   - 多策略自动降级: 管理员矢量模型API → LLM视觉模型fallback → 本地vtracer → raster-svg-wrapper兜底
   - 管理员矢量模型支持: chat/completions(SSE流解析) + multipart form + JSON + OpenAI images格式
   - LLM fallback: 当矢量模型API失败时，自动使用管理员配置的聊天模型(Gemini/GPT-4o等)生成SVG
-  - 支持 SSE 流式响应解析 (parseSSEContent)，兼容 apimart.ai 等代理的流式返回
+  - 支持 SSE 流式响应解析 (parseSSEContent)，兼容各种 API 代理的流式返回
   - 支持配置 PY_VECTORIZE_ENDPOINT 环境变量对接 VTracer/StarVector
   - POST 参数: imageUrl / layerId / mode
 
@@ -285,7 +286,8 @@ pnpm ts-check
 COZE_API_BASE=https://api.coze.cn
 COZE_API_KEY=your_api_key
 
-# apimart.ai 配置
+# API 提供商配置（管理员后台动态添加，支持任意 OpenAI 兼容 API）
+# 以下环境变量为向后兼容保留，优先使用管理员后台配置
 APIMART_API_KEY=your_apimart_key
 APIMART_BASE_URL=https://api.apimart.ai
 
@@ -355,6 +357,26 @@ UPSCALE_TIMEOUT_MS=300000
 
 ### API 辅助
 - `src/lib/api-helpers.ts`: `fetchWithV1Retry()` - 先尝试原始 URL，失败后自动重试带 `/v1` 的 URL
+
+### API 兼容层 (api-compatibility.ts)
+- **核心目标**: 让程序能对接任意 OpenAI 兼容 API 提供商，不偏向任何特定平台
+- **兼容配置文件 (CompatProfile)**:
+  - `openai`: 标准 OpenAI API（/images/edits + /images/generations，multipart 表单）
+  - `openai-async`: OpenAI 异步 API（/images/generations + /tasks/{id} 轮询）
+  - `apimart`: APImart 代理格式（/images/generations，JSON + image_urls，异步轮询）
+  - `auto`: 自动推断（根据 base URL 特征匹配）
+  - `custom`: 自定义（用户可通过管理员后台 advancedParams 指定所有参数）
+- **配置文件解析优先级**:
+  1. 提供商显式 `compatProfile` 字段
+  2. 提供商 `advancedParams.compatProfile` 字段
+  3. 自动推断（基于 base URL 特征）
+- **关键函数**:
+  - `resolveCompatProfile()`: 解析提供商的兼容配置文件
+  - `adjustRequestForProfile()`: 根据配置文件调整请求体（端点选择、参数格式、input_fidelity 等）
+  - `parseResponseForProfile()`: 根据配置文件解析响应（直接返回 vs 异步轮询）
+  - `buildPollUrl()`: 根据配置文件构建轮询 URL（支持不同路径模板）
+- **提交策略**: JSON 优先 → multipart/form-data 降级（兼容所有提供商）
+- **管理员自定义**: 通过 `advancedParams` 字段覆盖任意配置文件参数
 
 ## 常见问题
 

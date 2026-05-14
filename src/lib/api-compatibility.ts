@@ -38,7 +38,7 @@ export type EditEncoding = 'json-first' | 'multipart-only';
 
 /**
  * A compatibility profile describes how a specific API provider deviates from
- * the "apimart" defaults.  New providers just pick or create a profile.
+ * standard defaults. New providers just pick or create a profile.
  */
 export interface ApiCompatProfile {
   /** Unique identifier for this profile */
@@ -67,6 +67,21 @@ export interface ApiCompatProfile {
    * some ignore it, some error on it.
    */
   supportsInputFidelity: boolean;
+
+  /**
+   * Polling configuration for async providers.
+   * - 'path': Poll via GET /tasks/{taskId} (APImart style)
+   * - 'images-id': Poll via GET /images/{taskId} (some OpenAI proxies)
+   * - 'none': No polling needed (direct response only)
+   */
+  pollMode: 'path' | 'images-id' | 'none';
+
+  /**
+   * The URL path template for polling task status.
+   * Available placeholders: {taskId}
+   * Example: '/tasks/{taskId}?language=zh'
+   */
+  pollPathTemplate: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,20 +89,23 @@ export interface ApiCompatProfile {
 // ---------------------------------------------------------------------------
 
 /**
- * apimart.ai — the original async provider.
+ * APImart-style async provider.
  * - Accepts aspect-ratio size format ("1:1", "16:9", …)
  * - Returns task_id for polling
  * - /images/generations for everything
+ * - Poll via GET /tasks/{taskId}
  */
 export const PROFILE_APIMART: ApiCompatProfile = {
   id: 'apimart',
-  label: 'APImart (异步轮询)',
+  label: '异步轮询 (宽高比)',
   responseMode: 'polling',
   sizeFormat: 'aspect-ratio',
   defaultEndpoint: '/images/generations',
   editEndpoint: '/images/generations',
   editEncoding: 'json-first',
   supportsInputFidelity: false,
+  pollMode: 'path',
+  pollPathTemplate: '/tasks/{taskId}?language=zh',
 };
 
 /**
@@ -96,6 +114,7 @@ export const PROFILE_APIMART: ApiCompatProfile = {
  * - Returns data[].url or data[].b64_json directly
  * - Uses /images/edits for image editing
  * - Supports input_fidelity parameter
+ * - No polling needed (direct response)
  */
 export const PROFILE_OPENAI: ApiCompatProfile = {
   id: 'openai',
@@ -106,13 +125,16 @@ export const PROFILE_OPENAI: ApiCompatProfile = {
   editEndpoint: '/images/edits',
   editEncoding: 'multipart-only',
   supportsInputFidelity: true,
+  pollMode: 'none',
+  pollPathTemplate: '',
 };
 
 /**
- * OpenAI-compatible providers that use async task_id (some Chinese proxies).
+ * OpenAI-compatible providers that use async task_id (some proxies).
  * - Requires pixel size format
  * - Returns task_id for polling
  * - Uses /images/edits for image editing
+ * - Poll via GET /tasks/{taskId} (same as APImart pattern)
  */
 export const PROFILE_OPENAI_ASYNC: ApiCompatProfile = {
   id: 'openai-async',
@@ -123,6 +145,8 @@ export const PROFILE_OPENAI_ASYNC: ApiCompatProfile = {
   editEndpoint: '/images/edits',
   editEncoding: 'multipart-only',
   supportsInputFidelity: true,
+  pollMode: 'path',
+  pollPathTemplate: '/tasks/{taskId}',
 };
 
 /**
@@ -138,6 +162,8 @@ export const PROFILE_AUTO: ApiCompatProfile = {
   editEndpoint: '/images/edits',
   editEncoding: 'multipart-only',
   supportsInputFidelity: true,
+  pollMode: 'path',
+  pollPathTemplate: '/tasks/{taskId}',
 };
 
 /** Map of all built-in profiles by id */
@@ -160,6 +186,27 @@ const URL_PROFILE_RULES: Array<{ pattern: RegExp; profile: ApiCompatProfile }> =
   { pattern: /apimart\.ai/i,              profile: PROFILE_APIMART },
   { pattern: /api\.openai\.com/i,         profile: PROFILE_OPENAI },
 ];
+
+// ---------------------------------------------------------------------------
+// Utility: build polling URL
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the polling URL for an async task.
+ * Uses the profile's pollPathTemplate and pollMode to construct the correct URL.
+ * Returns null if the profile doesn't support polling.
+ */
+export function buildPollUrl(
+  apiBaseUrl: string,
+  taskId: string,
+  profile: ApiCompatProfile,
+): string | null {
+  if (profile.pollMode === 'none' || !profile.pollPathTemplate) {
+    return null;
+  }
+  const path = profile.pollPathTemplate.replace('{taskId}', taskId);
+  return `${apiBaseUrl}${path}`;
+}
 
 /**
  * Resolve the compatibility profile for a given provider.
@@ -396,8 +443,8 @@ export const COMPAT_PROFILE_OPTIONS: Array<{ value: string; label: string; descr
   },
   {
     value: 'apimart',
-    label: 'APImart (异步轮询)',
-    description: 'apimart.ai 专用，支持宽高比格式，返回 task_id 需轮询',
+    label: '异步轮询 (宽高比)',
+    description: '支持宽高比格式（1:1, 16:9等），返回 task_id 需轮询，适合 apimart.ai 等中转站',
   },
   {
     value: 'openai',

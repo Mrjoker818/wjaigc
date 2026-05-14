@@ -81,7 +81,7 @@ export interface ApiKey {
   id: string;
   userId: string;
   name: string;
-  provider: 'apimart' | 'gemini' | 'custom';
+  provider: 'apimart' | 'gemini' | 'custom' | 'openai' | 'openai-async' | 'async-poll' | 'direct';
   key: string;
   baseUrl?: string; // 自定义API的基地址
   isEnabled: boolean;

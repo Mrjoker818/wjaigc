@@ -949,7 +949,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
         }
       }).catch(() => onChatModelChange(null));
     } else {
-      // Built-in model (uses apimart)
+      // Server-managed model
       onChatModelChange({
         model,
         providerId: '',
