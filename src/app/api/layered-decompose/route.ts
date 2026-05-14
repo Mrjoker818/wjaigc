@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import sharp from 'sharp';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { saveImageFile } from '@/lib/server-data-root';
 
 /**
  * Qwen-Image-Layered RGBA 图层分解 API
@@ -188,33 +189,27 @@ async function decomposeViaAI(
   const results = data.data || [];
 
   // 保存每个图层
-  const uploadsDir = path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'public', 'layered');
-  if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-  }
-
   const taskPrefix = `layered_${Date.now()}`;
   const layerInfos: LayerInfo[] = [];
 
   for (let i = 0; i < results.length; i++) {
     const item = results[i];
     const filename = `${taskPrefix}_layer_${i}.png`;
-    const filePath = path.join(uploadsDir, filename);
 
+    let buffer: Buffer;
     if (item.b64_json) {
-      const buffer = Buffer.from(item.b64_json, 'base64');
-      fs.writeFileSync(filePath, buffer);
+      buffer = Buffer.from(item.b64_json, 'base64');
     } else if (item.url) {
       const imgResp = await fetch(item.url, { signal: AbortSignal.timeout(30000) });
-      const buffer = Buffer.from(await imgResp.arrayBuffer());
-      fs.writeFileSync(filePath, buffer);
+      buffer = Buffer.from(await imgResp.arrayBuffer());
+    } else {
+      continue;
     }
 
-    const baseUrl2 = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
-    const layerUrl = baseUrl2 ? `${baseUrl2}/layered/${filename}` : `/layered/${filename}`;
+    const layerUrl = await saveImageFile(buffer, filename, 'layered');
 
     try {
-      const meta = await sharp(fs.readFileSync(filePath)).metadata();
+      const meta = await sharp(buffer).metadata();
       layerInfos.push({
         id: i,
         name: `Layer ${i + 1}`,

@@ -134,3 +134,67 @@ export function getServerSystemDir(): string {
 export function getServerUsersDir(): string {
   return path.join(getServerDataRoot(), 'users');
 }
+
+/**
+ * 保存图片文件到服务器，兼容开发/生产环境
+ * - 开发环境: 保存到 public/{subDir}/ 并返回 /{subDir}/filename 的公共URL
+ * - 生产环境: 保存到 /space/wujie-data/{subDir}/ 并通过 /api/serve-upload/{subDir}/filename 访问
+ * @param buffer 文件数据 (Buffer | string)
+ * @param filename 文件名 (如 composite_1234.png)
+ * @param subDir 子目录 (如 outpaint, upscale, generated 等)
+ * @returns 公共URL路径 (如 /outpaint/composite_1234.png 或 /api/serve-upload/outpaint/composite_1234.png)
+ */
+export function saveImageFile(
+  buffer: Buffer | string,
+  filename: string,
+  subDir: string
+): string {
+  const root = getServerDataRoot();
+  const dir = path.join(root, subDir);
+  
+  // 确保目录存在
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  
+  const filePath = path.join(dir, filename);
+  const data = typeof buffer === 'string' ? Buffer.from(buffer, 'base64') : buffer;
+  fs.writeFileSync(filePath, data);
+  
+  // 生产环境通过 serve-upload API 访问，开发环境通过 public 目录访问
+  const isProd = process.env.COZE_PROJECT_ENV === 'PROD';
+  if (isProd) {
+    return `/api/serve-upload/${subDir}/${filename}`;
+  }
+  return `/${subDir}/${filename}`;
+}
+
+/**
+ * 获取图片文件的可写目录路径
+ * 用于需要直接写入文件的场景（如第三方工具输出）
+ * @param subDir 子目录名
+ * @returns 目录的绝对路径
+ */
+export function getImageWriteDir(subDir: string): string {
+  const root = getServerDataRoot();
+  const dir = path.join(root, subDir);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+}
+
+/**
+ * 将文件路径转换为公共URL
+ * @param filePath 文件的绝对路径
+ * @param subDir 子目录名 (用于计算相对路径)
+ * @returns 公共URL路径
+ */
+export function filePathToPublicUrl(filePath: string, subDir: string): string {
+  const filename = path.basename(filePath);
+  const isProd = process.env.COZE_PROJECT_ENV === 'PROD';
+  if (isProd) {
+    return `/api/serve-upload/${subDir}/${filename}`;
+  }
+  return `/${subDir}/${filename}`;
+}

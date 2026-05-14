@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { writeFile, mkdir, copyFile } from 'fs/promises';
 import { existsSync } from 'fs';
-import path from 'path';
-import { getServerDataRoot } from '@/lib/server-data-root';
 
 export async function POST(request: NextRequest) {
   try {
@@ -32,30 +29,8 @@ export async function POST(request: NextRequest) {
     const random = Math.random().toString(36).substring(2, 8);
     const filename = `upload-${timestamp}-${random}.${ext}`;
 
-    const isProd = process.env.COZE_PROJECT_ENV === 'PROD';
-    const uploadDir = isProd
-      ? path.join(getServerDataRoot(), 'uploads')
-      : path.join(process.cwd(), 'public', 'uploads');
-    if (!existsSync(uploadDir)) {
-      await mkdir(uploadDir, { recursive: true });
-    }
-
-    const filePath = path.join(uploadDir, filename);
-    await writeFile(filePath, buffer);
-
-    // 生产环境也写入 public/uploads 以便静态服务
-    let webPath: string;
-    if (isProd) {
-      const publicDir = path.join(process.cwd(), 'public', 'uploads');
-      if (!existsSync(publicDir)) await mkdir(publicDir, { recursive: true });
-      try { await copyFile(filePath, path.join(publicDir, filename)); } catch { /* ignore */ }
-      webPath = '/api/serve-upload';
-    } else {
-      webPath = '/uploads';
-    }
-
-    // Return the URL path
-    const url = `${webPath}/${filename}`;
+    const { saveImageFile } = await import('@/lib/server-data-root');
+    const url = await saveImageFile(buffer, filename, 'uploads');
 
     return NextResponse.json({
       success: true,

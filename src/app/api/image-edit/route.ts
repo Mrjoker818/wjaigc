@@ -3,10 +3,13 @@ import { findProviderForModel, findProviderById, findProviderForFeature, findAll
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, type ApiCompatProfile, type ImageEndpoint } from '@/lib/api-compatibility';
+import { saveImageFile } from '@/lib/server-data-root';
 import sharp from 'sharp';
 import fsSync from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
+import { getServerDataRoot } from '@/lib/server-data-root';
+import { isS3Available, uploadImageToS3 } from '@/lib/s3-storage';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -854,12 +857,12 @@ async function pollTaskUntilComplete(
  * 保存 buffer 到 public 目录并返回可访问的 URL 路径
  */
 async function saveBufferToPublic(buffer: Buffer, filename: string): Promise<string> {
-  const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
-  const publicDir = path.join(workspacePath, 'public', 'upscaled');
-  await fs.mkdir(publicDir, { recursive: true });
-  const filePath = path.join(publicDir, filename);
-  await fs.writeFile(filePath, buffer);
-  return `/upscaled/${filename}`;
+  if (isS3Available()) {
+    const s3Url = await uploadImageToS3(buffer, filename, 'image/png');
+    if (s3Url) return s3Url;
+  }
+  const url = await saveImageFile(buffer, filename, 'upscaled');
+  return url || `/api/serve-upload/upscaled/${filename}`;
 }
 
 export async function POST(request: NextRequest) {
@@ -984,12 +987,17 @@ export async function POST(request: NextRequest) {
         const localPrefix = `${domain}/`;
         if (url.startsWith(localPrefix)) {
           const localPath = url.replace(localPrefix, '');
-          const fullPath = `${process.env.COZE_WORKSPACE_PATH || '/workspace/projects'}/public/${localPath}`;
-          const fs = await import('fs/promises');
-          const buf = await fs.readFile(fullPath);
-          const ext = localPath.split('.').pop()?.toLowerCase() || 'png';
-          const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png';
-          return `data:${mime};base64,${buf.toString('base64')}`;
+          // Search multiple possible locations: dataRoot/localPath, dataRoot/public/localPath, devWorkspace/public/localPath
+          const dataRoot = await getServerDataRoot();
+          const searchPaths = [
+            path.join(dataRoot, localPath),
+            path.join(dataRoot, 'public', localPath),
+            path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'public', localPath),
+          ];
+          for (const fp of searchPaths) {
+            try { const buf = await fs.readFile(fp); const ext = localPath.split('.').pop()?.toLowerCase() || 'png'; const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png'; return `data:${mime};base64,${buf.toString('base64')}`; } catch {}
+          }
+          throw new Error(`Local file not found: ${localPath} (searched ${searchPaths.join(', ')})`);
         }
         // External URL: fetch it
         const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
@@ -997,13 +1005,18 @@ export async function POST(request: NextRequest) {
         const ct = res.headers.get('content-type') || 'image/png';
         return `data:${ct};base64,${buf.toString('base64')}`;
       }
-      // Relative path like /uploads/xxx.png
-      const fs = await import('fs/promises');
-      const fullPath = `${process.env.COZE_WORKSPACE_PATH || '/workspace/projects'}/public${url.startsWith('/') ? url : '/' + url}`;
-      const buf = await fs.readFile(fullPath);
-      const ext = url.split('.').pop()?.toLowerCase() || 'png';
-      const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png';
-      return `data:${mime};base64,${buf.toString('base64')}`;
+      // Relative path like /uploads/xxx.png or /outpaint/xxx.png
+      const dataRoot = await getServerDataRoot();
+      const relPath = url.startsWith('/') ? url.slice(1) : url;
+      const searchPaths = [
+        path.join(dataRoot, relPath),
+        path.join(dataRoot, 'public', relPath),
+        path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'public', relPath),
+      ];
+      for (const fp of searchPaths) {
+        try { const buf = await fs.readFile(fp); const ext = relPath.split('.').pop()?.toLowerCase() || 'png'; const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png'; return `data:${mime};base64,${buf.toString('base64')}`; } catch {}
+      }
+      throw new Error(`File not found: ${url} (searched ${searchPaths.join(', ')})`);
     };
 
     if (action === 'multi_angle') {
@@ -1503,13 +1516,14 @@ export async function POST(request: NextRequest) {
             .toBuffer();
 
           // 保存合成结果
-          const publicDir = path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'public', 'inpaint');
-          await fs.mkdir(publicDir, { recursive: true });
           const resultFileName = `inpaint_${Date.now()}.png`;
-          const resultPath = path.join(publicDir, resultFileName);
-          await fs.writeFile(resultPath, compositeResult);
+          let compositeUrl: string;
 
-          const compositeUrl = `/inpaint/${resultFileName}`;
+          if (isS3Available()) {
+            compositeUrl = (await uploadImageToS3(compositeResult, resultFileName, 'image/png')) || '';
+          } else {
+            compositeUrl = (await saveImageFile(compositeResult, resultFileName, 'inpaint')) || `/api/serve-upload/inpaint/${resultFileName}`;
+          }
           console.log(`[inpaint] AI composite result saved: ${resultFileName}`);
 
           return NextResponse.json({ success: true, imageUrl: compositeUrl, action, engine: 'ai-composite' });
@@ -1657,21 +1671,19 @@ export async function POST(request: NextRequest) {
         .png()
         .toBuffer();
 
-      // 保存合成图和蒙版到临时文件（避免 base64 过大导致 API 请求失败）
-      const publicDir = path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'public', 'outpaint');
-      await fs.mkdir(publicDir, { recursive: true });
+      // 保存合成图和蒙版到临时目录（生产环境 public 目录可能只读，统一使用 /tmp）
+      const tmpDir = path.join('/tmp', 'outpaint');
+      await fs.mkdir(tmpDir, { recursive: true });
       const timestamp = Date.now();
       const compositeFileName = `composite_${timestamp}.png`;
       const maskFileName = `mask_${timestamp}.png`;
-      const compositePath = path.join(publicDir, compositeFileName);
-      const maskPath = path.join(publicDir, maskFileName);
+      const compositePath = path.join(tmpDir, compositeFileName);
+      const maskPath = path.join(tmpDir, maskFileName);
       await fs.writeFile(compositePath, compositeImage);
       await fs.writeFile(maskPath, finalMask);
 
-      const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
-      // 优先使用 base64 数据 URL 发送图片（避免外部 API 无法访问 localhost）
+      // 始终使用 base64 数据 URL 发送图片（避免文件系统权限问题和外部 API 访问问题）
       const compositeBase64 = `data:image/png;base64,${compositeImage.toString('base64')}`;
-      const compositeUrl = domain ? `${domain}/outpaint/${compositeFileName}` : compositeBase64;
       const maskFileBase64 = `data:image/png;base64,${finalMask.toString('base64')}`;
 
       // 构建扩图方向的提示词
@@ -1784,11 +1796,14 @@ export async function POST(request: NextRequest) {
           const finalBuffer = await compositeOriginalOnResult(resultBuffer);
 
           const resultFileName = `outpaint_${timestamp}.png`;
-          const resultPath = path.join(publicDir, resultFileName);
-          await fs.writeFile(resultPath, finalBuffer);
+          let compositeResultUrl: string;
 
-          const compositeResultUrl = `${domain}/outpaint/${resultFileName}`;
-          console.log(`[outpaint] Sync result composited: ${resultFileName}`);
+          if (isS3Available()) {
+            compositeResultUrl = (await uploadImageToS3(finalBuffer, resultFileName, 'image/png')) || '';
+          } else {
+            compositeResultUrl = (await saveImageFile(finalBuffer, resultFileName, 'outpaint')) || `/api/serve-upload/outpaint/${resultFileName}`;
+          }
+          console.log(`[outpaint] Sync result saved: ${resultFileName}`);
 
           // 清理临时文件
           await cleanupFiles();

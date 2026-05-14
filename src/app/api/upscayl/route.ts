@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
+import { saveImageFile } from '@/lib/server-data-root';
 import sharp from 'sharp';
 
 // Upscayl 模型描述信息 (基于 upscayl/upscayl-ncnn Real-ESRGAN)
@@ -520,19 +521,9 @@ export async function POST(request: NextRequest) {
         finalBuffer = await sharp(resultBuffer).webp({ quality: compress }).toBuffer();
       }
 
-      // 保存到 public 目录并返回 URL
-      const uploadsDir = path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'public', 'upscayl');
-      if (!fs.existsSync(uploadsDir)) {
-        fs.mkdirSync(uploadsDir, { recursive: true });
-      }
+      // 保存结果文件
       const outputFilename = `upscayl_${Date.now()}_${modelName}_${upscaleScale}x.${format}`;
-      const outputFilePath = path.join(uploadsDir, outputFilename);
-      fs.writeFileSync(outputFilePath, finalBuffer);
-
-      const baseUrl = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
-      const imageUrlResult = baseUrl
-        ? `${baseUrl}/upscayl/${outputFilename}`
-        : `/upscayl/${outputFilename}`;
+      const imageUrlResult = await saveImageFile(finalBuffer, outputFilename, 'upscayl');
 
       // 清理临时文件
       try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
