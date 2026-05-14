@@ -5736,7 +5736,7 @@ export function InfiniteCanvas({
             const containerPad = 24;
             // 参考图组下方需要额外空间显示类别标签
             const leftPad = containerPad;
-            const bottomPad = isRef ? 130 : containerPad;
+            const bottomPad = isRef ? 52 : containerPad;
             const containerMinX = Math.min(...allBounds.map(b => b.x)) - containerPad;
             const containerMinY = Math.min(...allBounds.map(b => b.y)) - containerPad - 40;
             const containerMaxX = Math.max(...allBounds.map(b => b.x + b.w)) + containerPad;
@@ -5901,67 +5901,62 @@ export function InfiniteCanvas({
                     {/* Per-image category sliders (reference group only) - BELOW image */}
                     {isRef && (
                       <div
-                        className="flex flex-col gap-1.5 pt-2 pointer-events-auto"
+                        className="pointer-events-auto"
                         style={{ width: img.width }}
                         onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        {REFERENCE_CATEGORIES.map(cat => {
-                          const isSelected = imgCats.includes(cat);
-                          const strength = group.sourceStrengths[img.id]?.[cat] ?? 50;
-                          return (
-                            <div
-                              key={cat}
-                              className="flex items-center gap-2"
-                            >
-                              {/* Category pill tag */}
-                              <div
-                                className={`flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-bold text-center select-none cursor-pointer transition-all ${
-                                  isSelected ? '' : 'opacity-40'
-                                }`}
-                                style={{
-                                  width: 36,
-                                  border: `1.5px solid ${isSelected ? accentColor : (isMonochrome ? '#888' : '#555')}`,
-                                  background: isSelected
-                                    ? 'rgba(212,175,55,0.12)'
-                                    : (isMonochrome ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.05)'),
-                                  color: isSelected ? accentColor : (isMonochrome ? '#888' : '#777'),
-                                }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setGenGroups(prev => prev.map(g => {
-                                    if (g.id !== group.id) return g;
-                                    const newCats = { ...g.sourceCategories };
-                                    const newStr = { ...g.sourceStrengths };
-                                    const cats = [...(newCats[img.id] || [])];
-                                    const str = { ...(newStr[img.id] || {}) };
-                                    if (isSelected) {
-                                      const idx = cats.indexOf(cat);
-                                      if (idx >= 0) cats.splice(idx, 1);
-                                    } else {
-                                      if (!cats.includes(cat)) cats.push(cat);
-                                      if (!str[cat]) str[cat] = 50;
-                                    }
-                                    newCats[img.id] = cats;
-                                    newStr[img.id] = str;
-                                    return { ...g, sourceCategories: newCats, sourceStrengths: newStr };
-                                  }));
-                                }}
-                              >
-                                {REFERENCE_CATEGORY_LABELS[cat]}
-                              </div>
-                              {/* Slider track */}
-                              <div className="flex-1 relative h-3 flex items-center">
+                        <div className="flex flex-wrap gap-x-2 gap-y-1">
+                          {REFERENCE_CATEGORIES.map(cat => {
+                            const isSelected = imgCats.includes(cat);
+                            const strength = group.sourceStrengths[img.id]?.[cat] ?? 50;
+                            return (
+                              <div key={cat} className="flex items-center gap-1 group/cat">
+                                <div
+                                  className={`flex-shrink-0 rounded-md text-[9px] font-bold text-center select-none cursor-pointer transition-all leading-[20px] px-1.5`}
+                                  style={{
+                                    border: `1.5px solid ${isSelected ? accentColor : 'rgba(255,255,255,0.08)'}`,
+                                    background: isSelected
+                                      ? `linear-gradient(135deg, rgba(212,175,55,0.2), rgba(212,175,55,0.06))`
+                                      : 'rgba(255,255,255,0.03)',
+                                    color: isSelected ? accentColor : 'rgba(255,255,255,0.3)',
+                                    boxShadow: isSelected ? `0 0 8px rgba(212,175,55,0.12), inset 0 1px 0 rgba(255,255,255,0.06)` : 'none',
+                                    letterSpacing: '0.03em',
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setGenGroups(prev => prev.map(g => {
+                                      if (g.id !== group.id) return g;
+                                      const newCats = { ...g.sourceCategories };
+                                      const newStr = { ...g.sourceStrengths };
+                                      const cats = [...(newCats[img.id] || [])];
+                                      const str = { ...(newStr[img.id] || {}) };
+                                      if (isSelected) {
+                                        const idx = cats.indexOf(cat);
+                                        if (idx >= 0) cats.splice(idx, 1);
+                                      } else {
+                                        if (!cats.includes(cat)) cats.push(cat);
+                                        if (!str[cat]) str[cat] = 50;
+                                      }
+                                      newCats[img.id] = cats;
+                                      newStr[img.id] = str;
+                                      return { ...g, sourceCategories: newCats, sourceStrengths: newStr };
+                                    }));
+                                  }}
+                                >
+                                  {REFERENCE_CATEGORY_LABELS[cat]}
+                                </div>
                                 <input
                                   type="range"
                                   min={0}
                                   max={100}
                                   value={strength}
-                                  className="w-full h-1 appearance-none rounded-full cursor-pointer"
+                                  className="w-[36px] h-[3px] appearance-none rounded-full cursor-pointer"
                                   style={{
                                     accentColor,
-                                    background: `linear-gradient(to right, ${accentColor} ${strength}%, ${isMonochrome ? '#ccc' : '#333'} ${strength}%)`,
-                                    opacity: isSelected ? 1 : 0.35,
+                                    background: `linear-gradient(to right, ${isSelected ? accentColor : '#555'} ${strength}%, rgba(255,255,255,0.06) ${strength}%)`,
+                                    opacity: isSelected ? 1 : 0.3,
+                                    transition: 'opacity 0.2s',
                                   }}
                                   onChange={(e) => {
                                     const val = Number(e.target.value);
@@ -5969,7 +5964,6 @@ export function InfiniteCanvas({
                                       if (g.id !== group.id) return g;
                                       const newStr = { ...g.sourceStrengths };
                                       newStr[img.id] = { ...(newStr[img.id] || {}), [cat]: val };
-                                      // Auto-select category when dragging slider
                                       const newCats = { ...g.sourceCategories };
                                       const cats = [...(newCats[img.id] || [])];
                                       if (!cats.includes(cat)) cats.push(cat);
@@ -5978,27 +5972,24 @@ export function InfiniteCanvas({
                                     }));
                                   }}
                                   onClick={(e) => e.stopPropagation()}
-                                  title={`${REFERENCE_CATEGORY_LABELS[cat]}: ${strength}%`}
                                 />
+                                <span
+                                  className="text-[8px] font-semibold tabular-nums w-6 text-right"
+                                  style={{
+                                    color: isSelected ? accentColor : 'rgba(255,255,255,0.18)',
+                                  }}
+                                >
+                                  {strength}%
+                                </span>
                               </div>
-                              {/* Percentage label */}
-                              <span
-                                className="flex-shrink-0 text-[10px] font-medium w-7 text-right tabular-nums"
-                                style={{
-                                  color: isSelected ? accentColor : (isMonochrome ? '#888' : '#555'),
-                                  opacity: isSelected ? 1 : 0.5,
-                                }}
-                              >
-                                {strength}%
-                              </span>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
                       </div>
                     )}
                   </div>
-                  );
-                })}
+                );
+              })}
 
                 {/* Result placeholder frame + Toolbar */}
                 <div
