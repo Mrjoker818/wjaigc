@@ -2405,13 +2405,14 @@ export function InfiniteCanvas({
     // 根据工具栏中的尺寸设置计算结果框的显示尺寸
     let displayBaseSize = 400;
     if (toolbar.size) {
-      const [sw, sh] = toolbar.size.split('x').map(Number);
-      const maxEdge = Math.max(sw, sh);
+      const [sw, sh] = toolbar.size.replace(/×/g, 'x').split('x').map(Number);
+      const maxEdge = Math.max(sw || 1024, sh || 1024);
       // 根据实际像素尺寸缩放显示大小
       if (maxEdge <= 512) displayBaseSize = 200;
       else if (maxEdge <= 1024) displayBaseSize = 300;
+      else if (maxEdge <= 1536) displayBaseSize = 350;
       else if (maxEdge <= 1792) displayBaseSize = 400;
-      else if (maxEdge <= 2048) displayBaseSize = 450;
+      else if (maxEdge <= 2048) displayBaseSize = 420;
       else displayBaseSize = 500;
     }
     const phWidth = arRatio >= 1 ? displayBaseSize : Math.round(displayBaseSize * arRatio);
@@ -2562,27 +2563,22 @@ export function InfiniteCanvas({
         const srcRightEdge = srcImgs.length > 0 ? Math.max(...srcImgs.map(img => img.x + img.width)) : 0;
         const srcCenterY = srcImgs.length > 0 ? srcImgs.reduce((s, img) => s + img.y + img.height / 2, 0) / srcImgs.length : 0;
         const resultFrameRight = srcRightEdge + 80 + Math.max(phWidth, 420);
+        // Parse actual pixel dimensions from toolbar size string (e.g. "1536x1024")
+        const actualSize = toolbar.size ? toolbar.size.split('x').map(Number) : [phWidth, phHeight];
+        const actualW = actualSize[0] || phWidth;
+        const actualH = actualSize[1] || phHeight;
         const newImages = savedUrls.map((url: string, i: number) => ({
           id: `grp-result-${Date.now()}-${i}`,
           url,
           x: resultFrameRight + 20 + i * (phWidth + 20),
           y: srcCenterY - phHeight / 2,
           width: phWidth, height: phHeight,
+          originalWidth: actualW,
+          originalHeight: actualH,
           prompt: toolbar.prompt,
           aspectRatio: toolbar.aspectRatio,
         }));
         onImagesChange([...imagesRef.current, ...newImages]);
-        // Load actual image dimensions asynchronously
-        newImages.forEach((img: { id: string; url: string }, idx: number) => {
-          const el = new window.Image();
-          el.onload = () => {
-            const currentImages = imagesRef.current;
-            const updated = currentImages.map(p => p.id === img.id ? { ...p, originalWidth: el.naturalWidth, originalHeight: el.naturalHeight } : p);
-            imagesRef.current = updated;
-            onImagesChange(updated);
-          };
-          el.src = img.url;
-        });
         // Reset group: keep toolbar visible, clear result for next generation
         setGenGroups(prev => prev.map(g => {
           if (g.id !== group.id) return g;
@@ -2659,27 +2655,22 @@ export function InfiniteCanvas({
                 const srcRightEdge = srcImgs.length > 0 ? Math.max(...srcImgs.map(img => img.x + img.width)) : 0;
                 const srcCenterY = srcImgs.length > 0 ? srcImgs.reduce((s, img) => s + img.y + img.height / 2, 0) / srcImgs.length : 0;
                 const resultFrameRight = srcRightEdge + 80 + Math.max(phWidth, 420);
+                // Parse actual pixel dimensions from toolbar size string (e.g. "1536x1024")
+                const actualSize = toolbar.size ? toolbar.size.split('x').map(Number) : [phWidth, phHeight];
+                const actualW = actualSize[0] || phWidth;
+                const actualH = actualSize[1] || phHeight;
                 const resultImages = savedUrls.map((url: string, i: number) => ({
                   id: `grp-result-${Date.now()}-${i}`,
                   url,
                   x: resultFrameRight + 20 + i * (phWidth + 20),
                   y: srcCenterY - phHeight / 2,
                   width: phWidth, height: phHeight,
+                  originalWidth: actualW,
+                  originalHeight: actualH,
                   prompt: toolbar.prompt,
                   aspectRatio: toolbar.aspectRatio,
                 }));
                 onImagesChange([...imagesRef.current, ...resultImages]);
-                // Load actual image dimensions asynchronously
-                resultImages.forEach((img: { id: string; url: string }) => {
-                  const el = new window.Image();
-                  el.onload = () => {
-                    const currentImages = imagesRef.current;
-                    const updated = currentImages.map(p => p.id === img.id ? { ...p, originalWidth: el.naturalWidth, originalHeight: el.naturalHeight } : p);
-                    imagesRef.current = updated;
-                    onImagesChange(updated);
-                  };
-                  el.src = img.url;
-                });
                 // Reset group: keep toolbar visible, clear result for next generation
                 setGenGroups(prev => prev.map(g => {
                   if (g.id !== group.id) return g;
@@ -4882,17 +4873,45 @@ export function InfiniteCanvas({
         setActiveTool('none');
         return;
       }
-      // PNG format
-      const response = await fetch(image.url);
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${image.prompt?.substring(0, 30) || 'image'}.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // PNG format - try direct fetch, fallback to server proxy for CORS
+      try {
+        const response = await fetch(image.url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${image.prompt?.substring(0, 30) || 'image'}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch {
+        // Direct fetch failed (likely CORS), use server-side proxy
+        try {
+          const proxyRes = await fetch('/api/save-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageUrl: image.url }),
+          });
+          const proxyData = await proxyRes.json();
+          const proxyUrl = proxyData.savedUrl || proxyData.localUrl || proxyData.url;
+          if (proxyUrl) {
+            const response = await fetch(proxyUrl);
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${image.prompt?.substring(0, 30) || 'image'}.png`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          }
+        } catch (proxyError) {
+          console.error('Download proxy also failed:', proxyError);
+        }
+      }
     } catch (error) {
       console.error('Download failed:', error);
       setDownloadProgress(null);
@@ -5805,12 +5824,27 @@ export function InfiniteCanvas({
             const dragDx = isThisGroupDragging ? genGroupDragOffset.x : 0;
             const dragDy = isThisGroupDragging ? genGroupDragOffset.y : 0;
 
-            // Dynamically calculate result size from toolbar aspect ratio
+            // Dynamically calculate result size from toolbar aspect ratio and actual pixel size
             const arParts = group.toolbar.aspectRatio.split(':').map(Number);
             const arW = arParts[0] || 1;
             const arH = arParts[1] || 1;
-            const srcMaxDim = srcImages.length > 0 ? Math.max(...srcImages.map(img => Math.max(img.width, img.height))) : 512;
-            const baseSize = Math.max(srcMaxDim, 400);
+            // Use actual pixel size from toolbar to determine display scale
+            const sizeStr = group.toolbar.size || calculateActualPixels(group.toolbar.aspectRatio, group.toolbar.quality, group.toolbar.model);
+            const sizeParts = sizeStr.replace(/×/g, 'x').split('x').map(Number);
+            const pixelW = sizeParts[0] || 1024;
+            const pixelH = sizeParts[1] || 1024;
+            const maxPixel = Math.max(pixelW, pixelH);
+            // Scale: 512px→200, 1024px→300, 1536px→350, 1792px→400, 2048px→420, 3840px→500
+            let displayBase: number;
+            if (maxPixel <= 512) displayBase = 200;
+            else if (maxPixel <= 1024) displayBase = 300;
+            else if (maxPixel <= 1536) displayBase = 350;
+            else if (maxPixel <= 1792) displayBase = 400;
+            else if (maxPixel <= 2048) displayBase = 420;
+            else displayBase = 500;
+            // Also consider source image sizes to ensure placeholder isn't too small
+            const srcMaxDim = srcImages.length > 0 ? Math.max(...srcImages.map(img => Math.max(img.width, img.height))) : 0;
+            const baseSize = Math.max(displayBase, srcMaxDim, 300);
             const resultW = arW >= arH ? baseSize : Math.round(baseSize * (arW / arH));
             const resultH = arH >= arW ? baseSize : Math.round(baseSize * (arH / arW));
             const srcBounds = srcImages.map(img => ({ x: img.x + dragDx, y: img.y + dragDy, w: img.width, h: img.height }));

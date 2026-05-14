@@ -693,7 +693,13 @@ export class UserManager {
       'gemini-2.0-flash-exp': 'Nano Banana 2 (3.1-flash)',
       'gemini-2.5-pro-image-preview': 'Nano Banana Pro (3-pro)',
       'seedance-4k': '豆包4.5 (Seedance)',
+      'doubao-seedance-4-5': '豆包4.5 (Seedance)',
+      'gpt-image-2': 'GPT-Image 2',
       'gpt-image-2-official': 'GPT-Image 2',
+      'dall-e-3': 'DALL-E 3',
+      'stable-diffusion-xl': 'Stable Diffusion XL',
+      'flux-pro': 'Flux Pro',
+      'flux-schnell': 'Flux Schnell',
     };
 
     const getModelLabel = (modelId: string) => modelNames[modelId] || modelId;
@@ -870,11 +876,37 @@ export class UserManager {
       }).catch(() => {});
     }
   }
-  exportProjectToWujie(projectId: string): string {
+  async exportProjectToWujie(projectId: string): Promise<string> {
     const project = this.getProject(projectId);
     if (!project) throw new Error('Project not found');
     const userData = this.getCurrentUserData();
     const user = userData?.user;
+
+    // Convert image URLs to base64 data URLs for offline viewing
+    const imageUrlMap = new Map<string, string>();
+    const uniqueUrls = [...new Set(project.canvasImages.map(img => img.url).filter(Boolean))];
+    await Promise.all(uniqueUrls.map(async (url) => {
+      try {
+        // For relative URLs, prepend the origin
+        const fetchUrl = url.startsWith('/') ? `${window.location.origin}${url}` : url;
+        const resp = await fetch(fetchUrl, { mode: 'cors' });
+        if (resp.ok) {
+          const blob = await resp.blob();
+          const dataUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = () => resolve(url);
+            reader.readAsDataURL(blob);
+          });
+          imageUrlMap.set(url, dataUrl);
+        } else {
+          imageUrlMap.set(url, url);
+        }
+      } catch {
+        imageUrlMap.set(url, url);
+      }
+    }));
+    const resolveUrl = (url: string) => imageUrlMap.get(url) || url;
 
     const modelNames: Record<string, string> = {
       'gemini-2.5-flash-image-preview': 'Nano Banana (2.5-flash)',
@@ -1079,9 +1111,9 @@ export class UserManager {
       ${project.canvasImages.map((img, idx) => `
       <div class="img-card">
         <div class="img-wrap">
-          <img src="${esc(img.url)}" alt="作品 ${idx + 1}" loading="lazy" onerror="this.parentElement.innerHTML='<div style=\\'padding:40px;text-align:center;color:#333;font-size:13px\\'>图片不可用</div>'" />
+          <img src="${esc(resolveUrl(img.url))}" alt="作品 ${idx + 1}" loading="lazy" onerror="this.parentElement.innerHTML='<div style=\\'padding:40px;text-align:center;color:#333;font-size:13px\\'>图片不可用</div>'" />
           <div class="idx">#${idx + 1}</div>
-          <div class="dims">${img.originalWidth}×${img.originalHeight}</div>
+          <div class="dims">${img.originalWidth || img.width || '?'}×${img.originalHeight || img.height || '?'}</div>
         </div>
         <div class="card-body">
           ${img.prompt ? `<div class="prompt">${esc(img.prompt)}</div>` : '<div class="prompt" style="color:#444">无提示词</div>'}

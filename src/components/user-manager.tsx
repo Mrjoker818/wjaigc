@@ -162,17 +162,22 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
     loadData();
   };
 
-  const handleExportProject = (project: Project) => {
-    const content = userManager.exportProjectToWujie(project.id);
-    const blob = new Blob([content], { type: 'text/html;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${project.name}.wujie`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  const handleExportProject = async (project: Project) => {
+    try {
+      const content = await userManager.exportProjectToWujie(project.id);
+      const blob = new Blob([content], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${project.name}.wujie`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Export project failed:', err);
+      alert('导出项目失败: ' + (err instanceof Error ? err.message : '未知错误'));
+    }
   };
 
   const handleImportProject = (event: React.ChangeEvent<HTMLInputElement>) => {
