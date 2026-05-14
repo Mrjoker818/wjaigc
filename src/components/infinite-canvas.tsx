@@ -2592,8 +2592,8 @@ export function InfiniteCanvas({
               body: JSON.stringify({ imageUrl: url }),
             });
             const saveData = await saveRes.json();
-            if (saveData.success && saveData.imageUrl) {
-              referenceImages.push(saveData.imageUrl);
+            if (saveData.success && saveData.url) {
+              referenceImages.push(saveData.url);
             } else {
               console.warn('[handleGroupGenerate] Failed to save data URL, skipping:', saveData.error);
             }
@@ -2666,7 +2666,7 @@ export function InfiniteCanvas({
               body: JSON.stringify({ imageUrl: url }),
             });
             const saveData = await saveRes.json();
-            savedUrls.push(saveData.savedUrl || saveData.localUrl || url);
+            savedUrls.push(saveData.url || url);
           } catch {
             savedUrls.push(url);
           }
@@ -2758,7 +2758,7 @@ export function InfiniteCanvas({
                       body: JSON.stringify({ imageUrl: url }),
                     });
                     const saveData = await saveRes.json();
-                    savedUrls.push(saveData.savedUrl || saveData.localUrl || url);
+                    savedUrls.push(saveData.url || url);
                   } catch {
                     savedUrls.push(url);
                   }
@@ -3649,7 +3649,7 @@ export function InfiniteCanvas({
             });
             if (saveRes.ok) {
               const saveData = await saveRes.json();
-              if (saveData.success && saveData.savedUrl) savedUrl = saveData.savedUrl;
+              if (saveData.success && saveData.url) savedUrl = saveData.url;
             }
           } catch {}
           savedUrls.push(savedUrl);
@@ -4847,7 +4847,7 @@ export function InfiniteCanvas({
                   body: JSON.stringify({ imageUrl: editImg.url }),
                 });
                 const saveData = await saveRes.json();
-                return saveData.success && saveData.imageUrl ? saveData.imageUrl : editImg.url;
+                return saveData.success && saveData.url ? saveData.url : editImg.url;
               } catch { return editImg.url; }
             })() } : {}),
             strength: img2imgStrength,
@@ -4884,7 +4884,7 @@ export function InfiniteCanvas({
               });
               if (saveRes.ok) {
                 const saveData = await saveRes.json();
-                if (saveData.success && saveData.savedUrl) savedUrl = saveData.savedUrl;
+                if (saveData.success && saveData.url) savedUrl = saveData.url;
               }
             } catch {}
             // 直接返回图片模式 — 加载图片获取尺寸后完成
@@ -5167,7 +5167,7 @@ export function InfiniteCanvas({
             body: JSON.stringify({ imageUrl: image.url }),
           });
           const proxyData = await proxyRes.json();
-          const proxyUrl = proxyData.savedUrl || proxyData.localUrl || proxyData.url;
+          const proxyUrl = proxyData.url || proxyData.savedUrl || proxyData.localUrl;
           if (proxyUrl) {
             const response = await fetch(proxyUrl);
             const blob = await response.blob();
