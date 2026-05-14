@@ -309,7 +309,6 @@ interface InfiniteCanvasProps {
   onToggleHelp?: () => void;
   isPanelCollapsed?: boolean;
   onUndo?: () => void;
-  onOpenLayerGraph?: () => void;
   navigateToImageId?: string | null;
   onNavigateToImageComplete?: () => void;
   onGroupsChange?: (groups: ImageGroup[]) => void;
@@ -360,7 +359,6 @@ export function InfiniteCanvas({
   onToggleHelp,
   isPanelCollapsed = true,
   onUndo,
-  onOpenLayerGraph,
   navigateToImageId,
   onNavigateToImageComplete,
   onGroupsChange,
@@ -9686,19 +9684,7 @@ export function InfiniteCanvas({
 
         <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#2a2a2a]'}`} />
 
-        {/* Layer Graph */}
-        <button
-          onClick={() => onOpenLayerGraph?.()}
-          className={`p-2 rounded-xl transition-all relative group ${
-            isMonochrome
-              ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-              : 'text-[#888] hover:text-white hover:bg-white/10'
-          }`}
-          title="图层"
-        >
-          <Layers className="h-4 w-4" />
-          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-gray-900 text-white' : 'bg-black/90 text-white'}`}>图层</span>
-        </button>
+
 
         {/* HexCube 六面体 */}
         <button

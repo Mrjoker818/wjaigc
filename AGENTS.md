@@ -2,7 +2,7 @@
 
 ## 项目概览
 
-这是一个基于 Next.js 16 + React 19 + TypeScript 的 AI 图像生成与协作平台，支持无限画布操作、AI 聊天、图像生成与编辑、图生图、Layer Graph 设计工程等功能。
+这是一个基于 Next.js 16 + React 19 + TypeScript 的 AI 图像生成与协作平台，支持无限画布操作、AI 聊天、图像生成与编辑、图生图、PSD/SVG 导出等功能。
 
 ### 核心技术栈
 - **框架**: Next.js 16 (App Router)
@@ -10,7 +10,7 @@
 - **语言**: TypeScript 5
 - **AI 集成**: 通用 API 兼容层（支持 OpenAI / Gemini / 任意兼容格式 API）
 - **图像生成**: DALL-E 3、Midjourney、Stable Diffusion 等多种模型
-- **特色功能**: 无限画布、图生图、Layer Graph 设计工程、PSD/SVG 导出、3D 模型预览、本地图像编辑(upscayl/IOPaint)、Ctrl+Z 撤回
+- **特色功能**: 无限画布、图生图、PSD/SVG 导出、3D 模型预览、本地图像编辑(upscayl/IOPaint)、Ctrl+Z 撤回
 
 ### 项目结构
 ```
@@ -50,18 +50,11 @@ src/
 │   │   ├── ImageEditToolbar.tsx    # 图像编辑工具栏
 │   │   ├── MaskBrushCanvas.tsx     # 蒙版画布 (react-konva, 画笔/橡皮擦/撤销/导出)
 │   │   └── UpscaleDialog.tsx       # 无损放大弹窗 (模型/倍率/格式选择)
-│   ├── design-studio/
-│   │   ├── LayerGraphStudio.tsx    # Layer Graph 主弹窗
-│   │   ├── LayerPanel.tsx          # 图层面板 (可见/锁定/排序)
-│   │   ├── DesignCanvas.tsx        # 设计画布 (图层渲染+选择)
-│   │   └── PropertiesPanel.tsx     # 属性面板 (名称/透明度/位置/矢量化)
 │   └── ui/                         # shadcn/ui 组件库
 ├── lib/
 │   ├── db-client.ts                # PostgreSQL 连接池（使用 PGDATABASE_URL 环境变量）
 │   ├── db-storage.ts               # 数据库持久化存储（用户/API提供商/用户数据/系统设置）
 │   ├── api-helpers.ts              # API 辅助函数（fetchWithV1Retry 智能 /v1 重试）
-│   ├── design-graph.ts             # Layer Graph 图层转换与操作
-│   ├── design-export.ts            # .wujie 工程文件导入导出
 │   ├── psd-export.ts               # PSD 导出功能
 │   ├── svg-export.ts               # SVG 矢量化导出
 │   ├── config.ts                   # 配置文件
@@ -73,7 +66,6 @@ src/
 │       ├── upscayl.ts              # upscayl-node 放大引擎
 │       └── iopaint-client.ts       # IOPaint+LaMa 修图客户端
 ├── types/
-│   ├── designGraph.ts              # Layer Graph 类型系统
 │   └── image-tools.ts              # 本地图像工具类型定义
 scripts/
 └── start-iopaint-lama.sh           # IOPaint LaMa 启动脚本
@@ -96,7 +88,6 @@ scripts/
   - 选择工具（鼠标指针）
   - 平移工具（手掌）
   - 上传图片
-  - 图层（Layers图标，hover显示"图层"，打开Layer Graph Studio）
   - 放大/缩小/缩放百分比/重置视图
 - **图片操作工具栏** (选中图片后顶部显示):
   - 放大、移除背景、栅格化、擦除、蒙版、扩展、图生图、裁切、下载
@@ -158,32 +149,13 @@ scripts/
   - 优化历史记录，支持快速复用
 - **配色**: 适配黑白主题，金色强调色
 
-### 5. Layer Graph 设计工程 (design-studio/)
-- **入口**: 无限画布底部工具栏"图层"图标按钮
-- **功能**: 将当前画布图片转换为可编辑图层的设计工程
-- **LayerGraphStudio**: 主弹窗容器，三栏布局
-  - 左栏: LayerPanel (图层面板) - 可见性切换、锁定、拖拽排序
-  - 中栏: DesignCanvas (设计画布) - 图层渲染、选择高亮
-  - 右栏: PropertiesPanel (属性面板) - 名称/透明度/位置尺寸/矢量化
-- **设计文档类型** (types/designGraph.ts):
-  - LayerNode: 图层节点 (id/名称/类型/变换/可见性/锁定/矢量化状态)
-  - SceneGraph: 场景图 (图层列表/选中图层/画布尺寸)
-  - DesignDocument: 设计文档 (场景图+元数据+版本)
-- **图层操作** (lib/design-graph.ts):
-  - 从画布图片创建设计文档
-  - 图层移动/更新/选择/删除
-  - 图层矢量化 (调用 /api/design/vectorize)
-- **工程文件导入导出** (lib/design-export.ts):
-  - 导出 .wujie 工程文件 (JSON格式，含图层+元数据)
-  - 导入 .wujie 工程文件
-  - 导出 SVG 文件
-- **矢量化 API** (api/design/vectorize):
-  - 多策略自动降级: 管理员矢量模型API → LLM视觉模型fallback → 本地vtracer → raster-svg-wrapper兜底
-  - 管理员矢量模型支持: chat/completions(SSE流解析) + multipart form + JSON + OpenAI images格式
-  - LLM fallback: 当矢量模型API失败时，自动使用管理员配置的聊天模型(Gemini/GPT-4o等)生成SVG
-  - 支持 SSE 流式响应解析 (parseSSEContent)，兼容各种 API 代理的流式返回
-  - 支持配置 PY_VECTORIZE_ENDPOINT 环境变量对接 VTracer/StarVector
-  - POST 参数: imageUrl / layerId / mode
+### 5. 矢量化 API (api/design/vectorize)
+- 多策略自动降级: 管理员矢量模型API → LLM视觉模型fallback → 本地vtracer → raster-svg-wrapper兜底
+- 管理员矢量模型支持: chat/completions(SSE流解析) + multipart form + JSON + OpenAI images格式
+- LLM fallback: 当矢量模型API失败时，自动使用管理员配置的聊天模型(Gemini/GPT-4o等)生成SVG
+- 支持 SSE 流式响应解析 (parseSSEContent)，兼容各种 API 代理的流式返回
+- 支持配置 PY_VECTORIZE_ENDPOINT 环境变量对接 VTracer/StarVector
+- POST 参数: imageUrl / layerId / mode
 
 ### 6. PSD 导出 (lib/psd-export.ts)
 - 依据 bggg-creator-image2psd 开源项目方法论 + PSD SKILL V4 规范
@@ -298,7 +270,7 @@ GEMINI_API_KEY=your_gemini_key
 PGDATABASE_URL=postgresql://user:pass@host:5432/dbname?sslmode=require
 # 也支持 DATABASE_URL 环境变量
 
-# Layer Graph 矢量化 (可选)
+# 矢量化 (可选)
 PY_VECTORIZE_ENDPOINT=http://localhost:8000/vectorize
 
 # Inpainting 擦除/蒙版服务 (使用 AI 生成 API + 蒙版合成策略)
@@ -543,14 +515,6 @@ UPSCALE_TIMEOUT_MS=300000
 - 修复 generation-panel.tsx 中 effectiveApiKey 作用域错误
 
 ### v0.4.0
-
-**Layer Graph 设计工程**
-- 新增 Lovart Layer Graph 设计工程能力
-- 图层面板：可见性切换、锁定、拖拽排序
-- 设计画布：图层渲染、选择高亮
-- 属性面板：名称/透明度/位置尺寸/矢量化
-- .wujie 工程文件导入导出
-- Layer Graph 入口集成到画布底部工具栏（图层图标，hover显示"图层"）
 
 **图像生成面板**
 - 画面比例添加对应比例图形预览（矩形宽高按比例计算）

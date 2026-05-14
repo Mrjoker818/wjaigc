@@ -11,7 +11,7 @@ import { APP_VERSION_LABEL } from '@/config/app-meta';
 
 // ─── Types ──────────────────────────────────────────────────────
 
-type SectionId = 'canvas' | 'generate' | 'img2img' | 'chat' | 'tools' | 'layer-graph' | 'project' | 'admin' | 'shortcuts' | 'tips' | 'changelog';
+type SectionId = 'canvas' | 'generate' | 'img2img' | 'chat' | 'tools' | 'project' | 'admin' | 'shortcuts' | 'tips' | 'changelog';
 
 interface Section {
   id: SectionId;
@@ -31,7 +31,6 @@ const SECTIONS: Section[] = [
   { id: 'img2img', title: '图生图', icon: <ImagePlus size={16} /> },
   { id: 'chat', title: '智能对话', icon: <MessageSquare size={16} /> },
   { id: 'tools', title: '图片编辑工具', icon: <Eraser size={16} /> },
-  { id: 'layer-graph', title: 'Layer Graph', icon: <Layers size={16} /> },
   { id: 'project', title: '项目与文件', icon: <FileBox size={16} /> },
   { id: 'admin', title: '管理员系统', icon: <Settings size={16} /> },
   { id: 'shortcuts', title: '快捷键', icon: <Keyboard size={16} /> },
@@ -182,7 +181,7 @@ function CanvasSection({ themeStyle }: { themeStyle: string }) {
           {[
             { icon: <Move size={12} />, title: '选择/平移', desc: '切换选择和平移工具' },
             { icon: <ImageIcon size={12} />, title: '上传图片', desc: '从本地上传图片到画布' },
-            { icon: <Layers size={12} />, title: '图层管理', desc: '打开 Layer Graph Studio' },
+            { icon: <Layers size={12} />, title: '图层管理', desc: '查看图片分组和图层信息' },
             { icon: <ZoomIn size={12} />, title: '缩放控制', desc: '放大/缩小/百分比/重置' },
             { icon: <Eraser size={12} />, title: '编辑工具', desc: '选中图片后显示编辑工具' },
             { icon: <Download size={12} />, title: '下载导出', desc: 'PNG/SVG/PSD 多格式' },
@@ -398,58 +397,6 @@ function ToolsSection({ themeStyle }: { themeStyle: string }) {
             </div>
           </div>
         </CardHighlight>
-      </div>
-    </div>
-  );
-}
-
-function LayerGraphSection({ themeStyle }: { themeStyle: string }) {
-  const isGold = themeStyle !== 'monochrome';
-  return (
-    <div>
-      <SectionTitle themeStyle={themeStyle}>
-        <Layers size={18} className={isGold ? 'text-[#d4af37]' : 'text-yellow-500'} />
-        <span className={`text-sm font-bold ${isGold ? 'text-white' : 'text-gray-900'}`}>Layer Graph 设计工程</span>
-      </SectionTitle>
-
-      <div className="space-y-4">
-        <SubTitle themeStyle={themeStyle}>功能概览</SubTitle>
-        <CardHighlight themeStyle={themeStyle}>
-          <Text themeStyle={themeStyle}>将画布图片转换为可编辑图层的设计工程，三栏布局专业设计工具。入口：画布底部工具栏"图层"图标按钮。</Text>
-        </CardHighlight>
-
-        <SubTitle themeStyle={themeStyle}>三栏布局</SubTitle>
-        <div className="grid grid-cols-3 gap-2">
-          <Card themeStyle={themeStyle}>
-            <div className={`text-xs font-semibold mb-1 ${isGold ? 'text-[#d4af37]' : 'text-yellow-600'}`}>图层面板</div>
-            <Text themeStyle={themeStyle} muted>可见性切换、锁定、拖拽排序</Text>
-          </Card>
-          <Card themeStyle={themeStyle}>
-            <div className={`text-xs font-semibold mb-1 ${isGold ? 'text-[#d4af37]' : 'text-yellow-600'}`}>设计画布</div>
-            <Text themeStyle={themeStyle} muted>图层渲染、选择高亮</Text>
-          </Card>
-          <Card themeStyle={themeStyle}>
-            <div className={`text-xs font-semibold mb-1 ${isGold ? 'text-[#d4af37]' : 'text-yellow-600'}`}>属性面板</div>
-            <Text themeStyle={themeStyle} muted>名称/透明度/位置尺寸/矢量化</Text>
-          </Card>
-        </div>
-
-        <SubTitle themeStyle={themeStyle}>矢量化</SubTitle>
-        <Card themeStyle={themeStyle}>
-          <Text themeStyle={themeStyle}>支持多策略自动降级：管理员矢量模型API → LLM视觉模型fallback → 本地vtracer → raster-svg-wrapper兜底</Text>
-        </Card>
-
-        <SubTitle themeStyle={themeStyle}>工程文件</SubTitle>
-        <div className="grid grid-cols-2 gap-2">
-          <Card themeStyle={themeStyle}>
-            <div className={`text-xs font-semibold mb-1 ${isGold ? 'text-[#d4af37]' : 'text-yellow-600'}`}>.wujie 格式</div>
-            <Text themeStyle={themeStyle} muted>导入导出设计工程文件</Text>
-          </Card>
-          <Card themeStyle={themeStyle}>
-            <div className={`text-xs font-semibold mb-1 ${isGold ? 'text-[#d4af37]' : 'text-yellow-600'}`}>SVG 导出</div>
-            <Text themeStyle={themeStyle} muted>快速/专业/工作室三种模式</Text>
-          </Card>
-        </div>
       </div>
     </div>
   );
@@ -858,7 +805,6 @@ export function HelpGuide({ isOpen, onClose, themeStyle = 'gold' }: HelpGuidePro
                 case 'img2img': return <Img2ImgSection themeStyle={themeStyle} />;
                 case 'chat': return <ChatSection themeStyle={themeStyle} />;
                 case 'tools': return <ToolsSection themeStyle={themeStyle} />;
-                case 'layer-graph': return <LayerGraphSection themeStyle={themeStyle} />;
                 case 'project': return <ProjectSection themeStyle={themeStyle} />;
                 case 'admin': return <AdminSection themeStyle={themeStyle} />;
                 case 'shortcuts': return <ShortcutsSection themeStyle={themeStyle} />;

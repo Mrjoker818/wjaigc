@@ -1,11 +1,10 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { InfiniteCanvas, CanvasImage } from '@/components/infinite-canvas';
+import { InfiniteCanvas, CanvasImage, ImageGroup } from '@/components/infinite-canvas';
 import { GenerationPanel, GenerationParams, CtrlRefSelection } from '@/components/generation-panel';
 import { ImagePreview } from '@/components/image-preview';
 import { ChatPanel } from '@/components/chat-panel';
-import { LayerGraphStudio } from '@/components/design-studio/LayerGraphStudio';
 import { PromptEquation } from '@/components/prompt-equation';
 
 import { Toaster } from '@/components/ui/sonner';
@@ -120,11 +119,10 @@ function CanvasApp() {
   const [showProjectData, setShowProjectData] = useState(false);
   const [navigateToImageId, setNavigateToImageId] = useState<string | null>(null);
   const [showHelpGuide, setShowHelpGuide] = useState(false);
+  const [initialGroups, setInitialGroups] = useState<ImageGroup[]>([]);
   const [ctrlRefSelections, setCtrlRefSelections] = useState<CtrlRefSelection[]>([]);
   // Alt+Click inline reference markers (displayed as numbered tags in the prompt textarea)
   const [altRefMarkers, setAltRefMarkers] = useState<Array<{id: string; url: string; number: number}>>([]);
-  const [showLayerGraphStudio, setShowLayerGraphStudio] = useState(false);
-  const [initialGroups, setInitialGroups] = useState<Array<{id: string; name: string; note: string; imageIds: string[]; x: number; y: number; collapsed: boolean}>>([]);
   const [showPromptEquation, setShowPromptEquation] = useState(false);
 
   // Current chat model info from ChatPanel (used for vision-prompt)
@@ -1825,7 +1823,7 @@ function CanvasApp() {
           images={images}
           onImagesChange={setImages}
           onUndo={handleUndo}
-          onOpenLayerGraph={() => setShowLayerGraphStudio(true)}
+
           selectedImage={selectedImage}
           onSelectImage={setSelectedImage}
           onPreviewImage={handlePreview}
@@ -2082,13 +2080,6 @@ function CanvasApp() {
         </div>
       )}
 
-
-      {/* Lovart Layer Graph Studio */}
-      <LayerGraphStudio
-        open={showLayerGraphStudio}
-        images={images}
-        onClose={() => setShowLayerGraphStudio(false)}
-      />
 
       {/* 提示词方程式 */}
       <PromptEquation
