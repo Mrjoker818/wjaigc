@@ -1061,12 +1061,13 @@ export async function POST(request: NextRequest) {
 
       try {
         if (multiAngleBase64) {
+          // multiAngleBase64 is already a full data URL (data:image/xxx;base64,...), use directly
           result = await autoTrySubmitImageTask(candidateModels, (m) => ({
             model: m,
             prompt: multiAnglePrompt,
             size: '1:1',
             n: 1,
-            image: `data:image/png;base64,${multiAngleBase64}`,
+            image: multiAngleBase64,
             input_fidelity: 'high',
           }), '多角度(edits)', '/images/edits');
           console.info(`[multi-angle] Successfully used /images/edits endpoint`);
@@ -1088,7 +1089,7 @@ export async function POST(request: NextRequest) {
           size: '1:1',
           n: 1,
           image_urls: [imageUrl],
-          ...(multiAngleBase64 ? { image: `data:image/png;base64,${multiAngleBase64}` } : {}),
+          ...(multiAngleBase64 ? { image: multiAngleBase64 } : {}),
           input_fidelity: 'high',
         }), '多角度(generations)');
       }
