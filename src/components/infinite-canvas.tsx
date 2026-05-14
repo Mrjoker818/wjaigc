@@ -5000,7 +5000,7 @@ export function InfiniteCanvas({
     }
 
     exitEditMode();
-  }, [editMode, editImageId, images, editStrokes, editPrompt, maskKeyword, expandRatio, expandScale, img2imgKeyword, img2imgStrengths, img2imgActiveCategories, img2imgNegativePrompt, brushSize, zoom, cropRect, onImagesChange, getApiKey, getCurrentModel, renderMaskFromStrokes, pollForResult, exitEditMode, viewOffset, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
+  }, [editMode, editImageId, images, editStrokes, editPrompt, maskKeyword, expandPadding, img2imgKeyword, img2imgStrengths, img2imgActiveCategories, img2imgNegativePrompt, brushSize, zoom, cropRect, onImagesChange, getApiKey, getCurrentModel, renderMaskFromStrokes, pollForResult, exitEditMode, viewOffset, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
 
   // Mask keyword confirm
   // Download handlers
