@@ -5736,7 +5736,7 @@ export function InfiniteCanvas({
             const containerPad = 24;
             // 参考图组下方需要额外空间显示类别标签
             const leftPad = containerPad;
-            const bottomPad = isRef ? 52 : containerPad;
+            const bottomPad = isRef ? 142 : containerPad;
             const containerMinX = Math.min(...allBounds.map(b => b.x)) - containerPad;
             const containerMinY = Math.min(...allBounds.map(b => b.y)) - containerPad - 40;
             const containerMaxX = Math.max(...allBounds.map(b => b.x + b.w)) + containerPad;
@@ -5901,100 +5901,98 @@ export function InfiniteCanvas({
                     {/* Per-image category sliders (reference group only) - BELOW image */}
                     {isRef && (
                       <div
-                        className="pointer-events-auto mt-1 rounded-lg px-2 py-1.5"
+                        className="pointer-events-auto mt-1 rounded-md overflow-hidden"
                         style={{
-                          background: isMonochrome ? 'rgba(255,255,255,0.92)' : 'rgba(26,26,26,0.92)',
-                          border: isMonochrome ? '1px solid rgba(200,200,200,0.45)' : `1px solid ${accentBorder}`,
-                          backdropFilter: 'blur(8px)',
+                          background: isMonochrome ? 'rgba(0,0,0,0.04)' : 'rgba(0,0,0,0.35)',
+                          border: isMonochrome ? '1px solid rgba(0,0,0,0.08)' : '1px solid rgba(255,255,255,0.08)',
                         }}
                         onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <div className="flex flex-wrap gap-x-3 gap-y-1">
-                          {REFERENCE_CATEGORIES.map(cat => {
-                            const isSelected = imgCats.includes(cat);
-                            const strength = group.sourceStrengths[img.id]?.[cat] ?? 50;
-                            return (
-                              <div key={cat} className="flex items-center gap-1.5">
-                                <div
-                                  className="flex-shrink-0 rounded text-[10px] font-semibold text-center select-none cursor-pointer transition-all leading-[18px] px-1.5"
-                                  style={{
-                                    border: `1px solid ${isSelected
-                                      ? accentColor
-                                      : isMonochrome ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.1)'}`,
-                                    background: isSelected
-                                      ? isMonochrome
-                                        ? `rgba(212,175,55,0.12)`
-                                        : `rgba(212,175,55,0.15)`
-                                      : isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.04)',
-                                    color: isSelected
-                                      ? accentColor
-                                      : isMonochrome ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.35)',
-                                  }}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setGenGroups(prev => prev.map(g => {
-                                      if (g.id !== group.id) return g;
-                                      const newCats = { ...g.sourceCategories };
-                                      const newStr = { ...g.sourceStrengths };
-                                      const cats = [...(newCats[img.id] || [])];
-                                      const str = { ...(newStr[img.id] || {}) };
-                                      if (isSelected) {
-                                        const idx = cats.indexOf(cat);
-                                        if (idx >= 0) cats.splice(idx, 1);
-                                      } else {
-                                        if (!cats.includes(cat)) cats.push(cat);
-                                        if (!str[cat]) str[cat] = 50;
-                                      }
-                                      newCats[img.id] = cats;
-                                      newStr[img.id] = str;
-                                      return { ...g, sourceCategories: newCats, sourceStrengths: newStr };
-                                    }));
-                                  }}
-                                >
-                                  {REFERENCE_CATEGORY_LABELS[cat]}
-                                </div>
-                                <input
-                                  type="range"
-                                  min={0}
-                                  max={100}
-                                  value={strength}
-                                  className="w-[40px] h-[4px] appearance-none rounded-full cursor-pointer"
-                                  style={{
-                                    accentColor,
-                                    background: `linear-gradient(to right, ${isSelected ? accentColor : isMonochrome ? '#bbb' : '#555'} ${strength}%, ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)'} ${strength}%)`,
-                                    opacity: isSelected ? 1 : 0.4,
-                                    transition: 'opacity 0.2s',
-                                  }}
-                                  onChange={(e) => {
-                                    const val = Number(e.target.value);
-                                    setGenGroups(prev => prev.map(g => {
-                                      if (g.id !== group.id) return g;
-                                      const newStr = { ...g.sourceStrengths };
-                                      newStr[img.id] = { ...(newStr[img.id] || {}), [cat]: val };
-                                      const newCats = { ...g.sourceCategories };
-                                      const cats = [...(newCats[img.id] || [])];
+                        {REFERENCE_CATEGORIES.map((cat, idx) => {
+                          const isSelected = imgCats.includes(cat);
+                          const strength = group.sourceStrengths[img.id]?.[cat] ?? 50;
+                          return (
+                            <div
+                              key={cat}
+                              className="flex items-center gap-1.5 px-2"
+                              style={{
+                                height: '22px',
+                                borderBottom: idx < REFERENCE_CATEGORIES.length - 1
+                                  ? isMonochrome ? '1px solid rgba(0,0,0,0.06)' : '1px solid rgba(255,255,255,0.05)'
+                                  : 'none',
+                              }}
+                            >
+                              <span
+                                className="flex-shrink-0 w-7 text-[9px] font-medium select-none cursor-pointer transition-colors"
+                                style={{
+                                  color: isSelected
+                                    ? accentColor
+                                    : isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.35)',
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setGenGroups(prev => prev.map(g => {
+                                    if (g.id !== group.id) return g;
+                                    const newCats = { ...g.sourceCategories };
+                                    const newStr = { ...g.sourceStrengths };
+                                    const cats = [...(newCats[img.id] || [])];
+                                    const str = { ...(newStr[img.id] || {}) };
+                                    if (isSelected) {
+                                      const ci = cats.indexOf(cat);
+                                      if (ci >= 0) cats.splice(ci, 1);
+                                    } else {
                                       if (!cats.includes(cat)) cats.push(cat);
-                                      newCats[img.id] = cats;
-                                      return { ...g, sourceCategories: newCats, sourceStrengths: newStr };
-                                    }));
-                                  }}
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                                <span
-                                  className="text-[9px] font-semibold tabular-nums w-7 text-right"
-                                  style={{
-                                    color: isSelected
-                                      ? accentColor
-                                      : isMonochrome ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.2)',
-                                  }}
-                                >
-                                  {strength}%
-                                </span>
-                              </div>
-                            );
-                          })}
-                        </div>
+                                      if (!str[cat]) str[cat] = 50;
+                                    }
+                                    newCats[img.id] = cats;
+                                    newStr[img.id] = str;
+                                    return { ...g, sourceCategories: newCats, sourceStrengths: newStr };
+                                  }));
+                                }}
+                              >
+                                {REFERENCE_CATEGORY_LABELS[cat]}
+                              </span>
+                              <input
+                                type="range"
+                                min={0}
+                                max={100}
+                                value={strength}
+                                className="flex-1 h-[3px] appearance-none rounded-full cursor-pointer"
+                                style={{
+                                  accentColor,
+                                  background: `linear-gradient(to right, ${isSelected ? accentColor : isMonochrome ? '#ccc' : '#555'} ${strength}%, ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.1)'} ${strength}%)`,
+                                  opacity: isSelected ? 1 : 0.35,
+                                  transition: 'opacity 0.15s',
+                                }}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value);
+                                  setGenGroups(prev => prev.map(g => {
+                                    if (g.id !== group.id) return g;
+                                    const newStr = { ...g.sourceStrengths };
+                                    newStr[img.id] = { ...(newStr[img.id] || {}), [cat]: val };
+                                    const newCats = { ...g.sourceCategories };
+                                    const cats = [...(newCats[img.id] || [])];
+                                    if (!cats.includes(cat)) cats.push(cat);
+                                    newCats[img.id] = cats;
+                                    return { ...g, sourceCategories: newCats, sourceStrengths: newStr };
+                                  }));
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                              <span
+                                className="flex-shrink-0 w-6 text-right text-[9px] font-semibold tabular-nums"
+                                style={{
+                                  color: isSelected
+                                    ? accentColor
+                                    : isMonochrome ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.2)',
+                                }}
+                              >
+                                {strength}%
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
