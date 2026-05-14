@@ -886,9 +886,12 @@ export async function POST(request: NextRequest) {
       rotation = 0,
       tilt = 0,
       zoom = 1,
-      model = 'gemini-2.5-flash-image-preview',
+      model: rawModel = 'gemini-2.5-flash-image-preview',
       providerId,
     } = body;
+
+    // 防御性处理：确保 model 是字符串（前端可能误传对象）
+    const modelStr = typeof rawModel === 'string' ? rawModel : (rawModel as any)?.model || String(rawModel);
 
     // 放大/擦除/蒙版 均使用管理员系统的 image 类型模型
     // 策略：自动识别管理员配置的所有可用 image 模型，按优先级逐一尝试
@@ -907,28 +910,28 @@ export async function POST(request: NextRequest) {
       const specifiedProvider = await findProviderById(providerId);
       if (specifiedProvider) {
         candidateModels.push({
-          model,
+          model: modelStr,
           apiKey: specifiedProvider.apiKey,
           apiBaseUrl: normalizeApiBaseUrl(specifiedProvider.baseUrl),
           source: 'specified-provider',
           advancedParams: specifiedProvider.advancedParams,
         });
-        triedModels.add(model);
+        triedModels.add(modelStr);
       }
     }
     
     // 1. 前端指定的模型（如果匹配到 provider）
-    const preferredProvider = await findProviderForModel(model, 'image')
-      || await findProviderForModel(model, 'universal');
+    const preferredProvider = await findProviderForModel(modelStr, 'image')
+      || await findProviderForModel(modelStr, 'universal');
     if (preferredProvider) {
       candidateModels.push({
-        model,
+        model: modelStr,
         apiKey: preferredProvider.apiKey,
         apiBaseUrl: normalizeApiBaseUrl(preferredProvider.baseUrl),
         source: 'preferred',
         advancedParams: preferredProvider.advancedParams,
       });
-      triedModels.add(model);
+      triedModels.add(modelStr);
     }
     
     // 2. 管理员配置的所有 image 类型 provider 的模型
@@ -952,7 +955,7 @@ export async function POST(request: NextRequest) {
     const envApiBaseUrl = normalizeApiBaseUrl(process.env.APIMART_BASE_URL || 'https://api.apimart.ai');
     if (envApiKey && candidateModels.length === 0) {
       candidateModels.push({
-        model,
+        model: modelStr,
         apiKey: envApiKey,
         apiBaseUrl: envApiBaseUrl,
         source: 'env-fallback',

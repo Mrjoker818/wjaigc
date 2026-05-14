@@ -3397,7 +3397,7 @@ export function InfiniteCanvas({
     onProgress?: (progress: number, status: string) => void
   ): Promise<string | null> => {
     // apiKeyOrModel was previously apiKey, now we pass the model name for server-side key lookup
-    const currentModel = getCurrentModel();
+    const currentModelInfo = getCurrentModel();
     const maxAttempts = 150; // 150次 × 动态间隔 ≈ 600秒，兼容token link等慢速API
     const getEditPollInterval = (attempt: number) => {
       if (attempt <= 2) return 800;
@@ -3415,7 +3415,7 @@ export function InfiniteCanvas({
         const res = await fetch('/api/poll-task', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ taskId, model: currentModel, providerId: getCurrentProviderId() }),
+          body: JSON.stringify({ taskId, model: currentModelInfo.model, providerId: getCurrentProviderId() }),
         });
         const data = await res.json();
         if (data.status === 'completed' && data.imageUrl) {
@@ -3722,7 +3722,7 @@ export function InfiniteCanvas({
     exitEditMode();
     try {
       const apiKey = getApiKey();
-      const model = getCurrentModel();
+      const modelInfo = getCurrentModel();
       updateProcessingFrame(placeholderId, { progress: 8, status: '正在提交到 AI 模型...' });
       const res = await fetch('/api/image-edit', {
         method: 'POST',
@@ -3734,9 +3734,9 @@ export function InfiniteCanvas({
           targetWidth: targetW,
           targetHeight: targetH,
           aspectRatio: `${origW}:${origH}`,
-          model,
+          model: modelInfo.model,
           apiKey,
-          providerId: getCurrentProviderId(),
+          providerId: modelInfo.providerId || getCurrentProviderId(),
           scale: upMultiplier,
           originalWidth: origW,
           originalHeight: origH,
@@ -3756,7 +3756,7 @@ export function InfiniteCanvas({
       }
 
       updateProcessingFrame(placeholderId, { progress: 22, status: data.engine === 'tile-upscale' ? 'AI 正在分块放大（更高质量，耗时稍长）...' : 'AI 正在放大细节...' });
-      const usedModel = data.usedModel || model;
+      const usedModel = data.usedModel || modelInfo.model;
       const resultUrl = data.imageUrl || await pollForResult(data.taskId, usedModel, (progress, status) => {
         updateProcessingFrame(placeholderId, { progress, status });
       });
@@ -3838,7 +3838,7 @@ export function InfiniteCanvas({
     );
     setIsEditProcessing(true);
     try {
-      const model = getCurrentModel();
+      const modelInfo = getCurrentModel();
       updateProcessingFrame(placeholderId, { progress: 12, status: '正在提交到 AI 模型...' });
       const res = await fetch('/api/image-edit', {
         method: 'POST',
@@ -3847,9 +3847,9 @@ export function InfiniteCanvas({
           action: 'remove_background',
           imageUrl: img.url,
           aspectRatio: `${img.originalWidth || img.width}:${img.originalHeight || img.height}`,
-          model,
+          model: modelInfo.model,
           apiKey,
-          providerId: getCurrentProviderId(),
+          providerId: modelInfo.providerId || getCurrentProviderId(),
         }),
       });
 
@@ -3992,7 +3992,7 @@ export function InfiniteCanvas({
     );
     setIsMultiAngleProcessing(true);
     try {
-      const model = getCurrentModel();
+      const modelInfo = getCurrentModel();
       updateProcessingFrame(placeholderId, { progress: 12, status: '正在提交角度参数...' });
       const res = await fetch('/api/image-edit', {
         method: 'POST',
@@ -4004,9 +4004,9 @@ export function InfiniteCanvas({
           rotation: multiAngleRotation,
           tilt: multiAngleTilt,
           zoom: multiAngleZoom,
-          model,
+          model: modelInfo.model,
           apiKey,
-          providerId: getCurrentProviderId(),
+          providerId: modelInfo.providerId || getCurrentProviderId(),
         }),
       });
       const data = await res.json();
@@ -4385,7 +4385,7 @@ export function InfiniteCanvas({
 
         updateProcessingFrame(placeholderId, { progress: 8, status: '正在提交到 AI 模型...' });
 
-        const model = getCurrentModel();
+        const modelInfo = getCurrentModel();
         const res = await fetch('/api/image-edit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -4396,9 +4396,9 @@ export function InfiniteCanvas({
             prompt,
             editMode: currentEditMode as 'erase' | 'mask',
             aspectRatio: `${currentEditImg.originalWidth || currentEditImg.width}:${currentEditImg.originalHeight || currentEditImg.height}`,
-            model,
+            model: modelInfo.model,
             apiKey,
-            providerId: getCurrentProviderId(),
+            providerId: modelInfo.providerId || getCurrentProviderId(),
           }),
         });
 
@@ -4480,8 +4480,8 @@ export function InfiniteCanvas({
     }
 
     if (editMode === 'img2img') {
-      const img2imgModel = getCurrentModel();
-      const img2imgProviderId = getCurrentProviderId();
+      const img2imgModelInfo = getCurrentModel();
+      const img2imgProviderId = img2imgModelInfo.providerId || getCurrentProviderId();
 
       // 图生图提示词构建：明确告诉模型参考原图的哪些方面 + 用关键词作为新内容
       const categoryEnMap: Record<string, string> = {
@@ -4568,7 +4568,7 @@ export function InfiniteCanvas({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             prompt: fullPrompt,
-            model: img2imgModel,
+            model: img2imgModelInfo.model,
             providerId: img2imgProviderId || undefined,
             aspectRatio: (() => {
               const ow = editImg.originalWidth || Math.round(editImg.width);
@@ -4628,7 +4628,7 @@ export function InfiniteCanvas({
 
         const taskId = data.taskIds?.[0] || data.taskId || data.id;
         // 使用服务端实际使用的模型（可能因自动切换而与请求模型不同）
-        const actualModel = data.model || img2imgModel;
+        const actualModel = data.model || img2imgModelInfo.model;
         if (!taskId) {
           alert('未获取到任务ID');
           removeProcessingFrame(placeholderId);
@@ -4733,7 +4733,7 @@ export function InfiniteCanvas({
       // 立即退出编辑模式，让进度在右侧处理框中显示（而非覆盖当前图片）
       exitEditMode();
       try {
-        const model = getCurrentModel();
+        const modelInfo = getCurrentModel();
         updateProcessingFrame(placeholderId, { progress: 16, status: '正在提交扩展比例...' });
         const res = await fetch('/api/image-edit', {
           method: 'POST',
@@ -4745,9 +4745,9 @@ export function InfiniteCanvas({
             expandScale,
             aspectRatio: `${origW}:${origH}`,
             prompt: editPrompt || undefined,
-            model,
+            model: modelInfo.model,
             apiKey,
-            providerId: getCurrentProviderId(),
+            providerId: modelInfo.providerId || getCurrentProviderId(),
           }),
         });
 

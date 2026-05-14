@@ -93,12 +93,14 @@ export async function POST(request: NextRequest) {
       productCategory, 
       stylePreset, 
       outputCount,
-      model = 'gemini-2.5-flash-image-preview',
+      model: rawModel = 'gemini-2.5-flash-image-preview',
       quality = '1K',
       userId: requestUserId,
       strength,
       providerId,
     } = await request.json();
+    // 防御性处理：确保 model 是字符串（前端可能误传对象）
+    const model = typeof rawModel === 'string' ? rawModel : (rawModel as any)?.model || String(rawModel);
     const sessionUser = await getSessionUser(request);
     const userId = (sessionUser?.id || "anonymous") || requestUserId;
 

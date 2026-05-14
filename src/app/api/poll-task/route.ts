@@ -8,7 +8,9 @@ export const dynamic = 'force-dynamic';
 // 轮询 APImart 任务状态 - 由前端调用
 export async function POST(request: NextRequest) {
   try {
-    const { taskId, model, userId: requestUserId, providerId } = await request.json();
+    const { taskId, model: rawModel, userId: requestUserId, providerId } = await request.json();
+    // 防御性处理：确保 model 是字符串（前端可能误传对象）
+    const model = typeof rawModel === 'string' ? rawModel : (rawModel as any)?.model || String(rawModel || '');
     const sessionUser = await getSessionUser(request);
     const userId = (sessionUser?.id || "anonymous") || requestUserId;
 
