@@ -4837,19 +4837,8 @@ export function InfiniteCanvas({
             })(),
             quality: 'standard',
             count: 1,
-            referenceImages: editImg.url.startsWith('data:') ? [] : [editImg.url],
-            // data URL 图过大，改用 imageUrl 字段让后端自行下载
-            ...(editImg.url.startsWith('data:') ? { imageUrl: await (async () => {
-              try {
-                const saveRes = await fetch('/api/save-image', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ imageUrl: editImg.url }),
-                });
-                const saveData = await saveRes.json();
-                return saveData.success && saveData.url ? saveData.url : editImg.url;
-              } catch { return editImg.url; }
-            })() } : {}),
+            // 直接传递参考图 URL（data: URL 由后端处理，无需前端预上传，加速提交）
+            referenceImages: [editImg.url],
             strength: img2imgStrength,
           }),
         });

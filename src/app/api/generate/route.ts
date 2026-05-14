@@ -113,72 +113,61 @@ export async function POST(request: NextRequest) {
     const userId = (sessionUser?.id || "anonymous") || requestUserId;
 
     // 解析参考图片 URL（转换为 API 可访问的格式）
+    // 优化：并行处理所有参考图，加速提交
     const accessibleReferenceImages: string[] = [];
     if (referenceImages && Array.isArray(referenceImages)) {
       const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT;
-      for (const rawImg of referenceImages) {
-        // 支持字符串格式和 {url, strength} 对象格式
+      
+      const resolveImage = async (rawImg: unknown): Promise<string | null> => {
         const img = typeof rawImg === 'string' ? rawImg : (rawImg as { url?: string })?.url || String(rawImg);
-        if (img && typeof img === 'string' && img.trim()) {
-          let resolved = false;
-          // 相对路径 → 公网 URL
-          if (img.startsWith('/')) {
-            if (domain) {
-              accessibleReferenceImages.push(`https://${domain}${img}`);
-              resolved = true;
-            } else {
-              // 开发环境：转为 base64（API 无法访问 localhost）
-              try {
-                const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-                const port = process.env.DEPLOY_RUN_PORT || 5000;
-                const resp = await fetch(`${proto}://localhost:${port}${img}`, { signal: AbortSignal.timeout(5000) });
-                const buf = Buffer.from(await resp.arrayBuffer());
-                accessibleReferenceImages.push(`data:image/png;base64,${buf.toString('base64')}`);
-                resolved = true;
-              } catch { /* fallback below */ }
-            }
+        if (!img || typeof img !== 'string' || !img.trim()) return null;
+
+        // 1. 相对路径 → 公网 URL 或 base64
+        if (img.startsWith('/')) {
+          if (domain) {
+            return `https://${domain}${img}`;
           }
-          // data: URL → 尝试保存为服务器文件（避免 413 错误）
-          if (!resolved && img.startsWith('data:') && img.length > 500_000) {
-            try {
-              const saveResp = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/save-image`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ imageData: img }),
-              });
-              if (saveResp.ok) {
-                const saveData = await saveResp.json();
-                if (saveData.url) {
-                  if (domain) {
-                    accessibleReferenceImages.push(`https://${domain}${saveData.url}`);
-                  } else {
-                    accessibleReferenceImages.push(saveData.url);
-                  }
-                  resolved = true;
-                }
-              }
-            } catch { /* S3 not available, try other methods */ }
-          }
-          if (!resolved && img.startsWith('http')) {
-            accessibleReferenceImages.push(img);
-            resolved = true;
-          }
-          if (!resolved && domain) {
-            accessibleReferenceImages.push(`${domain}${img}`);
-            resolved = true;
-          }
-          if (!resolved) {
-            try {
-              const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-              const port = process.env.DEPLOY_RUN_PORT || 5000;
-              const resp = await fetch(`${proto}://localhost:${port}${img}`, { signal: AbortSignal.timeout(5000) });
-              const buf = Buffer.from(await resp.arrayBuffer());
-              accessibleReferenceImages.push(`data:image/png;base64,${buf.toString('base64')}`);
-            } catch {
-              accessibleReferenceImages.push(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${img}`);
-            }
-          }
+          try {
+            const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+            const port = process.env.DEPLOY_RUN_PORT || 5000;
+            const resp = await fetch(`${proto}://localhost:${port}${img}`, { signal: AbortSignal.timeout(5000) });
+            const buf = Buffer.from(await resp.arrayBuffer());
+            return `data:image/png;base64,${buf.toString('base64')}`;
+          } catch { /* fallback below */ }
         }
+        
+        // 2. data: URL — 小于 2MB 直接传递（避免不必要的 save-image 网络往返）
+        //    大于 2MB 才 save-image（防止请求体过大导致 413）
+        if (img.startsWith('data:')) {
+          if (img.length <= 2_000_000) {
+            return img; // 直接传递，速度快
+          }
+          try {
+            const saveResp = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/save-image`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ imageData: img }),
+            });
+            if (saveResp.ok) {
+              const saveData = await saveResp.json();
+              if (saveData.url) {
+                return domain ? `https://${domain}${saveData.url}` : saveData.url;
+              }
+            }
+          } catch { /* S3 not available */ }
+        }
+
+        // 3. 外部 URL 直接传递
+        if (img.startsWith('http')) return img;
+
+        // 4. 兜底
+        return domain ? `${domain}${img}` : img;
+      };
+      
+      // 并行处理所有参考图（而非串行）
+      const results = await Promise.all(referenceImages.map((ri: unknown) => resolveImage(ri)));
+      for (const url of results) {
+        if (url) accessibleReferenceImages.push(url);
       }
     }
 
