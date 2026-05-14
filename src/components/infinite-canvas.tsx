@@ -578,13 +578,17 @@ export function InfiniteCanvas({
 
   // SVG智能描摹 state
   const [svgTraceMode, setSvgTraceMode] = useState<'color' | 'bw' | 'compress' | 'thumbnail'>('color');
-  const [svgTraceColorPrecision, setSvgTraceColorPrecision] = useState(6);
-  const [svgTraceFilterSpeckle, setSvgTraceFilterSpeckle] = useState(4);
-  const [svgTraceCornerThreshold, setSvgTraceCornerThreshold] = useState(1);
-  const [svgTraceLengthThreshold, setSvgTraceLengthThreshold] = useState(4);
+  const [svgTraceQualityPreset, setSvgTraceQualityPreset] = useState<'fast' | 'balanced' | 'high' | 'max'>('balanced');
+  const [svgTraceColorPrecision, setSvgTraceColorPrecision] = useState<number | null>(null);  // null = use preset
+  const [svgTraceFilterSpeckle, setSvgTraceFilterSpeckle] = useState<number | null>(null);
+  const [svgTraceCornerThreshold, setSvgTraceCornerThreshold] = useState<number | null>(null);
+  const [svgTraceLengthThreshold, setSvgTraceLengthThreshold] = useState<number | null>(null);
+  const [svgTraceCurveMode, setSvgTraceCurveMode] = useState<'polygon' | 'spline' | null>(null);
+  const [svgTraceHierarchical, setSvgTraceHierarchical] = useState<'stacked' | 'cutout' | null>(null);
   const [svgTraceBwThreshold, setSvgTraceBwThreshold] = useState(50);
   const [svgTraceBwTurdSize, setSvgTraceBwTurdSize] = useState(2);
   const [svgTraceBwInvert, setSvgTraceBwInvert] = useState(false);
+  const [svgTraceBwAlphaMax, setSvgTraceBwAlphaMax] = useState(1);
   const [svgTraceCompressQuality, setSvgTraceCompressQuality] = useState(80);
   const [svgTraceCompressFormat, setSvgTraceCompressFormat] = useState<'webp' | 'jpeg' | 'png'>('webp');
   const [svgTraceThumbWidth, setSvgTraceThumbWidth] = useState(200);
@@ -4074,21 +4078,26 @@ export function InfiniteCanvas({
 
       // Mode-specific params
       if (svgTraceMode === 'color') {
-        requestBody.colorPrecision = svgTraceColorPrecision;
-        requestBody.filterSpeckle = svgTraceFilterSpeckle;
-        requestBody.cornerThreshold = svgTraceCornerThreshold;
-        requestBody.lengthThreshold = svgTraceLengthThreshold;
+        requestBody.qualityPreset = svgTraceQualityPreset;
+        // Only send individual overrides when user explicitly set them
+        if (svgTraceColorPrecision !== null) requestBody.colorPrecision = svgTraceColorPrecision;
+        if (svgTraceFilterSpeckle !== null) requestBody.filterSpeckle = svgTraceFilterSpeckle;
+        if (svgTraceCornerThreshold !== null) requestBody.cornerThreshold = svgTraceCornerThreshold;
+        if (svgTraceLengthThreshold !== null) requestBody.lengthThreshold = svgTraceLengthThreshold;
+        if (svgTraceCurveMode !== null) requestBody.curveMode = svgTraceCurveMode;
+        if (svgTraceHierarchical !== null) requestBody.hierarchical = svgTraceHierarchical;
       } else if (svgTraceMode === 'bw') {
         requestBody.threshold = svgTraceBwThreshold;
         requestBody.turdSize = svgTraceBwTurdSize;
         requestBody.invert = svgTraceBwInvert;
+        requestBody.alphaMax = svgTraceBwAlphaMax;
       } else if (svgTraceMode === 'compress') {
         requestBody.quality = svgTraceCompressQuality;
-        requestBody.outputFormat = svgTraceCompressFormat;
+        requestBody.compressFormat = svgTraceCompressFormat;
       } else if (svgTraceMode === 'thumbnail') {
-        requestBody.thumbWidth = svgTraceThumbWidth;
-        requestBody.thumbHeight = svgTraceThumbHeight;
-        requestBody.fit = svgTraceThumbFit;
+        requestBody.thumbnailWidth = svgTraceThumbWidth;
+        requestBody.thumbnailHeight = svgTraceThumbHeight;
+        requestBody.thumbnailFit = svgTraceThumbFit;
       }
 
       const response = await fetch('/api/svg-trace', {
@@ -4137,7 +4146,7 @@ export function InfiniteCanvas({
     }
     setIsEditProcessing(false);
     setEditMode('none');
-  }, [selectedImageData, svgTraceMode, svgTraceColorPrecision, svgTraceFilterSpeckle, svgTraceCornerThreshold, svgTraceLengthThreshold, svgTraceBwThreshold, svgTraceBwTurdSize, svgTraceBwInvert, svgTraceCompressQuality, svgTraceCompressFormat, svgTraceThumbWidth, svgTraceThumbHeight, svgTraceThumbFit, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame]);
+  }, [selectedImageData, svgTraceMode, svgTraceQualityPreset, svgTraceColorPrecision, svgTraceFilterSpeckle, svgTraceCornerThreshold, svgTraceLengthThreshold, svgTraceCurveMode, svgTraceHierarchical, svgTraceBwThreshold, svgTraceBwTurdSize, svgTraceBwInvert, svgTraceBwAlphaMax, svgTraceCompressQuality, svgTraceCompressFormat, svgTraceThumbWidth, svgTraceThumbHeight, svgTraceThumbFit, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame]);
 
   // Multi-angle - Lovart-style subject/camera mode, result to the right
   const handleOpenMultiAngle = useCallback(() => {
@@ -6922,38 +6931,128 @@ export function InfiniteCanvas({
                 {/* Mode-specific options */}
                 {svgTraceMode === 'color' && (
                   <div className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs text-[#aaa]">颜色精度</label>
-                      <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceColorPrecision}bit</span>
+                    {/* Quality preset selector */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs text-[#aaa]">质量预设</label>
+                        <span className="text-[10px] text-[#777]">调整后自动覆盖参数</span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1">
+                        {([
+                          { key: 'fast' as const, label: '快速', color: '#4ade80' },
+                          { key: 'balanced' as const, label: '均衡', color: '#d4af37' },
+                          { key: 'high' as const, label: '精细', color: '#f97316' },
+                          { key: 'max' as const, label: '极致', color: '#ef4444' },
+                        ]).map(p => (
+                          <button key={p.key}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSvgTraceQualityPreset(p.key);
+                              // Reset individual overrides when changing preset
+                              setSvgTraceColorPrecision(null);
+                              setSvgTraceFilterSpeckle(null);
+                              setSvgTraceCornerThreshold(null);
+                              setSvgTraceLengthThreshold(null);
+                              setSvgTraceCurveMode(null);
+                              setSvgTraceHierarchical(null);
+                            }}
+                            className="py-1 rounded text-[10px] font-medium border transition-all"
+                            style={{
+                              background: svgTraceQualityPreset === p.key ? `${p.color}20` : '#111',
+                              borderColor: svgTraceQualityPreset === p.key ? p.color : '#333',
+                              color: svgTraceQualityPreset === p.key ? p.color : '#555',
+                            }}
+                          >
+                            {p.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                    <input type="range" min={2} max={8} step={1} value={svgTraceColorPrecision}
-                      onChange={e => setSvgTraceColorPrecision(Number(e.target.value))}
-                      onClick={e => e.stopPropagation()}
-                      className="w-full h-1 accent-[#d4af37] cursor-pointer" />
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs text-[#aaa]">去斑</label>
-                      <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceFilterSpeckle}px</span>
+
+                    {/* Curve mode toggle */}
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-[#aaa]">曲线模式</label>
+                      <div className="flex items-center gap-1 ml-auto">
+                        {(['polygon', 'spline'] as const).map(cm => (
+                          <button key={cm}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSvgTraceCurveMode(svgTraceCurveMode === cm ? null : cm);
+                            }}
+                            className="px-2 py-0.5 rounded text-[10px] border transition-all"
+                            style={{
+                              background: (svgTraceCurveMode ?? (svgTraceQualityPreset === 'high' || svgTraceQualityPreset === 'max' ? 'spline' : 'polygon')) === cm ? '#d4af3720' : '#111',
+                              borderColor: (svgTraceCurveMode ?? (svgTraceQualityPreset === 'high' || svgTraceQualityPreset === 'max' ? 'spline' : 'polygon')) === cm ? '#d4af37' : '#333',
+                              color: (svgTraceCurveMode ?? (svgTraceQualityPreset === 'high' || svgTraceQualityPreset === 'max' ? 'spline' : 'polygon')) === cm ? '#d4af37' : '#555',
+                            }}
+                          >
+                            {cm === 'polygon' ? '折线' : '曲线'}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                    <input type="range" min={0} max={20} step={1} value={svgTraceFilterSpeckle}
-                      onChange={e => setSvgTraceFilterSpeckle(Number(e.target.value))}
-                      onClick={e => e.stopPropagation()}
-                      className="w-full h-1 accent-[#d4af37] cursor-pointer" />
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs text-[#aaa]">角点阈值</label>
-                      <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceCornerThreshold}</span>
+
+                    {/* Hierarchical toggle */}
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-[#aaa]">分层策略</label>
+                      <div className="flex items-center gap-1 ml-auto">
+                        {(['stacked', 'cutout'] as const).map(h => (
+                          <button key={h}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSvgTraceHierarchical(svgTraceHierarchical === h ? null : h);
+                            }}
+                            className="px-2 py-0.5 rounded text-[10px] border transition-all"
+                            style={{
+                              background: (svgTraceHierarchical ?? (svgTraceQualityPreset === 'max' ? 'cutout' : 'stacked')) === h ? '#d4af3720' : '#111',
+                              borderColor: (svgTraceHierarchical ?? (svgTraceQualityPreset === 'max' ? 'cutout' : 'stacked')) === h ? '#d4af37' : '#333',
+                              color: (svgTraceHierarchical ?? (svgTraceQualityPreset === 'max' ? 'cutout' : 'stacked')) === h ? '#d4af37' : '#555',
+                            }}
+                          >
+                            {h === 'stacked' ? '叠加' : '剪切'}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                    <input type="range" min={0} max={5} step={0.5} value={svgTraceCornerThreshold}
-                      onChange={e => setSvgTraceCornerThreshold(Number(e.target.value))}
-                      onClick={e => e.stopPropagation()}
-                      className="w-full h-1 accent-[#d4af37] cursor-pointer" />
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs text-[#aaa]">长度阈值</label>
-                      <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceLengthThreshold}</span>
+
+                    {/* Fine-tuning sliders (override preset values) */}
+                    <div className="border-t border-[#333] pt-2 mt-1">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] text-[#666]">精细调节（覆盖预设值）</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs text-[#888]">颜色精度</label>
+                        <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceColorPrecision ?? (svgTraceQualityPreset === 'fast' ? 4 : svgTraceQualityPreset === 'balanced' ? 6 : svgTraceQualityPreset === 'high' ? 8 : 10)}bit</span>
+                      </div>
+                      <input type="range" min={2} max={12} step={1} value={svgTraceColorPrecision ?? (svgTraceQualityPreset === 'fast' ? 4 : svgTraceQualityPreset === 'balanced' ? 6 : svgTraceQualityPreset === 'high' ? 8 : 10)}
+                        onChange={e => setSvgTraceColorPrecision(Number(e.target.value))}
+                        onClick={e => e.stopPropagation()}
+                        className="w-full h-1 accent-[#d4af37] cursor-pointer" />
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs text-[#888]">去斑</label>
+                        <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceFilterSpeckle ?? (svgTraceQualityPreset === 'fast' ? 8 : svgTraceQualityPreset === 'balanced' ? 4 : svgTraceQualityPreset === 'high' ? 2 : 1)}px</span>
+                      </div>
+                      <input type="range" min={0} max={20} step={1} value={svgTraceFilterSpeckle ?? (svgTraceQualityPreset === 'fast' ? 8 : svgTraceQualityPreset === 'balanced' ? 4 : svgTraceQualityPreset === 'high' ? 2 : 1)}
+                        onChange={e => setSvgTraceFilterSpeckle(Number(e.target.value))}
+                        onClick={e => e.stopPropagation()}
+                        className="w-full h-1 accent-[#d4af37] cursor-pointer" />
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs text-[#888]">角点阈值</label>
+                        <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceCornerThreshold ?? 1}</span>
+                      </div>
+                      <input type="range" min={0} max={5} step={0.5} value={svgTraceCornerThreshold ?? 1}
+                        onChange={e => setSvgTraceCornerThreshold(Number(e.target.value))}
+                        onClick={e => e.stopPropagation()}
+                        className="w-full h-1 accent-[#d4af37] cursor-pointer" />
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs text-[#888]">长度阈值</label>
+                        <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceLengthThreshold ?? (svgTraceQualityPreset === 'fast' ? 8 : svgTraceQualityPreset === 'balanced' ? 4 : svgTraceQualityPreset === 'high' ? 2 : 1)}</span>
+                      </div>
+                      <input type="range" min={1} max={20} step={1} value={svgTraceLengthThreshold ?? (svgTraceQualityPreset === 'fast' ? 8 : svgTraceQualityPreset === 'balanced' ? 4 : svgTraceQualityPreset === 'high' ? 2 : 1)}
+                        onChange={e => setSvgTraceLengthThreshold(Number(e.target.value))}
+                        onClick={e => e.stopPropagation()}
+                        className="w-full h-1 accent-[#d4af37] cursor-pointer" />
                     </div>
-                    <input type="range" min={1} max={20} step={1} value={svgTraceLengthThreshold}
-                      onChange={e => setSvgTraceLengthThreshold(Number(e.target.value))}
-                      onClick={e => e.stopPropagation()}
-                      className="w-full h-1 accent-[#d4af37] cursor-pointer" />
                   </div>
                 )}
 
@@ -6965,6 +7064,22 @@ export function InfiniteCanvas({
                     </div>
                     <input type="range" min={10} max={90} step={5} value={svgTraceBwThreshold}
                       onChange={e => setSvgTraceBwThreshold(Number(e.target.value))}
+                      onClick={e => e.stopPropagation()}
+                      className="w-full h-1 accent-[#9ca3af] cursor-pointer" />
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-[#aaa]">去斑大小</label>
+                      <span className="text-xs tabular-nums font-mono text-[#9ca3af]">{svgTraceBwTurdSize}px</span>
+                    </div>
+                    <input type="range" min={1} max={50} step={1} value={svgTraceBwTurdSize}
+                      onChange={e => setSvgTraceBwTurdSize(Number(e.target.value))}
+                      onClick={e => e.stopPropagation()}
+                      className="w-full h-1 accent-[#9ca3af] cursor-pointer" />
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-[#aaa]">角点平滑</label>
+                      <span className="text-xs tabular-nums font-mono text-[#9ca3af]">{svgTraceBwAlphaMax.toFixed(2)}</span>
+                    </div>
+                    <input type="range" min={0} max={1.334} step={0.001} value={svgTraceBwAlphaMax}
+                      onChange={e => setSvgTraceBwAlphaMax(Number(e.target.value))}
                       onClick={e => e.stopPropagation()}
                       className="w-full h-1 accent-[#9ca3af] cursor-pointer" />
                     <div className="flex items-center gap-2">
