@@ -4936,7 +4936,7 @@ export function InfiniteCanvas({
             imageUrl: currentEditImg.url,
             expandPadding: { top: pad.top, right: pad.right, bottom: pad.bottom, left: pad.left },
             aspectRatio: `${origW}:${origH}`,
-            prompt: editPrompt || undefined,
+            prompt: editPrompt || 'Naturally extend the image beyond its original borders. Fill the new areas with content that seamlessly continues the existing scene, maintaining consistent style, lighting, perspective and color palette.',
             model: modelInfo.model,
             apiKey,
             providerId: modelInfo.providerId || getCurrentProviderId(),

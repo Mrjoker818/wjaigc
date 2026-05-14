@@ -1730,20 +1730,12 @@ export async function POST(request: NextRequest) {
 
       // 确定模型支持的最大尺寸
       const firstModel = candidateModels[0]?.model || '';
+      let modelMaxPx = 1024;
       if (firstModel.toLowerCase().includes('gpt-image')) {
-        // GPT Image 2 支持较大尺寸
-      } else {
-        // 其他模型限制 1024
+        modelMaxPx = 4096; // GPT Image 2 支持较大尺寸
+      } else if (firstModel.toLowerCase().includes('gemini')) {
+        modelMaxPx = 2048; // Gemini 支持中等尺寸
       }
-
-      // ============================================================
-      // 扩图策略：缩小到模型尺寸 → AI 生成 → 提取边缘 → 放大回原始尺寸 → 与原图合成
-      // 解决核心问题：AI 模型只能生成有限尺寸（如 1024x1024），
-      // 但目标画布可能很大（如 2560x2560），直接拉伸会导致变形/空白
-      // ============================================================
-
-      // 确定模型最大输出尺寸
-      const modelMaxPx = 1024;
       const needsDownscale = targetW > modelMaxPx || targetH > modelMaxPx;
 
       // 计算缩小比例（如果目标超出模型限制）
@@ -1808,7 +1800,7 @@ export async function POST(request: NextRequest) {
       const genSize = `${scaledTargetW}x${scaledTargetH}`;
       const genBody: Record<string, unknown> = {
         model: modelStr,
-        prompt,
+        prompt: outpaintPrompt,
         n: 1,
         size: genSize,
       };
