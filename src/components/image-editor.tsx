@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { X, Pencil, Eraser, Trash2, Loader2, ChevronDown, Check, Sparkles, History, Image as ImageIcon } from 'lucide-react';
+import { X, Pencil, Eraser, Trash2, Loader2, ChevronDown, Check, Sparkles, History, Image as ImageIcon, Lock } from 'lucide-react';
 import type { CanvasImage } from './infinite-canvas';
 
 interface EditHistoryItem {
@@ -32,10 +32,13 @@ const QUALITIES = [
   { value: 'high', label: '高' },
 ];
 
-// 支持编辑的模型列表
+// 支持编辑的模型列表（包含 OpenAI 和 Gemini 模型）
 const EDITABLE_MODELS = [
-  { value: 'gpt-image-2', label: 'GPT Image 2', provider: 'OpenAI', isFree: false, apiKeyPlaceholder: 'OpenAI API Key' },
-  { value: 'dall-e-3', label: 'DALL-E 3', provider: 'OpenAI', isFree: false, apiKeyPlaceholder: 'OpenAI API Key' },
+  { value: 'gpt-image-2', label: 'GPT Image 2', provider: 'OpenAI', supportsMask: true, apiKeyPlaceholder: 'OpenAI API Key', hint: '支持区域涂抹' },
+  { value: 'dall-e-3', label: 'DALL-E 3', provider: 'OpenAI', supportsMask: true, apiKeyPlaceholder: 'OpenAI API Key', hint: '支持区域涂抹' },
+  { value: 'gemini-2.5-flash-image', label: 'Nano Banana', provider: 'Google', supportsMask: false, apiKeyPlaceholder: 'Google API Key', hint: '智能修图' },
+  { value: 'gemini-3-pro-image-preview', label: 'Nano Banana Pro', provider: 'Google', supportsMask: false, apiKeyPlaceholder: 'Google API Key', hint: '智能修图' },
+  { value: 'gemini-3.1-flash-image-preview', label: 'Nano Banana 2', provider: 'Google', supportsMask: false, apiKeyPlaceholder: 'Google API Key', hint: '智能修图' },
 ];
 
 export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPositionChange }: ImageEditorProps) {
@@ -60,6 +63,9 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [isResultLoading, setIsResultLoading] = useState(false);
 
+  // 当前模型是否支持蒙版涂抹
+  const currentModelSupportsMask = EDITABLE_MODELS.find(m => m.value === selectedModel)?.supportsMask ?? true;
+
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
   const resultContainerRef = useRef<HTMLDivElement>(null);
@@ -76,7 +82,7 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
   // 监听API Key输入显示逻辑
   useEffect(() => {
     const model = EDITABLE_MODELS.find(m => m.value === selectedModel);
-    setShowApiKeyInput(model ? !model.isFree : false);
+    setShowApiKeyInput(true);
   }, [selectedModel]);
 
   // 初始化图片和Canvas
@@ -88,7 +94,7 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
       // 计算显示尺寸（保持比例，最大280px）
       const maxSize = 280;
       const ratio = img.width / img.height;
-      let displayWidth, displayHeight;
+      let displayWidth: number, displayHeight: number;
       if (ratio > 1) {
         displayWidth = maxSize;
         displayHeight = maxSize / ratio;
@@ -162,6 +168,7 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
   // 鼠标按下
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (e.button !== 0) return;
+    if (!currentModelSupportsMask) return;
     setIsDrawing(true);
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -172,7 +179,7 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
     const y = e.clientY - rect.top;
     ctx.beginPath();
     ctx.moveTo(x, y);
-  }, []);
+  }, [currentModelSupportsMask]);
 
   // 鼠标移动
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -259,8 +266,8 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
     setLoadingProgress(0);
 
     try {
-      // 获取mask（如果有绘制）
-      const maskDataUrl = exportMask();
+      // 获取mask（仅支持蒙版的模型且有绘制内容时）
+      const maskDataUrl = currentModelSupportsMask ? exportMask() : null;
 
       // 模拟进度
       const progressInterval = setInterval(() => {
@@ -306,19 +313,23 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
         clearMask();
       } else if (data.requiresApiKey) {
         setIsResultLoading(false);
-        setError(`需要配置 API Key: ${data.error || '请输入 OpenAI API Key'}`);
+        setError(`需要配置 API Key: ${data.error || '请输入 API Key'}`);
+      } else if (data.networkError) {
+        setIsResultLoading(false);
+        setError(data.error || '网络连接失败');
       } else {
         setIsResultLoading(false);
         setError(data.error || '编辑失败');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setIsResultLoading(false);
+      const errMsg = err instanceof Error ? err.message : '网络错误，请重试';
       console.error('Edit error:', err);
-      setError(err.message || '网络错误，请重试');
+      setError(errMsg);
     } finally {
       setIsLoading(false);
     }
-  }, [prompt, apiKey, currentImageUrl, size, quality, selectedModel, showApiKeyInput, exportMask, clearMask, currentHistoryIndex]);
+  }, [prompt, apiKey, currentImageUrl, size, quality, selectedModel, showApiKeyInput, currentModelSupportsMask, exportMask, clearMask, currentHistoryIndex]);
 
   // 确认结果并关闭
   const handleConfirmResult = useCallback(() => {
@@ -385,6 +396,9 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
       y: position.y + 200,
     };
   }, [position]);
+
+  // 当前选中的模型配置
+  const currentModelConfig = EDITABLE_MODELS.find(m => m.value === selectedModel);
 
   return (
     <>
@@ -469,64 +483,78 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
                   crossOrigin="anonymous"
                 />
               )}
-              {/* Mask Canvas */}
+              {/* Mask Canvas - 仅支持蒙版的模型可交互 */}
               <canvas
                 ref={canvasRef}
-                className="absolute top-0 left-0 w-full h-full cursor-crosshair"
+                className={`absolute top-0 left-0 w-full h-full ${
+                  currentModelSupportsMask ? 'cursor-crosshair' : 'cursor-not-allowed'
+                }`}
                 style={{ width: imageDisplaySize.width, height: imageDisplaySize.height }}
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
                 onMouseLeave={handleMouseUp}
               />
+              {/* Gemini 模型蒙版禁用提示覆盖层 */}
+              {!currentModelSupportsMask && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded pointer-events-none">
+                  <div className="flex flex-col items-center gap-1.5 px-4 py-3 bg-[#1a1a1a]/90 rounded-lg border border-[#2a2a2a]">
+                    <Lock className="h-5 w-5 text-[#888]" />
+                    <span className="text-xs text-[#888] whitespace-nowrap">此模型暂不支持区域涂抹</span>
+                    <span className="text-xs text-[#d4af37]">使用文字描述即可智能修图</span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Drawing Tools */}
-          <div className="flex items-center gap-2 px-2">
-            <button
-              onClick={() => setTool('brush')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-all ${
-                tool === 'brush'
-                  ? 'bg-[#d4af37] text-black font-medium'
-                  : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a]'
-              }`}
-            >
-              <Pencil className="h-4 w-4" />
-              画笔
-            </button>
-            <button
-              onClick={() => setTool('eraser')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-all ${
-                tool === 'eraser'
-                  ? 'bg-[#d4af37] text-black font-medium'
-                  : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a]'
-              }`}
-            >
-              <Eraser className="h-4 w-4" />
-              橡皮擦
-            </button>
-            <button
-              onClick={clearMask}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a] transition-all"
-            >
-              <Trash2 className="h-4 w-4" />
-              清除
-            </button>
-            <div className="flex-1" />
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-[#888]">笔触</span>
-              <input
-                type="range"
-                min="10"
-                max="50"
-                value={brushSize}
-                onChange={(e) => setBrushSize(Number(e.target.value))}
-                className="w-20 h-1 bg-[#2a2a2a] rounded-lg appearance-none cursor-pointer accent-[#d4af37]"
-              />
-              <span className="text-xs text-[#d4af37] font-mono w-6">{brushSize}</span>
+          {/* Drawing Tools - 仅支持蒙版的模型显示 */}
+          {currentModelSupportsMask && (
+            <div className="flex items-center gap-2 px-2">
+              <button
+                onClick={() => setTool('brush')}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-all ${
+                  tool === 'brush'
+                    ? 'bg-[#d4af37] text-black font-medium'
+                    : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a]'
+                }`}
+              >
+                <Pencil className="h-4 w-4" />
+                画笔
+              </button>
+              <button
+                onClick={() => setTool('eraser')}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-all ${
+                  tool === 'eraser'
+                    ? 'bg-[#d4af37] text-black font-medium'
+                    : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a]'
+                }`}
+              >
+                <Eraser className="h-4 w-4" />
+                橡皮擦
+              </button>
+              <button
+                onClick={clearMask}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a] transition-all"
+              >
+                <Trash2 className="h-4 w-4" />
+                清除
+              </button>
+              <div className="flex-1" />
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[#888]">笔触</span>
+                <input
+                  type="range"
+                  min="10"
+                  max="50"
+                  value={brushSize}
+                  onChange={(e) => setBrushSize(Number(e.target.value))}
+                  className="w-20 h-1 bg-[#2a2a2a] rounded-lg appearance-none cursor-pointer accent-[#d4af37]"
+                />
+                <span className="text-xs text-[#d4af37] font-mono w-6">{brushSize}</span>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Prompt Input */}
           <div className="space-y-2">
@@ -537,7 +565,10 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="描述你想修改什么...例如：把背景换成日落海滩"
+              placeholder={currentModelSupportsMask 
+                ? "描述你想修改什么...例如：把背景换成日落海滩" 
+                : "描述你想修改什么...例如：把背景换成日落海滩、给人物加上帽子"
+              }
               className="w-full h-20 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-4 py-3 text-sm text-white placeholder:text-[#555] focus:border-[#d4af37] focus:outline-none resize-none transition-colors"
             />
             <p className="text-xs text-[#666]">按 Enter 提交，Shift+Enter 换行</p>
@@ -584,25 +615,40 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
             </div>
           </div>
 
-          {/* Model Selection */}
+          {/* Model Selection - 3+2 grid */}
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-[#d4af37] uppercase tracking-wider">
               模型
             </label>
-            <div className="flex gap-2">
+            <div className="grid grid-cols-3 gap-2">
               {EDITABLE_MODELS.map(model => (
                 <button
                   key={model.value}
                   onClick={() => setSelectedModel(model.value)}
-                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                  className={`relative px-2 py-2 rounded-lg text-xs font-medium transition-all ${
                     selectedModel === model.value
                       ? 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-black border border-[#d4af37]'
                       : 'bg-[#1a1a1a] text-[#888] border border-[#2a2a2a] hover:border-[#d4af37] hover:text-white'
                   }`}
                 >
-                  {model.label}
+                  <div className="flex flex-col items-center gap-0.5">
+                    <span className="truncate w-full text-center">{model.label}</span>
+                    <span className={`text-[10px] ${selectedModel === model.value ? 'text-black/60' : 'text-[#555]'}`}>
+                      {model.hint}
+                    </span>
+                  </div>
                 </button>
               ))}
+            </div>
+            {/* 当前模型特性提示 */}
+            <div className="flex items-center gap-1.5 px-1">
+              <span className={`inline-block w-1.5 h-1.5 rounded-full ${currentModelSupportsMask ? 'bg-green-500' : 'bg-[#d4af37]'}`} />
+              <span className="text-[10px] text-[#666]">
+                {currentModelSupportsMask 
+                  ? `${currentModelConfig?.provider} · 支持画笔涂抹指定修改区域` 
+                  : `${currentModelConfig?.provider} · 仅文字描述，AI 智能理解修改意图`
+                }
+              </span>
             </div>
           </div>
 
@@ -610,13 +656,13 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
           {showApiKeyInput && (
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-[#d4af37] uppercase tracking-wider">
-                {EDITABLE_MODELS.find(m => m.value === selectedModel)?.apiKeyPlaceholder || 'API Key'}
+                {currentModelConfig?.apiKeyPlaceholder || 'API Key'}
               </label>
               <input
                 type="password"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-..."
+                placeholder={currentModelConfig?.provider === 'Google' ? 'AIza...' : 'sk-...'}
                 className="w-full px-4 py-2.5 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-sm text-white placeholder:text-[#555] focus:border-[#d4af37] focus:outline-none transition-colors"
               />
             </div>

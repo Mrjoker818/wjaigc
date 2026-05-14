@@ -30,7 +30,7 @@ src/
 │       ├── vision-prompt/route.ts  # 图片识词 API (SSE流+JSON双模式)
 │       ├── poll-3d-task/route.ts   # 3D 模型任务轮询 API
 │       ├── segment-elements/route.ts  # 元素分层 API (支持管理员配置的分层模型)
-│       ├── edit/route.ts             # 语言修图 API (OpenAI images.edit，自然语言描述修改图片)
+│       ├── edit/route.ts             # 语言修图 API (OpenAI + Gemini，自然语言描述修改图片)
 │       ├── upscayl/route.ts        # [旧] 无损放大 API (向后兼容)
 │       ├── image/
 │       │   ├── health/route.ts     # 本地图像工具健康检测 API
@@ -216,23 +216,31 @@ scripts/
 
 ### 11. 语言修图 (image-editor.tsx + api/edit)
 
-基于自然语言描述的图片编辑功能，使用 OpenAI images.edit API，用户无需手动绘制蒙版，只需描述想要的修改即可。
+基于自然语言描述的图片编辑功能，支持 OpenAI 和 Google Gemini 两种模型提供商。
 
 - **入口**:
   - 无限画布右键菜单"语言修图"
   - 无限画布底部工具栏"语言修图"按钮
   - 图片预览浮窗"语言修图"按钮
+- **支持的模型**:
+  - **OpenAI**: GPT Image 2、DALL-E 3 — 支持画笔涂抹指定修改区域（蒙版）
+  - **Google Gemini**: Nano Banana (gemini-2.5-flash-image)、Nano Banana Pro (gemini-3-pro-image-preview)、Nano Banana 2 (gemini-3.1-flash-image-preview) — 仅文字描述，AI 智能理解修改意图
 - **ImageEditor 组件**:
   - 黑金配色浮动面板，显示原始图片预览
+  - 画笔/橡皮擦/清除工具（仅 OpenAI 模型可用）
+  - Gemini 模型显示"此模型暂不支持区域涂抹"覆盖层
+  - 5个模型按钮 3+2 网格布局，显示模型特性提示
   - 自然语言输入框描述修改意图
-  - 尺寸选择 (1024/1536/2048)
-  - 透明背景选项
-  - 加载/保存状态管理
+  - 尺寸选择 (1024/1536/2048)、质量选择 (低/中/高)
+  - API Key 输入（OpenAI/Google 分别显示不同占位符）
+  - 编辑历史记录、结果预览框、SVG连接线、拖拽移动
 - **API 接口**:
-  - POST `/api/edit` - 语言修图 (multipart form: image + prompt + size + background)
-  - 使用 openai SDK 调用 images.edit
-  - 支持 base64 和 URL 格式图片输入
-  - 自动查找服务器端配置的图像模型 API
+  - POST `/api/edit` - 语言修图 (JSON: image + prompt + mask + size + quality + apiKey + model)
+  - GET `/api/edit` - 获取支持的编辑模型列表
+  - OpenAI 路径: 使用 openai SDK 调用 images.edit，支持蒙版
+  - Gemini 路径: 使用 @google/generative-ai 调用 generateContent，不支持蒙版
+  - 支持 base64 data URL、HTTP URL、相对路径（/api/serve-upload/xxx）图片输入
+  - 完善的错误处理：401/403/429/503 + 网络错误 + API Key 无效 + 权限不足
 - **选择模式**:
   - 点击"语言修图"后进入选择模式 (langEditMode='selecting')
   - 顶部显示提示横幅"点击图片进行语言修图"
