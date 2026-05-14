@@ -763,10 +763,25 @@ export function InfiniteCanvas({
   /** Get current image model from localStorage (independent of component state) */
   const getCurrentModel = useCallback((): { model: string; providerId?: string } => {
     try {
+      // 优先读取 wujie_selected_model（generation-panel 写入）
       const raw = localStorage.getItem('wujie_selected_model');
       if (raw) {
         const parsed = JSON.parse(raw);
-        return { model: parsed.model || parsed.id || 'gemini-3-pro-image-preview', providerId: parsed.providerId };
+        if (parsed.model) return { model: parsed.model, providerId: parsed.providerId };
+      }
+      // 兜底：从 unbounded_ai_user_data 读取
+      const userId = localStorage.getItem('unbounded_ai_current_user');
+      if (userId) {
+        const stored = localStorage.getItem('unbounded_ai_user_data');
+        if (stored) {
+          const data = JSON.parse(stored);
+          const compositeKey = data?.userData?.[userId]?.selectedModel;
+          if (compositeKey) {
+            const pureId = compositeKey.includes('::') ? compositeKey.split('::').pop()! : compositeKey;
+            const providerId = compositeKey.includes('::') ? compositeKey.split('::')[0] : '';
+            return { model: pureId, providerId };
+          }
+        }
       }
     } catch {}
     return { model: 'gemini-3-pro-image-preview' };
@@ -2124,10 +2139,9 @@ export function InfiniteCanvas({
     // 根据当前模型获取支持的参数
     const initSupportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, currentModel) || DEFAULT_ASPECT_RATIOS;
     const initSupportedQualities = findModelConfig(MODEL_QUALITIES, currentModel) || DEFAULT_QUALITIES;
-    const initQualitySizeMap = findModelConfig(QUALITY_TO_SIZE, currentModel);
     const initAspectRatio = initSupportedRatios.includes('1:1') ? '1:1' : initSupportedRatios[0];
     const initQuality = initSupportedQualities[0] || '1K';
-    const initSize = initQualitySizeMap?.[initQuality] || '';
+    const initSize = calculateActualPixels(initAspectRatio, initQuality, currentModel);
     const group: CanvasGenGroup = {
       id: groupId,
       type: groupType,
@@ -6215,10 +6229,9 @@ export function InfiniteCanvas({
                                   // 获取新模型支持的参数，重置质量和比例
                                   const newSupportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, m.id) || DEFAULT_ASPECT_RATIOS;
                                   const newSupportedQualities = findModelConfig(MODEL_QUALITIES, m.id) || DEFAULT_QUALITIES;
-                                  const newQualitySizeMap = findModelConfig(QUALITY_TO_SIZE, m.id);
                                   const newAspectRatio = newSupportedRatios.includes('1:1') ? '1:1' : newSupportedRatios[0];
                                   const newQuality = newSupportedQualities[0];
-                                  const newSize = newQualitySizeMap?.[newQuality] || '';
+                                  const newSize = calculateActualPixels(newAspectRatio, newQuality, m.id);
                                   setGenGroups(prev => prev.map(g =>
                                     g.id === group.id ? { ...g, toolbar: { ...g.toolbar, model: m.id, providerId: m.providerId, providerName: m.providerName, aspectRatio: newAspectRatio, quality: newQuality, size: newSize } } : g
                                   ));
@@ -6238,7 +6251,6 @@ export function InfiniteCanvas({
                     {(() => {
                       const supportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, group.toolbar.model) || DEFAULT_ASPECT_RATIOS;
                       const supportedQualities = findModelConfig(MODEL_QUALITIES, group.toolbar.model) || DEFAULT_QUALITIES;
-                      const qualitySizeMap = findModelConfig(QUALITY_TO_SIZE, group.toolbar.model);
                       return (
                     <div className="flex items-center gap-2">
                       <select
@@ -6246,13 +6258,14 @@ export function InfiniteCanvas({
                         value={group.toolbar.aspectRatio}
                         onChange={(e) => {
                           const newAr = e.target.value;
+                          const newSize = calculateActualPixels(newAr, group.toolbar.quality, group.toolbar.model);
                           setGenGroups(prev => prev.map(g =>
-                            g.id === group.id ? { ...g, toolbar: { ...g.toolbar, aspectRatio: newAr } } : g
+                            g.id === group.id ? { ...g, toolbar: { ...g.toolbar, aspectRatio: newAr, size: newSize } } : g
                           ));
                         }}
                       >
                         {supportedRatios.map(r => (
-                          <option key={r} value={r}>{r} {ASPECT_RATIO_TO_PIXELS[r] ? `(${ASPECT_RATIO_TO_PIXELS[r]})` : ''}</option>
+                          <option key={r} value={r}>{r} ({calculateActualPixels(r, group.toolbar.quality, group.toolbar.model)})</option>
                         ))}
                       </select>
                       <select
@@ -6260,15 +6273,14 @@ export function InfiniteCanvas({
                         value={group.toolbar.quality}
                         onChange={(e) => {
                           const newQ = e.target.value;
-                          const qSizeMap = findModelConfig(QUALITY_TO_SIZE, group.toolbar.model);
-                          const newSize = qSizeMap?.[newQ] || '';
+                          const newSize = calculateActualPixels(group.toolbar.aspectRatio, newQ, group.toolbar.model);
                           setGenGroups(prev => prev.map(g =>
                             g.id === group.id ? { ...g, toolbar: { ...g.toolbar, quality: newQ, size: newSize } } : g
                           ));
                         }}
                       >
                         {supportedQualities.map(q => (
-                          <option key={q} value={q}>{QUALITY_DISPLAY_NAMES[q] || q} {qualitySizeMap?.[q] ? `(${qualitySizeMap[q]})` : ''}</option>
+                          <option key={q} value={q}>{QUALITY_DISPLAY_NAMES[q] || q} ({calculateActualPixels(group.toolbar.aspectRatio, q, group.toolbar.model)})</option>
                         ))}
                       </select>
                       <select
@@ -8182,10 +8194,9 @@ export function InfiniteCanvas({
                                   // 获取新模型支持的参数，重置质量和比例
                                   const newSupportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, m.id) || DEFAULT_ASPECT_RATIOS;
                                   const newSupportedQualities = findModelConfig(MODEL_QUALITIES, m.id) || DEFAULT_QUALITIES;
-                                  const newQualitySizeMap = findModelConfig(QUALITY_TO_SIZE, m.id);
                                   const newAspectRatio = newSupportedRatios.includes('1:1') ? '1:1' : newSupportedRatios[0];
                                   const newQuality = newSupportedQualities[0];
-                                  const newSize = newQualitySizeMap?.[newQuality] || '';
+                                  const newSize = calculateActualPixels(newAspectRatio, newQuality, m.id);
                                   setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, model: m.id, providerId: m.providerId, providerName: m.providerName, aspectRatio: newAspectRatio, quality: newQuality, size: newSize } } : g));
                                   setOpenModelDropdownGroupId(null);
                                 }}
@@ -8203,24 +8214,31 @@ export function InfiniteCanvas({
                       {(() => {
                         const hcgRatios = findModelConfig(MODEL_ASPECT_RATIOS, hcg.toolbar.model) || DEFAULT_ASPECT_RATIOS;
                         const hcgQualities = findModelConfig(MODEL_QUALITIES, hcg.toolbar.model) || DEFAULT_QUALITIES;
-                        const hcgQualitySizeMap = findModelConfig(QUALITY_TO_SIZE, hcg.toolbar.model);
                         return (<>
                       <select
                         className="px-2 py-1.5 rounded-lg text-xs"
                         style={{ background: isMonochrome ? '#f3f4f6' : '#252525', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : '#444'}` }}
                         value={hcg.toolbar.aspectRatio}
-                        onChange={(e) => setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, aspectRatio: e.target.value } } : g))}
+                        onChange={(e) => {
+                          const newAr = e.target.value;
+                          const newSize = calculateActualPixels(newAr, hcg.toolbar.quality, hcg.toolbar.model);
+                          setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, aspectRatio: newAr, size: newSize } } : g));
+                        }}
                       >
-                        {hcgRatios.map(r => <option key={r} value={r}>{r} {ASPECT_RATIO_TO_PIXELS[r] ? `(${ASPECT_RATIO_TO_PIXELS[r]})` : ''}</option>)}
+                        {hcgRatios.map(r => <option key={r} value={r}>{r} ({calculateActualPixels(r, hcg.toolbar.quality, hcg.toolbar.model)})</option>)}
                       </select>
                       {/* 质量 */}
                       <select
                         className="px-2 py-1.5 rounded-lg text-xs"
                         style={{ background: isMonochrome ? '#f3f4f6' : '#252525', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : '#444'}` }}
                         value={hcg.toolbar.quality}
-                        onChange={(e) => setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, quality: e.target.value } } : g))}
+                        onChange={(e) => {
+                          const newQ = e.target.value;
+                          const newSize = calculateActualPixels(hcg.toolbar.aspectRatio, newQ, hcg.toolbar.model);
+                          setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, quality: newQ, size: newSize } } : g));
+                        }}
                       >
-                        {hcgQualities.map(q => <option key={q} value={q}>{QUALITY_DISPLAY_NAMES[q] || q} {hcgQualitySizeMap?.[q] ? `(${hcgQualitySizeMap[q]})` : ''}</option>)}
+                        {hcgQualities.map(q => <option key={q} value={q}>{QUALITY_DISPLAY_NAMES[q] || q} ({calculateActualPixels(hcg.toolbar.aspectRatio, q, hcg.toolbar.model)})</option>)}
                       </select>
                       </>);
                       })()}

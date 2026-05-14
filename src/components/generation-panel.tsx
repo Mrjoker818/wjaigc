@@ -360,6 +360,16 @@ export function GenerationPanel(
                                 setPendingModelMigration(saved);
                             } else {
                                 setModel(saved);
+                                // 同步写入 wujie_selected_model
+                                try {
+                                    const pureId = saved.includes('::') ? saved.split('::').pop()! : saved;
+                                    const providerId = saved.includes('::') ? saved.split('::')[0] : '';
+                                    localStorage.setItem('wujie_selected_model', JSON.stringify({
+                                        model: pureId,
+                                        providerId: providerId,
+                                        compositeKey: saved,
+                                    }));
+                                } catch {}
                             }
                         }
                     }
@@ -389,9 +399,9 @@ export function GenerationPanel(
     // 尺寸映射 — 使用 calculateActualPixels 综合考虑模型+比例+质量
     const getModelSize = useCallback((ratio: string): string => {
         const modelSize = sharedCalculateActualPixels(ratio, quality, pureModelId);
-        if (modelSize) return modelSize;
+        if (modelSize) return modelSize.replace('×', 'x');
         // 通用回退
-        if (ASPECT_RATIO_TO_PIXELS[ratio]) return ASPECT_RATIO_TO_PIXELS[ratio];
+        if (SHARED_ASPECT_RATIO_TO_PIXELS[ratio]) return SHARED_ASPECT_RATIO_TO_PIXELS[ratio];
         const fallback: Record<string, string> = {
             "1:1": "1024x1024", "4:3": "1536x1024", "3:4": "1024x1536",
             "16:9": "2048x1152", "9:16": "1152x2048", "3:2": "1536x1024",
@@ -631,6 +641,16 @@ export function GenerationPanel(
                             }
                         }
                     }
+                } catch {}
+                // 同步写入 wujie_selected_model
+                try {
+                    const pureId = compositeKey.includes('::') ? compositeKey.split('::').pop()! : compositeKey;
+                    const providerId = compositeKey.includes('::') ? compositeKey.split('::')[0] : '';
+                    localStorage.setItem('wujie_selected_model', JSON.stringify({
+                        model: pureId,
+                        providerId: providerId,
+                        compositeKey: compositeKey,
+                    }));
                 } catch {}
             }
             setPendingModelMigration(null);
@@ -898,6 +918,16 @@ export function GenerationPanel(
                             } catch (err) {
                               console.error('Failed to save selected model:', err);
                             }
+                            // 同步写入 wujie_selected_model 供画布工具读取
+                            try {
+                              const newPureModelId = compositeKey.includes('::') ? compositeKey.split('::').pop()! : compositeKey;
+                              const providerId = compositeKey.includes('::') ? compositeKey.split('::')[0] : '';
+                              localStorage.setItem('wujie_selected_model', JSON.stringify({
+                                model: newPureModelId,
+                                providerId: providerId,
+                                compositeKey: compositeKey,
+                              }));
+                            } catch {}
                             // Extract pure modelId for ratio/quality lookup
                             const newPureModelId = compositeKey.includes('::') ? compositeKey.split('::').pop()! : compositeKey;
                             const supportedRatios = sharedFindModelConfig(SHARED_MODEL_ASPECT_RATIOS, newPureModelId) || ['1:1'];
@@ -1347,6 +1377,7 @@ export function GenerationPanel(
                                       }}
                                     />
                                     <span className="text-xs">{ratio}</span>
+                                    <span className="text-[9px] opacity-35">{getModelSize(ratio)}</span>
                                 </div>
                             </button>
                         ))}
