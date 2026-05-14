@@ -8,7 +8,7 @@ import {
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
-  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen
+  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool
 } from 'lucide-react';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
 import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
@@ -322,7 +322,7 @@ interface InfiniteCanvasProps {
   onForceSave?: () => void;
 }
 
-type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'img2img' | 'upscale';
+type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'img2img' | 'upscale' | 'svg-trace';
 type ActiveTool = 'none' | 'upscale' | 'download' | 'multiAngle' | 'to3d';
 type MultiAngleMode = 'image' | 'camera';
 type ThreeDBackend = 'api' | 'local';
@@ -573,6 +573,21 @@ export function InfiniteCanvas({
   // Actual pixel dimensions of the image being upscaled (loaded from DOM)
   const [upscaleActualW, setUpscaleActualW] = useState(0);
   const [upscaleActualH, setUpscaleActualH] = useState(0);
+
+  // SVG智能描摹 state
+  const [svgTraceMode, setSvgTraceMode] = useState<'color' | 'bw' | 'compress' | 'thumbnail'>('color');
+  const [svgTraceColorPrecision, setSvgTraceColorPrecision] = useState(6);
+  const [svgTraceFilterSpeckle, setSvgTraceFilterSpeckle] = useState(4);
+  const [svgTraceCornerThreshold, setSvgTraceCornerThreshold] = useState(1);
+  const [svgTraceLengthThreshold, setSvgTraceLengthThreshold] = useState(4);
+  const [svgTraceBwThreshold, setSvgTraceBwThreshold] = useState(50);
+  const [svgTraceBwTurdSize, setSvgTraceBwTurdSize] = useState(2);
+  const [svgTraceBwInvert, setSvgTraceBwInvert] = useState(false);
+  const [svgTraceCompressQuality, setSvgTraceCompressQuality] = useState(80);
+  const [svgTraceCompressFormat, setSvgTraceCompressFormat] = useState<'webp' | 'jpeg' | 'png'>('webp');
+  const [svgTraceThumbWidth, setSvgTraceThumbWidth] = useState(200);
+  const [svgTraceThumbHeight, setSvgTraceThumbHeight] = useState(200);
+  const [svgTraceThumbFit, setSvgTraceThumbFit] = useState<'cover' | 'contain' | 'inside' | 'fill'>('cover');
 
   // Check Upscayl NCNN availability on mount
   useEffect(() => {
@@ -3972,90 +3987,118 @@ export function InfiniteCanvas({
     setIsEditProcessing(false);
   }, [selectedImageData, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame]);
 
-  // 3. VECTORIZE - convert raster image to true vector SVG via server API
-  // Priority: admin-configured vectorize model → PY_VECTORIZE_ENDPOINT → client-side vtracer fallback
-  const handleRasterize = useCallback(async () => {
+  // 3. SVG智能描摹 - Sharp + VTracer (彩色) / ImageMagick + Potrace (黑白) / Sharp (压缩/缩略图)
+  const handleOpenSvgTrace = useCallback(() => {
+    if (!selectedImageData) return;
+    if (selectedImage) setEditImageId(selectedImage.id);
+    setEditMode('svg-trace');
+  }, [selectedImageData, selectedImage]);
+
+  const handleSvgTraceConfirm = useCallback(async () => {
     const img = selectedImageData;
     if (!img) return;
 
+    const modeLabels: Record<string, string> = {
+      color: '彩色矢量化',
+      bw: '黑白描摹',
+      compress: '图片压缩',
+      thumbnail: '缩略图生成',
+    };
+    const modeLabel = modeLabels[svgTraceMode] || 'SVG描摹';
+
     const placeholderId = createProcessingFrameRightOf(
       img,
-      '矢量化中',
+      modeLabel + '中',
       img.width,
       img.height,
-      '正在分析颜色和轮廓...'
+      '正在处理...'
     );
     setIsEditProcessing(true);
     try {
-      // Call server-side vectorize API (uses admin-configured vectorize model)
-      updateProcessingFrame(placeholderId, { progress: 18, status: '正在调用矢量模型...' });
-      const response = await fetch('/api/design/vectorize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: img.url, layerId: img.id, mode: 'auto' }),
-      });
-      const data = await response.json();
-
-      if (data.success && data.svg) {
-        updateProcessingFrame(placeholderId, { progress: 88, status: '正在渲染 SVG 预览...' });
-        const svgBlob = new Blob([data.svg], { type: 'image/svg+xml;charset=utf-8' });
-        const svgUrl = URL.createObjectURL(svgBlob);
-        const engineLabel = data.engine === 'raster-svg-wrapper' ? '容器模式' : (data.engine || '矢量');
-        completeProcessingFrame(placeholderId, svgUrl, img.width, img.height, {
-          originalWidth: img.originalWidth || Math.round(img.width),
-          originalHeight: img.originalHeight || Math.round(img.height),
-          modifyPrompt: `矢量化 SVG (${engineLabel})`,
-        });
-        if (data.warnings && data.warnings.length > 0) {
-          console.warn('Vectorize warnings:', data.warnings);
-        }
-      } else {
-        // Server API failed, fallback to client-side vtracer
-        updateProcessingFrame(placeholderId, { progress: 34, status: '服务端矢量模型不可用，使用本地转换...' });
-        const { exportAsSVG } = await import('@/lib/svg-export');
-        const result = await exportAsSVG(img.url, { mode: 'pro' });
-
-        if (result.svgString && result.svgString.length > 0) {
-          updateProcessingFrame(placeholderId, { progress: 88, status: '正在渲染 SVG 预览...' });
-          const svgBlob = new Blob([result.svgString], { type: 'image/svg+xml;charset=utf-8' });
-          const svgUrl = URL.createObjectURL(svgBlob);
-          completeProcessingFrame(placeholderId, svgUrl, img.width, img.height, {
-            originalWidth: img.originalWidth || Math.round(img.width),
-            originalHeight: img.originalHeight || Math.round(img.height),
-            modifyPrompt: `矢量化 SVG (${result.quality?.label || '本地'})`,
-          });
-        } else {
-          // Ultimate fallback: embed PNG in SVG wrapper
-          const image = new Image();
-          image.crossOrigin = 'anonymous';
-          await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = reject; image.src = img.url; });
-          const canvas = document.createElement('canvas');
-          const width = image.naturalWidth || Math.round(img.originalWidth || img.width);
-          const height = image.naturalHeight || Math.round(img.originalHeight || img.height);
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) throw new Error('Canvas context unavailable');
-          ctx.drawImage(image, 0, 0, width, height);
-          const embeddedPng = canvas.toDataURL('image/png');
-          const svgContent = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-  <image href="${embeddedPng}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="none"/>
-</svg>`;
-          const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
-          completeProcessingFrame(placeholderId, svgUrl, img.width, img.height, {
-            originalWidth: img.originalWidth || Math.round(img.width),
-            originalHeight: img.originalHeight || Math.round(img.height),
-            modifyPrompt: '栅格化 (SVG)',
-          });
+      // Prepare image URL: convert data/blob URLs to server URLs first
+      let imageUrl = img.url;
+      if (imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) {
+        updateProcessingFrame(placeholderId, { progress: 10, status: '正在上传图片...' });
+        const saveRes = await fetch('/api/save-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageUrl }) });
+        if (saveRes.ok) {
+          const saveData = await saveRes.json();
+          imageUrl = saveData.url || imageUrl;
         }
       }
+
+      updateProcessingFrame(placeholderId, { progress: 20, status: `正在${modeLabel}...` });
+
+      const requestBody: Record<string, unknown> = {
+        imageUrl,
+        mode: svgTraceMode,
+      };
+
+      // Mode-specific params
+      if (svgTraceMode === 'color') {
+        requestBody.colorPrecision = svgTraceColorPrecision;
+        requestBody.filterSpeckle = svgTraceFilterSpeckle;
+        requestBody.cornerThreshold = svgTraceCornerThreshold;
+        requestBody.lengthThreshold = svgTraceLengthThreshold;
+      } else if (svgTraceMode === 'bw') {
+        requestBody.threshold = svgTraceBwThreshold;
+        requestBody.turdSize = svgTraceBwTurdSize;
+        requestBody.invert = svgTraceBwInvert;
+      } else if (svgTraceMode === 'compress') {
+        requestBody.quality = svgTraceCompressQuality;
+        requestBody.outputFormat = svgTraceCompressFormat;
+      } else if (svgTraceMode === 'thumbnail') {
+        requestBody.thumbWidth = svgTraceThumbWidth;
+        requestBody.thumbHeight = svgTraceThumbHeight;
+        requestBody.fit = svgTraceThumbFit;
+      }
+
+      const response = await fetch('/api/svg-trace', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      updateProcessingFrame(placeholderId, { progress: 60, status: '正在处理结果...' });
+
+      const data = await response.json();
+
+      if (data.success) {
+        updateProcessingFrame(placeholderId, { progress: 88, status: '正在渲染预览...' });
+
+        if (svgTraceMode === 'color' || svgTraceMode === 'bw') {
+          // SVG result - use data URL for canvas display
+          const displayUrl = data.dataUrl || data.url;
+          const engineLabel = data.engine === 'vtracer' ? 'VTracer' : data.engine === 'potrace' ? 'Potrace' : data.engine;
+          completeProcessingFrame(placeholderId, displayUrl, img.width, img.height, {
+            originalWidth: img.originalWidth || Math.round(img.width),
+            originalHeight: img.originalHeight || Math.round(img.height),
+            modifyPrompt: `${modeLabel} (${engineLabel})`,
+          });
+        } else {
+          // Compress / thumbnail result - use data URL for display
+          const displayUrl = data.dataUrl || data.url;
+          let resultW = img.width;
+          let resultH = img.height;
+          if (data.stats) {
+            resultW = data.stats.width || img.width;
+            resultH = data.stats.height || img.height;
+          }
+          completeProcessingFrame(placeholderId, displayUrl, resultW, resultH, {
+            originalWidth: img.originalWidth || Math.round(img.width),
+            originalHeight: img.originalHeight || Math.round(img.height),
+            modifyPrompt: modeLabel,
+          });
+        }
+      } else {
+        throw new Error(data.error || '处理失败');
+      }
     } catch (e) {
-      console.error('Vectorize failed:', e);
-      alert('矢量化失败');
+      console.error('SVG trace failed:', e);
+      alert(`SVG智能描摹失败: ${e instanceof Error ? e.message : '请重试'}`);
     }
     setIsEditProcessing(false);
-  }, [selectedImageData, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame]);
+    setEditMode('none');
+  }, [selectedImageData, svgTraceMode, svgTraceColorPrecision, svgTraceFilterSpeckle, svgTraceCornerThreshold, svgTraceLengthThreshold, svgTraceBwThreshold, svgTraceBwTurdSize, svgTraceBwInvert, svgTraceCompressQuality, svgTraceCompressFormat, svgTraceThumbWidth, svgTraceThumbHeight, svgTraceThumbFit, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame]);
 
   // Multi-angle - Lovart-style subject/camera mode, result to the right
   const handleOpenMultiAngle = useCallback(() => {
@@ -5133,7 +5176,7 @@ export function InfiniteCanvas({
   const imageActions = [
     { icon: <ZoomIn size={14} />, label: '放大', desc: '智能补细节放大，变大变高清，不改内容', action: handleOpenUpscale },
     { icon: <Eraser size={14} />, label: '移除背景', desc: '一键删除背景，只剩透明底主体', action: handleRemoveBackground },
-    { icon: <ArrowUpFromLine size={14} />, label: '矢量化', desc: '转换为SVG矢量图', action: handleRasterize },
+    { icon: <PenTool size={14} />, label: 'SVG智能描摹', desc: '矢量描摹/压缩/缩略图', action: handleOpenSvgTrace },
     { icon: <Paintbrush size={14} />, label: '擦除', desc: '涂抹消除，自动无缝补全画面', action: handleOpenErase },
     { icon: <Wand2 size={14} />, label: '蒙版', desc: '精准遮罩控制，只改露出的区域', action: handleOpenMask },
     { icon: <Layers size={14} />, label: '编辑元素', desc: '按元素分层，独立编辑', action: handleEditElements },
@@ -6764,6 +6807,238 @@ export function InfiniteCanvas({
               </div>
               <div className="text-center mt-1">
                 <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>Esc 退出</span>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ====== SVG智能描摹 FLOATING PANEL ====== */}
+        {editMode === 'svg-trace' && (() => {
+          const editImg = images.find(i => i.id === editImageId);
+          if (!editImg) return null;
+          const imgOrigW = editImg.originalWidth || Math.round(editImg.width);
+          const imgOrigH = editImg.originalHeight || Math.round(editImg.height);
+
+          const svgTraceModes = [
+            { key: 'color' as const, label: '彩色矢量化', icon: <Palette size={14} />, desc: 'Sharp + VTracer', color: '#d4af37' },
+            { key: 'bw' as const, label: '黑白描摹', icon: <Contrast size={14} />, desc: 'ImageMagick + Potrace', color: '#9ca3af' },
+            { key: 'compress' as const, label: '图片压缩', icon: <Minimize2 size={14} />, desc: 'Sharp', color: '#60a5fa' },
+            { key: 'thumbnail' as const, label: '缩略图生成', icon: <Frame size={14} />, desc: 'Sharp', color: '#34d399' },
+          ];
+
+          return (
+            <div className={panelBaseClass} style={{ minWidth: 340 }}>
+              {/* Title bar */}
+              <div className="flex items-center justify-between mb-3">
+                <span className={`text-sm font-semibold ${isMonochrome ? 'text-gray-800' : 'text-[#d4af37]'}`}>
+                  SVG智能描摹
+                </span>
+                <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>Esc 退出</span>
+              </div>
+
+              {/* Mode selector */}
+              <div className="grid grid-cols-2 gap-1.5 mb-3">
+                {svgTraceModes.map(m => (
+                  <button
+                    key={m.key}
+                    onClick={() => setSvgTraceMode(m.key)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all text-left ${
+                      svgTraceMode === m.key
+                        ? isMonochrome
+                          ? 'border-[#d4af37] bg-[#d4af37]/10 text-[#d4af37]'
+                          : 'border-[#d4af37] bg-[#d4af37]/10 text-[#d4af37]'
+                        : isMonochrome
+                          ? 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                          : 'border-[#333] bg-[#1a1a1a] text-[#999] hover:border-[#444]'
+                    }`}
+                  >
+                    <span style={{ color: svgTraceMode === m.key ? m.color : undefined }}>{m.icon}</span>
+                    <div className="flex flex-col">
+                      <span className="text-xs font-medium leading-tight">{m.label}</span>
+                      <span className={`text-[10px] leading-tight ${isMonochrome ? 'text-gray-400' : 'text-[#555]'}`}>{m.desc}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Source image info */}
+              <div className={`flex items-center gap-2 px-2 py-1.5 rounded-md mb-3 text-xs ${isMonochrome ? 'bg-gray-50 text-gray-500' : 'bg-[#111] text-[#666]'}`}>
+                <ImageIcon size={12} />
+                <span>原图 {imgOrigW}×{imgOrigH}</span>
+              </div>
+
+              {/* Mode-specific options */}
+              {svgTraceMode === 'color' && (
+                <div className="space-y-2 mb-3">
+                  <div className="flex items-center justify-between">
+                    <label className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#aaa]'}`}>颜色精度</label>
+                    <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-gray-800' : 'text-[#d4af37]'}`}>{svgTraceColorPrecision}bit</span>
+                  </div>
+                  <input type="range" min={2} max={8} step={1} value={svgTraceColorPrecision}
+                    onChange={e => setSvgTraceColorPrecision(Number(e.target.value))}
+                    className="w-full h-1 accent-[#d4af37] cursor-pointer" />
+                  <div className="flex items-center justify-between">
+                    <label className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#aaa]'}`}>去斑</label>
+                    <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-gray-800' : 'text-[#d4af37]'}`}>{svgTraceFilterSpeckle}px</span>
+                  </div>
+                  <input type="range" min={0} max={20} step={1} value={svgTraceFilterSpeckle}
+                    onChange={e => setSvgTraceFilterSpeckle(Number(e.target.value))}
+                    className="w-full h-1 accent-[#d4af37] cursor-pointer" />
+                  <div className="flex items-center justify-between">
+                    <label className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#aaa]'}`}>角点阈值</label>
+                    <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-gray-800' : 'text-[#d4af37]'}`}>{svgTraceCornerThreshold}</span>
+                  </div>
+                  <input type="range" min={0} max={5} step={0.5} value={svgTraceCornerThreshold}
+                    onChange={e => setSvgTraceCornerThreshold(Number(e.target.value))}
+                    className="w-full h-1 accent-[#d4af37] cursor-pointer" />
+                  <div className="flex items-center justify-between">
+                    <label className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#aaa]'}`}>长度阈值</label>
+                    <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-gray-800' : 'text-[#d4af37]'}`}>{svgTraceLengthThreshold}</span>
+                  </div>
+                  <input type="range" min={1} max={20} step={1} value={svgTraceLengthThreshold}
+                    onChange={e => setSvgTraceLengthThreshold(Number(e.target.value))}
+                    className="w-full h-1 accent-[#d4af37] cursor-pointer" />
+                </div>
+              )}
+
+              {svgTraceMode === 'bw' && (
+                <div className="space-y-2 mb-3">
+                  <div className="flex items-center justify-between">
+                    <label className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#aaa]'}`}>二值化阈值</label>
+                    <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-gray-800' : 'text-[#d4af37]'}`}>{svgTraceBwThreshold}%</span>
+                  </div>
+                  <input type="range" min={10} max={90} step={5} value={svgTraceBwThreshold}
+                    onChange={e => setSvgTraceBwThreshold(Number(e.target.value))}
+                    className="w-full h-1 accent-[#9ca3af] cursor-pointer" />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setSvgTraceBwInvert(!svgTraceBwInvert)}
+                      className={`px-2.5 py-1 rounded text-xs border transition-all ${
+                        svgTraceBwInvert
+                          ? isMonochrome ? 'border-gray-600 bg-gray-100 text-gray-800' : 'border-[#555] bg-[#333] text-[#ccc]'
+                          : isMonochrome ? 'border-gray-200 bg-white text-gray-400' : 'border-[#333] bg-[#1a1a1a] text-[#555]'
+                      }`}
+                    >
+                      反色输出
+                    </button>
+                    <span className={`text-[10px] ${isMonochrome ? 'text-gray-400' : 'text-[#555]'}`}>
+                      {svgTraceBwInvert ? '白底黑线→黑底白线' : '黑线白底'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {svgTraceMode === 'compress' && (
+                <div className="space-y-2 mb-3">
+                  <div className="flex items-center justify-between">
+                    <label className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#aaa]'}`}>压缩质量</label>
+                    <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-gray-800' : 'text-[#60a5fa]'}`}>{svgTraceCompressQuality}%</span>
+                  </div>
+                  <input type="range" min={10} max={100} step={5} value={svgTraceCompressQuality}
+                    onChange={e => setSvgTraceCompressQuality(Number(e.target.value))}
+                    className="w-full h-1 accent-[#60a5fa] cursor-pointer" />
+                  <div className="flex items-center gap-1.5">
+                    {(['webp', 'jpeg', 'png'] as const).map(fmt => (
+                      <button key={fmt}
+                        onClick={() => setSvgTraceCompressFormat(fmt)}
+                        className={`px-2.5 py-1 rounded text-xs border transition-all uppercase ${
+                          svgTraceCompressFormat === fmt
+                            ? isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-600' : 'border-[#60a5fa] bg-[#60a5fa]/10 text-[#60a5fa]'
+                            : isMonochrome ? 'border-gray-200 bg-white text-gray-400' : 'border-[#333] bg-[#1a1a1a] text-[#555]'
+                        }`}
+                      >
+                        {fmt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {svgTraceMode === 'thumbnail' && (
+                <div className="space-y-2 mb-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#aaa]'}`}>宽度</label>
+                      <input type="number" min={16} max={4096} value={svgTraceThumbWidth}
+                        onChange={e => setSvgTraceThumbWidth(Math.max(16, Number(e.target.value)))}
+                        className={`w-full mt-1 px-2 py-1 rounded text-xs tabular-nums border ${
+                          isMonochrome ? 'bg-white border-gray-200 text-gray-800' : 'bg-[#111] border-[#333] text-[#ccc]'
+                        }`} />
+                    </div>
+                    <div>
+                      <label className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#aaa]'}`}>高度</label>
+                      <input type="number" min={16} max={4096} value={svgTraceThumbHeight}
+                        onChange={e => setSvgTraceThumbHeight(Math.max(16, Number(e.target.value)))}
+                        className={`w-full mt-1 px-2 py-1 rounded text-xs tabular-nums border ${
+                          isMonochrome ? 'bg-white border-gray-200 text-gray-800' : 'bg-[#111] border-[#333] text-[#ccc]'
+                        }`} />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {(['cover', 'contain', 'fill', 'inside'] as const).map(fit => (
+                      <button key={fit}
+                        onClick={() => setSvgTraceThumbFit(fit)}
+                        className={`px-2 py-1 rounded text-xs border transition-all ${
+                          svgTraceThumbFit === fit
+                            ? isMonochrome ? 'border-emerald-400 bg-emerald-50 text-emerald-600' : 'border-[#34d399] bg-[#34d399]/10 text-[#34d399]'
+                            : isMonochrome ? 'border-gray-200 bg-white text-gray-400' : 'border-[#333] bg-[#1a1a1a] text-[#555]'
+                        }`}
+                      >
+                        {fit === 'cover' ? '覆盖' : fit === 'contain' ? '包含' : fit === 'fill' ? '填充' : '适应'}
+                      </button>
+                    ))}
+                  </div>
+                  {/* Quick size presets */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {[
+                      { label: '128', w: 128, h: 128 },
+                      { label: '256', w: 256, h: 256 },
+                      { label: '512', w: 512, h: 512 },
+                      { label: '1024', w: 1024, h: 1024 },
+                      { label: '同比例', w: 0, h: 0 },
+                    ].map(p => (
+                      <button key={p.label}
+                        onClick={() => {
+                          if (p.w === 0) {
+                            const scale = Math.min(256 / imgOrigW, 256 / imgOrigH, 1);
+                            setSvgTraceThumbWidth(Math.round(imgOrigW * scale));
+                            setSvgTraceThumbHeight(Math.round(imgOrigH * scale));
+                          } else {
+                            setSvgTraceThumbWidth(p.w);
+                            setSvgTraceThumbHeight(p.h);
+                          }
+                        }}
+                        className={`px-2 py-0.5 rounded text-[10px] border transition-all ${
+                          isMonochrome ? 'border-gray-200 bg-white text-gray-500 hover:border-gray-300' : 'border-[#333] bg-[#111] text-[#666] hover:border-[#444]'
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleSvgTraceConfirm}
+                  disabled={isEditProcessing}
+                  className={`flex-1 py-2 rounded-lg text-xs font-semibold transition-all ${
+                    isEditProcessing
+                      ? 'bg-[#333] text-[#555] cursor-not-allowed'
+                      : svgTraceMode === 'color'
+                        ? 'bg-[#d4af37] text-black hover:bg-[#e5c047] active:scale-[0.98]'
+                        : svgTraceMode === 'bw'
+                          ? isMonochrome ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-[#555] text-white hover:bg-[#666]'
+                          : svgTraceMode === 'compress'
+                            ? 'bg-[#60a5fa] text-black hover:bg-[#93bbfd] active:scale-[0.98]'
+                            : 'bg-[#34d399] text-black hover:bg-[#6ee7b7] active:scale-[0.98]'
+                  }`}
+                >
+                  {isEditProcessing ? '处理中...' : svgTraceModes.find(m => m.key === svgTraceMode)?.label || '开始'}
+                </button>
+                <button onClick={exitEditMode} className={panelCancelBtnClass}>取消</button>
               </div>
             </div>
           );
@@ -8996,7 +9271,7 @@ export function InfiniteCanvas({
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>图片操作工具栏</div>
                       <div className="space-y-2">
-                        {[['放大', '智能补细节，变大变高清'], ['移除背景', '一键去背景，生成透明底图'], ['矢量化', '转换为SVG矢量图'], ['擦除', '画笔涂抹消除，AI自动补全'], ['蒙版', '精准遮罩控制，AI重新生成'], ['编辑元素', '按元素智能分层，独立编辑'], ['多角度', '多视角生成图片'], ['转3D', '生成3D模型预览'], ['扩展', '向四周延伸画面，自动补齐'], ['裁切', '自由/预设比例裁切'], ['图生图', '6大类别参考，基于当前图生成新图'], ['下载', 'PNG/SVG/PSD多格式下载']].map(([k, v]) => (
+                        {[['放大', '智能补细节，变大变高清'], ['移除背景', '一键去背景，生成透明底图'], ['SVG智能描摹', '彩色/黑白矢量化，图片压缩，缩略图'], ['擦除', '画笔涂抹消除，AI自动补全'], ['蒙版', '精准遮罩控制，AI重新生成'], ['编辑元素', '按元素智能分层，独立编辑'], ['多角度', '多视角生成图片'], ['转3D', '生成3D模型预览'], ['扩展', '向四周延伸画面，自动补齐'], ['裁切', '自由/预设比例裁切'], ['图生图', '6大类别参考，基于当前图生成新图'], ['下载', 'PNG/SVG/PSD多格式下载']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
                         ))}
                       </div>
@@ -9034,10 +9309,10 @@ export function InfiniteCanvas({
                     <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>{APP_VERSION_LABEL}</div>
                     <div className="space-y-2.5">
                       {[
-                        '12大图片工具：放大/移除背景/矢量化/擦除/蒙版/编辑元素/多角度/转3D/扩展/裁切/图生图/下载',
+                        '12大图片工具：放大/移除背景/SVG智能描摹/擦除/蒙版/编辑元素/多角度/转3D/扩展/裁切/图生图/下载',
                         '放大：智能补细节把图片变大变高清，不改画面内容',
                         '移除背景：一键删除背景，生成透明底主体图',
-                        '矢量化：调用管理员配置的矢量模型API，转换为SVG矢量图',
+                        'SVG智能描摹：Sharp+VTracer彩色矢量化 / ImageMagick+Potrace黑白描摹 / Sharp压缩与缩略图',
                         '擦除：画笔涂抹消除 + AI自动补全画面，Alt键反向涂抹',
                         '蒙版：精准遮罩控制 + AI重新生成指定区域',
                         '编辑元素：根据图片元素进行智能分层，独立编辑',
