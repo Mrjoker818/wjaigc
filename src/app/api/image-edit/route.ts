@@ -1722,27 +1722,40 @@ export async function POST(request: NextRequest) {
         `Do not modify, crop, or alter the original center content in any way.`
       );
 
-      // 计算目标比例和像素尺寸
-      const targetRatioStr = `${targetW}:${targetH}`;
-      const targetRatio = findClosestAspectRatio(targetRatioStr);
-      // 使用 convertAspectRatioToSize 将比例转换为实际像素尺寸
-      const targetPixelSize = convertAspectRatioToSize(targetRatio, undefined, candidateModels[0]?.model);
-      // 如果是比例格式 (如 "1:1") 而非像素格式，则转换为像素
-      const targetSize = targetPixelSize.includes('x') ? targetPixelSize : targetRatio;
+      // ============================================================
+      // 即梦风格扩图策略
+      // 核心思路：如果目标画布超出模型支持尺寸，先缩小到模型尺寸生成，
+      // 然后提取 AI 生成的边缘内容，放大回原始尺寸，与原图合成
+      // ============================================================
 
-      // 使用 base64 数据 URL 发送图片（确保外部 API 可访问）+ mask_image
-      const result = await autoTrySubmitImageTask(
-        candidateModels,
-        (modelId: string) => ({
-          model: modelId,
-          prompt: outpaintPrompt,
-          size: targetSize,
-          n: 1,
-          image_urls: [compositeBase64],
-          mask_image: maskFileBase64,
-        }),
-        'outpaint'
-      );
+      // 确定模型支持的最大尺寸
+      const firstModel = candidateModels[0]?.model || '';
+      if (firstModel.toLowerCase().includes('gpt-image')) {
+        // GPT Image 2 支持较大尺寸
+      } else {
+        // 其他模型限制 1024
+      }
+
+      // ============================================================
+      // 扩图策略：缩小到模型尺寸 → AI 生成 → 提取边缘 → 放大回原始尺寸 → 与原图合成
+      // 解决核心问题：AI 模型只能生成有限尺寸（如 1024x1024），
+      // 但目标画布可能很大（如 2560x2560），直接拉伸会导致变形/空白
+      // ============================================================
+
+      // 确定模型最大输出尺寸
+      const modelMaxPx = 1024;
+      const needsDownscale = targetW > modelMaxPx || targetH > modelMaxPx;
+
+      // 计算缩小比例（如果目标超出模型限制）
+      const scaleFactor = needsDownscale ? Math.min(modelMaxPx / targetW, modelMaxPx / targetH) : 1;
+      const scaledTargetW = Math.max(8, Math.ceil(targetW * scaleFactor / 8) * 8);
+      const scaledTargetH = Math.max(8, Math.ceil(targetH * scaleFactor / 8) * 8);
+      const scaledOffsetX = Math.round(offsetX * scaleFactor);
+      const scaledOffsetY = Math.round(offsetY * scaleFactor);
+      const scaledSrcW = Math.round(srcW * scaleFactor);
+      const scaledSrcH = Math.round(srcH * scaleFactor);
+
+      console.log(`[outpaint] ${needsDownscale ? 'DOWNSCALE' : 'DIRECT'}: target ${targetW}x${targetH}, scaled ${scaledTargetW}x${scaledTargetH}, scale=${scaleFactor.toFixed(3)}`);
 
       // 清理临时文件（延迟清理，异步任务需要文件存在）
       const cleanupFiles = async () => {
@@ -1750,65 +1763,63 @@ export async function POST(request: NextRequest) {
         try { await fs.unlink(maskPath); } catch (_) { /* ignore */ }
       };
 
-      // 辅助函数：将原图合成到结果中心，确保像素级保留
+      // 辅助函数：将 AI 生成结果与原图合成
+      // 策略：AI 在缩小尺寸上生成 → 提取扩展边缘 → 放大回原始尺寸 → 与原图合成
       const compositeOriginalOnResult = async (resultBuffer: Buffer): Promise<Buffer> => {
         const resultMeta = await sharp(resultBuffer).metadata();
-        const resultW = resultMeta.width || targetW;
-        const resultH = resultMeta.height || targetH;
+        const resultW = resultMeta.width || scaledTargetW;
+        const resultH = resultMeta.height || scaledTargetH;
 
-        // 将结果 resize 到目标尺寸（API 可能返回不同尺寸）
-        let resizedResult = resultBuffer;
-        if (resultW !== targetW || resultH !== targetH) {
-          resizedResult = await sharp(resultBuffer)
-            .resize(targetW, targetH, { fit: 'fill' })
+        // Step 1: 将 AI 结果 resize 到缩放后的目标尺寸（如果 API 返回尺寸不一致）
+        let aiResult = resultBuffer;
+        if (resultW !== scaledTargetW || resultH !== scaledTargetH) {
+          aiResult = await sharp(resultBuffer)
+            .resize(scaledTargetW, scaledTargetH, { fit: 'fill' })
             .png()
             .toBuffer();
         }
 
-        // 创建渐变蒙版：原图区域=黑(使用生成结果)，边缘过渡=灰(混合)
-        // 但为了确保原图内容完全保留，我们直接将原图叠在结果上
-        // 先创建一个带羽化边缘的蒙版
-        const featherSize = 10; // 羽化像素数
-        const blendMask = await sharp({
-          create: {
-            width: srcW,
-            height: srcH,
-            channels: 3,
-            background: { r: 255, g: 255, b: 255 }, // 白色=保留原图
-          },
-        })
-          .blur(featherSize) // 边缘羽化
+        // Step 2: 在缩放尺寸上将原图叠在 AI 结果上（像素级保留原图区域）
+        const scaledOriginal = await sharp(imageBuffer)
+          .resize(scaledSrcW, scaledSrcH, { fit: 'fill' })
           .png()
           .toBuffer();
 
-        // 将原图 resize 到 srcW x srcH
-        const originalForComposite = await sharp(imageBuffer)
-          .resize(srcW, srcH, { fit: 'fill' })
-          .png()
-          .toBuffer();
-
-        // 在原图上应用 alpha 通道（蒙版控制透明度）
-        const originalWithAlpha = await sharp(originalForComposite)
+        const scaledComposite = await sharp(aiResult)
           .composite([{
-            input: blendMask,
-            blend: 'dest-in', // 使用蒙版作为 alpha
-          }])
-          .png()
-          .toBuffer();
-
-        // 将带 alpha 的原图合成到结果中心
-        const finalComposite = await sharp(resizedResult)
-          .composite([{
-            input: originalWithAlpha,
-            left: offsetX,
-            top: offsetY,
+            input: scaledOriginal,
+            left: scaledOffsetX,
+            top: scaledOffsetY,
             blend: 'over',
           }])
           .png()
           .toBuffer();
 
+        // Step 3: 将合成结果放大到原始目标尺寸
+        const finalComposite = await sharp(scaledComposite)
+          .resize(targetW, targetH, { fit: 'fill' })
+          .png()
+          .toBuffer();
+
         return finalComposite;
       };
+
+      // Build request body for AI generation using scaled target size
+      const genSize = `${scaledTargetW}x${scaledTargetH}`;
+      const genBody: Record<string, unknown> = {
+        model: modelStr,
+        prompt,
+        n: 1,
+        size: genSize,
+      };
+      const outpaintNegPrompt = '(worst quality, low quality, normal quality:2), blurry, pixelated, jpeg artifacts, noise, grain, changed content, new elements, different colors, altered composition, deformed';
+      if (outpaintNegPrompt) genBody.negative_prompt = outpaintNegPrompt;
+
+      // Submit to AI model API
+      const cm = candidateModels[0];
+      const result = await submitImageTask(
+        cm.apiBaseUrl, cm.apiKey, genBody, '/images/generations', cm
+      );
 
       if (result.directUrl) {
         // 同步结果 - 合成原图到中心
@@ -1845,7 +1856,7 @@ export async function POST(request: NextRequest) {
         action,
         targetWidth: targetW,
         targetHeight: targetH,
-        outpaintInfo: { offsetX, offsetY, srcW, srcH, targetW, targetH, origW, origH, featherSize: 10 },
+        outpaintInfo: { offsetX, offsetY, srcW, srcH, targetW, targetH, origW, origH, scaleFactor, scaledTargetW, scaledTargetH, scaledOffsetX, scaledOffsetY, scaledSrcW, scaledSrcH },
       });
     }
 

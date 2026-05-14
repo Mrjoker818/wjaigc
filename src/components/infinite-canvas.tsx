@@ -4402,6 +4402,28 @@ export function InfiniteCanvas({
     setExpandPadding(newPadding);
   }, []);
 
+  // 快捷扩展：扩展到指定比例（居中放置原图）
+  const handleExpandToRatio = useCallback((ratioW: number, ratioH: number) => {
+    const img = images.find(i => i.id === editImageId);
+    if (!img) return;
+    const ow = img.originalWidth || Math.round(img.width);
+    const oh = img.originalHeight || Math.round(img.height);
+    // 计算目标尺寸：保持短边不变，按比例扩展长边
+    const targetW = Math.round(oh * ratioW / ratioH);
+    const targetH = Math.round(ow * ratioH / ratioW);
+    // 选择能完全包含原图的最小尺寸
+    const finalW = Math.max(targetW, ow);
+    const finalH = Math.max(targetH, oh);
+    // 8px对齐
+    const padL = Math.round((finalW - ow) / 2 / 8) * 8;
+    const padR = finalW - ow - padL;
+    const padT = Math.round((finalH - oh) / 2 / 8) * 8;
+    const padB = finalH - oh - padT;
+    const newPadding = { top: padT, right: padR, bottom: padB, left: padL };
+    expandPaddingRef.current = newPadding;
+    setExpandPadding(newPadding);
+  }, [images, editImageId]);
+
   // 7. CROP - floating toolbar with custom ratios, drag crop points
   const handleOpenCrop = useCallback(() => {
     const img = selectedImageData;
@@ -7456,6 +7478,30 @@ export function InfiniteCanvas({
                   <Expand size={14} className="text-[#d4af37]" />
                   <span className={panelLabelClass}>扩图</span>
                   <div className={panelDividerClass} />
+                  {/* 比例快捷按钮 */}
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {[
+                      { label: '1:1', w: 1, h: 1 },
+                      { label: '4:3', w: 4, h: 3 },
+                      { label: '3:4', w: 3, h: 4 },
+                      { label: '16:9', w: 16, h: 9 },
+                      { label: '9:16', w: 9, h: 16 },
+                      { label: '3:2', w: 3, h: 2 },
+                      { label: '2:3', w: 2, h: 3 },
+                      { label: '21:9', w: 21, h: 9 },
+                    ].map(r => (
+                      <button
+                        key={r.label}
+                        onClick={() => handleExpandToRatio(r.w, r.h)}
+                        className={`px-2 py-1 text-xs rounded-md transition-all ${
+                          isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                        }`}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className={panelDividerClass} />
                   {/* 快捷扩展按钮 */}
                   <div className="flex items-center gap-1">
                     <button
@@ -7464,7 +7510,7 @@ export function InfiniteCanvas({
                         isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-[#252525] text-[#999] hover:bg-[#333]'
                       }`}
                     >
-                      等比+256
+                      +256
                     </button>
                     <button
                       onClick={() => handleExpandEqualPadding(512)}
@@ -7472,7 +7518,7 @@ export function InfiniteCanvas({
                         isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-[#252525] text-[#999] hover:bg-[#333]'
                       }`}
                     >
-                      等比+512
+                      +512
                     </button>
                   </div>
                   <div className={panelDividerClass} />
