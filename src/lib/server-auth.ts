@@ -101,7 +101,9 @@ async function writeStore(file: StoredUsersFile): Promise<void> {
   // Write to file (backward compatible)
   await mkdir(SYSTEM_DIR, { recursive: true });
   await writeFile(USERS_PATH, JSON.stringify(data, null, 2), 'utf8');
-  // Write to database (persistent)
+  // Write to database (persistent) - uses UPSERT to prevent data loss
+  // Only users in the current list will be upserted; DB users not in
+  // this list are preserved (never auto-deleted).
   await dbWriteUsers(data.users.map(u => ({
     id: u.id,
     name: u.name,

@@ -283,12 +283,22 @@ export async function dbWriteUsers(users: Array<{
   updatedAt: number;
 }>): Promise<boolean> {
   try {
-    // Delete all existing users first, then re-insert
-    await execSql('DELETE FROM wujie_users');
+    // Use UPSERT instead of DELETE ALL + INSERT to prevent data loss.
+    // When readStore() reads a partial user list (e.g., from stale file),
+    // DELETE ALL would erase users that exist in DB but not in the list.
     for (const u of users) {
       await execSql(`
         INSERT INTO wujie_users (id, name, password_hash, role, status, api_permissions, storage_folder, email, created_at, updated_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          password_hash = EXCLUDED.password_hash,
+          role = EXCLUDED.role,
+          status = EXCLUDED.status,
+          api_permissions = EXCLUDED.api_permissions,
+          storage_folder = EXCLUDED.storage_folder,
+          email = EXCLUDED.email,
+          updated_at = EXCLUDED.updated_at
       `, [
         u.id, u.name, u.passwordHash, u.role, u.status,
         JSON.stringify(u.apiPermissions), u.storageFolder,
@@ -320,20 +330,29 @@ export async function migrateFileDataToDb(): Promise<void> {
     const users = usersData.users || usersData;
 
     if (Array.isArray(users)) {
+      // Only migrate users that don't already exist in DB
+      // (prevent stale file data from overwriting newer DB records)
+      const existingDbUsers = await dbGetUsers();
+      const existingIds = new Set(existingDbUsers.map(u => u.id));
+      
+      let migrated = 0;
       for (const user of users) {
-        await dbUpsertUser({
-          id: user.id,
-          name: user.name,
-          password_hash: user.passwordHash || user.password_hash || '',
-          role: user.role || 'user',
-          status: user.status || 'active',
-          api_permissions: user.apiPermissions || user.api_permissions || { image: true, chat: true, threeD: true, imageEdit: true, vectorize: true, layer: true },
-          storage_folder: user.storageFolder || user.storage_folder || `data/users/${user.id}`,
-          created_at: user.createdAt || user.created_at || Date.now(),
-          updated_at: user.updatedAt || user.updated_at || Date.now(),
-        });
+        if (!existingIds.has(user.id)) {
+          await dbUpsertUser({
+            id: user.id,
+            name: user.name,
+            password_hash: user.passwordHash || user.password_hash || '',
+            role: user.role || 'user',
+            status: user.status || 'active',
+            api_permissions: user.apiPermissions || user.api_permissions || { image: true, chat: true, threeD: true, imageEdit: true, vectorize: true, layer: true },
+            storage_folder: user.storageFolder || user.storage_folder || `data/users/${user.id}`,
+            created_at: user.createdAt || user.created_at || Date.now(),
+            updated_at: user.updatedAt || user.updated_at || Date.now(),
+          });
+          migrated++;
+        }
       }
-      console.log(`[db-storage] Migrated ${users.length} users`);
+      console.log(`[db-storage] Migrated ${migrated} new users (${existingDbUsers.length} already in DB)`);
     }
   } catch {
     // File may not exist, that's OK
