@@ -2399,22 +2399,14 @@ export function InfiniteCanvas({
     const toolbar = group.toolbar;
     if (!toolbar.prompt.trim()) return;
 
-    // 计算结果框尺寸（根据用户选择的比例和模型尺寸）
+    // 计算结果框尺寸（根据用户选择的比例和源图片大小）
     const [arW, arH] = toolbar.aspectRatio.split(':').map(Number);
     const arRatio = (arW || 1) / (arH || 1);
-    // 根据工具栏中的尺寸设置计算结果框的显示尺寸
-    let displayBaseSize = 400;
-    if (toolbar.size) {
-      const [sw, sh] = toolbar.size.replace(/×/g, 'x').split('x').map(Number);
-      const maxEdge = Math.max(sw || 1024, sh || 1024);
-      // 根据实际像素尺寸缩放显示大小
-      if (maxEdge <= 512) displayBaseSize = 200;
-      else if (maxEdge <= 1024) displayBaseSize = 300;
-      else if (maxEdge <= 1536) displayBaseSize = 350;
-      else if (maxEdge <= 1792) displayBaseSize = 400;
-      else if (maxEdge <= 2048) displayBaseSize = 420;
-      else displayBaseSize = 500;
-    }
+    // 显示尺寸基于源图片大小，不随像素尺寸剧烈变化
+    const srcMaxDim = group.sourceImages.length > 0
+      ? Math.max(...group.sourceImages.map(img => Math.max(img.width, img.height)))
+      : 0;
+    const displayBaseSize = Math.max(srcMaxDim, 300);
     const phWidth = arRatio >= 1 ? displayBaseSize : Math.round(displayBaseSize * arRatio);
     const phHeight = arRatio >= 1 ? Math.round(displayBaseSize / arRatio) : displayBaseSize;
 
@@ -5828,23 +5820,15 @@ export function InfiniteCanvas({
             const arParts = group.toolbar.aspectRatio.split(':').map(Number);
             const arW = arParts[0] || 1;
             const arH = arParts[1] || 1;
-            // Use actual pixel size from toolbar to determine display scale
+            // Use actual pixel size from toolbar for display label only
             const sizeStr = group.toolbar.size || calculateActualPixels(group.toolbar.aspectRatio, group.toolbar.quality, group.toolbar.model);
             const sizeParts = sizeStr.replace(/×/g, 'x').split('x').map(Number);
             const pixelW = sizeParts[0] || 1024;
             const pixelH = sizeParts[1] || 1024;
-            const maxPixel = Math.max(pixelW, pixelH);
-            // Scale: 512px→200, 1024px→300, 1536px→350, 1792px→400, 2048px→420, 3840px→500
-            let displayBase: number;
-            if (maxPixel <= 512) displayBase = 200;
-            else if (maxPixel <= 1024) displayBase = 300;
-            else if (maxPixel <= 1536) displayBase = 350;
-            else if (maxPixel <= 1792) displayBase = 400;
-            else if (maxPixel <= 2048) displayBase = 420;
-            else displayBase = 500;
-            // Also consider source image sizes to ensure placeholder isn't too small
+            // Display size based on source images and aspect ratio, not actual pixel dimensions
+            // This keeps the placeholder frame size consistent regardless of quality selection
             const srcMaxDim = srcImages.length > 0 ? Math.max(...srcImages.map(img => Math.max(img.width, img.height))) : 0;
-            const baseSize = Math.max(displayBase, srcMaxDim, 300);
+            const baseSize = Math.max(srcMaxDim, 300);
             const resultW = arW >= arH ? baseSize : Math.round(baseSize * (arW / arH));
             const resultH = arH >= arW ? baseSize : Math.round(baseSize * (arH / arW));
             const srcBounds = srcImages.map(img => ({ x: img.x + dragDx, y: img.y + dragDy, w: img.width, h: img.height }));
