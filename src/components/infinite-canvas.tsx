@@ -534,6 +534,11 @@ export function InfiniteCanvas({
   const [expandRatio, setExpandRatio] = useState('原始比例');
   const [expandScale, setExpandScale] = useState(1);
   const [showExpandScaleMenu, setShowExpandScaleMenu] = useState(false);
+  // 即梦风格方向性扩展：上下左右独立 padding（像素值，基于原始图片尺寸）
+  const [expandPadding, setExpandPadding] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
+  // 拖拽控制点状态
+  const [draggingHandle, setDraggingHandle] = useState<string | null>(null);
+  const expandPaddingRef = useRef({ top: 0, right: 0, bottom: 0, left: 0 });
   const [cropRatio, setCropRatio] = useState('free');
   const [showExpandRatios, setShowExpandRatios] = useState(false);
   const [showCropRatios, setShowCropRatios] = useState(false);
@@ -4312,7 +4317,7 @@ export function InfiniteCanvas({
     setMaskKeyword('');
   }, [selectedImageData]);
 
-  // 6. EXPAND - floating toolbar with ratio presets
+  // 6. EXPAND - 即梦风格方向性扩展
   const handleOpenExpand = useCallback(() => {
     const img = selectedImageData;
     if (!img) return;
@@ -4320,7 +4325,82 @@ export function InfiniteCanvas({
     setEditImageId(img.id);
     setExpandRatio('1:1');
     setExpandScale(1);
+    // 重置方向性扩展 padding
+    setExpandPadding({ top: 0, right: 0, bottom: 0, left: 0 });
+    expandPaddingRef.current = { top: 0, right: 0, bottom: 0, left: 0 };
   }, [selectedImageData]);
+
+  // 即梦风格扩展：拖拽控制点事件处理
+  const handleExpandDragStart = useCallback((handle: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDraggingHandle(handle);
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startPadding = { ...expandPaddingRef.current };
+
+    const handleMouseMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      // 屏幕像素 → 原始像素
+      const origImg = images.find(i => i.id === editImageId);
+      if (!origImg) return;
+      const origW = origImg.originalWidth || Math.round(origImg.width);
+      const origH = origImg.originalHeight || Math.round(origImg.height);
+      const displayW = origImg.width;
+      const displayH = origImg.height;
+      const scaleX = origW / (displayW * zoom);
+      const scaleY = origH / (displayH * zoom);
+
+      let newPadding = { ...startPadding };
+      const step = 8; // 对齐到8的倍数
+
+      // 根据拖拽方向更新 padding
+      if (handle === 'top' || handle === 'top-left' || handle === 'top-right') {
+        const delta = Math.round((-dy * scaleY) / step) * step;
+        newPadding.top = Math.max(0, startPadding.top + delta);
+      }
+      if (handle === 'bottom' || handle === 'bottom-left' || handle === 'bottom-right') {
+        const delta = Math.round((dy * scaleY) / step) * step;
+        newPadding.bottom = Math.max(0, startPadding.bottom + delta);
+      }
+      if (handle === 'left' || handle === 'top-left' || handle === 'bottom-left') {
+        const delta = Math.round((-dx * scaleX) / step) * step;
+        newPadding.left = Math.max(0, startPadding.left + delta);
+      }
+      if (handle === 'right' || handle === 'top-right' || handle === 'bottom-right') {
+        const delta = Math.round((dx * scaleX) / step) * step;
+        newPadding.right = Math.max(0, startPadding.right + delta);
+      }
+
+      expandPaddingRef.current = newPadding;
+      setExpandPadding(newPadding);
+    };
+
+    const handleMouseUp = () => {
+      setDraggingHandle(null);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  }, [images, editImageId, zoom]);
+
+  // 快捷扩展：等比扩展四边
+  const handleExpandEqualPadding = useCallback((pixels: number) => {
+    const newPadding = { top: pixels, right: pixels, bottom: pixels, left: pixels };
+    expandPaddingRef.current = newPadding;
+    setExpandPadding(newPadding);
+  }, []);
+
+  // 快捷扩展：单方向扩展
+  const handleExpandDirection = useCallback((direction: 'top' | 'right' | 'bottom' | 'left', pixels: number) => {
+    const newPadding = { ...expandPaddingRef.current };
+    newPadding[direction] = pixels;
+    expandPaddingRef.current = newPadding;
+    setExpandPadding(newPadding);
+  }, []);
 
   // 7. CROP - floating toolbar with custom ratios, drag crop points
   const handleOpenCrop = useCallback(() => {
@@ -4794,40 +4874,26 @@ export function InfiniteCanvas({
     }
 
     if (editMode === 'expand') {
-      // Calculate target dimensions before creating processing frame
+      // 方向性扩展：使用 expandPadding (top/right/bottom/left)
+      const pad = expandPadding;
+      const hasPadding = pad.top > 0 || pad.right > 0 || pad.bottom > 0 || pad.left > 0;
+      if (!hasPadding) {
+        alert('请拖动控制点设置扩展区域');
+        return;
+      }
+
       const origW = editImg.originalWidth || Math.round(editImg.width);
       const origH = editImg.originalHeight || Math.round(editImg.height);
-      let targetW = origW;
-      let targetH = origH;
-
-      if (expandRatio === '原始比例') {
-        targetW = Math.round(origW * expandScale);
-        targetH = Math.round(origH * expandScale);
-      } else {
-        const [rw, rh] = expandRatio.split(':').map(Number);
-        const targetRatio = rw / rh;
-        const origRatio = origW / origH;
-        // Target canvas must contain original image, expand in the short direction
-        if (origRatio >= targetRatio) {
-          // Original is wider than target ratio → expand height
-          targetW = origW;
-          targetH = Math.round(origW / targetRatio);
-        } else {
-          // Original is taller than target ratio → expand width
-          targetH = origH;
-          targetW = Math.round(origH * targetRatio);
-        }
-        // Apply scale multiplier
-        targetW = Math.max(origW, Math.round(targetW * expandScale));
-        targetH = Math.max(origH, Math.round(targetH * expandScale));
-      }
+      const targetW = origW + pad.left + pad.right;
+      const targetH = origH + pad.top + pad.bottom;
 
       // 保存当前编辑图片引用（exitEditMode后state会清空）
       const currentEditImg = { ...editImg };
 
       // Processing frame size matches the target expanded size (in display coords)
-      const displayTargetW = currentEditImg.width * (targetW / origW);
-      const displayTargetH = currentEditImg.height * (targetH / origH);
+      const scale = currentEditImg.width / origW;
+      const displayTargetW = targetW * scale;
+      const displayTargetH = targetH * scale;
       const placeholderId = createProcessingFrameRightOf(
         currentEditImg,
         '扩展中',
@@ -4835,19 +4901,18 @@ export function InfiniteCanvas({
         displayTargetH,
         '正在创建扩图任务...'
       );
-      // 立即退出编辑模式，让进度在右侧处理框中显示（而非覆盖当前图片）
+      // 立即退出编辑模式，让进度在右侧处理框中显示
       exitEditMode();
       try {
         const modelInfo = getCurrentModel();
-        updateProcessingFrame(placeholderId, { progress: 16, status: '正在提交扩展比例...' });
+        updateProcessingFrame(placeholderId, { progress: 16, status: '正在提交扩展请求...' });
         const res = await fetch('/api/image-edit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'outpaint',
             imageUrl: currentEditImg.url,
-            expandRatio,
-            expandScale,
+            expandPadding: { top: pad.top, right: pad.right, bottom: pad.bottom, left: pad.left },
             aspectRatio: `${origW}:${origH}`,
             prompt: editPrompt || undefined,
             model: modelInfo.model,
@@ -7086,6 +7151,288 @@ export function InfiniteCanvas({
           );
         })()}
 
+        {/* ====== EXPAND PREVIEW OVERLAY + DRAG HANDLES ====== */}
+        {editMode === 'expand' && (() => {
+          const editImg = images.find(i => i.id === editImageId);
+          if (!editImg) return null;
+          const imgSX = editImg.x * zoom + viewOffset.x;
+          const imgSY = editImg.y * zoom + viewOffset.y;
+          const imgSW = editImg.width * zoom;
+          const imgSH = editImg.height * zoom;
+
+          // Scale factor: display pixels → original pixels
+          const scaleX = (editImg.originalWidth || Math.round(editImg.width)) / editImg.width;
+          const scaleY = (editImg.originalHeight || Math.round(editImg.height)) / editImg.height;
+
+          // Padding in screen pixels
+          const padTop = expandPadding.top * zoom / scaleY;
+          const padRight = expandPadding.right * zoom / scaleX;
+          const padBottom = expandPadding.bottom * zoom / scaleY;
+          const padLeft = expandPadding.left * zoom / scaleX;
+
+          // Total expanded area bounds (screen coords)
+          const expX = imgSX - padLeft;
+          const expY = imgSY - padTop;
+          const expW = imgSW + padLeft + padRight;
+          const expH = imgSH + padTop + padBottom;
+
+          // Handle size
+          const hs = 10;
+          const hColor = '#d4af37';
+
+          // Handle definitions: position, cursor, direction flags
+          const handles = [
+            { id: 'top',          cx: expX + expW / 2, cy: expY,            cursor: 'ns-resize',  dir: 'top' },
+            { id: 'bottom',       cx: expX + expW / 2, cy: expY + expH,     cursor: 'ns-resize',  dir: 'bottom' },
+            { id: 'left',         cx: expX,            cy: expY + expH / 2, cursor: 'ew-resize',  dir: 'left' },
+            { id: 'right',        cx: expX + expW,     cy: expY + expH / 2, cursor: 'ew-resize',  dir: 'right' },
+            { id: 'top-left',     cx: expX,            cy: expY,            cursor: 'nwse-resize', dir: 'top-left' },
+            { id: 'top-right',    cx: expX + expW,     cy: expY,            cursor: 'nesw-resize', dir: 'top-right' },
+            { id: 'bottom-left',  cx: expX,            cy: expY + expH,     cursor: 'nesw-resize', dir: 'bottom-left' },
+            { id: 'bottom-right', cx: expX + expW,     cy: expY + expH,     cursor: 'nwse-resize', dir: 'bottom-right' },
+          ];
+
+          // Padding dimension label positions (midpoint of each padding edge)
+          const dimLabels = [
+            { key: 'top',   x: imgSX + imgSW / 2, y: imgSY - padTop / 2,  val: expandPadding.top,    show: expandPadding.top > 0 },
+            { key: 'bottom',x: imgSX + imgSW / 2, y: imgSY + imgSH + padBottom / 2, val: expandPadding.bottom, show: expandPadding.bottom > 0 },
+            { key: 'left',  x: imgSX - padLeft / 2, y: imgSY + imgSH / 2,  val: expandPadding.left,   show: expandPadding.left > 0 },
+            { key: 'right', x: imgSX + imgSW + padRight / 2, y: imgSY + imgSH / 2, val: expandPadding.right,  show: expandPadding.right > 0 },
+          ];
+
+          return (
+            <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 45 }}>
+              {/* Semi-transparent padding areas */}
+              {/* Top padding */}
+              {expandPadding.top > 0 && (
+                <div
+                  className="absolute pointer-events-none"
+                  style={{
+                    left: expX, top: expY,
+                    width: expW, height: padTop,
+                    background: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(212,175,55,0.12) 4px, rgba(212,175,55,0.12) 8px)',
+                    border: '1px dashed rgba(212,175,55,0.5)',
+                    borderBottom: 'none',
+                  }}
+                />
+              )}
+              {/* Bottom padding */}
+              {expandPadding.bottom > 0 && (
+                <div
+                  className="absolute pointer-events-none"
+                  style={{
+                    left: expX, top: imgSY + imgSH,
+                    width: expW, height: padBottom,
+                    background: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(212,175,55,0.12) 4px, rgba(212,175,55,0.12) 8px)',
+                    border: '1px dashed rgba(212,175,55,0.5)',
+                    borderTop: 'none',
+                  }}
+                />
+              )}
+              {/* Left padding */}
+              {expandPadding.left > 0 && (
+                <div
+                  className="absolute pointer-events-none"
+                  style={{
+                    left: expX, top: expY,
+                    width: padLeft, height: expH,
+                    background: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(212,175,55,0.12) 4px, rgba(212,175,55,0.12) 8px)',
+                    border: '1px dashed rgba(212,175,55,0.5)',
+                    borderRight: 'none',
+                  }}
+                />
+              )}
+              {/* Right padding */}
+              {expandPadding.right > 0 && (
+                <div
+                  className="absolute pointer-events-none"
+                  style={{
+                    left: imgSX + imgSW, top: expY,
+                    width: padRight, height: expH,
+                    background: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(212,175,55,0.12) 4px, rgba(212,175,55,0.12) 8px)',
+                    border: '1px dashed rgba(212,175,55,0.5)',
+                    borderLeft: 'none',
+                  }}
+                />
+              )}
+
+              {/* Outer border of expanded area */}
+              <div
+                className="absolute pointer-events-none"
+                style={{
+                  left: expX, top: expY,
+                  width: expW, height: expH,
+                  border: `2px solid ${hColor}`,
+                }}
+              />
+
+              {/* Original image border highlight */}
+              <div
+                className="absolute pointer-events-none"
+                style={{
+                  left: imgSX, top: imgSY,
+                  width: imgSW, height: imgSH,
+                  border: '1.5px solid rgba(212,175,55,0.7)',
+                }}
+              />
+
+              {/* Padding dimension labels */}
+              {dimLabels.filter(d => d.show).map(d => (
+                <div
+                  key={d.key}
+                  className="absolute pointer-events-none flex items-center justify-center"
+                  style={{
+                    left: d.x, top: d.y,
+                    transform: 'translate(-50%, -50%)',
+                  }}
+                >
+                  <span
+                    className="text-[10px] font-mono px-1.5 py-0.5 rounded"
+                    style={{ background: 'rgba(0,0,0,0.8)', color: hColor, whiteSpace: 'nowrap' }}
+                  >
+                    +{d.val}px
+                  </span>
+                </div>
+              ))}
+
+              {/* Drag handles */}
+              {handles.map(h => (
+                <div
+                  key={h.id}
+                  className="absolute pointer-events-auto"
+                  style={{
+                    left: h.cx - hs / 2,
+                    top: h.cy - hs / 2,
+                    width: hs,
+                    height: hs,
+                    cursor: h.cursor,
+                    zIndex: 46,
+                  }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    const startX = e.clientX;
+                    const startY = e.clientY;
+                    const startPad = { ...expandPaddingRef.current };
+
+                    const onMove = (ev: MouseEvent) => {
+                      ev.preventDefault();
+                      const dx = ev.clientX - startX;
+                      const dy = ev.clientY - startY;
+                      // Convert screen pixels to original pixels
+                      const origDx = Math.round(dx / zoom * scaleX);
+                      const origDy = Math.round(dy / zoom * scaleY);
+                      // Step to nearest 8px for cleaner values
+                      const stepDx = Math.round(origDx / 8) * 8;
+                      const stepDy = Math.round(origDy / 8) * 8;
+
+                      const newPad = { ...startPad };
+                      if (h.dir.includes('top'))    newPad.top    = Math.max(0, startPad.top    - stepDy);
+                      if (h.dir.includes('bottom')) newPad.bottom = Math.max(0, startPad.bottom + stepDy);
+                      if (h.dir.includes('left'))   newPad.left   = Math.max(0, startPad.left   - stepDx);
+                      if (h.dir.includes('right'))  newPad.right  = Math.max(0, startPad.right  + stepDx);
+
+                      // Clamp max total dimension to 4096
+                      const ow = (editImg?.originalWidth || Math.round(editImg?.width || 512));
+                      const oh = (editImg?.originalHeight || Math.round(editImg?.height || 512));
+                      const maxDim = 4096;
+                      newPad.right  = Math.min(newPad.right,  maxDim - ow - newPad.left);
+                      newPad.bottom = Math.min(newPad.bottom, maxDim - oh - newPad.top);
+                      newPad.left   = Math.min(newPad.left,   maxDim - ow - newPad.right);
+                      newPad.top    = Math.min(newPad.top,    maxDim - oh - newPad.bottom);
+
+                      expandPaddingRef.current = newPad;
+                      setExpandPadding(newPad);
+                    };
+                    const onUp = () => {
+                      document.removeEventListener('mousemove', onMove);
+                      document.removeEventListener('mouseup', onUp);
+                    };
+                    document.addEventListener('mousemove', onMove);
+                    document.addEventListener('mouseup', onUp);
+                  }}
+                >
+                  {/* Inner handle visual */}
+                  <div
+                    className="w-full h-full rounded-sm"
+                    style={{
+                      background: h.dir.includes('-')
+                        ? `linear-gradient(135deg, ${hColor} 30%, rgba(212,175,55,0.6) 30%, rgba(212,175,55,0.6) 70%, ${hColor} 70%)`
+                        : hColor,
+                      boxShadow: '0 0 6px rgba(212,175,55,0.5)',
+                      border: '1px solid rgba(255,255,255,0.3)',
+                    }}
+                  />
+                </div>
+              ))}
+
+              {/* Edge drag zones (thin strips for easier edge dragging) */}
+              {[
+                { id: 'edge-top',    x: expX + hs, y: expY - 4,             w: expW - hs * 2, h: 8, cursor: 'ns-resize',  dir: 'top' },
+                { id: 'edge-bottom', x: expX + hs, y: expY + expH - 4,      w: expW - hs * 2, h: 8, cursor: 'ns-resize',  dir: 'bottom' },
+                { id: 'edge-left',   x: expX - 4,  y: expY + hs,            w: 8, h: expH - hs * 2, cursor: 'ew-resize', dir: 'left' },
+                { id: 'edge-right',  x: expX + expW - 4, y: expY + hs,      w: 8, h: expH - hs * 2, cursor: 'ew-resize', dir: 'right' },
+              ].map(edge => (
+                <div
+                  key={edge.id}
+                  className="absolute pointer-events-auto"
+                  style={{
+                    left: edge.x, top: edge.y,
+                    width: edge.w, height: edge.h,
+                    cursor: edge.cursor,
+                    zIndex: 45,
+                  }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    const startX = e.clientX;
+                    const startY = e.clientY;
+                    const startPad = { ...expandPaddingRef.current };
+
+                    const onMove = (ev: MouseEvent) => {
+                      ev.preventDefault();
+                      const dx = ev.clientX - startX;
+                      const dy = ev.clientY - startY;
+                      const origDx = Math.round(dx / zoom * scaleX);
+                      const origDy = Math.round(dy / zoom * scaleY);
+                      const stepDx = Math.round(origDx / 8) * 8;
+                      const stepDy = Math.round(origDy / 8) * 8;
+
+                      const newPad = { ...startPad };
+                      if (edge.dir === 'top')    newPad.top    = Math.max(0, startPad.top    - stepDy);
+                      if (edge.dir === 'bottom') newPad.bottom = Math.max(0, startPad.bottom + stepDy);
+                      if (edge.dir === 'left')   newPad.left   = Math.max(0, startPad.left   - stepDx);
+                      if (edge.dir === 'right')  newPad.right  = Math.max(0, startPad.right  + stepDx);
+
+                      const ow = (editImg?.originalWidth || Math.round(editImg?.width || 512));
+                      const oh = (editImg?.originalHeight || Math.round(editImg?.height || 512));
+                      const maxDim = 4096;
+                      if (edge.dir === 'top' || edge.dir === 'bottom') {
+                        const maxPad = maxDim - oh;
+                        if (edge.dir === 'top')    newPad.top    = Math.min(newPad.top, maxPad);
+                        if (edge.dir === 'bottom') newPad.bottom = Math.min(newPad.bottom, maxPad);
+                      } else {
+                        const maxPad = maxDim - ow;
+                        if (edge.dir === 'left')  newPad.left  = Math.min(newPad.left, maxPad);
+                        if (edge.dir === 'right') newPad.right = Math.min(newPad.right, maxPad);
+                      }
+
+                      expandPaddingRef.current = newPad;
+                      setExpandPadding(newPad);
+                    };
+                    const onUp = () => {
+                      document.removeEventListener('mousemove', onMove);
+                      document.removeEventListener('mouseup', onUp);
+                    };
+                    document.addEventListener('mousemove', onMove);
+                    document.addEventListener('mouseup', onUp);
+                  }}
+                />
+              ))}
+            </div>
+          );
+        })()}
+
         {/* ====== EXPAND/CROP FLOATING TOOLBARS ====== */}
         {(editMode === 'expand' || editMode === 'crop') && (() => {
           const editImg = images.find(i => i.id === editImageId);
@@ -7105,83 +7452,55 @@ export function InfiniteCanvas({
               onWheel={(e) => e.stopPropagation()}
             >
               {editMode === 'expand' && (
-                <div className={panelBaseClass} style={{ minWidth: 520 }} onMouseDown={(e) => e.stopPropagation()}>
+                <div className={panelBaseClass} style={{ minWidth: 360 }} onMouseDown={(e) => e.stopPropagation()}>
                   <Expand size={14} className="text-[#d4af37]" />
                   <span className={panelLabelClass}>扩图</span>
                   <div className={panelDividerClass} />
-                  {/* 缩放比例 */}
-                  <div className="relative">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setShowExpandScaleMenu(!showExpandScaleMenu); }}
-                      className={`px-2 py-1 text-xs rounded-md transition-all flex items-center gap-1 ${
-                        isMonochrome
-                          ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                          : 'bg-[#252525] text-[#999] hover:bg-[#333]'
-                      }`}
-                    >
-                      {expandScale}x
-                      <ChevronDown size={10} />
-                    </button>
-                    {showExpandScaleMenu && (
-                      <div className={`absolute top-full left-0 mt-1 py-1 rounded-lg border shadow-xl z-50 min-w-[80px] ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#333]'}`}>
-                        {[1, 1.5, 2, 3, 4].map(s => (
-                          <button key={s} onClick={(e) => { e.stopPropagation(); setExpandScale(s as number); setShowExpandScaleMenu(false); }} className={`w-full px-3 py-1.5 text-xs text-left flex items-center justify-between hover:bg-[#d4af37]/10 ${expandScale === s ? 'text-[#d4af37]' : isMonochrome ? 'text-gray-600' : 'text-[#ccc]'}`}>
-                            <span>{s}x</span>
-                            {expandScale === s && <span className="text-[#d4af37]">✓</span>}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className={panelDividerClass} />
+                  {/* 快捷扩展按钮 */}
                   <div className="flex items-center gap-1">
                     <button
-                      onClick={() => setExpandRatio('原始比例')}
+                      onClick={() => handleExpandEqualPadding(256)}
                       className={`px-2 py-1 text-xs rounded-md transition-all ${
-                        expandRatio === '原始比例'
-                          ? 'bg-[#d4af37] text-black font-medium'
-                          : isMonochrome
-                            ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                            : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                        isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-[#252525] text-[#999] hover:bg-[#333]'
                       }`}
                     >
-                      原始比例
+                      等比+256
                     </button>
-                    {ratioOptions.slice(0, 4).map(r => (
-                      <button
-                        key={r}
-                        onClick={() => setExpandRatio(r)}
-                        className={`px-2 py-1 text-xs rounded-md transition-all ${
-                          expandRatio === r
-                            ? 'bg-[#d4af37] text-black font-medium'
-                            : isMonochrome
-                              ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                              : 'bg-[#252525] text-[#999] hover:bg-[#333]'
-                        }`}
-                      >
-                        {r}
-                      </button>
-                    ))}
-                    <div className="relative">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setShowExpandRatios(!showExpandRatios); }}
-                        className={`px-2 py-1 text-xs rounded-md transition-all ${isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-[#252525] text-[#999] hover:bg-[#333]'}`}
-                      >
-                        <ChevronDown size={10} />
-                      </button>
-                      {showExpandRatios && (
-                        <div className={`absolute top-full left-0 mt-1 py-1 rounded-lg border shadow-xl z-50 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#333]'}`}>
-                          {ratioOptions.slice(5).map(r => (
-                            <button key={r} onClick={(e) => { e.stopPropagation(); setExpandRatio(r); setShowExpandRatios(false); }} className={`w-full px-3 py-1.5 text-xs text-left hover:bg-[#d4af37]/10 ${expandRatio === r ? 'text-[#d4af37]' : isMonochrome ? 'text-gray-600' : 'text-[#ccc]'}`}>
-                              {r} {expandRatio === r && '✓'}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                    <button
+                      onClick={() => handleExpandEqualPadding(512)}
+                      className={`px-2 py-1 text-xs rounded-md transition-all ${
+                        isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                      }`}
+                    >
+                      等比+512
+                    </button>
                   </div>
                   <div className={panelDividerClass} />
-                  <button onClick={handleEditConfirm} className={panelBtnClass}>确认扩展</button>
+                  {/* 扩展尺寸信息 */}
+                  <span className="text-xs text-[#888] whitespace-nowrap">
+                    {(() => {
+                      const editImg2 = images.find(i => i.id === editImageId);
+                      if (!editImg2) return '';
+                      const ow = editImg2.originalWidth || Math.round(editImg2.width);
+                      const oh = editImg2.originalHeight || Math.round(editImg2.height);
+                      const tw = ow + expandPadding.left + expandPadding.right;
+                      const th = oh + expandPadding.top + expandPadding.bottom;
+                      return `${ow}×${oh} → ${tw}×${th}`;
+                    })()}
+                  </span>
+                  <div className={panelDividerClass} />
+                  <button
+                    onClick={handleEditConfirm}
+                    disabled={expandPadding.top + expandPadding.right + expandPadding.bottom + expandPadding.left === 0}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                      expandPadding.top + expandPadding.right + expandPadding.bottom + expandPadding.left === 0
+                        ? 'bg-[#333] text-[#555] cursor-not-allowed'
+                        : 'bg-[#d4af37] text-black hover:bg-[#e5c047]'
+                    }`}
+                  >
+                    确认扩展
+                  </button>
+                  <button onClick={() => { setExpandPadding({ top: 0, right: 0, bottom: 0, left: 0 }); expandPaddingRef.current = { top: 0, right: 0, bottom: 0, left: 0 }; }} className={panelCancelBtnClass}>重置</button>
                   <button onClick={exitEditMode} className={panelCancelBtnClass}>取消</button>
                 </div>
               )}

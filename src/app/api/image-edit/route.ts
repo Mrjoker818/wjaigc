@@ -61,6 +61,7 @@ interface EditRequest {
   editMode?: 'erase' | 'mask'; // 区分擦除和蒙版模式，用于错误消息
   expandRatio?: string;
   expandScale?: number;
+  expandPadding?: { top: number; right: number; bottom: number; left: number }; // 即梦风格方向性扩展
   targetWidth?: number;
   targetHeight?: number;
   aspectRatio?: string; // e.g. "4:3" - used to preserve original image ratio
@@ -879,6 +880,7 @@ export async function POST(request: NextRequest) {
       editMode,
       expandRatio,
       expandScale = 1,
+      expandPadding,
       targetWidth,
       targetHeight,
       aspectRatio,
@@ -1552,11 +1554,11 @@ export async function POST(request: NextRequest) {
     if (action === 'outpaint') {
       // ============================================================
       // 扩图 - 向外扩展画面
-      // 策略：合成扩展画布(原图居中+灰色填充) + mask → API → 合成原图到结果中心
-      // 核心改进：不依赖 API 的 mask_image 支持，而是在结果上合成原图确保像素级保留
+      // 支持两种模式：
+      // 1. 即梦风格方向性扩展 (expandPadding): 指定 top/right/bottom/left 像素
+      // 2. 传统比例扩展 (expandRatio + expandScale): 指定目标比例和倍率
+      // 策略：合成扩展画布(原图按偏移放置+灰色填充) + mask → API → 合成原图到结果
       // ============================================================
-      const ratio = expandRatio || '1:1';
-      const scale = expandScale || 1;
 
       // 获取原始图片
       let imageBuffer: Buffer;
@@ -1573,52 +1575,62 @@ export async function POST(request: NextRequest) {
       const origH = origMeta.height || 512;
 
       // 计算目标扩展尺寸
-      // 原则：倍数和比例是先后叠加融合关系
-      //   Step1: 根据比例计算目标画布（原图完整放入，不足方向扩展）
-      //   Step2: 在比例扩展基础上再应用倍数放大
       let targetW: number, targetH: number;
+      let offsetX: number, offsetY: number;
 
-      if (ratio === '原始比例') {
-        // 原始比例 + scale：等比放大
-        targetW = Math.round(origW * scale);
-        targetH = Math.round(origH * scale);
+      if (expandPadding && (expandPadding.top > 0 || expandPadding.right > 0 || expandPadding.bottom > 0 || expandPadding.left > 0)) {
+        // 即梦风格方向性扩展：直接使用像素偏移量
+        const pad = expandPadding;
+        targetW = origW + pad.left + pad.right;
+        targetH = origH + pad.top + pad.bottom;
+        offsetX = pad.left;
+        offsetY = pad.top;
+        console.log(`[outpaint] directional padding: top=${pad.top} right=${pad.right} bottom=${pad.bottom} left=${pad.left}`);
       } else {
-        // 指定比例：原图完整放入目标画布，不足方向扩展
-        const [rw, rh] = parseRatio(ratio);
-        const targetRatio = rw / rh;
-        const origRatio = origW / origH;
+        // 传统比例扩展
+        const ratio = expandRatio || '1:1';
+        const scale = expandScale || 1;
 
-        if (origRatio >= targetRatio) {
-          // 原图更宽或等宽：以原图宽度为基准，高度按目标比例扩展
-          targetW = origW;
-          targetH = Math.round(origW / targetRatio);
+        if (ratio === '原始比例') {
+          targetW = Math.round(origW * scale);
+          targetH = Math.round(origH * scale);
         } else {
-          // 原图更高：以原图高度为基准，宽度按目标比例扩展
-          targetH = origH;
-          targetW = Math.round(origH * targetRatio);
+          const [rw, rh] = parseRatio(ratio);
+          const targetRatio = rw / rh;
+          const origRatio = origW / origH;
+
+          if (origRatio >= targetRatio) {
+            targetW = origW;
+            targetH = Math.round(origW / targetRatio);
+          } else {
+            targetH = origH;
+            targetW = Math.round(origH * targetRatio);
+          }
+
+          if (scale > 1) {
+            targetW = Math.round(targetW * scale);
+            targetH = Math.round(targetH * scale);
+          }
         }
 
-        // 应用 scale 倍数（在比例扩展基础上再放大）
-        if (scale > 1) {
-          targetW = Math.round(targetW * scale);
-          targetH = Math.round(targetH * scale);
-        }
+        // 确保尺寸不小于原图
+        targetW = Math.max(origW, targetW);
+        targetH = Math.max(origH, targetH);
+
+        // 原图居中放置
+        offsetX = Math.round((targetW - origW) / 2);
+        offsetY = Math.round((targetH - origH) / 2);
       }
 
-      // 确保尺寸不小于原图
-      targetW = Math.max(origW, targetW);
-      targetH = Math.max(origH, targetH);
       // 对齐到8的倍数（API要求）
       targetW = Math.ceil(targetW / 8) * 8;
       targetH = Math.ceil(targetH / 8) * 8;
 
-      // 原图在目标画布中的位置（居中放置，保持原始像素大小）
+      // 原图在目标画布中的位置
       const srcW = origW;
       const srcH = origH;
-      const offsetX = Math.round((targetW - srcW) / 2);
-      const offsetY = Math.round((targetH - srcH) / 2);
 
-      console.log(`[outpaint] orig ${origW}x${origH} → target ${targetW}x${targetH}, offset (${offsetX},${offsetY}), ratio=${ratio}, scale=${scale}`);
+      console.log(`[outpaint] orig ${origW}x${origH} → target ${targetW}x${targetH}, offset (${offsetX},${offsetY})`);
 
       // 使用 sharp 合成扩展画布
       // 1. 创建背景画布（灰色填充表示需要扩展的区域）
