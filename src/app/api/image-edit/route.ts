@@ -527,8 +527,18 @@ async function autoTrySubmitImageTask(
       if (err instanceof ModelCapabilityError) {
         continue;
       }
-      // 其他错误（网络/超时等）→ 不继续尝试，直接抛出
-      throw err;
+      // 不可重试的致命错误（认证/配额等）→ 直接抛出
+      const nonRetryable = 
+        errMsg.includes('Invalid API key') || 
+        errMsg.includes('invalid api_key') ||
+        errMsg.includes('Insufficient balance') ||
+        errMsg.includes('insufficient balance');
+      if (nonRetryable) {
+        throw err;
+      }
+      // 提供商通道/配额/网络等错误 → 继续尝试下一个模型
+      console.warn(`[image-edit] ${operation}: Retrying with next model...`);
+      continue;
     }
   }
   
