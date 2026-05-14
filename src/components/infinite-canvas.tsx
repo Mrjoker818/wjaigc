@@ -2497,8 +2497,8 @@ export function InfiniteCanvas({
           .map(cat => {
             const s = catStrengthMap[cat];
             const desc = categoryEnMap[cat] || cat;
-            if (s >= 80) return `strictly preserve the ${desc} of the reference image(s)`;
-            if (s >= 50) return `maintain the ${desc} of the reference image(s)`;
+            if (s >= 80) return `strictly preserve the ${desc} of the reference image(s) — do NOT change the original ${desc === 'subject/character' ? 'product/object identity' : desc}`;
+            if (s >= 50) return `maintain the ${desc} of the reference image(s) without altering the core ${desc === 'subject/character' ? 'identity' : desc}`;
             if (s >= 20) return `subtly reference the ${desc} of the reference image(s)`;
             return `lightly hint at the ${desc} of the reference image(s)`;
           });
@@ -2508,11 +2508,17 @@ export function InfiniteCanvas({
           .filter(cat => !catStrengthMap[cat] || catStrengthMap[cat] === 0)
           .map(cat => categoryEnMap[cat]);
 
+        // 检查是否有主体保留
+        const hasSubjectInRef = catStrengthMap['主体'] > 0;
+
         // 构建完整提示词
         if (keyword) {
           fullPrompt = `Create an image of: ${keyword}.`;
           if (preserveAspects.length > 0) {
             fullPrompt += ` While creating this new image, ${preserveAspects.join(', ')}.`;
+          }
+          if (hasSubjectInRef) {
+            fullPrompt += ` IMPORTANT: The product/object in the result MUST be the SAME product/object as in the reference image — do NOT substitute or replace it with a different product.`;
           }
           if (freeAspects.length > 0) {
             fullPrompt += ` Feel free to reimagine the ${freeAspects.join(', ')}.`;
@@ -2521,6 +2527,9 @@ export function InfiniteCanvas({
           fullPrompt = 'Generate a creative variation of the reference image(s).';
           if (preserveAspects.length > 0) {
             fullPrompt += ` Keep the ${preserveAspects.join(', ')}.`;
+          }
+          if (hasSubjectInRef) {
+            fullPrompt += ` IMPORTANT: The product/object in the result MUST be the SAME product/object as in the reference image.`;
           }
           if (freeAspects.length > 0) {
             fullPrompt += ` Creatively transform the ${freeAspects.join(', ')}.`;
@@ -2534,8 +2543,14 @@ export function InfiniteCanvas({
         const totalPreserveScore = activeKeys.reduce((sum, cat) => sum + catStrengthMap[cat], 0);
         const maxScore = activeKeys.length * 100;
         const preserveRatio = totalPreserveScore / maxScore;
-        // 0.25 (完全自由) ~ 0.85 (高度保留)
-        calculatedStrength = Math.round((0.85 - preserveRatio * 0.6) * 100) / 100;
+        // 0.20 (高度保留) ~ 0.80 (较多自由)
+        calculatedStrength = Math.round((0.80 - preserveRatio * 0.60) * 100) / 100;
+        // 当保留主体时，额外降低 strength
+        if (hasSubjectInRef) {
+          const subjectStr = catStrengthMap['主体'] || 0;
+          const subjectReduction = (subjectStr / 100) * 0.25;
+          calculatedStrength = Math.max(0.15, calculatedStrength - subjectReduction);
+        }
       } else {
         // 无激活类别，仅作为参考图
         if (keyword) {
@@ -4723,6 +4738,9 @@ export function InfiniteCanvas({
 
       const keyword = img2imgKeyword.trim();
 
+      // 判断是否激活了"主体"保留
+      const hasSubjectPreserve = img2imgActiveCategories.has('主体') && (img2imgStrengths['主体'] || 0) > 0;
+
       // 收集激活的类别（强度>0表示要保留原图该方面）
       const preserveAspects = Array.from(img2imgActiveCategories)
         .filter(cat => (img2imgStrengths[cat] || 0) > 0)
@@ -4743,13 +4761,19 @@ export function InfiniteCanvas({
       // 构建完整提示词
       let fullPrompt = '';
       if (keyword) {
-        // 有关键词：以关键词为主题，保留原图指定方面
-        fullPrompt = `Create an image of: ${keyword}.`;
-        if (preserveAspects.length > 0) {
-          fullPrompt += ` While creating this new image, ${preserveAspects.join(', ')}.`;
-        }
-        if (freeAspects.length > 0) {
-          fullPrompt += ` Feel free to reimagine the ${freeAspects.join(', ')}.`;
+        // 有关键词时：关键词是对参考图的操作指令，不是新图描述
+        if (hasSubjectPreserve) {
+          // 明确保留主体：关键词是修饰指令，主体必须与参考图一致
+          fullPrompt = `Modify the reference image with the following instructions: ${keyword}. CRITICAL: The main subject (product/object/person) must remain EXACTLY the same as in the reference image — same item, same identity, same appearance. Do NOT replace or change the subject to a different object. Only apply the specified modifications to the existing subject.`;
+        } else {
+          // 未保留主体：关键词可以作为新方向
+          fullPrompt = `Create an image of: ${keyword}.`;
+          if (preserveAspects.length > 0) {
+            fullPrompt += ` While creating this new image, ${preserveAspects.join(', ')}.`;
+          }
+          if (freeAspects.length > 0) {
+            fullPrompt += ` Feel free to reimagine the ${freeAspects.join(', ')}.`;
+          }
         }
       } else {
         // 无关键词：对原图做创意变体
@@ -4773,13 +4797,19 @@ export function InfiniteCanvas({
       // strength 计算：
       // 保留方面多/强 → 需要更接近原图 → strength 低（偏离少）
       // 保留方面少/弱 → 允许更多自由 → strength 高（偏离多）
-      // 基础 strength = 0.6，每个保留方面降低一些
       const totalPreserveScore = Array.from(img2imgActiveCategories)
         .reduce((sum, cat) => sum + (img2imgStrengths[cat] || 0), 0);
       const maxPossibleScore = 600; // 6个类别 * 100
       const preserveRatio = totalPreserveScore / maxPossibleScore;
-      // strength 范围: 0.25（大量保留） ~ 0.85（几乎不保留）
-      const img2imgStrength = 0.85 - preserveRatio * 0.6;
+      // strength 范围: 0.20（大量保留） ~ 0.80（几乎不保留）
+      let img2imgStrength = 0.80 - preserveRatio * 0.60;
+      // 当保留主体时，额外降低 strength 以确保主体不变
+      if (hasSubjectPreserve) {
+        const subjectStr = img2imgStrengths['主体'] || 0;
+        const subjectReduction = (subjectStr / 100) * 0.25; // 主体强度越高，strength 越低
+        img2imgStrength = Math.max(0.15, img2imgStrength - subjectReduction);
+      }
+      img2imgStrength = Math.round(img2imgStrength * 100) / 100;
 
       const placeholderId = createProcessingFrameRightOf(
         editImg,
