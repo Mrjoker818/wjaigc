@@ -530,6 +530,57 @@ async function tryChatProviderFallback(
   return tryChatCompletionsVectorize(baseUrl, chatProvider.apiKey, imageBase64, imageUrl, mode, model);
 }
 
+/** Sanitize SVG for Adobe Illustrator compatibility — removes DOCTYPE, metadata, external refs, ensures proper viewBox/xmlns */
+function sanitizeSvgForAI(svg: string): string {
+  let s = svg;
+  // Remove XML declaration
+  s = s.replace(/<\?xml[^?]*\?>/g, '');
+  // Remove DOCTYPE (may span multiple lines)
+  s = s.replace(/<!DOCTYPE[\s\S]*?>/gi, '');
+  // Remove metadata blocks
+  s = s.replace(/<metadata[\s\S]*?<\/metadata>/gi, '');
+  // Remove standalone attribute
+  s = s.replace(/\sstandalone="[^"]*"/gi, '');
+  // Remove comments
+  s = s.replace(/<!--[\s\S]*?-->/g, '');
+  // Remove preserveAspectRatio (causes issues in AI)
+  s = s.replace(/\s*preserveAspectRatio="[^"]*"/gi, '');
+  // Replace pt units with unitless values
+  s = s.replace(/(width|height)="([0-9.]+)pt"/gi, '$1="$2"');
+  // Ensure xmlns exists
+  if (!s.includes('xmlns=')) {
+    s = s.replace(/<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
+  }
+  // Ensure viewBox exists
+  if (!s.includes('viewBox')) {
+    const wMatch = s.match(/width="([0-9.]+)"/);
+    const hMatch = s.match(/height="([0-9.]+)"/);
+    if (wMatch && hMatch) {
+      s = s.replace(/<svg/, `<svg viewBox="0 0 ${wMatch[1]} ${hMatch[1]}"`);
+    }
+  }
+  // Remove xlink:href (deprecated) and replace with href
+  s = s.replace(/xlink:href=/g, 'href=');
+  // Remove any external resource references that could cause "missing links"
+  // Remove <use> elements referencing external resources
+  s = s.replace(/<use[^>]*href="(?!#)[^"]*"[^>]*\/?>/gi, '');
+  // Remove <image> with external href (not data: URI)
+  s = s.replace(/<image[^>]*href="(?!data:)[^"]*"[^>]*\/?>/gi, '');
+  // Remove <link> elements
+  s = s.replace(/<link[^>]*>/gi, '');
+  // Remove style imports (@import url(...))
+  s = s.replace(/@import\s+url\([^)]*\)[^;]*;/gi, '');
+  // Clean up empty <g> elements
+  s = s.replace(/<g>\s*<\/g>/g, '');
+  // Clean up excessive whitespace
+  s = s.replace(/\n\s*\n/g, '\n');
+  s = s.trim();
+  // Ensure starts with <svg
+  const svgIdx = s.indexOf('<svg');
+  if (svgIdx > 0) s = s.substring(svgIdx);
+  return s;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -548,6 +599,10 @@ export async function POST(req: NextRequest) {
     const imageBase64 = imageBuffer ? imageBuffer.toString('base64') : null;
     const publicImageUrl = imageUrl.startsWith('http') ? imageUrl : buildPublicImageUrl(imageUrl);
 
+    /** Build SVG response with automatic sanitization for AI compatibility */
+    const svgResponse = (svg: string, engine: string) =>
+      NextResponse.json({ success: true, svg: sanitizeSvgForAI(svg), engine });
+
     // 1. 尝试管理员配置的矢量模型 API
     const vectorizeProvider = await findProviderForFeature('vectorize');
     console.log('[vectorize] Provider lookup result:', vectorizeProvider ? { id: vectorizeProvider.id, name: vectorizeProvider.name, baseUrl: vectorizeProvider.baseUrl, modelType: vectorizeProvider.modelType, selectedModels: vectorizeProvider.selectedModels } : null);
@@ -561,27 +616,27 @@ export async function POST(req: NextRequest) {
       // Strategy 1: Chat completions with vision (most compatible with API proxies like 302.ai)
       const chatResult = await tryChatCompletionsVectorize(baseUrl, vectorizeProvider.apiKey, imageBase64, publicImageUrl, mode, model);
       if (chatResult) {
-        return NextResponse.json({ success: true, svg: chatResult.svg, engine: chatResult.engine });
+        return svgResponse(chatResult.svg, chatResult.engine);
       }
 
       // Strategy 2: Multipart form-data (Vectorizer.AI / VTracer style API)
       if (imageBuffer) {
         const multipartResult = await tryMultipartVectorize(baseUrl, vectorizeProvider.apiKey, imageBuffer, imageUrl, model);
         if (multipartResult) {
-          return NextResponse.json({ success: true, svg: multipartResult.svg, engine: multipartResult.engine });
+          return svgResponse(multipartResult.svg, multipartResult.engine);
         }
       }
 
       // Strategy 3: JSON body with image URL and/or base64
       const jsonResult = await tryJsonVectorize(baseUrl, vectorizeProvider.apiKey, imageUrl, imageBase64, layerId, mode, model);
       if (jsonResult) {
-        return NextResponse.json({ success: true, svg: jsonResult.svg, engine: jsonResult.engine });
+        return svgResponse(jsonResult.svg, jsonResult.engine);
       }
 
       // Strategy 4: OpenAI images/generations format
       const openaiResult = await tryOpenAIFormat(baseUrl, vectorizeProvider.apiKey, imageBase64, mode, model);
       if (openaiResult) {
-        return NextResponse.json({ success: true, svg: openaiResult.svg, engine: openaiResult.engine });
+        return svgResponse(openaiResult.svg, openaiResult.engine);
       }
 
       console.warn('[vectorize] All admin-configured vectorize API attempts failed');
@@ -590,7 +645,7 @@ export async function POST(req: NextRequest) {
     // 2. 尝试使用管理员配置的 LLM 模型（带视觉能力）作为 fallback
     const chatFallbackResult = await tryChatProviderFallback(imageBase64, publicImageUrl, mode);
     if (chatFallbackResult) {
-      return NextResponse.json({ success: true, svg: chatFallbackResult.svg, engine: chatFallbackResult.engine });
+      return svgResponse(chatFallbackResult.svg, chatFallbackResult.engine);
     }
 
     // 3. 尝试环境变量配置的矢量化端点
@@ -618,7 +673,7 @@ export async function POST(req: NextRequest) {
         if (response.ok) {
           const data = await response.json() as Record<string, unknown>;
           if (data.svg) {
-            return NextResponse.json({ success: true, svg: data.svg, engine: 'py-vectorize' });
+            return svgResponse(String(data.svg), 'py-vectorize');
           }
         }
         console.warn('[vectorize] PY_VECTORIZE_ENDPOINT returned non-OK or no svg');

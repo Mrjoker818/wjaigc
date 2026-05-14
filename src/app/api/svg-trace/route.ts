@@ -234,7 +234,7 @@ async function runPotrace(
     let svgContent = require('fs').readFileSync(outputPath, 'utf-8');
 
     // Potrace outputs SVG with pt units and no viewBox — fix for proper scaling
-    svgContent = normalizePotraceSvg(svgContent);
+    svgContent = sanitizeSvgForIllustrator(svgContent);
 
     return svgContent;
   } finally {
@@ -246,24 +246,192 @@ async function runPotrace(
 }
 
 /**
- * Potrace SVG output uses pt units and may lack viewBox.
- * Normalize to use viewBox + width/height in px for web compatibility.
+ * Sanitize SVG for Adobe Illustrator compatibility.
+ *
+ * Issues fixed:
+ * 1. Remove DOCTYPE / external DTD references → "missing links" in Illustrator
+ * 2. Remove <metadata> blocks (not needed, can confuse AI)
+ * 3. Potrace: convert all path coords to screen-pixel coords, remove transform
+ * 4. VTracer: add viewBox, ensure xmlns present
+ * 5. Remove preserveAspectRatio (Illustrator handles default)
+ * 6. Remove XML processing instruction (re-add clean one at end)
+ * 7. Ensure the SVG has proper namespace declarations
  */
-function normalizePotraceSvg(svg: string): string {
-  // Extract width/height from pt values
-  const widthMatch = svg.match(/width="([\d.]+)pt"/);
-  const heightMatch = svg.match(/height="([\d.]+)pt"/);
-  if (widthMatch && heightMatch) {
-    const w = parseFloat(widthMatch[1]);
-    const h = parseFloat(heightMatch[1]);
-    svg = svg
-      .replace(/width="[\d.]+pt"/, `width="${w}"`)
-      .replace(/height="[\d.]+pt"/, `height="${h}"`)
-      .replace(/viewBox="0 0 [\d.]+ [\d.]+"/, `viewBox="0 0 ${w} ${h}"`);
+function sanitizeSvgForIllustrator(svg: string, sourceWidth?: number, sourceHeight?: number): string {
+  // 1. Remove DOCTYPE (multi-line aware) — primary cause of "missing links" in AI
+  svg = svg.replace(/<!DOCTYPE[\s\S]*?>\s*/g, '');
+
+  // 2. Remove XML processing instruction
+  svg = svg.replace(/<\?xml[^?]*\?>\s*/g, '');
+
+  // 3. Remove <metadata> blocks
+  svg = svg.replace(/<metadata[\s\S]*?<\/metadata>\s*/g, '');
+
+  // 4. Remove standalone="no" from svg tag
+  svg = svg.replace(/\s+standalone="no"/g, '');
+
+  // ─── Potrace-specific: transform path coords to screen pixels ───
+  // Potrace output: translate(tx,ty) scale(sx,-sy)
+  //   screen_x = tx + path_x * sx
+  //   screen_y = ty - path_y * sy
+  // We convert all path coordinates to screen-space and remove the transform.
+  const negScaleMatch = svg.match(/transform="translate\(([^,]+),([^)]+)\)\s+scale\(([^,]+),-([^)]+)\)"/);
+  if (negScaleMatch) {
+    const tx = parseFloat(negScaleMatch[1]);
+    const ty = parseFloat(negScaleMatch[2]);
+    const sx = parseFloat(negScaleMatch[3]);
+    const sy = parseFloat(negScaleMatch[4]);
+
+    // Transform all path d attributes
+    svg = svg.replace(/d="([^"]+)"/g, (_match: string, d: string) => {
+      return 'd="' + transformPotracePath(d, tx, ty, sx, sy) + '"';
+    });
+
+    // Remove the transform from <g>
+    svg = svg.replace(
+      /transform="translate\([^)]+\)\s+scale\([^)]+\)"/,
+      ''
+    );
   }
-  // Remove DOCTYPE (causes issues in browsers)
-  svg = svg.replace(/<!DOCTYPE[^>]*>\n?/g, '');
+
+  // ─── Potrace pt units → px ───
+  const ptWidth = svg.match(/width="([\d.]+)pt"/);
+  const ptHeight = svg.match(/height="([\d.]+)pt"/);
+  if (ptWidth) svg = svg.replace(/width="[\d.]+pt"/, `width="${parseFloat(ptWidth[1])}"`);
+  if (ptHeight) svg = svg.replace(/height="[\d.]+pt"/, `height="${parseFloat(ptHeight[1])}"`);
+
+  // ─── Ensure viewBox exists ───
+  if (!svg.includes('viewBox=')) {
+    const wMatch = svg.match(/width="([\d.]+)"/);
+    const hMatch = svg.match(/height="([\d.]+)"/);
+    if (wMatch && hMatch) {
+      const w = parseFloat(wMatch[1]);
+      const h = parseFloat(hMatch[1]);
+      svg = svg.replace(
+        /height="[\d.]+"/,
+        `height="${h}" viewBox="0 0 ${w} ${h}"`
+      );
+    } else if (sourceWidth && sourceHeight) {
+      svg = svg.replace(/<svg\b/, `<svg viewBox="0 0 ${sourceWidth} ${sourceHeight}"`);
+    }
+  }
+
+  // ─── Ensure xmlns is present ───
+  if (!svg.includes('xmlns=')) {
+    svg = svg.replace(/<svg\b/, '<svg xmlns="http://www.w3.org/2000/svg"');
+  }
+  // Remove duplicate xmlns declarations
+  const xmlnsCount = (svg.match(/xmlns="http:\/\/www\.w3\.org\/2000\/svg"/g) || []).length;
+  if (xmlnsCount > 1) {
+    svg = svg.replace(/xmlns="http:\/\/www\.w3\.org\/2000\/svg"/g, '');
+    svg = svg.replace(/<svg\b/, '<svg xmlns="http://www.w3.org/2000/svg"');
+  }
+
+  // Remove preserveAspectRatio (let AI use default)
+  svg = svg.replace(/\s+preserveAspectRatio="[^"]*"/g, '');
+
+  // Clean up multiple blank lines
+  svg = svg.replace(/\n{3,}/g, '\n\n');
+
+  // Re-add clean XML declaration
+  if (!svg.startsWith('<?xml')) {
+    svg = '<?xml version="1.0" encoding="UTF-8"?>\n' + svg;
+  }
+
   return svg;
+}
+
+/**
+ * Transform Potrace path data from Potrace coordinate space to screen pixels.
+ * Potrace: screen_x = tx + path_x * sx, screen_y = ty - path_y * sy
+ */
+function transformPotracePath(d: string, tx: number, ty: number, sx: number, sy: number): string {
+  let result = '';
+  let i = 0;
+  let currentCmd = '';
+
+  function skipWS() {
+    while (i < d.length && (d[i] === ' ' || d[i] === ',' || d[i] === '\t' || d[i] === '\n')) i++;
+  }
+  function readNum(): number {
+    skipWS();
+    let s = '';
+    if (i < d.length && (d[i] === '-' || d[i] === '+')) { s += d[i]; i++; }
+    while (i < d.length && ((d[i] >= '0' && d[i] <= '9') || d[i] === '.')) { s += d[i]; i++; }
+    return s ? parseFloat(s) : NaN;
+  }
+  function r(n: number): string {
+    return Number.isNaN(n) ? '0' : (Math.round(n * 100) / 100).toString();
+  }
+  function tX(x: number): number { return tx + x * sx; }
+  function tY(y: number): number { return ty - y * sy; }
+
+  while (i < d.length) {
+    const ch = d[i];
+
+    // Command letters
+    if ('MLCSQTA'.includes(ch) || 'mlcsqta'.includes(ch)) {
+      currentCmd = ch;
+      result += ch;
+      i++;
+    } else if (ch === 'H') {
+      currentCmd = ch; result += ch; i++;
+      result += r(tX(readNum()));
+    } else if (ch === 'h') {
+      currentCmd = ch; result += ch; i++;
+      result += r(readNum() * sx);
+    } else if (ch === 'V') {
+      currentCmd = ch; result += ch; i++;
+      result += r(tY(readNum()));
+    } else if (ch === 'v') {
+      currentCmd = ch; result += ch; i++;
+      result += r(-readNum() * sy);
+    } else if (ch === 'Z' || ch === 'z') {
+      result += ch; i++;
+    } else if ((ch >= '0' && ch <= '9') || ch === '-' || ch === '+' || ch === '.') {
+      // Implicit coords for current command
+      if (currentCmd === 'M' || currentCmd === 'L') {
+        const x = readNum(), y = readNum();
+        result += r(tX(x)) + ',' + r(tY(y));
+      } else if (currentCmd === 'm' || currentCmd === 'l') {
+        const dx = readNum(), dy = readNum();
+        result += r(dx * sx) + ',' + r(-dy * sy);
+      } else if (currentCmd === 'C') {
+        const x1 = readNum(), y1 = readNum(), x2 = readNum(), y2 = readNum(), x = readNum(), y = readNum();
+        result += r(tX(x1))+','+r(tY(y1))+' '+r(tX(x2))+','+r(tY(y2))+' '+r(tX(x))+','+r(tY(y));
+      } else if (currentCmd === 'c') {
+        const dx1=readNum(),dy1=readNum(),dx2=readNum(),dy2=readNum(),dx=readNum(),dy=readNum();
+        result += r(dx1*sx)+','+r(-dy1*sy)+' '+r(dx2*sx)+','+r(-dy2*sy)+' '+r(dx*sx)+','+r(-dy*sy);
+      } else if (currentCmd === 'S') {
+        const x2=readNum(),y2=readNum(),x=readNum(),y=readNum();
+        result += r(tX(x2))+','+r(tY(y2))+' '+r(tX(x))+','+r(tY(y));
+      } else if (currentCmd === 's') {
+        const dx2=readNum(),dy2=readNum(),dx=readNum(),dy=readNum();
+        result += r(dx2*sx)+','+r(-dy2*sy)+' '+r(dx*sx)+','+r(-dy*sy);
+      } else if (currentCmd === 'Q') {
+        const x1=readNum(),y1=readNum(),x=readNum(),y=readNum();
+        result += r(tX(x1))+','+r(tY(y1))+' '+r(tX(x))+','+r(tY(y));
+      } else if (currentCmd === 'q') {
+        const dx1=readNum(),dy1=readNum(),dx=readNum(),dy=readNum();
+        result += r(dx1*sx)+','+r(-dy1*sy)+' '+r(dx*sx)+','+r(-dy*sy);
+      } else if (currentCmd === 'T') {
+        const x=readNum(),y=readNum();
+        result += r(tX(x))+','+r(tY(y));
+      } else if (currentCmd === 't') {
+        const dx=readNum(),dy=readNum();
+        result += r(dx*sx)+','+r(-dy*sy);
+      } else if (currentCmd === 'A') {
+        const rx=readNum(),ry=readNum(),angle=readNum(),la=readNum(),sw=readNum(),x=readNum(),y=readNum();
+        result += r(rx*sx)+','+r(ry*sy)+' '+angle+' '+la+' '+sw+' '+r(tX(x))+','+r(tY(y));
+      } else if (currentCmd === 'a') {
+        const rx=readNum(),ry=readNum(),angle=readNum(),la=readNum(),sw=readNum(),dx=readNum(),dy=readNum();
+        result += r(rx*sx)+','+r(ry*sy)+' '+angle+' '+la+' '+sw+' '+r(dx*sx)+','+r(-dy*sy);
+      }
+    } else {
+      result += ch; i++;
+    }
+  }
+  return result;
 }
 
 // ─── Sharp: Image Compression ──────────────────────────
@@ -412,7 +580,7 @@ export async function POST(req: NextRequest) {
           preprocessed = await sharp(inputBuffer).png().toBuffer();
         }
 
-        const svgContent = await runVTracer(preprocessed, {
+        let svgContent = await runVTracer(preprocessed, {
           colorPrecision: body.colorPrecision,
           filterSpeckle: body.filterSpeckle,
           cornerThreshold: body.cornerThreshold,
@@ -420,6 +588,9 @@ export async function POST(req: NextRequest) {
           spliceThreshold: body.spliceThreshold,
           pathPrecision: body.pathPrecision,
         });
+
+        // Sanitize SVG for Adobe Illustrator compatibility
+        svgContent = sanitizeSvgForIllustrator(svgContent, meta.width, meta.height);
 
         const filename = `svg-color-${uid}.svg`;
         const { url } = await saveResult(svgContent, filename, 'svg-trace', 'image/svg+xml');
