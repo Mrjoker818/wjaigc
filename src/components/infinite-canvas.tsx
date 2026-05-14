@@ -3879,7 +3879,7 @@ export function InfiniteCanvas({
       }
     } catch (e) {
       console.error('Remove background error:', e);
-      alert('操作失败，请重试');
+      alert(`操作失败: ${e instanceof Error ? e.message : '请重试'}`);
     }
     setIsEditProcessing(false);
   }, [selectedImageData, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame]);
@@ -4681,7 +4681,7 @@ export function InfiniteCanvas({
         removeProcessingFrame(placeholderId);
       } catch (e) {
         console.error('Img2Img error:', e);
-        alert('操作失败，请重试');
+        alert(`操作失败: ${e instanceof Error ? e.message : '请重试'}`);
         removeProcessingFrame(placeholderId);
       }
 
@@ -4751,7 +4751,13 @@ export function InfiniteCanvas({
           }),
         });
 
-        const data = await res.json();
+        let data: any;
+        try {
+          const resText = await res.text();
+          try { data = JSON.parse(resText); } catch { data = { success: false, error: resText.substring(0, 200) }; }
+        } catch {
+          data = { success: false, error: `HTTP ${res.status}` };
+        }
         if (!data.success) {
           alert(data.error || '扩展失败');
           removeProcessingFrame(placeholderId);
@@ -4793,7 +4799,8 @@ export function InfiniteCanvas({
         }
       } catch (e) {
         console.error('Expand error:', e);
-        alert('操作失败，请重试');
+        const errMsg = e instanceof Error ? e.message : String(e);
+        alert(`操作失败: ${errMsg}`);
         removeProcessingFrame(placeholderId);
       }
 

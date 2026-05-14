@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderById, findProviderForFeature, findAllProvidersForType, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, type ApiCompatProfile, type ImageEndpoint } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, convertAspectRatioToSize, type ApiCompatProfile, type ImageEndpoint } from '@/lib/api-compatibility';
 import { saveImageFile } from '@/lib/server-data-root';
 import sharp from 'sharp';
 import fsSync from 'fs';
@@ -89,17 +89,19 @@ async function fetchImageBuffer(url: string): Promise<Buffer> {
   }
   // local path (e.g., /api/serve-upload/xxx, /uploads/xxx)
   if (url.startsWith('/')) {
+    // 1. Try local public directory (dev)
     const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
-    // 1. Try local public directory
     const localPath = path.join(workspacePath, 'public', url);
     if (fsSync.existsSync(localPath)) return fsSync.readFileSync(localPath);
-    // 2. Try persistent data directory (PROD)
-    if (process.env.COZE_PROJECT_ENV === 'PROD') {
-      const { getServerDataRoot } = await import('@/lib/server-data-root');
-      const dataRoot = await getServerDataRoot();
-      const persistentPath = path.join(dataRoot, url.replace(/^\//, ''));
-      if (fsSync.existsSync(persistentPath)) return fsSync.readFileSync(persistentPath);
-    }
+    // 2. Try persistent data directory
+    const { getServerDataRoot } = await import('@/lib/server-data-root');
+    const dataRoot = await getServerDataRoot();
+    // Try exact path under dataRoot
+    const persistentPath = path.join(dataRoot, url.replace(/^\//, ''));
+    if (fsSync.existsSync(persistentPath)) return fsSync.readFileSync(persistentPath);
+    // Try uploads/ prefix under dataRoot
+    const uploadPath = path.join(dataRoot, 'uploads', url.replace(/^\//, ''));
+    if (fsSync.existsSync(uploadPath)) return fsSync.readFileSync(uploadPath);
     // 3. Try S3 object storage fallback (try both 'images/' and 'uploads/' prefixes)
     const { isS3Available, downloadImageFromS3 } = await import('@/lib/s3-storage');
     if (isS3Available()) {
@@ -1705,9 +1707,13 @@ export async function POST(request: NextRequest) {
         `Do not modify, crop, or alter the original center content in any way.`
       );
 
-      // 计算目标比例字符串用于API
+      // 计算目标比例和像素尺寸
       const targetRatioStr = `${targetW}:${targetH}`;
-      const targetSize = findClosestAspectRatio(targetRatioStr);
+      const targetRatio = findClosestAspectRatio(targetRatioStr);
+      // 使用 convertAspectRatioToSize 将比例转换为实际像素尺寸
+      const targetPixelSize = convertAspectRatioToSize(targetRatio, undefined, candidateModels[0]?.model);
+      // 如果是比例格式 (如 "1:1") 而非像素格式，则转换为像素
+      const targetSize = targetPixelSize.includes('x') ? targetPixelSize : targetRatio;
 
       // 使用 base64 数据 URL 发送图片（确保外部 API 可访问）+ mask_image
       const result = await autoTrySubmitImageTask(
