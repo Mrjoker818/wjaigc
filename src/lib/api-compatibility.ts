@@ -224,9 +224,24 @@ const ASPECT_RATIO_TO_PIXELS: Record<string, string> = {
  * Convert an aspect-ratio string ("1:1", "16:9") to a pixel-size string
  * ("1024x1024", "1536x1024") suitable for OpenAI-compatible APIs.
  *
+ * For GPT Image 2, quality affects the actual pixel dimensions:
+ * - high quality + 16:9 → 3840x2160 (4K)
+ * - high quality + 9:16 → 2160x3840 (4K)
+ *
  * For ratios not in the lookup table, dynamically calculates based on 2048 max edge.
  */
-export function convertAspectRatioToSize(ratio: string): string {
+export function convertAspectRatioToSize(ratio: string, quality?: string, modelId?: string): string {
+  // GPT Image 2 with high quality uses 4K sizes for wide/tall ratios
+  const lowerModel = (modelId || '').toLowerCase();
+  const isGptImage2 = lowerModel.includes('gpt-image-2') || lowerModel.includes('gpt-image2');
+  if (isGptImage2 && quality === 'high') {
+    const gptImage2HighResMap: Record<string, string> = {
+      '16:9': '3840x2160',
+      '9:16': '2160x3840',
+    };
+    if (gptImage2HighResMap[ratio]) return gptImage2HighResMap[ratio];
+  }
+
   if (ASPECT_RATIO_TO_PIXELS[ratio]) return ASPECT_RATIO_TO_PIXELS[ratio];
 
   // Dynamic calculation for non-standard ratios
@@ -277,7 +292,9 @@ export function adjustRequestForProfile(
   if (profile.sizeFormat === 'pixel' && body.size && typeof body.size === 'string') {
     const sizeStr = body.size as string;
     if (sizeStr.includes(':')) {
-      body.size = convertAspectRatioToSize(sizeStr);
+      const quality = typeof body.quality === 'string' ? body.quality : undefined;
+      const modelId = typeof body.model === 'string' ? body.model : undefined;
+      body.size = convertAspectRatioToSize(sizeStr, quality, modelId);
     }
   }
 

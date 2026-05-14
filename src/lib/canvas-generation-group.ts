@@ -300,10 +300,15 @@ export function calculateActualPixels(
   // 模型默认像素尺寸映射（根据各模型官方API文档配置）
   const MODEL_PIXEL_SIZES: Record<string, Record<string, Record<string, string>>> = {
     // GPT Image 2 — 官方支持的尺寸
+    // Ref: https://platform.openai.com/docs/guides/image-generation
+    // quality: auto/low/medium/high
+    // Sizes: 1024x1024, 1536x1024, 1024x1536, 2048x1152, 1152x2048, 3840x2160(4K), 2160x3840(4K)
     'gpt-image-2': {
-      '1:1': { 'standard': '1024×1024', 'low': '1024×1024', 'medium': '1024×1024', 'high': '1024×1024' },
-      '3:2': { 'standard': '1536×1024', 'low': '1536×1024', 'medium': '1536×1024', 'high': '1536×1024' },
-      '2:3': { 'standard': '1024×1536', 'low': '1024×1536', 'medium': '1024×1536', 'high': '1024×1536' },
+      '1:1':  { 'auto': '1024×1024', 'low': '1024×1024', 'medium': '1024×1024', 'high': '1024×1024' },
+      '3:2':  { 'auto': '1536×1024', 'low': '1536×1024', 'medium': '1536×1024', 'high': '1536×1024' },
+      '2:3':  { 'auto': '1024×1536', 'low': '1024×1536', 'medium': '1024×1536', 'high': '1024×1536' },
+      '16:9': { 'auto': '2048×1152', 'low': '2048×1152', 'medium': '2048×1152', 'high': '3840×2160' },
+      '9:16': { 'auto': '1152×2048', 'low': '1152×2048', 'medium': '1152×2048', 'high': '2160×3840' },
     },
     // Gemini 系列
     'gemini-2.5-flash-image-preview': {

@@ -2542,22 +2542,42 @@ export function InfiniteCanvas({
             savedUrls.push(url);
           }
         }
-        // Add result images to canvas images array for persistence (they'll be hidden on canvas, shown in result frame)
+        // Add result images as REGULAR canvas images (visible, downloadable, editable)
+        // Position: right side of the result placeholder frame
+        const srcImgs = group.sourceImageIds.map(id => imagesRef.current.find(i => i.id === id)).filter(Boolean) as CanvasImage[];
+        const srcRightEdge = srcImgs.length > 0 ? Math.max(...srcImgs.map(img => img.x + img.width)) : 0;
+        const srcCenterY = srcImgs.length > 0 ? srcImgs.reduce((s, img) => s + img.y + img.height / 2, 0) / srcImgs.length : 0;
+        const resultFrameRight = srcRightEdge + 80 + Math.max(phWidth, 420);
         const newImages = savedUrls.map((url: string, i: number) => ({
           id: `grp-result-${Date.now()}-${i}`,
           url,
-          x: phX + i * (phWidth + 20),
-          y: phY,
+          x: resultFrameRight + 20 + i * (phWidth + 20),
+          y: srcCenterY - phHeight / 2,
           width: phWidth, height: phHeight,
-          originalWidth: phWidth * 2, originalHeight: phHeight * 2,
           prompt: toolbar.prompt,
           aspectRatio: toolbar.aspectRatio,
         }));
         onImagesChange([...imagesRef.current, ...newImages]);
-        // Update group result
+        // Load actual image dimensions asynchronously
+        newImages.forEach((img: { id: string; url: string }, idx: number) => {
+          const el = new window.Image();
+          el.onload = () => {
+            const currentImages = imagesRef.current;
+            const updated = currentImages.map(p => p.id === img.id ? { ...p, originalWidth: el.naturalWidth, originalHeight: el.naturalHeight } : p);
+            imagesRef.current = updated;
+            onImagesChange(updated);
+          };
+          el.src = img.url;
+        });
+        // Reset group: keep toolbar visible, clear result for next generation
         setGenGroups(prev => prev.map(g => {
           if (g.id !== group.id) return g;
-          return { ...g, status: 'completed' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 100, resultUrl: savedUrls[0] }, resultImageIds: newImages.map((img: { id: string }) => img.id) };
+          return {
+            ...g,
+            status: 'idle' as const,
+            resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, resultUrl: undefined, resultImageIds: [], errorMsg: undefined },
+            resultImageIds: [],
+          };
         }));
       } else if (data.error) {
         // API返回错误
@@ -2619,22 +2639,42 @@ export function InfiniteCanvas({
                     savedUrls.push(url);
                   }
                 }
-                // Add result images to canvas images array for persistence (hidden on canvas, shown in result frame)
+                // Add result images as REGULAR canvas images (visible, downloadable, editable)
+                // Position: right side of the result placeholder frame
+                const srcImgs = group.sourceImageIds.map(id => imagesRef.current.find(i => i.id === id)).filter(Boolean) as CanvasImage[];
+                const srcRightEdge = srcImgs.length > 0 ? Math.max(...srcImgs.map(img => img.x + img.width)) : 0;
+                const srcCenterY = srcImgs.length > 0 ? srcImgs.reduce((s, img) => s + img.y + img.height / 2, 0) / srcImgs.length : 0;
+                const resultFrameRight = srcRightEdge + 80 + Math.max(phWidth, 420);
                 const resultImages = savedUrls.map((url: string, i: number) => ({
                   id: `grp-result-${Date.now()}-${i}`,
                   url,
-                  x: phX + i * (phWidth + 20),
-                  y: phY,
+                  x: resultFrameRight + 20 + i * (phWidth + 20),
+                  y: srcCenterY - phHeight / 2,
                   width: phWidth, height: phHeight,
-                  originalWidth: phWidth * 2, originalHeight: phHeight * 2,
                   prompt: toolbar.prompt,
                   aspectRatio: toolbar.aspectRatio,
                 }));
                 onImagesChange([...imagesRef.current, ...resultImages]);
-                // Update group result
+                // Load actual image dimensions asynchronously
+                resultImages.forEach((img: { id: string; url: string }) => {
+                  const el = new window.Image();
+                  el.onload = () => {
+                    const currentImages = imagesRef.current;
+                    const updated = currentImages.map(p => p.id === img.id ? { ...p, originalWidth: el.naturalWidth, originalHeight: el.naturalHeight } : p);
+                    imagesRef.current = updated;
+                    onImagesChange(updated);
+                  };
+                  el.src = img.url;
+                });
+                // Reset group: keep toolbar visible, clear result for next generation
                 setGenGroups(prev => prev.map(g => {
                   if (g.id !== group.id) return g;
-                  return { ...g, status: 'completed' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 100, resultUrl: savedUrls[0] }, resultImageIds: resultImages.map((img: { id: string }) => img.id) };
+                  return {
+                    ...g,
+                    status: 'idle' as const,
+                    resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, resultUrl: undefined, resultImageIds: [], errorMsg: undefined },
+                    resultImageIds: [],
+                  };
                 }));
               } else {
                 // 完成 but 没有图片URL

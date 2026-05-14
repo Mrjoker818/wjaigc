@@ -8,7 +8,7 @@ import { ApiProvider } from '@/lib/universal-api-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { ThirdPartyModelDialog } from '@/components/third-party-model-dialog';
 import { getModelDisplayName } from '@/lib/model-name-map';
-import { MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS, MODEL_QUALITIES as SHARED_MODEL_QUALITIES, QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE as SHARED_QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES, findModelConfig as sharedFindModelConfig } from '@/lib/canvas-generation-group';
+import { MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS, MODEL_QUALITIES as SHARED_MODEL_QUALITIES, QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE as SHARED_QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES, findModelConfig as sharedFindModelConfig, calculateActualPixels as sharedCalculateActualPixels } from '@/lib/canvas-generation-group';
 
 export interface GenerationParams {
     prompt: string;
@@ -386,25 +386,28 @@ export function GenerationPanel(
         return findModelConfig(MODEL_QUALITIES, pureModelId) || ['standard'];
     }, [pureModelId]);
 
-    // 尺寸映射 — 使用共享的 ASPECT_RATIO_TO_PIXELS 或回退到通用映射
+    // 尺寸映射 — 使用 calculateActualPixels 综合考虑模型+比例+质量
     const getModelSize = useCallback((ratio: string): string => {
-        // 优先使用共享的像素映射
-        if (ASPECT_RATIO_TO_PIXELS[ratio]) return ASPECT_RATIO_TO_PIXELS[ratio];
+        const modelSize = sharedCalculateActualPixels(ratio, quality, pureModelId);
+        if (modelSize) return modelSize;
         // 通用回退
+        if (ASPECT_RATIO_TO_PIXELS[ratio]) return ASPECT_RATIO_TO_PIXELS[ratio];
         const fallback: Record<string, string> = {
             "1:1": "1024x1024", "4:3": "1536x1024", "3:4": "1024x1536",
             "16:9": "2048x1152", "9:16": "1152x2048", "3:2": "1536x1024",
             "2:3": "1024x1536", "21:9": "2048x878", "9:21": "878x2048",
         };
         return fallback[ratio] || "1024x1024";
-    }, []);
+    }, [quality, pureModelId]);
 
-    // 质量对应的尺寸提示
+    // 质量对应的尺寸提示 — 显示该质量+当前比例的实际像素
     const getQualitySizeHint = useCallback((q: string): string => {
+        const actualSize = sharedCalculateActualPixels(aspectRatio, q, pureModelId);
+        if (actualSize) return actualSize.replace('×', 'x');
         const qMap = findModelConfig(QUALITY_TO_SIZE, pureModelId);
         if (qMap && qMap[q]) return qMap[q];
         return q;
-    }, [pureModelId]);
+    }, [aspectRatio, pureModelId]);
 
     // 生成
     const handleGenerate = () => {
