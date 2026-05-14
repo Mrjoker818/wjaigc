@@ -407,7 +407,7 @@ export function InfiniteCanvas({
   const prevImageIdsRef = useRef<Set<string>>(new Set(images.map(img => img.id)));
   useEffect(() => {
     const currentIds = new Set(images.map(img => img.id));
-    const newImages = images.filter(img => !prevImageIdsRef.current.has(img.id) && !img.isProcessingPlaceholder);
+    const newImages = images.filter(img => !prevImageIdsRef.current.has(img.id));
 
     if (newImages.length > 0) {
       // Center on the first new image (most recent addition)
@@ -424,8 +424,12 @@ export function InfiniteCanvas({
         const fitZoomY = (canvasH * 0.8) / targetImg.height;
         const fitZoom = Math.min(fitZoomX, fitZoomY, 2); // Cap at 2x zoom
 
-        // Use a reasonable zoom: keep current if it shows the image well, otherwise use fitZoom
-        const newZoom = fitZoom;
+        // Keep current zoom if it shows the image well, otherwise use fitZoom
+        const currentZoom = zoom;
+        const imgScreenWidth = targetImg.width * currentZoom;
+        const imgScreenHeight = targetImg.height * currentZoom;
+        const isVisible = imgScreenWidth > 30 && imgScreenHeight > 30 && imgScreenWidth < canvasW * 3 && imgScreenHeight < canvasH * 3;
+        const newZoom = isVisible ? currentZoom : fitZoom;
 
         setZoom(newZoom);
         setViewOffset({
@@ -441,7 +445,7 @@ export function InfiniteCanvas({
 
     prevImageIdsRef.current = currentIds;
     prevImageCountRef.current = images.length;
-  }, [images]);
+  }, [images, zoom]);
 
   // Selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -2459,6 +2463,28 @@ export function InfiniteCanvas({
         },
       };
     }));
+
+    // 自动将视图平移到 processing frame 的位置
+    const canvasEl = canvasRef.current;
+    if (canvasEl) {
+      const canvasW = canvasEl.clientWidth;
+      const canvasH = canvasEl.clientHeight;
+      const phCenterX = phX + phWidth / 2;
+      const phCenterY = phY + phHeight / 2;
+
+      // 适度缩放以显示 processing frame
+      const fitZoomX = (canvasW * 0.6) / phWidth;
+      const fitZoomY = (canvasH * 0.6) / phHeight;
+      const fitZoom = Math.min(fitZoomX, fitZoomY, 2);
+      // 如果当前缩放太小看不到，则调整缩放
+      const newZoom = zoom < fitZoom * 0.5 ? fitZoom : zoom;
+
+      setZoom(newZoom);
+      setViewOffset({
+        x: canvasW / 2 - phCenterX * newZoom,
+        y: canvasH / 2 - phCenterY * newZoom,
+      });
+    }
 
     // 构建提示词
     let fullPrompt = toolbar.prompt;
