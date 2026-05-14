@@ -1536,22 +1536,26 @@ export async function POST(request: NextRequest) {
             ? await sharp(resultBuffer).resize(origW, origH, { fit: 'fill' }).png().toBuffer()
             : resultBuffer;
 
-          // 创建渐变融合蒙版：在蒙版边界做柔和过渡，避免硬边
-          const blendMask = await sharp(binaryMaskBuffer)
+          // 用蒙版合成：AI结果在白色区域(蒙版区域)，原图在黑色区域(保留区域)
+          // 方法：将模糊蒙版的亮度直接作为AI结果的alpha通道，然后叠加到原图上
+          // 注意：不能用 sharp composite dest-in + blur mask，因为 blur 会导致黑色区域也有非零值
+          //       造成整个图像半透明，原图被AI结果覆盖
+          const softAlphaMask = await sharp(binaryMaskBuffer)
             .threshold(127)
             .blur(8)  // 边界柔化 8px
-            .png()
+            .grayscale()
+            .raw()
             .toBuffer();
 
-          // 用蒙版合成：AI结果在白色区域(蒙版区域)，原图在黑色区域(保留区域)
-          // 步骤：1) 给AI结果加上蒙版alpha 2) 叠加到原图上
-          const resultWithAlpha = await sharp(resizedResult)
-            .composite([{ input: blendMask, blend: 'dest-in' }])
-            .png()
-            .toBuffer();
+          // 将 AI 结果转换为 RGBA，手动设置 alpha 通道
+          const aiRaw = await sharp(resizedResult).ensureAlpha().raw().toBuffer();
+          for (let i = 0; i < origW * origH; i++) {
+            aiRaw[i * 4 + 3] = softAlphaMask[i]; // alpha = 蒙版亮度
+          }
+          const aiWithAlpha = await sharp(aiRaw, { raw: { width: origW, height: origH, channels: 4 } }).png().toBuffer();
 
           const compositeResult = await sharp(imageBuffer)
-            .composite([{ input: resultWithAlpha, blend: 'over' }])
+            .composite([{ input: aiWithAlpha, blend: 'over' }])
             .png()
             .toBuffer();
 
