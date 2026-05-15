@@ -615,6 +615,37 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     throw new Error('图片转换失败，请尝试重新上传图片');
   }, []);
 
+  /** 压缩图片dataURL：限制最大边长 + JPEG质量压缩，大幅减小请求体体积 */
+  const compressImageDataUrl = useCallback(async (
+    dataUrl: string,
+    maxEdge: number = 1536,
+    quality: number = 0.85
+  ): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.naturalWidth;
+        let h = img.naturalHeight;
+        // 仅在图片超过最大边长时缩放
+        if (w > maxEdge || h > maxEdge) {
+          const scale = maxEdge / Math.max(w, h);
+          w = Math.round(w * scale);
+          h = Math.round(h * scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(dataUrl); return; }
+        ctx.drawImage(img, 0, 0, w, h);
+        // JPEG压缩（PNG→JPEG通常可缩小10-50倍）
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => resolve(dataUrl); // 压缩失败返回原图
+      img.src = dataUrl;
+    });
+  }, []);
+
   const handleSubmit = useCallback(async () => {
     if (!currentImageUrl) {
       setError('请先添加要修图的图片');
@@ -640,6 +671,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       let imageAsDataUrl: string;
       try {
         imageAsDataUrl = await imageToDataUrl(currentImageUrl);
+        imageAsDataUrl = await compressImageDataUrl(imageAsDataUrl); // 压缩减小体积
       } catch {
         setError('图片加载失败，请尝试重新添加图片');
         setIsLoading(false);
@@ -665,9 +697,14 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         llmModelId = llmParts.slice(2).join('::');
       }
 
-      // ★ 参考图也转为base64
+      // ★ 参考图也转为base64并压缩
       const refDataUrls = referenceImages.length > 0
-        ? await Promise.all(referenceImages.map(r => imageToDataUrl(r.url)))
+        ? await Promise.all(
+            referenceImages.map(async r => {
+              const dataUrl = await imageToDataUrl(r.url);
+              return compressImageDataUrl(dataUrl);
+            })
+          )
         : undefined;
 
       // ★ 构建请求体（不含 count，单次请求只生成1张图）
@@ -750,7 +787,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     } finally {
       setIsLoading(false);
     }
-  }, [prompt, selectedModelKey, selectedLlmKey, currentImageUrl, aspectRatio, quality, outputCount, currentModelSupportsMask, exportMask, clearMask, currentHistoryIndex, referenceImages, imageToDataUrl]);
+  }, [prompt, selectedModelKey, selectedLlmKey, currentImageUrl, aspectRatio, quality, outputCount, currentModelSupportsMask, exportMask, clearMask, currentHistoryIndex, referenceImages, imageToDataUrl, compressImageDataUrl]);
 
   const handleConfirmResult = useCallback((url?: string) => {
     const finalUrl = url || resultImages[0];
