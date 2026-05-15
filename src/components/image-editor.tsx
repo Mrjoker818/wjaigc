@@ -30,7 +30,7 @@ interface ReferenceImage {
 interface ImageEditorProps {
   image: CanvasImage | null;
   onClose: () => void;
-  onConfirm: (editedImage: { url: string; prompt: string; aspectRatio?: string }) => void;
+  onConfirm: (result: { url: string; prompt: string; aspectRatio?: string }) => void;
   /** 画布上的所有图片，用于选择参考图 */
   canvasImages?: CanvasImage[];
   connectionStart?: { x: number; y: number };
@@ -92,6 +92,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
   // 结果图片状态
   const [resultImages, setResultImages] = useState<string[]>([]);
+  const [selectedResultIndexes, setSelectedResultIndexes] = useState<Set<number>>(new Set());
   const [isResultLoading, setIsResultLoading] = useState(false);
 
   // 服务器模型列表（从管理员系统获取）
@@ -664,6 +665,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     setIsLoading(true);
     setIsResultLoading(true);
     setResultImages([]);
+    setSelectedResultIndexes(new Set());
     setLoadingProgress(0);
 
     try {
@@ -759,6 +761,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
       if (collectedUrls.length > 0) {
         setResultImages(collectedUrls);
+        setSelectedResultIndexes(new Set(collectedUrls.map((_, i) => i)));
 
         const newHistoryItem: EditHistoryItem = {
           id: `edit-${Date.now()}`,
@@ -790,18 +793,29 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   }, [prompt, selectedModelKey, selectedLlmKey, currentImageUrl, aspectRatio, quality, outputCount, currentModelSupportsMask, exportMask, clearMask, currentHistoryIndex, referenceImages, imageToDataUrl, compressImageDataUrl]);
 
   const handleConfirmResult = useCallback((url?: string) => {
-    const finalUrl = url || resultImages[0];
-    if (finalUrl) {
+    if (url) {
+      // 单张点击使用
       onConfirm({
-        url: finalUrl,
+        url,
         prompt: image?.prompt ? `${image.prompt} + ${prompt}` : prompt,
         aspectRatio,
       });
+    } else {
+      // 确认使用 - 发送所有选中的结果
+      const selectedUrls = resultImages.filter((_, i) => selectedResultIndexes.has(i));
+      for (const sUrl of selectedUrls) {
+        onConfirm({
+          url: sUrl,
+          prompt: image?.prompt ? `${image.prompt} + ${prompt}` : prompt,
+          aspectRatio,
+        });
+      }
     }
     setPrompt('');
     setResultImages([]);
+    setSelectedResultIndexes(new Set());
     onClose();
-  }, [resultImages, prompt, image?.prompt, onConfirm, onClose, aspectRatio]);
+  }, [resultImages, selectedResultIndexes, prompt, image?.prompt, onConfirm, onClose, aspectRatio]);
 
   const handleHistoryClick = useCallback((index: number) => {
     const historyItem = history[index];
@@ -1441,7 +1455,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                 onClick={() => handleConfirmResult()}
                 className="px-2 py-0.5 text-[10px] bg-[#d4af37] hover:bg-[#daa520] text-black rounded font-medium transition-all"
               >
-                确认使用
+                确认使用{resultImages.length > 1 && selectedResultIndexes.size > 0 ? ` (${selectedResultIndexes.size})` : ''}
               </button>
             )}
           </div>
@@ -1467,18 +1481,75 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               </div>
             ) : resultImages.length > 0 ? (
               <div className={`flex gap-2 overflow-x-auto pb-1`}>
+                {resultImages.length > 1 && (
+                  <div className="flex items-center gap-1.5 mb-1 flex-shrink-0">
+                    <button
+                      onClick={() => {
+                        if (selectedResultIndexes.size === resultImages.length) {
+                          setSelectedResultIndexes(new Set());
+                        } else {
+                          setSelectedResultIndexes(new Set(resultImages.map((_, i) => i)));
+                        }
+                      }}
+                      className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded transition-colors ${
+                        selectedResultIndexes.size === resultImages.length
+                          ? 'bg-[#d4af37] text-black font-medium'
+                          : 'bg-[#2a2a2a] text-[#999] hover:bg-[#3a3a3a]'
+                      }`}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                        <rect x="1" y="1" width="14" height="14" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+                        {selectedResultIndexes.size === resultImages.length && (
+                          <path d="M4 8L7 11L12 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        )}
+                      </svg>
+                      全选
+                    </button>
+                    <span className="text-[10px] text-[#666]">已选 {selectedResultIndexes.size}/{resultImages.length}</span>
+                  </div>
+                )}
                 {resultImages.map((url, idx) => {
                   const ratioParts = aspectRatio.split(':').map(Number);
                   const ratioW = ratioParts[0] || 1;
                   const ratioH = ratioParts[1] || 1;
+                  const isSelected = selectedResultIndexes.has(idx);
                   return (
-                    <div key={idx} className="relative bg-[#1a1a1a] rounded-lg overflow-hidden cursor-pointer group flex-shrink-0"
+                    <div key={idx} className={`relative bg-[#1a1a1a] rounded-lg overflow-hidden cursor-pointer group flex-shrink-0 ${isSelected ? 'ring-2 ring-[#d4af37]' : ''}`}
                       style={{ aspectRatio: `${ratioW}/${ratioH}`, width: resultImages.length > 1 ? '140px' : undefined }}
-                      onClick={() => handleConfirmResult(url)}
+                      onClick={() => {
+                        // 多图时点击切换选中，单图时直接使用
+                        if (resultImages.length > 1) {
+                          setSelectedResultIndexes(prev => {
+                            const next = new Set(prev);
+                            if (next.has(idx)) { next.delete(idx); } else { next.add(idx); }
+                            return next;
+                          });
+                        } else {
+                          handleConfirmResult(url);
+                        }
+                      }}
                     >
                       <img src={url} alt={`结果 ${idx + 1}`} className="w-full h-full object-cover rounded-lg" />
+                      {/* 选中勾选框 */}
+                      {resultImages.length > 1 && (
+                        <div className={`absolute top-1.5 left-1.5 w-5 h-5 rounded-full flex items-center justify-center transition-all ${
+                          isSelected ? 'bg-[#d4af37]' : 'bg-black/40 group-hover:bg-black/60'
+                        }`}>
+                          {isSelected && (
+                            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                              <path d="M4 8L7 11L12 5" stroke="black" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                          )}
+                        </div>
+                      )}
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center">
-                        <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-white bg-[#d4af37] px-2 py-1 rounded">点击使用</span>
+                        {resultImages.length > 1 ? (
+                          <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-white bg-[#d4af37] px-2 py-1 rounded">
+                            {isSelected ? '取消选择' : '选择'}
+                          </span>
+                        ) : (
+                          <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-white bg-[#d4af37] px-2 py-1 rounded">点击使用</span>
+                        )}
                       </div>
                     </div>
                   );
