@@ -1829,13 +1829,25 @@ function CanvasApp() {
   }, []);
 
   // Language-based image editing handler - called when editor confirms/replaces image
-  const handleEditImage = useCallback((imageId: string, resultUrl: string, resultPrompt?: string) => {
-    setImages(prev => prev.map(img =>
-      img.id === imageId
-        ? { ...img, url: resultUrl, prompt: resultPrompt || img.prompt }
-        : img
-    ));
-  }, []);
+  // Language-based image editing handler - called by canvas when opening editor via connection point
+  const handleCanvasEditImage = useCallback((imageId: string, imageUrl: string, resultPrompt?: string, sourceRect?: { left: number; top: number; right: number; bottom: number; width: number; height: number }) => {
+    if (sourceRect) {
+      // Connection point click: open the ImageEditor
+      const img = images.find(i => i.id === imageId);
+      if (img) {
+        setEditingImage(img);
+        setEditSourceRect(sourceRect);
+        setLangEditMode('idle');
+      }
+    } else {
+      // Editor confirmation: update the image URL
+      setImages(prev => prev.map(img =>
+        img.id === imageId
+          ? { ...img, url: imageUrl, prompt: resultPrompt || img.prompt }
+          : img
+      ));
+    }
+  }, [images]);
 
   return (
     <div className={`h-screen w-screen relative overflow-hidden ${themeStyle === 'monochrome' ? 'bg-white' : 'bg-[#0a0a0a]'}`}>
@@ -1911,7 +1923,7 @@ function CanvasApp() {
               }
             } catch {}
           }}
-          onEditImage={handleEditImage}
+          onEditImage={handleCanvasEditImage}
           langEditMode={langEditMode}
           onLangEditModeChange={setLangEditMode}
         />
@@ -2123,7 +2135,18 @@ function CanvasApp() {
         image={previewImage}
         onClose={() => setPreviewImage(null)}
         themeStyle={themeStyle}
-        onEditImage={(img) => { setPreviewImage(null); setEditingImage(img); }}
+        onEditImage={(img) => {
+          setPreviewImage(null);
+          setEditingImage(img);
+          // Calculate source rect from the preview image element
+          setTimeout(() => {
+            const el = document.querySelector(`[data-image-id="${img.id}"]`);
+            if (el) {
+              const rect = el.getBoundingClientRect();
+              setEditSourceRect({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height });
+            }
+          }, 100);
+        }}
       />
 
       {/* Language Image Editor */}
