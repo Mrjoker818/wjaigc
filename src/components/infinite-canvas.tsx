@@ -6034,19 +6034,6 @@ export function InfiniteCanvas({
                         }}
                       />
                     ))}
-                    {/* Language edit connection point - right side center */}
-                    <button
-                      className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-4 h-4 rounded-full bg-[#d4af37] hover:bg-[#e5c249] shadow-lg border-2 border-black/50 cursor-pointer pointer-events-auto z-10 transition-all hover:scale-125"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onEditImage?.(image);
-                      }}
-                      title="连接语言修图工具"
-                    >
-                      <svg viewBox="0 0 16 16" className="w-3 h-3 text-black" fill="none" stroke="currentColor" strokeWidth="2.5">
-                        <path d="M8 3v10M3 8h10" />
-                      </svg>
-                    </button>
                   </div>
                 )}
                 {/* Alt+Click reference marker badge */}
@@ -10010,14 +9997,7 @@ export function InfiniteCanvas({
 
         {/* Language Edit - 修图 */}
         <button
-          onClick={() => {
-            const img = selectedImageData;
-            if (img && onEditImage) {
-              onEditImage(img);
-            } else {
-              onLangEditModeChange?.('selecting');
-            }
-          }}
+          onClick={() => { if (onEditImage) { onLangEditModeChange?.('selecting'); } }}
           className={`p-2 rounded-xl transition-all relative group ${
             langEditMode === 'selecting'
               ? 'bg-[#d4af37]/20 text-[#d4af37] ring-1 ring-[#d4af37]/50'
