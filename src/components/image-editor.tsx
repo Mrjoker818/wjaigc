@@ -1447,33 +1447,33 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           </div>
           <div className="p-3">
             {isResultLoading ? (
-              <div className="space-y-2">
+              <div className="flex gap-2 overflow-x-auto pb-1">
                 {Array.from({ length: Math.max(1, Math.min(outputCount, 4)) }, (_, i) => {
                   const ratioParts = aspectRatio.split(':').map(Number);
                   const ratioW = ratioParts[0] || 1;
                   const ratioH = ratioParts[1] || 1;
                   return (
-                    <div key={i} className="relative bg-[#1a1a1a] rounded-lg border-2 border-dashed border-[#d4af37]/30 flex flex-col items-center justify-center overflow-hidden"
-                      style={{ aspectRatio: `${ratioW}/${ratioH}` }}
+                    <div key={i} className="relative bg-[#1a1a1a] rounded-lg border-2 border-dashed border-[#d4af37]/30 flex flex-col items-center justify-center overflow-hidden flex-shrink-0"
+                      style={{ aspectRatio: `${ratioW}/${ratioH}`, width: outputCount > 1 ? '140px' : undefined }}
                     >
-                      <div className="relative w-10 h-10 mb-2">
+                      <div className="relative w-8 h-8 mb-1">
                         <div className="absolute inset-0 border-2 border-[#2a2a2a] rounded-full" />
                         <div className="absolute inset-0 border-2 border-[#d4af37] rounded-full animate-spin" />
                       </div>
-                      <span className="text-[10px] text-[#666]">生成中 {outputCount > 1 ? `(${i + 1}/${outputCount})` : `${loadingProgress}%`}</span>
+                      <span className="text-[9px] text-[#666]">生成中 {outputCount > 1 ? `(${i + 1}/${outputCount})` : `${loadingProgress}%`}</span>
                     </div>
                   );
                 })}
               </div>
             ) : resultImages.length > 0 ? (
-              <div className="space-y-2">
+              <div className={`flex gap-2 overflow-x-auto pb-1`}>
                 {resultImages.map((url, idx) => {
                   const ratioParts = aspectRatio.split(':').map(Number);
                   const ratioW = ratioParts[0] || 1;
                   const ratioH = ratioParts[1] || 1;
                   return (
-                    <div key={idx} className="relative bg-[#1a1a1a] rounded-lg overflow-hidden cursor-pointer group"
-                      style={{ aspectRatio: `${ratioW}/${ratioH}` }}
+                    <div key={idx} className="relative bg-[#1a1a1a] rounded-lg overflow-hidden cursor-pointer group flex-shrink-0"
+                      style={{ aspectRatio: `${ratioW}/${ratioH}`, width: resultImages.length > 1 ? '140px' : undefined }}
                       onClick={() => handleConfirmResult(url)}
                     >
                       <img src={url} alt={`结果 ${idx + 1}`} className="w-full h-full object-cover rounded-lg" />
