@@ -22,7 +22,7 @@ import dynamic from 'next/dynamic';
 const ModelViewer3D = dynamic(() => import('@/components/model-viewer-3d'), { ssr: false });
 
 const PsdLayerEditor = lazy(() => import('@/components/psd-editor/PsdLayerEditor'));
-const ImageEditor = lazy(() => import('@/components/image-editor'));
+const ImageEditor = lazy(() => import('@/components/image-editor').then(m => ({ default: m.ImageEditor })));
 
 
 /* ====== Multi-Angle Sphere Preview (Canvas 2D) ====== */
@@ -529,10 +529,6 @@ export function InfiniteCanvas({
   const [visionHoverImage, setVisionHoverImage] = useState<CanvasImage | null>(null);
   const [showRefFusion, setShowRefFusion] = useState(false);
   const [editingImage, setEditingImage] = useState<CanvasImage | null>(null);
-  const [editPanelPos, setEditPanelPos] = useState<{ x: number; y: number } | null>(null);
-  const [editResult, setEditResult] = useState<{ url: string; prompt?: string } | null>(null);
-  const [editResultPos, setEditResultPos] = useState<{ x: number; y: number } | null>(null);
-  const [isEditingInProgress, setIsEditingInProgress] = useState(false);
 
   // Context menu
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
@@ -6035,9 +6031,6 @@ export function InfiniteCanvas({
                       onClick={(e) => {
                         e.stopPropagation();
                         setEditingImage(image);
-                        setEditPanelPos({ x: image.x + image.width + 30, y: image.y });
-                        setEditResult(null);
-                        setEditResultPos(null);
                       }}
                       title="连接语言修图工具"
                     >
@@ -6806,174 +6799,26 @@ export function InfiniteCanvas({
           })}
 
           {/* Language Edit Panel - inside canvas transform space */}
-          {editingImage && (() => {
-            const gap = 40;
-            const editorW = 380;
-            const editorH = 600;
-            const resultW = 200;
-            const resultH = 200;
-            // Connection point: right center of source image
-            const cpX = editingImage.x + editingImage.width;
-            const cpY = editingImage.y + editingImage.height / 2;
-            // Editor left edge connects to connection point
-            const edLeft = editPanelPos?.x ?? (editingImage.x + editingImage.width + 24);
-            const edTop = editPanelPos?.y ?? (editingImage.y + 20);
-            // Editor right center
-            const edRightX = edLeft + editorW;
-            const edRightY = edTop + editorH / 2;
-            // Result frame position
-            const rfX = edRightX + gap;
-            const rfY = edTop + 30;
-            // Result frame center-left
-            const rfLeftX = rfX;
-            const rfLeftY = rfY + resultH / 2;
-
-            return (
-              <Suspense fallback={null}>
-                {/* SVG connection lines layer */}
-                <svg
-                  style={{
-                    position: 'absolute',
-                    left: 0,
-                    top: 0,
-                    width: '100%',
-                    height: '100%',
-                    pointerEvents: 'none',
-                    overflow: 'visible',
-                  }}
-                >
-                  {/* Line: image connection point → editor left */}
-                  <path
-                    d={`M ${cpX} ${cpY} C ${cpX + gap * 0.8} ${cpY}, ${edLeft - gap * 0.8} ${edTop + editorH / 2}, ${edLeft} ${edTop + editorH / 2}`}
-                    fill="none"
-                    stroke="#d4af37"
-                    strokeWidth={2}
-                    strokeDasharray="6 4"
-                    opacity={0.7}
-                  />
-                  {/* Small circle at image connection point */}
-                  <circle cx={cpX} cy={cpY} r={5} fill="#d4af37" opacity={0.9} />
-                  {/* Small circle at editor left */}
-                  <circle cx={edLeft} cy={edTop + editorH / 2} r={4} fill="#d4af37" opacity={0.7} />
-
-                  {/* Line: editor right → result frame left */}
-                  {editResult?.url && (
-                    <>
-                      <path
-                        d={`M ${edRightX} ${edRightY} C ${edRightX + gap * 0.8} ${edRightY}, ${rfLeftX - gap * 0.8} ${rfLeftY}, ${rfLeftX} ${rfLeftY}`}
-                        fill="none"
-                        stroke="#d4af37"
-                        strokeWidth={2}
-                        strokeDasharray="6 4"
-                        opacity={0.7}
-                      />
-                      {/* Small circle at editor right */}
-                      <circle cx={edRightX} cy={edRightY} r={4} fill="#d4af37" opacity={0.7} />
-                      {/* Small circle at result frame left */}
-                      <circle cx={rfLeftX} cy={rfLeftY} r={4} fill="#d4af37" opacity={0.7} />
-                    </>
-                  )}
-                </svg>
-
-                {/* Editor panel - draggable */}
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: edLeft,
-                    top: edTop,
-                    zIndex: 50,
-                  }}
-                  onWheel={(e) => { e.stopPropagation(); e.preventDefault(); }}
-                >
-                  {/* Drag handle */}
-                  <div
-                    className="absolute -top-6 left-0 right-0 h-6 flex items-center justify-center cursor-grab active:cursor-grabbing group"
-                    onMouseDown={(e) => {
-                      if (e.button !== 0) return;
-                      e.stopPropagation();
-                      e.preventDefault();
-                      const startX = e.clientX;
-                      const startY = e.clientY;
-                      const startLeft = editPanelPos?.x ?? (editingImage.x + editingImage.width + 24);
-                      const startTop = editPanelPos?.y ?? (editingImage.y + 20);
-                      const onMove = (ev: MouseEvent) => {
-                        const dx = ev.clientX - startX;
-                        const dy = ev.clientY - startY;
-                        setEditPanelPos({ x: startLeft + dx / zoom, y: startTop + dy / zoom });
-                      };
-                      const onUp = () => {
-                        window.removeEventListener('mousemove', onMove);
-                        window.removeEventListener('mouseup', onUp);
-                      };
-                      window.addEventListener('mousemove', onMove);
-                      window.addEventListener('mouseup', onUp);
-                    }}
-                  >
-                    <div className="flex gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
-                      <div className="w-1 h-1 rounded-full bg-[#d4af37]" />
-                      <div className="w-1 h-1 rounded-full bg-[#d4af37]" />
-                      <div className="w-1 h-1 rounded-full bg-[#d4af37]" />
-                      <div className="w-1 h-1 rounded-full bg-[#d4af37]" />
-                      <div className="w-1 h-1 rounded-full bg-[#d4af37]" />
-                    </div>
-                  </div>
-
-                  <ImageEditor
-                    image={editingImage}
-                    onClose={() => { setEditingImage(null); setEditResult(null); }}
-                    onConfirm={(result: { url: string; prompt?: string }) => {
-                      setEditResult({ url: result.url, prompt: result.prompt });
-                      // Update the image in canvas
-                      const updatedImages = images.map(img =>
-                        img.id === editingImage.id
-                          ? { ...img, url: result.url, prompt: result.prompt || img.prompt }
-                          : img
-                      );
-                      onImagesChange(updatedImages);
-                      // Notify parent
-                      onEditImage?.(editingImage.id, result.url, result.prompt);
-                    }}
-                  />
-                </div>
-
-                {/* Result frame */}
-                {(editResult || isEditingInProgress) && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      left: rfX,
-                      top: rfY,
-                      width: resultW,
-                      height: resultH,
-                      zIndex: 50,
-                    }}
-                    onWheel={(e) => { e.stopPropagation(); e.preventDefault(); }}
-                  >
-                    <div className="bg-[#1a1a1a] border border-[#333] rounded-lg overflow-hidden flex items-center justify-center"
-                      style={{ width: '100%', height: '100%' }}
-                    >
-                      {isEditingInProgress ? (
-                        <div className="flex flex-col items-center gap-2">
-                          <div className="w-8 h-8 border-2 border-[#d4af37] border-t-transparent rounded-full animate-spin" />
-                          <span className="text-[#999] text-xs">生成中...</span>
-                        </div>
-                      ) : editResult?.url ? (
-                        <img
-                          src={editResult.url}
-                          alt="result"
-                          className="w-full h-full object-contain"
-                          draggable={false}
-                        />
-                      ) : null}
-                    </div>
-                    {editResult?.url && (
-                      <div className="text-[#999] text-[10px] text-center mt-1">修图结果</div>
-                    )}
-                  </div>
-                )}
-              </Suspense>
-            );
-          })()}
+          {editingImage && (
+            <Suspense fallback={null}>
+              <ImageEditor
+                image={editingImage}
+                onClose={() => setEditingImage(null)}
+                onConfirm={(result: { url: string; prompt?: string }) => {
+                  // Update the image in canvas
+                  const updatedImages = images.map(img =>
+                    img.id === editingImage.id
+                      ? { ...img, url: result.url, prompt: result.prompt || img.prompt }
+                      : img
+                  );
+                  onImagesChange(updatedImages);
+                  // Notify parent
+                  onEditImage?.(editingImage.id, result.url, result.prompt);
+                  setEditingImage(null);
+                }}
+              />
+            </Suspense>
+          )}
         </div>
 
 
@@ -10182,7 +10027,6 @@ export function InfiniteCanvas({
             const img = selectedImageData;
             if (img) {
               setEditingImage(img);
-              setEditPanelPos({ x: img.x + img.width + 40, y: img.y });
             } else {
               onLangEditModeChange?.('selecting');
             }
