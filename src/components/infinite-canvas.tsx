@@ -22,7 +22,6 @@ import dynamic from 'next/dynamic';
 const ModelViewer3D = dynamic(() => import('@/components/model-viewer-3d'), { ssr: false });
 
 const PsdLayerEditor = lazy(() => import('@/components/psd-editor/PsdLayerEditor'));
-const ImageEditor = lazy(() => import('@/components/image-editor').then(m => ({ default: m.ImageEditor })));
 
 
 /* ====== Multi-Angle Sphere Preview (Canvas 2D) ====== */
@@ -321,7 +320,7 @@ interface InfiniteCanvasProps {
   /** Force save canvas data to localStorage + server */
   onForceSave?: () => void;
   /** Called when user wants to open the language-based image editor */
-  onEditImage?: (imageId: string, resultUrl: string, resultPrompt?: string) => void;
+  onEditImage?: (image: CanvasImage) => void;
   /** Language edit selection mode */
   langEditMode?: 'idle' | 'selecting';
   onLangEditModeChange?: (mode: 'idle' | 'selecting') => void;
@@ -528,7 +527,6 @@ export function InfiniteCanvas({
   const canvasGenFrameHeight = 288; // 16:9 ratio
   const [visionHoverImage, setVisionHoverImage] = useState<CanvasImage | null>(null);
   const [showRefFusion, setShowRefFusion] = useState(false);
-  const [editingImage, setEditingImage] = useState<CanvasImage | null>(null);
 
   // Context menu
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
@@ -1587,6 +1585,15 @@ export function InfiniteCanvas({
 
     const hitId = hitTestImage(canvasPos.x, canvasPos.y);
     if (hitId) {
+      // Language edit mode: clicking an image opens the editor
+      if (langEditMode === 'selecting') {
+        const img = images.find(i => i.id === hitId);
+        if (img) {
+          onEditImage?.(img);
+          onLangEditModeChange?.('idle');
+        }
+        return;
+      }
       mouseDownOnImageRef.current = true;
       imageDragReadyRef.current = false;
       if (e.ctrlKey || e.metaKey) {
@@ -5314,6 +5321,7 @@ export function InfiniteCanvas({
     { icon: <Expand size={14} />, label: '扩展', desc: '向四周延伸画面，自动补齐背景', action: handleOpenExpand },
     { icon: <Scissors size={14} />, label: '裁切', desc: '自由/预设比例裁切', action: handleOpenCrop },
     { icon: <ImagePlus size={14} />, label: '图生图', desc: '基于当前图生成新图', action: () => { if (selectedImage) setEditImageId(selectedImage.id); setEditMode('img2img'); } },
+    { icon: <Pencil size={14} />, label: '语言修图', desc: '用自然语言描述修改图片', action: () => { if (selectedImage) onEditImage?.(selectedImage); } },
     { icon: <Download size={14} />, label: '下载', desc: 'PNG/SVG/PSD下载', action: handleOpenDownload },
   ];
 
@@ -5453,6 +5461,7 @@ export function InfiniteCanvas({
     { label: '删除', shortcut: 'Delete', action: () => { onImagesChange(images.filter(i => !selectedIds.has(i.id))); setSelectedIds(new Set()); selectImage(null); } },
     { label: '发送参考图', action: () => { const img = selectedImageData; if (img) onGenerateVariation(img); } },
     { label: '提取关键词', action: () => { const img = selectedImageData; if (img) onExtractKeywords(img); } },
+    { label: '语言修图', action: () => { const img = selectedImageData; if (img) onEditImage?.(img); } },
   ];
 
   const ratioOptions = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9'];
@@ -6025,19 +6034,6 @@ export function InfiniteCanvas({
                         }}
                       />
                     ))}
-                    {/* Language edit connection point - right side center */}
-                    <button
-                      className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-4 h-4 rounded-full bg-[#d4af37] hover:bg-[#e5c249] shadow-lg border-2 border-black/50 cursor-pointer pointer-events-auto z-10 transition-all hover:scale-125"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingImage(image);
-                      }}
-                      title="连接语言修图工具"
-                    >
-                      <svg viewBox="0 0 16 16" className="w-3 h-3 text-black" fill="none" stroke="currentColor" strokeWidth="2.5">
-                        <path d="M8 3v10M3 8h10" />
-                      </svg>
-                    </button>
                   </div>
                 )}
                 {/* Alt+Click reference marker badge */}
@@ -6797,28 +6793,6 @@ export function InfiniteCanvas({
               </div>
             );
           })}
-
-          {/* Language Edit Panel - inside canvas transform space */}
-          {editingImage && (
-            <Suspense fallback={null}>
-              <ImageEditor
-                image={editingImage}
-                onClose={() => setEditingImage(null)}
-                onConfirm={(result: { url: string; prompt?: string }) => {
-                  // Update the image in canvas
-                  const updatedImages = images.map(img =>
-                    img.id === editingImage.id
-                      ? { ...img, url: result.url, prompt: result.prompt || img.prompt }
-                      : img
-                  );
-                  onImagesChange(updatedImages);
-                  // Notify parent
-                  onEditImage?.(editingImage.id, result.url, result.prompt);
-                  setEditingImage(null);
-                }}
-              />
-            </Suspense>
-          )}
         </div>
 
 
@@ -10023,16 +9997,9 @@ export function InfiniteCanvas({
 
         {/* Language Edit - 修图 */}
         <button
-          onClick={() => {
-            const img = selectedImageData;
-            if (img) {
-              setEditingImage(img);
-            } else {
-              onLangEditModeChange?.('selecting');
-            }
-          }}
+          onClick={() => { if (onEditImage) { onLangEditModeChange?.('selecting'); } }}
           className={`p-2 rounded-xl transition-all relative group ${
-            editingImage !== null
+            langEditMode === 'selecting'
               ? 'bg-[#d4af37]/20 text-[#d4af37] ring-1 ring-[#d4af37]/50'
               : isMonochrome
                 ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
