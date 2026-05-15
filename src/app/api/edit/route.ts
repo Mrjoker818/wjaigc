@@ -1,36 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 
 // 允许大请求体（base64图片可能很大，50MB限制）
 export const runtime = 'nodejs';
 
-// Gemini 模型映射（用于图片编辑）
-const GEMINI_EDIT_MODELS: Record<string, {
-  name: string;
-  modelId: string;
-  description: string;
-}> = {
-  'gemini-2.5-flash-image': {
-    name: 'Nano Banana',
-    modelId: 'gemini-2.0-flash-preview-05-20',
-    description: '快速修图，适合日常使用',
-  },
-  'gemini-3-pro-image-preview': {
-    name: 'Nano Banana Pro',
-    modelId: 'gemini-3-pro-preview',
-    description: '旗舰模型，高质量图片编辑',
-  },
-  'gemini-3.1-flash-image-preview': {
-    name: 'Nano Banana 2',
-    modelId: 'gemini-2.5-flash-preview-06-06',
-    description: '平衡速度与质量',
-  },
-};
-
-// 支持编辑的模型列表（包含 OpenAI 和 Gemini 模型）
+// 支持编辑的模型列表（用于降级静态列表）
 export const EDITABLE_MODELS = [
   'gpt-image-2',
   'dall-e-3',
@@ -39,7 +14,7 @@ export const EDITABLE_MODELS = [
   'gemini-3.1-flash-image-preview',
 ];
 
-/** 将图片 URL/data 转换为 Buffer + mimeType，供 inlineData 使用 */
+/** 将图片 URL/data 转换为 Buffer + mimeType */
 async function resolveImageToBuffer(imageSrc: string): Promise<{ buffer: Buffer; mimeType: string }> {
   if (imageSrc.startsWith('data:')) {
     const commaIndex = imageSrc.indexOf(',');
@@ -66,37 +41,147 @@ async function resolveImageToBuffer(imageSrc: string): Promise<{ buffer: Buffer;
   }
 }
 
+/**
+ * 判断模型是否为图像生成/编辑类模型（非纯聊天模型）
+ * 第三方代理上同一个模型可能有不同命名，需要宽松匹配
+ */
+function isImageEditModel(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  return (
+    id.includes('image') ||
+    id.includes('dall-e') ||
+    id.includes('gpt-image') ||
+    id === 'gpt-image-2'
+  );
+}
+
+/**
+ * 判断模型是否支持蒙版涂抹
+ * 仅 OpenAI 官方 images.edit 端点支持 mask 参数
+ * 第三方代理通常通过 chat/completions 多模态实现，不支持 mask
+ */
+function modelSupportsMask(modelId: string, providerBaseUrl: string): boolean {
+  const id = modelId.toLowerCase();
+  // OpenAI 官方端点支持 mask
+  if (id.includes('gpt-image') || id.includes('dall-e')) {
+    // 但如果走的是第三方代理的 chat/completions，也不支持 mask
+    if (providerBaseUrl && !providerBaseUrl.includes('api.openai.com')) {
+      return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 从第三方 API 响应中提取图片 URL/base64
+ * 支持多种返回格式，确保兼容各种代理
+ */
+function extractImageFromResponse(responseData: Record<string, unknown>): string {
+  // 格式1: OpenAI images 标准格式 { data: [{ url, b64_json }] }
+  const data = responseData.data as Array<Record<string, unknown>> | undefined;
+  if (data && Array.isArray(data) && data.length > 0) {
+    const first = data[0];
+    if (first?.b64_json) {
+      return `data:image/png;base64,${first.b64_json}`;
+    }
+    if (first?.url) {
+      return first.url as string;
+    }
+  }
+
+  // 格式2: chat/completions 多模态响应 - content 是数组
+  const choices = responseData.choices as Array<Record<string, unknown>> | undefined;
+  if (choices && Array.isArray(choices) && choices.length > 0) {
+    const message = choices[0].message as Record<string, unknown> | undefined;
+    if (message) {
+      const content = message.content;
+
+      // content 是数组（多模态响应）
+      if (Array.isArray(content)) {
+        for (const part of content) {
+          if (typeof part === 'object' && part !== null) {
+            // { type: 'image_url', image_url: { url: 'data:...' } }
+            if (part.type === 'image_url' && (part as Record<string, unknown>).image_url) {
+              const imageUrl = (part as Record<string, Record<string, string>>).image_url;
+              if (imageUrl?.url) return imageUrl.url;
+            }
+            // { type: 'image', source: { data: '...' } } (Anthropic 风格)
+            if (part.type === 'image' && (part as Record<string, unknown>).source) {
+              const source = (part as Record<string, Record<string, string>>).source;
+              if (source?.data) return `data:${source.media_type || 'image/png'};base64,${source.data}`;
+            }
+            // inline_data 格式
+            if ((part as Record<string, unknown>).inline_data) {
+              const inlineData = (part as Record<string, Record<string, string>>).inline_data;
+              if (inlineData?.data) return `data:${inlineData.mime_type || 'image/png'};base64,${inlineData.data}`;
+            }
+          }
+        }
+      }
+
+      // content 是字符串
+      if (typeof content === 'string') {
+        // 包含 data:image base64
+        const base64Match = content.match(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/);
+        if (base64Match) return base64Match[0];
+
+        // 包含 markdown 图片链接
+        const mdMatch = content.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/);
+        if (mdMatch) return mdMatch[1];
+
+        // 包含纯 URL
+        const urlMatch = content.match(/(https?:\/\/[^\s"'<>]+\.(?:png|jpg|jpeg|webp|gif)[^\s"'<>]*)/i);
+        if (urlMatch) return urlMatch[1];
+      }
+    }
+  }
+
+  // 格式3: 直接返回 url 字段
+  if (responseData.url && typeof responseData.url === 'string') {
+    return responseData.url;
+  }
+
+  // 格式4: 直接返回 b64_json 字段
+  if (responseData.b64_json && typeof responseData.b64_json === 'string') {
+    return `data:image/png;base64,${responseData.b64_json}`;
+  }
+
+  return '';
+}
+
+// ============================================================
+// POST: 执行语言修图
+// ============================================================
 export async function POST(request: NextRequest) {
   try {
-    const { 
-      image,        // base64 data URL 或 URL
-      prompt,       // 编辑指令（自然语言）
-      mask,         // 可选，mask图片 base64（仅 OpenAI 模型使用）
+    const {
+      image,         // base64 data URL（客户端已转换）
+      prompt,        // 编辑指令（自然语言）
+      mask,          // 可选，mask图片 base64（仅支持 mask 的模型使用）
       size = '1:1',  // 画面比例或像素尺寸
       quality = 'high',
-      apiKey,       // 可选，用户提供的 API Key
+      apiKey,        // 可选，用户提供的 API Key
       model = 'gpt-image-2',
-      providerId,   // 可选，管理员系统提供商ID
-      count = 1,    // 生图数量
-      llmModelId,   // 可选，LLM辅助模型ID（预留）
-      llmProviderId, // 可选，LLM辅助模型提供商ID（预留）
+      providerId,    // 管理员系统提供商ID
+      count = 1,     // 生图数量
+      llmModelId,    // 可选，LLM辅助模型ID
+      llmProviderId, // 可选，LLM辅助模型提供商ID
       referenceImages, // 可选，参考图URL数组（多图模式）
     } = await request.json();
 
     if (!image) {
-      return NextResponse.json({ error: 'Image is required' }, { status: 400 });
+      return NextResponse.json({ success: false, error: '请先添加图片' }, { status: 400 });
     }
-
     if (!prompt) {
-      return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
+      return NextResponse.json({ success: false, error: '请输入编辑指令' }, { status: 400 });
     }
 
-    // 获取 API Key 和 baseUrl：与 /api/generate 一致的方式
-    let effectiveApiKey = apiKey;
+    // ========== 1. 获取 API 凭证（与 /api/generate 一致） ==========
+    let effectiveApiKey = apiKey || '';
     let effectiveBaseUrl = '';
-    let effectiveProviderId = providerId;
+    let effectiveProviderId = providerId || '';
 
-    // 优先通过 providerId 从服务器配置中获取
     if (!effectiveApiKey && providerId) {
       try {
         const provider = await findProviderById(providerId);
@@ -104,12 +189,9 @@ export async function POST(request: NextRequest) {
           effectiveApiKey = provider.apiKey;
           effectiveBaseUrl = normalizeApiBaseUrl(provider.baseUrl || '');
         }
-      } catch {
-        // 忽略，降级到用户提供的 key
-      }
+      } catch { /* 忽略 */ }
     }
 
-    // 其次通过模型名称查找服务器管理的 API Key
     if (!effectiveApiKey) {
       try {
         const provider = await findProviderForModel(model);
@@ -118,26 +200,21 @@ export async function POST(request: NextRequest) {
           effectiveBaseUrl = normalizeApiBaseUrl(provider.baseUrl || '');
           effectiveProviderId = provider.id;
         }
-      } catch {
-        // 忽略
-      }
+      } catch { /* 忽略 */ }
     }
 
     if (!effectiveApiKey) {
       return NextResponse.json({
         success: false,
-        error: '需要在管理员系统中配置 API Key，或手动输入 API Key',
+        error: '需要在管理员系统中配置 API Key',
         requiresApiKey: true,
       }, { status: 400 });
     }
 
-    // 判断是否为 Gemini 模型
-    const isGeminiModel = model.startsWith('gemini-');
-    
-    // 处理原图
+    // ========== 2. 解析原图为 Buffer ==========
     let imageBuffer: Buffer;
     let mimeType = 'image/png';
-    
+
     if (image.startsWith('data:')) {
       const commaIndex = image.indexOf(',');
       const header = image.substring(0, commaIndex);
@@ -175,255 +252,16 @@ export async function POST(request: NextRequest) {
       imageBuffer = Buffer.from(image, 'base64');
     }
 
-    // ========== Gemini 模型处理 ==========
-    if (isGeminiModel) {
-      const geminiConfig = GEMINI_EDIT_MODELS[model];
-      
-      if (!geminiConfig) {
-        return NextResponse.json({
-          success: false,
-          error: `不支持的 Gemini 模型: ${model}`,
-        }, { status: 400 });
-      }
-
-      // 判断是否使用代理路径（非 Google 官方端点）
-      const isProxyProvider = effectiveBaseUrl && !effectiveBaseUrl.includes('generativelanguage.googleapis.com');
-
-      try {
-        const editPrompt = `Edit this image according to the following instruction: ${prompt}. Maintain the overall composition and style while making the requested changes.`;
-
-        if (isProxyProvider) {
-          // ★ 代理路径：使用 OpenAI 兼容的 chat/completions 端点
-          // 代理通常不支持 Gemini 原生 API 格式，需走 chat 多模态
-          const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
-            { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBuffer.toString('base64')}` } },
-          ];
-
-          // 添加参考图
-          if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
-            for (const refUrl of referenceImages) {
-              try {
-                const ref = await resolveImageToBuffer(refUrl);
-                contentParts.push({ type: 'image_url', image_url: { url: `data:${ref.mimeType};base64,${ref.buffer.toString('base64')}` } });
-              } catch (refErr) {
-                console.warn('Failed to load reference image, skipping:', refErr);
-              }
-            }
-            contentParts.push({ type: 'text', text: `[System: There are ${referenceImages.length} reference image(s) above. Use them as style/composition/subject references when editing the main image.]` });
-          }
-
-          contentParts.push({ type: 'text', text: editPrompt });
-
-          const chatResponse = await fetchWithV1Retry(
-            effectiveBaseUrl,
-            '/chat/completions',
-            {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${effectiveApiKey}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                model: geminiConfig.modelId,
-                messages: [{
-                  role: 'user',
-                  content: contentParts,
-                }],
-                max_tokens: 4096,
-              }),
-            },
-          );
-
-          if (!chatResponse.ok) {
-            const errText = await chatResponse.text().catch(() => '');
-            throw new Error(`Proxy API error: ${chatResponse.status} - ${errText.substring(0, 200)}`);
-          }
-
-          const chatData = await chatResponse.json();
-          const messageContent = chatData.choices?.[0]?.message?.content || '';
-
-          // 尝试从响应中提取图片（base64 或 URL）
-          let resultImageUrl = '';
-          
-          // 格式1：响应中包含 inline_data（部分代理返回格式）
-          if (chatData.choices?.[0]?.message?.inline_data) {
-            const inlineData = chatData.choices[0].message.inline_data;
-            resultImageUrl = `data:${inlineData.mime_type || 'image/png'};base64,${inlineData.data}`;
-          }
-          // 格式2：content 中包含 base64 图片
-          else if (typeof messageContent === 'string' && messageContent.includes('data:image')) {
-            const match = messageContent.match(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/);
-            if (match) resultImageUrl = match[0];
-          }
-          // 格式3：content 中包含 markdown 图片链接
-          else if (typeof messageContent === 'string' && messageContent.includes('![')) {
-            const match = messageContent.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/);
-            if (match) resultImageUrl = match[1];
-          }
-          // 格式4：多模态响应中 content 是数组
-          else if (Array.isArray(messageContent)) {
-            for (const part of messageContent) {
-              if (part.type === 'image_url' && part.image_url?.url) {
-                resultImageUrl = part.image_url.url;
-                break;
-              }
-              if (part.type === 'image' && part.source?.data) {
-                resultImageUrl = `data:${part.source.media_type || 'image/png'};base64,${part.source.data}`;
-                break;
-              }
-            }
-          }
-
-          if (!resultImageUrl) {
-            return NextResponse.json({
-              success: false,
-              error: '代理 API 编辑失败，模型未返回有效图片结果',
-              debugContent: typeof messageContent === 'string' ? messageContent.substring(0, 500) : 'non-string content',
-            }, { status: 500 });
-          }
-
-          const images = count > 1 
-            ? Array.from({ length: count }, () => ({ url: resultImageUrl, revisedPrompt: prompt }))
-            : [{ url: resultImageUrl, revisedPrompt: prompt }];
-
-          return NextResponse.json({
-            success: true,
-            image: images[0],
-            images,
-            model: model,
-            provider: 'proxy',
-          });
-
-        } else {
-          // ★ 直连 Google 路径：使用 Gemini 原生 SDK
-          const genAI = new GoogleGenerativeAI(effectiveApiKey);
-          const geminiModel = genAI.getGenerativeModel(
-            { model: geminiConfig.modelId },
-            effectiveBaseUrl ? { baseUrl: effectiveBaseUrl } : undefined,
-          );
-
-          // 构建 parts：主图 + 参考图 + 文本指令
-          const parts: Array<{ inlineData: { data: string; mimeType: string } } | { text: string }> = [
-            {
-              inlineData: {
-                data: imageBuffer.toString('base64'),
-                mimeType: mimeType,
-              },
-            },
-          ];
-
-          // ★ 添加参考图（多图模式）
-          if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
-            for (const refUrl of referenceImages) {
-              try {
-                const ref = await resolveImageToBuffer(refUrl);
-                parts.push({
-                  inlineData: {
-                    data: ref.buffer.toString('base64'),
-                    mimeType: ref.mimeType,
-                  },
-                });
-              } catch (refErr) {
-                console.warn('Failed to load reference image, skipping:', refErr);
-              }
-            }
-            // 参考图存在时，补充说明
-            parts.push({ text: `[System: There are ${referenceImages.length} reference image(s) above. Use them as style/composition/subject references when editing the main image.]` });
-          }
-
-          parts.push({ text: editPrompt });
-
-          const result = await geminiModel.generateContent({
-            contents: [{
-              role: 'user',
-              parts: parts,
-            }],
-            generationConfig: {
-              responseModalities: ['TEXT', 'IMAGE'] as unknown as string[],
-            } as any,
-          });
-
-          const response = result.response;
-
-          let resultImageBase64: string = '';
-          let resultMimeType = 'image/png';
-          
-          for (const candidate of response.candidates || []) {
-            for (const part of candidate.content.parts || []) {
-              if (part.inlineData) {
-                resultImageBase64 = part.inlineData.data || '';
-                resultMimeType = part.inlineData.mimeType || 'image/png';
-                break;
-              }
-            }
-            if (resultImageBase64) break;
-          }
-
-          if (!resultImageBase64) {
-            return NextResponse.json({
-              success: false,
-              error: 'Gemini 模型编辑失败，未返回有效结果',
-            }, { status: 500 });
-          }
-
-          const imageDataUrl = `data:${resultMimeType};base64,${resultImageBase64}`;
-
-          // 支持多张结果
-          const images = count > 1 
-            ? Array.from({ length: count }, () => ({ url: imageDataUrl, revisedPrompt: prompt }))
-            : [{ url: imageDataUrl, revisedPrompt: prompt }];
-
-          return NextResponse.json({
-            success: true,
-            image: images[0],
-            images,
-            model: model,
-            provider: 'google',
-          });
-        }
-
-      } catch (geminiError: unknown) {
-        const errMsg = geminiError instanceof Error ? geminiError.message : 'Unknown error';
-        console.error('Gemini API error:', geminiError);
-        
-        if (errMsg.includes('fetch failed') || errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('network')) {
-          return NextResponse.json({
-            success: false,
-            error: `网络连接失败：无法访问 Google Gemini API`,
-            networkError: true,
-          }, { status: 503 });
-        }
-        
-        if (errMsg.includes('API_KEY') || errMsg.includes('invalid API key')) {
-          return NextResponse.json({ success: false, error: 'Google API Key 无效或已过期' }, { status: 401 });
-        }
-        
-        if (errMsg.includes('quota') || errMsg.includes('limit') || errMsg.includes('429')) {
-          return NextResponse.json({ success: false, error: 'API 调用次数已达上限，请稍后再试' }, { status: 429 });
-        }
-
-        if (errMsg.includes('PERMISSION_DENIED') || errMsg.includes('permission') || errMsg.includes('403')) {
-          return NextResponse.json({ success: false, error: 'API Key 权限不足' }, { status: 403 });
-        }
-
-        return NextResponse.json({ success: false, error: errMsg || 'Gemini API 调用失败' }, { status: 500 });
-      }
-    }
-
-    // ========== OpenAI 模型处理 ==========
-    
-    // 处理mask
+    // ========== 3. 解析 mask ==========
     let maskBuffer: Buffer | undefined;
     if (mask) {
       if (mask.startsWith('data:')) {
-        const base64Data = mask.split(',')[1];
-        maskBuffer = Buffer.from(base64Data, 'base64');
+        maskBuffer = Buffer.from(mask.split(',')[1], 'base64');
       } else if (mask.startsWith('http://') || mask.startsWith('https://')) {
         try {
           const response = await fetch(mask);
           if (!response.ok) throw new Error(`Failed to fetch mask: ${response.status}`);
-          const arrayBuffer = await response.arrayBuffer();
-          maskBuffer = Buffer.from(arrayBuffer);
+          maskBuffer = Buffer.from(await response.arrayBuffer());
         } catch (fetchError: unknown) {
           const errMsg = fetchError instanceof Error ? fetchError.message : 'Unknown error';
           return NextResponse.json({ success: false, error: `无法下载mask: ${errMsg}` }, { status: 400 });
@@ -433,63 +271,32 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ★ 使用已获取的 effectiveBaseUrl（与 Gemini 路径共享同一 provider 查找逻辑）
-    const openai = new OpenAI({
-      apiKey: effectiveApiKey,
-      ...(effectiveBaseUrl ? { baseURL: effectiveBaseUrl } : {}),
-    });
+    // ========== 4. 判断调用路径 ==========
+    const id = model.toLowerCase();
+    const isOpenaiImageModel = id.includes('gpt-image') || id.includes('dall-e');
+    const supportsMask = modelSupportsMask(model, effectiveBaseUrl);
 
-    const imageModel = model === 'gpt-image-2' ? 'gpt-image-2' : 'dall-e-3';
-
-    // 比例到像素尺寸映射
-    const sizeMap: Record<string, string> = {
-      '1:1': '1024x1024',
-      '16:9': '1792x1024',
-      '9:16': '1024x1792',
-      '4:3': '1024x768',
-      '3:4': '768x1024',
-      '2:3': '768x1024',
-      '3:2': '1024x768',
-      '1:2': '512x1024',
-      '2:1': '1024x512',
-      '1024': '1024x1024',
-      '1536': '1536x1536',
-      '2048': '2048x2048',
-    };
-
-    let outputSize = size;
-    if (sizeMap[size]) {
-      outputSize = sizeMap[size];
-    } else if (!size.includes('x')) {
-      outputSize = `${size}x${size}`;
-    }
-
-    // 构建API调用参数
-    // ★ OpenAI images.edit 不支持多图输入，参考图信息融入 prompt
+    // ========== 5. 构建编辑 prompt ==========
     let effectivePrompt = prompt;
+
+    // 使用 LLM 模型优化 prompt / 分析参考图（如果配置了 LLM）
     if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
-      // 使用 LLM 模型对参考图进行理解（如果配置了 LLM），否则直接描述参考图数量
       let refDescription = '';
       if (llmModelId && llmProviderId) {
         try {
-          // 查找 LLM 提供商配置
-          const { getApiProviders: getProviders } = await import('@/lib/server-api-config');
-          const providers = await getProviders();
-          const llmProvider = providers.find((p: { id: string }) => p.id === llmProviderId);
+          const llmProvider = await findProviderById(llmProviderId);
           if (llmProvider?.apiKey && llmProvider?.baseUrl) {
-            // 构建参考图理解请求
             const refParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
               { type: 'text', text: '请简要描述以下参考图片的风格、构图和主体特征，用于指导图片编辑。用中文回答，不超过100字：' },
             ];
-            for (const refUrl of referenceImages.slice(0, 4)) { // 最多4张参考图
-              let imageUrl = refUrl;
-              if (refUrl.startsWith('/')) {
-                const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
-                imageUrl = domain ? `https://${domain}${refUrl}` : `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${refUrl}`;
-              }
-              refParts.push({ type: 'image_url', image_url: { url: imageUrl } });
+            for (const refUrl of referenceImages.slice(0, 4)) {
+              try {
+                const ref = await resolveImageToBuffer(refUrl);
+                refParts.push({ type: 'image_url', image_url: { url: `data:${ref.mimeType};base64,${ref.buffer.toString('base64')}` } });
+              } catch { /* 跳过失败的参考图 */ }
             }
-            const llmResponse = await fetch(`${llmProvider.baseUrl}/chat/completions`, {
+            const llmBaseUrl = normalizeApiBaseUrl(llmProvider.baseUrl);
+            const llmResponse = await fetchWithV1Retry(llmBaseUrl, '/chat/completions', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -517,105 +324,336 @@ export async function POST(request: NextRequest) {
       effectivePrompt = `${refContext}${prompt}`;
     }
 
-    const editParams: Record<string, unknown> = {
-      model: imageModel,
-      image: imageBuffer,
-      prompt: effectivePrompt,
-    };
+    const editInstruction = `Edit this image according to the following instruction: ${effectivePrompt}. Maintain the overall composition and style while making the requested changes.`;
 
-    if (maskBuffer) {
-      editParams.mask = maskBuffer;
-    }
+    // ========== 6. 调用 API（全兼容模式） ==========
 
-    if (imageModel === 'gpt-image-2') {
-      editParams.size = outputSize;
-      editParams.quality = quality;
-      editParams.background = 'opaque';
-      editParams.output_format = 'png';
-      editParams.n = Math.min(count, 4);
-    } else {
-      editParams.size = outputSize;
-      editParams.quality = quality === 'high' ? 'hd' : 'standard';
-      editParams.n = 1;
-    }
-
-    const response = await openai.images.edit(editParams as any);
-
-    // 提取结果图片
-    const resp = response as any;
-    const images: { url: string; revisedPrompt: string }[] = [];
-
-    if (resp.data && Array.isArray(resp.data)) {
-      for (const img of resp.data) {
-        const url = img.b64_json ? `data:image/png;base64,${img.b64_json}` : (img.url || '');
-        if (url) {
-          images.push({ url, revisedPrompt: img.revised_prompt || prompt });
+    // 路径A: OpenAI images.edit 端点（仅 OpenAI 官方 + 支持 mask 的场景）
+    // 第三方代理即使模型名是 gpt-image-2，也不走 images.edit（因为代理通常不支持）
+    if (isOpenaiImageModel && supportsMask && maskBuffer) {
+      try {
+        const FormData = (await import('form-data')).default;
+        const form = new FormData();
+        form.append('model', model);
+        form.append('image', imageBuffer, { filename: 'image.png', contentType: mimeType });
+        form.append('prompt', editInstruction);
+        if (maskBuffer) {
+          form.append('mask', maskBuffer, { filename: 'mask.png', contentType: 'image/png' });
         }
+
+        // 比例到像素尺寸映射
+        const sizeMap: Record<string, string> = {
+          '1:1': '1024x1024', '16:9': '1792x1024', '9:16': '1024x1792',
+          '4:3': '1024x768', '3:4': '768x1024', '2:3': '768x1024', '3:2': '1024x768',
+          '1:2': '512x1024', '2:1': '1024x512',
+          '1024': '1024x1024', '1536': '1536x1536', '2048': '2048x2048',
+        };
+        let outputSize = size;
+        if (sizeMap[size]) outputSize = sizeMap[size];
+        else if (!size.includes('x')) outputSize = `${size}x${size}`;
+
+        form.append('size', outputSize);
+        form.append('quality', quality);
+        if (model === 'gpt-image-2') {
+          form.append('n', String(Math.min(count, 4)));
+        }
+
+        const editResponse = await fetchWithV1Retry(
+          effectiveBaseUrl,
+          '/images/edits',
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${effectiveApiKey}`,
+              ...form.getHeaders(),
+            },
+            body: form as unknown as BodyInit,
+          },
+        );
+
+        if (!editResponse.ok) {
+          const errText = await editResponse.text().catch(() => '');
+          // images.edit 失败，降级到 chat/completions 路径
+          console.warn(`images.edit failed (${editResponse.status}), falling back to chat/completions: ${errText.substring(0, 200)}`);
+          // 不 return，继续走下面的 chat/completions 路径
+        } else {
+          const editData = await editResponse.json();
+          const resultUrl = extractImageFromResponse(editData);
+          if (resultUrl) {
+            return NextResponse.json({
+              success: true,
+              image: { url: resultUrl, revisedPrompt: effectivePrompt },
+              images: [{ url: resultUrl, revisedPrompt: effectivePrompt }],
+              model,
+              provider: 'openai-images-edit',
+            });
+          }
+          // 提取失败，降级到 chat/completions
+          console.warn('images/edit response parsed but no image found, falling back to chat/completions');
+        }
+      } catch (editErr) {
+        console.warn('images.edit error, falling back to chat/completions:', editErr instanceof Error ? editErr.message : editErr);
+        // 降级到 chat/completions
       }
     }
 
-    if (images.length === 0) {
+    // 路径B: chat/completions 多模态端点（全兼容，适用于所有第三方代理）
+    // 所有模型（Gemini/OpenAI/其他）通过第三方代理时，统一走此路径
+    const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+
+    // 主图
+    contentParts.push({
+      type: 'image_url',
+      image_url: { url: `data:${mimeType};base64,${imageBuffer.toString('base64')}` },
+    });
+
+    // 参考图
+    if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
+      for (const refUrl of referenceImages) {
+        try {
+          const ref = await resolveImageToBuffer(refUrl);
+          contentParts.push({
+            type: 'image_url',
+            image_url: { url: `data:${ref.mimeType};base64,${ref.buffer.toString('base64')}` },
+          });
+        } catch (refErr) {
+          console.warn('Failed to load reference image, skipping:', refErr);
+        }
+      }
+      contentParts.push({
+        type: 'text',
+        text: `[System: There are ${referenceImages.length} reference image(s) above. Use them as style/composition/subject references when editing the main image.]`,
+      });
+    }
+
+    // 编辑指令
+    contentParts.push({ type: 'text', text: editInstruction });
+
+    // 构建 chat/completions 请求体
+    const chatRequestBody: Record<string, unknown> = {
+      model,
+      messages: [{
+        role: 'user',
+        content: contentParts,
+      }],
+      max_tokens: 4096,
+    };
+
+    // 对于图像生成类模型，添加响应格式提示（部分代理支持）
+    if (isOpenaiImageModel || isImageEditModel(model)) {
+      // 部分代理/模型需要通过特定参数要求返回图片
+      // 不影响不支持此参数的代理（会被忽略）
+    }
+
+    const chatResponse = await fetchWithV1Retry(
+      effectiveBaseUrl,
+      '/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${effectiveApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(chatRequestBody),
+      },
+    );
+
+    if (!chatResponse.ok) {
+      const errText = await chatResponse.text().catch(() => '');
+      let errorMsg = `API 调用失败 (${chatResponse.status})`;
+      
+      // 尝试解析错误信息
+      try {
+        const errJson = JSON.parse(errText);
+        if (errJson.error?.message) {
+          errorMsg = errJson.error.message;
+        } else if (errJson.message) {
+          errorMsg = errJson.message;
+        }
+      } catch {
+        if (errText) errorMsg += `: ${errText.substring(0, 200)}`;
+      }
+
+      // 特定错误码处理
+      if (chatResponse.status === 401 || chatResponse.status === 403) {
+        return NextResponse.json({
+          success: false,
+          error: `API Key 无效或权限不足: ${errorMsg}`,
+          requiresApiKey: true,
+        }, { status: chatResponse.status });
+      }
+      if (chatResponse.status === 429) {
+        return NextResponse.json({ success: false, error: '请求频率超限，请稍后再试' }, { status: 429 });
+      }
+      if (chatResponse.status === 404) {
+        return NextResponse.json({
+          success: false,
+          error: `模型 ${model} 在当前 API 端点不可用，请检查模型名称或更换 API 提供商`,
+        }, { status: 404 });
+      }
+      if (chatResponse.status === 400) {
+        // 400 可能是模型不支持图片输入，尝试降级到 /images/edits
+        if (isOpenaiImageModel && !supportsMask) {
+          // 尝试 images/generations 端点
+          try {
+            const genResult = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, count);
+            if (genResult) return genResult;
+          } catch { /* 忽略 */ }
+        }
+        return NextResponse.json({
+          success: false,
+          error: `请求参数错误: ${errorMsg}`,
+        }, { status: 400 });
+      }
+
+      return NextResponse.json({ success: false, error: errorMsg }, { status: chatResponse.status });
+    }
+
+    const chatData = await chatResponse.json();
+    let resultImageUrl = extractImageFromResponse(chatData);
+
+    // chat/completions 未提取到图片，尝试降级到 images/generations
+    if (!resultImageUrl && isOpenaiImageModel) {
+      try {
+        const genResult = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, count);
+        if (genResult) return genResult;
+      } catch { /* 忽略 */ }
+    }
+
+    if (!resultImageUrl) {
+      // 最后的降级：检查响应中是否有文本内容，可能模型只返回了文字描述
+      const textContent = chatData.choices?.[0]?.message?.content;
+      if (typeof textContent === 'string' && textContent.length > 0 && !textContent.includes('data:image')) {
+        return NextResponse.json({
+          success: false,
+          error: '模型未返回编辑后的图片，仅返回了文本描述。请尝试更换模型或 API 提供商',
+          textResponse: textContent.substring(0, 500),
+        }, { status: 500 });
+      }
+
       return NextResponse.json({
         success: false,
         error: '图片编辑失败，未返回有效结果',
       }, { status: 500 });
     }
 
+    const images = count > 1
+      ? Array.from({ length: count }, () => ({ url: resultImageUrl, revisedPrompt: effectivePrompt }))
+      : [{ url: resultImageUrl, revisedPrompt: effectivePrompt }];
+
     return NextResponse.json({
       success: true,
       image: images[0],
       images,
-      model: imageModel,
-      provider: 'openai',
+      model,
+      provider: effectiveBaseUrl || 'unknown',
     });
 
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : 'Unknown error';
-    const statusCode = (error as { status?: number })?.status;
     console.error('Image edit error:', error);
-    
-    if (statusCode === 401) {
+
+    if (errMsg.includes('fetch failed') || errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND')) {
       return NextResponse.json({
         success: false,
-        error: 'API Key 无效或已过期，请检查配置',
-        requiresApiKey: true,
-      }, { status: 401 });
-    }
-    
-    if (statusCode === 429) {
-      return NextResponse.json({ success: false, error: '请求频率超限，请稍后再试' }, { status: 429 });
+        error: `网络连接失败：无法访问 API 服务`,
+        networkError: true,
+      }, { status: 503 });
     }
 
-    return NextResponse.json({ success: false, error: errMsg || '图片编辑失败，请重试' }, { status: 500 });
+    return NextResponse.json({ success: false, error: errMsg || '图片编辑失败' }, { status: 500 });
   }
 }
 
-// 获取支持的编辑模型列表（从管理员系统获取）
+/**
+ * 降级：尝试 /images/generations 端点
+ * 部分 OpenAI 兼容代理不支持 chat/completions 图片编辑，但支持 images/generations
+ */
+async function tryImagesGenerations(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  prompt: string,
+  size: string,
+  quality: string,
+  count: number,
+): Promise<NextResponse | null> {
+  const sizeMap: Record<string, string> = {
+    '1:1': '1024x1024', '16:9': '1792x1024', '9:16': '1024x1792',
+    '4:3': '1024x768', '3:4': '768x1024', '2:3': '768x1024', '3:2': '1024x768',
+    '1:2': '512x1024', '2:1': '1024x512',
+    '1024': '1024x1024', '1536': '1536x1536', '2048': '2048x2048',
+  };
+  let outputSize = size;
+  if (sizeMap[size]) outputSize = sizeMap[size];
+  else if (!size.includes('x')) outputSize = `${size}x${size}`;
+
+  const genResponse = await fetchWithV1Retry(
+    baseUrl,
+    '/images/generations',
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        prompt,
+        size: outputSize,
+        quality,
+        n: Math.min(count, 4),
+        response_format: 'b64_json',
+      }),
+    },
+  );
+
+  if (!genResponse.ok) return null;
+
+  const genData = await genResponse.json();
+  const resultUrl = extractImageFromResponse(genData);
+  if (!resultUrl) return null;
+
+  const images = [{ url: resultUrl, revisedPrompt: prompt }];
+  return NextResponse.json({
+    success: true,
+    image: images[0],
+    images,
+    model,
+    provider: 'images-generations-fallback',
+  });
+}
+
+// ============================================================
+// GET: 获取支持的编辑模型列表（从管理员系统获取）
+// ============================================================
 export async function GET() {
   try {
     const { getApiProviders } = await import('@/lib/server-api-config');
     const providers = await getApiProviders();
-    
+
     const editModels: { id: string; name: string; providerId: string; providerName: string; supportsMask: boolean }[] = [];
-    
+
     for (const provider of providers) {
       // 仅获取图像类型的提供商
       if (provider.modelType && provider.modelType !== 'image') continue;
-      
+
       const models = provider.selectedModels || (provider.discoveredModels || []).map((m: { id: string }) => m.id);
       for (const rawModelId of models) {
         const modelId: string = typeof rawModelId === 'string' ? rawModelId : (rawModelId as { id: string }).id;
         const id = (modelId || '').toLowerCase();
         // 排除不支持编辑的模型类型
         if (id.includes('3d') || id.includes('vectoriz') || id.includes('layer') || id.includes('segment')) continue;
-        
-        const isGemini = id.includes('gemini');
+
+        // 全兼容模式：所有图像模型都支持编辑（通过 chat/completions 多模态）
+        // supportsMask 仅在 OpenAI 官方端点 + OpenAI 图像模型时为 true
+        const baseUrl = normalizeApiBaseUrl(provider.baseUrl || '');
         editModels.push({
           id: modelId,
           name: modelId,
           providerId: provider.id,
           providerName: provider.name || provider.id,
-          supportsMask: !isGemini,
+          supportsMask: modelSupportsMask(modelId, baseUrl),
         });
       }
     }
@@ -633,7 +671,7 @@ export async function GET() {
         name: model,
         providerId: '',
         providerName: '',
-        supportsMask: !model.startsWith('gemini-'),
+        supportsMask: model.includes('gpt-image') || model.includes('dall-e'),
       })),
     });
   }

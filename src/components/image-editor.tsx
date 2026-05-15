@@ -53,13 +53,13 @@ const QUALITIES = [
 // 生图数量选项
 const COUNTS = [1, 2, 3, 4];
 
-// 模型功能描述映射（按模型ID关键词匹配）
+// 模型功能描述映射（按模型ID关键词匹配，全兼容模式）
 const MODEL_HINTS: Record<string, string> = {
-  'gpt-image-2': '支持全区域涂抹，蒙版精准编辑',
-  'dall-e-3': '支持蒙版涂抹指定修改区域',
-  'gemini-2.5-flash-image': '文字描述即可，AI智能理解意图',
+  'gpt-image-2': '高精度修图，AI智能理解编辑意图',
+  'dall-e-3': '文字描述修图，创意风格变换',
+  'gemini-2.5-flash-image': '快速文字修图，响应更快',
   'gemini-3-pro-image': '高精度文字修图，细节还原更好',
-  'gemini-3.1-flash-image': '快速文字修图，响应更快',
+  'gemini-3.1-flash-image': '快速文字修图，平衡速度与质量',
 };
 
 function getModelHint(modelId: string): string {
@@ -115,10 +115,14 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   })();
 
   // 当前选中的图像模型是否支持蒙版
+  // 全兼容模式：仅 OpenAI 官方端点 + gpt-image/dall-e 模型支持 mask
+  // 第三方代理（APImart/302等）即使模型名是 gpt-image-2 也不支持 mask
   const currentModelSupportsMask = (() => {
-    if (!currentImageModel) return true;
+    if (!currentImageModel) return false;
     if (currentImageModel.supportsMask !== undefined) return currentImageModel.supportsMask;
-    return !currentImageModel.id.toLowerCase().includes('gemini');
+    // 降级判断：仅 OpenAI 官方模型支持 mask
+    const id = currentImageModel.id.toLowerCase();
+    return (id.includes('gpt-image') || id.includes('dall-e')) && !currentImageModel.providerName.toLowerCase().includes('apimart') && !currentImageModel.providerName.includes('302');
   })();
 
   // 当前选中的图像模型名称
@@ -782,7 +786,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
   // 模型列表项组件
   const renderModelItem = (model: ServerModel, modelKey: string, isSelected: boolean, supportsMask?: boolean) => {
-    const maskSupported = supportsMask !== undefined ? supportsMask : !model.id.toLowerCase().includes('gemini');
+    const maskSupported = supportsMask !== undefined ? supportsMask : false;
     const hint = getModelHint(model.id);
     const hasDuplicate = imageModels.filter(m => m.id === model.id).length > 1;
     return (
