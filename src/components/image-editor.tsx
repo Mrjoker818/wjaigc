@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { X, Pencil, Eraser, Trash2, Loader2, Check, Sparkles, History, Image as ImageIcon, Lock, ChevronDown, ChevronUp, Hand, ZoomIn, ZoomOut, RotateCcw, Plus, Minus, Maximize2 } from 'lucide-react';
+import { X, Pencil, Eraser, Trash2, Loader2, Check, Sparkles, History, Image as ImageIcon, Lock, ChevronDown, ChevronUp, Hand, Plus, Minus, Maximize2 } from 'lucide-react';
 import type { CanvasImage } from './infinite-canvas';
 
 interface EditHistoryItem {
@@ -44,14 +44,21 @@ const QUALITIES = [
 // 生图数量选项
 const COUNTS = [1, 2, 3, 4];
 
-// 内置模型定义（保留原有5个模型 + 功能说明）
-const BUILT_IN_MODELS = [
-  { id: 'gpt-image-2', name: 'GPT Image 2', provider: 'OpenAI', supportsMask: true, hint: '支持全区域涂抹，蒙版精准编辑' },
-  { id: 'dall-e-3', name: 'DALL-E 3', provider: 'OpenAI', supportsMask: true, hint: '支持蒙版涂抹指定修改区域' },
-  { id: 'gemini-2.5-flash-image-preview', name: 'Nano Banana', provider: 'Google', supportsMask: false, hint: '文字描述即可，AI智能理解意图' },
-  { id: 'gemini-3-pro-image-preview', name: 'Nano Banana Pro', provider: 'Google', supportsMask: false, hint: '高精度文字修图，细节还原更好' },
-  { id: 'gemini-3.1-flash-image-preview', name: 'Nano Banana 2', provider: 'Google', supportsMask: false, hint: '快速文字修图，响应更快' },
-];
+// 模型功能描述映射（按模型ID关键词匹配）
+const MODEL_HINTS: Record<string, string> = {
+  'gpt-image-2': '支持全区域涂抹，蒙版精准编辑',
+  'dall-e-3': '支持蒙版涂抹指定修改区域',
+  'gemini-2.5-flash-image': '文字描述即可，AI智能理解意图',
+  'gemini-3-pro-image': '高精度文字修图，细节还原更好',
+  'gemini-3.1-flash-image': '快速文字修图，响应更快',
+};
+
+function getModelHint(modelId: string): string {
+  for (const [key, hint] of Object.entries(MODEL_HINTS)) {
+    if (modelId.includes(key)) return hint;
+  }
+  return '';
+}
 
 export function ImageEditor({ image, onClose, onConfirm, connectionStart, initialAspectRatio, initialQuality, initialCount, onParamsChange }: ImageEditorProps) {
   // 状态管理
@@ -63,7 +70,7 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
   const [quality, setQuality] = useState(initialQuality || 'high');
   const [outputCount, setOutputCount] = useState(initialCount || 1);
 
-  // 模型选择：使用 "builtin::<id>" 或 "server::<providerId>::<id>" 作为 key
+  // 模型选择：使用 "server::<providerId>::<modelId>" 作为 key
   const [selectedModelKey, setSelectedModelKey] = useState('');
   const [modelListExpanded, setModelListExpanded] = useState(false);
 
@@ -79,28 +86,44 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
   const [isResultLoading, setIsResultLoading] = useState(false);
 
   // 服务器模型列表（从管理员系统获取）
-  const [serverModels, setServerModels] = useState<ServerModel[]>([]);
+  const [imageModels, setImageModels] = useState<ServerModel[]>([]);
   const [llmModels, setLlmModels] = useState<ServerModel[]>([]);
-  const [llmModelId, setLlmModelId] = useState<string>('');
+  const [selectedLlmKey, setSelectedLlmKey] = useState('');
+  const [llmListExpanded, setLlmListExpanded] = useState(false);
 
-  // 当前选中的模型是否支持蒙版
-  const currentModelSupportsMask = (() => {
-    if (selectedModelKey.startsWith('builtin::')) {
-      const id = selectedModelKey.replace('builtin::', '');
-      const m = BUILT_IN_MODELS.find(bm => bm.id === id);
-      return m ? m.supportsMask : true;
-    }
-    if (selectedModelKey.startsWith('server::')) {
-      const parts = selectedModelKey.split('::');
-      const providerId = parts[1];
-      const modelId = parts.slice(2).join('::');
-      const m = serverModels.find(sm => sm.providerId === providerId && sm.id === modelId);
-      if (!m) return true;
-      if (m.supportsMask !== undefined) return m.supportsMask;
-      return !m.id.toLowerCase().includes('gemini');
-    }
-    return true; // 默认支持
+  // 当前选中的图像模型
+  const currentImageModel = (() => {
+    if (!selectedModelKey.startsWith('server::')) return null;
+    const parts = selectedModelKey.split('::');
+    const providerId = parts[1];
+    const modelId = parts.slice(2).join('::');
+    return imageModels.find(m => m.providerId === providerId && m.id === modelId) || null;
   })();
+
+  // 当前选中的图像模型是否支持蒙版
+  const currentModelSupportsMask = (() => {
+    if (!currentImageModel) return true;
+    if (currentImageModel.supportsMask !== undefined) return currentImageModel.supportsMask;
+    return !currentImageModel.id.toLowerCase().includes('gemini');
+  })();
+
+  // 当前选中的图像模型名称
+  const currentModelName = currentImageModel
+    ? `${currentImageModel.name}${imageModels.filter(m => m.id === currentImageModel.id).length > 1 ? ` (${currentImageModel.providerName})` : ''}`
+    : '选择图像模型';
+
+  // 当前选中的LLM模型
+  const currentLlmModel = (() => {
+    if (!selectedLlmKey) return null;
+    const parts = selectedLlmKey.split('::');
+    const providerId = parts[1];
+    const modelId = parts.slice(2).join('::');
+    return llmModels.find(m => m.providerId === providerId && m.id === modelId) || null;
+  })();
+
+  const currentLlmModelName = currentLlmModel
+    ? `${currentLlmModel.name}${llmModels.filter(m => m.id === currentLlmModel.id).length > 1 ? ` (${currentLlmModel.providerName})` : ''}`
+    : '选择LLM模型';
 
   // 图片预览区缩放/平移状态
   const [previewZoom, setPreviewZoom] = useState(1);
@@ -140,26 +163,9 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
     setPreviewPan({ x: 0, y: 0 });
   }, []);
 
-  // 当前选中模型的名称
-  const currentModelName = (() => {
-    if (selectedModelKey.startsWith('builtin::')) {
-      const id = selectedModelKey.replace('builtin::', '');
-      return BUILT_IN_MODELS.find(bm => bm.id === id)?.name || id;
-    }
-    if (selectedModelKey.startsWith('server::')) {
-      const parts = selectedModelKey.split('::');
-      const providerId = parts[1];
-      const modelId = parts.slice(2).join('::');
-      const m = serverModels.find(sm => sm.providerId === providerId && sm.id === modelId);
-      return m ? `${m.name}` : modelId;
-    }
-    return '选择模型';
-  })();
-
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
   const resultContainerRef = useRef<HTMLDivElement>(null);
-  const previewContainerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const [imageDisplaySize, setImageDisplaySize] = useState({ width: 260, height: 260 });
@@ -170,9 +176,10 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [position, setPosition] = useState({ x: 100, y: 100 });
 
-  // 从服务器加载编辑模型
+  // 从服务器加载模型
   useEffect(() => {
     const loadModels = async () => {
+      // 加载图像编辑模型
       try {
         const editRes = await fetch('/api/edit');
         if (editRes.ok) {
@@ -186,7 +193,7 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
               type: 'image',
               supportsMask: m.supportsMask,
             }));
-            setServerModels(models);
+            setImageModels(models);
           }
         }
       } catch (err) {
@@ -198,13 +205,20 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
         const llmRes = await fetch('/api/models?type=chat');
         if (llmRes.ok) {
           const llmData = await llmRes.json();
+          // 从 providers 列表构建 providerId → providerName 映射
+          const providerNameMap: Record<string, string> = {};
+          if (llmData.providers && Array.isArray(llmData.providers)) {
+            for (const p of llmData.providers) {
+              if (p.id && p.name) providerNameMap[p.id] = p.name;
+            }
+          }
           if (llmData.models && Array.isArray(llmData.models)) {
-            const models: ServerModel[] = llmData.models.map((m: { id: string; name: string; providerId: string; providerName: string }) => ({
+            const models: ServerModel[] = llmData.models.map((m: { id: string; name: string; providerId: string }) => ({
               id: m.id,
               name: m.name,
               providerId: m.providerId,
-              providerName: m.providerName || '',
-              type: 'chat',
+              providerName: providerNameMap[m.providerId] || m.providerId,
+              type: 'chat' as const,
             }));
             setLlmModels(models);
           }
@@ -216,23 +230,38 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
     loadModels();
   }, []);
 
-  // 初始化模型选择（优先恢复上次选择，否则默认选内置第一个）
+  // 初始化模型选择（优先恢复上次选择，否则默认选第一个）
   useEffect(() => {
+    if (imageModels.length === 0) return;
     const saved = localStorage.getItem('wujie_edit_selected_model');
-    if (saved) {
+    if (saved && imageModels.some(m => `server::${m.providerId}::${m.id}` === saved)) {
       setSelectedModelKey(saved);
       return;
     }
-    // 默认选内置第一个
-    if (BUILT_IN_MODELS.length > 0) {
-      setSelectedModelKey(`builtin::${BUILT_IN_MODELS[0].id}`);
+    setSelectedModelKey(`server::${imageModels[0].providerId}::${imageModels[0].id}`);
+  }, [imageModels]);
+
+  // 初始化LLM模型选择
+  useEffect(() => {
+    if (llmModels.length === 0) return;
+    const saved = localStorage.getItem('wujie_edit_selected_llm');
+    if (saved && llmModels.some(m => `server::${m.providerId}::${m.id}` === saved)) {
+      setSelectedLlmKey(saved);
+      return;
     }
-  }, []);
+    setSelectedLlmKey(`server::${llmModels[0].providerId}::${llmModels[0].id}`);
+  }, [llmModels]);
 
   const handleModelSelect = useCallback((key: string) => {
     setSelectedModelKey(key);
     setModelListExpanded(false);
     localStorage.setItem('wujie_edit_selected_model', key);
+  }, []);
+
+  const handleLlmSelect = useCallback((key: string) => {
+    setSelectedLlmKey(key);
+    setLlmListExpanded(false);
+    localStorage.setItem('wujie_edit_selected_llm', key);
   }, []);
 
   // 同步参数变化
@@ -362,7 +391,7 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
       return;
     }
     if (!selectedModelKey) {
-      setError('请选择模型');
+      setError('请选择图像模型');
       return;
     }
 
@@ -378,19 +407,18 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
         setLoadingProgress(prev => Math.min(prev + 10, 90));
       }, 500);
 
-      // 解析模型信息
-      let modelId = '';
-      let providerId = '';
-      let isBuiltIn = false;
-      let apiKey = '';
+      // 解析图像模型信息
+      const parts = selectedModelKey.split('::');
+      const providerId = parts[1];
+      const modelId = parts.slice(2).join('::');
 
-      if (selectedModelKey.startsWith('builtin::')) {
-        modelId = selectedModelKey.replace('builtin::', '');
-        isBuiltIn = true;
-      } else if (selectedModelKey.startsWith('server::')) {
-        const parts = selectedModelKey.split('::');
-        providerId = parts[1];
-        modelId = parts.slice(2).join('::');
+      // 解析LLM模型信息
+      let llmModelId = '';
+      let llmProviderId = '';
+      if (selectedLlmKey) {
+        const llmParts = selectedLlmKey.split('::');
+        llmProviderId = llmParts[1];
+        llmModelId = llmParts.slice(2).join('::');
       }
 
       const requestBody: Record<string, unknown> = {
@@ -400,18 +428,11 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
         size: aspectRatio,
         quality,
         model: modelId,
+        providerId: providerId,
         count: outputCount,
         llmModelId: llmModelId || undefined,
-        llmProviderId: llmModels.find(m => m.id === llmModelId)?.providerId || undefined,
+        llmProviderId: llmProviderId || undefined,
       };
-
-      if (isBuiltIn) {
-        // 内置模型需要用户输入API Key
-        const storedKey = (window as unknown as Record<string, unknown>).__editApiKey as string | undefined;
-        requestBody.apiKey = storedKey || '';
-      } else {
-        requestBody.providerId = providerId; // 服务器管理模型使用providerId
-      }
 
       const response = await fetch('/api/edit', {
         method: 'POST',
@@ -454,7 +475,7 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
     } finally {
       setIsLoading(false);
     }
-  }, [prompt, selectedModelKey, currentImageUrl, aspectRatio, quality, outputCount, currentModelSupportsMask, exportMask, clearMask, currentHistoryIndex]);
+  }, [prompt, selectedModelKey, selectedLlmKey, currentImageUrl, aspectRatio, quality, outputCount, currentModelSupportsMask, exportMask, clearMask, currentHistoryIndex]);
 
   const handleConfirmResult = useCallback((url?: string) => {
     const finalUrl = url || resultImages[0];
@@ -512,10 +533,36 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
     return { x: position.x + 360 + 80, y: position.y + 140 };
   }, [position, resultImages]);
 
-  // 判断内置模型是否在服务器模型中已存在（按模型ID匹配）
-  const isBuiltInAvailableOnServer = useCallback((builtinId: string) => {
-    return serverModels.some(sm => sm.id === builtinId);
-  }, [serverModels]);
+  // 模型列表项组件
+  const renderModelItem = (model: ServerModel, modelKey: string, isSelected: boolean, supportsMask?: boolean) => {
+    const maskSupported = supportsMask !== undefined ? supportsMask : !model.id.toLowerCase().includes('gemini');
+    const hint = getModelHint(model.id);
+    const hasDuplicate = imageModels.filter(m => m.id === model.id).length > 1;
+    return (
+      <button
+        key={modelKey}
+        onClick={() => handleModelSelect(modelKey)}
+        className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-all border-b border-[#1a1a1a] last:border-b-0 ${
+          isSelected
+            ? 'bg-[#d4af37]/15 text-[#d4af37]'
+            : 'text-[#aaa] hover:bg-[#1a1a1a] hover:text-white'
+        }`}
+      >
+        <div className="flex-1 min-w-0">
+          <div className="font-medium flex items-center gap-1.5">
+            {model.name}
+            {hasDuplicate && <span className="text-[8px] px-1 py-0.5 bg-[#d4af37]/20 text-[#d4af37] rounded">{model.providerName}</span>}
+            {maskSupported
+              ? <span className="text-[8px] px-1 py-0.5 bg-green-500/20 text-green-400 rounded">支持涂抹</span>
+              : <span className="text-[8px] px-1 py-0.5 bg-[#d4af37]/20 text-[#d4af37] rounded">文字修图</span>
+            }
+          </div>
+          <div className="text-[10px] text-[#666] truncate">{model.providerName}{hint ? ` · ${hint}` : ''}</div>
+        </div>
+        {isSelected && <Check size={12} className="text-[#d4af37] flex-shrink-0" />}
+      </button>
+    );
+  };
 
   return (
     <>
@@ -628,7 +675,7 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
 
             <div
               className="w-full h-full flex items-center justify-center overflow-hidden"
-              style={{ cursor: isPanning ? (isPanning ? 'grabbing' : 'grab') : 'default' }}
+              style={{ cursor: isPanning ? (isPanDragging ? 'grabbing' : 'grab') : 'default' }}
               onMouseDown={isPanning ? (e) => { handlePanStart(e); } : undefined}
             >
               <div
@@ -727,7 +774,7 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
             <p className="text-[10px] text-[#555] mt-0.5">Enter 提交 · Shift+Enter 换行</p>
           </div>
 
-          {/* 模型选择 - 列表形式（内置5个 + 管理员系统模型） */}
+          {/* 图像模型选择 - 统一列表（管理员系统） */}
           <div>
             <button
               onClick={() => setModelListExpanded(!modelListExpanded)}
@@ -746,16 +793,45 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
 
             {modelListExpanded && (
               <div className="mt-1 max-h-56 overflow-y-auto rounded-lg border border-[#2a2a2a] bg-[#0d0d0d]">
-                {/* 内置模型组 - 保留原有5个模型按钮 */}
-                <div className="px-2 py-1 text-[9px] text-[#666] uppercase tracking-wider border-b border-[#1a1a1a]">内置模型</div>
-                {BUILT_IN_MODELS.map(model => {
-                  const key = `builtin::${model.id}`;
+                <div className="px-2 py-1 text-[9px] text-[#666] uppercase tracking-wider border-b border-[#1a1a1a]">图像模型</div>
+                {imageModels.length > 0 ? imageModels.map(model => {
+                  const key = `server::${model.providerId}::${model.id}`;
                   const isSelected = selectedModelKey === key;
-                  const onServer = isBuiltInAvailableOnServer(model.id);
+                  return renderModelItem(model, key, isSelected, model.supportsMask);
+                }) : (
+                  <div className="px-3 py-3 text-center text-[10px] text-[#555]">
+                    管理员系统中暂无图像模型
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* LLM 辅助模型选择 - 列表形式 */}
+          <div>
+            <button
+              onClick={() => setLlmListExpanded(!llmListExpanded)}
+              className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-xs text-[#ccc] hover:border-[#d4af37] transition-all"
+            >
+              <span className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                {currentLlmModelName}
+                <span className="text-[9px] text-blue-400">辅助理解</span>
+              </span>
+              {llmListExpanded ? <ChevronUp size={12} className="text-[#888]" /> : <ChevronDown size={12} className="text-[#888]" />}
+            </button>
+
+            {llmListExpanded && (
+              <div className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-[#2a2a2a] bg-[#0d0d0d]">
+                <div className="px-2 py-1 text-[9px] text-[#666] uppercase tracking-wider border-b border-[#1a1a1a]">LLM 模型</div>
+                {llmModels.length > 0 ? llmModels.map(model => {
+                  const key = `server::${model.providerId}::${model.id}`;
+                  const isSelected = selectedLlmKey === key;
+                  const hasDuplicate = llmModels.filter(m => m.id === model.id).length > 1;
                   return (
                     <button
                       key={key}
-                      onClick={() => handleModelSelect(key)}
+                      onClick={() => handleLlmSelect(key)}
                       className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-all border-b border-[#1a1a1a] last:border-b-0 ${
                         isSelected
                           ? 'bg-[#d4af37]/15 text-[#d4af37]'
@@ -765,53 +841,16 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
                       <div className="flex-1 min-w-0">
                         <div className="font-medium flex items-center gap-1.5">
                           {model.name}
-                          {onServer && <span className="text-[8px] px-1 py-0.5 bg-green-500/20 text-green-400 rounded">已接入</span>}
+                          {hasDuplicate && <span className="text-[8px] px-1 py-0.5 bg-blue-400/20 text-blue-400 rounded">{model.providerName}</span>}
                         </div>
-                        <div className="text-[10px] text-[#666]">{model.provider} · {model.hint}</div>
+                        <div className="text-[10px] text-[#666] truncate">{model.providerName} · 辅助理解修图意图</div>
                       </div>
                       {isSelected && <Check size={12} className="text-[#d4af37] flex-shrink-0" />}
                     </button>
                   );
-                })}
-
-                {/* 服务器模型组 - 管理员系统添加的模型（排除与内置重复的） */}
-                {serverModels.length > 0 && (() => {
-                  const uniqueServerModels = serverModels.filter(sm =>
-                    !BUILT_IN_MODELS.some(bm => bm.id === sm.id)
-                  );
-                  if (uniqueServerModels.length === 0) return null;
-                  return (
-                    <>
-                      <div className="px-2 py-1 text-[9px] text-[#666] uppercase tracking-wider border-b border-[#1a1a1a]">管理员配置</div>
-                      {uniqueServerModels.map(model => {
-                        const key = `server::${model.providerId}::${model.id}`;
-                        const isSelected = selectedModelKey === key;
-                        const supportsMask = model.supportsMask !== undefined ? model.supportsMask : !model.id.toLowerCase().includes('gemini');
-                        return (
-                          <button
-                            key={key}
-                            onClick={() => handleModelSelect(key)}
-                            className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-all border-b border-[#1a1a1a] last:border-b-0 ${
-                              isSelected
-                                ? 'bg-[#d4af37]/15 text-[#d4af37]'
-                                : 'text-[#aaa] hover:bg-[#1a1a1a] hover:text-white'
-                            }`}
-                          >
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium truncate">{model.name}</div>
-                              <div className="text-[10px] text-[#666]">{model.providerName} · {supportsMask ? '支持区域涂抹' : '文字描述智能修图'}</div>
-                            </div>
-                            {isSelected && <Check size={12} className="text-[#d4af37] flex-shrink-0" />}
-                          </button>
-                        );
-                      })}
-                    </>
-                  );
-                })()}
-
-                {serverModels.length === 0 && (
+                }) : (
                   <div className="px-3 py-3 text-center text-[10px] text-[#555]">
-                    管理员系统中暂无额外模型
+                    管理员系统中暂无LLM模型
                   </div>
                 )}
               </div>
@@ -850,23 +889,6 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
                 {COUNTS.map(c => <option key={c} value={c}>{c}张</option>)}
               </select>
             </div>
-          </div>
-
-          {/* LLM 辅助模型选择 */}
-          <div>
-            <label className="text-[10px] text-[#888] mb-0.5 block">LLM 辅助模型</label>
-            <select
-              value={llmModelId}
-              onChange={e => setLlmModelId(e.target.value)}
-              className="w-full px-2 py-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded text-[11px] text-white appearance-none cursor-pointer focus:border-[#d4af37] focus:outline-none"
-            >
-              <option value="">不使用LLM辅助</option>
-              {llmModels.map(m => (
-                <option key={m.id + '|' + m.providerId} value={m.id + '|' + m.providerId}>
-                  {m.name} ({m.providerName})
-                </option>
-              ))}
-            </select>
           </div>
 
           {/* 错误 */}
