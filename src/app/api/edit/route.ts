@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { findProviderForModel } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/lib/server-api-config';
+import { fetchWithV1Retry } from '@/lib/api-helpers';
 
 // 允许大请求体（base64图片可能很大，50MB限制）
 export const runtime = 'nodejs';
@@ -90,29 +91,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
     }
 
-    // 获取 API Key：优先用户提供的，其次从服务器管理配置中查找
+    // 获取 API Key 和 baseUrl：与 /api/generate 一致的方式
     let effectiveApiKey = apiKey;
+    let effectiveBaseUrl = '';
+    let effectiveProviderId = providerId;
 
+    // 优先通过 providerId 从服务器配置中获取
     if (!effectiveApiKey && providerId) {
-      // 通过 providerId 从服务器配置中获取
       try {
-        const { getApiProviders } = await import('@/lib/server-api-config');
-        const providers = await getApiProviders();
-        const provider = providers.find((p: { id: string }) => p.id === providerId);
+        const provider = await findProviderById(providerId);
         if (provider?.apiKey) {
           effectiveApiKey = provider.apiKey;
+          effectiveBaseUrl = normalizeApiBaseUrl(provider.baseUrl || '');
         }
       } catch {
         // 忽略，降级到用户提供的 key
       }
     }
 
-    if (!effectiveApiKey && !providerId) {
-      // 尝试通过模型名称查找服务器管理的 API Key
+    // 其次通过模型名称查找服务器管理的 API Key
+    if (!effectiveApiKey) {
       try {
         const provider = await findProviderForModel(model);
         if (provider?.apiKey) {
           effectiveApiKey = provider.apiKey;
+          effectiveBaseUrl = normalizeApiBaseUrl(provider.baseUrl || '');
+          effectiveProviderId = provider.id;
         }
       } catch {
         // 忽略
@@ -182,92 +186,201 @@ export async function POST(request: NextRequest) {
         }, { status: 400 });
       }
 
-      try {
-        const genAI = new GoogleGenerativeAI(effectiveApiKey);
-        const geminiModel = genAI.getGenerativeModel({
-          model: geminiConfig.modelId,
-        });
+      // 判断是否使用代理路径（非 Google 官方端点）
+      const isProxyProvider = effectiveBaseUrl && !effectiveBaseUrl.includes('generativelanguage.googleapis.com');
 
+      try {
         const editPrompt = `Edit this image according to the following instruction: ${prompt}. Maintain the overall composition and style while making the requested changes.`;
 
-        // 构建 parts：主图 + 参考图 + 文本指令
-        const parts: Array<{ inlineData: { data: string; mimeType: string } } | { text: string }> = [
-          {
-            inlineData: {
-              data: imageBuffer.toString('base64'),
-              mimeType: mimeType,
+        if (isProxyProvider) {
+          // ★ 代理路径：使用 OpenAI 兼容的 chat/completions 端点
+          // 代理通常不支持 Gemini 原生 API 格式，需走 chat 多模态
+          const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+            { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBuffer.toString('base64')}` } },
+          ];
+
+          // 添加参考图
+          if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
+            for (const refUrl of referenceImages) {
+              try {
+                const ref = await resolveImageToBuffer(refUrl);
+                contentParts.push({ type: 'image_url', image_url: { url: `data:${ref.mimeType};base64,${ref.buffer.toString('base64')}` } });
+              } catch (refErr) {
+                console.warn('Failed to load reference image, skipping:', refErr);
+              }
+            }
+            contentParts.push({ type: 'text', text: `[System: There are ${referenceImages.length} reference image(s) above. Use them as style/composition/subject references when editing the main image.]` });
+          }
+
+          contentParts.push({ type: 'text', text: editPrompt });
+
+          const chatResponse = await fetchWithV1Retry(
+            effectiveBaseUrl,
+            '/chat/completions',
+            {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${effectiveApiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                model: geminiConfig.modelId,
+                messages: [{
+                  role: 'user',
+                  content: contentParts,
+                }],
+                max_tokens: 4096,
+              }),
             },
-          },
-        ];
+          );
 
-        // ★ 添加参考图（多图模式）
-        if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
-          for (const refUrl of referenceImages) {
-            try {
-              const ref = await resolveImageToBuffer(refUrl);
-              parts.push({
-                inlineData: {
-                  data: ref.buffer.toString('base64'),
-                  mimeType: ref.mimeType,
-                },
-              });
-            } catch (refErr) {
-              console.warn('Failed to load reference image, skipping:', refErr);
+          if (!chatResponse.ok) {
+            const errText = await chatResponse.text().catch(() => '');
+            throw new Error(`Proxy API error: ${chatResponse.status} - ${errText.substring(0, 200)}`);
+          }
+
+          const chatData = await chatResponse.json();
+          const messageContent = chatData.choices?.[0]?.message?.content || '';
+
+          // 尝试从响应中提取图片（base64 或 URL）
+          let resultImageUrl = '';
+          
+          // 格式1：响应中包含 inline_data（部分代理返回格式）
+          if (chatData.choices?.[0]?.message?.inline_data) {
+            const inlineData = chatData.choices[0].message.inline_data;
+            resultImageUrl = `data:${inlineData.mime_type || 'image/png'};base64,${inlineData.data}`;
+          }
+          // 格式2：content 中包含 base64 图片
+          else if (typeof messageContent === 'string' && messageContent.includes('data:image')) {
+            const match = messageContent.match(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/);
+            if (match) resultImageUrl = match[0];
+          }
+          // 格式3：content 中包含 markdown 图片链接
+          else if (typeof messageContent === 'string' && messageContent.includes('![')) {
+            const match = messageContent.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/);
+            if (match) resultImageUrl = match[1];
+          }
+          // 格式4：多模态响应中 content 是数组
+          else if (Array.isArray(messageContent)) {
+            for (const part of messageContent) {
+              if (part.type === 'image_url' && part.image_url?.url) {
+                resultImageUrl = part.image_url.url;
+                break;
+              }
+              if (part.type === 'image' && part.source?.data) {
+                resultImageUrl = `data:${part.source.media_type || 'image/png'};base64,${part.source.data}`;
+                break;
+              }
             }
           }
-          // 参考图存在时，补充说明
-          parts.push({ text: `[System: There are ${referenceImages.length} reference image(s) above. Use them as style/composition/subject references when editing the main image.]` });
-        }
 
-        parts.push({ text: editPrompt });
-
-        const result = await geminiModel.generateContent({
-          contents: [{
-            role: 'user',
-            parts: parts,
-          }],
-          generationConfig: {
-            responseModalities: ['TEXT', 'IMAGE'] as unknown as string[],
-          } as any,
-        });
-
-        const response = result.response;
-
-        let resultImageBase64: string = '';
-        let resultMimeType = 'image/png';
-        
-        for (const candidate of response.candidates || []) {
-          for (const part of candidate.content.parts || []) {
-            if (part.inlineData) {
-              resultImageBase64 = part.inlineData.data || '';
-              resultMimeType = part.inlineData.mimeType || 'image/png';
-              break;
-            }
+          if (!resultImageUrl) {
+            return NextResponse.json({
+              success: false,
+              error: '代理 API 编辑失败，模型未返回有效图片结果',
+              debugContent: typeof messageContent === 'string' ? messageContent.substring(0, 500) : 'non-string content',
+            }, { status: 500 });
           }
-          if (resultImageBase64) break;
-        }
 
-        if (!resultImageBase64) {
+          const images = count > 1 
+            ? Array.from({ length: count }, () => ({ url: resultImageUrl, revisedPrompt: prompt }))
+            : [{ url: resultImageUrl, revisedPrompt: prompt }];
+
           return NextResponse.json({
-            success: false,
-            error: 'Gemini 模型编辑失败，未返回有效结果',
-          }, { status: 500 });
+            success: true,
+            image: images[0],
+            images,
+            model: model,
+            provider: 'proxy',
+          });
+
+        } else {
+          // ★ 直连 Google 路径：使用 Gemini 原生 SDK
+          const genAI = new GoogleGenerativeAI(effectiveApiKey);
+          const geminiModel = genAI.getGenerativeModel(
+            { model: geminiConfig.modelId },
+            effectiveBaseUrl ? { baseUrl: effectiveBaseUrl } : undefined,
+          );
+
+          // 构建 parts：主图 + 参考图 + 文本指令
+          const parts: Array<{ inlineData: { data: string; mimeType: string } } | { text: string }> = [
+            {
+              inlineData: {
+                data: imageBuffer.toString('base64'),
+                mimeType: mimeType,
+              },
+            },
+          ];
+
+          // ★ 添加参考图（多图模式）
+          if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
+            for (const refUrl of referenceImages) {
+              try {
+                const ref = await resolveImageToBuffer(refUrl);
+                parts.push({
+                  inlineData: {
+                    data: ref.buffer.toString('base64'),
+                    mimeType: ref.mimeType,
+                  },
+                });
+              } catch (refErr) {
+                console.warn('Failed to load reference image, skipping:', refErr);
+              }
+            }
+            // 参考图存在时，补充说明
+            parts.push({ text: `[System: There are ${referenceImages.length} reference image(s) above. Use them as style/composition/subject references when editing the main image.]` });
+          }
+
+          parts.push({ text: editPrompt });
+
+          const result = await geminiModel.generateContent({
+            contents: [{
+              role: 'user',
+              parts: parts,
+            }],
+            generationConfig: {
+              responseModalities: ['TEXT', 'IMAGE'] as unknown as string[],
+            } as any,
+          });
+
+          const response = result.response;
+
+          let resultImageBase64: string = '';
+          let resultMimeType = 'image/png';
+          
+          for (const candidate of response.candidates || []) {
+            for (const part of candidate.content.parts || []) {
+              if (part.inlineData) {
+                resultImageBase64 = part.inlineData.data || '';
+                resultMimeType = part.inlineData.mimeType || 'image/png';
+                break;
+              }
+            }
+            if (resultImageBase64) break;
+          }
+
+          if (!resultImageBase64) {
+            return NextResponse.json({
+              success: false,
+              error: 'Gemini 模型编辑失败，未返回有效结果',
+            }, { status: 500 });
+          }
+
+          const imageDataUrl = `data:${resultMimeType};base64,${resultImageBase64}`;
+
+          // 支持多张结果
+          const images = count > 1 
+            ? Array.from({ length: count }, () => ({ url: imageDataUrl, revisedPrompt: prompt }))
+            : [{ url: imageDataUrl, revisedPrompt: prompt }];
+
+          return NextResponse.json({
+            success: true,
+            image: images[0],
+            images,
+            model: model,
+            provider: 'google',
+          });
         }
-
-        const imageDataUrl = `data:${resultMimeType};base64,${resultImageBase64}`;
-
-        // 支持多张结果
-        const images = count > 1 
-          ? Array.from({ length: count }, (_, i) => ({ url: imageDataUrl, revisedPrompt: prompt }))
-          : [{ url: imageDataUrl, revisedPrompt: prompt }];
-
-        return NextResponse.json({
-          success: true,
-          image: images[0],
-          images,
-          model: model,
-          provider: 'google',
-        });
 
       } catch (geminiError: unknown) {
         const errMsg = geminiError instanceof Error ? geminiError.message : 'Unknown error';
@@ -320,22 +433,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 获取 provider 的 base_url（如果通过服务器管理）
-    let baseUrl: string | undefined;
-    if (providerId) {
-      try {
-        const { getApiProviders } = await import('@/lib/server-api-config');
-        const providers = await getApiProviders();
-        const provider = providers.find((p: { id: string }) => p.id === providerId);
-        if (provider?.baseUrl) baseUrl = provider.baseUrl;
-      } catch {
-        // 忽略
-      }
-    }
-
+    // ★ 使用已获取的 effectiveBaseUrl（与 Gemini 路径共享同一 provider 查找逻辑）
     const openai = new OpenAI({
       apiKey: effectiveApiKey,
-      ...(baseUrl ? { baseURL: baseUrl } : {}),
+      ...(effectiveBaseUrl ? { baseURL: effectiveBaseUrl } : {}),
     });
 
     const imageModel = model === 'gpt-image-2' ? 'gpt-image-2' : 'dall-e-3';
