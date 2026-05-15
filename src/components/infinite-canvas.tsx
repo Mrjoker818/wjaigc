@@ -320,7 +320,7 @@ interface InfiniteCanvasProps {
   /** Force save canvas data to localStorage + server */
   onForceSave?: () => void;
   /** Called when user wants to open the language-based image editor */
-  onEditImage?: (imageId: string, imageUrl: string, resultPrompt?: string, sourceRect?: { left: number; top: number; right: number; bottom: number; width: number; height: number }) => void;
+  onEditImage?: (image: CanvasImage) => void;
   /** Language edit selection mode */
   langEditMode?: 'idle' | 'selecting';
   onLangEditModeChange?: (mode: 'idle' | 'selecting') => void;
@@ -527,7 +527,6 @@ export function InfiniteCanvas({
   const canvasGenFrameHeight = 288; // 16:9 ratio
   const [visionHoverImage, setVisionHoverImage] = useState<CanvasImage | null>(null);
   const [showRefFusion, setShowRefFusion] = useState(false);
-  const [editingImage, setEditingImage] = useState<CanvasImage | null>(null);
 
   // Context menu
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
@@ -581,24 +580,6 @@ export function InfiniteCanvas({
       localStorage.setItem('wujie_toolbar_hidden', JSON.stringify([...toolbarHiddenItems]));
     }
   }, [toolbarHiddenItems]);
-
-  // When editingImage changes, calculate screen rect and notify parent
-  useEffect(() => {
-    if (editingImage) {
-      const container = canvasRef.current;
-      if (container) {
-        const el = container.querySelector(`[data-image-id="${editingImage.id}"]`);
-        if (el) {
-          const rect = el.getBoundingClientRect();
-          onEditImage?.(editingImage.id, editingImage.url, undefined, {
-            left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
-            width: rect.width, height: rect.height,
-          });
-        }
-      }
-      setEditingImage(null);
-    }
-  }, [editingImage]);
 
   // 图生图 state
   const IMG2IMG_CATEGORIES = [
@@ -1604,6 +1585,15 @@ export function InfiniteCanvas({
 
     const hitId = hitTestImage(canvasPos.x, canvasPos.y);
     if (hitId) {
+      // Language edit mode: clicking an image opens the editor
+      if (langEditMode === 'selecting') {
+        const img = images.find(i => i.id === hitId);
+        if (img) {
+          onEditImage?.(img);
+          onLangEditModeChange?.('idle');
+        }
+        return;
+      }
       mouseDownOnImageRef.current = true;
       imageDragReadyRef.current = false;
       if (e.ctrlKey || e.metaKey) {
@@ -5331,6 +5321,7 @@ export function InfiniteCanvas({
     { icon: <Expand size={14} />, label: '扩展', desc: '向四周延伸画面，自动补齐背景', action: handleOpenExpand },
     { icon: <Scissors size={14} />, label: '裁切', desc: '自由/预设比例裁切', action: handleOpenCrop },
     { icon: <ImagePlus size={14} />, label: '图生图', desc: '基于当前图生成新图', action: () => { if (selectedImage) setEditImageId(selectedImage.id); setEditMode('img2img'); } },
+    { icon: <Pencil size={14} />, label: '语言修图', desc: '用自然语言描述修改图片', action: () => { if (selectedImage) onEditImage?.(selectedImage); } },
     { icon: <Download size={14} />, label: '下载', desc: 'PNG/SVG/PSD下载', action: handleOpenDownload },
   ];
 
@@ -5470,6 +5461,7 @@ export function InfiniteCanvas({
     { label: '删除', shortcut: 'Delete', action: () => { onImagesChange(images.filter(i => !selectedIds.has(i.id))); setSelectedIds(new Set()); selectImage(null); } },
     { label: '发送参考图', action: () => { const img = selectedImageData; if (img) onGenerateVariation(img); } },
     { label: '提取关键词', action: () => { const img = selectedImageData; if (img) onExtractKeywords(img); } },
+    { label: '语言修图', action: () => { const img = selectedImageData; if (img) onEditImage?.(img); } },
   ];
 
   const ratioOptions = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9'];
@@ -5896,7 +5888,6 @@ export function InfiniteCanvas({
             return (
               <div
                 key={image.id}
-                data-image-id={image.id}
                 className={`absolute group z-10 ${isSelected ? 'z-20' : ''} ${editMode !== 'none' && editImageId !== image.id ? 'opacity-30' : ''}`}
                 style={{
                   left: image.x + (isDragging ? dragOffset.x : 0) + (isGroupDragging ? groupDragOffset.x : 0) + (isInDraggedGenGroup ? genGroupDragOffset.x : 0),
@@ -6045,14 +6036,10 @@ export function InfiniteCanvas({
                     ))}
                     {/* Language edit connection point - right side center */}
                     <button
-                      className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-5 h-5 rounded-full bg-[#d4af37] hover:bg-[#e5c249] shadow-lg border-2 border-black/50 cursor-pointer pointer-events-auto z-10 transition-all hover:scale-125"
-                      onMouseDown={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                      }}
+                      className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-4 h-4 rounded-full bg-[#d4af37] hover:bg-[#e5c249] shadow-lg border-2 border-black/50 cursor-pointer pointer-events-auto z-10 transition-all hover:scale-125"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setEditingImage(image);
+                        onEditImage?.(image);
                       }}
                       title="连接语言修图工具"
                     >
@@ -6819,8 +6806,6 @@ export function InfiniteCanvas({
               </div>
             );
           })}
-
-
         </div>
 
 
@@ -10023,7 +10008,30 @@ export function InfiniteCanvas({
 
         <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#2a2a2a]'}`} />
 
+        {/* Language Edit - 修图 */}
+        <button
+          onClick={() => {
+            const img = selectedImageData;
+            if (img && onEditImage) {
+              onEditImage(img);
+            } else {
+              onLangEditModeChange?.('selecting');
+            }
+          }}
+          className={`p-2 rounded-xl transition-all relative group ${
+            langEditMode === 'selecting'
+              ? 'bg-[#d4af37]/20 text-[#d4af37] ring-1 ring-[#d4af37]/50'
+              : isMonochrome
+                ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                : 'text-[#888] hover:text-white hover:bg-white/10'
+          }`}
+          title="语言修图"
+        >
+          <Pencil className="h-4 w-4" />
+          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-gray-900 text-white' : 'bg-black/90 text-white'}`}>修图</span>
+        </button>
 
+        <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#2a2a2a]'}`} />
 
         {/* HexCube 六面体 */}
         <button
