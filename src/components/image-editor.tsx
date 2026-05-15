@@ -670,7 +670,8 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         ? await Promise.all(referenceImages.map(r => imageToDataUrl(r.url)))
         : undefined;
 
-      const requestBody: Record<string, unknown> = {
+      // ★ 构建请求体（不含 count，单次请求只生成1张图）
+      const baseRequestBody: Record<string, unknown> = {
         image: imageAsDataUrl,
         prompt: prompt,
         mask: maskDataUrl,
@@ -678,45 +679,68 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         quality,
         model: modelId,
         providerId: providerId,
-        count: outputCount,
         llmModelId: llmModelId || undefined,
         llmProviderId: llmProviderId || undefined,
-        // ★ 参考图base64列表
         referenceImages: refDataUrls,
       };
 
-      const response = await fetch('/api/edit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-      });
+      // ★ 多图模式：并行发起 outputCount 次请求
+      const requestCount = Math.max(1, Math.min(outputCount, 4));
+      const fetchPromises = Array.from({ length: requestCount }, () =>
+        fetch('/api/edit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(baseRequestBody),
+        }).then(r => r.json().then(data => ({ ok: r.ok, data })))
+      );
+
+      const results = await Promise.allSettled(fetchPromises);
 
       clearInterval(progressInterval);
       setLoadingProgress(100);
 
-      const data = await response.json();
+      // ★ 收集所有成功的图片
+      const collectedUrls: string[] = [];
+      let firstError = '';
 
-      if (data.success && data.image) {
-        setIsResultLoading(false);
-        const urls = data.images ? data.images.map((img: { url: string }) => img.url) : [data.image.url];
-        setResultImages(urls);
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          const { data } = result.value;
+          if (data.success && data.image?.url) {
+            collectedUrls.push(data.image.url);
+          } else if (data.images) {
+            collectedUrls.push(...data.images.map((img: { url: string }) => img.url));
+          } else if (!firstError && data.error) {
+            firstError = data.error;
+          }
+        } else {
+          if (!firstError) firstError = result.reason?.message || '请求失败';
+        }
+      }
+
+      setIsResultLoading(false);
+
+      if (collectedUrls.length > 0) {
+        setResultImages(collectedUrls);
 
         const newHistoryItem: EditHistoryItem = {
           id: `edit-${Date.now()}`,
           prompt: prompt,
-          imageUrl: data.image.url,
+          imageUrl: collectedUrls[0],
           timestamp: Date.now(),
         };
         setHistory(prev => [...prev.slice(0, currentHistoryIndex + 1), newHistoryItem]);
         setCurrentHistoryIndex(prev => prev + 1);
-        setCurrentImageUrl(data.image.url);
+        setCurrentImageUrl(collectedUrls[0]);
         clearMask();
-      } else if (data.requiresApiKey) {
-        setIsResultLoading(false);
-        setError(`需要在管理员系统中配置 API Key`);
+
+        if (collectedUrls.length < requestCount && firstError) {
+          setError(`已生成 ${collectedUrls.length}/${requestCount} 张，部分失败: ${firstError}`);
+        }
+      } else if (firstError) {
+        setError(firstError);
       } else {
-        setIsResultLoading(false);
-        setError(data.error || '编辑失败');
+        setError('编辑失败，未返回有效图片');
       }
     } catch (err: unknown) {
       setIsResultLoading(false);
@@ -1386,18 +1410,23 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           </div>
           <div className="p-3">
             {isResultLoading ? (
-              <div className="flex flex-col items-center justify-center h-[200px] bg-[#1a1a1a] rounded-lg border-2 border-dashed border-[#d4af37]/30">
-                <div className="relative w-12 h-12 mb-3">
-                  <div className="absolute inset-0 border-3 border-[#2a2a2a] rounded-full" />
-                  <div
-                    className="absolute inset-0 border-3 border-[#d4af37] rounded-full animate-spin"
-                    style={{ clipPath: `polygon(50% 50%, 50% 0%, ${50 + 50 * Math.sin(loadingProgress / 100 * 2 * Math.PI)}% ${50 - 50 * Math.cos(loadingProgress / 100 * 2 * Math.PI)}%, 50% 50%)` }}
-                  />
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-[#d4af37] text-[10px] font-mono">{loadingProgress}%</span>
-                  </div>
-                </div>
-                <p className="text-[11px] text-[#888]">正在生成...</p>
+              <div className="space-y-2">
+                {Array.from({ length: Math.max(1, Math.min(outputCount, 4)) }, (_, i) => {
+                  const ratioParts = aspectRatio.split(':').map(Number);
+                  const ratioW = ratioParts[0] || 1;
+                  const ratioH = ratioParts[1] || 1;
+                  return (
+                    <div key={i} className="relative bg-[#1a1a1a] rounded-lg border-2 border-dashed border-[#d4af37]/30 flex flex-col items-center justify-center overflow-hidden"
+                      style={{ aspectRatio: `${ratioW}/${ratioH}` }}
+                    >
+                      <div className="relative w-10 h-10 mb-2">
+                        <div className="absolute inset-0 border-2 border-[#2a2a2a] rounded-full" />
+                        <div className="absolute inset-0 border-2 border-[#d4af37] rounded-full animate-spin" />
+                      </div>
+                      <span className="text-[10px] text-[#666]">生成中 {outputCount > 1 ? `(${i + 1}/${outputCount})` : `${loadingProgress}%`}</span>
+                    </div>
+                  );
+                })}
               </div>
             ) : resultImages.length > 0 ? (
               <div className="space-y-2">

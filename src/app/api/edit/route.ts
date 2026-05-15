@@ -4,6 +4,7 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 
 // 允许大请求体（base64图片可能很大，50MB限制）
 export const runtime = 'nodejs';
+export const maxDuration = 120;
 
 // 支持编辑的模型列表（用于降级静态列表）
 export const EDITABLE_MODELS = [
