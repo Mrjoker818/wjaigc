@@ -3365,10 +3365,12 @@ export function InfiniteCanvas({
     resultImageUrl: string,
     origW: number,
     origH: number,
-    cropInfo?: { cropX: number; cropY: number; cropW: number; cropH: number } | null
+    cropInfo?: { cropX: number; cropY: number; cropW: number; cropH: number } | null,
+    mode?: 'erase' | 'mask'
   ): Promise<string> => {
     // 使用 Canvas 2D 合成，IOPaint/LaMa 风格的蒙版合成
     // cropInfo: 如果API使用了裁剪策略，结果图像是裁剪尺寸，需要放置到(cropX, cropY)位置
+    const isErase = mode === 'erase';
     const canvas = document.createElement('canvas');
     canvas.width = origW;
     canvas.height = origH;
@@ -3384,13 +3386,23 @@ export function InfiniteCanvas({
     // 2. 绘制原图作为底层
     ctx.drawImage(origImg, 0, 0, origW, origH);
 
-    // 3. 解析蒙版
+    // 3. 解析蒙版（带模糊，擦除用12px，蒙版修图用18px）
     const maskCanvas = document.createElement('canvas');
     maskCanvas.width = origW;
     maskCanvas.height = origH;
     const maskCtx = maskCanvas.getContext('2d')!;
     maskCtx.drawImage(maskImg, 0, 0, origW, origH);
-    const maskData = maskCtx.getImageData(0, 0, origW, origH);
+    const blurMaskCanvas = document.createElement('canvas');
+    blurMaskCanvas.width = origW;
+    blurMaskCanvas.height = origH;
+    const blurMaskCtx = blurMaskCanvas.getContext('2d')!;
+    try {
+      blurMaskCtx.filter = `blur(${isErase ? 12 : 18}px)`;
+    } catch {
+      // ignore unsupported filter
+    }
+    blurMaskCtx.drawImage(maskCanvas, 0, 0, origW, origH);
+    const maskData = blurMaskCtx.getImageData(0, 0, origW, origH);
 
     // 4. 创建蒙版化的生成结果
     // 如果有cropInfo，结果图像是裁剪区域的，需要放置到正确位置
@@ -3402,6 +3414,33 @@ export function InfiniteCanvas({
     if (cropInfo) {
       // 裁剪策略：结果图像是裁剪尺寸，放置到 (cropX, cropY) 位置
       resultCtx.drawImage(resultImg, cropInfo.cropX, cropInfo.cropY, cropInfo.cropW, cropInfo.cropH);
+      // 蒙版修图模式：对裁剪边缘做羽化处理
+      if (!isErase) {
+        const edgeFeather = 36;
+        const patchData = resultCtx.getImageData(0, 0, origW, origH);
+        const cropRight = cropInfo.cropX + cropInfo.cropW - 1;
+        const cropBottom = cropInfo.cropY + cropInfo.cropH - 1;
+        for (let y = cropInfo.cropY; y <= cropBottom; y++) {
+          for (let x = cropInfo.cropX; x <= cropRight; x++) {
+            const idx = (y * origW + x) * 4 + 3;
+            const edgeDistance = Math.min(
+              x - cropInfo.cropX,
+              y - cropInfo.cropY,
+              cropRight - x,
+              cropBottom - y
+            );
+            if (edgeDistance < edgeFeather) {
+              patchData.data[idx] = Math.min(
+                patchData.data[idx],
+                Math.max(0, Math.round((edgeDistance / edgeFeather) * 255))
+              );
+            }
+          }
+        }
+        resultCtx.putImageData(patchData, 0, 0);
+        ctx.drawImage(resultCanvas, 0, 0);
+        return canvas.toDataURL('image/png');
+      }
     } else {
       // 全图策略：结果图像是完整尺寸
       resultCtx.drawImage(resultImg, 0, 0, origW, origH);
@@ -3411,23 +3450,20 @@ export function InfiniteCanvas({
     const resultImageData = resultCtx.getImageData(0, 0, origW, origH);
 
     // 5. 应用蒙版作为 alpha 通道（IOPaint sd_mask_blur 风格）
-    // 蒙版白色(>127) → 保留生成结果（显示生成内容）
-    // 蒙版黑色(<128) → 设为透明（保留原图）
-    // 使用渐变 alpha 实现羽化过渡：alpha = clamp(maskValue * 2, 0, 255)
-    // 这样在蒙版边缘（128左右），alpha 会有平滑过渡
+    // 模糊后的蒙版提供更平滑的边界过渡
+    // 擦除模式：WHITE_START=210, BLACK_START=24 → 保留更多原图边界
+    // 蒙版模式：WHITE_START=120, BLACK_START=4 → 更清晰的修图边界
+    const WHITE_START = isErase ? 210 : 120;
+    const BLACK_START = isErase ? 24 : 4;
     for (let i = 0; i < maskData.data.length; i += 4) {
-      const maskValue = maskData.data[i]; // R channel
-      // 渐变 alpha：蒙版边缘区域（64-192）有平滑过渡
-      // 白色区域(>192): alpha=255 (完全显示生成结果)
-      // 黑色区域(<64): alpha=0 (完全显示原图)
-      // 过渡区域(64-192): alpha 线性插值
+      const maskValue = maskData.data[i]; // R channel (模糊后)
       let alpha: number;
-      if (maskValue >= 192) {
+      if (maskValue >= WHITE_START) {
         alpha = 255;
-      } else if (maskValue <= 64) {
+      } else if (maskValue <= BLACK_START) {
         alpha = 0;
       } else {
-        alpha = Math.round(((maskValue - 64) / 128) * 255);
+        alpha = Math.round(((maskValue - BLACK_START) / (WHITE_START - BLACK_START)) * 255);
       }
       resultImageData.data[i + 3] = alpha;
     }
@@ -3556,7 +3592,7 @@ export function InfiniteCanvas({
       blurCanvas.height = maskH;
       const blurCtx = blurCanvas.getContext('2d');
       if (blurCtx) {
-        blurCtx.filter = 'blur(4px)';
+        blurCtx.filter = `blur(${editMode === 'erase' ? 12 : 18}px)`;
         blurCtx.drawImage(canvas, 0, 0);
         ctx.clearRect(0, 0, maskW, maskH);
         ctx.drawImage(blurCanvas, 0, 0);
@@ -3566,7 +3602,7 @@ export function InfiniteCanvas({
     }
 
     return canvas.toDataURL('image/png');
-  }, [editStrokes, brushSize, images, editImageId]);
+  }, [editStrokes, brushSize, images, editImageId, editMode]);
 
   // Poll for task completion
   const pollForResult = useCallback(async (
@@ -4783,7 +4819,8 @@ export function InfiniteCanvas({
               resultUrl,
               currentEditImg.originalWidth || Math.round(currentEditImg.width),
               currentEditImg.originalHeight || Math.round(currentEditImg.height),
-              cropInfo
+              cropInfo,
+              editMode === 'erase' ? 'erase' : 'mask'
             );
             resultUrl = compositeUrl;
           } catch (compositeErr) {

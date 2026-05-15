@@ -47,6 +47,197 @@ function parseRatio(ratio: string): [number, number] {
   return [1, 1];
 }
 
+/* ─── Inpaint 裁剪 & 本地擦除 ─── */
+interface InpaintCropInfo {
+  cropX: number;
+  cropY: number;
+  cropW: number;
+  cropH: number;
+  origW: number;
+  origH: number;
+}
+
+function clampInt(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+/**
+ * 计算蒙版区域的裁剪范围，仅裁取蒙版边界框 + 上下文边距，
+ * 减少送入 AI 模型的图片面积，提升速度和质量。
+ */
+function calculateInpaintCrop(
+  origW: number,
+  origH: number,
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+  isErase: boolean,
+): InpaintCropInfo {
+  const bboxW = Math.max(1, maxX - minX + 1);
+  const bboxH = Math.max(1, maxY - minY + 1);
+  const longest = Math.max(bboxW, bboxH);
+  const minPad = Math.max(
+    isErase ? 64 : 96,
+    Math.round(Math.min(origW, origH) * (isErase ? 0.04 : 0.08))
+  );
+  const contextualPad = Math.round(longest * (isErase ? 0.65 : 1.05));
+  const pad = Math.max(minPad, contextualPad);
+
+  const cropX = clampInt(minX - pad, 0, origW - 1);
+  const cropY = clampInt(minY - pad, 0, origH - 1);
+  const cropRight = clampInt(maxX + pad + 1, cropX + 1, origW);
+  const cropBottom = clampInt(maxY + pad + 1, cropY + 1, origH);
+
+  return {
+    cropX,
+    cropY,
+    cropW: cropRight - cropX,
+    cropH: cropBottom - cropY,
+    origW,
+    origH,
+  };
+}
+
+/**
+ * 本地擦除修复：BFS 边界扩散 + 高斯平滑，无需调用 AI 模型。
+ * 适用于无提示词的纯擦除场景，速度快且无黑白块/笔刷痕迹。
+ */
+async function createLocalEraseInpaint(
+  imageBuffer: Buffer,
+  maskRawData: Buffer,
+  origW: number,
+  origH: number,
+  cropInfo: InpaintCropInfo,
+): Promise<Buffer> {
+  const src = await sharp(imageBuffer).ensureAlpha().raw().toBuffer();
+  const out = Buffer.from(src);
+  const total = origW * origH;
+  const masked = new Uint8Array(total);
+  const filled = new Uint8Array(total);
+  let maskedCount = 0;
+  const x0 = Math.max(0, cropInfo.cropX);
+  const y0 = Math.max(0, cropInfo.cropY);
+  const x1 = Math.min(origW - 1, cropInfo.cropX + cropInfo.cropW - 1);
+  const y1 = Math.min(origH - 1, cropInfo.cropY + cropInfo.cropH - 1);
+
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const p = y * origW + x;
+      if (maskRawData[p] > 127) { masked[p] = 1; maskedCount++; }
+      else { filled[p] = 1; }
+    }
+  }
+  if (maskedCount === 0) return imageBuffer;
+
+  const queue = new Int32Array(Math.max(1, maskedCount));
+  let head = 0;
+  let tail = 0;
+
+  const tryFill = (p: number): boolean => {
+    if (!masked[p] || filled[p]) return false;
+    const x = p % origW;
+    const y = Math.floor(p / origW);
+    let r = 0; let g = 0; let b = 0; let a = 0; let count = 0;
+    for (let dy = -1; dy <= 1; dy++) {
+      const yy = y + dy;
+      if (yy < 0 || yy >= origH) continue;
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const xx = x + dx;
+        if (xx < 0 || xx >= origW) continue;
+        const np = yy * origW + xx;
+        if (!filled[np]) continue;
+        const ni = np * 4;
+        r += out[ni]; g += out[ni + 1]; b += out[ni + 2]; a += out[ni + 3];
+        count++;
+      }
+    }
+    if (count === 0) return false;
+    const i = p * 4;
+    out[i] = Math.round(r / count);
+    out[i + 1] = Math.round(g / count);
+    out[i + 2] = Math.round(b / count);
+    out[i + 3] = Math.round(a / count);
+    filled[p] = 1;
+    if (tail < queue.length) queue[tail++] = p;
+    return true;
+  };
+
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      tryFill(y * origW + x);
+    }
+  }
+
+  while (head < tail) {
+    const p = queue[head++];
+    const x = p % origW;
+    const y = Math.floor(p / origW);
+    for (let dy = -1; dy <= 1; dy++) {
+      const yy = y + dy;
+      if (yy < y0 || yy > y1) continue;
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const xx = x + dx;
+        if (xx < x0 || xx > x1) continue;
+        tryFill(yy * origW + xx);
+      }
+    }
+  }
+
+  const smoothPasses = Math.min(22, Math.max(8, Math.round(Math.sqrt(maskedCount) / 18)));
+  for (let pass = 0; pass < smoothPasses; pass++) {
+    const prev = Buffer.from(out);
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const p = y * origW + x;
+        if (!masked[p]) continue;
+        const i = p * 4;
+        let r = prev[i] * 2; let g = prev[i + 1] * 2; let b = prev[i + 2] * 2; let a = prev[i + 3] * 2;
+        let weight = 2;
+        for (let dy = -1; dy <= 1; dy++) {
+          const yy = y + dy;
+          if (yy < 0 || yy >= origH) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const xx = x + dx;
+            if (xx < 0 || xx >= origW) continue;
+            const ni = (yy * origW + xx) * 4;
+            r += prev[ni]; g += prev[ni + 1]; b += prev[ni + 2]; a += prev[ni + 3];
+            weight++;
+          }
+        }
+        out[i] = Math.round(r / weight);
+        out[i + 1] = Math.round(g / weight);
+        out[i + 2] = Math.round(b / weight);
+        out[i + 3] = Math.round(a / weight);
+      }
+    }
+  }
+
+  const maskGray = Buffer.alloc(total, 0);
+  for (let p = 0; p < total; p++) maskGray[p] = masked[p] ? 255 : 0;
+  const alpha = await sharp(maskGray, { raw: { width: origW, height: origH, channels: 1 } })
+    .blur(7)
+    .raw()
+    .toBuffer();
+  const finalPixels = Buffer.from(src);
+  for (let p = 0; p < total; p++) {
+    const blend = alpha[p] / 255;
+    if (blend <= 0) continue;
+    const i = p * 4;
+    finalPixels[i] = Math.round(out[i] * blend + src[i] * (1 - blend));
+    finalPixels[i + 1] = Math.round(out[i + 1] * blend + src[i + 1] * (1 - blend));
+    finalPixels[i + 2] = Math.round(out[i + 2] * blend + src[i + 2] * (1 - blend));
+    finalPixels[i + 3] = src[i + 3];
+  }
+
+  return sharp(finalPixels, { raw: { width: origW, height: origH, channels: 4 } })
+    .png()
+    .toBuffer();
+}
+
 // 图像编辑 API - 支持放大、擦除、蒙版修复、扩图、移除背景
 export const maxDuration = 600; // 10分钟 - token link等API生图最久可达600s
 export const dynamic = 'force-dynamic';
@@ -1364,9 +1555,9 @@ export async function POST(request: NextRequest) {
 
     if (action === 'inpaint') {
       // ============================================================
-      // 蒙版修复/擦除 - AI 智能修复策略
-      // 将原图 + 蒙版 + 提示词发送给 AI 模型生成新内容，
-      // 然后将生成结果与原图按蒙版合成，确保非蒙版区域像素级保留。
+      // 蒙版修复/擦除 - 双路径策略
+      // 擦除 (无提示词): 本地 BFS 边界扩散 + 高斯平滑，速度快无黑白块
+      // 蒙版修图 (有提示词): AI 智能修复 + 裁剪优化 + 合成回原图
       // ============================================================
       if (!maskImage) {
         return NextResponse.json({ success: false, error: '需要提供蒙版图像' }, { status: 400 });
@@ -1407,9 +1598,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, error: '蒙版处理失败' }, { status: 500 });
       }
 
-      // 3. 检测蒙版是否为空
-      // 前端 renderMaskFromStrokes 生成黑色背景+白色笔触的 PNG，alpha 通道全为 255，
-      // 因此不能以 alpha > 127 判断蒙版区域，只能以 RGB 亮度判断（白色=蒙版区域）。
+      // 3. 检测蒙版是否为空 & 获取蒙版原始灰度数据
       const maskRawData = await sharp(maskBuffer).ensureAlpha().raw().toBuffer();
       let maskPixelCount = 0;
       let minX = origW, minY = origH, maxX = 0, maxY = 0;
@@ -1436,7 +1625,41 @@ export async function POST(request: NextRequest) {
       const maskRatio = (maskPixelCount / totalPixels * 100).toFixed(1);
       console.log(`[inpaint] ${isErase ? 'ERASE' : 'MASK'} mode, image ${origW}x${origH}, mask pixels ${maskPixelCount}/${totalPixels} (${maskRatio}%)`);
 
-      // 4. 生成标准黑白蒙版（白色=需要修复区域，黑色=保留区域）
+      // 4. 计算裁剪区域（减少送入模型的图片面积）
+      const cropInfo = calculateInpaintCrop(origW, origH, minX, minY, maxX, maxY, isErase);
+      console.log(`[inpaint] Crop region: ${cropInfo.cropW}x${cropInfo.cropH} at (${cropInfo.cropX},${cropInfo.cropY})`);
+
+      // ★★★ 路径分叉：擦除走本地修复，蒙版修图走 AI 模型 ★★★
+      if (isErase) {
+        // ─── 擦除路径：本地 BFS 边界扩散 + 高斯平滑，无需 AI 模型 ───
+        try {
+          const maskGrayData = Buffer.alloc(origW * origH, 0);
+          for (let p = 0; p < origW * origH; p++) {
+            const idx = p * 4;
+            const brightness = (maskRawData[idx] + maskRawData[idx + 1] + maskRawData[idx + 2]) / 3;
+            maskGrayData[p] = brightness > 127 ? 255 : 0;
+          }
+
+          const resultBuffer = await createLocalEraseInpaint(imageBuffer, maskGrayData, origW, origH, cropInfo);
+
+          const resultFileName = `erase_${Date.now()}.png`;
+          let resultUrl: string;
+          if (isS3Available()) {
+            resultUrl = (await uploadImageToS3(resultBuffer, resultFileName, 'image/png')) || '';
+          } else {
+            resultUrl = (await saveImageFile(resultBuffer, resultFileName, 'inpaint')) || `/api/serve-upload/inpaint/${resultFileName}`;
+          }
+          console.log(`[inpaint] Local erase result saved: ${resultFileName}`);
+          return NextResponse.json({ success: true, imageUrl: resultUrl, action, engine: 'local-erase' });
+        } catch (localErr) {
+          console.error('[inpaint] Local erase failed:', localErr);
+          return NextResponse.json({ success: false, error: '擦除修复失败，请重试' }, { status: 500 });
+        }
+      }
+
+      // ─── 蒙版修图路径：AI 模型 + 裁剪优化 + 合成回原图 ───
+
+      // 5. 生成标准黑白蒙版（白色=需要修复区域，黑色=保留区域）
       const binaryMaskPixels = Buffer.alloc(maskRawData.length);
       for (let i = 0; i < maskRawData.length; i += 4) {
         const brightness = (maskRawData[i] + maskRawData[i + 1] + maskRawData[i + 2]) / 3;
@@ -1451,71 +1674,52 @@ export async function POST(request: NextRequest) {
         .png()
         .toBuffer();
 
-      // 5. 构建提示词
-      let inpaintPrompt: string;
-      if (isErase) {
-        inpaintPrompt = (
-          `Seamlessly erase the object in the masked area and fill it with content that naturally ` +
-          `continues the surrounding scene. Match the same style, colors, lighting, perspective, ` +
-          `and texture of the adjacent areas. The result should look as if the erased content ` +
-          `never existed. Do not add any new objects, people, or text.`
-        );
-      } else {
-        inpaintPrompt = prompt!.trim();
-      }
+      // 6. 裁剪原图和蒙版到蒙版边界框区域，减少 AI 模型计算面积
+      const croppedImageBuffer = await sharp(imageBuffer)
+        .extract({ left: cropInfo.cropX, top: cropInfo.cropY, width: cropInfo.cropW, height: cropInfo.cropH })
+        .png()
+        .toBuffer();
+      const croppedMaskBuffer = await sharp(binaryMaskBuffer)
+        .extract({ left: cropInfo.cropX, top: cropInfo.cropY, width: cropInfo.cropW, height: cropInfo.cropH })
+        .png()
+        .toBuffer();
 
-      // 6. 确保 imageUrl 是 API 可访问的完整 URL
-      let accessibleImageUrl = imageUrl;
-      if (imageUrl.startsWith('/')) {
-        const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT;
-        if (domain) {
-          accessibleImageUrl = `${domain}${imageUrl}`;
-        } else {
-          // 无公网域名时，将本地图片转为 base64 数据 URL
-          try {
-            const imgBuffer = await fetchImageBuffer(imageUrl);
-            const imgBase64 = `data:image/png;base64,${imgBuffer.toString('base64')}`;
-            accessibleImageUrl = imgBase64;
-          } catch {
-            accessibleImageUrl = `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}`;
-          }
-        }
-      }
+      // 7. 构建提示词
+      const inpaintPrompt = prompt!.trim();
 
-      // 7. 计算宽高比
-      const effectiveSize = aspectRatio ? findClosestAspectRatio(aspectRatio) : '1:1';
+      // 8. 确保 imageUrl 是 API 可访问的完整 URL（使用裁剪后的图片）
+      const croppedImageDataUrl = `data:image/png;base64,${croppedImageBuffer.toString('base64')}`;
+      const croppedMaskDataUrl = `data:image/png;base64,${croppedMaskBuffer.toString('base64')}`;
 
-      // 8. 构建蒙版 data URL（标准黑白图，白色=修复区域）
-      const maskDataUrl = `data:image/png;base64,${binaryMaskBuffer.toString('base64')}`;
+      // 9. 计算宽高比（使用裁剪区域的比例）
+      const cropGcd = gcd(cropInfo.cropW, cropInfo.cropH);
+      const cropAspectStr = `${cropInfo.cropW / cropGcd}:${cropInfo.cropH / cropGcd}`;
+      const effectiveSize = aspectRatio ? findClosestAspectRatio(aspectRatio) : cropAspectStr;
 
-      // 9. 发送 AI 生成请求 - 自动尝试管理员系统中的所有可用图像模型
+      // 10. 发送 AI 生成请求 - 使用裁剪后的图片和蒙版
       const requestBody: Record<string, unknown> = {
         prompt: inpaintPrompt,
-        negative_prompt: isErase
-          ? 'text, watermark, logo, signature, new objects, new people, new animals, low quality, blurry, distorted, deformed'
-          : 'low quality, blurry, distorted, deformed, watermark, text, signature',
+        negative_prompt: 'low quality, blurry, distorted, deformed, watermark, text, signature',
         size: effectiveSize,
         n: 1,
-        image_urls: [accessibleImageUrl],
-        mask_image: maskDataUrl,
-        strength: isErase ? 0.85 : 0.8,
+        image_urls: [croppedImageDataUrl],
+        mask_image: croppedMaskDataUrl,
+        strength: 0.8,
       };
 
-      console.log(`[inpaint] AI API request: size=${effectiveSize}, strength=${isErase ? 0.85 : 0.8}`);
+      console.log(`[inpaint] AI API request: crop ${cropInfo.cropW}x${cropInfo.cropH}, size=${effectiveSize}, strength=0.8`);
 
       let result: { taskId?: string; directUrl?: string; usedModel?: string };
       try {
-        // 自动尝试管理员系统中的所有可用图像模型
         result = await autoTrySubmitImageTask(
           candidateModels,
           (m: string) => ({ ...requestBody, model: m }),
-          `${editMode === 'erase' ? '擦除' : '蒙版修图'}`,
+          '蒙版修图',
         );
       } catch (autoTryErr: unknown) {
-        // 所有 image 类型模型都失败，回退到视觉模型生成
         console.log(`[inpaint] All image models failed, trying chat-vision fallback...`);
         const fallbackResult = await autoTryChatVisionFallback(
-          await resolveImageToBase64(accessibleImageUrl), maskDataUrl || null, inpaintPrompt, 'inpaint'
+          croppedImageDataUrl, croppedMaskDataUrl, inpaintPrompt, 'inpaint'
         );
         if (fallbackResult) {
           result = fallbackResult as { taskId: string; directUrl?: string; usedModel?: string };
@@ -1524,42 +1728,38 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // 10. 处理结果
+      // 11. 处理结果
       if (result.directUrl) {
         try {
           // 下载 AI 生成的结果
           const resultBuffer = await fetchImageBuffer(result.directUrl);
           const resultMeta = await sharp(resultBuffer).metadata();
 
-          // 确保 AI 结果尺寸与原图一致
-          const resizedResult = (resultMeta.width !== origW || resultMeta.height !== origH)
-            ? await sharp(resultBuffer).resize(origW, origH, { fit: 'fill' }).png().toBuffer()
+          // 将 AI 结果缩放到裁剪区域尺寸
+          const resizedResult = (resultMeta.width !== cropInfo.cropW || resultMeta.height !== cropInfo.cropH)
+            ? await sharp(resultBuffer).resize(cropInfo.cropW, cropInfo.cropH, { fit: 'fill' }).png().toBuffer()
             : resultBuffer;
 
-          // 用蒙版合成：AI结果在白色区域(蒙版区域)，原图在黑色区域(保留区域)
-          // 方法：将模糊蒙版的亮度直接作为AI结果的alpha通道，然后叠加到原图上
-          // 注意：不能用 sharp composite dest-in + blur mask，因为 blur 会导致黑色区域也有非零值
-          //       造成整个图像半透明，原图被AI结果覆盖
-          const softAlphaMask = await sharp(binaryMaskBuffer)
+          // 用裁剪区域的蒙版做柔边合成
+          const croppedSoftMask = await sharp(croppedMaskBuffer)
             .threshold(127)
-            .blur(8)  // 边界柔化 8px
+            .blur(8)
             .grayscale()
             .raw()
             .toBuffer();
 
-          // 将 AI 结果转换为 RGBA，手动设置 alpha 通道
           const aiRaw = await sharp(resizedResult).ensureAlpha().raw().toBuffer();
-          for (let i = 0; i < origW * origH; i++) {
-            aiRaw[i * 4 + 3] = softAlphaMask[i]; // alpha = 蒙版亮度
+          for (let i = 0; i < cropInfo.cropW * cropInfo.cropH; i++) {
+            aiRaw[i * 4 + 3] = croppedSoftMask[i];
           }
-          const aiWithAlpha = await sharp(aiRaw, { raw: { width: origW, height: origH, channels: 4 } }).png().toBuffer();
+          const aiWithAlpha = await sharp(aiRaw, { raw: { width: cropInfo.cropW, height: cropInfo.cropH, channels: 4 } }).png().toBuffer();
 
+          // 将裁剪区域的 AI 结果合成回原图
           const compositeResult = await sharp(imageBuffer)
-            .composite([{ input: aiWithAlpha, blend: 'over' }])
+            .composite([{ input: aiWithAlpha, left: cropInfo.cropX, top: cropInfo.cropY, blend: 'over' }])
             .png()
             .toBuffer();
 
-          // 保存合成结果
           const resultFileName = `inpaint_${Date.now()}.png`;
           let compositeUrl: string;
 
@@ -1570,10 +1770,9 @@ export async function POST(request: NextRequest) {
           }
           console.log(`[inpaint] AI composite result saved: ${resultFileName}`);
 
-          return NextResponse.json({ success: true, imageUrl: compositeUrl, action, engine: 'ai-composite' });
+          return NextResponse.json({ success: true, imageUrl: compositeUrl, action, engine: 'ai-crop-composite', cropInfo });
         } catch (compositeErr) {
           console.error('[inpaint] Composite failed, returning raw AI result:', compositeErr);
-          // 合成失败时直接返回 AI 结果
           return NextResponse.json({ success: true, imageUrl: result.directUrl, action, engine: 'ai-raw' });
         }
       }
@@ -1583,7 +1782,7 @@ export async function POST(request: NextRequest) {
         success: true,
         taskId: result.taskId,
         action,
-        cropInfo: { cropX: 0, cropY: 0, cropW: origW, cropH: origH, origW, origH },
+        cropInfo,
         engine: 'ai-api',
       });
     }
