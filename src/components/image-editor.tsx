@@ -17,6 +17,7 @@ interface ServerModel {
   providerId: string;
   providerName: string;
   type?: string;
+  supportsMask?: boolean;
 }
 
 interface ImageEditorProps {
@@ -55,6 +56,12 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
   const [quality, setQuality] = useState(initialQuality || 'high');
   const [outputCount, setOutputCount] = useState(initialCount || 1);
   const [selectedModelId, setSelectedModelId] = useState('');
+  // 保存模型选择到 localStorage
+  const handleModelSelect = useCallback((key: string) => {
+    setSelectedModelId(key);
+    setModelListExpanded(false);
+    localStorage.setItem('wujie_edit_selected_model', key);
+  }, []);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -73,8 +80,10 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
   const currentModelSupportsMask = (() => {
     const m = serverModels.find(m => `${m.providerId}::${m.id}` === selectedModelId);
     if (!m) return true; // 默认支持
+    // 优先使用服务端提供的 supportsMask 标记
+    if (m.supportsMask !== undefined) return m.supportsMask;
+    // 降级：Gemini 系列不支持蒙版
     const id = m.id.toLowerCase();
-    // Gemini 系列不支持蒙版
     return !id.includes('gemini');
   })();
 
@@ -94,10 +103,35 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
   // 模型列表展开/折叠
   const [modelListExpanded, setModelListExpanded] = useState(false);
 
-  // 从服务器加载编辑模型
+  // 从服务器加载编辑模型（使用 /api/edit 的专用列表）
   useEffect(() => {
     const loadModels = async () => {
       try {
+        // 优先使用 /api/edit GET 获取专用编辑模型列表
+        const editRes = await fetch('/api/edit');
+        if (editRes.ok) {
+          const editData = await editRes.json();
+          if (editData.models && Array.isArray(editData.models) && editData.models.length > 0) {
+            const models: ServerModel[] = editData.models.map((m: { id: string; name: string; providerId: string; providerName: string; supportsMask?: boolean }) => ({
+              id: m.id,
+              name: m.name,
+              providerId: m.providerId,
+              providerName: m.providerName || '',
+              type: 'image',
+              supportsMask: m.supportsMask,
+            }));
+            setServerModels(models);
+            // 尝试恢复上次选择的模型
+            const savedModel = localStorage.getItem('wujie_edit_selected_model');
+            if (savedModel && models.some(m => `${m.providerId}::${m.id}` === savedModel)) {
+              setSelectedModelId(savedModel);
+            } else if (models.length > 0) {
+              setSelectedModelId(`${models[0].providerId}::${models[0].id}`);
+            }
+            return;
+          }
+        }
+        // 降级到 /api/models?type=image
         const res = await fetch('/api/models?type=image');
         if (res.ok) {
           const data = await res.json();
@@ -105,8 +139,7 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
           if (data.models && Array.isArray(data.models)) {
             for (const m of data.models) {
               const id = (m.id || m.name || '').toLowerCase();
-              // 过滤仅支持编辑的模型（图片编辑模型 + 支持编辑的通用模型）
-              // 排除明显不支持编辑的类型：3D模型、矢量模型、分层模型
+              // 排除明显不支持编辑的类型
               if (id.includes('3d') || id.includes('vectoriz') || id.includes('layer') || id.includes('segment')) continue;
               models.push({
                 id: m.id || m.name,
@@ -118,8 +151,10 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
             }
           }
           setServerModels(models);
-          // 自动选择第一个模型
-          if (models.length > 0 && !selectedModelId) {
+          const savedModel = localStorage.getItem('wujie_edit_selected_model');
+          if (savedModel && models.some(m => `${m.providerId}::${m.id}` === savedModel)) {
+            setSelectedModelId(savedModel);
+          } else if (models.length > 0) {
             setSelectedModelId(`${models[0].providerId}::${models[0].id}`);
           }
         }
@@ -460,7 +495,7 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
               )}
               <canvas
                 ref={canvasRef}
-                className={`absolute top-0 left-0 w-full h-full ${currentModelSupportsMask ? 'cursor-crosshair' : 'cursor-not-allowed'}`}
+                className={`absolute top-0 left-0 w-full h-full ${currentModelSupportsMask ? 'cursor-crosshair' : 'pointer-events-none'}`}
                 style={{ width: imageDisplaySize.width, height: imageDisplaySize.height }}
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
@@ -468,35 +503,65 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
                 onMouseLeave={handleMouseUp}
               />
               {!currentModelSupportsMask && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded pointer-events-none">
-                  <div className="flex flex-col items-center gap-1 px-3 py-2 bg-[#1a1a1a]/90 rounded-lg border border-[#2a2a2a]">
-                    <Lock className="h-4 w-4 text-[#888]" />
-                    <span className="text-[10px] text-[#888]">此模型不支持区域涂抹</span>
-                    <span className="text-[10px] text-[#d4af37]">文字描述即可智能修图</span>
+                <div className="absolute bottom-1 left-1 right-1 flex items-center justify-center pointer-events-none">
+                  <div className="flex items-center gap-1 px-2 py-0.5 bg-[#1a1a1a]/80 rounded border border-[#2a2a2a]">
+                    <Lock className="h-3 w-3 text-[#888]" />
+                    <span className="text-[9px] text-[#d4af37]">此模型不支持涂抹，文字描述即可智能修图</span>
                   </div>
                 </div>
               )}
             </div>
           </div>
 
-          {/* 画笔工具 - 仅支持蒙版时显示，紧凑一行 */}
-          {currentModelSupportsMask && (
-            <div className="flex items-center gap-1.5 px-1">
-              <button onClick={() => setTool('brush')} className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-all ${tool === 'brush' ? 'bg-[#d4af37] text-black font-medium' : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a]'}`}>
-                <Pencil className="h-3 w-3" />画笔
-              </button>
-              <button onClick={() => setTool('eraser')} className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-all ${tool === 'eraser' ? 'bg-[#d4af37] text-black font-medium' : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a]'}`}>
-                <Eraser className="h-3 w-3" />橡皮
-              </button>
-              <button onClick={clearMask} className="flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a] transition-all">
-                <Trash2 className="h-3 w-3" />清除
-              </button>
-              <div className="flex-1" />
-              <span className="text-[10px] text-[#666]">笔触</span>
-              <input type="range" min="10" max="50" value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} className="w-14 h-0.5 bg-[#2a2a2a] rounded appearance-none cursor-pointer accent-[#d4af37]" />
-              <span className="text-[10px] text-[#d4af37] font-mono w-4">{brushSize}</span>
-            </div>
-          )}
+          {/* 画笔工具 - 始终显示，不支持涂抹时禁用交互 */}
+          <div className="flex items-center gap-1.5 px-1">
+            <button
+              onClick={() => currentModelSupportsMask && setTool('brush')}
+              className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-all ${
+                !currentModelSupportsMask
+                  ? 'bg-[#1a1a1a] text-[#444] border border-[#1a1a1a] cursor-not-allowed'
+                  : tool === 'brush'
+                    ? 'bg-[#d4af37] text-black font-medium'
+                    : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a]'
+              }`}
+            >
+              <Pencil className="h-3 w-3" />画笔
+            </button>
+            <button
+              onClick={() => currentModelSupportsMask && setTool('eraser')}
+              className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-all ${
+                !currentModelSupportsMask
+                  ? 'bg-[#1a1a1a] text-[#444] border border-[#1a1a1a] cursor-not-allowed'
+                  : tool === 'eraser'
+                    ? 'bg-[#d4af37] text-black font-medium'
+                    : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a]'
+              }`}
+            >
+              <Eraser className="h-3 w-3" />橡皮
+            </button>
+            <button
+              onClick={() => currentModelSupportsMask && clearMask()}
+              className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-all ${
+                !currentModelSupportsMask
+                  ? 'bg-[#1a1a1a] text-[#444] border border-[#1a1a1a] cursor-not-allowed'
+                  : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a]'
+              }`}
+            >
+              <Trash2 className="h-3 w-3" />清除
+            </button>
+            <div className="flex-1" />
+            <span className="text-[10px] text-[#666]">笔触</span>
+            <input
+              type="range"
+              min="10"
+              max="50"
+              value={brushSize}
+              onChange={(e) => setBrushSize(Number(e.target.value))}
+              disabled={!currentModelSupportsMask}
+              className={`w-14 h-0.5 rounded appearance-none accent-[#d4af37] ${!currentModelSupportsMask ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer bg-[#2a2a2a]'}`}
+            />
+            <span className={`text-[10px] font-mono w-4 ${currentModelSupportsMask ? 'text-[#d4af37]' : 'text-[#444]'}`}>{brushSize}</span>
+          </div>
 
           {/* 编辑指令 - 紧凑 */}
           <div>
@@ -519,10 +584,13 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
               <span className="flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#d4af37]" />
                 {serverModels.find(m => `${m.providerId}::${m.id}` === selectedModelId)?.name || '选择模型'}
-                {currentModelSupportsMask
-                  ? <span className="text-[9px] text-green-500">支持涂抹</span>
-                  : <span className="text-[9px] text-[#d4af37]">文字修图</span>
-                }
+                {(() => {
+                  const cm = serverModels.find(m => `${m.providerId}::${m.id}` === selectedModelId);
+                  const sm = cm?.supportsMask ?? (cm ? !cm.id.toLowerCase().includes('gemini') : true);
+                  return sm
+                    ? <span className="text-[9px] text-green-500">支持涂抹</span>
+                    : <span className="text-[9px] text-[#d4af37]">文字修图</span>;
+                })()}
               </span>
               {modelListExpanded ? <ChevronUp size={12} className="text-[#888]" /> : <ChevronDown size={12} className="text-[#888]" />}
             </button>
@@ -531,11 +599,11 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
                 {serverModels.map(model => {
                   const key = `${model.providerId}::${model.id}`;
                   const isSelected = selectedModelId === key;
-                  const supportsMask = !model.id.toLowerCase().includes('gemini');
+                  const supportsMask = model.supportsMask !== undefined ? model.supportsMask : !model.id.toLowerCase().includes('gemini');
                   return (
                     <button
                       key={key}
-                      onClick={() => { setSelectedModelId(key); setModelListExpanded(false); }}
+                      onClick={() => handleModelSelect(key)}
                       className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-all border-b border-[#1a1a1a] last:border-b-0 ${
                         isSelected
                           ? 'bg-[#d4af37]/15 text-[#d4af37]'
