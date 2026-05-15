@@ -483,7 +483,7 @@ export function InfiniteCanvas({
   // Resize
   const [resizingImage, setResizingImage] = useState<string | null>(null);
   const [resizeCorner, setResizeCorner] = useState<string | null>(null);
-  const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, w: 0, h: 0 });
+  const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, w: 0, h: 0, imgX: 0, imgY: 0 });
 
   // Box select
   const [boxSelectStart, setBoxSelectStart] = useState<{ x: number; y: number } | null>(null);
@@ -1567,7 +1567,7 @@ export function InfiniteCanvas({
               Math.abs(canvasPos.y - corner.y) < handleSize) {
             setResizingImage(selId);
             setResizeCorner(corner.name);
-            setResizeStart({ x: canvasPos.x, y: canvasPos.y, w: selImg.width, h: selImg.height });
+            setResizeStart({ x: canvasPos.x, y: canvasPos.y, w: selImg.width, h: selImg.height, imgX: selImg.x, imgY: selImg.y });
             return;
           }
         }
@@ -1644,8 +1644,8 @@ export function InfiniteCanvas({
       const aspect = resizeStart.w / resizeStart.h;
       let newW = resizeStart.w;
       let newH = resizeStart.h;
-      let newX = img.x;
-      let newY = img.y;
+      let newX = resizeStart.imgX;
+      let newY = resizeStart.imgY;
 
       if (resizeCorner === 'br') {
         newW = Math.max(40, resizeStart.w + dx);
@@ -1653,16 +1653,16 @@ export function InfiniteCanvas({
       } else if (resizeCorner === 'bl') {
         newW = Math.max(40, resizeStart.w - dx);
         newH = newW / aspect;
-        newX = img.x + (resizeStart.w - newW);
+        newX = resizeStart.imgX + (resizeStart.w - newW);
       } else if (resizeCorner === 'tr') {
         newW = Math.max(40, resizeStart.w + dx);
         newH = newW / aspect;
-        newY = img.y + (resizeStart.h - newH);
+        newY = resizeStart.imgY + (resizeStart.h - newH);
       } else if (resizeCorner === 'tl') {
         newW = Math.max(40, resizeStart.w - dx);
         newH = newW / aspect;
-        newX = img.x + (resizeStart.w - newW);
-        newY = img.y + (resizeStart.h - newH);
+        newX = resizeStart.imgX + (resizeStart.w - newW);
+        newY = resizeStart.imgY + (resizeStart.h - newH);
       }
 
       onImagesChange(images.map(i =>
