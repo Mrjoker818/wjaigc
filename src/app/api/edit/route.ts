@@ -57,15 +57,14 @@ function isImageEditModel(modelId: string): boolean {
 }
 
 /**
- * 判断模型是否支持蒙版涂抹
- * 仅 OpenAI 官方 images.edit 端点支持 mask 参数
- * 第三方代理通常通过 chat/completions 多模态实现，不支持 mask
+ * 判断模型是否支持原生蒙版涂抹（OpenAI images.edit 端点的 mask 参数）
+ * 注意：即使不支持原生 mask，也可以通过 chat/completions 将蒙版作为参考图发送
+ * 所以所有模型在 UI 层面都"支持涂抹"，这里仅决定是否走 images.edit 路径
  */
-function modelSupportsMask(modelId: string, providerBaseUrl: string): boolean {
+function modelSupportsNativeMask(modelId: string, providerBaseUrl: string): boolean {
   const id = modelId.toLowerCase();
-  // OpenAI 官方端点支持 mask
+  // 仅 OpenAI 官方端点支持 images.edit 的 mask 参数
   if (id.includes('gpt-image') || id.includes('dall-e')) {
-    // 但如果走的是第三方代理的 chat/completions，也不支持 mask
     if (providerBaseUrl && !providerBaseUrl.includes('api.openai.com')) {
       return false;
     }
@@ -206,7 +205,7 @@ export async function POST(request: NextRequest) {
     const {
       image,         // base64 data URL（客户端已转换）
       prompt,        // 编辑指令（自然语言）
-      mask,          // 可选，mask图片 base64（仅支持 mask 的模型使用）
+      mask,          // 可选，mask图片 base64（涂抹区域，所有模型均支持，AI理解蒙版语义）
       size = '1:1',  // 画面比例或像素尺寸
       quality = 'high',
       apiKey,        // 可选，用户提供的 API Key
@@ -322,7 +321,7 @@ export async function POST(request: NextRequest) {
     // ========== 4. 判断调用路径 ==========
     const id = model.toLowerCase();
     const isOpenaiImageModel = id.includes('gpt-image') || id.includes('dall-e');
-    const supportsMask = modelSupportsMask(model, effectiveBaseUrl);
+    const supportsNativeMask = modelSupportsNativeMask(model, effectiveBaseUrl);
 
     // ========== 5. 构建编辑 prompt ==========
     let effectivePrompt = prompt;
@@ -388,7 +387,7 @@ export async function POST(request: NextRequest) {
 
     // 路径A: OpenAI images.edit 端点（仅 OpenAI 官方 + 支持 mask 的场景）
     // 第三方代理即使模型名是 gpt-image-2，也不走 images.edit（因为代理通常不支持）
-    if (isOpenaiImageModel && supportsMask && maskBuffer) {
+    if (isOpenaiImageModel && supportsNativeMask && maskBuffer) {
       try {
         const FormData = (await import('form-data')).default;
         const form = new FormData();
@@ -484,6 +483,21 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // 蒙版参考图（将蒙版作为参考图发送给AI）
+    // 白色区域=需要修改的区域，黑色区域=保持不变的区域
+    // 无论是否支持原生mask，都通过chat/completions参考图模式发送蒙版
+    // （如果路径A成功则不会走到这里，路径A失败降级时也能正确处理）
+    if (maskBuffer) {
+      contentParts.push({
+        type: 'image_url',
+        image_url: { url: `data:image/png;base64,${maskBuffer.toString('base64')}` },
+      });
+      contentParts.push({
+        type: 'text',
+        text: `[System: The last image is a mask overlay. The WHITE areas indicate the regions you should modify/edit. The BLACK areas must remain unchanged. Only apply changes within the white mask regions. Preserve all details outside the mask precisely.]`,
+      });
+    }
+
     // 编辑指令
     contentParts.push({ type: 'text', text: editInstruction });
 
@@ -552,7 +566,7 @@ export async function POST(request: NextRequest) {
       }
       if (chatResponse.status === 400) {
         // 400 可能是模型不支持图片输入，尝试降级到 /images/edits
-        if (isOpenaiImageModel && !supportsMask) {
+        if (isOpenaiImageModel && !supportsNativeMask) {
           // 尝试 images/generations 端点
           try {
             const genResult = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, count);
@@ -726,14 +740,13 @@ export async function GET() {
         if (id.includes('3d') || id.includes('vectoriz') || id.includes('layer') || id.includes('segment')) continue;
 
         // 全兼容模式：所有图像模型都支持编辑（通过 chat/completions 多模态）
-        // supportsMask 仅在 OpenAI 官方端点 + OpenAI 图像模型时为 true
-        const baseUrl = normalizeApiBaseUrl(provider.baseUrl || '');
+        // 所有模型都支持涂抹（蒙版作为参考图发送，AI 理解白色区域为编辑范围）
         editModels.push({
           id: modelId,
           name: modelId,
           providerId: provider.id,
           providerName: provider.name || provider.id,
-          supportsMask: modelSupportsMask(modelId, baseUrl),
+          supportsMask: true,
         });
       }
     }
@@ -751,7 +764,7 @@ export async function GET() {
         name: model,
         providerId: '',
         providerName: '',
-        supportsMask: model.includes('gpt-image') || model.includes('dall-e'),
+        supportsMask: true,
       })),
     });
   }

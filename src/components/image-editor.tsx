@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { X, Pencil, Eraser, Trash2, Loader2, Check, Sparkles, History, Image as ImageIcon, Lock, ChevronDown, ChevronUp, Hand, Plus, Minus, Maximize2, GripVertical, Upload } from 'lucide-react';
+import { X, Pencil, Eraser, Trash2, Loader2, Check, Sparkles, History, Image as ImageIcon, ChevronDown, ChevronUp, Hand, Plus, Minus, Maximize2, GripVertical, Upload } from 'lucide-react';
 import type { CanvasImage } from './infinite-canvas';
 
 interface EditHistoryItem {
@@ -115,15 +115,14 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     return imageModels.find(m => m.providerId === providerId && m.id === modelId) || null;
   })();
 
-  // 当前选中的图像模型是否支持蒙版
-  // 全兼容模式：仅 OpenAI 官方端点 + gpt-image/dall-e 模型支持 mask
-  // 第三方代理（APImart/302等）即使模型名是 gpt-image-2 也不支持 mask
+  // 当前选中的图像模型是否支持蒙版涂抹
+  // 全兼容模式：所有模型都支持涂抹（蒙版作为参考图+文本指令发送给AI）
+  // OpenAI 官方端点走 images.edit 原生 mask，第三方代理走 chat/completions 参考图模式
   const currentModelSupportsMask = (() => {
     if (!currentImageModel) return false;
     if (currentImageModel.supportsMask !== undefined) return currentImageModel.supportsMask;
-    // 降级判断：仅 OpenAI 官方模型支持 mask
-    const id = currentImageModel.id.toLowerCase();
-    return (id.includes('gpt-image') || id.includes('dall-e')) && !currentImageModel.providerName.toLowerCase().includes('apimart') && !currentImageModel.providerName.includes('302');
+    // 降级判断：默认所有图像模型都支持涂抹
+    return true;
   })();
 
   // 当前选中的图像模型名称
@@ -387,15 +386,17 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     for (let i = 0; i < imageData.data.length; i += 4) {
       const alpha = imageData.data[i + 3];
       if (alpha > 10) {
+        // 白色=涂抹区域
         resultData.data[i] = 255;
         resultData.data[i + 1] = 255;
         resultData.data[i + 2] = 255;
         resultData.data[i + 3] = 255;
       } else {
+        // 黑色=保持不变（实心黑，非透明）
         resultData.data[i] = 0;
         resultData.data[i + 1] = 0;
         resultData.data[i + 2] = 0;
-        resultData.data[i + 3] = 0;
+        resultData.data[i + 3] = 255;
       }
     }
     tempCtx.putImageData(resultData, 0, 0);
@@ -861,8 +862,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   }, [position, resultImages]);
 
   // 模型列表项组件
-  const renderModelItem = (model: ServerModel, modelKey: string, isSelected: boolean, supportsMask?: boolean) => {
-    const maskSupported = supportsMask !== undefined ? supportsMask : false;
+  const renderModelItem = (model: ServerModel, modelKey: string, isSelected: boolean, _supportsMask?: boolean) => {
     const hint = getModelHint(model.id);
     const hasDuplicate = imageModels.filter(m => m.id === model.id).length > 1;
     return (
@@ -879,10 +879,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           <div className="font-medium flex items-center gap-1.5">
             {model.name}
             {hasDuplicate && <span className="text-[8px] px-1 py-0.5 bg-[#d4af37]/20 text-[#d4af37] rounded">{model.providerName}</span>}
-            {maskSupported
-              ? <span className="text-[8px] px-1 py-0.5 bg-green-500/20 text-green-400 rounded">支持涂抹</span>
-              : <span className="text-[8px] px-1 py-0.5 bg-[#d4af37]/20 text-[#d4af37] rounded">文字修图</span>
-            }
+            <span className="text-[8px] px-1 py-0.5 bg-green-500/20 text-green-400 rounded">支持涂抹</span>
           </div>
           <div className="text-[10px] text-[#666] truncate">{model.providerName}{hint ? ` · ${hint}` : ''}</div>
         </div>
@@ -1084,14 +1081,13 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                   onMouseUp={!isPanning ? handleMouseUp : undefined}
                   onMouseLeave={!isPanning ? handleMouseUp : undefined}
                 />
-                {!currentModelSupportsMask && (
-                  <div className="absolute bottom-1 left-1 right-1 flex items-center justify-center pointer-events-none">
-                    <div className="flex items-center gap-1 px-2 py-0.5 bg-[#1a1a1a]/80 rounded border border-[#2a2a2a]">
-                      <Lock className="h-3 w-3 text-[#888]" />
-                      <span className="text-[9px] text-[#d4af37]">此模型不支持涂抹，文字描述即可智能修图</span>
-                    </div>
+                {/* 画笔涂抹提示 */}
+                <div className="absolute bottom-1 left-1 right-1 flex items-center justify-center pointer-events-none">
+                  <div className="flex items-center gap-1 px-2 py-0.5 bg-[#1a1a1a]/80 rounded border border-[#2a2a2a]">
+                    <Pencil className="h-3 w-3 text-[#d4af37]" />
+                    <span className="text-[9px] text-[#d4af37]">涂抹区域 + 文字描述 = 精准修图</span>
                   </div>
-                )}
+                </div>
               </div>
             </div>
           </div>
@@ -1279,12 +1275,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-xs text-[#ccc] hover:border-[#d4af37] transition-all"
             >
               <span className="flex items-center gap-1.5">
-                <span className={`w-1.5 h-1.5 rounded-full ${currentModelSupportsMask ? 'bg-green-500' : 'bg-[#d4af37]'}`} />
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
                 {currentModelName}
-                {currentModelSupportsMask
-                  ? <span className="text-[9px] text-green-500">支持涂抹</span>
-                  : <span className="text-[9px] text-[#d4af37]">文字修图</span>
-                }
+                <span className="text-[9px] text-green-500">支持涂抹</span>
               </span>
               {modelListExpanded ? <ChevronUp size={12} className="text-[#888]" /> : <ChevronDown size={12} className="text-[#888]" />}
             </button>
