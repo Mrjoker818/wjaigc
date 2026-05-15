@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { X, Pencil, Eraser, Trash2, Loader2, ChevronDown, Check, Sparkles, History, Image as ImageIcon, Lock } from 'lucide-react';
+import { X, Pencil, Eraser, Trash2, Loader2, Check, Sparkles, History, Image as ImageIcon, Lock, ChevronDown, ChevronUp, ZoomIn, ZoomOut, RotateCcw, MessageSquare } from 'lucide-react';
 import type { CanvasImage } from './infinite-canvas';
 
 interface EditHistoryItem {
@@ -11,47 +11,72 @@ interface EditHistoryItem {
   timestamp: number;
 }
 
+interface ServerModel {
+  id: string;
+  name: string;
+  providerId: string;
+  providerName: string;
+  type?: string;
+}
+
 interface ImageEditorProps {
   image: CanvasImage;
   onClose: () => void;
   onConfirm: (editedImage: { url: string; prompt: string }) => void;
-  // 用于计算SVG连接线位置
-  editorPosition?: { x: number; y: number };
-  onPositionChange?: (pos: { x: number; y: number; width: number; height: number }) => void;
+  /** 图片右侧连接点位置（画布坐标） */
+  connectionPoint?: { x: number; y: number };
+  /** 画面比例/质量/生图数量初始值 */
+  initialAspectRatio?: string;
+  initialQuality?: string;
+  initialCount?: number;
+  onParamsChange?: (params: { aspectRatio: string; quality: string; count: number }) => void;
 }
 
-const SIZES = [
-  { value: '1024', label: '1024' },
-  { value: '1536', label: '1536' },
-  { value: '2048', label: '2048' },
-];
-
+// 画面比例选项
+const ASPECT_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '2:3', '3:2', '1:2', '2:1'];
+// 图片质量选项
 const QUALITIES = [
-  { value: 'low', label: '低' },
-  { value: 'medium', label: '中' },
-  { value: 'high', label: '高' },
+  { value: 'low', label: '快速' },
+  { value: 'medium', label: '中等' },
+  { value: 'high', label: '高清' },
+  { value: 'auto', label: '自动' },
+  { value: 'standard', label: '标准' },
 ];
+// 生图数量选项
+const COUNTS = [1, 2, 3, 4];
 
-// 支持编辑的模型列表（包含 OpenAI 和 Gemini 模型）
-const EDITABLE_MODELS = [
-  { value: 'gpt-image-2', label: 'GPT Image 2', provider: 'OpenAI', supportsMask: true, apiKeyPlaceholder: 'OpenAI API Key', hint: '支持区域涂抹' },
-  { value: 'dall-e-3', label: 'DALL-E 3', provider: 'OpenAI', supportsMask: true, apiKeyPlaceholder: 'OpenAI API Key', hint: '支持区域涂抹' },
-  { value: 'gemini-2.5-flash-image', label: 'Nano Banana', provider: 'Google', supportsMask: false, apiKeyPlaceholder: 'Google API Key', hint: '智能修图' },
-  { value: 'gemini-3-pro-image-preview', label: 'Nano Banana Pro', provider: 'Google', supportsMask: false, apiKeyPlaceholder: 'Google API Key', hint: '智能修图' },
-  { value: 'gemini-3.1-flash-image-preview', label: 'Nano Banana 2', provider: 'Google', supportsMask: false, apiKeyPlaceholder: 'Google API Key', hint: '智能修图' },
-];
+// 图片模型到LLM模型的映射
+const IMAGE_TO_LLM: Record<string, string[]> = {
+  'gemini': ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'],
+  'gpt-image': ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
+  'dall-e': ['gpt-4o', 'gpt-4o-mini'],
+};
+const LLM_TO_IMAGE: Record<string, string[]> = {
+  'gemini': ['gemini-2.5-flash-image-preview', 'gemini-3-pro-image-preview', 'gemini-3.1-flash-image-preview'],
+  'gpt': ['gpt-image-2', 'gpt-image-2'],
+  'claude': ['gpt-image-2'],
+};
 
-export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPositionChange }: ImageEditorProps) {
-  // 状态管理
+function getModelFamily(id: string): string {
+  const lid = id.toLowerCase();
+  if (lid.includes('gemini')) return 'gemini';
+  if (lid.includes('gpt-image') || lid.includes('dall-e')) return 'gpt-image';
+  if (lid.includes('gpt') || lid.includes('o1') || lid.includes('o3') || lid.includes('o4')) return 'gpt';
+  if (lid.includes('claude')) return 'claude';
+  return 'unknown';
+}
+
+export function ImageEditor({ image, onClose, onConfirm, connectionPoint, initialAspectRatio, initialQuality, initialCount, onParamsChange }: ImageEditorProps) {
+  // 基础状态
   const [isDrawing, setIsDrawing] = useState(false);
   const [brushSize, setBrushSize] = useState(20);
   const [tool, setTool] = useState<'brush' | 'eraser'>('brush');
   const [prompt, setPrompt] = useState('');
-  const [size, setSize] = useState('1024');
-  const [quality, setQuality] = useState('high');
-  const [selectedModel, setSelectedModel] = useState('gpt-image-2');
-  const [apiKey, setApiKey] = useState('');
-  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+  const [aspectRatio, setAspectRatio] = useState(initialAspectRatio || '1:1');
+  const [quality, setQuality] = useState(initialQuality || 'high');
+  const [outputCount, setOutputCount] = useState(initialCount || 1);
+  const [selectedModelId, setSelectedModelId] = useState('');
+  const [selectedLLMId, setSelectedLLMId] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -60,39 +85,160 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
   const [currentImageUrl, setCurrentImageUrl] = useState(image.url);
 
   // 结果图片状态
-  const [resultImage, setResultImage] = useState<string | null>(null);
+  const [resultImages, setResultImages] = useState<string[]>([]);
   const [isResultLoading, setIsResultLoading] = useState(false);
 
+  // 服务器模型列表
+  const [serverModels, setServerModels] = useState<ServerModel[]>([]);
+  const [llmModels, setLLMModels] = useState<ServerModel[]>([]);
+
+  // 图片缩放
+  const [imageZoom, setImageZoom] = useState(1);
+  const [imagePan, setImagePan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+
+  // 模型列表展开
+  const [modelListExpanded, setModelListExpanded] = useState(false);
+  const [llmListExpanded, setLLMListExpanded] = useState(false);
+
   // 当前模型是否支持蒙版涂抹
-  const currentModelSupportsMask = EDITABLE_MODELS.find(m => m.value === selectedModel)?.supportsMask ?? true;
+  const currentModelSupportsMask = (() => {
+    const m = serverModels.find(m => `${m.providerId}::${m.id}` === selectedModelId);
+    if (!m) return true;
+    return !m.id.toLowerCase().includes('gemini');
+  })();
 
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
   const resultContainerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
-  const [imageDisplaySize, setImageDisplaySize] = useState({ width: 280, height: 280 });
-  const [canvasSize, setCanvasSize] = useState({ width: 280, height: 280 });
+  const [imageDisplaySize, setImageDisplaySize] = useState({ width: 320, height: 320 });
+  const [canvasSize, setCanvasSize] = useState({ width: 320, height: 320 });
 
   // 拖拽状态
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const [position, setPosition] = useState(editorPosition || { x: 100, y: 100 });
+  const [position, setPosition] = useState(() => {
+    // 如果有连接点，编辑器定位在连接点右侧
+    if (connectionPoint) {
+      return { x: connectionPoint.x + 50, y: connectionPoint.y - 200 };
+    }
+    return { x: 300, y: 100 };
+  });
 
-  // 监听API Key输入显示逻辑
+  // 图片原始尺寸
+  const [imageNaturalSize, setImageNaturalSize] = useState({ width: 512, height: 512 });
+
+  // 从服务器加载编辑模型
   useEffect(() => {
-    const model = EDITABLE_MODELS.find(m => m.value === selectedModel);
-    setShowApiKeyInput(true);
-  }, [selectedModel]);
+    const loadModels = async () => {
+      try {
+        // 加载图片编辑模型
+        const imgRes = await fetch('/api/models?type=image');
+        if (imgRes.ok) {
+          const data = await imgRes.json();
+          const models: ServerModel[] = [];
+          if (data.models && Array.isArray(data.models)) {
+            for (const m of data.models) {
+              const id = (m.id || m.name || '').toLowerCase();
+              if (id.includes('3d') || id.includes('vectoriz') || id.includes('layer') || id.includes('segment')) continue;
+              models.push({
+                id: m.id || m.name,
+                name: m.name || m.id,
+                providerId: m.providerId || '',
+                providerName: m.providerName || m.providerId || '',
+                type: m.type,
+              });
+            }
+          }
+          setServerModels(models);
+          if (models.length > 0 && !selectedModelId) {
+            setSelectedModelId(`${models[0].providerId}::${models[0].id}`);
+          }
+        }
 
-  // 初始化图片和Canvas
+        // 加载LLM聊天模型
+        const chatRes = await fetch('/api/models?type=chat');
+        if (chatRes.ok) {
+          const data = await chatRes.json();
+          const models: ServerModel[] = [];
+          if (data.models && Array.isArray(data.models)) {
+            for (const m of data.models) {
+              models.push({
+                id: m.id || m.name,
+                name: m.name || m.id,
+                providerId: m.providerId || '',
+                providerName: m.providerName || m.providerId || '',
+                type: m.type,
+              });
+            }
+          }
+          setLLMModels(models);
+        }
+      } catch (err) {
+        console.error('Failed to load edit models:', err);
+      }
+    };
+    loadModels();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 图片模型改变时，自动联动LLM模型
+  useEffect(() => {
+    if (!selectedModelId || llmModels.length === 0) return;
+    const m = serverModels.find(m => `${m.providerId}::${m.id}` === selectedModelId);
+    if (!m) return;
+    const family = getModelFamily(m.id);
+    const targetLLMs = LLM_TO_IMAGE[family];
+    if (!targetLLMs) return;
+    // 如果当前LLM不在同一家族，则自动切换
+    const currentLLM = llmModels.find(lm => `${lm.providerId}::${lm.id}` === selectedLLMId);
+    if (currentLLM && getModelFamily(currentLLM.id) === family) return; // 已经同族
+    // 找到同族的第一个LLM
+    const matchLLM = llmModels.find(lm => {
+      const lFamily = getModelFamily(lm.id);
+      return lFamily === family;
+    });
+    if (matchLLM) {
+      setSelectedLLMId(`${matchLLM.providerId}::${matchLLM.id}`);
+    }
+  }, [selectedModelId, llmModels, serverModels, selectedLLMId]);
+
+  // LLM模型改变时，自动联动图片模型
+  useEffect(() => {
+    if (!selectedLLMId || serverModels.length === 0) return;
+    const lm = llmModels.find(lm => `${lm.providerId}::${lm.id}` === selectedLLMId);
+    if (!lm) return;
+    const family = getModelFamily(lm.id);
+    const targetImages = IMAGE_TO_LLM[family];
+    if (!targetImages) return;
+    // 如果当前图片模型不在同一家族，则自动切换
+    const currentImg = serverModels.find(m => `${m.providerId}::${m.id}` === selectedModelId);
+    if (currentImg && getModelFamily(currentImg.id) === family) return; // 已经同族
+    // 找到同族的第一个图片模型
+    const matchImg = serverModels.find(m => {
+      const mFamily = getModelFamily(m.id);
+      return mFamily === family || (family === 'gpt' && mFamily === 'gpt-image') || (family === 'gemini' && mFamily === 'gemini');
+    });
+    if (matchImg) {
+      setSelectedModelId(`${matchImg.providerId}::${matchImg.id}`);
+    }
+  }, [selectedLLMId, serverModels, llmModels, selectedModelId]);
+
+  // 同步参数变化
+  useEffect(() => {
+    onParamsChange?.({ aspectRatio, quality, count: outputCount });
+  }, [aspectRatio, quality, outputCount, onParamsChange]);
+
+  // 初始化图片
   useEffect(() => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       imageRef.current = img;
-      // 计算显示尺寸（保持比例，最大280px）
-      const maxSize = 280;
+      setImageNaturalSize({ width: img.width, height: img.height });
+      const maxSize = 320;
       const ratio = img.width / img.height;
       let displayWidth: number, displayHeight: number;
       if (ratio > 1) {
@@ -112,87 +258,53 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
-    // 设置Canvas尺寸
     canvas.width = canvasSize.width;
     canvas.height = canvasSize.height;
-    
-    // 透明背景
     ctx.clearRect(0, 0, canvas.width, canvas.height);
   }, [canvasSize]);
-
-  // 通知位置变化
-  useEffect(() => {
-    if (containerRef.current && onPositionChange) {
-      const rect = containerRef.current.getBoundingClientRect();
-      onPositionChange({
-        x: rect.left,
-        y: rect.top,
-        width: rect.width,
-        height: rect.height,
-      });
-    }
-  }, [position, onPositionChange, resultImage]);
 
   // 绘制线条
   const drawLine = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
     ctx.lineWidth = brushSize;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-
-    if (tool === 'brush') {
-      ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
-    } else {
-      ctx.strokeStyle = 'rgba(0, 0, 0, 1)';
-    }
-
+    ctx.strokeStyle = tool === 'brush' ? 'rgba(255, 0, 0, 0.5)' : 'rgba(0, 0, 0, 1)';
     ctx.lineTo(x, y);
     ctx.stroke();
     ctx.beginPath();
     ctx.moveTo(x, y);
   }, [brushSize, tool]);
 
-  // 鼠标按下
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (e.button !== 0) return;
-    if (!currentModelSupportsMask) return;
+    if (e.button !== 0 || !currentModelSupportsMask) return;
     setIsDrawing(true);
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
     ctx.beginPath();
     ctx.moveTo(x, y);
   }, [currentModelSupportsMask]);
 
-  // 鼠标移动
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing) return;
     drawLine(e);
   }, [isDrawing, drawLine]);
 
-  // 鼠标释放
-  const handleMouseUp = useCallback(() => {
-    setIsDrawing(false);
-  }, []);
+  const handleMouseUp = useCallback(() => { setIsDrawing(false); }, []);
 
-  // 清除mask
   const clearMask = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -201,25 +313,18 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
     ctx.clearRect(0, 0, canvas.width, canvas.height);
   }, []);
 
-  // 导出mask（涂抹区域=白色，未涂抹=透明）
   const exportMask = useCallback((): string | null => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
-    
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
-
-    // 创建临时Canvas存储结果
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = canvas.width;
     tempCanvas.height = canvas.height;
     const tempCtx = tempCanvas.getContext('2d');
     if (!tempCtx) return null;
-
-    // 获取原始图像数据
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const resultData = tempCtx.createImageData(canvas.width, canvas.height);
-
     for (let i = 0; i < imageData.data.length; i += 4) {
       const alpha = imageData.data[i + 3];
       if (alpha > 10) {
@@ -234,45 +339,40 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
         resultData.data[i + 3] = 0;
       }
     }
-
     tempCtx.putImageData(resultData, 0, 0);
     return tempCanvas.toDataURL('image/png');
   }, []);
 
-  // 处理Enter提交（Shift+Enter换行）
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
     }
-  }, [prompt]);
+  }, [prompt]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const handleSubmit = useCallback(async () => {
     if (!prompt.trim()) {
       setError('请输入编辑指令');
       return;
     }
-
-    if (showApiKeyInput && !apiKey.trim()) {
-      setError('请输入 API Key');
+    if (!selectedModelId) {
+      setError('请选择模型');
       return;
     }
 
     setError(null);
     setIsLoading(true);
     setIsResultLoading(true);
-    setResultImage(null);
+    setResultImages([]);
     setLoadingProgress(0);
 
     try {
-      // 获取mask（仅支持蒙版的模型且有绘制内容时）
       const maskDataUrl = currentModelSupportsMask ? exportMask() : null;
-
-      // 模拟进度
       const progressInterval = setInterval(() => {
         setLoadingProgress(prev => Math.min(prev + 10, 90));
       }, 500);
+
+      const [providerId, modelId] = selectedModelId.split('::');
 
       const response = await fetch('/api/edit', {
         method: 'POST',
@@ -281,10 +381,11 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
           image: currentImageUrl,
           prompt: prompt,
           mask: maskDataUrl,
-          size: `${size}x${size}`,
+          size: aspectRatio,
           quality,
-          apiKey,
-          model: selectedModel,
+          model: modelId || selectedModelId,
+          providerId,
+          count: outputCount,
         }),
       });
 
@@ -295,28 +396,22 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
 
       if (data.success && data.image) {
         setIsResultLoading(false);
-        setResultImage(data.image.url);
-        
-        // 添加到历史记录
+        const urls = data.images ? data.images.map((img: { url: string }) => img.url) : [data.image.url];
+        setResultImages(urls);
+
         const newHistoryItem: EditHistoryItem = {
           id: `edit-${Date.now()}`,
           prompt: prompt,
           imageUrl: data.image.url,
           timestamp: Date.now(),
         };
-        
         setHistory(prev => [...prev.slice(0, currentHistoryIndex + 1), newHistoryItem]);
         setCurrentHistoryIndex(prev => prev + 1);
         setCurrentImageUrl(data.image.url);
-        
-        // 清除mask
         clearMask();
       } else if (data.requiresApiKey) {
         setIsResultLoading(false);
-        setError(`需要配置 API Key: ${data.error || '请输入 API Key'}`);
-      } else if (data.networkError) {
-        setIsResultLoading(false);
-        setError(data.error || '网络连接失败');
+        setError('需要在管理员系统中配置 API Key');
       } else {
         setIsResultLoading(false);
         setError(data.error || '编辑失败');
@@ -329,22 +424,21 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
     } finally {
       setIsLoading(false);
     }
-  }, [prompt, apiKey, currentImageUrl, size, quality, selectedModel, showApiKeyInput, currentModelSupportsMask, exportMask, clearMask, currentHistoryIndex]);
+  }, [prompt, selectedModelId, currentImageUrl, aspectRatio, quality, outputCount, currentModelSupportsMask, exportMask, clearMask, currentHistoryIndex]);
 
-  // 确认结果并关闭
-  const handleConfirmResult = useCallback(() => {
-    if (resultImage) {
+  const handleConfirmResult = useCallback((url?: string) => {
+    const finalUrl = url || resultImages[0];
+    if (finalUrl) {
       onConfirm({
-        url: resultImage,
+        url: finalUrl,
         prompt: `${image.prompt} + ${prompt}`,
       });
     }
     setPrompt('');
-    setResultImage(null);
+    setResultImages([]);
     onClose();
-  }, [resultImage, prompt, image.prompt, onConfirm, onClose]);
+  }, [resultImages, prompt, image.prompt, onConfirm, onClose]);
 
-  // 回退到历史版本
   const handleHistoryClick = useCallback((index: number) => {
     const historyItem = history[index];
     if (historyItem) {
@@ -353,370 +447,405 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
     }
   }, [history]);
 
-  // 拖拽相关
+  // 拖拽
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     setIsDragging(true);
-    setDragOffset({
-      x: e.clientX - position.x,
-      y: e.clientY - position.y,
-    });
+    setDragOffset({ x: e.clientX - position.x, y: e.clientY - position.y });
   }, [position]);
 
   const handleDrag = useCallback((e: React.MouseEvent) => {
     if (!isDragging) return;
-    setPosition({
-      x: e.clientX - dragOffset.x,
-      y: e.clientY - dragOffset.y,
-    });
+    setPosition({ x: e.clientX - dragOffset.x, y: e.clientY - dragOffset.y });
   }, [isDragging, dragOffset]);
 
-  const handleDragEnd = useCallback(() => {
-    setIsDragging(false);
-  }, []);
+  const handleDragEnd = useCallback(() => { setIsDragging(false); }, []);
 
-  // 计算连接线终点（结果框左侧中点）
-  const getResultBoxPosition = useCallback(() => {
-    if (resultContainerRef.current) {
-      const rect = resultContainerRef.current.getBoundingClientRect();
-      return {
-        x: rect.left,
-        y: rect.top + rect.height / 2,
-      };
-    }
-    return {
-      x: position.x + 420 + 60,
-      y: position.y + 200,
-    };
-  }, [position, resultImage]);
+  // 图片缩放控制
+  const handleZoomIn = useCallback(() => setImageZoom(prev => Math.min(prev + 0.25, 3)), []);
+  const handleZoomOut = useCallback(() => setImageZoom(prev => Math.max(prev - 0.25, 0.5)), []);
+  const handleZoomReset = useCallback(() => { setImageZoom(1); setImagePan({ x: 0, y: 0 }); }, []);
 
-  // 获取连接线起点（编辑器右侧中点）
-  const getEditorConnectionPoint = useCallback(() => {
-    return {
-      x: position.x + 420,
-      y: position.y + 200,
-    };
+  // 图片平移
+  const handleImageMouseDown = useCallback((e: React.MouseEvent) => {
+    if (imageZoom <= 1) return;
+    setIsPanning(true);
+    setPanStart({ x: e.clientX - imagePan.x, y: e.clientY - imagePan.y });
+  }, [imageZoom, imagePan]);
+
+  const handleImageMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isPanning) return;
+    setImagePan({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
+  }, [isPanning, panStart]);
+
+  const handleImageMouseUp = useCallback(() => { setIsPanning(false); }, []);
+
+  // SVG连线端点计算
+  const getLeftLineStart = useCallback(() => {
+    // 图片右侧连接点 → 编辑器左侧
+    if (connectionPoint) return connectionPoint;
+    return { x: position.x - 40, y: position.y + 180 };
+  }, [connectionPoint, position]);
+
+  const getLeftLineEnd = useCallback(() => {
+    // 编辑器左侧中心
+    return { x: position.x, y: position.y + 180 };
   }, [position]);
 
-  // 当前选中的模型配置
-  const currentModelConfig = EDITABLE_MODELS.find(m => m.value === selectedModel);
+  const getRightLineStart = useCallback(() => {
+    // 编辑器右侧中心
+    return { x: position.x + 420, y: position.y + 180 };
+  }, [position]);
+
+  const getRightLineEnd = useCallback(() => {
+    // 结果框左侧
+    return { x: position.x + 420 + 40, y: position.y + 180 };
+  }, [position]);
+
+  // 编辑器宽度
+  const editorWidth = 420;
 
   return (
     <>
-      {/* SVG连接线层 */}
-      {resultImage && (
-        <svg
-          className="fixed inset-0 pointer-events-none z-40"
-          style={{ overflow: 'visible' }}
-        >
-          <defs>
-            <linearGradient id="lineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#d4af37" />
-              <stop offset="100%" stopColor="#b8860b" />
-            </linearGradient>
-            <style>
-              {`
-                @keyframes flowAnimation {
-                  from { stroke-dashoffset: 24; }
-                  to { stroke-dashoffset: 0; }
-                }
-                .flowing-line {
-                  animation: flowAnimation 0.5s linear infinite;
-                }
-              `}
-            </style>
-          </defs>
-          <path
-            d={`M ${getEditorConnectionPoint().x} ${getEditorConnectionPoint().y}
-                C ${getEditorConnectionPoint().x + 30} ${getEditorConnectionPoint().y},
-                  ${getResultBoxPosition().x - 30} ${getResultBoxPosition().y},
-                  ${getResultBoxPosition().x} ${getResultBoxPosition().y}`}
-            stroke="#d4af37"
-            strokeWidth="2"
-            fill="none"
-            strokeDasharray="8 4"
-            className="flowing-line"
-          />
-        </svg>
-      )}
+      {/* SVG连接线 - 图片连接点→编辑器 */}
+      <svg className="fixed inset-0 pointer-events-none z-[199]" style={{ overflow: 'visible' }}>
+        <defs>
+          <linearGradient id="editLineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#d4af37" />
+            <stop offset="100%" stopColor="#b8860b" />
+          </linearGradient>
+          <style>{`
+            @keyframes editFlow { from { stroke-dashoffset: 16; } to { stroke-dashoffset: 0; } }
+            .edit-flow-line { animation: editFlow 0.4s linear infinite; }
+            @keyframes editPulse { 0%,100% { r: 6; opacity: 0.8; } 50% { r: 9; opacity: 1; } }
+            .edit-connector-pulse { animation: editPulse 1.5s ease-in-out infinite; }
+          `}</style>
+        </defs>
 
-      {/* 主编辑器容器 - 左侧 */}
+        {/* 图片→编辑器 连线 */}
+        <path
+          d={`M ${getLeftLineStart().x} ${getLeftLineStart().y}
+              C ${getLeftLineStart().x + 25} ${getLeftLineStart().y},
+                ${getLeftLineEnd().x - 25} ${getLeftLineEnd().y},
+                ${getLeftLineEnd().x} ${getLeftLineEnd().y}`}
+          stroke="#d4af37"
+          strokeWidth="2"
+          fill="none"
+          strokeDasharray="8 4"
+          className="edit-flow-line"
+        />
+        {/* 连接点圆点 - 图片端 */}
+        <circle cx={getLeftLineStart().x} cy={getLeftLineStart().y} r="6" fill="#d4af37" className="edit-connector-pulse" />
+        <circle cx={getLeftLineStart().x} cy={getLeftLineStart().y} r="3" fill="#141414" />
+        {/* 连接点圆点 - 编辑器端 */}
+        <circle cx={getLeftLineEnd().x} cy={getLeftLineEnd().y} r="5" fill="#d4af37" />
+        <circle cx={getLeftLineEnd().x} cy={getLeftLineEnd().y} r="2.5" fill="#141414" />
+
+        {/* 编辑器→结果框 连线 */}
+        {(isResultLoading || resultImages.length > 0) && (
+          <>
+            <path
+              d={`M ${getRightLineStart().x} ${getRightLineStart().y}
+                  C ${getRightLineStart().x + 25} ${getRightLineStart().y},
+                    ${getRightLineEnd().x - 25} ${getRightLineEnd().y},
+                    ${getRightLineEnd().x} ${getRightLineEnd().y}`}
+              stroke="#d4af37"
+              strokeWidth="2"
+              fill="none"
+              strokeDasharray="8 4"
+              className="edit-flow-line"
+            />
+            <circle cx={getRightLineStart().x} cy={getRightLineStart().y} r="5" fill="#d4af37" />
+            <circle cx={getRightLineStart().x} cy={getRightLineStart().y} r="2.5" fill="#141414" />
+            <circle cx={getRightLineEnd().x} cy={getRightLineEnd().y} r="5" fill="#d4af37" />
+            <circle cx={getRightLineEnd().x} cy={getRightLineEnd().y} r="2.5" fill="#141414" />
+          </>
+        )}
+      </svg>
+
+      {/* 主编辑器面板 - 放大版 */}
       <div
         ref={containerRef}
-        className="fixed z-[200] w-[420px] bg-[#141414] border border-[#2a2a2a] rounded-xl shadow-2xl overflow-hidden"
-        style={{
-          left: position.x,
-          top: position.y,
-          maxHeight: '90vh',
-        }}
+        className="fixed z-[200] bg-[#141414] border border-[#2a2a2a] rounded-xl shadow-2xl overflow-hidden"
+        style={{ left: position.x, top: position.y, width: editorWidth, maxHeight: '90vh' }}
         onMouseMove={handleDrag}
         onMouseUp={handleDragEnd}
         onMouseLeave={handleDragEnd}
       >
-        {/* Header */}
+        {/* Header - 可拖拽 */}
         <div
-          className="flex items-center justify-between px-5 py-4 border-b border-[#2a2a2a] bg-gradient-to-r from-[#1a1a1a] to-[#141414] cursor-move"
+          className="flex items-center justify-between px-4 py-3 border-b border-[#2a2a2a] bg-gradient-to-r from-[#1a1a1a] to-[#141414] cursor-move"
           onMouseDown={handleDragStart}
         >
-          <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-            <Pencil className="h-5 w-5 text-[#d4af37]" />
+          <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+            <Pencil className="h-4 w-4 text-[#d4af37]" />
             语言修图
           </h2>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-[#2a2a2a] transition-colors"
-          >
-            <X className="h-5 w-5 text-[#888]" />
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-[#2a2a2a] transition-colors">
+            <X className="h-4 w-4 text-[#888]" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="p-4 space-y-4 max-h-[calc(90vh-140px)] overflow-y-auto">
-          {/* Image Preview with Mask Canvas */}
-          <div className="relative bg-[#1a1a1a] rounded-lg p-3 flex justify-center">
-            <div className="relative" style={{ width: imageDisplaySize.width, height: imageDisplaySize.height }}>
-              {/* Original Image */}
-              {currentImageUrl && (
-                <img
-                  src={currentImageUrl}
-                  alt="编辑图片"
-                  className="absolute top-0 left-0 w-full h-full object-contain rounded"
-                  crossOrigin="anonymous"
-                />
-              )}
-              {/* Mask Canvas - 仅支持蒙版的模型可交互 */}
-              <canvas
-                ref={canvasRef}
-                className={`absolute top-0 left-0 w-full h-full ${
-                  currentModelSupportsMask ? 'cursor-crosshair' : 'cursor-not-allowed'
-                }`}
-                style={{ width: imageDisplaySize.width, height: imageDisplaySize.height }}
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-                onMouseLeave={handleMouseUp}
-              />
-              {/* Gemini 模型蒙版禁用提示覆盖层 */}
-              {!currentModelSupportsMask && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded pointer-events-none">
-                  <div className="flex flex-col items-center gap-1.5 px-4 py-3 bg-[#1a1a1a]/90 rounded-lg border border-[#2a2a2a]">
-                    <Lock className="h-5 w-5 text-[#888]" />
-                    <span className="text-xs text-[#888] whitespace-nowrap">此模型暂不支持区域涂抹</span>
-                    <span className="text-xs text-[#d4af37]">使用文字描述即可智能修图</span>
-                  </div>
+        <div className="p-4 space-y-3 max-h-[calc(90vh-50px)] overflow-y-auto">
+          {/* 图片预览区 + 缩放控制 */}
+          <div className="relative bg-[#1a1a1a] rounded-lg overflow-hidden" style={{ height: Math.min(360, imageDisplaySize.height * 1.15 + 40) }}>
+            {/* 缩放控制条 - 右上角 */}
+            <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-[#0d0d0d]/80 rounded-lg px-1.5 py-1 backdrop-blur-sm border border-[#2a2a2a]/50">
+              <button onClick={handleZoomOut} className="p-1 rounded hover:bg-[#2a2a2a] transition-colors" title="缩小">
+                <ZoomOut className="h-3.5 w-3.5 text-[#888]" />
+              </button>
+              <span className="text-[10px] text-[#d4af37] font-mono w-8 text-center">{Math.round(imageZoom * 100)}%</span>
+              <button onClick={handleZoomIn} className="p-1 rounded hover:bg-[#2a2a2a] transition-colors" title="放大">
+                <ZoomIn className="h-3.5 w-3.5 text-[#888]" />
+              </button>
+              <button onClick={handleZoomReset} className="p-1 rounded hover:bg-[#2a2a2a] transition-colors" title="重置">
+                <RotateCcw className="h-3.5 w-3.5 text-[#888]" />
+              </button>
+            </div>
+
+            {/* 图片+蒙版容器 */}
+            <div
+              className="w-full h-full flex items-center justify-center overflow-hidden"
+              onMouseDown={handleImageMouseDown}
+              onMouseMove={handleImageMouseMove}
+              onMouseUp={handleImageMouseUp}
+              onMouseLeave={handleImageMouseUp}
+              style={{ cursor: imageZoom > 1 ? (isPanning ? 'grabbing' : 'grab') : 'default' }}
+            >
+              <div
+                style={{
+                  transform: `scale(${imageZoom}) translate(${imagePan.x / imageZoom}px, ${imagePan.y / imageZoom}px)`,
+                  transformOrigin: 'center center',
+                  transition: isPanning ? 'none' : 'transform 0.15s ease-out',
+                }}
+              >
+                <div className="relative" style={{ width: imageDisplaySize.width, height: imageDisplaySize.height }}>
+                  {currentImageUrl && (
+                    <img src={currentImageUrl} alt="编辑" className="absolute top-0 left-0 w-full h-full object-contain rounded" crossOrigin="anonymous" draggable={false} />
+                  )}
+                  <canvas
+                    ref={canvasRef}
+                    className={`absolute top-0 left-0 w-full h-full ${currentModelSupportsMask ? 'cursor-crosshair' : 'cursor-not-allowed'}`}
+                    style={{ width: imageDisplaySize.width, height: imageDisplaySize.height }}
+                    onMouseDown={handleMouseDown}
+                    onMouseMove={handleMouseMove}
+                    onMouseUp={handleMouseUp}
+                    onMouseLeave={handleMouseUp}
+                  />
+                  {!currentModelSupportsMask && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded pointer-events-none">
+                      <div className="flex flex-col items-center gap-1.5 px-4 py-3 bg-[#1a1a1a]/90 rounded-lg border border-[#2a2a2a]">
+                        <Lock className="h-5 w-5 text-[#888]" />
+                        <span className="text-xs text-[#888]">此模型不支持区域涂抹</span>
+                        <span className="text-xs text-[#d4af37] font-medium">文字描述即可智能修图</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
+            </div>
+            {/* 图片尺寸信息 */}
+            <div className="absolute bottom-2 left-2 text-[10px] text-[#555] bg-[#0d0d0d]/70 px-1.5 py-0.5 rounded backdrop-blur-sm">
+              {imageNaturalSize.width} × {imageNaturalSize.height}
             </div>
           </div>
 
-          {/* Drawing Tools - 仅支持蒙版的模型显示 */}
+          {/* 画笔工具 - 仅支持蒙版时显示 */}
           {currentModelSupportsMask && (
-            <div className="flex items-center gap-2 px-2">
-              <button
-                onClick={() => setTool('brush')}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-all ${
-                  tool === 'brush'
-                    ? 'bg-[#d4af37] text-black font-medium'
-                    : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a]'
-                }`}
-              >
-                <Pencil className="h-4 w-4" />
-                画笔
+            <div className="flex items-center gap-2 px-1">
+              <button onClick={() => setTool('brush')} className={`flex items-center gap-1 px-2.5 py-1.5 rounded text-xs transition-all ${tool === 'brush' ? 'bg-[#d4af37] text-black font-medium' : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a]'}`}>
+                <Pencil className="h-3.5 w-3.5" />画笔
               </button>
-              <button
-                onClick={() => setTool('eraser')}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-all ${
-                  tool === 'eraser'
-                    ? 'bg-[#d4af37] text-black font-medium'
-                    : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a]'
-                }`}
-              >
-                <Eraser className="h-4 w-4" />
-                橡皮擦
+              <button onClick={() => setTool('eraser')} className={`flex items-center gap-1 px-2.5 py-1.5 rounded text-xs transition-all ${tool === 'eraser' ? 'bg-[#d4af37] text-black font-medium' : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a]'}`}>
+                <Eraser className="h-3.5 w-3.5" />橡皮
               </button>
-              <button
-                onClick={clearMask}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a] transition-all"
-              >
-                <Trash2 className="h-4 w-4" />
-                清除
+              <button onClick={clearMask} className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a] transition-all">
+                <Trash2 className="h-3.5 w-3.5" />清除
               </button>
               <div className="flex-1" />
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-[#888]">笔触</span>
-                <input
-                  type="range"
-                  min="10"
-                  max="50"
-                  value={brushSize}
-                  onChange={(e) => setBrushSize(Number(e.target.value))}
-                  className="w-20 h-1 bg-[#2a2a2a] rounded-lg appearance-none cursor-pointer accent-[#d4af37]"
-                />
-                <span className="text-xs text-[#d4af37] font-mono w-6">{brushSize}</span>
-              </div>
+              <span className="text-[10px] text-[#666]">笔触</span>
+              <input type="range" min="10" max="50" value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} className="w-16 h-1 bg-[#2a2a2a] rounded appearance-none cursor-pointer accent-[#d4af37]" />
+              <span className="text-[10px] text-[#d4af37] font-mono w-5">{brushSize}</span>
             </div>
           )}
 
-          {/* Prompt Input */}
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-[#d4af37] uppercase tracking-wider">
-              编辑指令
-            </label>
+          {/* 编辑指令输入 */}
+          <div>
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={currentModelSupportsMask 
-                ? "描述你想修改什么...例如：把背景换成日落海滩" 
-                : "描述你想修改什么...例如：把背景换成日落海滩、给人物加上帽子"
-              }
-              className="w-full h-20 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-4 py-3 text-sm text-white placeholder:text-[#555] focus:border-[#d4af37] focus:outline-none resize-none transition-colors"
+              placeholder="描述修改内容，如：把背景换成日落..."
+              className="w-full h-20 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-[#555] focus:border-[#d4af37] focus:outline-none resize-none transition-colors"
             />
-            <p className="text-xs text-[#666]">按 Enter 提交，Shift+Enter 换行</p>
+            <p className="text-[10px] text-[#555] mt-1">Enter 提交 · Shift+Enter 换行</p>
           </div>
 
-          {/* Parameters - 2 columns */}
-          <div className="grid grid-cols-2 gap-3">
-            {/* Size */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-[#d4af37] uppercase tracking-wider">
-                大小
-              </label>
-              <div className="relative">
-                <select
-                  value={size}
-                  onChange={(e) => setSize(e.target.value)}
-                  className="w-full px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-sm text-white appearance-none cursor-pointer focus:border-[#d4af37] focus:outline-none"
-                >
-                  {SIZES.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-[#888] pointer-events-none" />
-              </div>
-            </div>
-
-            {/* Quality */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-[#d4af37] uppercase tracking-wider">
-                质量
-              </label>
-              <div className="relative">
-                <select
-                  value={quality}
-                  onChange={(e) => setQuality(e.target.value)}
-                  className="w-full px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-sm text-white appearance-none cursor-pointer focus:border-[#d4af37] focus:outline-none"
-                >
-                  {QUALITIES.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-[#888] pointer-events-none" />
-              </div>
-            </div>
-          </div>
-
-          {/* Model Selection - 3+2 grid */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-[#d4af37] uppercase tracking-wider">
-              模型
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {EDITABLE_MODELS.map(model => (
-                <button
-                  key={model.value}
-                  onClick={() => setSelectedModel(model.value)}
-                  className={`relative px-2 py-2 rounded-lg text-xs font-medium transition-all ${
-                    selectedModel === model.value
-                      ? 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-black border border-[#d4af37]'
-                      : 'bg-[#1a1a1a] text-[#888] border border-[#2a2a2a] hover:border-[#d4af37] hover:text-white'
-                  }`}
-                >
-                  <div className="flex flex-col items-center gap-0.5">
-                    <span className="truncate w-full text-center">{model.label}</span>
-                    <span className={`text-[10px] ${selectedModel === model.value ? 'text-black/60' : 'text-[#555]'}`}>
-                      {model.hint}
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
-            {/* 当前模型特性提示 */}
-            <div className="flex items-center gap-1.5 px-1">
-              <span className={`inline-block w-1.5 h-1.5 rounded-full ${currentModelSupportsMask ? 'bg-green-500' : 'bg-[#d4af37]'}`} />
-              <span className="text-[10px] text-[#666]">
-                {currentModelSupportsMask 
-                  ? `${currentModelConfig?.provider} · 支持画笔涂抹指定修改区域` 
-                  : `${currentModelConfig?.provider} · 仅文字描述，AI 智能理解修改意图`
+          {/* 图片模型选择 */}
+          <div>
+            <label className="text-[11px] text-[#888] mb-1.5 block font-medium">图片模型</label>
+            <button
+              onClick={() => setModelListExpanded(!modelListExpanded)}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-xs text-[#ccc] hover:border-[#d4af37] transition-all"
+            >
+              <span className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#d4af37]" />
+                {serverModels.find(m => `${m.providerId}::${m.id}` === selectedModelId)?.name || '选择模型'}
+                {currentModelSupportsMask
+                  ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-green-500/15 text-green-400">支持涂抹</span>
+                  : <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#d4af37]/15 text-[#d4af37]">文字修图</span>
                 }
               </span>
+              {modelListExpanded ? <ChevronUp size={14} className="text-[#888]" /> : <ChevronDown size={14} className="text-[#888]" />}
+            </button>
+            {modelListExpanded && (
+              <div className="mt-1.5 max-h-48 overflow-y-auto rounded-lg border border-[#2a2a2a] bg-[#0d0d0d]">
+                {serverModels.length > 0 ? serverModels.map(model => {
+                  const key = `${model.providerId}::${model.id}`;
+                  const isSelected = selectedModelId === key;
+                  const supportsMask = !model.id.toLowerCase().includes('gemini');
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => { setSelectedModelId(key); setModelListExpanded(false); }}
+                      className={`w-full flex items-center gap-2 px-3 py-2.5 text-left text-xs transition-all border-b border-[#1a1a1a] last:border-b-0 ${
+                        isSelected ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'text-[#aaa] hover:bg-[#1a1a1a] hover:text-white'
+                      }`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium truncate">{model.name}</div>
+                        <div className="text-[10px] text-[#666] mt-0.5">{model.providerName} · {supportsMask ? '支持区域涂抹' : '文字描述智能修图'}</div>
+                      </div>
+                      {isSelected && <Check size={14} className="text-[#d4af37] flex-shrink-0" />}
+                    </button>
+                  );
+                }) : (
+                  <div className="px-3 py-4 text-center text-[11px] text-[#666]">管理员系统中暂无可用图片模型</div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* LLM模型选择 */}
+          <div>
+            <label className="text-[11px] text-[#888] mb-1.5 block font-medium flex items-center gap-1.5">
+              <MessageSquare className="h-3 w-3" />
+              LLM 辅助模型
+            </label>
+            <button
+              onClick={() => setLLMListExpanded(!llmListExpanded)}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-xs text-[#ccc] hover:border-[#d4af37] transition-all"
+            >
+              <span className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#6366f1]" />
+                {selectedLLMId
+                  ? (llmModels.find(m => `${m.providerId}::${m.id}` === selectedLLMId)?.name || '选择LLM')
+                  : '选择LLM模型（可选）'}
+              </span>
+              {llmListExpanded ? <ChevronUp size={14} className="text-[#888]" /> : <ChevronDown size={14} className="text-[#888]" />}
+            </button>
+            {llmListExpanded && (
+              <div className="mt-1.5 max-h-48 overflow-y-auto rounded-lg border border-[#2a2a2a] bg-[#0d0d0d]">
+                {llmModels.length > 0 ? llmModels.map(model => {
+                  const key = `${model.providerId}::${model.id}`;
+                  const isSelected = selectedLLMId === key;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => { setSelectedLLMId(key); setLLMListExpanded(false); }}
+                      className={`w-full flex items-center gap-2 px-3 py-2.5 text-left text-xs transition-all border-b border-[#1a1a1a] last:border-b-0 ${
+                        isSelected ? 'bg-[#6366f1]/15 text-[#6366f1]' : 'text-[#aaa] hover:bg-[#1a1a1a] hover:text-white'
+                      }`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium truncate">{model.name}</div>
+                        <div className="text-[10px] text-[#666] mt-0.5">{model.providerName}</div>
+                      </div>
+                      {isSelected && <Check size={14} className="text-[#6366f1] flex-shrink-0" />}
+                    </button>
+                  );
+                }) : (
+                  <div className="px-3 py-4 text-center text-[11px] text-[#666]">管理员系统中暂无可用LLM模型</div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 参数行 - 画面比例/质量/数量 三列 */}
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="text-[10px] text-[#888] mb-1 block">画面比例</label>
+              <select
+                value={aspectRatio}
+                onChange={(e) => setAspectRatio(e.target.value)}
+                className="w-full px-2 py-1.5 bg-[#1a1a1a] border border-[#2a2a2a] rounded text-xs text-white appearance-none cursor-pointer focus:border-[#d4af37] focus:outline-none"
+              >
+                {ASPECT_RATIOS.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] text-[#888] mb-1 block">图片质量</label>
+              <select
+                value={quality}
+                onChange={(e) => setQuality(e.target.value)}
+                className="w-full px-2 py-1.5 bg-[#1a1a1a] border border-[#2a2a2a] rounded text-xs text-white appearance-none cursor-pointer focus:border-[#d4af37] focus:outline-none"
+              >
+                {QUALITIES.map(q => <option key={q.value} value={q.value}>{q.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] text-[#888] mb-1 block">生图数量</label>
+              <select
+                value={outputCount}
+                onChange={(e) => setOutputCount(Number(e.target.value))}
+                className="w-full px-2 py-1.5 bg-[#1a1a1a] border border-[#2a2a2a] rounded text-xs text-white appearance-none cursor-pointer focus:border-[#d4af37] focus:outline-none"
+              >
+                {COUNTS.map(c => <option key={c} value={c}>{c}张</option>)}
+              </select>
             </div>
           </div>
 
-          {/* API Key Input - 仅需要Key的模型显示 */}
-          {showApiKeyInput && (
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-[#d4af37] uppercase tracking-wider">
-                {currentModelConfig?.apiKeyPlaceholder || 'API Key'}
-              </label>
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder={currentModelConfig?.provider === 'Google' ? 'AIza...' : 'sk-...'}
-                className="w-full px-4 py-2.5 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-sm text-white placeholder:text-[#555] focus:border-[#d4af37] focus:outline-none transition-colors"
-              />
-            </div>
-          )}
-
-          {/* Error */}
+          {/* 错误 */}
           {error && (
-            <div className="px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+            <div className="px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-xs">
               {error}
             </div>
           )}
 
-          {/* Submit Button */}
+          {/* 生成按钮 */}
           <button
             onClick={handleSubmit}
-            disabled={isLoading || !prompt.trim() || (showApiKeyInput && !apiKey.trim())}
-            className="w-full py-3 rounded-lg bg-gradient-to-r from-[#d4af37] to-[#b8860b] hover:from-[#daa520] hover:to-[#cd9b1d] text-black font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            disabled={isLoading || !prompt.trim() || !selectedModelId}
+            className="w-full py-2.5 rounded-lg bg-gradient-to-r from-[#d4af37] to-[#b8860b] hover:from-[#daa520] hover:to-[#cd9b1d] text-black text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isLoading ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                修改中...
-              </>
+              <><Loader2 className="h-4 w-4 animate-spin" />修改中...</>
             ) : (
-              <>
-                <Sparkles className="h-4 w-4" />
-                开始修改
-              </>
+              <><Sparkles className="h-4 w-4" />开始修改</>
             )}
           </button>
 
-          {/* History */}
+          {/* 编辑历史 */}
           {history.length > 0 && (
-            <div className="space-y-2 pt-2 border-t border-[#2a2a2a]">
-              <div className="flex items-center gap-2 text-xs text-[#888]">
+            <div className="pt-2 border-t border-[#2a2a2a]">
+              <div className="flex items-center gap-1.5 text-[11px] text-[#888] mb-1.5">
                 <History className="h-3.5 w-3.5" />
                 <span className="font-medium text-[#d4af37]">编辑历史</span>
               </div>
-              <div className="max-h-32 overflow-y-auto space-y-1">
+              <div className="max-h-24 overflow-y-auto space-y-1">
                 {history.map((item, index) => (
                   <button
                     key={item.id}
                     onClick={() => handleHistoryClick(index)}
-                    className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-all flex items-center gap-2 ${
+                    className={`w-full text-left px-2.5 py-1.5 rounded text-[11px] transition-all flex items-center gap-1.5 ${
                       index === currentHistoryIndex
-                        ? 'bg-[#d4af37]/20 text-[#d4af37] border border-[#d4af37]/30'
-                        : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a] hover:border-[#3a3a3a]'
+                        ? 'bg-[#d4af37]/20 text-[#d4af37]'
+                        : 'bg-[#1a1a1a] text-[#888] hover:text-white'
                     }`}
                   >
-                    <span className="flex-shrink-0">#{index + 1}</span>
+                    <span>#{index + 1}</span>
                     <span className="truncate flex-1">{item.prompt}</span>
-                    {index === currentHistoryIndex && (
-                      <Check className="h-3 w-3 text-[#d4af37] flex-shrink-0" />
-                    )}
+                    {index === currentHistoryIndex && <Check className="h-3 w-3 text-[#d4af37] flex-shrink-0" />}
                   </button>
                 ))}
               </div>
@@ -725,90 +854,57 @@ export function ImageEditor({ image, onClose, onConfirm, editorPosition, onPosit
         </div>
       </div>
 
-      {/* 结果图片框 - 右侧 */}
-      <div
-        ref={resultContainerRef}
-        className="fixed z-[200] w-[280px] bg-[#141414] border border-[#2a2a2a] rounded-xl shadow-2xl overflow-hidden"
-        style={{
-          left: position.x + 420 + 60,
-          top: position.y,
-          maxHeight: '90vh',
-        }}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[#2a2a2a] bg-gradient-to-r from-[#1a1a1a] to-[#141414]">
-          <h3 className="text-sm font-medium text-white flex items-center gap-2">
-            <ImageIcon className="h-4 w-4 text-[#d4af37]" />
-            结果预览
-          </h3>
-          {resultImage && (
-            <button
-              onClick={handleConfirmResult}
-              className="px-3 py-1 text-xs bg-[#d4af37] hover:bg-[#daa520] text-black rounded-lg font-medium transition-all"
-            >
-              确认使用
-            </button>
-          )}
-        </div>
-
-        {/* Content */}
-        <div className="p-4">
-          {isResultLoading ? (
-            /* 加载状态 - 显示进度动画 */
-            <div className="flex flex-col items-center justify-center h-[280px] bg-[#1a1a1a] rounded-lg border-2 border-dashed border-[#d4af37]/30">
-              <div className="relative w-16 h-16 mb-4">
-                <div className="absolute inset-0 border-4 border-[#2a2a2a] rounded-full" />
-                <div 
-                  className="absolute inset-0 border-4 border-[#d4af37] rounded-full"
-                  style={{
-                    clipPath: `polygon(50% 50%, 50% 0%, ${50 + 50 * Math.sin(loadingProgress / 100 * 2 * Math.PI)}% ${50 - 50 * Math.cos(loadingProgress / 100 * 2 * Math.PI)}%, 50% 50%)`,
-                  }}
-                />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-[#d4af37] text-xs font-mono">{loadingProgress}%</span>
+      {/* 结果框 - 右侧，SVG线连接 */}
+      {(isResultLoading || resultImages.length > 0) && (
+        <div
+          ref={resultContainerRef}
+          className="fixed z-[200] w-[280px] bg-[#141414] border border-[#2a2a2a] rounded-xl shadow-2xl overflow-hidden"
+          style={{ left: position.x + editorWidth + 40, top: position.y, maxHeight: '90vh' }}
+        >
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#2a2a2a]">
+            <h3 className="text-xs font-medium text-white flex items-center gap-2">
+              <ImageIcon className="h-4 w-4 text-[#d4af37]" />
+              修图结果
+            </h3>
+            {resultImages.length > 0 && (
+              <button
+                onClick={() => handleConfirmResult()}
+                className="px-2.5 py-1 text-[10px] bg-[#d4af37] hover:bg-[#daa520] text-black rounded font-medium transition-all"
+              >
+                确认使用
+              </button>
+            )}
+          </div>
+          <div className="p-4">
+            {isResultLoading ? (
+              <div className="flex flex-col items-center justify-center h-[240px] bg-[#1a1a1a] rounded-lg border-2 border-dashed border-[#d4af37]/30">
+                <div className="relative w-14 h-14 mb-3">
+                  <div className="absolute inset-0 border-[3px] border-[#2a2a2a] rounded-full" />
+                  <div
+                    className="absolute inset-0 border-[3px] border-[#d4af37] rounded-full animate-spin"
+                    style={{ clipPath: `polygon(50% 50%, 50% 0%, ${50 + 50 * Math.sin(loadingProgress / 100 * 2 * Math.PI)}% ${50 - 50 * Math.cos(loadingProgress / 100 * 2 * Math.PI)}%, 50% 50%)` }}
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-[#d4af37] text-xs font-mono">{loadingProgress}%</span>
+                  </div>
                 </div>
+                <p className="text-xs text-[#888]">正在生成...</p>
               </div>
-              <p className="text-sm text-[#888]">正在生成图片...</p>
-              <p className="text-xs text-[#666] mt-1">请稍候</p>
-            </div>
-          ) : resultImage ? (
-            /* 成功状态 - 显示结果图片 */
-            <div className="space-y-3">
-              <div className="relative bg-[#1a1a1a] rounded-lg overflow-hidden">
-                <img
-                  src={resultImage}
-                  alt="编辑结果"
-                  className="w-full h-auto object-contain rounded-lg"
-                />
+            ) : resultImages.length > 0 ? (
+              <div className="space-y-2">
+                {resultImages.map((url, idx) => (
+                  <div key={idx} className="relative bg-[#1a1a1a] rounded-lg overflow-hidden cursor-pointer group" onClick={() => handleConfirmResult(url)}>
+                    <img src={url} alt={`结果 ${idx + 1}`} className="w-full h-auto object-contain rounded-lg" />
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center">
+                      <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[11px] text-white bg-[#d4af37] px-3 py-1.5 rounded font-medium">点击使用</span>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    setResultImage(null);
-                    setPrompt('');
-                  }}
-                  className="flex-1 px-3 py-2 text-sm bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a] rounded-lg transition-all"
-                >
-                  重新编辑
-                </button>
-                <button
-                  onClick={handleConfirmResult}
-                  className="flex-1 px-3 py-2 text-sm bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-black rounded-lg font-medium transition-all"
-                >
-                  确认使用
-                </button>
-              </div>
-            </div>
-          ) : (
-            /* 等待状态 */
-            <div className="flex flex-col items-center justify-center h-[280px] bg-[#1a1a1a] rounded-lg border-2 border-dashed border-[#2a2a2a]">
-              <ImageIcon className="w-12 h-12 text-[#333] mb-3" />
-              <p className="text-sm text-[#666]">等待生成结果</p>
-              <p className="text-xs text-[#555] mt-1">输入指令后点击开始修改</p>
-            </div>
-          )}
+            ) : null}
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 }

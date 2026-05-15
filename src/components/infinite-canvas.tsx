@@ -8,7 +8,7 @@ import {
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
-  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil
+  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, ChevronsLeft, ChevronsRight, Settings2, ChevronUp
 } from 'lucide-react';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
 import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
@@ -552,6 +552,35 @@ export function InfiniteCanvas({
   const [cropRatio, setCropRatio] = useState('free');
   const [showExpandRatios, setShowExpandRatios] = useState(false);
   const [showCropRatios, setShowCropRatios] = useState(false);
+  // 图片工具栏折叠状态
+  const [toolbarExpanded, setToolbarExpanded] = useState(true);
+  const [showToolbarCustomize, setShowToolbarCustomize] = useState(false);
+  // 工具栏自定义排序/可见性（从 localStorage 读取）
+  const [toolbarItemOrder, setToolbarItemOrder] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      try { const saved = localStorage.getItem('wujie_toolbar_order'); if (saved) return JSON.parse(saved); } catch {}
+    }
+    return ['放大','移除背景','SVG智能描摹','擦除','蒙版','编辑元素','多角度','转3D','扩展','裁切','图生图','语言修图','下载'];
+  });
+  const [toolbarHiddenItems, setToolbarHiddenItems] = useState<Set<string>>(() => {
+    if (typeof window !== 'undefined') {
+      try { const saved = localStorage.getItem('wujie_toolbar_hidden'); if (saved) return new Set(JSON.parse(saved)); } catch {}
+    }
+    return new Set<string>();
+  });
+
+  // 持久化工具栏自定义设置
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('wujie_toolbar_order', JSON.stringify(toolbarItemOrder));
+    }
+  }, [toolbarItemOrder]);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('wujie_toolbar_hidden', JSON.stringify([...toolbarHiddenItems]));
+    }
+  }, [toolbarHiddenItems]);
+
   // 图生图 state
   const IMG2IMG_CATEGORIES = [
     { key: '风格', prefix: 'in the style of', placeholder: '如：水彩画风格' },
@@ -5296,6 +5325,16 @@ export function InfiniteCanvas({
     { icon: <Download size={14} />, label: '下载', desc: 'PNG/SVG/PSD下载', action: handleOpenDownload },
   ];
 
+  // 根据 toolbarItemOrder 和 toolbarHiddenItems 过滤/排序工具栏
+  const visibleImageActions = toolbarItemOrder
+    .filter(label => !toolbarHiddenItems.has(label))
+    .map(label => imageActions.find(a => a.label === label))
+    .filter((a): a is typeof imageActions[number] => a !== undefined);
+
+  // 折叠时仅显示前5个
+  const displayedActions = toolbarExpanded ? visibleImageActions : visibleImageActions.slice(0, 5);
+  const hasMoreActions = visibleImageActions.length > 5;
+
   // Canvas right-click menu items
   const canvasMenuItems = [
     { label: '粘贴', shortcut: 'Ctrl+V', action: () => {} },
@@ -5995,6 +6034,19 @@ export function InfiniteCanvas({
                         }}
                       />
                     ))}
+                    {/* Language edit connection point - right side center */}
+                    <button
+                      className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-4 h-4 rounded-full bg-[#d4af37] hover:bg-[#e5c249] shadow-lg border-2 border-black/50 cursor-pointer pointer-events-auto z-10 transition-all hover:scale-125"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onEditImage?.(image);
+                      }}
+                      title="连接语言修图工具"
+                    >
+                      <svg viewBox="0 0 16 16" className="w-3 h-3 text-black" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <path d="M8 3v10M3 8h10" />
+                      </svg>
+                    </button>
                   </div>
                 )}
                 {/* Alt+Click reference marker badge */}
@@ -9423,8 +9475,8 @@ export function InfiniteCanvas({
               onWheel={(e) => e.stopPropagation()}
             >
               <div className={`flex items-center gap-0.5 px-1 py-1 rounded-xl border shadow-xl ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-[#1a1a1a]/95 border-[#333] backdrop-blur-sm'}`}>
-                {imageActions.map((action, idx) => (
-                  <div key={idx} className="relative">
+                {displayedActions.map((action, idx) => (
+                  <div key={action.label} className="relative">
                     <button
                       onClick={(e) => { e.stopPropagation(); action.action(); }}
                       className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-all ${
@@ -9437,10 +9489,96 @@ export function InfiniteCanvas({
                       {action.icon}
                       <span>{action.label}</span>
                     </button>
-                    {idx < imageActions.length - 1 && <div className={`absolute right-0 top-1/2 -translate-y-1/2 w-px h-4 ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`} style={{ right: '-1px' }} />}
+                    {idx < displayedActions.length - 1 && <div className={`absolute right-0 top-1/2 -translate-y-1/2 w-px h-4 ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`} style={{ right: '-1px' }} />}
                   </div>
                 ))}
+                {/* 折叠/展开按钮 */}
+                {hasMoreActions && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setToolbarExpanded(!toolbarExpanded); }}
+                    className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      isMonochrome
+                        ? 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
+                        : 'text-[#666] hover:text-[#d4af37] hover:bg-[#252525]'
+                    }`}
+                    title={toolbarExpanded ? '收起工具栏' : '展开更多工具'}
+                  >
+                    {toolbarExpanded ? <ChevronsLeft size={14} /> : <ChevronsRight size={14} />}
+                  </button>
+                )}
+                {/* 自定义按钮 */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowToolbarCustomize(true); }}
+                  className={`flex items-center px-1.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    isMonochrome
+                      ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                      : 'text-[#555] hover:text-[#888] hover:bg-[#252525]'
+                  }`}
+                  title="自定义工具栏"
+                >
+                  <Settings2 size={12} />
+                </button>
               </div>
+
+              {/* 工具栏自定义弹窗 */}
+              {showToolbarCustomize && (
+                <div
+                  className={`absolute top-full mt-2 left-1/2 -translate-x-1/2 w-72 p-3 rounded-xl border shadow-2xl z-50 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#333]'}`}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  data-popup="toolbar-customize"
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-700' : 'text-[#d4af37]'}`}>自定义工具栏</span>
+                    <button onClick={() => setShowToolbarCustomize(false)} className={`p-1 rounded-lg ${isMonochrome ? 'text-gray-400 hover:text-gray-600' : 'text-[#666] hover:text-white'}`}><X size={14} /></button>
+                  </div>
+                  <div className="space-y-1 max-h-60 overflow-y-auto">
+                    {toolbarItemOrder.map(label => {
+                      const isHidden = toolbarHiddenItems.has(label);
+                      return (
+                        <div key={label} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all ${isMonochrome ? 'hover:bg-gray-50' : 'hover:bg-[#252525]'}`}>
+                          <button
+                            onClick={() => {
+                              const newHidden = new Set(toolbarHiddenItems);
+                              if (isHidden) newHidden.delete(label); else newHidden.add(label);
+                              setToolbarHiddenItems(newHidden);
+                            }}
+                            className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-colors ${isHidden ? (isMonochrome ? 'border-gray-300' : 'border-[#444]') : 'bg-[#d4af37] border-[#d4af37]'}`}
+                          >
+                            {!isHidden && <Check size={10} className="text-black" />}
+                          </button>
+                          <span className={`text-xs flex-1 ${isHidden ? (isMonochrome ? 'text-gray-400 line-through' : 'text-[#555] line-through') : (isMonochrome ? 'text-gray-700' : 'text-[#ccc]')}`}>{label}</span>
+                          <div className="flex gap-0.5">
+                            <button
+                              onClick={() => {
+                                const idx = toolbarItemOrder.indexOf(label);
+                                if (idx > 0) {
+                                  const newOrder = [...toolbarItemOrder];
+                                  [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
+                                  setToolbarItemOrder(newOrder);
+                                }
+                              }}
+                              className={`p-0.5 rounded ${isMonochrome ? 'text-gray-400 hover:text-gray-600' : 'text-[#666] hover:text-white'}`}
+                              title="上移"
+                            ><ChevronUp size={12} /></button>
+                            <button
+                              onClick={() => {
+                                const idx = toolbarItemOrder.indexOf(label);
+                                if (idx < toolbarItemOrder.length - 1) {
+                                  const newOrder = [...toolbarItemOrder];
+                                  [newOrder[idx], newOrder[idx + 1]] = [newOrder[idx + 1], newOrder[idx]];
+                                  setToolbarItemOrder(newOrder);
+                                }
+                              }}
+                              className={`p-0.5 rounded ${isMonochrome ? 'text-gray-400 hover:text-gray-600' : 'text-[#666] hover:text-white'}`}
+                              title="下移"
+                            ><ChevronDown size={12} /></button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           );
         })()}
@@ -9870,7 +10008,30 @@ export function InfiniteCanvas({
 
         <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#2a2a2a]'}`} />
 
+        {/* Language Edit - 修图 */}
+        <button
+          onClick={() => {
+            const img = selectedImageData;
+            if (img && onEditImage) {
+              onEditImage(img);
+            } else {
+              onLangEditModeChange?.('selecting');
+            }
+          }}
+          className={`p-2 rounded-xl transition-all relative group ${
+            langEditMode === 'selecting'
+              ? 'bg-[#d4af37]/20 text-[#d4af37] ring-1 ring-[#d4af37]/50'
+              : isMonochrome
+                ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                : 'text-[#888] hover:text-white hover:bg-white/10'
+          }`}
+          title="语言修图"
+        >
+          <Pencil className="h-4 w-4" />
+          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-gray-900 text-white' : 'bg-black/90 text-white'}`}>修图</span>
+        </button>
 
+        <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#2a2a2a]'}`} />
 
         {/* HexCube 六面体 */}
         <button
