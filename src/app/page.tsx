@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { InfiniteCanvas, CanvasImage, ImageGroup } from '@/components/infinite-canvas';
 import { GenerationPanel, GenerationParams, CtrlRefSelection } from '@/components/generation-panel';
 import { ImagePreview } from '@/components/image-preview';
+import ImageEditor from '@/components/image-editor';
 import { ChatPanel } from '@/components/chat-panel';
 import { PromptEquation } from '@/components/prompt-equation';
 
@@ -127,6 +128,8 @@ function CanvasApp() {
 
   // Language-based image editing state
   const [langEditMode, setLangEditMode] = useState<'idle' | 'selecting'>('idle');
+  const [editingImage, setEditingImage] = useState<CanvasImage | null>(null);
+  const [editSourceRect, setEditSourceRect] = useState<{ left: number; top: number; right: number; bottom: number; width: number; height: number } | null>(null);
 
   // Current chat model info from ChatPanel (used for vision-prompt)
   const [currentChatModelInfo, setCurrentChatModelInfo] = useState<{
@@ -1818,7 +1821,14 @@ function CanvasApp() {
     });
   }, [handleFusion]);
 
-  // Language-based image editing handler - called by canvas when editor confirms
+  // Language-based image editing handler - called by canvas when opening editor
+  const handleOpenEditor = useCallback((image: CanvasImage, sourceRect?: DOMRect | null) => {
+    setEditingImage(image);
+    setEditSourceRect(sourceRect ? { left: sourceRect.left, top: sourceRect.top, right: sourceRect.right, bottom: sourceRect.bottom, width: sourceRect.width, height: sourceRect.height } : null);
+    setLangEditMode('idle');
+  }, []);
+
+  // Language-based image editing handler - called when editor confirms/replaces image
   const handleEditImage = useCallback((imageId: string, resultUrl: string, resultPrompt?: string) => {
     setImages(prev => prev.map(img =>
       img.id === imageId
@@ -2113,8 +2123,26 @@ function CanvasApp() {
         image={previewImage}
         onClose={() => setPreviewImage(null)}
         themeStyle={themeStyle}
-        onEditImage={(img) => { setPreviewImage(null); setLangEditMode('selecting'); }}
+        onEditImage={(img) => { setPreviewImage(null); setEditingImage(img); }}
       />
+
+      {/* Language Image Editor */}
+      {editingImage && editSourceRect && (
+        <ImageEditor
+          image={editingImage}
+          sourceRect={editSourceRect}
+          onClose={() => { setEditingImage(null); setEditSourceRect(null); }}
+          onConfirm={(imageId: string, resultUrl: string, resultPrompt?: string) => {
+            setImages(prev => prev.map(img =>
+              img.id === imageId
+                ? { ...img, url: resultUrl, prompt: resultPrompt || img.prompt }
+                : img
+            ));
+            setEditingImage(null);
+            setEditSourceRect(null);
+          }}
+        />
+      )}
 
       {/* Toast */}
       <Toaster 

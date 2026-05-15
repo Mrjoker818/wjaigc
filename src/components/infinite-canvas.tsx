@@ -22,7 +22,6 @@ import dynamic from 'next/dynamic';
 const ModelViewer3D = dynamic(() => import('@/components/model-viewer-3d'), { ssr: false });
 
 const PsdLayerEditor = lazy(() => import('@/components/psd-editor/PsdLayerEditor'));
-const ImageEditor = lazy(() => import('@/components/image-editor').then(m => ({ default: m.ImageEditor })));
 
 
 /* ====== Multi-Angle Sphere Preview (Canvas 2D) ====== */
@@ -321,7 +320,7 @@ interface InfiniteCanvasProps {
   /** Force save canvas data to localStorage + server */
   onForceSave?: () => void;
   /** Called when user wants to open the language-based image editor */
-  onEditImage?: (imageId: string, resultUrl: string, resultPrompt?: string) => void;
+  onEditImage?: (imageId: string, imageUrl: string, resultPrompt?: string, sourceRect?: { left: number; top: number; right: number; bottom: number; width: number; height: number }) => void;
   /** Language edit selection mode */
   langEditMode?: 'idle' | 'selecting';
   onLangEditModeChange?: (mode: 'idle' | 'selecting') => void;
@@ -582,6 +581,24 @@ export function InfiniteCanvas({
       localStorage.setItem('wujie_toolbar_hidden', JSON.stringify([...toolbarHiddenItems]));
     }
   }, [toolbarHiddenItems]);
+
+  // When editingImage changes, calculate screen rect and notify parent
+  useEffect(() => {
+    if (editingImage) {
+      const container = canvasRef.current;
+      if (container) {
+        const el = container.querySelector(`[data-image-id="${editingImage.id}"]`);
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          onEditImage?.(editingImage.id, editingImage.url, undefined, {
+            left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
+            width: rect.width, height: rect.height,
+          });
+        }
+      }
+      setEditingImage(null);
+    }
+  }, [editingImage]);
 
   // 图生图 state
   const IMG2IMG_CATEGORIES = [
@@ -5879,6 +5896,7 @@ export function InfiniteCanvas({
             return (
               <div
                 key={image.id}
+                data-image-id={image.id}
                 className={`absolute group z-10 ${isSelected ? 'z-20' : ''} ${editMode !== 'none' && editImageId !== image.id ? 'opacity-30' : ''}`}
                 style={{
                   left: image.x + (isDragging ? dragOffset.x : 0) + (isGroupDragging ? groupDragOffset.x : 0) + (isInDraggedGenGroup ? genGroupDragOffset.x : 0),
@@ -6798,27 +6816,7 @@ export function InfiniteCanvas({
             );
           })}
 
-          {/* Language Edit Panel - inside canvas transform space */}
-          {editingImage && (
-            <Suspense fallback={null}>
-              <ImageEditor
-                image={editingImage}
-                onClose={() => setEditingImage(null)}
-                onConfirm={(result: { url: string; prompt?: string }) => {
-                  // Update the image in canvas
-                  const updatedImages = images.map(img =>
-                    img.id === editingImage.id
-                      ? { ...img, url: result.url, prompt: result.prompt || img.prompt }
-                      : img
-                  );
-                  onImagesChange(updatedImages);
-                  // Notify parent
-                  onEditImage?.(editingImage.id, result.url, result.prompt);
-                  setEditingImage(null);
-                }}
-              />
-            </Suspense>
-          )}
+
         </div>
 
 
@@ -10021,30 +10019,7 @@ export function InfiniteCanvas({
 
         <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#2a2a2a]'}`} />
 
-        {/* Language Edit - 修图 */}
-        <button
-          onClick={() => {
-            const img = selectedImageData;
-            if (img) {
-              setEditingImage(img);
-            } else {
-              onLangEditModeChange?.('selecting');
-            }
-          }}
-          className={`p-2 rounded-xl transition-all relative group ${
-            editingImage !== null
-              ? 'bg-[#d4af37]/20 text-[#d4af37] ring-1 ring-[#d4af37]/50'
-              : isMonochrome
-                ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                : 'text-[#888] hover:text-white hover:bg-white/10'
-          }`}
-          title="语言修图"
-        >
-          <Pencil className="h-4 w-4" />
-          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-gray-900 text-white' : 'bg-black/90 text-white'}`}>修图</span>
-        </button>
 
-        <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#2a2a2a]'}`} />
 
         {/* HexCube 六面体 */}
         <button
