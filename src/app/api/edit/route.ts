@@ -35,6 +35,33 @@ export const EDITABLE_MODELS = [
   'gemini-3.1-flash-image-preview',
 ];
 
+/** 将图片 URL/data 转换为 Buffer + mimeType，供 inlineData 使用 */
+async function resolveImageToBuffer(imageSrc: string): Promise<{ buffer: Buffer; mimeType: string }> {
+  if (imageSrc.startsWith('data:')) {
+    const commaIndex = imageSrc.indexOf(',');
+    const header = imageSrc.substring(0, commaIndex);
+    const base64Data = imageSrc.substring(commaIndex + 1);
+    const mimeMatch = header.match(/data:([^;]+)/);
+    return { buffer: Buffer.from(base64Data, 'base64'), mimeType: mimeMatch?.[1] || 'image/png' };
+  } else if (imageSrc.startsWith('http://') || imageSrc.startsWith('https://')) {
+    const response = await fetch(imageSrc);
+    if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
+    const arrayBuffer = await response.arrayBuffer();
+    const contentType = response.headers.get('content-type');
+    return { buffer: Buffer.from(arrayBuffer), mimeType: contentType || 'image/png' };
+  } else if (imageSrc.startsWith('/')) {
+    const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
+    const fullUrl = domain ? `https://${domain}${imageSrc}` : `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageSrc}`;
+    const response = await fetch(fullUrl);
+    if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
+    const arrayBuffer = await response.arrayBuffer();
+    const contentType = response.headers.get('content-type');
+    return { buffer: Buffer.from(arrayBuffer), mimeType: contentType || 'image/png' };
+  } else {
+    return { buffer: Buffer.from(imageSrc, 'base64'), mimeType: 'image/png' };
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { 
@@ -49,6 +76,7 @@ export async function POST(request: NextRequest) {
       count = 1,    // 生图数量
       llmModelId,   // 可选，LLM辅助模型ID（预留）
       llmProviderId, // 可选，LLM辅助模型提供商ID（预留）
+      referenceImages, // 可选，参考图URL数组（多图模式）
     } = await request.json();
 
     if (!image) {
@@ -159,18 +187,41 @@ export async function POST(request: NextRequest) {
 
         const editPrompt = `Edit this image according to the following instruction: ${prompt}. Maintain the overall composition and style while making the requested changes.`;
 
+        // 构建 parts：主图 + 参考图 + 文本指令
+        const parts: Array<{ inlineData: { data: string; mimeType: string } } | { text: string }> = [
+          {
+            inlineData: {
+              data: imageBuffer.toString('base64'),
+              mimeType: mimeType,
+            },
+          },
+        ];
+
+        // ★ 添加参考图（多图模式）
+        if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
+          for (const refUrl of referenceImages) {
+            try {
+              const ref = await resolveImageToBuffer(refUrl);
+              parts.push({
+                inlineData: {
+                  data: ref.buffer.toString('base64'),
+                  mimeType: ref.mimeType,
+                },
+              });
+            } catch (refErr) {
+              console.warn('Failed to load reference image, skipping:', refErr);
+            }
+          }
+          // 参考图存在时，补充说明
+          parts.push({ text: `[System: There are ${referenceImages.length} reference image(s) above. Use them as style/composition/subject references when editing the main image.]` });
+        }
+
+        parts.push({ text: editPrompt });
+
         const result = await geminiModel.generateContent({
           contents: [{
             role: 'user',
-            parts: [
-              {
-                inlineData: {
-                  data: imageBuffer.toString('base64'),
-                  mimeType: mimeType,
-                },
-              },
-              { text: editPrompt },
-            ],
+            parts: parts,
           }],
           generationConfig: {
             responseModalities: ['TEXT', 'IMAGE'] as unknown as string[],
@@ -310,10 +361,62 @@ export async function POST(request: NextRequest) {
     }
 
     // 构建API调用参数
+    // ★ OpenAI images.edit 不支持多图输入，参考图信息融入 prompt
+    let effectivePrompt = prompt;
+    if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
+      // 使用 LLM 模型对参考图进行理解（如果配置了 LLM），否则直接描述参考图数量
+      let refDescription = '';
+      if (llmModelId && llmProviderId) {
+        try {
+          // 查找 LLM 提供商配置
+          const { getApiProviders: getProviders } = await import('@/lib/server-api-config');
+          const providers = await getProviders();
+          const llmProvider = providers.find((p: { id: string }) => p.id === llmProviderId);
+          if (llmProvider?.apiKey && llmProvider?.baseUrl) {
+            // 构建参考图理解请求
+            const refParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+              { type: 'text', text: '请简要描述以下参考图片的风格、构图和主体特征，用于指导图片编辑。用中文回答，不超过100字：' },
+            ];
+            for (const refUrl of referenceImages.slice(0, 4)) { // 最多4张参考图
+              let imageUrl = refUrl;
+              if (refUrl.startsWith('/')) {
+                const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
+                imageUrl = domain ? `https://${domain}${refUrl}` : `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${refUrl}`;
+              }
+              refParts.push({ type: 'image_url', image_url: { url: imageUrl } });
+            }
+            const llmResponse = await fetch(`${llmProvider.baseUrl}/chat/completions`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${llmProvider.apiKey}`,
+              },
+              body: JSON.stringify({
+                model: llmModelId,
+                messages: [{ role: 'user', content: refParts }],
+                max_tokens: 300,
+              }),
+            });
+            if (llmResponse.ok) {
+              const llmData = await llmResponse.json();
+              const llmText = llmData.choices?.[0]?.message?.content;
+              if (llmText) refDescription = llmText;
+            }
+          }
+        } catch (llmErr) {
+          console.warn('LLM reference image analysis failed:', llmErr);
+        }
+      }
+      const refContext = refDescription
+        ? `参考图特征：${refDescription}。`
+        : `有${referenceImages.length}张参考图。`;
+      effectivePrompt = `${refContext}${prompt}`;
+    }
+
     const editParams: Record<string, unknown> = {
       model: imageModel,
       image: imageBuffer,
-      prompt: prompt,
+      prompt: effectivePrompt,
     };
 
     if (maskBuffer) {

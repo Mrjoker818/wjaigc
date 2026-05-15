@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { X, Pencil, Eraser, Trash2, Loader2, Check, Sparkles, History, Image as ImageIcon, Lock, ChevronDown, ChevronUp, Hand, Plus, Minus, Maximize2 } from 'lucide-react';
+import { X, Pencil, Eraser, Trash2, Loader2, Check, Sparkles, History, Image as ImageIcon, Lock, ChevronDown, ChevronUp, Hand, Plus, Minus, Maximize2, GripVertical, Upload } from 'lucide-react';
 import type { CanvasImage } from './infinite-canvas';
 
 interface EditHistoryItem {
@@ -20,10 +20,19 @@ interface ServerModel {
   supportsMask?: boolean;
 }
 
+/** 参考图条目 */
+interface ReferenceImage {
+  id: string;
+  url: string;
+  prompt?: string;
+}
+
 interface ImageEditorProps {
   image: CanvasImage;
   onClose: () => void;
   onConfirm: (editedImage: { url: string; prompt: string }) => void;
+  /** 画布上的所有图片，用于选择参考图 */
+  canvasImages?: CanvasImage[];
   connectionStart?: { x: number; y: number };
   initialAspectRatio?: string;
   initialQuality?: string;
@@ -60,7 +69,7 @@ function getModelHint(modelId: string): string {
   return '';
 }
 
-export function ImageEditor({ image, onClose, onConfirm, connectionStart, initialAspectRatio, initialQuality, initialCount, onParamsChange }: ImageEditorProps) {
+export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectionStart, initialAspectRatio, initialQuality, initialCount, onParamsChange }: ImageEditorProps) {
   // 状态管理
   const [isDrawing, setIsDrawing] = useState(false);
   const [brushSize, setBrushSize] = useState(20);
@@ -90,6 +99,11 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
   const [llmModels, setLlmModels] = useState<ServerModel[]>([]);
   const [selectedLlmKey, setSelectedLlmKey] = useState('');
   const [llmListExpanded, setLlmListExpanded] = useState(false);
+
+  // ★ 多图参考模式
+  const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([]);
+  const [refPickerOpen, setRefPickerOpen] = useState(false); // 从画布选择参考图弹窗
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 当前选中的图像模型
   const currentImageModel = (() => {
@@ -175,6 +189,10 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [position, setPosition] = useState({ x: 100, y: 100 });
+
+  // ★ 参考图拖拽排序状态
+  const [dragRefIdx, setDragRefIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   // 从服务器加载模型
   useEffect(() => {
@@ -385,6 +403,76 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
     }
   }, [prompt]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ★ 添加参考图 - 从画布选择
+  const handleAddRefFromCanvas = useCallback((canvasImg: CanvasImage) => {
+    if (canvasImg.id === image.id) return; // 不能添加主图自身
+    if (referenceImages.some(r => r.id === canvasImg.id)) return; // 不重复
+    setReferenceImages(prev => [...prev, {
+      id: canvasImg.id,
+      url: canvasImg.url,
+      prompt: canvasImg.prompt,
+    }]);
+    setRefPickerOpen(false);
+  }, [image.id, referenceImages]);
+
+  // ★ 添加参考图 - 从本地上传
+  const handleAddRefFromFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith('image/')) continue;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const dataUrl = ev.target?.result as string;
+        if (dataUrl) {
+          setReferenceImages(prev => [...prev, {
+            id: `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            url: dataUrl,
+          }]);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+    // reset input so same file can be re-selected
+    e.target.value = '';
+  }, []);
+
+  // ★ 删除参考图
+  const handleRemoveRef = useCallback((refId: string) => {
+    setReferenceImages(prev => prev.filter(r => r.id !== refId));
+  }, []);
+
+  // ★ 参考图拖拽排序
+  const handleRefDragStart = useCallback((idx: number) => {
+    setDragRefIdx(idx);
+  }, []);
+
+  const handleRefDragOver = useCallback((e: React.DragEvent, idx: number) => {
+    e.preventDefault();
+    setDragOverIdx(idx);
+  }, []);
+
+  const handleRefDrop = useCallback((idx: number) => {
+    if (dragRefIdx === null || dragRefIdx === idx) {
+      setDragRefIdx(null);
+      setDragOverIdx(null);
+      return;
+    }
+    setReferenceImages(prev => {
+      const next = [...prev];
+      const [moved] = next.splice(dragRefIdx, 1);
+      next.splice(idx, 0, moved);
+      return next;
+    });
+    setDragRefIdx(null);
+    setDragOverIdx(null);
+  }, [dragRefIdx]);
+
+  // 可选的画布图片（排除主图和已添加的参考图）
+  const availableCanvasImages = (canvasImages || []).filter(
+    ci => ci.id !== image.id && !referenceImages.some(r => r.id === ci.id)
+  );
+
   const handleSubmit = useCallback(async () => {
     if (!prompt.trim()) {
       setError('请输入编辑指令');
@@ -432,6 +520,10 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
         count: outputCount,
         llmModelId: llmModelId || undefined,
         llmProviderId: llmProviderId || undefined,
+        // ★ 参考图URL列表
+        referenceImages: referenceImages.length > 0
+          ? referenceImages.map(r => r.url)
+          : undefined,
       };
 
       const response = await fetch('/api/edit', {
@@ -475,7 +567,7 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
     } finally {
       setIsLoading(false);
     }
-  }, [prompt, selectedModelKey, selectedLlmKey, currentImageUrl, aspectRatio, quality, outputCount, currentModelSupportsMask, exportMask, clearMask, currentHistoryIndex]);
+  }, [prompt, selectedModelKey, selectedLlmKey, currentImageUrl, aspectRatio, quality, outputCount, currentModelSupportsMask, exportMask, clearMask, currentHistoryIndex, referenceImages]);
 
   const handleConfirmResult = useCallback((url?: string) => {
     const finalUrl = url || resultImages[0];
@@ -673,6 +765,11 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
               </button>
             </div>
 
+            {/* 主图标记 */}
+            <div className="absolute top-1 left-1 z-10">
+              <span className="text-[9px] px-1.5 py-0.5 bg-[#d4af37]/80 text-black rounded font-medium">原图</span>
+            </div>
+
             <div
               className="w-full h-full flex items-center justify-center overflow-hidden"
               style={{ cursor: isPanning ? (isPanDragging ? 'grabbing' : 'grab') : 'default' }}
@@ -710,6 +807,119 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
                 )}
               </div>
             </div>
+          </div>
+
+          {/* ★ 参考图区域 */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] text-[#888] flex items-center gap-1">
+                <ImageIcon className="h-3 w-3 text-[#d4af37]" />
+                参考图
+                {referenceImages.length > 0 && (
+                  <span className="text-[#d4af37] font-medium">{referenceImages.length}</span>
+                )}
+              </span>
+              <div className="flex items-center gap-1">
+                {/* 从画布选择 */}
+                {canvasImages && canvasImages.length > 1 && (
+                  <button
+                    onClick={() => setRefPickerOpen(!refPickerOpen)}
+                    className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] bg-[#1a1a1a] border border-[#2a2a2a] rounded text-[#aaa] hover:text-[#d4af37] hover:border-[#d4af37] transition-all"
+                  >
+                    <Plus className="h-2.5 w-2.5" />画布选图
+                  </button>
+                )}
+                {/* 本地上传 */}
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] bg-[#1a1a1a] border border-[#2a2a2a] rounded text-[#aaa] hover:text-[#d4af37] hover:border-[#d4af37] transition-all"
+                >
+                  <Upload className="h-2.5 w-2.5" />上传
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={handleAddRefFromFile}
+                />
+              </div>
+            </div>
+
+            {/* 参考图缩略图列表 */}
+            {referenceImages.length > 0 ? (
+              <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+                {referenceImages.map((ref, idx) => (
+                  <div
+                    key={ref.id}
+                    draggable
+                    onDragStart={() => handleRefDragStart(idx)}
+                    onDragOver={(e) => handleRefDragOver(e, idx)}
+                    onDrop={() => handleRefDrop(idx)}
+                    onDragEnd={() => { setDragRefIdx(null); setDragOverIdx(null); }}
+                    className={`relative flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden border-2 transition-all cursor-grab group ${
+                      dragOverIdx === idx ? 'border-[#d4af37] scale-105' :
+                      dragRefIdx === idx ? 'border-[#666] opacity-50' :
+                      'border-[#2a2a2a] hover:border-[#d4af37]/50'
+                    }`}
+                  >
+                    <img src={ref.url} alt={`参考${idx + 1}`} className="w-full h-full object-cover" crossOrigin="anonymous" />
+                    {/* 序号 */}
+                    <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-[8px] text-center text-[#ccc]">
+                      {idx + 1}
+                    </div>
+                    {/* 拖拽手柄 */}
+                    <div className="absolute top-0 left-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <GripVertical className="h-2.5 w-2.5 text-white drop-shadow" />
+                    </div>
+                    {/* 删除按钮 */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleRemoveRef(ref.id); }}
+                      className="absolute top-0 right-0 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 bg-red-500/80 rounded-bl-lg"
+                    >
+                      <X className="h-2.5 w-2.5 text-white" />
+                    </button>
+                    {/* prompt提示 */}
+                    {ref.prompt && (
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all flex items-center justify-center pointer-events-none">
+                        <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[7px] text-white text-center px-0.5 line-clamp-2 max-h-full overflow-hidden">{ref.prompt.slice(0, 30)}</span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-[10px] text-[#555] py-1.5 text-center border border-dashed border-[#2a2a2a] rounded-lg">
+                添加参考图帮助AI更好理解修图意图
+              </div>
+            )}
+
+            {/* 从画布选择参考图弹窗 */}
+            {refPickerOpen && availableCanvasImages.length > 0 && (
+              <div className="mt-1.5 max-h-32 overflow-y-auto rounded-lg border border-[#2a2a2a] bg-[#0d0d0d]">
+                <div className="px-2 py-1 text-[9px] text-[#666] uppercase tracking-wider border-b border-[#1a1a1a] sticky top-0 bg-[#0d0d0d]">选择画布图片</div>
+                {availableCanvasImages.map(ci => (
+                  <button
+                    key={ci.id}
+                    onClick={() => handleAddRefFromCanvas(ci)}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs text-[#aaa] hover:bg-[#1a1a1a] hover:text-white transition-all border-b border-[#1a1a1a] last:border-b-0"
+                  >
+                    <img src={ci.url} alt="" className="w-8 h-8 object-cover rounded flex-shrink-0" crossOrigin="anonymous" />
+                    <div className="flex-1 min-w-0">
+                      <div className="truncate text-[11px]">{ci.prompt || ci.url.split('/').pop() || '图片'}</div>
+                      <div className="text-[9px] text-[#555]">{ci.originalWidth || 0}x{ci.originalHeight || 0}</div>
+                    </div>
+                    <Plus className="h-3 w-3 text-[#d4af37] flex-shrink-0" />
+                  </button>
+                ))}
+              </div>
+            )}
+            {refPickerOpen && availableCanvasImages.length === 0 && (
+              <div className="mt-1.5 px-3 py-2 text-[10px] text-[#555] text-center border border-[#2a2a2a] rounded-lg bg-[#0d0d0d]">
+                画布上没有其他可添加的图片
+              </div>
+            )}
           </div>
 
           {/* 画笔工具 - 始终显示 */}

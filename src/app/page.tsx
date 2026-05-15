@@ -1914,6 +1914,7 @@ function CanvasApp() {
       {editingImage && (
         <ImageEditor
           image={editingImage}
+          canvasImages={images}
           onClose={handleEditCancel}
           onConfirm={(result) => {
             // Replace the edited image with the result
