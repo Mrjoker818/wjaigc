@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { X, Pencil, Eraser, Trash2, Loader2, Check, Sparkles, History, Image as ImageIcon, Lock, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, Pencil, Eraser, Trash2, Loader2, Check, Sparkles, History, Image as ImageIcon, Lock, ChevronDown, ChevronUp, Hand, ZoomIn, ZoomOut, RotateCcw, Plus, Minus, Maximize2 } from 'lucide-react';
 import type { CanvasImage } from './infinite-canvas';
 
 interface EditHistoryItem {
@@ -80,6 +80,8 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
 
   // 服务器模型列表（从管理员系统获取）
   const [serverModels, setServerModels] = useState<ServerModel[]>([]);
+  const [llmModels, setLlmModels] = useState<ServerModel[]>([]);
+  const [llmModelId, setLlmModelId] = useState<string>('');
 
   // 当前选中的模型是否支持蒙版
   const currentModelSupportsMask = (() => {
@@ -100,6 +102,44 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
     return true; // 默认支持
   })();
 
+  // 图片预览区缩放/平移状态
+  const [previewZoom, setPreviewZoom] = useState(1);
+  const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [isPanDragging, setIsPanDragging] = useState(false);
+  const panStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+
+  const handlePreviewWheel = useCallback((e: React.WheelEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    setPreviewZoom(prev => Math.min(5, Math.max(0.5, prev + delta)));
+  }, []);
+
+  const handlePanStart = useCallback((e: React.MouseEvent) => {
+    if (!isPanning) return;
+    e.stopPropagation();
+    setIsPanDragging(true);
+    panStartRef.current = { x: e.clientX, y: e.clientY, panX: previewPan.x, panY: previewPan.y };
+  }, [isPanning, previewPan]);
+
+  const handlePanMove = useCallback((e: React.MouseEvent) => {
+    if (!isPanDragging) return;
+    e.stopPropagation();
+    const dx = e.clientX - panStartRef.current.x;
+    const dy = e.clientY - panStartRef.current.y;
+    setPreviewPan({ x: panStartRef.current.panX + dx, y: panStartRef.current.panY + dy });
+  }, [isPanDragging]);
+
+  const handlePanEnd = useCallback(() => {
+    setIsPanDragging(false);
+  }, []);
+
+  const resetPreviewView = useCallback(() => {
+    setPreviewZoom(1);
+    setPreviewPan({ x: 0, y: 0 });
+  }, []);
+
   // 当前选中模型的名称
   const currentModelName = (() => {
     if (selectedModelKey.startsWith('builtin::')) {
@@ -119,6 +159,7 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
   const resultContainerRef = useRef<HTMLDivElement>(null);
+  const previewContainerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const [imageDisplaySize, setImageDisplaySize] = useState({ width: 260, height: 260 });
@@ -150,6 +191,26 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
         }
       } catch (err) {
         console.error('Failed to load edit models:', err);
+      }
+
+      // 加载LLM模型
+      try {
+        const llmRes = await fetch('/api/models?type=chat');
+        if (llmRes.ok) {
+          const llmData = await llmRes.json();
+          if (llmData.models && Array.isArray(llmData.models)) {
+            const models: ServerModel[] = llmData.models.map((m: { id: string; name: string; providerId: string; providerName: string }) => ({
+              id: m.id,
+              name: m.name,
+              providerId: m.providerId,
+              providerName: m.providerName || '',
+              type: 'chat',
+            }));
+            setLlmModels(models);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load LLM models:', err);
       }
     };
     loadModels();
@@ -340,6 +401,8 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
         quality,
         model: modelId,
         count: outputCount,
+        llmModelId: llmModelId || undefined,
+        llmProviderId: llmModels.find(m => m.id === llmModelId)?.providerId || undefined,
       };
 
       if (isBuiltIn) {
@@ -521,29 +584,84 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
 
         {/* Content */}
         <div className="p-3 space-y-3 max-h-[calc(85vh-50px)] overflow-y-auto">
-          {/* 图片预览 + 蒙版 */}
-          <div className="relative bg-[#1a1a1a] rounded-lg p-2 flex justify-center">
-            <div className="relative" style={{ width: imageDisplaySize.width, height: imageDisplaySize.height }}>
-              {currentImageUrl && (
-                <img src={currentImageUrl} alt="编辑" className="absolute top-0 left-0 w-full h-full object-contain rounded" crossOrigin="anonymous" />
-              )}
-              <canvas
-                ref={canvasRef}
-                className={`absolute top-0 left-0 w-full h-full ${currentModelSupportsMask ? 'cursor-crosshair' : 'pointer-events-none'}`}
-                style={{ width: imageDisplaySize.width, height: imageDisplaySize.height }}
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-                onMouseLeave={handleMouseUp}
-              />
-              {!currentModelSupportsMask && (
-                <div className="absolute bottom-1 left-1 right-1 flex items-center justify-center pointer-events-none">
-                  <div className="flex items-center gap-1 px-2 py-0.5 bg-[#1a1a1a]/80 rounded border border-[#2a2a2a]">
-                    <Lock className="h-3 w-3 text-[#888]" />
-                    <span className="text-[9px] text-[#d4af37]">此模型不支持涂抹，文字描述即可智能修图</span>
+          {/* 图片预览 + 蒙版 + 缩放/平移 */}
+          <div
+            className="relative bg-[#1a1a1a] rounded-lg overflow-hidden"
+            onWheel={handlePreviewWheel}
+            onMouseMove={isPanning ? handlePanMove : undefined}
+            onMouseUp={isPanning ? handlePanEnd : undefined}
+            onMouseLeave={isPanning ? handlePanEnd : undefined}
+            style={{ height: Math.min(imageDisplaySize.height + 32, 280) }}
+          >
+            {/* 缩放/平移工具 */}
+            <div className="absolute top-1 right-1 z-10 flex items-center gap-0.5">
+              <button
+                onClick={() => setIsPanning(!isPanning)}
+                className={`p-1 rounded transition-colors ${isPanning ? 'bg-[#d4af37] text-black' : 'bg-[#2a2a2a]/80 text-[#888] hover:text-white'}`}
+                title="手掌工具：拖动画面"
+              >
+                <Hand className="h-3 w-3" />
+              </button>
+              <button
+                onClick={() => setPreviewZoom(prev => Math.min(5, prev + 0.25))}
+                className="p-1 rounded bg-[#2a2a2a]/80 text-[#888] hover:text-white transition-colors"
+                title="放大"
+              >
+                <Plus className="h-3 w-3" />
+              </button>
+              <span className="text-[9px] text-[#d4af37] font-mono px-0.5 min-w-[32px] text-center">{Math.round(previewZoom * 100)}%</span>
+              <button
+                onClick={() => setPreviewZoom(prev => Math.max(0.2, prev - 0.25))}
+                className="p-1 rounded bg-[#2a2a2a]/80 text-[#888] hover:text-white transition-colors"
+                title="缩小"
+              >
+                <Minus className="h-3 w-3" />
+              </button>
+              <button
+                onClick={resetPreviewView}
+                className="p-1 rounded bg-[#2a2a2a]/80 text-[#888] hover:text-white transition-colors"
+                title="重置视图"
+              >
+                <Maximize2 className="h-3 w-3" />
+              </button>
+            </div>
+
+            <div
+              className="w-full h-full flex items-center justify-center overflow-hidden"
+              style={{ cursor: isPanning ? (isPanning ? 'grabbing' : 'grab') : 'default' }}
+              onMouseDown={isPanning ? (e) => { handlePanStart(e); } : undefined}
+            >
+              <div
+                className="relative"
+                style={{
+                  width: imageDisplaySize.width * previewZoom,
+                  height: imageDisplaySize.height * previewZoom,
+                  transform: `translate(${previewPan.x}px, ${previewPan.y}px)`,
+                  transformOrigin: 'center center',
+                  transition: isPanning ? 'none' : 'transform 0.15s ease-out',
+                }}
+              >
+                {currentImageUrl && (
+                  <img src={currentImageUrl} alt="编辑" className="absolute top-0 left-0 w-full h-full object-contain rounded" crossOrigin="anonymous" />
+                )}
+                <canvas
+                  ref={canvasRef}
+                  className={`absolute top-0 left-0 w-full h-full ${currentModelSupportsMask && !isPanning ? 'cursor-crosshair' : 'pointer-events-none'}`}
+                  style={{ width: imageDisplaySize.width * previewZoom, height: imageDisplaySize.height * previewZoom }}
+                  onMouseDown={!isPanning ? handleMouseDown : undefined}
+                  onMouseMove={!isPanning ? handleMouseMove : undefined}
+                  onMouseUp={!isPanning ? handleMouseUp : undefined}
+                  onMouseLeave={!isPanning ? handleMouseUp : undefined}
+                />
+                {!currentModelSupportsMask && (
+                  <div className="absolute bottom-1 left-1 right-1 flex items-center justify-center pointer-events-none">
+                    <div className="flex items-center gap-1 px-2 py-0.5 bg-[#1a1a1a]/80 rounded border border-[#2a2a2a]">
+                      <Lock className="h-3 w-3 text-[#888]" />
+                      <span className="text-[9px] text-[#d4af37]">此模型不支持涂抹，文字描述即可智能修图</span>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
 
@@ -734,31 +852,22 @@ export function ImageEditor({ image, onClose, onConfirm, connectionStart, initia
             </div>
           </div>
 
-          {/* 内置模型需要API Key输入 */}
-          {selectedModelKey.startsWith('builtin::') && (
-            <div>
-              <label className="text-[10px] text-[#888] mb-0.5 block">
-                API Key {(() => {
-                  const id = selectedModelKey.replace('builtin::', '');
-                  const m = BUILT_IN_MODELS.find(bm => bm.id === id);
-                  return m?.provider === 'OpenAI' ? '(OpenAI)' : m?.provider === 'Google' ? '(Google)' : '';
-                })()}
-              </label>
-              <input
-                type="password"
-                placeholder={(() => {
-                  const id = selectedModelKey.replace('builtin::', '');
-                  const m = BUILT_IN_MODELS.find(bm => bm.id === id);
-                  return m?.provider === 'OpenAI' ? 'sk-...' : m?.provider === 'Google' ? 'AIza...' : 'API Key';
-                })()}
-                className="w-full px-2 py-1.5 bg-[#1a1a1a] border border-[#2a2a2a] rounded text-[11px] text-white placeholder:text-[#444] focus:border-[#d4af37] focus:outline-none"
-                onChange={(e) => {
-                  // 存储到临时ref
-                  (window as unknown as Record<string, unknown>).__editApiKey = e.target.value;
-                }}
-              />
-            </div>
-          )}
+          {/* LLM 辅助模型选择 */}
+          <div>
+            <label className="text-[10px] text-[#888] mb-0.5 block">LLM 辅助模型</label>
+            <select
+              value={llmModelId}
+              onChange={e => setLlmModelId(e.target.value)}
+              className="w-full px-2 py-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded text-[11px] text-white appearance-none cursor-pointer focus:border-[#d4af37] focus:outline-none"
+            >
+              <option value="">不使用LLM辅助</option>
+              {llmModels.map(m => (
+                <option key={m.id + '|' + m.providerId} value={m.id + '|' + m.providerId}>
+                  {m.name} ({m.providerName})
+                </option>
+              ))}
+            </select>
+          </div>
 
           {/* 错误 */}
           {error && (

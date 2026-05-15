@@ -47,6 +47,8 @@ export async function POST(request: NextRequest) {
       model = 'gpt-image-2',
       providerId,   // 可选，管理员系统提供商ID
       count = 1,    // 生图数量
+      llmModelId,   // 可选，LLM辅助模型ID（预留）
+      llmProviderId, // 可选，LLM辅助模型提供商ID（预留）
     } = await request.json();
 
     if (!image) {
