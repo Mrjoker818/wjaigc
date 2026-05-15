@@ -3,6 +3,9 @@ import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { findProviderForModel } from '@/lib/server-api-config';
 
+// 允许大请求体（base64图片可能很大，50MB限制）
+export const runtime = 'nodejs';
+
 // Gemini 模型映射（用于图片编辑）
 const GEMINI_EDIT_MODELS: Record<string, {
   name: string;

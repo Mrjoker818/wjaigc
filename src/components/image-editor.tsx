@@ -538,6 +538,79 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     e.target.value = '';
   }, []);
 
+  // 将任意图片URL转换为base64 data URL（确保服务端能处理）
+  const imageToDataUrl = useCallback(async (url: string): Promise<string> => {
+    if (url.startsWith('data:')) return url;
+
+    // 方法1：fetch + blob（适用于同源和CORS友好的URL）
+    try {
+      const resp = await fetch(url, { mode: 'cors' });
+      if (resp.ok) {
+        const blob = await resp.blob();
+        return new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      }
+    } catch {
+      // CORS限制或网络错误，继续尝试其他方式
+    }
+
+    // 方法2：通过canvas绘制（适用于同源或已设置crossOrigin的图片）
+    try {
+      return await new Promise<string>((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) { reject(new Error('Canvas context failed')); return; }
+            ctx.drawImage(img, 0, 0);
+            resolve(canvas.toDataURL('image/png'));
+          } catch {
+            reject(new Error('CORS限制'));
+          }
+        };
+        img.onerror = () => reject(new Error('图片加载失败'));
+        img.src = url;
+      });
+    } catch {
+      // canvas方式也失败
+    }
+
+    // 方法3：通过服务端代理下载（服务端不受CORS限制）
+    try {
+      const saveResp = await fetch('/api/save-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: url }),
+      });
+      const saveData = await saveResp.json();
+      if (saveData.success && saveData.url) {
+        // 服务端已保存，用本地URL重新fetch
+        const localResp = await fetch(saveData.url);
+        if (localResp.ok) {
+          const blob = await localResp.blob();
+          return new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        }
+      }
+    } catch {
+      // 服务端代理也失败
+    }
+
+    throw new Error('图片转换失败，请尝试重新上传图片');
+  }, []);
+
   const handleSubmit = useCallback(async () => {
     if (!currentImageUrl) {
       setError('请先添加要修图的图片');
@@ -559,6 +632,16 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     setLoadingProgress(0);
 
     try {
+      // ★ 将图片URL转为base64，确保服务端可处理
+      let imageAsDataUrl: string;
+      try {
+        imageAsDataUrl = await imageToDataUrl(currentImageUrl);
+      } catch {
+        setError('图片加载失败，请尝试重新添加图片');
+        setIsLoading(false);
+        setIsResultLoading(false);
+        return;
+      }
       const maskDataUrl = currentModelSupportsMask ? exportMask() : null;
       const progressInterval = setInterval(() => {
         setLoadingProgress(prev => Math.min(prev + 10, 90));
@@ -578,8 +661,13 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         llmModelId = llmParts.slice(2).join('::');
       }
 
+      // ★ 参考图也转为base64
+      const refDataUrls = referenceImages.length > 0
+        ? await Promise.all(referenceImages.map(r => imageToDataUrl(r.url)))
+        : undefined;
+
       const requestBody: Record<string, unknown> = {
-        image: currentImageUrl,
+        image: imageAsDataUrl,
         prompt: prompt,
         mask: maskDataUrl,
         size: aspectRatio,
@@ -589,10 +677,8 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         count: outputCount,
         llmModelId: llmModelId || undefined,
         llmProviderId: llmProviderId || undefined,
-        // ★ 参考图URL列表
-        referenceImages: referenceImages.length > 0
-          ? referenceImages.map(r => r.url)
-          : undefined,
+        // ★ 参考图base64列表
+        referenceImages: refDataUrls,
       };
 
       const response = await fetch('/api/edit', {
@@ -636,7 +722,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     } finally {
       setIsLoading(false);
     }
-  }, [prompt, selectedModelKey, selectedLlmKey, currentImageUrl, aspectRatio, quality, outputCount, currentModelSupportsMask, exportMask, clearMask, currentHistoryIndex, referenceImages]);
+  }, [prompt, selectedModelKey, selectedLlmKey, currentImageUrl, aspectRatio, quality, outputCount, currentModelSupportsMask, exportMask, clearMask, currentHistoryIndex, referenceImages, imageToDataUrl]);
 
   const handleConfirmResult = useCallback((url?: string) => {
     const finalUrl = url || resultImages[0];
