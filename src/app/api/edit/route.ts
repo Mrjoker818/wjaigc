@@ -74,6 +74,53 @@ function modelSupportsMask(modelId: string, providerBaseUrl: string): boolean {
 }
 
 /**
+ * 解析 SSE 流式响应，拼接所有 delta content 为完整 JSON 结构
+ * 兼容第三方代理忽略 stream:false 强制流式返回的情况
+ */
+function parseSSEToJSON(sseText: string): Record<string, unknown> {
+  const lines = sseText.split('\n');
+  let fullContent = '';
+  let lastChunk: Record<string, unknown> | null = null;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed === 'data: [DONE]' || !trimmed.startsWith('data: ')) continue;
+
+    try {
+      const chunk = JSON.parse(trimmed.slice(6));
+      lastChunk = chunk;
+      const delta = chunk.choices?.[0]?.delta;
+      if (delta?.content && typeof delta.content === 'string') {
+        fullContent += delta.content;
+      }
+      // 检查多模态内容（部分代理直接在 delta 中返回图片）
+      if (delta?.content && Array.isArray(delta.content)) {
+        for (const part of delta.content) {
+          if (typeof part === 'string') fullContent += part;
+          else if (typeof part === 'object' && part !== null) fullContent += JSON.stringify(part);
+        }
+      }
+    } catch {
+      // 跳过无法解析的行
+    }
+  }
+
+  // 构建与标准 chat/completions 非流式响应一致的 JSON 结构
+  if (lastChunk) {
+    return {
+      ...lastChunk,
+      choices: [{
+        ...((lastChunk as Record<string, unknown>).choices as Array<Record<string, unknown>>)?.[0],
+        message: { role: 'assistant', content: fullContent || '' },
+        finish_reason: 'stop',
+      }],
+    };
+  }
+
+  return { choices: [{ message: { role: 'assistant', content: fullContent } }] };
+}
+
+/**
  * 从第三方 API 响应中提取图片 URL/base64
  * 支持多种返回格式，确保兼容各种代理
  */
@@ -306,12 +353,22 @@ export async function POST(request: NextRequest) {
                 model: llmModelId,
                 messages: [{ role: 'user', content: refParts }],
                 max_tokens: 300,
+                stream: false,
               }),
             });
             if (llmResponse.ok) {
-              const llmData = await llmResponse.json();
-              const llmText = llmData.choices?.[0]?.message?.content;
-              if (llmText) refDescription = llmText;
+              const llmText = await llmResponse.text();
+              let llmData: Record<string, unknown>;
+              if (llmText.trimStart().startsWith('data:')) {
+                llmData = parseSSEToJSON(llmText);
+              } else {
+                try { llmData = JSON.parse(llmText); } catch { llmData = {}; }
+              }
+              const llmChoices = (llmData as Record<string, unknown>).choices as Array<Record<string, unknown>> | undefined;
+              const llmContent = llmChoices?.[0]?.message
+                ? ((llmChoices[0].message as Record<string, unknown>).content)
+                : undefined;
+              if (llmContent) refDescription = String(llmContent);
             }
           }
         } catch (llmErr) {
@@ -429,7 +486,7 @@ export async function POST(request: NextRequest) {
     // 编辑指令
     contentParts.push({ type: 'text', text: editInstruction });
 
-    // 构建 chat/completions 请求体
+    // 构建 chat/completions 请求体（必须 stream:false，第三方代理默认可能流式返回）
     const chatRequestBody: Record<string, unknown> = {
       model,
       messages: [{
@@ -437,6 +494,7 @@ export async function POST(request: NextRequest) {
         content: contentParts,
       }],
       max_tokens: 4096,
+      stream: false,
     };
 
     // 对于图像生成类模型，添加响应格式提示（部分代理支持）
@@ -509,7 +567,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: errorMsg }, { status: chatResponse.status });
     }
 
-    const chatData = await chatResponse.json();
+    // 解析响应（兼容流式和非流式，部分代理忽略 stream:false 强制流式返回）
+    const chatText = await chatResponse.text();
+    let chatData: Record<string, unknown>;
+
+    if (chatText.trimStart().startsWith('data:')) {
+      // SSE 流式响应 — 拼接所有 delta content
+      console.info('[edit] API returned SSE stream despite stream:false, parsing SSE events');
+      chatData = parseSSEToJSON(chatText);
+    } else {
+      try {
+        chatData = JSON.parse(chatText);
+      } catch {
+        return NextResponse.json({
+          success: false,
+          error: `API 响应解析失败: ${chatText.substring(0, 200)}`,
+        }, { status: 502 });
+      }
+    }
+
     let resultImageUrl = extractImageFromResponse(chatData);
 
     // chat/completions 未提取到图片，尝试降级到 images/generations
@@ -522,7 +598,10 @@ export async function POST(request: NextRequest) {
 
     if (!resultImageUrl) {
       // 最后的降级：检查响应中是否有文本内容，可能模型只返回了文字描述
-      const textContent = chatData.choices?.[0]?.message?.content;
+      const chatChoices = (chatData as Record<string, unknown>).choices as Array<Record<string, unknown>> | undefined;
+      const textContent = chatChoices?.[0]?.message
+        ? ((chatChoices[0].message as Record<string, unknown>).content as string)
+        : undefined;
       if (typeof textContent === 'string' && textContent.length > 0 && !textContent.includes('data:image')) {
         return NextResponse.json({
           success: false,
