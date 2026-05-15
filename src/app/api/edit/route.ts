@@ -323,18 +323,62 @@ export async function POST(request: NextRequest) {
     const isOpenaiImageModel = id.includes('gpt-image') || id.includes('dall-e');
     const supportsNativeMask = modelSupportsNativeMask(model, effectiveBaseUrl);
 
-    // ========== 5. 构建编辑 prompt ==========
+    // ========== 5. LLM 协作：分析原图 + 优化 prompt + 蒙版语义 ==========
+    // 核心思路：LLM 是"大脑"理解意图，图像模型是"手"执行修改
+    // 协作流程：LLM 分析原图内容 → 理解用户意图 → 结合蒙版区域 → 生成精准编辑指令
     let effectivePrompt = prompt;
 
-    // 使用 LLM 模型优化 prompt / 分析参考图（如果配置了 LLM）
-    if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
-      let refDescription = '';
-      if (llmModelId && llmProviderId) {
-        try {
-          const llmProvider = await findProviderById(llmProviderId);
-          if (llmProvider?.apiKey && llmProvider?.baseUrl) {
+    if (llmModelId && llmProviderId) {
+      try {
+        const llmProvider = await findProviderById(llmProviderId);
+        if (llmProvider?.apiKey && llmProvider?.baseUrl) {
+          const llmBaseUrl = normalizeApiBaseUrl(llmProvider.baseUrl);
+          const llmHeaders = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${llmProvider.apiKey}`,
+          };
+
+          // ===== 阶段1: LLM 分析原图内容 =====
+          let imageDescription = '';
+          const analyzeParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+            { type: 'text', text: '请仔细观察这张图片，简要描述图片中的：1.主要主体 2.背景环境 3.色彩风格 4.构图特征。用中文回答，不超过80字：' },
+            { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBuffer.toString('base64')}` } },
+          ];
+
+          try {
+            const analyzeResponse = await fetchWithV1Retry(llmBaseUrl, '/chat/completions', {
+              method: 'POST',
+              headers: llmHeaders,
+              body: JSON.stringify({
+                model: llmModelId,
+                messages: [{ role: 'user', content: analyzeParts }],
+                max_tokens: 200,
+                stream: false,
+              }),
+            });
+            if (analyzeResponse.ok) {
+              const analyzeText = await analyzeResponse.text();
+              let analyzeData: Record<string, unknown>;
+              if (analyzeText.trimStart().startsWith('data:')) {
+                analyzeData = parseSSEToJSON(analyzeText);
+              } else {
+                try { analyzeData = JSON.parse(analyzeText); } catch { analyzeData = {}; }
+              }
+              const analyzeChoices = (analyzeData as Record<string, unknown>).choices as Array<Record<string, unknown>> | undefined;
+              const analyzeContent = analyzeChoices?.[0]?.message
+                ? ((analyzeChoices[0].message as Record<string, unknown>).content)
+                : undefined;
+              if (analyzeContent) imageDescription = String(analyzeContent);
+            }
+          } catch (analyzeErr) {
+            console.warn('LLM image analysis failed:', analyzeErr);
+          }
+
+          // ===== 阶段2: LLM 分析参考图（如有） =====
+          let refDescription = '';
+          if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
             const refParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
-              { type: 'text', text: '请简要描述以下参考图片的风格、构图和主体特征，用于指导图片编辑。用中文回答，不超过100字：' },
+              { type: 'text', text: '请简要描述以下参考图片的风格、构图和主体特征，用于指导图片编辑。用中文回答，不超过80字：' },
             ];
             for (const refUrl of referenceImages.slice(0, 4)) {
               try {
@@ -342,43 +386,116 @@ export async function POST(request: NextRequest) {
                 refParts.push({ type: 'image_url', image_url: { url: `data:${ref.mimeType};base64,${ref.buffer.toString('base64')}` } });
               } catch { /* 跳过失败的参考图 */ }
             }
-            const llmBaseUrl = normalizeApiBaseUrl(llmProvider.baseUrl);
-            const llmResponse = await fetchWithV1Retry(llmBaseUrl, '/chat/completions', {
+            try {
+              const refResponse = await fetchWithV1Retry(llmBaseUrl, '/chat/completions', {
+                method: 'POST',
+                headers: llmHeaders,
+                body: JSON.stringify({
+                  model: llmModelId,
+                  messages: [{ role: 'user', content: refParts }],
+                  max_tokens: 200,
+                  stream: false,
+                }),
+              });
+              if (refResponse.ok) {
+                const refText = await refResponse.text();
+                let refData: Record<string, unknown>;
+                if (refText.trimStart().startsWith('data:')) {
+                  refData = parseSSEToJSON(refText);
+                } else {
+                  try { refData = JSON.parse(refText); } catch { refData = {}; }
+                }
+                const refChoices = (refData as Record<string, unknown>).choices as Array<Record<string, unknown>> | undefined;
+                const refContent = refChoices?.[0]?.message
+                  ? ((refChoices[0].message as Record<string, unknown>).content)
+                  : undefined;
+                if (refContent) refDescription = String(refContent);
+              }
+            } catch (refErr) {
+              console.warn('LLM reference image analysis failed:', refErr);
+            }
+          }
+
+          // ===== 阶段3: LLM 生成精准编辑指令 =====
+          // 将原图分析 + 参考图分析 + 用户意图 + 蒙版语义 → 组合成精准编辑指令
+          let maskContext = '';
+          if (maskBuffer) {
+            maskContext = '\n\n[蒙版信息：用户用画笔标记了需要修改的区域（蒙版白色区域），请重点关注标记区域进行修改，未标记区域尽量保持原样。]';
+          }
+
+          const optimizeParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+            {
+              type: 'text',
+              text: `你是一个专业的AI图片编辑指令优化师。请根据以下信息，生成一条精准的英文图片编辑指令。
+
+## 原图内容分析
+${imageDescription || '（未能分析原图）'}
+
+## 参考图特征
+${refDescription || '（无参考图）'}
+${maskContext}
+## 用户的编辑意图
+${prompt}
+
+## 要求
+1. 将用户的中文意图翻译为精准的英文编辑指令
+2. 结合原图内容分析，明确指出需要修改和保持的部分
+3. 如果有参考图特征，融入参考图的风格/构图/主体元素
+4. 如果有蒙版信息，强调只在标记区域修改
+5. 指令要具体、可执行，包含视觉细节（颜色、纹理、光影等）
+6. 只输出编辑指令本身，不要任何解释或前缀
+
+请直接输出英文编辑指令：`,
+            },
+          ];
+          // 让LLM也看到原图，辅助理解
+          if (imageDescription) {
+            optimizeParts.push({ type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBuffer.toString('base64')}` } });
+          }
+
+          try {
+            const optimizeResponse = await fetchWithV1Retry(llmBaseUrl, '/chat/completions', {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${llmProvider.apiKey}`,
-              },
+              headers: llmHeaders,
               body: JSON.stringify({
                 model: llmModelId,
-                messages: [{ role: 'user', content: refParts }],
-                max_tokens: 300,
+                messages: [{ role: 'user', content: optimizeParts }],
+                max_tokens: 500,
                 stream: false,
               }),
             });
-            if (llmResponse.ok) {
-              const llmText = await llmResponse.text();
-              let llmData: Record<string, unknown>;
-              if (llmText.trimStart().startsWith('data:')) {
-                llmData = parseSSEToJSON(llmText);
+            if (optimizeResponse.ok) {
+              const optimizeText = await optimizeResponse.text();
+              let optimizeData: Record<string, unknown>;
+              if (optimizeText.trimStart().startsWith('data:')) {
+                optimizeData = parseSSEToJSON(optimizeText);
               } else {
-                try { llmData = JSON.parse(llmText); } catch { llmData = {}; }
+                try { optimizeData = JSON.parse(optimizeText); } catch { optimizeData = {}; }
               }
-              const llmChoices = (llmData as Record<string, unknown>).choices as Array<Record<string, unknown>> | undefined;
-              const llmContent = llmChoices?.[0]?.message
-                ? ((llmChoices[0].message as Record<string, unknown>).content)
+              const optimizeChoices = (optimizeData as Record<string, unknown>).choices as Array<Record<string, unknown>> | undefined;
+              const optimizeContent = optimizeChoices?.[0]?.message
+                ? ((optimizeChoices[0].message as Record<string, unknown>).content)
                 : undefined;
-              if (llmContent) refDescription = String(llmContent);
+              if (optimizeContent && String(optimizeContent).trim()) {
+                effectivePrompt = String(optimizeContent).trim();
+                console.log(`[LLM协作] 原始prompt: "${prompt}" → 优化后: "${effectivePrompt.substring(0, 100)}..."`);
+              }
             }
+          } catch (optimizeErr) {
+            console.warn('LLM prompt optimization failed, using original prompt:', optimizeErr);
           }
-        } catch (llmErr) {
-          console.warn('LLM reference image analysis failed:', llmErr);
         }
+      } catch (llmErr) {
+        console.warn('LLM collaboration failed, using original prompt:', llmErr);
       }
-      const refContext = refDescription
-        ? `参考图特征：${refDescription}。`
-        : `有${referenceImages.length}张参考图。`;
-      effectivePrompt = `${refContext}${prompt}`;
+    } else {
+      // 没有配置LLM模型时，仅做简单处理
+      if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
+        effectivePrompt = `有${referenceImages.length}张参考图作为风格/构图参考。${prompt}`;
+      }
+      if (maskBuffer) {
+        effectivePrompt = `${prompt}（仅修改涂抹标记的区域，其他区域保持不变）`;
+      }
     }
 
     const editInstruction = `Edit this image according to the following instruction: ${effectivePrompt}. Maintain the overall composition and style while making the requested changes.`;

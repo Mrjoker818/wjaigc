@@ -186,6 +186,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   const resultContainerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const llmWarningShownRef = useRef(false);
   const [imageDisplaySize, setImageDisplaySize] = useState({ width: 260, height: 260 });
   const [canvasSize, setCanvasSize] = useState({ width: 260, height: 260 });
 
@@ -661,6 +662,16 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       setError('请选择图像模型');
       return;
     }
+    if (!selectedLlmKey) {
+      // 软提醒：建议选择LLM协作模型
+      setError('建议选择LLM协作模型，可智能分析原图内容并优化编辑指令，效果更精准。如仍要继续，请再次点击"开始修图"');
+      // 标记已提醒过，下次点击不再提醒
+      if (!llmWarningShownRef.current) {
+        llmWarningShownRef.current = true;
+        return;
+      }
+    }
+    llmWarningShownRef.current = false;
 
     setError(null);
     setIsLoading(true);
@@ -1268,8 +1279,12 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             <p className="text-[10px] text-[#555] mt-0.5">Enter 提交 · Shift+Enter 换行</p>
           </div>
 
-          {/* 图像模型选择 - 统一列表（管理员系统） */}
+          {/* 图像模型选择 - 执行修图 */}
           <div>
+            <div className="flex items-center gap-1 mb-0.5">
+              <span className="text-[10px] text-[#888]">图像模型</span>
+              <span className="text-[8px] text-green-400/70">执行修图</span>
+            </div>
             <button
               onClick={() => setModelListExpanded(!modelListExpanded)}
               className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-xs text-[#ccc] hover:border-[#d4af37] transition-all"
@@ -1298,23 +1313,31 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             )}
           </div>
 
-          {/* LLM 辅助模型选择 - 列表形式 */}
+          {/* LLM 协作模型 - 分析原图+优化指令 */}
           <div>
+            <div className="flex items-center gap-1 mb-0.5">
+              <span className="text-[10px] text-[#888]">LLM 协作模型</span>
+              <span className="text-[8px] text-blue-400/70">分析原图 + 优化指令</span>
+            </div>
             <button
               onClick={() => setLlmListExpanded(!llmListExpanded)}
-              className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-xs text-[#ccc] hover:border-[#d4af37] transition-all"
+              className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg bg-[#1a1a1a] border text-xs text-[#ccc] hover:border-[#d4af37] transition-all ${!selectedLlmKey ? 'border-[#d4af37]/50' : 'border-[#2a2a2a]'}`}
             >
               <span className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                <span className={`w-1.5 h-1.5 rounded-full ${selectedLlmKey ? 'bg-blue-400' : 'bg-[#d4af37] animate-pulse'}`} />
                 {currentLlmModelName}
-                <span className="text-[9px] text-blue-400">辅助理解</span>
+                <span className={`text-[9px] ${selectedLlmKey ? 'text-blue-400' : 'text-[#d4af37]'}`}>
+                  {selectedLlmKey ? '协作模式' : '请选择'}
+                </span>
               </span>
               {llmListExpanded ? <ChevronUp size={12} className="text-[#888]" /> : <ChevronDown size={12} className="text-[#888]" />}
             </button>
 
             {llmListExpanded && (
               <div className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-[#2a2a2a] bg-[#0d0d0d]">
-                <div className="px-2 py-1 text-[9px] text-[#666] uppercase tracking-wider border-b border-[#1a1a1a]">LLM 模型</div>
+                <div className="px-2 py-1 text-[9px] text-[#666] uppercase tracking-wider border-b border-[#1a1a1a]">
+                  LLM 模型 — 分析原图内容，优化编辑指令
+                </div>
                 {llmModels.length > 0 ? llmModels.map(model => {
                   const key = `server::${model.providerId}::${model.id}`;
                   const isSelected = selectedLlmKey === key;
@@ -1334,7 +1357,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                           {model.name}
                           {hasDuplicate && <span className="text-[8px] px-1 py-0.5 bg-blue-400/20 text-blue-400 rounded">{model.providerName}</span>}
                         </div>
-                        <div className="text-[10px] text-[#666] truncate">{model.providerName} · 辅助理解修图意图</div>
+                        <div className="text-[10px] text-[#666] truncate">{model.providerName} · 分析原图+优化指令</div>
                       </div>
                       {isSelected && <Check size={12} className="text-[#d4af37] flex-shrink-0" />}
                     </button>
@@ -1346,7 +1369,33 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                 )}
               </div>
             )}
+            {!selectedLlmKey && (
+              <div className="mt-0.5 text-[9px] text-[#d4af37]/70 flex items-center gap-1">
+                <Sparkles className="h-2.5 w-2.5" />
+                选择LLM模型可智能分析原图，生成精准编辑指令
+              </div>
+            )}
           </div>
+
+          {/* 协作流程指示 */}
+          {selectedLlmKey && selectedModelKey && (
+            <div className="flex items-center gap-1 px-1 py-1 rounded bg-[#0d0d0d] border border-[#1a1a1a]">
+              <div className="flex items-center gap-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                <span className="text-[8px] text-blue-400">LLM分析</span>
+              </div>
+              <span className="text-[8px] text-[#444]">→</span>
+              <div className="flex items-center gap-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#d4af37]" />
+                <span className="text-[8px] text-[#d4af37]">优化指令</span>
+              </div>
+              <span className="text-[8px] text-[#444]">→</span>
+              <div className="flex items-center gap-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                <span className="text-[8px] text-green-500">图像执行</span>
+              </div>
+            </div>
+          )}
 
           {/* 参数行 - 画面比例/质量/数量 三列 */}
           <div className="grid grid-cols-3 gap-2">
