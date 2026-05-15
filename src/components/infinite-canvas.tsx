@@ -6045,7 +6045,11 @@ export function InfiniteCanvas({
                     ))}
                     {/* Language edit connection point - right side center */}
                     <button
-                      className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-4 h-4 rounded-full bg-[#d4af37] hover:bg-[#e5c249] shadow-lg border-2 border-black/50 cursor-pointer pointer-events-auto z-10 transition-all hover:scale-125"
+                      className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-5 h-5 rounded-full bg-[#d4af37] hover:bg-[#e5c249] shadow-lg border-2 border-black/50 cursor-pointer pointer-events-auto z-10 transition-all hover:scale-125"
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                      }}
                       onClick={(e) => {
                         e.stopPropagation();
                         setEditingImage(image);
