@@ -10,6 +10,7 @@ import { PromptEquation } from '@/components/prompt-equation';
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 import { Image as ImageIcon, MessageSquare, Sparkles } from 'lucide-react';
+import { ImageEditor } from '@/components/image-editor';
 import { UserManager } from '@/components/user-manager';
 import { ProjectDataPanel } from '@/components/project-data-panel';
 import { AdminSystem } from '@/components/admin-system';
@@ -127,6 +128,7 @@ function CanvasApp() {
 
   // Language-based image editing state
   const [langEditMode, setLangEditMode] = useState<'idle' | 'selecting'>('idle');
+  const [editingImage, setEditingImage] = useState<CanvasImage | null>(null);
 
   // Current chat model info from ChatPanel (used for vision-prompt)
   const [currentChatModelInfo, setCurrentChatModelInfo] = useState<{
@@ -1818,13 +1820,14 @@ function CanvasApp() {
     });
   }, [handleFusion]);
 
-  // Language-based image editing handler - called by canvas when editor confirms
-  const handleEditImage = useCallback((imageId: string, resultUrl: string, resultPrompt?: string) => {
-    setImages(prev => prev.map(img =>
-      img.id === imageId
-        ? { ...img, url: resultUrl, prompt: resultPrompt || img.prompt }
-        : img
-    ));
+  // Language-based image editing handler
+  const handleEditImage = useCallback((image: CanvasImage) => {
+    setEditingImage(image);
+    setLangEditMode('idle');
+  }, []);
+
+  const handleEditCancel = useCallback(() => {
+    setEditingImage(null);
   }, []);
 
   return (
@@ -1906,6 +1909,23 @@ function CanvasApp() {
           onLangEditModeChange={setLangEditMode}
         />
       </div>
+
+      {/* Language-based Image Editor */}
+      {editingImage && (
+        <ImageEditor
+          image={editingImage}
+          onClose={handleEditCancel}
+          onConfirm={(result) => {
+            // Replace the edited image with the result
+            setImages(prev => prev.map(img =>
+              img.id === editingImage.id
+                ? { ...img, url: result.url, prompt: result.prompt || img.prompt }
+                : img
+            ));
+            setEditingImage(null);
+          }}
+        />
+      )}
 
       {/* Floating Panel */}
       {!panelCollapsed && (
@@ -2113,7 +2133,7 @@ function CanvasApp() {
         image={previewImage}
         onClose={() => setPreviewImage(null)}
         themeStyle={themeStyle}
-        onEditImage={(img) => { setPreviewImage(null); setLangEditMode('selecting'); }}
+        onEditImage={(img) => { setPreviewImage(null); handleEditImage(img); }}
       />
 
       {/* Toast */}
