@@ -127,7 +127,7 @@ function CanvasApp() {
   const [showPromptEquation, setShowPromptEquation] = useState(false);
 
   // Language-based image editing state
-  const [langEditMode, setLangEditMode] = useState<'idle' | 'selecting'>('idle');
+  const [showImageEditor, setShowImageEditor] = useState(false);
   const [editingImage, setEditingImage] = useState<CanvasImage | null>(null);
 
   // Current chat model info from ChatPanel (used for vision-prompt)
@@ -1821,12 +1821,13 @@ function CanvasApp() {
   }, [handleFusion]);
 
   // Language-based image editing handler
-  const handleEditImage = useCallback((image: CanvasImage) => {
+  const handleEditImage = useCallback((image: CanvasImage | null) => {
     setEditingImage(image);
-    setLangEditMode('idle');
+    setShowImageEditor(true);
   }, []);
 
   const handleEditCancel = useCallback(() => {
+    setShowImageEditor(false);
     setEditingImage(null);
   }, []);
 
@@ -1905,24 +1906,37 @@ function CanvasApp() {
             } catch {}
           }}
           onEditImage={handleEditImage}
-          langEditMode={langEditMode}
-          onLangEditModeChange={setLangEditMode}
         />
       </div>
 
       {/* Language-based Image Editor */}
-      {editingImage && (
+      {showImageEditor && (
         <ImageEditor
           image={editingImage}
           canvasImages={images}
           onClose={handleEditCancel}
           onConfirm={(result) => {
-            // Replace the edited image with the result
-            setImages(prev => prev.map(img =>
-              img.id === editingImage.id
-                ? { ...img, url: result.url, prompt: result.prompt || img.prompt }
-                : img
-            ));
+            if (editingImage) {
+              // Replace the edited image with the result (if existing image)
+              setImages(prev => prev.map(img =>
+                img.id === editingImage.id
+                  ? { ...img, url: result.url, prompt: result.prompt || img.prompt }
+                  : img
+              ));
+            } else {
+              // New image from editor - add to canvas
+              const newImg: CanvasImage = {
+                id: `lang-edit-${Date.now()}`,
+                url: result.url,
+                prompt: result.prompt,
+                x: 100 + Math.random() * 200,
+                y: 100 + Math.random() * 200,
+                width: 400,
+                height: 400,
+              };
+              setImages(prev => [...prev, newImg]);
+            }
+            setShowImageEditor(false);
             setEditingImage(null);
           }}
         />

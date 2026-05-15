@@ -319,11 +319,8 @@ interface InfiniteCanvasProps {
   altRefMarkerIds?: string[];
   /** Force save canvas data to localStorage + server */
   onForceSave?: () => void;
-  /** Called when user wants to open the language-based image editor */
-  onEditImage?: (image: CanvasImage) => void;
-  /** Language edit selection mode */
-  langEditMode?: 'idle' | 'selecting';
-  onLangEditModeChange?: (mode: 'idle' | 'selecting') => void;
+  /** Called when user wants to open the language-based image editor (null = open empty) */
+  onEditImage?: (image: CanvasImage | null) => void;
 }
 
 type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'img2img' | 'upscale' | 'svg-trace';
@@ -372,8 +369,6 @@ export function InfiniteCanvas({
   altRefMarkerIds = [],
   onForceSave,
   onEditImage,
-  langEditMode = 'idle',
-  onLangEditModeChange,
 }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
@@ -1132,10 +1127,6 @@ export function InfiniteCanvas({
         setIsSpacePressed(true);
       }
       if (e.code === 'Escape') {
-        // Exit language edit selecting mode
-        if (langEditMode === 'selecting') {
-          onLangEditModeChange?.('idle');
-        }
         if (editMode === 'upscale' || editMode === 'erase' || editMode === 'mask') {
         }
         if (editMode !== 'none') {
@@ -1585,15 +1576,6 @@ export function InfiniteCanvas({
 
     const hitId = hitTestImage(canvasPos.x, canvasPos.y);
     if (hitId) {
-      // Language edit mode: clicking an image opens the editor
-      if (langEditMode === 'selecting') {
-        const img = images.find(i => i.id === hitId);
-        if (img) {
-          onEditImage?.(img);
-          onLangEditModeChange?.('idle');
-        }
-        return;
-      }
       mouseDownOnImageRef.current = true;
       imageDragReadyRef.current = false;
       if (e.ctrlKey || e.metaKey) {
@@ -5321,7 +5303,7 @@ export function InfiniteCanvas({
     { icon: <Expand size={14} />, label: '扩展', desc: '向四周延伸画面，自动补齐背景', action: handleOpenExpand },
     { icon: <Scissors size={14} />, label: '裁切', desc: '自由/预设比例裁切', action: handleOpenCrop },
     { icon: <ImagePlus size={14} />, label: '图生图', desc: '基于当前图生成新图', action: () => { if (selectedImage) setEditImageId(selectedImage.id); setEditMode('img2img'); } },
-    { icon: <Pencil size={14} />, label: '语言修图', desc: '用自然语言描述修改图片', action: () => { if (selectedImage) onEditImage?.(selectedImage); } },
+    { icon: <Pencil size={14} />, label: '语言修图', desc: '用自然语言描述修改图片', action: () => { if (selectedImage) onEditImage?.(selectedImage); else onEditImage?.(null); } },
     { icon: <Download size={14} />, label: '下载', desc: 'PNG/SVG/PSD下载', action: handleOpenDownload },
   ];
 
@@ -5461,7 +5443,7 @@ export function InfiniteCanvas({
     { label: '删除', shortcut: 'Delete', action: () => { onImagesChange(images.filter(i => !selectedIds.has(i.id))); setSelectedIds(new Set()); selectImage(null); } },
     { label: '发送参考图', action: () => { const img = selectedImageData; if (img) onGenerateVariation(img); } },
     { label: '提取关键词', action: () => { const img = selectedImageData; if (img) onExtractKeywords(img); } },
-    { label: '语言修图', action: () => { const img = selectedImageData; if (img) onEditImage?.(img); } },
+    { label: '语言修图', action: () => { const img = selectedImageData; if (img) onEditImage?.(img); else onEditImage?.(null); } },
   ];
 
   const ratioOptions = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9'];
@@ -6808,20 +6790,6 @@ export function InfiniteCanvas({
               height: Math.abs(boxSelectEnd.y - boxSelectStart.y),
             }}
           />
-        )}
-
-        {/* Language edit mode hint banner */}
-        {langEditMode === 'selecting' && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-black/80 text-white px-6 py-3 rounded-lg flex items-center gap-3 backdrop-blur-sm border border-[#d4af37]/40">
-            <Pencil size={16} className="text-[#d4af37]" />
-            <span className="text-sm">点击图片进行语言修图</span>
-            <button
-              className="text-xs text-gray-400 hover:text-white ml-2 transition-colors"
-              onClick={(e) => { e.stopPropagation(); onLangEditModeChange?.('idle'); }}
-            >
-              ESC 取消
-            </button>
-          </div>
         )}
 
         {/* Edit mode overlay */}
@@ -9997,13 +9965,11 @@ export function InfiniteCanvas({
 
         {/* Language Edit - 修图 */}
         <button
-          onClick={() => { if (onEditImage) { onLangEditModeChange?.('selecting'); } }}
+          onClick={() => { onEditImage?.(null); }}
           className={`p-2 rounded-xl transition-all relative group ${
-            langEditMode === 'selecting'
-              ? 'bg-[#d4af37]/20 text-[#d4af37] ring-1 ring-[#d4af37]/50'
-              : isMonochrome
-                ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                : 'text-[#888] hover:text-white hover:bg-white/10'
+            isMonochrome
+              ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              : 'text-[#888] hover:text-white hover:bg-white/10'
           }`}
           title="语言修图"
         >

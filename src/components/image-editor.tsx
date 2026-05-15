@@ -28,7 +28,7 @@ interface ReferenceImage {
 }
 
 interface ImageEditorProps {
-  image: CanvasImage;
+  image: CanvasImage | null;
   onClose: () => void;
   onConfirm: (editedImage: { url: string; prompt: string }) => void;
   /** 画布上的所有图片，用于选择参考图 */
@@ -88,7 +88,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<EditHistoryItem[]>([]);
   const [currentHistoryIndex, setCurrentHistoryIndex] = useState(-1);
-  const [currentImageUrl, setCurrentImageUrl] = useState(image.url);
+  const [currentImageUrl, setCurrentImageUrl] = useState(image?.url || '');
 
   // 结果图片状态
   const [resultImages, setResultImages] = useState<string[]>([]);
@@ -289,6 +289,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
   // 初始化图片和Canvas
   useEffect(() => {
+    if (!currentImageUrl) return;
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
@@ -306,8 +307,8 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       setImageDisplaySize({ width: displayWidth, height: displayHeight });
       setCanvasSize({ width: displayWidth, height: displayHeight });
     };
-    img.src = image.url;
-  }, [image.url]);
+    img.src = currentImageUrl;
+  }, [currentImageUrl]);
 
   // 初始化Canvas
   useEffect(() => {
@@ -405,7 +406,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
   // ★ 添加参考图 - 从画布选择
   const handleAddRefFromCanvas = useCallback((canvasImg: CanvasImage) => {
-    if (canvasImg.id === image.id) return; // 不能添加主图自身
+    if (canvasImg.id === image?.id) return; // 不能添加主图自身
     if (referenceImages.some(r => r.id === canvasImg.id)) return; // 不重复
     setReferenceImages(prev => [...prev, {
       id: canvasImg.id,
@@ -413,7 +414,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       prompt: canvasImg.prompt,
     }]);
     setRefPickerOpen(false);
-  }, [image.id, referenceImages]);
+  }, [image?.id, referenceImages]);
 
   // ★ 添加参考图 - 从本地上传
   const handleAddRefFromFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -470,10 +471,78 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
   // 可选的画布图片（排除主图和已添加的参考图）
   const availableCanvasImages = (canvasImages || []).filter(
-    ci => ci.id !== image.id && !referenceImages.some(r => r.id === ci.id)
+    ci => ci.id !== image?.id && !referenceImages.some(r => r.id === ci.id)
   );
 
+  // ★ 主图选择器（无主图时弹出）
+  const [mainPickerOpen, setMainPickerOpen] = useState(false);
+
+  // 从画布选择主图
+  const handleSelectMainFromCanvas = useCallback((canvasImg: CanvasImage) => {
+    setCurrentImageUrl(canvasImg.url);
+    setMainPickerOpen(false);
+    // 同时初始化图片尺寸
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      imageRef.current = img;
+      const maxSize = 260;
+      const ratio = img.width / img.height;
+      let displayWidth: number, displayHeight: number;
+      if (ratio > 1) {
+        displayWidth = maxSize;
+        displayHeight = maxSize / ratio;
+      } else {
+        displayHeight = maxSize;
+        displayWidth = maxSize * ratio;
+      }
+      setImageDisplaySize({ width: displayWidth, height: displayHeight });
+      setCanvasSize({ width: displayWidth, height: displayHeight });
+    };
+    img.src = canvasImg.url;
+  }, []);
+
+  // 从本地上传主图
+  const mainFileInputRef = useRef<HTMLInputElement>(null);
+  const handleSelectMainFromFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      if (dataUrl) {
+        setCurrentImageUrl(dataUrl);
+        setMainPickerOpen(false);
+        // 初始化图片尺寸
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          imageRef.current = img;
+          const maxSize = 260;
+          const ratio = img.width / img.height;
+          let displayWidth: number, displayHeight: number;
+          if (ratio > 1) {
+            displayWidth = maxSize;
+            displayHeight = maxSize / ratio;
+          } else {
+            displayHeight = maxSize;
+            displayWidth = maxSize * ratio;
+          }
+          setImageDisplaySize({ width: displayWidth, height: displayHeight });
+          setCanvasSize({ width: displayWidth, height: displayHeight });
+        };
+        img.src = dataUrl;
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  }, []);
+
   const handleSubmit = useCallback(async () => {
+    if (!currentImageUrl) {
+      setError('请先添加要修图的图片');
+      return;
+    }
     if (!prompt.trim()) {
       setError('请输入编辑指令');
       return;
@@ -574,13 +643,13 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     if (finalUrl) {
       onConfirm({
         url: finalUrl,
-        prompt: `${image.prompt} + ${prompt}`,
+        prompt: image?.prompt ? `${image.prompt} + ${prompt}` : prompt,
       });
     }
     setPrompt('');
     setResultImages([]);
     onClose();
-  }, [resultImages, prompt, image.prompt, onConfirm, onClose]);
+  }, [resultImages, prompt, image?.prompt, onConfirm, onClose]);
 
   const handleHistoryClick = useCallback((index: number) => {
     const historyItem = history[index];
@@ -723,7 +792,61 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
         {/* Content */}
         <div className="p-3 space-y-3 max-h-[calc(85vh-50px)] overflow-y-auto">
-          {/* 图片预览 + 蒙版 + 缩放/平移 */}
+          {/* 图片预览区域 - 无图时显示大+号 */}
+          {!currentImageUrl ? (
+            <div className="relative">
+              {/* 大+号占位区域 */}
+              <button
+                onClick={() => setMainPickerOpen(!mainPickerOpen)}
+                className="w-full h-[200px] bg-[#1a1a1a] rounded-lg border-2 border-dashed border-[#2a2a2a] hover:border-[#d4af37]/50 flex flex-col items-center justify-center gap-2 transition-all group"
+              >
+                <div className="w-12 h-12 rounded-full bg-[#2a2a2a] group-hover:bg-[#d4af37]/20 flex items-center justify-center transition-all">
+                  <Plus className="h-6 w-6 text-[#888] group-hover:text-[#d4af37] transition-colors" />
+                </div>
+                <span className="text-xs text-[#555] group-hover:text-[#888] transition-colors">添加要修图的图片</span>
+                <span className="text-[10px] text-[#444]">从画布选择或上传本地图片</span>
+              </button>
+
+              {/* 选择主图弹窗 */}
+              {mainPickerOpen && (
+                <div className="mt-2 max-h-48 overflow-y-auto rounded-lg border border-[#2a2a2a] bg-[#0d0d0d]">
+                  <div className="px-2 py-1 text-[9px] text-[#666] uppercase tracking-wider border-b border-[#1a1a1a] sticky top-0 bg-[#0d0d0d]">选择图片</div>
+                  {/* 从画布选择 */}
+                  {canvasImages && canvasImages.length > 0 && canvasImages.map(ci => (
+                    <button
+                      key={ci.id}
+                      onClick={() => handleSelectMainFromCanvas(ci)}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs text-[#aaa] hover:bg-[#1a1a1a] hover:text-white transition-all border-b border-[#1a1a1a] last:border-b-0"
+                    >
+                      <img src={ci.url} alt="" className="w-8 h-8 object-cover rounded flex-shrink-0" crossOrigin="anonymous" />
+                      <div className="flex-1 min-w-0">
+                        <div className="truncate text-[11px]">{ci.prompt || ci.url.split('/').pop() || '图片'}</div>
+                        <div className="text-[9px] text-[#555]">{ci.originalWidth || 0}x{ci.originalHeight || 0}</div>
+                      </div>
+                      <Plus className="h-3 w-3 text-[#d4af37] flex-shrink-0" />
+                    </button>
+                  ))}
+                  {/* 上传按钮 */}
+                  <button
+                    onClick={() => mainFileInputRef.current?.click()}
+                    className="w-full flex items-center gap-2 px-2 py-2 text-left text-xs text-[#aaa] hover:bg-[#1a1a1a] hover:text-[#d4af37] transition-all"
+                  >
+                    <div className="w-8 h-8 rounded bg-[#2a2a2a] flex items-center justify-center flex-shrink-0">
+                      <Upload className="h-3.5 w-3.5 text-[#888]" />
+                    </div>
+                    <span className="text-[11px]">上传本地图片</span>
+                  </button>
+                  <input
+                    ref={mainFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleSelectMainFromFile}
+                  />
+                </div>
+              )}
+            </div>
+          ) : (
           <div
             className="relative bg-[#1a1a1a] rounded-lg overflow-hidden"
             onWheel={handlePreviewWheel}
@@ -785,9 +908,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                   transition: isPanning ? 'none' : 'transform 0.15s ease-out',
                 }}
               >
-                {currentImageUrl && (
-                  <img src={currentImageUrl} alt="编辑" className="absolute top-0 left-0 w-full h-full object-contain rounded" crossOrigin="anonymous" />
-                )}
+                <img src={currentImageUrl} alt="编辑" className="absolute top-0 left-0 w-full h-full object-contain rounded" crossOrigin="anonymous" />
                 <canvas
                   ref={canvasRef}
                   className={`absolute top-0 left-0 w-full h-full ${currentModelSupportsMask && !isPanning ? 'cursor-crosshair' : 'pointer-events-none'}`}
@@ -808,6 +929,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               </div>
             </div>
           </div>
+          )}
 
           {/* ★ 参考图区域 */}
           <div>
@@ -821,7 +943,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               </span>
               <div className="flex items-center gap-1">
                 {/* 从画布选择 */}
-                {canvasImages && canvasImages.length > 1 && (
+                {canvasImages && canvasImages.length > (currentImageUrl ? 1 : 0) && (
                   <button
                     onClick={() => setRefPickerOpen(!refPickerOpen)}
                     className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] bg-[#1a1a1a] border border-[#2a2a2a] rounded text-[#aaa] hover:text-[#d4af37] hover:border-[#d4af37] transition-all"
