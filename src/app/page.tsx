@@ -1918,21 +1918,44 @@ function CanvasApp() {
           onConfirm={(result) => {
             if (editingImage) {
               // Replace the edited image with the result (if existing image)
+              // Adjust dimensions to match new aspect ratio if changed
+              const ar = result.aspectRatio || '1:1';
+              const [arW, arH] = ar.split(':').map(Number);
+              const currentArea = editingImage.width * editingImage.height;
+              let imgW: number, imgH: number;
+              if (arW >= arH) {
+                imgW = Math.round(Math.sqrt(currentArea * arW / arH));
+                imgH = Math.round(imgW * arH / arW);
+              } else {
+                imgH = Math.round(Math.sqrt(currentArea * arH / arW));
+                imgW = Math.round(imgH * arW / arH);
+              }
               setImages(prev => prev.map(img =>
                 img.id === editingImage.id
-                  ? { ...img, url: result.url, prompt: result.prompt || img.prompt }
+                  ? { ...img, url: result.url, prompt: result.prompt || img.prompt, width: imgW, height: imgH }
                   : img
               ));
             } else {
-              // New image from editor - add to canvas
+              // New image from editor - add to canvas with correct aspect ratio
+              const ar = result.aspectRatio || '1:1';
+              const [arW, arH] = ar.split(':').map(Number);
+              const baseSize = 400;
+              let imgW: number, imgH: number;
+              if (arW >= arH) {
+                imgW = baseSize;
+                imgH = Math.round(baseSize * arH / arW);
+              } else {
+                imgH = baseSize;
+                imgW = Math.round(baseSize * arW / arH);
+              }
               const newImg: CanvasImage = {
                 id: `lang-edit-${Date.now()}`,
                 url: result.url,
                 prompt: result.prompt,
                 x: 100 + Math.random() * 200,
                 y: 100 + Math.random() * 200,
-                width: 400,
-                height: 400,
+                width: imgW,
+                height: imgH,
               };
               setImages(prev => [...prev, newImg]);
             }
