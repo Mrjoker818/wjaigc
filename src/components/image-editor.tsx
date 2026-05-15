@@ -1,699 +1,528 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { X, Pencil, Eraser, Trash2, Loader2, Check, Sparkles, History, Image as ImageIcon, Lock, ChevronDown, ChevronUp, GripVertical } from 'lucide-react';
-import type { CanvasImage } from './infinite-canvas';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { X, ChevronDown, ChevronUp, ZoomIn, ZoomOut, RotateCcw, GripVertical, Hand } from 'lucide-react';
 
-interface EditHistoryItem {
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface CanvasImage {
   id: string;
-  prompt: string;
-  imageUrl: string;
-  timestamp: number;
+  url: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  prompt?: string;
 }
 
-interface ServerModel {
+interface EditModelInfo {
   id: string;
   name: string;
   providerId: string;
   providerName: string;
-  type?: string;
+  supportsMask: boolean;
+}
+
+interface LLMModelInfo {
+  id: string;
+  name: string;
+  providerId: string;
+  providerName: string;
 }
 
 interface ImageEditorProps {
   image: CanvasImage;
+  /** Screen-space rect of the source image (from getBoundingClientRect) */
+  sourceRect: { left: number; top: number; right: number; bottom: number; width: number; height: number };
+  onConfirm: (imageId: string, resultUrl: string, resultPrompt?: string) => void;
   onClose: () => void;
-  onConfirm: (editedImage: { url: string; prompt: string }) => void;
-  // 连接线起点（图片右侧金色圆点位置）
-  connectionStart?: { x: number; y: number };
-  // 画面比例/质量/生图数量初始值（与生成面板同步）
-  initialAspectRatio?: string;
-  initialQuality?: string;
-  initialCount?: number;
-  onParamsChange?: (params: { aspectRatio: string; quality: string; count: number }) => void;
 }
 
-// 画面比例选项
-const ASPECT_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '2:3', '3:2', '1:2', '2:1'];
-// 图片质量选项
-const QUALITIES = [
-  { value: 'low', label: '快速' },
-  { value: 'medium', label: '中等' },
-  { value: 'high', label: '高清' },
-  { value: 'auto', label: '自动' },
-  { value: 'standard', label: '标准' },
+// ─── Aspect ratio presets ────────────────────────────────────────────────────
+
+const ASPECT_RATIOS = [
+  { label: '1:1', w: 1, h: 1 },
+  { label: '4:3', w: 4, h: 3 },
+  { label: '3:4', w: 3, h: 4 },
+  { label: '16:9', w: 16, h: 9 },
+  { label: '9:16', w: 9, h: 16 },
 ];
-// 生图数量选项
-const COUNTS = [1, 2, 3, 4];
 
-export function ImageEditor({ image, onClose, onConfirm, connectionStart, initialAspectRatio, initialQuality, initialCount, onParamsChange }: ImageEditorProps) {
-  // 状态管理
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [brushSize, setBrushSize] = useState(20);
-  const [tool, setTool] = useState<'brush' | 'eraser'>('brush');
+const QUALITY_OPTIONS = [
+  { label: '标准', value: 'standard' },
+  { label: '高清', value: 'hd' },
+];
+
+const COUNT_OPTIONS = [
+  { label: '1张', value: 1 },
+  { label: '2张', value: 2 },
+  { label: '3张', value: 3 },
+];
+
+// ─── Component ───────────────────────────────────────────────────────────────
+
+export default function ImageEditor({ image, sourceRect, onConfirm, onClose }: ImageEditorProps) {
+  // ── Models ──
+  const [editModels, setEditModels] = useState<EditModelInfo[]>([]);
+  const [llmModels, setLlmModels] = useState<LLMModelInfo[]>([]);
+  const [selectedModel, setSelectedModel] = useState<EditModelInfo | null>(null);
+  const [selectedLLM, setSelectedLLM] = useState<LLMModelInfo | null>(null);
+
+  // ── Inputs ──
   const [prompt, setPrompt] = useState('');
-  const [aspectRatio, setAspectRatio] = useState(initialAspectRatio || '1:1');
-  const [quality, setQuality] = useState(initialQuality || 'high');
-  const [outputCount, setOutputCount] = useState(initialCount || 1);
-  const [selectedModelId, setSelectedModelId] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
+
+  // ── Params ──
+  const [aspectRatio, setAspectRatio] = useState(ASPECT_RATIOS[0]);
+  const [quality, setQuality] = useState('hd');
+  const [count, setCount] = useState(1);
+
+  // ── UI state ──
+  const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [history, setHistory] = useState<EditHistoryItem[]>([]);
-  const [currentHistoryIndex, setCurrentHistoryIndex] = useState(-1);
-  const [currentImageUrl, setCurrentImageUrl] = useState(image.url);
+  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [resultPrompt, setResultPrompt] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0);
 
-  // 结果图片状态
-  const [resultImages, setResultImages] = useState<string[]>([]);
-  const [isResultLoading, setIsResultLoading] = useState(false);
+  // ── Position (floating) ──
+  const editorWidth = 340;
+  const editorRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const dragOffset = useRef({ x: 0, y: 0 });
 
-  // 服务器模型列表
-  const [serverModels, setServerModels] = useState<ServerModel[]>([]);
+  // ── Image zoom ──
+  const [imgScale, setImgScale] = useState(1);
+  const [imgOffset, setImgOffset] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const panStart = useRef({ x: 0, y: 0, ox: 0, oy: 0 });
 
-  // 当前模型是否支持蒙版涂抹
-  const currentModelSupportsMask = (() => {
-    const m = serverModels.find(m => `${m.providerId}::${m.id}` === selectedModelId);
-    if (!m) return true; // 默认支持
-    const id = m.id.toLowerCase();
-    // Gemini 系列不支持蒙版
-    return !id.includes('gemini');
-  })();
+  // ── Result box size ──
+  const resultBoxSize = { w: 160, h: Math.round(160 / (aspectRatio.w / aspectRatio.h)) };
 
-  // Refs
-  const containerRef = useRef<HTMLDivElement>(null);
-  const resultContainerRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const imageRef = useRef<HTMLImageElement | null>(null);
-  const [imageDisplaySize, setImageDisplaySize] = useState({ width: 260, height: 260 });
-  const [canvasSize, setCanvasSize] = useState({ width: 260, height: 260 });
-
-  // 拖拽状态
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const [position, setPosition] = useState({ x: 100, y: 100 });
-
-  // 模型列表展开/折叠
-  const [modelListExpanded, setModelListExpanded] = useState(false);
-
-  // 从服务器加载编辑模型
+  // ── Init position ──
   useEffect(() => {
-    const loadModels = async () => {
+    const x = sourceRect.right + 24;
+    const y = Math.max(40, sourceRect.top);
+    setPos({ x, y });
+  }, [sourceRect]);
+
+  // ── Load models ──
+  useEffect(() => {
+    (async () => {
       try {
-        const res = await fetch('/api/models?type=image');
-        if (res.ok) {
-          const data = await res.json();
-          const models: ServerModel[] = [];
-          if (data.models && Array.isArray(data.models)) {
-            for (const m of data.models) {
-              const id = (m.id || m.name || '').toLowerCase();
-              // 过滤仅支持编辑的模型（图片编辑模型 + 支持编辑的通用模型）
-              // 排除明显不支持编辑的类型：3D模型、矢量模型、分层模型
-              if (id.includes('3d') || id.includes('vectoriz') || id.includes('layer') || id.includes('segment')) continue;
-              models.push({
-                id: m.id || m.name,
-                name: m.name || m.id,
-                providerId: m.providerId || '',
-                providerName: m.providerName || m.providerId || '',
-                type: m.type,
-              });
-            }
-          }
-          setServerModels(models);
-          // 自动选择第一个模型
-          if (models.length > 0 && !selectedModelId) {
-            setSelectedModelId(`${models[0].providerId}::${models[0].id}`);
-          }
+        const res = await fetch('/api/edit');
+        const data = await res.json();
+        if (data.models?.length) {
+          setEditModels(data.models);
+          setSelectedModel(data.models[0]);
         }
-      } catch (err) {
-        console.error('Failed to load edit models:', err);
-      }
-    };
-    loadModels();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 同步参数变化
-  useEffect(() => {
-    onParamsChange?.({ aspectRatio, quality, count: outputCount });
-  }, [aspectRatio, quality, outputCount, onParamsChange]);
-
-  // 初始化图片和Canvas
-  useEffect(() => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      imageRef.current = img;
-      const maxSize = 260;
-      const ratio = img.width / img.height;
-      let displayWidth: number, displayHeight: number;
-      if (ratio > 1) {
-        displayWidth = maxSize;
-        displayHeight = maxSize / ratio;
-      } else {
-        displayHeight = maxSize;
-        displayWidth = maxSize * ratio;
-      }
-      setImageDisplaySize({ width: displayWidth, height: displayHeight });
-      setCanvasSize({ width: displayWidth, height: displayHeight });
-    };
-    img.src = image.url;
-  }, [image.url]);
-
-  // 初始化Canvas
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    canvas.width = canvasSize.width;
-    canvas.height = canvasSize.height;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-  }, [canvasSize]);
-
-  // 绘制线条
-  const drawLine = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    ctx.lineWidth = brushSize;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = tool === 'brush' ? 'rgba(255, 0, 0, 0.5)' : 'rgba(0, 0, 0, 1)';
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-  }, [brushSize, tool]);
-
-  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (e.button !== 0 || !currentModelSupportsMask) return;
-    setIsDrawing(true);
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const rect = canvas.getBoundingClientRect();
-    ctx.beginPath();
-    ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
-  }, [currentModelSupportsMask]);
-
-  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return;
-    drawLine(e);
-  }, [isDrawing, drawLine]);
-
-  const handleMouseUp = useCallback(() => { setIsDrawing(false); }, []);
-
-  const clearMask = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+      } catch {}
+      try {
+        const res = await fetch('/api/models?type=chat');
+        const data = await res.json();
+        if (data.models?.length) {
+          setLlmModels(data.models);
+          setSelectedLLM(data.models[0]);
+        }
+      } catch {}
+    })();
   }, []);
 
-  const exportMask = useCallback((): string | null => {
-    const canvas = canvasRef.current;
-    if (!canvas) return null;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = canvas.width;
-    tempCanvas.height = canvas.height;
-    const tempCtx = tempCanvas.getContext('2d');
-    if (!tempCtx) return null;
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const resultData = tempCtx.createImageData(canvas.width, canvas.height);
-    for (let i = 0; i < imageData.data.length; i += 4) {
-      const alpha = imageData.data[i + 3];
-      if (alpha > 10) {
-        resultData.data[i] = 255;
-        resultData.data[i + 1] = 255;
-        resultData.data[i + 2] = 255;
-        resultData.data[i + 3] = 255;
-      } else {
-        resultData.data[i] = 0;
-        resultData.data[i + 1] = 0;
-        resultData.data[i + 2] = 0;
-        resultData.data[i + 3] = 0;
-      }
-    }
-    tempCtx.putImageData(resultData, 0, 0);
-    return tempCanvas.toDataURL('image/png');
+  // ── Drag handlers ──
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setDragging(true);
+    dragOffset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
+  }, [pos.x, pos.y]);
+
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e: MouseEvent) => setPos({ x: e.clientX - dragOffset.current.x, y: e.clientY - dragOffset.current.y });
+    const onUp = () => setDragging(false);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, [dragging]);
+
+  // ── Image zoom ──
+  const handleImageWheel = useCallback((e: React.WheelEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    setImgScale(s => Math.max(0.1, Math.min(5, s * delta)));
   }, []);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
-    }
-  }, [prompt]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handlePanStart = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setIsPanning(true);
+    panStart.current = { x: e.clientX, y: e.clientY, ox: imgOffset.x, oy: imgOffset.y };
+  }, [imgOffset]);
 
-  const handleSubmit = useCallback(async () => {
-    if (!prompt.trim()) {
-      setError('请输入编辑指令');
-      return;
-    }
-    if (!selectedModelId) {
-      setError('请选择模型');
-      return;
-    }
+  useEffect(() => {
+    if (!isPanning) return;
+    const onMove = (e: MouseEvent) => setImgOffset({ x: panStart.current.ox + e.clientX - panStart.current.x, y: panStart.current.oy + e.clientY - panStart.current.y });
+    const onUp = () => setIsPanning(false);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, [isPanning]);
 
+  const resetZoom = () => { setImgScale(1); setImgOffset({ x: 0, y: 0 }); };
+
+  // ── Stop propagation for wheel events ──
+  const stopProp = (e: React.WheelEvent) => { e.stopPropagation(); e.preventDefault(); };
+
+  // ── Submit ──
+  const handleSubmit = async () => {
+    if (!prompt.trim() || !selectedModel) return;
+    setIsProcessing(true);
     setError(null);
-    setIsLoading(true);
-    setIsResultLoading(true);
-    setResultImages([]);
-    setLoadingProgress(0);
+    setProgress(0);
+    setResultUrl(null);
+
+    const interval = setInterval(() => setProgress(p => Math.min(p + Math.random() * 12, 90)), 600);
 
     try {
-      const maskDataUrl = currentModelSupportsMask ? exportMask() : null;
-      const progressInterval = setInterval(() => {
-        setLoadingProgress(prev => Math.min(prev + 10, 90));
-      }, 500);
+      const body: Record<string, unknown> = {
+        image: image.url,
+        prompt: prompt.trim(),
+        model: selectedModel.id,
+        providerId: selectedModel.providerId,
+        size: `${aspectRatio.w * 1024 / Math.max(aspectRatio.w, aspectRatio.h)}x${aspectRatio.h * 1024 / Math.max(aspectRatio.w, aspectRatio.h)}`,
+        quality,
+        n: count,
+      };
+      if (maskDataUrl && selectedModel.supportsMask) body.mask = maskDataUrl;
+      if (selectedLLM) {
+        body.llmModel = selectedLLM.id;
+        body.llmProviderId = selectedLLM.providerId;
+      }
 
-      // 解析模型ID
-      const [providerId, modelId] = selectedModelId.split('::');
-
-      const response = await fetch('/api/edit', {
+      const res = await fetch('/api/edit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image: currentImageUrl,
-          prompt: prompt,
-          mask: maskDataUrl,
-          size: aspectRatio,
-          quality,
-          model: modelId || selectedModelId,
-          providerId,
-          count: outputCount,
-        }),
+        body: JSON.stringify(body),
       });
-
-      clearInterval(progressInterval);
-      setLoadingProgress(100);
-
-      const data = await response.json();
-
-      if (data.success && data.image) {
-        setIsResultLoading(false);
-        const urls = data.images ? data.images.map((img: { url: string }) => img.url) : [data.image.url];
-        setResultImages(urls);
-
-        const newHistoryItem: EditHistoryItem = {
-          id: `edit-${Date.now()}`,
-          prompt: prompt,
-          imageUrl: data.image.url,
-          timestamp: Date.now(),
-        };
-        setHistory(prev => [...prev.slice(0, currentHistoryIndex + 1), newHistoryItem]);
-        setCurrentHistoryIndex(prev => prev + 1);
-        setCurrentImageUrl(data.image.url);
-        clearMask();
-      } else if (data.requiresApiKey) {
-        setIsResultLoading(false);
-        setError(`需要在管理员系统中配置 API Key`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '修图失败');
+      if (data.url) {
+        setResultUrl(data.url);
+        setResultPrompt(data.revised_prompt || prompt);
+        setProgress(100);
       } else {
-        setIsResultLoading(false);
-        setError(data.error || '编辑失败');
+        throw new Error('未返回图片结果');
       }
     } catch (err: unknown) {
-      setIsResultLoading(false);
-      const errMsg = err instanceof Error ? err.message : '网络错误，请重试';
-      console.error('Edit error:', err);
-      setError(errMsg);
+      setError(err instanceof Error ? err.message : '修图失败');
     } finally {
-      setIsLoading(false);
+      clearInterval(interval);
+      setIsProcessing(false);
     }
-  }, [prompt, selectedModelId, currentImageUrl, aspectRatio, quality, outputCount, currentModelSupportsMask, exportMask, clearMask, currentHistoryIndex]);
+  };
 
-  const handleConfirmResult = useCallback((url?: string) => {
-    const finalUrl = url || resultImages[0];
-    if (finalUrl) {
-      onConfirm({
-        url: finalUrl,
-        prompt: `${image.prompt} + ${prompt}`,
-      });
+  // ── Apply result ──
+  const handleApply = () => {
+    if (resultUrl) {
+      onConfirm(image.id, resultUrl, resultPrompt || undefined);
+      onClose();
     }
-    setPrompt('');
-    setResultImages([]);
-    onClose();
-  }, [resultImages, prompt, image.prompt, onConfirm, onClose]);
+  };
 
-  const handleHistoryClick = useCallback((index: number) => {
-    const historyItem = history[index];
-    if (historyItem) {
-      setCurrentImageUrl(historyItem.imageUrl);
-      setCurrentHistoryIndex(index);
-    }
-  }, [history]);
+  // ── SVG connection line ──
+  const editorLeft = pos.x;
+  const editorTop = pos.y + 36; // below title bar
+  const editorRight = pos.x + editorWidth;
+  const editorMidY = pos.y + 36 + 120; // middle of preview area
 
-  // 拖拽
-  const handleDragStart = useCallback((e: React.MouseEvent) => {
-    setIsDragging(true);
-    setDragOffset({ x: e.clientX - position.x, y: e.clientY - position.y });
-  }, [position]);
+  const resultLeft = editorRight + 20;
+  const resultTop = editorMidY - resultBoxSize.h / 2;
 
-  const handleDrag = useCallback((e: React.MouseEvent) => {
-    if (!isDragging) return;
-    setPosition({ x: e.clientX - dragOffset.x, y: e.clientY - dragOffset.y });
-  }, [isDragging, dragOffset]);
+  // Source image connection point (right edge middle)
+  const srcX = sourceRect.right;
+  const srcY = sourceRect.top + sourceRect.height / 2;
 
-  const handleDragEnd = useCallback(() => { setIsDragging(false); }, []);
+  // SVG path: source → editor (bezier)
+  const srcToEditor = `M${srcX},${srcY} C${srcX + 40},${srcY} ${editorLeft - 40},${editorMidY} ${editorLeft},${editorMidY}`;
 
-  // SVG连接线计算
-  const getLineStart = useCallback(() => {
-    if (connectionStart) return connectionStart;
-    return { x: position.x, y: position.y + 140 };
-  }, [connectionStart, position]);
+  // SVG path: editor → result (bezier)
+  const editorToResult = `M${editorRight},${editorMidY} C${editorRight + 8},${editorMidY} ${resultLeft - 8},${editorMidY} ${resultLeft},${editorMidY}`;
 
-  const getLineEnd = useCallback(() => {
-    return { x: position.x, y: position.y + 20 };
-  }, [position]);
-
-  const getResultLineStart = useCallback(() => {
-    return { x: position.x + 360, y: position.y + 140 };
-  }, [position]);
-
-  const getResultLineEnd = useCallback(() => {
-    if (resultContainerRef.current) {
-      const rect = resultContainerRef.current.getBoundingClientRect();
-      return { x: rect.left, y: rect.top + rect.height / 2 };
-    }
-    return { x: position.x + 360 + 80, y: position.y + 140 };
-  }, [position, resultImages]);
+  const modelSupportsMask = selectedModel?.supportsMask ?? false;
 
   return (
     <>
-      {/* SVG连接线 - 图片到编辑器 */}
-      {connectionStart && (
-        <svg className="fixed inset-0 pointer-events-none z-[199]" style={{ overflow: 'visible' }}>
-          <defs>
-            <linearGradient id="editLineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#d4af37" />
-              <stop offset="100%" stopColor="#b8860b" />
-            </linearGradient>
-            <style>{`
-              @keyframes editFlow { from { stroke-dashoffset: 16; } to { stroke-dashoffset: 0; } }
-              .edit-flow-line { animation: editFlow 0.4s linear infinite; }
-            `}</style>
-          </defs>
-          <path
-            d={`M ${getLineStart().x} ${getLineStart().y}
-                C ${getLineStart().x} ${getLineStart().y - 40},
-                  ${getLineEnd().x} ${getLineEnd().y + 40},
-                  ${getLineEnd().x} ${getLineEnd().y}`}
-            stroke="#d4af37"
-            strokeWidth="2"
-            fill="none"
-            strokeDasharray="8 4"
-            className="edit-flow-line"
-          />
-          {/* 编辑器右侧到结果框 */}
-          {(isResultLoading || resultImages.length > 0) && (
-            <path
-              d={`M ${getResultLineStart().x} ${getResultLineStart().y}
-                  C ${getResultLineStart().x + 40} ${getResultLineStart().y},
-                    ${getResultLineEnd().x - 40} ${getResultLineEnd().y},
-                    ${getResultLineEnd().x} ${getResultLineEnd().y}`}
-              stroke="#d4af37"
-              strokeWidth="2"
-              fill="none"
-              strokeDasharray="8 4"
-              className="edit-flow-line"
-            />
-          )}
-        </svg>
-      )}
-
-      {/* 主编辑器面板 */}
-      <div
-        ref={containerRef}
-        className="fixed z-[200] w-[360px] bg-[#141414] border border-[#2a2a2a] rounded-xl shadow-2xl overflow-hidden"
-        style={{ left: position.x, top: position.y, maxHeight: '85vh' }}
-        onMouseMove={handleDrag}
-        onMouseUp={handleDragEnd}
-        onMouseLeave={handleDragEnd}
+      {/* SVG connection lines overlay */}
+      <svg
+        style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', pointerEvents: 'none', zIndex: 9998 }}
       >
-        {/* Header - 可拖拽 */}
-        <div
-          className="flex items-center justify-between px-4 py-3 border-b border-[#2a2a2a] bg-gradient-to-r from-[#1a1a1a] to-[#141414] cursor-move"
-          onMouseDown={handleDragStart}
-        >
-          <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-            <Pencil className="h-4 w-4 text-[#d4af37]" />
-            语言修图
-          </h2>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-[#2a2a2a] transition-colors">
-            <X className="h-4 w-4 text-[#888]" />
-          </button>
-        </div>
+        {/* Source → Editor */}
+        <path
+          d={srcToEditor}
+          fill="none"
+          stroke="#d4af37"
+          strokeWidth={2}
+          strokeDasharray="6 4"
+          opacity={0.7}
+        />
+        {/* Connection dot on source image */}
+        <circle cx={srcX} cy={srcY} r={5} fill="#d4af37" />
+        {/* Connection dot on editor left */}
+        <circle cx={editorLeft} cy={editorMidY} r={4} fill="#d4af37" />
 
-        {/* Content - 精简布局 */}
-        <div className="p-3 space-y-3 max-h-[calc(85vh-50px)] overflow-y-auto">
-          {/* 图片预览 + 蒙版 - 紧凑 */}
-          <div className="relative bg-[#1a1a1a] rounded-lg p-2 flex justify-center">
-            <div className="relative" style={{ width: imageDisplaySize.width, height: imageDisplaySize.height }}>
-              {currentImageUrl && (
-                <img src={currentImageUrl} alt="编辑" className="absolute top-0 left-0 w-full h-full object-contain rounded" crossOrigin="anonymous" />
-              )}
-              <canvas
-                ref={canvasRef}
-                className={`absolute top-0 left-0 w-full h-full ${currentModelSupportsMask ? 'cursor-crosshair' : 'cursor-not-allowed'}`}
-                style={{ width: imageDisplaySize.width, height: imageDisplaySize.height }}
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-                onMouseLeave={handleMouseUp}
-              />
-              {!currentModelSupportsMask && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded pointer-events-none">
-                  <div className="flex flex-col items-center gap-1 px-3 py-2 bg-[#1a1a1a]/90 rounded-lg border border-[#2a2a2a]">
-                    <Lock className="h-4 w-4 text-[#888]" />
-                    <span className="text-[10px] text-[#888]">此模型不支持区域涂抹</span>
-                    <span className="text-[10px] text-[#d4af37]">文字描述即可智能修图</span>
-                  </div>
-                </div>
-              )}
-            </div>
+        {/* Editor → Result */}
+        <path
+          d={editorToResult}
+          fill="none"
+          stroke="#d4af37"
+          strokeWidth={2}
+          strokeDasharray="6 4"
+          opacity={0.7}
+        />
+        {/* Connection dot on editor right */}
+        <circle cx={editorRight} cy={editorMidY} r={4} fill="#d4af37" />
+        {/* Connection dot on result left */}
+        <circle cx={resultLeft} cy={resultTop + resultBoxSize.h / 2} r={4} fill="#d4af37" />
+      </svg>
+
+      {/* Result frame */}
+      <div
+        onWheel={stopProp}
+        style={{
+          position: 'fixed',
+          left: resultLeft,
+          top: resultTop,
+          width: resultBoxSize.w,
+          height: resultBoxSize.h,
+          zIndex: 9999,
+          pointerEvents: 'auto',
+        }}
+        className="bg-[#111] border border-[#d4af37]/30 rounded-lg overflow-hidden flex flex-col items-center justify-center"
+      >
+        {isProcessing && !resultUrl && (
+          <div className="flex flex-col items-center gap-2">
+            <div className="w-8 h-8 border-2 border-[#d4af37] border-t-transparent rounded-full animate-spin" />
+            <span className="text-[#d4af37] text-xs">{Math.round(progress)}%</span>
           </div>
-
-          {/* 画笔工具 - 仅支持蒙版时显示，紧凑一行 */}
-          {currentModelSupportsMask && (
-            <div className="flex items-center gap-1.5 px-1">
-              <button onClick={() => setTool('brush')} className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-all ${tool === 'brush' ? 'bg-[#d4af37] text-black font-medium' : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a]'}`}>
-                <Pencil className="h-3 w-3" />画笔
-              </button>
-              <button onClick={() => setTool('eraser')} className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-all ${tool === 'eraser' ? 'bg-[#d4af37] text-black font-medium' : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a]'}`}>
-                <Eraser className="h-3 w-3" />橡皮
-              </button>
-              <button onClick={clearMask} className="flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a] transition-all">
-                <Trash2 className="h-3 w-3" />清除
-              </button>
-              <div className="flex-1" />
-              <span className="text-[10px] text-[#666]">笔触</span>
-              <input type="range" min="10" max="50" value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} className="w-14 h-0.5 bg-[#2a2a2a] rounded appearance-none cursor-pointer accent-[#d4af37]" />
-              <span className="text-[10px] text-[#d4af37] font-mono w-4">{brushSize}</span>
-            </div>
-          )}
-
-          {/* 编辑指令 - 紧凑 */}
-          <div>
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="描述修改内容，如：把背景换成日落..."
-              className="w-full h-14 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-xs text-white placeholder:text-[#555] focus:border-[#d4af37] focus:outline-none resize-none transition-colors"
-            />
-            <p className="text-[10px] text-[#555] mt-0.5">Enter 提交 · Shift+Enter 换行</p>
-          </div>
-
-          {/* 模型选择 - 列表形式，默认折叠 */}
-          <div>
-            <button
-              onClick={() => setModelListExpanded(!modelListExpanded)}
-              className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-xs text-[#ccc] hover:border-[#d4af37] transition-all"
-            >
-              <span className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#d4af37]" />
-                {serverModels.find(m => `${m.providerId}::${m.id}` === selectedModelId)?.name || '选择模型'}
-                {currentModelSupportsMask
-                  ? <span className="text-[9px] text-green-500">支持涂抹</span>
-                  : <span className="text-[9px] text-[#d4af37]">文字修图</span>
-                }
-              </span>
-              {modelListExpanded ? <ChevronUp size={12} className="text-[#888]" /> : <ChevronDown size={12} className="text-[#888]" />}
-            </button>
-            {modelListExpanded && serverModels.length > 0 && (
-              <div className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-[#2a2a2a] bg-[#0d0d0d]">
-                {serverModels.map(model => {
-                  const key = `${model.providerId}::${model.id}`;
-                  const isSelected = selectedModelId === key;
-                  const supportsMask = !model.id.toLowerCase().includes('gemini');
-                  return (
-                    <button
-                      key={key}
-                      onClick={() => { setSelectedModelId(key); setModelListExpanded(false); }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-all border-b border-[#1a1a1a] last:border-b-0 ${
-                        isSelected
-                          ? 'bg-[#d4af37]/15 text-[#d4af37]'
-                          : 'text-[#aaa] hover:bg-[#1a1a1a] hover:text-white'
-                      }`}
-                    >
-                      <GripVertical size={10} className="text-[#444] flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium truncate">{model.name}</div>
-                        <div className="text-[10px] text-[#666]">{model.providerName} · {supportsMask ? '支持区域涂抹' : '文字描述智能修图'}</div>
-                      </div>
-                      {isSelected && <Check size={12} className="text-[#d4af37] flex-shrink-0" />}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {serverModels.length === 0 && modelListExpanded && (
-              <div className="mt-1 px-3 py-4 text-center text-[10px] text-[#666] rounded-lg border border-[#2a2a2a] bg-[#0d0d0d]">
-                管理员系统中暂无可用图片模型
-              </div>
-            )}
-          </div>
-
-          {/* 参数行 - 画面比例/质量/数量 三列 */}
-          <div className="grid grid-cols-3 gap-2">
-            <div>
-              <label className="text-[10px] text-[#888] mb-0.5 block">画面比例</label>
-              <select
-                value={aspectRatio}
-                onChange={(e) => setAspectRatio(e.target.value)}
-                className="w-full px-2 py-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded text-[11px] text-white appearance-none cursor-pointer focus:border-[#d4af37] focus:outline-none"
-              >
-                {ASPECT_RATIOS.map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-[10px] text-[#888] mb-0.5 block">图片质量</label>
-              <select
-                value={quality}
-                onChange={(e) => setQuality(e.target.value)}
-                className="w-full px-2 py-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded text-[11px] text-white appearance-none cursor-pointer focus:border-[#d4af37] focus:outline-none"
-              >
-                {QUALITIES.map(q => <option key={q.value} value={q.value}>{q.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-[10px] text-[#888] mb-0.5 block">生图数量</label>
-              <select
-                value={outputCount}
-                onChange={(e) => setOutputCount(Number(e.target.value))}
-                className="w-full px-2 py-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded text-[11px] text-white appearance-none cursor-pointer focus:border-[#d4af37] focus:outline-none"
-              >
-                {COUNTS.map(c => <option key={c} value={c}>{c}张</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* 错误 */}
-          {error && (
-            <div className="px-3 py-1.5 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-[11px]">
-              {error}
-            </div>
-          )}
-
-          {/* 生成按钮 */}
+        )}
+        {resultUrl && (
+          <img src={resultUrl} alt="result" className="w-full h-full object-contain" />
+        )}
+        {!isProcessing && !resultUrl && (
+          <span className="text-[#555] text-xs">结果预览</span>
+        )}
+        {resultUrl && (
           <button
-            onClick={handleSubmit}
-            disabled={isLoading || !prompt.trim() || !selectedModelId}
-            className="w-full py-2 rounded-lg bg-gradient-to-r from-[#d4af37] to-[#b8860b] hover:from-[#daa520] hover:to-[#cd9b1d] text-black text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            onClick={handleApply}
+            className="absolute bottom-1 right-1 bg-[#d4af37] text-black text-[10px] px-2 py-0.5 rounded font-medium hover:bg-[#e5c349] transition-colors"
           >
-            {isLoading ? (
-              <><Loader2 className="h-4 w-4 animate-spin" />修改中...</>
-            ) : (
-              <><Sparkles className="h-4 w-4" />开始修改</>
-            )}
+            应用
           </button>
-
-          {/* 编辑历史 - 紧凑 */}
-          {history.length > 0 && (
-            <div className="pt-2 border-t border-[#2a2a2a]">
-              <div className="flex items-center gap-1.5 text-[10px] text-[#888] mb-1">
-                <History className="h-3 w-3" />
-                <span className="font-medium text-[#d4af37]">编辑历史</span>
-              </div>
-              <div className="max-h-20 overflow-y-auto space-y-0.5">
-                {history.map((item, index) => (
-                  <button
-                    key={item.id}
-                    onClick={() => handleHistoryClick(index)}
-                    className={`w-full text-left px-2 py-1 rounded text-[10px] transition-all flex items-center gap-1 ${
-                      index === currentHistoryIndex
-                        ? 'bg-[#d4af37]/20 text-[#d4af37]'
-                        : 'bg-[#1a1a1a] text-[#888] hover:text-white'
-                    }`}
-                  >
-                    <span>#{index + 1}</span>
-                    <span className="truncate flex-1">{item.prompt}</span>
-                    {index === currentHistoryIndex && <Check className="h-3 w-3 text-[#d4af37] flex-shrink-0" />}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
+        )}
       </div>
 
-      {/* 结果框 - 右侧，SVG线连接 */}
-      {(isResultLoading || resultImages.length > 0) && (
+      {/* Editor panel */}
+      <div
+        ref={editorRef}
+        onWheel={stopProp}
+        style={{
+          position: 'fixed',
+          left: pos.x,
+          top: pos.y,
+          width: editorWidth,
+          zIndex: 9999,
+        }}
+        className="bg-[#1a1a1a] border border-[#d4af37]/40 rounded-xl shadow-2xl select-none"
+      >
+        {/* ── Title bar (draggable) ── */}
         <div
-          ref={resultContainerRef}
-          className="fixed z-[200] w-[240px] bg-[#141414] border border-[#2a2a2a] rounded-xl shadow-2xl overflow-hidden"
-          style={{ left: position.x + 360 + 40, top: position.y, maxHeight: '85vh' }}
+          onMouseDown={handleDragStart}
+          className="flex items-center justify-between px-3 py-2.5 cursor-grab active:cursor-grabbing border-b border-[#333]"
         >
-          <div className="flex items-center justify-between px-3 py-2 border-b border-[#2a2a2a]">
-            <h3 className="text-[11px] font-medium text-white flex items-center gap-1.5">
-              <ImageIcon className="h-3.5 w-3.5 text-[#d4af37]" />
-              修图结果
-            </h3>
-            {resultImages.length > 0 && (
-              <button
-                onClick={() => handleConfirmResult()}
-                className="px-2 py-0.5 text-[10px] bg-[#d4af37] hover:bg-[#daa520] text-black rounded font-medium transition-all"
-              >
-                确认使用
-              </button>
+          <div className="flex items-center gap-2">
+            <span className="text-[#d4af37]">✏️</span>
+            <span className="text-white text-sm font-medium">语言修图</span>
+          </div>
+          <button onClick={onClose} className="text-[#888] hover:text-white transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* ── Image preview with zoom ── */}
+        <div className="px-3 pt-3">
+          <div
+            className="relative bg-[#111] rounded-lg overflow-hidden border border-[#333]"
+            style={{ height: 200 }}
+            onWheel={handleImageWheel}
+          >
+            {/* Zoom / pan controls */}
+            <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-black/60 rounded-md px-1.5 py-0.5">
+              <button onClick={() => setImgScale(s => Math.min(5, s * 1.2))} className="text-white/70 hover:text-white p-0.5"><ZoomIn size={13} /></button>
+              <button onClick={() => setImgScale(s => Math.max(0.1, s * 0.8))} className="text-white/70 hover:text-white p-0.5"><ZoomOut size={13} /></button>
+              <button onClick={resetZoom} className="text-white/70 hover:text-white p-0.5"><RotateCcw size={13} /></button>
+              <span className="text-[10px] text-[#d4af37] min-w-[32px] text-center">{Math.round(imgScale * 100)}%</span>
+              {imgScale > 1 && (
+                <button
+                  onMouseDown={handlePanStart}
+                  className="text-[#d4af37] hover:text-[#e5c349] p-0.5"
+                  style={{ cursor: isPanning ? 'grabbing' : 'grab' }}
+                >
+                  <Hand size={13} />
+                </button>
+              )}
+            </div>
+
+            {/* Image */}
+            <div
+              className="w-full h-full flex items-center justify-center"
+              style={{ cursor: imgScale > 1 ? (isPanning ? 'grabbing' : 'grab') : 'default', overflow: 'hidden' }}
+              onMouseDown={imgScale > 1 ? handlePanStart : undefined}
+            >
+              <img
+                src={image.url}
+                alt="edit source"
+                draggable={false}
+                style={{
+                  transform: `scale(${imgScale}) translate(${imgOffset.x / imgScale}px, ${imgOffset.y / imgScale}px)`,
+                  transition: isPanning ? 'none' : 'transform 0.15s ease',
+                  maxWidth: '100%',
+                  maxHeight: '100%',
+                  objectFit: 'contain',
+                  pointerEvents: 'none',
+                }}
+              />
+            </div>
+
+            {/* Gemini mask overlay */}
+            {!modelSupportsMask && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                <div className="text-center">
+                  <span className="text-[#888] text-lg">🔒</span>
+                  <p className="text-[#d4af37] text-xs mt-1">文字描述即可智能修图</p>
+                </div>
+              </div>
             )}
           </div>
-          <div className="p-3">
-            {isResultLoading ? (
-              <div className="flex flex-col items-center justify-center h-[200px] bg-[#1a1a1a] rounded-lg border-2 border-dashed border-[#d4af37]/30">
-                <div className="relative w-12 h-12 mb-3">
-                  <div className="absolute inset-0 border-3 border-[#2a2a2a] rounded-full" />
-                  <div
-                    className="absolute inset-0 border-3 border-[#d4af37] rounded-full animate-spin"
-                    style={{ clipPath: `polygon(50% 50%, 50% 0%, ${50 + 50 * Math.sin(loadingProgress / 100 * 2 * Math.PI)}% ${50 - 50 * Math.cos(loadingProgress / 100 * 2 * Math.PI)}%, 50% 50%)` }}
-                  />
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-[#d4af37] text-[10px] font-mono">{loadingProgress}%</span>
-                  </div>
-                </div>
-                <p className="text-[11px] text-[#888]">正在生成...</p>
-              </div>
-            ) : resultImages.length > 0 ? (
-              <div className="space-y-2">
-                {resultImages.map((url, idx) => (
-                  <div key={idx} className="relative bg-[#1a1a1a] rounded-lg overflow-hidden cursor-pointer group" onClick={() => handleConfirmResult(url)}>
-                    <img src={url} alt={`结果 ${idx + 1}`} className="w-full h-auto object-contain rounded-lg" />
-                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center">
-                      <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-white bg-[#d4af37] px-2 py-1 rounded">点击使用</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : null}
+        </div>
+
+        {/* ── Prompt input ── */}
+        <div className="px-3 pt-3">
+          <textarea
+            value={prompt}
+            onChange={e => setPrompt(e.target.value)}
+            placeholder="描述修改内容，如：把背景换成日落..."
+            rows={2}
+            className="w-full bg-[#111] border border-[#333] rounded-lg px-3 py-2 text-sm text-white placeholder:text-[#555] resize-none focus:outline-none focus:border-[#d4af37]/50"
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
+            }}
+          />
+          <div className="text-[10px] text-[#555] mt-0.5 text-right">Enter 提交 · Shift+Enter 换行</div>
+        </div>
+
+        {/* ── Edit model selector ── */}
+        <div className="px-3 pt-3">
+          <div className="text-[10px] text-[#888] mb-1">图片模型</div>
+          <select
+            value={selectedModel ? `${selectedModel.id}__${selectedModel.providerId}` : ''}
+            onChange={e => {
+              const [id, providerId] = e.target.value.split('__');
+              const m = editModels.find(m => m.id === id && m.providerId === providerId);
+              if (m) setSelectedModel(m);
+            }}
+            className="w-full bg-[#111] border border-[#333] rounded-md px-2 py-1.5 text-xs text-white focus:outline-none focus:border-[#d4af37]/50 appearance-none"
+          >
+            {editModels.map(m => (
+              <option key={`${m.id}__${m.providerId}`} value={`${m.id}__${m.providerId}`}>
+                {m.name} ({m.providerName}){m.supportsMask ? ' · 支持涂抹' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* ── LLM model selector ── */}
+        <div className="px-3 pt-2">
+          <div className="text-[10px] text-[#888] mb-1">LLM 辅助模型</div>
+          <select
+            value={selectedLLM ? `${selectedLLM.id}__${selectedLLM.providerId}` : ''}
+            onChange={e => {
+              const [id, providerId] = e.target.value.split('__');
+              const m = llmModels.find(m => m.id === id && m.providerId === providerId);
+              if (m) setSelectedLLM(m);
+            }}
+            className="w-full bg-[#111] border border-[#333] rounded-md px-2 py-1.5 text-xs text-white focus:outline-none focus:border-[#d4af37]/50 appearance-none"
+          >
+            {llmModels.map(m => (
+              <option key={`${m.id}__${m.providerId}`} value={`${m.id}__${m.providerId}`}>
+                {m.name} ({m.providerName})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* ── Params row ── */}
+        <div className="px-3 pt-3 flex gap-2">
+          {/* Aspect ratio */}
+          <div className="flex-1">
+            <div className="text-[10px] text-[#888] mb-1">画面比例</div>
+            <select
+              value={aspectRatio.label}
+              onChange={e => { const a = ASPECT_RATIOS.find(r => r.label === e.target.value); if (a) setAspectRatio(a); }}
+              className="w-full bg-[#111] border border-[#333] rounded-md px-1.5 py-1 text-[11px] text-white focus:outline-none focus:border-[#d4af37]/50 appearance-none"
+            >
+              {ASPECT_RATIOS.map(r => <option key={r.label} value={r.label}>{r.label}</option>)}
+            </select>
+          </div>
+          {/* Quality */}
+          <div className="flex-1">
+            <div className="text-[10px] text-[#888] mb-1">图片质量</div>
+            <select
+              value={quality}
+              onChange={e => setQuality(e.target.value)}
+              className="w-full bg-[#111] border border-[#333] rounded-md px-1.5 py-1 text-[11px] text-white focus:outline-none focus:border-[#d4af37]/50 appearance-none"
+            >
+              {QUALITY_OPTIONS.map(q => <option key={q.value} value={q.value}>{q.label}</option>)}
+            </select>
+          </div>
+          {/* Count */}
+          <div className="flex-1">
+            <div className="text-[10px] text-[#888] mb-1">生图数量</div>
+            <select
+              value={count}
+              onChange={e => setCount(Number(e.target.value))}
+              className="w-full bg-[#111] border border-[#333] rounded-md px-1.5 py-1 text-[11px] text-white focus:outline-none focus:border-[#d4af37]/50 appearance-none"
+            >
+              {COUNT_OPTIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
           </div>
         </div>
-      )}
+
+        {/* ── Error ── */}
+        {error && (
+          <div className="px-3 pt-2">
+            <div className="bg-red-900/30 border border-red-700/40 rounded-md px-2 py-1 text-[11px] text-red-300">{error}</div>
+          </div>
+        )}
+
+        {/* ── Submit button ── */}
+        <div className="px-3 pt-3 pb-3">
+          <button
+            onClick={handleSubmit}
+            disabled={isProcessing || !prompt.trim() || !selectedModel}
+            className="w-full bg-[#d4af37] text-black font-semibold text-sm py-2 rounded-lg hover:bg-[#e5c349] disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+          >
+            {isProcessing ? (
+              <>
+                <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                处理中 {Math.round(progress)}%
+              </>
+            ) : (
+              <>✨ 开始修改</>
+            )}
+          </button>
+        </div>
+      </div>
     </>
   );
 }

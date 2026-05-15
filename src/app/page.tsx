@@ -4,13 +4,13 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { InfiniteCanvas, CanvasImage, ImageGroup } from '@/components/infinite-canvas';
 import { GenerationPanel, GenerationParams, CtrlRefSelection } from '@/components/generation-panel';
 import { ImagePreview } from '@/components/image-preview';
+import ImageEditor from '@/components/image-editor';
 import { ChatPanel } from '@/components/chat-panel';
 import { PromptEquation } from '@/components/prompt-equation';
 
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 import { Image as ImageIcon, MessageSquare, Sparkles } from 'lucide-react';
-import { ImageEditor } from '@/components/image-editor';
 import { UserManager } from '@/components/user-manager';
 import { ProjectDataPanel } from '@/components/project-data-panel';
 import { AdminSystem } from '@/components/admin-system';
@@ -129,6 +129,7 @@ function CanvasApp() {
   // Language-based image editing state
   const [langEditMode, setLangEditMode] = useState<'idle' | 'selecting'>('idle');
   const [editingImage, setEditingImage] = useState<CanvasImage | null>(null);
+  const [editSourceRect, setEditSourceRect] = useState<{ left: number; top: number; right: number; bottom: number; width: number; height: number } | null>(null);
 
   // Current chat model info from ChatPanel (used for vision-prompt)
   const [currentChatModelInfo, setCurrentChatModelInfo] = useState<{
@@ -1820,14 +1821,20 @@ function CanvasApp() {
     });
   }, [handleFusion]);
 
-  // Language-based image editing handler
-  const handleEditImage = useCallback((image: CanvasImage) => {
+  // Language-based image editing handler - called by canvas when opening editor
+  const handleOpenEditor = useCallback((image: CanvasImage, sourceRect?: DOMRect | null) => {
     setEditingImage(image);
+    setEditSourceRect(sourceRect ? { left: sourceRect.left, top: sourceRect.top, right: sourceRect.right, bottom: sourceRect.bottom, width: sourceRect.width, height: sourceRect.height } : null);
     setLangEditMode('idle');
   }, []);
 
-  const handleEditCancel = useCallback(() => {
-    setEditingImage(null);
+  // Language-based image editing handler - called when editor confirms/replaces image
+  const handleEditImage = useCallback((imageId: string, resultUrl: string, resultPrompt?: string) => {
+    setImages(prev => prev.map(img =>
+      img.id === imageId
+        ? { ...img, url: resultUrl, prompt: resultPrompt || img.prompt }
+        : img
+    ));
   }, []);
 
   return (
@@ -1909,23 +1916,6 @@ function CanvasApp() {
           onLangEditModeChange={setLangEditMode}
         />
       </div>
-
-      {/* Language-based Image Editor */}
-      {editingImage && (
-        <ImageEditor
-          image={editingImage}
-          onClose={handleEditCancel}
-          onConfirm={(result) => {
-            // Replace the edited image with the result
-            setImages(prev => prev.map(img =>
-              img.id === editingImage.id
-                ? { ...img, url: result.url, prompt: result.prompt || img.prompt }
-                : img
-            ));
-            setEditingImage(null);
-          }}
-        />
-      )}
 
       {/* Floating Panel */}
       {!panelCollapsed && (
@@ -2133,8 +2123,26 @@ function CanvasApp() {
         image={previewImage}
         onClose={() => setPreviewImage(null)}
         themeStyle={themeStyle}
-        onEditImage={(img) => { setPreviewImage(null); handleEditImage(img); }}
+        onEditImage={(img) => { setPreviewImage(null); setEditingImage(img); }}
       />
+
+      {/* Language Image Editor */}
+      {editingImage && editSourceRect && (
+        <ImageEditor
+          image={editingImage}
+          sourceRect={editSourceRect}
+          onClose={() => { setEditingImage(null); setEditSourceRect(null); }}
+          onConfirm={(imageId: string, resultUrl: string, resultPrompt?: string) => {
+            setImages(prev => prev.map(img =>
+              img.id === imageId
+                ? { ...img, url: resultUrl, prompt: resultPrompt || img.prompt }
+                : img
+            ));
+            setEditingImage(null);
+            setEditSourceRect(null);
+          }}
+        />
+      )}
 
       {/* Toast */}
       <Toaster 
