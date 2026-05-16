@@ -2049,7 +2049,8 @@ export async function POST(request: NextRequest) {
       // Submit to AI model API
       const cm = candidateModels[0];
       const result = await submitImageTask(
-        cm.apiBaseUrl, cm.apiKey, genBody, '/images/generations', cm
+        cm.apiBaseUrl, cm.apiKey, genBody, '/images/generations',
+        { baseUrl: cm.apiBaseUrl, advancedParams: cm.advancedParams }
       );
 
       if (result.directUrl) {

@@ -314,6 +314,42 @@ export function convertAspectRatioToSize(ratio: string, quality?: string, modelI
 }
 
 /**
+ * Convert a pixel size string (e.g. "1248x1064") to the closest supported aspect ratio.
+ * Many models (especially Gemini) only accept specific aspect ratios like "4:3", "16:9", etc.
+ * This function finds the best match from the model's supported ratios.
+ */
+export function convertPixelSizeToAspectRatio(pixelSize: string, modelId?: string): string {
+  const parts = pixelSize.split('x').map(Number);
+  if (parts.length !== 2 || parts[0] <= 0 || parts[1] <= 0) {
+    return '1:1';
+  }
+
+  const [w, h] = parts;
+  const actualRatio = w / h;
+
+  // Gemini-supported aspect ratios (width:height)
+  const SUPPORTED_RATIOS = [
+    '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3',
+    '4:5', '5:4', '1:4', '4:1', '1:8', '8:1', '21:9',
+  ];
+
+  let bestRatio = '1:1';
+  let bestDiff = Infinity;
+
+  for (const ratio of SUPPORTED_RATIOS) {
+    const [rw, rh] = ratio.split(':').map(Number);
+    const ratioValue = rw / rh;
+    const diff = Math.abs(Math.log(actualRatio / ratioValue));
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestRatio = ratio;
+    }
+  }
+
+  return bestRatio;
+}
+
+/**
  * Adjust a request body according to the compatibility profile.
  *
  * - Converts size format if needed
@@ -342,6 +378,13 @@ export function adjustRequestForProfile(
       const quality = typeof body.quality === 'string' ? body.quality : undefined;
       const modelId = typeof body.model === 'string' ? body.model : undefined;
       body.size = convertAspectRatioToSize(sizeStr, quality, modelId);
+    }
+  } else if (profile.sizeFormat === 'aspect-ratio' && body.size && typeof body.size === 'string') {
+    const sizeStr = body.size as string;
+    // If size is in pixel format (e.g., "1248x1064"), convert to closest supported aspect ratio
+    if (/^\d+x\d+$/.test(sizeStr)) {
+      const modelId = typeof body.model === 'string' ? body.model : undefined;
+      body.size = convertPixelSizeToAspectRatio(sizeStr, modelId);
     }
   }
 
