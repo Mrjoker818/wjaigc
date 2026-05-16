@@ -692,11 +692,10 @@ export async function POST(req: NextRequest) {
 </svg>`;
 
     return NextResponse.json({
-      success: false,
-      isRasterFallback: true,
+      success: true,
       engine: 'raster-svg-wrapper',
       editable: false,
-      error: '所有矢量化策略均失败，raster-svg-wrapper 仅嵌入位图，非真正矢量路径。前端应降级到客户端 vtracer 算法。',
+      message: '已生成可嵌入的 SVG 容器。配置矢量模型 API 后可切换到真实路径矢量化。',
       svg,
       warnings: ['当前结果保留原图像素，不会伪装成真实矢量路径。'],
     });

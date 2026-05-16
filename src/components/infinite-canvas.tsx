@@ -4231,27 +4231,6 @@ export function InfiniteCanvas({
             modifyPrompt: modeLabel,
           });
         }
-      } else if (data.fallbackToClient) {
-        // 服务端vtracers不可用，降级到客户端JS矢量化
-        updateProcessingFrame(placeholderId, { progress: 30, status: '正在使用本地矢量化引擎...' });
-        try {
-          const { exportAsSVG } = await import('@/lib/svg-export');
-          const modeConfig: Record<string, 'fast' | 'pro' | 'studio'> = { color: 'pro', bw: 'fast' };
-          const svgResult = await exportAsSVG(img.url, { mode: modeConfig[svgTraceMode] || 'fast' });
-          if (svgResult && svgResult.svgString) {
-            const svgDataUrl = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgResult.svgString)))}`;
-            completeProcessingFrame(placeholderId, svgDataUrl, img.width, img.height, {
-              originalWidth: img.originalWidth || Math.round(img.width),
-              originalHeight: img.originalHeight || Math.round(img.height),
-              modifyPrompt: `${modeLabel} (本地引擎)`,
-            });
-          } else {
-            throw new Error('本地矢量化引擎未能生成结果');
-          }
-        } catch (clientErr) {
-          console.error('Client-side vectorization failed:', clientErr);
-          throw new Error('矢量化暂不可用，请稍后重试');
-        }
       } else {
         throw new Error(data.error || '处理失败');
       }

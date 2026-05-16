@@ -843,7 +843,7 @@ export async function downloadSVG(
       body: JSON.stringify({ imageUrl, mode }),
     });
     const data = await response.json();
-    if (data.success && data.svg && !data.isRasterFallback) {
+    if (data.success && data.svg) {
       onProgress?.('rendering_preview', 90);
       const blob = new Blob([data.svg], { type: 'image/svg+xml' });
       const url = URL.createObjectURL(blob);

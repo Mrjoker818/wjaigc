@@ -303,12 +303,7 @@ async function runVTracer(
       execFile('python3', args, { timeout }, (error, _stdout, stderr) => {
         if (error) {
           console.error('[svg-trace] VTracer error:', stderr || error.message);
-          const errMsg = (stderr || error.message || '').toLowerCase();
-          if (errMsg.includes('nomodulename') || errMsg.includes('modulenotfound') || errMsg.includes('no module named')) {
-            reject(new Error('VTRACER_MODULE_NOT_INSTALLED'));
-          } else {
-            reject(new Error(`VTracer failed: ${stderr || error.message}`));
-          }
+          reject(new Error(`VTracer failed: ${stderr || error.message}`));
         } else {
           resolve();
         }
@@ -1063,18 +1058,9 @@ export async function POST(req: NextRequest) {
     }
   } catch (error) {
     console.error('[svg-trace] Error:', error);
-    const errMsg = error instanceof Error ? error.message : 'Unknown error';
-    // 当 vtracers 模块未安装时，返回特定标记，前端可降级到客户端 JS 矢量化
-    if (errMsg === 'VTRACER_MODULE_NOT_INSTALLED') {
-      return NextResponse.json({
-        success: false,
-        error: '服务端矢量化引擎暂不可用，将自动使用本地矢量化引擎',
-        fallbackToClient: true,
-      }, { status: 200 });
-    }
     return NextResponse.json({
       success: false,
-      error: errMsg,
+      error: error instanceof Error ? error.message : 'Unknown error',
     }, { status: 500 });
   }
 }
