@@ -2046,10 +2046,19 @@ export async function POST(request: NextRequest) {
       const outpaintNegPrompt = '(worst quality, low quality, normal quality:2), blurry, pixelated, jpeg artifacts, noise, grain, changed content, new elements, different colors, altered composition, deformed';
       if (outpaintNegPrompt) genBody.negative_prompt = outpaintNegPrompt;
 
-      // Submit to AI model API
+      // ★ 关键修复：将合成图（原图+灰色边框）作为参考图发送给 AI
+      // 如果不发送参考图，AI 不知道原图内容，会生成与原图完全无关的内容
+      genBody.image = compositeBase64;
+      genBody.image_urls = [compositeBase64];
+      // 蒙版：白色=需要AI生成的区域，黑色=保留原图的区域
+      genBody.mask = maskFileBase64;
+      // 扩图时 strength 设为较高值（0.7），让 AI 在保留原图内容的同时扩展边缘
+      genBody.strength = 0.7;
+
+      // Submit to AI model API (hasImage=true 让兼容层选择 /images/edits 端点)
       const cm = candidateModels[0];
       const result = await submitImageTask(
-        cm.apiBaseUrl, cm.apiKey, genBody, '/images/generations',
+        cm.apiBaseUrl, cm.apiKey, genBody, '/images/edits',
         { baseUrl: cm.apiBaseUrl, advancedParams: cm.advancedParams }
       );
 

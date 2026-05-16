@@ -4950,13 +4950,13 @@ export function InfiniteCanvas({
           // 明确保留主体：关键词是修饰指令，主体必须与参考图一致
           fullPrompt = `Modify the reference image with the following instructions: ${keyword}. CRITICAL: The main subject (product/object/person) must remain EXACTLY the same as in the reference image — same item, same identity, same appearance. Do NOT replace or change the subject to a different object. Only apply the specified modifications to the existing subject.`;
         } else {
-          // 未保留主体：关键词可以作为新方向
-          fullPrompt = `Create an image of: ${keyword}.`;
+          // 未保留主体：关键词作为编辑方向，但仍在原图基础上修改
+          fullPrompt = `Edit the reference image with the following changes: ${keyword}.`;
           if (preserveAspects.length > 0) {
-            fullPrompt += ` While creating this new image, ${preserveAspects.join(', ')}.`;
+            fullPrompt += ` Preserve the ${preserveAspects.join(', ')} from the reference image.`;
           }
           if (freeAspects.length > 0) {
-            fullPrompt += ` Feel free to reimagine the ${freeAspects.join(', ')}.`;
+            fullPrompt += ` You may reimagine the ${freeAspects.join(', ')}.`;
           }
         }
       } else {

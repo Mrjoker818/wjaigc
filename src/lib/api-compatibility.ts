@@ -389,8 +389,14 @@ export function adjustRequestForProfile(
   }
 
   // --- Endpoint selection ---
+  // When a source image is present (img2img, outpaint, inpaint, etc.),
+  // always use /images/edits — this is the standard OpenAI endpoint for
+  // image editing that accepts a source `image` field. /images/generations
+  // is only for text-to-image and will ignore reference images.
   let endpoint: ImageEndpoint;
-  if (isEditEndpoint || hasImage) {
+  if (hasImage) {
+    endpoint = '/images/edits';
+  } else if (isEditEndpoint) {
     endpoint = profile.editEndpoint;
   } else {
     endpoint = profile.defaultEndpoint;
@@ -402,8 +408,9 @@ export function adjustRequestForProfile(
     if (!body.input_fidelity) {
       body.input_fidelity = 'high';
     }
-  } else if (!profile.supportsInputFidelity) {
-    // Remove input_fidelity if provider doesn't support it
+  }
+  // Remove input_fidelity if provider doesn't support it or not in edits mode
+  if (!profile.supportsInputFidelity || endpoint !== '/images/edits') {
     delete body.input_fidelity;
   }
 
