@@ -111,7 +111,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
   // ★ LLM自动区域识别 + 自动Mask
   const [autoMaskPreview, setAutoMaskPreview] = useState<string | null>(null); // 预览用data URL
-  const [showAutoMaskConfirm, setShowAutoMaskConfirm] = useState(false); // 是否显示确认弹窗
+
   const [pendingAutoRegions, setPendingAutoRegions] = useState<Array<{ label: string; bounds: { x: number; y: number; width: number; height: number } }>>([]);
 
   // 当前选中的图像模型
@@ -356,9 +356,8 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (e.button !== 0 || !currentModelSupportsMask) return;
     // 手动画笔与自动mask互斥：开始手绘时清除自动mask
-    if (autoMaskPreview || showAutoMaskConfirm) {
+    if (autoMaskPreview) {
       setAutoMaskPreview(null);
-      setShowAutoMaskConfirm(false);
       setPendingAutoRegions([]);
     }
     setIsDrawing(true);
@@ -369,7 +368,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     const rect = canvas.getBoundingClientRect();
     ctx.beginPath();
     ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
-  }, [currentModelSupportsMask, autoMaskPreview, showAutoMaskConfirm]);
+  }, [currentModelSupportsMask, autoMaskPreview]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing) return;
@@ -873,7 +872,6 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               }
               setAutoMaskPreview(previewCanvas.toDataURL('image/png'));
               setPendingAutoRegions(collectedEditRegions);
-              setShowAutoMaskConfirm(true);
             }
           } catch (maskErr) {
             console.warn('Auto mask preview generation failed:', maskErr);
@@ -916,14 +914,12 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       }
     }
     setAutoMaskPreview(null);
-    setShowAutoMaskConfirm(false);
     setPendingAutoRegions([]);
   }, [autoMaskPreview]);
 
   // ★ 取消自动Mask
   const handleCancelAutoMask = useCallback(() => {
     setAutoMaskPreview(null);
-    setShowAutoMaskConfirm(false);
     setPendingAutoRegions([]);
   }, []);
 
@@ -951,7 +947,6 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     setSelectedResultIndexes(new Set());
     setEditContextHistory([]);
     setAutoMaskPreview(null);
-    setShowAutoMaskConfirm(false);
     setPendingAutoRegions([]);
     onClose();
   }, [resultImages, selectedResultIndexes, prompt, image?.prompt, onConfirm, onClose, aspectRatio]);
@@ -1086,7 +1081,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             <Pencil className="h-4 w-4 text-[#d4af37]" />
             语言修图
           </h2>
-          <button onClick={() => { setEditContextHistory([]); setAutoMaskPreview(null); setShowAutoMaskConfirm(false); setPendingAutoRegions([]); onClose(); }} className="p-1 rounded-lg hover:bg-[#2a2a2a] transition-colors">
+          <button onClick={() => { setEditContextHistory([]); setAutoMaskPreview(null); setPendingAutoRegions([]); onClose(); }} className="p-1 rounded-lg hover:bg-[#2a2a2a] transition-colors">
             <X className="h-4 w-4 text-[#888]" />
           </button>
         </div>
@@ -1612,7 +1607,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         <div
           ref={resultContainerRef}
           className="fixed z-[200] bg-[#141414] border border-[#2a2a2a] rounded-xl shadow-2xl overflow-hidden"
-          style={{ left: position.x + 360 + 40, top: position.y, maxHeight: '85vh', width: '280px' }}
+          style={{ left: position.x + 360 + 40, top: position.y, maxHeight: '85vh', width: resultImages.length > 1 ? '440px' : '380px' }}
         >
           <div className="flex items-center justify-between px-3 py-2 border-b border-[#2a2a2a]">
             <h3 className="text-[11px] font-medium text-white flex items-center gap-1.5">
@@ -1637,7 +1632,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                   const ratioH = ratioParts[1] || 1;
                   return (
                     <div key={i} className="relative bg-[#1a1a1a] rounded-lg border-2 border-dashed border-[#d4af37]/30 flex flex-col items-center justify-center overflow-hidden flex-shrink-0"
-                      style={{ aspectRatio: `${ratioW}/${ratioH}`, width: outputCount > 1 ? '140px' : undefined }}
+                      style={{ aspectRatio: `${ratioW}/${ratioH}`, width: outputCount > 1 ? '200px' : '320px', maxHeight: '400px' }}
                     >
                       <div className="relative w-8 h-8 mb-1">
                         <div className="absolute inset-0 border-2 border-[#2a2a2a] rounded-full" />
@@ -1684,7 +1679,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                   const isSelected = selectedResultIndexes.has(idx);
                   return (
                     <div key={idx} className={`relative bg-[#1a1a1a] rounded-lg overflow-hidden cursor-pointer group flex-shrink-0 ${isSelected ? 'ring-2 ring-[#d4af37]' : ''}`}
-                      style={{ aspectRatio: `${ratioW}/${ratioH}`, width: resultImages.length > 1 ? '140px' : undefined }}
+                      style={{ aspectRatio: `${ratioW}/${ratioH}`, width: resultImages.length > 1 ? '200px' : '100%', maxHeight: '360px' }}
                       onClick={() => {
                         // 多图时点击切换选中，单图时直接使用
                         if (resultImages.length > 1) {
@@ -1698,7 +1693,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                         }
                       }}
                     >
-                      <img src={url} alt={`结果 ${idx + 1}`} className="w-full h-full object-cover rounded-lg" />
+                      <img src={url} alt={`结果 ${idx + 1}`} className="w-full h-full object-contain rounded-lg" />
                       {/* 选中勾选框 */}
                       {resultImages.length > 1 && (
                         <div className={`absolute top-1.5 left-1.5 w-5 h-5 rounded-full flex items-center justify-center transition-all ${
@@ -1725,51 +1720,52 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                 })}
               </div>
             ) : null}
+            {/* ★ LLM自动区域识别 - 非阻塞内联卡片，嵌入结果框底部 */}
+            {pendingAutoRegions.length > 0 && (
+              <div className="bg-[#1a1a1a] border border-[#d4af37]/30 rounded-lg p-2.5 mt-2">
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#d4af37" strokeWidth="2">
+                      <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+                    </svg>
+                    <span className="text-[#d4af37] text-[10px] font-semibold">AI 识别到编辑区域</span>
+                  </div>
+                  <button
+                    onClick={() => { setPendingAutoRegions([]); setAutoMaskPreview(null); }}
+                    className="text-[#666] hover:text-[#999] text-[10px]"
+                  >✕</button>
+                </div>
+                <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                  {pendingAutoRegions.map((region, idx) => (
+                    <span key={idx} className="inline-flex items-center gap-1 text-[9px] text-[#bbb] bg-[#2a2a2a] rounded px-1.5 py-0.5">
+                      <span className="text-[#d4af37] font-mono">{idx + 1}</span>
+                      {region.label || `区域 ${idx + 1}`}
+                    </span>
+                  ))}
+                </div>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={handleConfirmAutoMask}
+                    className="px-2.5 py-1 text-[10px] bg-[#d4af37] hover:bg-[#daa520] text-black rounded font-medium transition-all"
+                  >
+                    应用蒙版
+                  </button>
+                  <button
+                    onClick={() => { setPendingAutoRegions([]); setAutoMaskPreview(null); }}
+                    className="px-2.5 py-1 text-[10px] bg-[#2a2a2a] hover:bg-[#3a3a3a] text-[#999] rounded font-medium transition-all"
+                  >
+                    跳过
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* ★ LLM自动区域识别 - Mask确认弹窗 */}
-      {showAutoMaskConfirm && pendingAutoRegions.length > 0 && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-[#1a1a1a] border border-[#d4af37]/40 rounded-xl p-4 max-w-xs w-full mx-4 shadow-2xl">
-            <div className="flex items-center gap-2 mb-3">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d4af37" strokeWidth="2">
-                <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
-              </svg>
-              <span className="text-[#d4af37] text-xs font-semibold">AI 识别到编辑区域</span>
-            </div>
-            <div className="mb-3 space-y-1">
-              {pendingAutoRegions.map((region, idx) => (
-                <div key={idx} className="flex items-center gap-2 text-[11px] text-[#ccc]">
-                  <span className="w-4 h-4 rounded bg-[#d4af37]/20 flex items-center justify-center text-[#d4af37] text-[9px] font-mono">{idx + 1}</span>
-                  <span>{region.label || `区域 ${idx + 1}`}</span>
-                </div>
-              ))}
-            </div>
-            {autoMaskPreview && (
-              <div className="mb-3 rounded-lg overflow-hidden border border-[#333]">
-                <img src={autoMaskPreview} alt="自动蒙版预览" className="w-full h-auto max-h-32 object-contain" />
-              </div>
-            )}
-            <p className="text-[10px] text-[#888] mb-3">确认后将自动生成蒙版，手动涂抹与自动蒙版互斥</p>
-            <div className="flex gap-2">
-              <button
-                onClick={handleConfirmAutoMask}
-                className="flex-1 px-3 py-1.5 text-xs bg-[#d4af37] hover:bg-[#daa520] text-black rounded-lg font-medium transition-all"
-              >
-                应用蒙版
-              </button>
-              <button
-                onClick={handleCancelAutoMask}
-                className="flex-1 px-3 py-1.5 text-xs bg-[#2a2a2a] hover:bg-[#3a3a3a] text-[#ccc] rounded-lg font-medium transition-all"
-              >
-                跳过
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ★ LLM自动区域识别 - 内嵌在结果框底部 */}
+      {/* Moved inside the result container below */}
+
     </>
   );
 }

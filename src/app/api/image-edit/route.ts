@@ -1735,9 +1735,12 @@ export async function POST(request: NextRequest) {
           const resultBuffer = await fetchImageBuffer(result.directUrl);
           const resultMeta = await sharp(resultBuffer).metadata();
 
-          // 将 AI 结果缩放到裁剪区域尺寸
+          // 将 AI 结果缩放到裁剪区域尺寸（保持比例，cover模式避免拉伸变形）
           const resizedResult = (resultMeta.width !== cropInfo.cropW || resultMeta.height !== cropInfo.cropH)
-            ? await sharp(resultBuffer).resize(cropInfo.cropW, cropInfo.cropH, { fit: 'fill' }).png().toBuffer()
+            ? await sharp(resultBuffer)
+                .resize(cropInfo.cropW, cropInfo.cropH, { fit: 'cover', position: 'center' })
+                .png()
+                .toBuffer()
             : resultBuffer;
 
           // 用裁剪区域的蒙版做柔边合成

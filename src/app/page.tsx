@@ -1916,49 +1916,35 @@ function CanvasApp() {
           canvasImages={images}
           onClose={handleEditCancel}
           onConfirm={(result) => {
-            if (editingImage) {
-              // Replace the edited image with the result (if existing image)
-              // Adjust dimensions to match new aspect ratio if changed
-              const ar = result.aspectRatio || '1:1';
-              const [arW, arH] = ar.split(':').map(Number);
-              const currentArea = editingImage.width * editingImage.height;
-              let imgW: number, imgH: number;
-              if (arW >= arH) {
-                imgW = Math.round(Math.sqrt(currentArea * arW / arH));
-                imgH = Math.round(imgW * arH / arW);
-              } else {
-                imgH = Math.round(Math.sqrt(currentArea * arH / arW));
-                imgW = Math.round(imgH * arW / arH);
-              }
-              setImages(prev => prev.map(img =>
-                img.id === editingImage.id
-                  ? { ...img, url: result.url, prompt: result.prompt || img.prompt, width: imgW, height: imgH }
-                  : img
-              ));
+            // Always add a new image to canvas (preserve the original)
+            const ar = result.aspectRatio || '1:1';
+            const [arW, arH] = ar.split(':').map(Number);
+            const baseSize = 400;
+            let imgW: number, imgH: number;
+            if (arW >= arH) {
+              imgW = baseSize;
+              imgH = Math.round(baseSize * arH / arW);
             } else {
-              // New image from editor - add to canvas with correct aspect ratio
-              const ar = result.aspectRatio || '1:1';
-              const [arW, arH] = ar.split(':').map(Number);
-              const baseSize = 400;
-              let imgW: number, imgH: number;
-              if (arW >= arH) {
-                imgW = baseSize;
-                imgH = Math.round(baseSize * arH / arW);
-              } else {
-                imgH = baseSize;
-                imgW = Math.round(baseSize * arW / arH);
-              }
-              const newImg: CanvasImage = {
-                id: `lang-edit-${Date.now()}`,
-                url: result.url,
-                prompt: result.prompt,
-                x: 100 + Math.random() * 200,
-                y: 100 + Math.random() * 200,
-                width: imgW,
-                height: imgH,
-              };
-              setImages(prev => [...prev, newImg]);
+              imgH = baseSize;
+              imgW = Math.round(baseSize * arW / arH);
             }
+            // Position new image to the right of the original if editing existing
+            let newX = 100 + Math.random() * 200;
+            let newY = 100 + Math.random() * 200;
+            if (editingImage) {
+              newX = editingImage.x + editingImage.width + 20;
+              newY = editingImage.y;
+            }
+            const newImg: CanvasImage = {
+              id: `lang-edit-${Date.now()}`,
+              url: result.url,
+              prompt: result.prompt,
+              x: newX,
+              y: newY,
+              width: imgW,
+              height: imgH,
+            };
+            setImages(prev => [...prev, newImg]);
             setShowImageEditor(false);
             setEditingImage(null);
           }}

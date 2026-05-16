@@ -3412,8 +3412,21 @@ export function InfiniteCanvas({
     const resultCtx = resultCanvas.getContext('2d')!;
 
     if (cropInfo) {
-      // 裁剪策略：结果图像是裁剪尺寸，放置到 (cropX, cropY) 位置
-      resultCtx.drawImage(resultImg, cropInfo.cropX, cropInfo.cropY, cropInfo.cropW, cropInfo.cropH);
+      // 裁剪策略：结果图像需要覆盖 (cropX, cropY, cropW, cropH) 区域
+      // AI返回的结果可能是固定尺寸(如1024x1024)，需保持比例居中裁切后放置
+      const resultAspect = resultImg.naturalWidth / resultImg.naturalHeight;
+      const cropAspect = cropInfo.cropW / cropInfo.cropH;
+      let sx = 0, sy = 0, sw = resultImg.naturalWidth, sh = resultImg.naturalHeight;
+      if (resultAspect > cropAspect) {
+        // 结果更宽，裁掉左右
+        sw = Math.round(resultImg.naturalHeight * cropAspect);
+        sx = Math.round((resultImg.naturalWidth - sw) / 2);
+      } else if (resultAspect < cropAspect) {
+        // 结果更高，裁掉上下
+        sh = Math.round(resultImg.naturalWidth / cropAspect);
+        sy = Math.round((resultImg.naturalHeight - sh) / 2);
+      }
+      resultCtx.drawImage(resultImg, sx, sy, sw, sh, cropInfo.cropX, cropInfo.cropY, cropInfo.cropW, cropInfo.cropH);
       // 蒙版修图模式：对裁剪边缘做羽化处理
       if (!isErase) {
         const edgeFeather = 36;
@@ -3605,6 +3618,9 @@ export function InfiniteCanvas({
   }, [editStrokes, brushSize, images, editImageId, editMode]);
 
   // Poll for task completion
+  // 存储最近一次 pollForResult 的错误信息，供调用方展示更精准的错误提示
+  const lastPollErrorRef = useRef<string>('');
+
   const pollForResult = useCallback(async (
     taskId: string,
     apiKeyOrModel: string,
@@ -3619,6 +3635,7 @@ export function InfiniteCanvas({
       if (attempt <= 15) return 1500;
       return 2000;
     };
+    lastPollErrorRef.current = '';
     for (let i = 0; i < maxAttempts; i++) {
       onProgress?.(
         Math.min(95, 18 + Math.round((i / Math.max(1, maxAttempts - 1)) * 76)),
@@ -3635,14 +3652,22 @@ export function InfiniteCanvas({
         if (data.status === 'completed' && data.imageUrl) {
           return data.imageUrl;
         }
-        if (data.status === 'failed') {
+        if (data.status === 'failed' || data.status === 'error') {
           console.error('Task failed:', data.error);
+          lastPollErrorRef.current = data.error || 'AI 模型处理失败';
+          return null;
+        }
+        // retryable errors — continue polling
+        if (data.retryable === false) {
+          lastPollErrorRef.current = data.error || '任务不可重试';
           return null;
         }
       } catch (e) {
+        // Network/polling errors — continue polling
         console.error('Poll error:', e);
       }
     }
+    lastPollErrorRef.current = '生成超时，AI 模型响应时间过长，请稍后重试或切换其他模型';
     return null;
   }, [getCurrentModel]);
 
@@ -3983,10 +4008,11 @@ export function InfiniteCanvas({
           modifyPrompt: `${upMultiplier}x HD ${upscalePreset.toUpperCase()} 放大`,
         });
       } else {
+        const pollError = lastPollErrorRef.current || '放大超时，请重试';
         updateProcessingFrame(placeholderId, {
           progress: -1,
-          status: '❌ 放大超时，请重试',
-          error: '放大超时，请重试',
+          status: `❌ ${pollError}`,
+          error: pollError,
         });
         setTimeout(() => removeProcessingFrame(placeholderId), 5000);
       }
@@ -4089,7 +4115,7 @@ export function InfiniteCanvas({
           modifyPrompt: '背景移除',
         });
       } else {
-        alert('移除背景超时，请重试');
+        alert(lastPollErrorRef.current || '移除背景超时，请重试');
       }
     } catch (e) {
       console.error('Remove background error:', e);
@@ -4205,6 +4231,27 @@ export function InfiniteCanvas({
             modifyPrompt: modeLabel,
           });
         }
+      } else if (data.fallbackToClient) {
+        // 服务端vtracers不可用，降级到客户端JS矢量化
+        updateProcessingFrame(placeholderId, { progress: 30, status: '正在使用本地矢量化引擎...' });
+        try {
+          const { exportAsSVG } = await import('@/lib/svg-export');
+          const modeConfig: Record<string, 'fast' | 'pro' | 'studio'> = { color: 'pro', bw: 'fast' };
+          const svgResult = await exportAsSVG(img.url, { mode: modeConfig[svgTraceMode] || 'fast' });
+          if (svgResult && svgResult.svgString) {
+            const svgDataUrl = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgResult.svgString)))}`;
+            completeProcessingFrame(placeholderId, svgDataUrl, img.width, img.height, {
+              originalWidth: img.originalWidth || Math.round(img.width),
+              originalHeight: img.originalHeight || Math.round(img.height),
+              modifyPrompt: `${modeLabel} (本地引擎)`,
+            });
+          } else {
+            throw new Error('本地矢量化引擎未能生成结果');
+          }
+        } catch (clientErr) {
+          console.error('Client-side vectorization failed:', clientErr);
+          throw new Error('矢量化暂不可用，请稍后重试');
+        }
       } else {
         throw new Error(data.error || '处理失败');
       }
@@ -4266,7 +4313,7 @@ export function InfiniteCanvas({
         updateProcessingFrame(placeholderId, { progress, status });
       });
       if (!resultUrl) {
-        alert('多角度生成超时，请重试');
+        alert(lastPollErrorRef.current || '多角度生成超时，请重试');
         return;
       }
       updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入新角度图片...' });
@@ -4838,10 +4885,11 @@ export function InfiniteCanvas({
             completeProcessingFrame(placeholderId, resultUrl, currentEditImg.width, currentEditImg.height, { originalWidth: currentEditImg.originalWidth || Math.round(currentEditImg.width), originalHeight: currentEditImg.originalHeight || Math.round(currentEditImg.height) });
           }
         } else {
+          const pollError = lastPollErrorRef.current || '未获取到结果';
           updateProcessingFrame(placeholderId, {
             progress: -1,
-            status: '❌ 未获取到结果',
-            error: '未获取到结果',
+            status: `❌ ${pollError}`,
+            error: pollError,
           });
           setTimeout(() => removeProcessingFrame(placeholderId), 5000);
         }
@@ -5184,7 +5232,8 @@ export function InfiniteCanvas({
             completeProcessingFrame(placeholderId, resultUrl, currentEditImg.width * (finalW / origW), currentEditImg.height * (finalH / origH), { originalWidth: finalW, originalHeight: finalH });
           }
         } else {
-          alert('扩展超时，请重试');
+          const pollError = lastPollErrorRef.current || '扩展超时，请重试';
+          alert(pollError);
           removeProcessingFrame(placeholderId);
         }
       } catch (e) {
