@@ -5230,6 +5230,32 @@ export function InfiniteCanvas({
 
   // Mask keyword confirm
   // Download handlers
+  /** Ensure an SVG string has viewBox and xmlns:xlink for Adobe Illustrator compatibility */
+  function ensureSvgAiCompatible(svgStr: string): string {
+    try {
+      // Add xmlns:xlink if missing
+      if (!svgStr.includes('xmlns:xlink')) {
+        svgStr = svgStr.replace('<svg ', '<svg xmlns:xlink="http://www.w3.org/1999/xlink" ');
+      }
+      // Add viewBox if missing — derive from width/height
+      if (!svgStr.includes('viewBox')) {
+        const wMatch = svgStr.match(/width="(\d+(?:\.\d+)?)"[^>]*height="(\d+(?:\.\d+)?)"/);
+        const hMatch = svgStr.match(/height="(\d+(?:\.\d+)?)"[^>]*width="(\d+(?:\.\d+)?)"/);
+        let w = 0, h = 0;
+        if (wMatch) { w = parseFloat(wMatch[1]); h = parseFloat(wMatch[2]); }
+        else if (hMatch) { h = parseFloat(hMatch[1]); w = parseFloat(hMatch[2]); }
+        if (w > 0 && h > 0) {
+          svgStr = svgStr.replace('<svg ', `<svg viewBox="0 0 ${w} ${h}" `);
+        }
+      }
+      // Ensure xml declaration
+      if (!svgStr.startsWith('<?xml')) {
+        svgStr = '<?xml version="1.0" encoding="UTF-8"?>\n' + svgStr;
+      }
+    } catch { /* best effort */ }
+    return svgStr;
+  }
+
   const handleDownloadImage = async (image: CanvasImage, format: string = 'png') => {
     try {
       if (format === '3d') {
@@ -5260,6 +5286,32 @@ export function InfiniteCanvas({
         return;
       }
       if (format === 'svg') {
+        // If image URL is already an SVG data URL (from SVG描摹), download directly
+        if (image.url.startsWith('data:image/svg+xml')) {
+          setDownloadProgress('正在导出矢量图...');
+          try {
+            let svgContent = decodeURIComponent(image.url.replace(/^data:image\/svg\+xml;charset=utf-8,/, ''));
+            // Apply AI-compatible sanitization: add viewBox, ensure proper namespaces
+            svgContent = ensureSvgAiCompatible(svgContent);
+            const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${image.prompt?.substring(0, 30) || 'vector'}.svg`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          } catch {
+            // Fallback to re-vectorize if data URL parsing fails
+            const { downloadSVG } = await import('@/lib/svg-export');
+            await downloadSVG(image.url, svgMode);
+          }
+          setDownloadProgress(null);
+          setShowDownloadPopup(false);
+          setActiveTool('none');
+          return;
+        }
         setDownloadProgress('正在矢量化...');
         const { downloadSVG } = await import('@/lib/svg-export');
         await downloadSVG(image.url, svgMode, (stage, progress) => {

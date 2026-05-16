@@ -494,6 +494,33 @@ function sanitizeSvgForIllustrator(svg: string, sourceWidth?: number, sourceHeig
   if (ptWidth) svg = svg.replace(/width="[\d.]+pt"/, `width="${parseFloat(ptWidth[1])}"`);
   if (ptHeight) svg = svg.replace(/height="[\d.]+pt"/, `height="${parseFloat(ptHeight[1])}"`);
 
+  // ─── VTracer-specific: bake transform="translate(x,y)" into path coordinates ───
+  // VTracer uses translate on each <path> for stacking; Illustrator sometimes fails to parse these.
+  // We inline the translation directly into path data so no transform remains.
+  svg = svg.replace(/<path\s+([^>]*)\/>/g, (_match: string, attrs: string) => {
+    const transformMatch = attrs.match(/transform="translate\(([^,]+),([^)]+)\)"/);
+    if (!transformMatch) return _match; // no transform, keep as-is
+
+    const tx = parseFloat(transformMatch[1]);
+    const ty = parseFloat(transformMatch[2]);
+    if (Number.isNaN(tx) || Number.isNaN(ty) || (tx === 0 && ty === 0)) {
+      // Zero or invalid transform, just remove the attribute
+      const cleanAttrs = attrs.replace(/\s*transform="translate\([^)]+\)"/, '');
+      return `<path ${cleanAttrs}/>`;
+    }
+
+    // Bake translate into the d attribute coordinates
+    const dMatch = attrs.match(/d="([^"]+)"/);
+    if (!dMatch) return _match; // no d attribute, keep as-is
+
+    const newD = bakeTranslateIntoPath(dMatch[1], tx, ty);
+    const cleanAttrs = attrs
+      .replace(/d="[^"]+"/, `d="${newD}"`)
+      .replace(/\s*transform="translate\([^)]+\)"/, '');
+
+    return `<path ${cleanAttrs}/>`;
+  });
+
   // ─── Convert style="fill:#xxx" to fill="#xxx" (Illustrator prefers presentation attributes) ───
   svg = convertStyleToPresentationAttrs(svg);
 
@@ -524,6 +551,14 @@ function sanitizeSvgForIllustrator(svg: string, sourceWidth?: number, sourceHeig
   if (xmlnsCount > 1) {
     svg = svg.replace(/xmlns="http:\/\/www\.w3\.org\/2000\/svg"/g, '');
     svg = svg.replace(/<svg\b/, '<svg xmlns="http://www.w3.org/2000/svg"');
+  }
+
+  // ─── Add xmlns:xlink for Illustrator compatibility (some AI versions expect it) ───
+  if (!svg.includes('xmlns:xlink=')) {
+    svg = svg.replace(
+      /xmlns="http:\/\/www\.w3\.org\/2000\/svg"/,
+      'xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"'
+    );
   }
 
   // Remove preserveAspectRatio (let AI use default)
@@ -785,6 +820,79 @@ function transformPotracePath(d: string, tx: number, ty: number, sx: number, sy:
       result += ch; i++;
     }
   }
+  return result;
+}
+
+/**
+ * Bake a simple translate(x,y) transform into SVG path data coordinates.
+ * This eliminates transform attributes that Illustrator sometimes fails to parse.
+ *
+ * For absolute commands (M, L, H, V, C, S, Q, T, A) we add tx/ty to x and y coords.
+ * For relative commands (m, l, h, v, c, s, q, t, a) we leave coords unchanged
+ * (relative coords are already relative to the previous point, so translate is implicitly applied).
+ */
+function bakeTranslateIntoPath(d: string, tx: number, ty: number): string {
+  let result = '';
+  let i = 0;
+  let currentCmd = '';
+
+  const isAbs = (cmd: string) => 'MLHVCSQTA'.includes(cmd);
+  const isRel = (cmd: string) => 'mlhvcsqta'.includes(cmd);
+
+  const r = (v: number) => {
+    const rounded = Math.round(v * 100) / 100;
+    return String(rounded);
+  };
+
+  while (i < d.length) {
+    const ch = d[i];
+
+    if (isAbs(ch) || isRel(ch)) {
+      currentCmd = ch;
+      result += ch;
+      i++;
+    } else if (ch === 'Z' || ch === 'z') {
+      result += ch;
+      i++;
+    } else if ((ch >= '0' && ch <= '9') || ch === '-' || ch === '+' || ch === '.') {
+      // Parse a number (possibly negative, with decimal)
+      const numStart = i;
+      if (d[i] === '-' || d[i] === '+') i++;
+      while (i < d.length && ((d[i] >= '0' && d[i] <= '9') || d[i] === '.')) i++;
+      const num = parseFloat(d.slice(numStart, i));
+
+      if (isAbs(currentCmd)) {
+        // For absolute commands, add translate offset to coordinates
+        if ('MLCSQTA'.includes(currentCmd)) {
+          // These commands come in (x,y) pairs — the number we just read is x
+          result += r(num + tx);
+          // Skip separator
+          while (i < d.length && (d[i] === ',' || d[i] === ' ')) { result += d[i]; i++; }
+          // Read y
+          const yStart = i;
+          if (d[i] === '-' || d[i] === '+') i++;
+          while (i < d.length && ((d[i] >= '0' && d[i] <= '9') || d[i] === '.')) i++;
+          const y = parseFloat(d.slice(yStart, i));
+          result += r(y + ty);
+        } else if (currentCmd === 'H') {
+          // Horizontal: only x coordinate
+          result += r(num + tx);
+        } else if (currentCmd === 'V') {
+          // Vertical: only y coordinate
+          result += r(num + ty);
+        } else {
+          result += r(num);
+        }
+      } else {
+        // Relative commands: no translation needed (coords are deltas)
+        result += r(num);
+      }
+    } else {
+      result += ch;
+      i++;
+    }
+  }
+
   return result;
 }
 
