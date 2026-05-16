@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderById, findProviderForFeature, findAllProvidersForType, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, convertAspectRatioToSize, buildPollUrl, type ApiCompatProfile, type ImageEndpoint } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, convertAspectRatioToSize, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, type ApiCompatProfile, type ImageEndpoint } from '@/lib/api-compatibility';
 import { saveImageFile } from '@/lib/server-data-root';
 import sharp from 'sharp';
 import fsSync from 'fs';
@@ -503,6 +503,43 @@ async function submitImageTask(
       const errorJson = JSON.parse(errorText);
       if (errorJson.error?.message) errorMsg = errorJson.error.message;
     } catch { /* ignore */ }
+
+    // 自动回退：如果 /images/edits 端点不被支持，回退到 /images/generations
+    if (effectiveEndpoint === '/images/edits' && isEditsEndpointRejected(submitResponse.status, errorMsg)) {
+      console.log('[submitImageTask] /images/edits rejected, auto-falling back to /images/generations');
+      const fallbackBody = stripEditsOnlyFields(adjustedBody);
+      const fallbackEndpoint: ImageEndpoint = '/images/generations';
+      try {
+        const fallbackResponse = await fetchWithV1Retry(
+          apiBaseUrl,
+          fallbackEndpoint,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(fallbackBody),
+            signal: AbortSignal.timeout(60000),
+          }
+        );
+        if (fallbackResponse.ok) {
+          console.log('[submitImageTask] fallback to /images/generations succeeded');
+          const fallbackText = await fallbackResponse.text();
+          const fallbackJson = JSON.parse(fallbackText);
+          const parsed = parseResponseForProfile(fallbackJson, profile);
+          return {
+            taskId: parsed.taskIds?.[0],
+            directUrl: parsed.directImageUrls?.[0],
+          };
+        } else {
+          const fallbackErrorText = await fallbackResponse.text();
+          console.error('[submitImageTask] fallback also failed:', fallbackResponse.status, fallbackErrorText);
+        }
+      } catch (fallbackErr) {
+        console.error('[submitImageTask] fallback request error:', fallbackErr);
+      }
+    }
 
     // 清理常见 API 错误信息，提供更友好的中文提示
     if (errorMsg.includes('ratio or price') || errorMsg.includes('not configured')) {
@@ -1938,8 +1975,13 @@ export async function POST(request: NextRequest) {
       await fs.writeFile(compositePath, compositeImage);
       await fs.writeFile(maskPath, finalMask);
 
-      // 始终使用 base64 数据 URL 发送图片（避免文件系统权限问题和外部 API 访问问题）
-      const compositeBase64 = `data:image/png;base64,${compositeImage.toString('base64')}`;
+      // 构建发送给AI的参考图（使用JPEG压缩+尺寸限制，避免请求体过大被代理拒绝）
+      const maxRefEdge = 1024;
+      const compositeRefBuffer = await sharp(compositeImage)
+        .resize(maxRefEdge, maxRefEdge, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 85 })
+        .toBuffer();
+      const compositeBase64 = `data:image/jpeg;base64,${compositeRefBuffer.toString('base64')}`;
       const maskFileBase64 = `data:image/png;base64,${finalMask.toString('base64')}`;
 
       // 构建扩图方向的提示词

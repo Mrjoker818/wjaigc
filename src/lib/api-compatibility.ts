@@ -389,15 +389,14 @@ export function adjustRequestForProfile(
   }
 
   // --- Endpoint selection ---
-  // Respect the profile's editEndpoint when a source image is present.
-  // - Profiles with editEndpoint='/images/edits' (e.g. standard OpenAI)
-  //   will route to /images/edits where the `image` field is mandatory.
-  // - Profiles with editEndpoint='/images/generations' (e.g. proxy adapters)
-  //   will stay on /images/generations where `image_urls` is used for
-  //   reference images. These adapters reject /images/edits.
+  // When a source image is present, always try /images/edits first.
+  // This is the standard OpenAI endpoint for image editing where the `image`
+  // field is mandatory — the AI MUST process the source image.
+  // Callers should auto-fallback to /images/generations if /images/edits
+  // is rejected (e.g. by proxy adapters that don't support it).
   let endpoint: ImageEndpoint;
   if (hasImage || isEditEndpoint) {
-    endpoint = profile.editEndpoint;
+    endpoint = '/images/edits';
   } else {
     endpoint = profile.defaultEndpoint;
   }
@@ -412,16 +411,37 @@ export function adjustRequestForProfile(
     delete body.input_fidelity;
   }
 
-  // --- Clean up request body based on endpoint ---
-  // /images/generations: proxies reject the `image` field ("direct image relay").
-  //   Reference images must go through `image_urls` only.
-  // /images/edits: the `image` field is mandatory (source image to edit).
-  if (endpoint === '/images/generations') {
-    delete body.image;
-    delete body.mask;
-  }
-
   return { body, endpoint };
+}
+
+/**
+ * Strip fields that are only valid on /images/edits so the request body
+ * becomes compatible with /images/generations.  Reference images are
+ * preserved through `image_urls`.
+ */
+export function stripEditsOnlyFields(body: Record<string, unknown>): void {
+  delete body.image;
+  delete body.mask;
+  delete body.strength;
+}
+
+/**
+ * Check whether an API error response indicates that /images/edits is
+ * not supported (generic / universal errors from proxy adapters).
+ * This is provider-agnostic — we simply check for common rejection patterns.
+ */
+export function isEditsEndpointRejected(status: number, errorBody: string): boolean {
+  if (status >= 500) return false; // server errors → not an endpoint rejection
+  // Common patterns when /images/edits is not supported by the provider
+  const lower = errorBody.toLowerCase();
+  return (
+    lower.includes('not supported') ||
+    lower.includes('not found') ||
+    lower.includes('direct image relay') ||
+    lower.includes('task submission flow') ||
+    lower.includes('route') ||
+    (status === 404) // endpoint doesn't exist
+  );
 }
 
 // ---------------------------------------------------------------------------

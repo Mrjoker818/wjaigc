@@ -4,7 +4,7 @@ import { findProviderForModel, normalizeApiBaseUrl, findAllProvidersForType, fin
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, type ApiCompatProfile } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile } from '@/lib/api-compatibility';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
@@ -501,37 +501,65 @@ export async function POST(request: NextRequest) {
 
         if (!submitResponse.ok) {
           const errorText = await submitResponse.text();
-          const needsMultipart = errorText.includes('multipart') ||
-            errorText.includes('form-data') ||
-            errorText.includes('Content-Type') ||
-            errorText.includes('expected multipart') ||
-            errorText.includes('no file') ||
-            errorText.includes('file required') ||
-            errorText.includes('Missing image');
 
-          if (needsMultipart) {
-            console.info('[generate] JSON failed for edits endpoint, retrying with multipart form data...');
+          // 检查是否是不支持 /images/edits 端点的错误 → 自动回退到 /images/generations
+          if (isEditsEndpointRejected(submitResponse.status, errorText)) {
+            console.info('[generate] /images/edits rejected by API, auto-falling back to /images/generations with image_urls only...');
             clearTimeout(timeoutId);
 
-            const multipartController = new AbortController();
-            const multipartTimeoutId = setTimeout(() => multipartController.abort(), timeoutMs);
+            const fallbackController = new AbortController();
+            const fallbackTimeoutId = setTimeout(() => fallbackController.abort(), timeoutMs);
 
+            const fallbackBody = stripEditsOnlyFields(adjustedBody);
             submitResponse = await fetchWithV1Retry(
               currentApiBaseUrl,
-              endpoint,
+              '/images/generations',
               {
                 method: 'POST',
                 headers: {
                   'Authorization': `Bearer ${currentApiKey}`,
+                  'Content-Type': 'application/json',
                 },
-                body: buildMultipartBody(),
-                signal: multipartController.signal,
+                body: JSON.stringify(fallbackBody),
+                signal: fallbackController.signal,
               }
             );
 
-            clearTimeout(multipartTimeoutId);
+            clearTimeout(fallbackTimeoutId);
           } else {
-            clearTimeout(timeoutId);
+            // 检查是否需要 multipart 编码
+            const needsMultipart = errorText.includes('multipart') ||
+              errorText.includes('form-data') ||
+              errorText.includes('Content-Type') ||
+              errorText.includes('expected multipart') ||
+              errorText.includes('no file') ||
+              errorText.includes('file required') ||
+              errorText.includes('Missing image');
+
+            if (needsMultipart) {
+              console.info('[generate] JSON failed for edits endpoint, retrying with multipart form data...');
+              clearTimeout(timeoutId);
+
+              const multipartController = new AbortController();
+              const multipartTimeoutId = setTimeout(() => multipartController.abort(), timeoutMs);
+
+              submitResponse = await fetchWithV1Retry(
+                currentApiBaseUrl,
+                endpoint,
+                {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${currentApiKey}`,
+                  },
+                  body: buildMultipartBody(),
+                  signal: multipartController.signal,
+                }
+              );
+
+              clearTimeout(multipartTimeoutId);
+            } else {
+              clearTimeout(timeoutId);
+            }
           }
         } else {
           clearTimeout(timeoutId);
