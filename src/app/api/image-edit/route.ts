@@ -2048,14 +2048,24 @@ export async function POST(request: NextRequest) {
 
       // ★ 关键修复：将合成图（原图+灰色边框）作为参考图发送给 AI
       // 如果不发送参考图，AI 不知道原图内容，会生成与原图完全无关的内容
+      //
+      // 对于 /images/edits 端点（标准 OpenAI）:
+      //   - `image` 字段是必须的（AI 必须编辑这张图）
+      //   - `mask` 字段告诉 AI 哪里需要生成（白色=生成区域）
+      //
+      // 对于 /images/generations 端点（代理适配器）:
+      //   - `image` 和 `mask` 会被兼容层自动移除（代理拒绝 "direct image relay"）
+      //   - 仅通过 `image_urls` 传递参考图
+      //   - 提示词中已包含扩展指引，AI 根据参考图+提示词理解任务
       genBody.image = compositeBase64;
       genBody.image_urls = [compositeBase64];
-      // 蒙版：白色=需要AI生成的区域，黑色=保留原图的区域
       genBody.mask = maskFileBase64;
-      // 扩图时 strength 设为较高值（0.7），让 AI 在保留原图内容的同时扩展边缘
       genBody.strength = 0.7;
 
-      // Submit to AI model API (hasImage=true 让兼容层选择 /images/edits 端点)
+      // Submit to AI model API
+      // 兼容层会根据 profile 的 editEndpoint 决定最终端点:
+      //   - OpenAI profile → /images/edits（保留 image + mask）
+      //   - Proxy adapter profile → /images/generations（自动删除 image + mask，仅用 image_urls）
       const cm = candidateModels[0];
       const result = await submitImageTask(
         cm.apiBaseUrl, cm.apiKey, genBody, '/images/edits',

@@ -389,14 +389,14 @@ export function adjustRequestForProfile(
   }
 
   // --- Endpoint selection ---
-  // When a source image is present (img2img, outpaint, inpaint, etc.),
-  // always use /images/edits — this is the standard OpenAI endpoint for
-  // image editing that accepts a source `image` field. /images/generations
-  // is only for text-to-image and will ignore reference images.
+  // Respect the profile's editEndpoint when a source image is present.
+  // - Profiles with editEndpoint='/images/edits' (e.g. standard OpenAI)
+  //   will route to /images/edits where the `image` field is mandatory.
+  // - Profiles with editEndpoint='/images/generations' (e.g. proxy adapters)
+  //   will stay on /images/generations where `image_urls` is used for
+  //   reference images. These adapters reject /images/edits.
   let endpoint: ImageEndpoint;
-  if (hasImage) {
-    endpoint = '/images/edits';
-  } else if (isEditEndpoint) {
+  if (hasImage || isEditEndpoint) {
     endpoint = profile.editEndpoint;
   } else {
     endpoint = profile.defaultEndpoint;
@@ -404,14 +404,21 @@ export function adjustRequestForProfile(
 
   // --- input_fidelity ---
   if (profile.supportsInputFidelity && hasImage && endpoint === '/images/edits') {
-    // Add input_fidelity: 'high' for better image fidelity in edits
     if (!body.input_fidelity) {
       body.input_fidelity = 'high';
     }
   }
-  // Remove input_fidelity if provider doesn't support it or not in edits mode
   if (!profile.supportsInputFidelity || endpoint !== '/images/edits') {
     delete body.input_fidelity;
+  }
+
+  // --- Clean up request body based on endpoint ---
+  // /images/generations: proxies reject the `image` field ("direct image relay").
+  //   Reference images must go through `image_urls` only.
+  // /images/edits: the `image` field is mandatory (source image to edit).
+  if (endpoint === '/images/generations') {
+    delete body.image;
+    delete body.mask;
   }
 
   return { body, endpoint };
