@@ -109,6 +109,11 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   // ★ 多轮上下文历史（最近5轮编辑记录，用于LLM连续理解）
   const [editContextHistory, setEditContextHistory] = useState<Array<{userPrompt: string; llmInstruction: string}>>([]);
 
+  // ★ LLM自动区域识别 + 自动Mask
+  const [autoMaskPreview, setAutoMaskPreview] = useState<string | null>(null); // 预览用data URL
+  const [showAutoMaskConfirm, setShowAutoMaskConfirm] = useState(false); // 是否显示确认弹窗
+  const [pendingAutoRegions, setPendingAutoRegions] = useState<Array<{ label: string; bounds: { x: number; y: number; width: number; height: number } }>>([]);
+
   // 当前选中的图像模型
   const currentImageModel = (() => {
     if (!selectedModelKey.startsWith('server::')) return null;
@@ -350,6 +355,12 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (e.button !== 0 || !currentModelSupportsMask) return;
+    // 手动画笔与自动mask互斥：开始手绘时清除自动mask
+    if (autoMaskPreview || showAutoMaskConfirm) {
+      setAutoMaskPreview(null);
+      setShowAutoMaskConfirm(false);
+      setPendingAutoRegions([]);
+    }
     setIsDrawing(true);
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -358,7 +369,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     const rect = canvas.getBoundingClientRect();
     ctx.beginPath();
     ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
-  }, [currentModelSupportsMask]);
+  }, [currentModelSupportsMask, autoMaskPreview, showAutoMaskConfirm]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing) return;
@@ -784,20 +795,26 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       const collectedUrls: string[] = [];
       let firstError = '';
       let collectedLlmInstruction = ''; // 记录LLM优化指令，用于多轮上下文
+      let collectedEditRegions: Array<{ label: string; bounds: { x: number; y: number; width: number; height: number } }> = [];
 
       for (const result of results) {
         if (result.status === 'fulfilled') {
           const { data } = result.value;
           if (data.success && data.image?.url) {
             collectedUrls.push(data.image.url);
-            // 取第一个成功结果的 llmInstruction
             if (!collectedLlmInstruction && data.llmInstruction) {
               collectedLlmInstruction = data.llmInstruction;
+            }
+            if (collectedEditRegions.length === 0 && data.editRegions && Array.isArray(data.editRegions) && data.editRegions.length > 0) {
+              collectedEditRegions = data.editRegions;
             }
           } else if (data.images) {
             collectedUrls.push(...data.images.map((img: { url: string }) => img.url));
             if (!collectedLlmInstruction && data.llmInstruction) {
               collectedLlmInstruction = data.llmInstruction;
+            }
+            if (collectedEditRegions.length === 0 && data.editRegions && Array.isArray(data.editRegions) && data.editRegions.length > 0) {
+              collectedEditRegions = data.editRegions;
             }
           } else if (!firstError && data.error) {
             firstError = data.error;
@@ -830,6 +847,39 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         setCurrentImageUrl(collectedUrls[0]);
         clearMask();
 
+        // ★ LLM自动区域识别：生成自动mask预览供用户确认
+        if (collectedEditRegions.length > 0) {
+          try {
+            const origW = image?.originalWidth || image?.width || 400;
+            const origH = image?.originalHeight || image?.height || 400;
+            const previewCanvas = document.createElement('canvas');
+            previewCanvas.width = origW;
+            previewCanvas.height = origH;
+            const previewCtx = previewCanvas.getContext('2d');
+            if (previewCtx) {
+              // 黑色背景（保留区域）
+              previewCtx.fillStyle = '#000000';
+              previewCtx.fillRect(0, 0, origW, origH);
+              // 白色椭圆（编辑区域）
+              previewCtx.fillStyle = '#ffffff';
+              for (const region of collectedEditRegions) {
+                const cx = (region.bounds.x + region.bounds.width / 2) * origW;
+                const cy = (region.bounds.y + region.bounds.height / 2) * origH;
+                const rx = (region.bounds.width / 2) * origW;
+                const ry = (region.bounds.height / 2) * origH;
+                previewCtx.beginPath();
+                previewCtx.ellipse(cx, cy, Math.max(1, rx), Math.max(1, ry), 0, 0, Math.PI * 2);
+                previewCtx.fill();
+              }
+              setAutoMaskPreview(previewCanvas.toDataURL('image/png'));
+              setPendingAutoRegions(collectedEditRegions);
+              setShowAutoMaskConfirm(true);
+            }
+          } catch (maskErr) {
+            console.warn('Auto mask preview generation failed:', maskErr);
+          }
+        }
+
         if (collectedUrls.length < requestCount && firstError) {
           setError(`已生成 ${collectedUrls.length}/${requestCount} 张，部分失败: ${firstError}`);
         }
@@ -847,6 +897,35 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       setIsLoading(false);
     }
   }, [prompt, selectedModelKey, selectedLlmKey, currentImageUrl, aspectRatio, quality, outputCount, currentModelSupportsMask, exportMask, clearMask, currentHistoryIndex, referenceImages, imageToDataUrl, compressImageDataUrl]);
+
+  // ★ 确认使用自动Mask（将预览mask绘制到Canvas上，与手动mask互斥）
+  const handleConfirmAutoMask = useCallback(() => {
+    if (autoMaskPreview) {
+      // 将自动mask绘制到画布上
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          const img = new Image();
+          img.onload = () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          };
+          img.src = autoMaskPreview;
+        }
+      }
+    }
+    setAutoMaskPreview(null);
+    setShowAutoMaskConfirm(false);
+    setPendingAutoRegions([]);
+  }, [autoMaskPreview]);
+
+  // ★ 取消自动Mask
+  const handleCancelAutoMask = useCallback(() => {
+    setAutoMaskPreview(null);
+    setShowAutoMaskConfirm(false);
+    setPendingAutoRegions([]);
+  }, []);
 
   const handleConfirmResult = useCallback((url?: string) => {
     if (url) {
@@ -871,6 +950,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     setResultImages([]);
     setSelectedResultIndexes(new Set());
     setEditContextHistory([]);
+    setAutoMaskPreview(null);
+    setShowAutoMaskConfirm(false);
+    setPendingAutoRegions([]);
     onClose();
   }, [resultImages, selectedResultIndexes, prompt, image?.prompt, onConfirm, onClose, aspectRatio]);
 
@@ -1004,7 +1086,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             <Pencil className="h-4 w-4 text-[#d4af37]" />
             语言修图
           </h2>
-          <button onClick={() => { setEditContextHistory([]); onClose(); }} className="p-1 rounded-lg hover:bg-[#2a2a2a] transition-colors">
+          <button onClick={() => { setEditContextHistory([]); setAutoMaskPreview(null); setShowAutoMaskConfirm(false); setPendingAutoRegions([]); onClose(); }} className="p-1 rounded-lg hover:bg-[#2a2a2a] transition-colors">
             <X className="h-4 w-4 text-[#888]" />
           </button>
         </div>
@@ -1643,6 +1725,48 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                 })}
               </div>
             ) : null}
+          </div>
+        </div>
+      )}
+
+      {/* ★ LLM自动区域识别 - Mask确认弹窗 */}
+      {showAutoMaskConfirm && pendingAutoRegions.length > 0 && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-[#1a1a1a] border border-[#d4af37]/40 rounded-xl p-4 max-w-xs w-full mx-4 shadow-2xl">
+            <div className="flex items-center gap-2 mb-3">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d4af37" strokeWidth="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+              </svg>
+              <span className="text-[#d4af37] text-xs font-semibold">AI 识别到编辑区域</span>
+            </div>
+            <div className="mb-3 space-y-1">
+              {pendingAutoRegions.map((region, idx) => (
+                <div key={idx} className="flex items-center gap-2 text-[11px] text-[#ccc]">
+                  <span className="w-4 h-4 rounded bg-[#d4af37]/20 flex items-center justify-center text-[#d4af37] text-[9px] font-mono">{idx + 1}</span>
+                  <span>{region.label || `区域 ${idx + 1}`}</span>
+                </div>
+              ))}
+            </div>
+            {autoMaskPreview && (
+              <div className="mb-3 rounded-lg overflow-hidden border border-[#333]">
+                <img src={autoMaskPreview} alt="自动蒙版预览" className="w-full h-auto max-h-32 object-contain" />
+              </div>
+            )}
+            <p className="text-[10px] text-[#888] mb-3">确认后将自动生成蒙版，手动涂抹与自动蒙版互斥</p>
+            <div className="flex gap-2">
+              <button
+                onClick={handleConfirmAutoMask}
+                className="flex-1 px-3 py-1.5 text-xs bg-[#d4af37] hover:bg-[#daa520] text-black rounded-lg font-medium transition-all"
+              >
+                应用蒙版
+              </button>
+              <button
+                onClick={handleCancelAutoMask}
+                className="flex-1 px-3 py-1.5 text-xs bg-[#2a2a2a] hover:bg-[#3a3a3a] text-[#ccc] rounded-lg font-medium transition-all"
+              >
+                跳过
+              </button>
+            </div>
           </div>
         </div>
       )}

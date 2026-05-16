@@ -329,6 +329,7 @@ export async function POST(request: NextRequest) {
     // 协作流程：LLM 分析原图内容 → 理解用户意图 → 结合蒙版区域 → 生成精准编辑指令
     let effectivePrompt = prompt;
     let llmInstruction = prompt; // LLM 生成的精准指令，无 LLM 参与时等于原始 prompt
+    let llmEditRegions: Array<{ label: string; bounds: { x: number; y: number; width: number; height: number } }> = []; // LLM 识别的编辑区域
 
     if (llmModelId && llmProviderId) {
       try {
@@ -456,9 +457,19 @@ ${prompt}
 4. 如果有蒙版信息，强调只在标记区域修改
 5. 如果有历史编辑记录，保持与之前修改的一致性和连贯性
 6. 指令要具体、可执行，包含视觉细节（颜色、纹理、光影等）
-7. 只输出编辑指令本身，不要任何解释或前缀
+7. 如果编辑仅涉及图片的局部区域（如背景、某个物体、某个区域），在指令末尾用\`\`\`json代码块输出edit_regions，格式如下：
+\`\`\`json
+{
+  "edit_regions": [
+    { "label": "区域描述", "bounds": { "x": 0.1, "y": 0.2, "width": 0.5, "height": 0.6 } }
+  ]
+}
+\`\`\`
+   其中bounds为0-1相对坐标（x=左, y=上, width=宽, height=高），表示需要修改的区域范围。
+8. 如果编辑是全局性的（如整体色调、整体风格），不需要输出edit_regions，留空即可
+9. 输出格式：先输出英文编辑指令，然后如果有局部区域则附上\`\`\`json代码块
 
-请直接输出英文编辑指令：`,
+请输出：`,
             },
           ];
           // 让LLM也看到原图，辅助理解
@@ -490,9 +501,51 @@ ${prompt}
                 ? ((optimizeChoices[0].message as Record<string, unknown>).content)
                 : undefined;
               if (optimizeContent && String(optimizeContent).trim()) {
-                effectivePrompt = String(optimizeContent).trim();
-                llmInstruction = effectivePrompt; // 记录 LLM 生成的精准指令
-                console.log(`[LLM协作] 原始prompt: "${prompt}" → 优化后: "${effectivePrompt.substring(0, 100)}..."`);
+                const rawContent = String(optimizeContent).trim();
+                // 解析 edit_regions（从 ```json 代码块或正则提取）
+                let parsedRegions: Array<{ label: string; bounds: { x: number; y: number; width: number; height: number } }> = [];
+                try {
+                  // 方式1: 尝试从 ```json 代码块提取
+                  const jsonBlockMatch = rawContent.match(/```json\s*\n?([\s\S]*?)\n?\s*```/);
+                  if (jsonBlockMatch) {
+                    const parsed = JSON.parse(jsonBlockMatch[1]);
+                    if (parsed.edit_regions && Array.isArray(parsed.edit_regions)) {
+                      parsedRegions = parsed.edit_regions;
+                    }
+                  }
+                  // 方式2: 正则提取 JSON 对象
+                  if (parsedRegions.length === 0) {
+                    const jsonObjectMatch = rawContent.match(/\{[\s\S]*"edit_regions"[\s\S]*\}/);
+                    if (jsonObjectMatch) {
+                      const parsed = JSON.parse(jsonObjectMatch[0]);
+                      if (parsed.edit_regions && Array.isArray(parsed.edit_regions)) {
+                        parsedRegions = parsed.edit_regions;
+                      }
+                    }
+                  }
+                  // 坐标校验裁剪到 0-1 范围
+                  parsedRegions = parsedRegions.filter((r: { label?: string; bounds?: { x: number; y: number; width: number; height: number } }) =>
+                    r.bounds && typeof r.bounds.x === 'number' && typeof r.bounds.y === 'number' &&
+                    typeof r.bounds.width === 'number' && typeof r.bounds.height === 'number'
+                  ).map((r: { label: string; bounds: { x: number; y: number; width: number; height: number } }) => ({
+                    label: r.label || '',
+                    bounds: {
+                      x: Math.max(0, Math.min(1, r.bounds.x)),
+                      y: Math.max(0, Math.min(1, r.bounds.y)),
+                      width: Math.max(0, Math.min(1 - Math.max(0, Math.min(1, r.bounds.x)), r.bounds.width)),
+                      height: Math.max(0, Math.min(1 - Math.max(0, Math.min(1, r.bounds.y)), r.bounds.height)),
+                    },
+                  }));
+                } catch (parseErr) {
+                  console.warn('Failed to parse edit_regions, defaulting to empty:', parseErr);
+                  parsedRegions = [];
+                }
+                // 从指令文本中移除 json 代码块，保留纯编辑指令
+                effectivePrompt = rawContent.replace(/```json\s*\n?[\s\S]*?\n?\s*```/g, '').trim();
+                llmInstruction = effectivePrompt;
+                // 存储解析结果供后续返回使用
+                llmEditRegions = parsedRegions;
+                console.log(`[LLM协作] 原始prompt: "${prompt}" → 优化后: "${effectivePrompt.substring(0, 100)}..." edit_regions: ${parsedRegions.length}个`);
               }
             }
           } catch (optimizeErr) {
@@ -575,6 +628,8 @@ ${prompt}
               model,
               provider: 'openai-images-edit',
               llmInstruction,
+              editRegions: llmEditRegions,
+              autoMaskGenerated: llmEditRegions.length > 0,
             });
           }
           // 提取失败，降级到 chat/completions
@@ -774,6 +829,8 @@ ${prompt}
       model,
       provider: effectiveBaseUrl || 'unknown',
       llmInstruction,
+      editRegions: llmEditRegions,
+      autoMaskGenerated: llmEditRegions.length > 0,
     });
 
   } catch (error: unknown) {
@@ -849,6 +906,8 @@ async function tryImagesGenerations(
     model,
     provider: 'images-generations-fallback',
     llmInstruction: prompt,
+    editRegions: [],
+    autoMaskGenerated: false,
   });
 }
 
