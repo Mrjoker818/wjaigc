@@ -159,8 +159,8 @@ export const PROFILE_AUTO: ApiCompatProfile = {
   responseMode: 'direct',       // will be overridden by actual response
   sizeFormat: 'pixel',          // safe default: convert to pixel format
   defaultEndpoint: '/images/generations',
-  editEndpoint: '/images/edits',
-  editEncoding: 'multipart-only',
+  editEndpoint: '/images/generations',  // Use /images/generations by default for max compatibility
+  editEncoding: 'json-first',          // JSON-first for /images/generations compatibility
   supportsInputFidelity: true,
   pollMode: 'path',
   pollPathTemplate: '/tasks/{taskId}',
@@ -454,12 +454,17 @@ export function isEditsEndpointRejected(status: number, errorBody: string): bool
   return (
     lower.includes('not supported') ||
     lower.includes('not found') ||
+    lower.includes('not available') ||
     lower.includes('direct image relay') ||
     lower.includes('task submission flow') ||
     lower.includes('routed through') ||
     lower.includes('image relay') ||
+    lower.includes('incompatible') ||
+    lower.includes('invalid endpoint') ||
+    lower.includes('unsupported endpoint') ||
     (status === 404) || // endpoint doesn't exist
-    (status === 405)    // method not allowed on this endpoint
+    (status === 405) || // method not allowed on this endpoint
+    (status === 422)    // unprocessable entity — endpoint doesn't accept this payload
   );
 }
 
