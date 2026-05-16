@@ -106,6 +106,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   const [refPickerOpen, setRefPickerOpen] = useState(false); // 从画布选择参考图弹窗
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ★ 多轮上下文历史（最近5轮编辑记录，用于LLM连续理解）
+  const [editContextHistory, setEditContextHistory] = useState<Array<{userPrompt: string; llmInstruction: string}>>([]);
+
   // 当前选中的图像模型
   const currentImageModel = (() => {
     if (!selectedModelKey.startsWith('server::')) return null;
@@ -733,6 +736,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         llmModelId: llmModelId || undefined,
         llmProviderId: llmProviderId || undefined,
         referenceImages: refDataUrls,
+        editHistory: editContextHistory.slice(-5),
       };
 
       // ★ 多图模式：并行发起 outputCount 次请求
@@ -753,14 +757,22 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       // ★ 收集所有成功的图片
       const collectedUrls: string[] = [];
       let firstError = '';
+      let collectedLlmInstruction = ''; // 记录LLM优化指令，用于多轮上下文
 
       for (const result of results) {
         if (result.status === 'fulfilled') {
           const { data } = result.value;
           if (data.success && data.image?.url) {
             collectedUrls.push(data.image.url);
+            // 取第一个成功结果的 llmInstruction
+            if (!collectedLlmInstruction && data.llmInstruction) {
+              collectedLlmInstruction = data.llmInstruction;
+            }
           } else if (data.images) {
             collectedUrls.push(...data.images.map((img: { url: string }) => img.url));
+            if (!collectedLlmInstruction && data.llmInstruction) {
+              collectedLlmInstruction = data.llmInstruction;
+            }
           } else if (!firstError && data.error) {
             firstError = data.error;
           }
@@ -774,6 +786,12 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       if (collectedUrls.length > 0) {
         setResultImages(collectedUrls);
         setSelectedResultIndexes(new Set(collectedUrls.map((_, i) => i)));
+
+        // ★ 更新多轮上下文历史（保留最近5轮）
+        setEditContextHistory(prev => [
+          ...prev.slice(-(5 - 1)),
+          { userPrompt: prompt, llmInstruction: collectedLlmInstruction || prompt },
+        ]);
 
         const newHistoryItem: EditHistoryItem = {
           id: `edit-${Date.now()}`,
@@ -826,6 +844,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     setPrompt('');
     setResultImages([]);
     setSelectedResultIndexes(new Set());
+    setEditContextHistory([]);
     onClose();
   }, [resultImages, selectedResultIndexes, prompt, image?.prompt, onConfirm, onClose, aspectRatio]);
 
@@ -959,7 +978,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             <Pencil className="h-4 w-4 text-[#d4af37]" />
             语言修图
           </h2>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-[#2a2a2a] transition-colors">
+          <button onClick={() => { setEditContextHistory([]); onClose(); }} className="p-1 rounded-lg hover:bg-[#2a2a2a] transition-colors">
             <X className="h-4 w-4 text-[#888]" />
           </button>
         </div>

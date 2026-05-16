@@ -215,6 +215,7 @@ export async function POST(request: NextRequest) {
       llmModelId,    // 可选，LLM辅助模型ID
       llmProviderId, // 可选，LLM辅助模型提供商ID
       referenceImages, // 可选，参考图URL数组（多图模式）
+      editHistory = [], // 可选，多轮编辑历史 [{userPrompt, llmInstruction}]
     } = await request.json();
 
     if (!image) {
@@ -327,6 +328,7 @@ export async function POST(request: NextRequest) {
     // 核心思路：LLM 是"大脑"理解意图，图像模型是"手"执行修改
     // 协作流程：LLM 分析原图内容 → 理解用户意图 → 结合蒙版区域 → 生成精准编辑指令
     let effectivePrompt = prompt;
+    let llmInstruction = prompt; // LLM 生成的精准指令，无 LLM 参与时等于原始 prompt
 
     if (llmModelId && llmProviderId) {
       try {
@@ -417,17 +419,27 @@ export async function POST(request: NextRequest) {
           }
 
           // ===== 阶段3: LLM 生成精准编辑指令 =====
-          // 将原图分析 + 参考图分析 + 用户意图 + 蒙版语义 → 组合成精准编辑指令
+          // 将原图分析 + 参考图分析 + 用户意图 + 蒙版语义 + 编辑历史 → 组合成精准编辑指令
           let maskContext = '';
           if (maskBuffer) {
             maskContext = '\n\n[蒙版信息：用户用画笔标记了需要修改的区域（蒙版白色区域），请重点关注标记区域进行修改，未标记区域尽量保持原样。]';
+          }
+
+          // 构建历史编辑记录（最近5轮）
+          let historyContext = '';
+          if (Array.isArray(editHistory) && editHistory.length > 0) {
+            const recentHistory = editHistory.slice(-5);
+            const historyLines = recentHistory.map((h: { userPrompt?: string; llmInstruction?: string }) =>
+              `用户指令: ${h.userPrompt || ''} → AI优化指令: ${h.llmInstruction || ''}`
+            ).join('\n');
+            historyContext = `\n## 历史编辑记录（供上下文参考，避免与之前操作矛盾）\n${historyLines}\n`;
           }
 
           const optimizeParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
             {
               type: 'text',
               text: `你是一个专业的AI图片编辑指令优化师。请根据以下信息，生成一条精准的英文图片编辑指令。
-
+${historyContext}
 ## 原图内容分析
 ${imageDescription || '（未能分析原图）'}
 
@@ -442,8 +454,9 @@ ${prompt}
 2. 结合原图内容分析，明确指出需要修改和保持的部分
 3. 如果有参考图特征，融入参考图的风格/构图/主体元素
 4. 如果有蒙版信息，强调只在标记区域修改
-5. 指令要具体、可执行，包含视觉细节（颜色、纹理、光影等）
-6. 只输出编辑指令本身，不要任何解释或前缀
+5. 如果有历史编辑记录，保持与之前修改的一致性和连贯性
+6. 指令要具体、可执行，包含视觉细节（颜色、纹理、光影等）
+7. 只输出编辑指令本身，不要任何解释或前缀
 
 请直接输出英文编辑指令：`,
             },
@@ -478,6 +491,7 @@ ${prompt}
                 : undefined;
               if (optimizeContent && String(optimizeContent).trim()) {
                 effectivePrompt = String(optimizeContent).trim();
+                llmInstruction = effectivePrompt; // 记录 LLM 生成的精准指令
                 console.log(`[LLM协作] 原始prompt: "${prompt}" → 优化后: "${effectivePrompt.substring(0, 100)}..."`);
               }
             }
@@ -560,6 +574,7 @@ ${prompt}
               images: [{ url: resultUrl, revisedPrompt: effectivePrompt }],
               model,
               provider: 'openai-images-edit',
+              llmInstruction,
             });
           }
           // 提取失败，降级到 chat/completions
@@ -758,6 +773,7 @@ ${prompt}
       images,
       model,
       provider: effectiveBaseUrl || 'unknown',
+      llmInstruction,
     });
 
   } catch (error: unknown) {
@@ -832,6 +848,7 @@ async function tryImagesGenerations(
     images,
     model,
     provider: 'images-generations-fallback',
+    llmInstruction: prompt,
   });
 }
 
