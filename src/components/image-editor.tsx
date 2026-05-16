@@ -380,32 +380,58 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     if (!canvas) return null;
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = canvas.width;
-    tempCanvas.height = canvas.height;
-    const tempCtx = tempCanvas.getContext('2d');
-    if (!tempCtx) return null;
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const resultData = tempCtx.createImageData(canvas.width, canvas.height);
+
+    // 检测是否有涂抹内容（alpha > 10 的像素）
+    let hasMask = false;
+    for (let i = 0; i < imageData.data.length; i += 4) {
+      if (imageData.data[i + 3] > 10) { hasMask = true; break; }
+    }
+    if (!hasMask) return null;
+
+    // 先在280px画布上生成黑白数据
+    const bwCanvas = document.createElement('canvas');
+    bwCanvas.width = canvas.width;
+    bwCanvas.height = canvas.height;
+    const bwCtx = bwCanvas.getContext('2d');
+    if (!bwCtx) return null;
+    const resultData = bwCtx.createImageData(canvas.width, canvas.height);
     for (let i = 0; i < imageData.data.length; i += 4) {
       const alpha = imageData.data[i + 3];
       if (alpha > 10) {
-        // 白色=涂抹区域
         resultData.data[i] = 255;
         resultData.data[i + 1] = 255;
         resultData.data[i + 2] = 255;
         resultData.data[i + 3] = 255;
       } else {
-        // 黑色=保持不变（实心黑，非透明）
         resultData.data[i] = 0;
         resultData.data[i + 1] = 0;
         resultData.data[i + 2] = 0;
         resultData.data[i + 3] = 255;
       }
     }
-    tempCtx.putImageData(resultData, 0, 0);
-    return tempCanvas.toDataURL('image/png');
-  }, []);
+    bwCtx.putImageData(resultData, 0, 0);
+
+    // 获取原图尺寸（上限2048），将280px mask缩放到原图分辨率
+    const origW = image?.originalWidth || image?.width || canvas.width;
+    const origH = image?.originalHeight || image?.height || canvas.height;
+    const maxEdge = 2048;
+    const scale = Math.min(maxEdge / Math.max(origW, origH), 1);
+    const targetW = Math.round(origW * scale);
+    const targetH = Math.round(origH * scale);
+
+    const scaledCanvas = document.createElement('canvas');
+    scaledCanvas.width = targetW;
+    scaledCanvas.height = targetH;
+    const scaledCtx = scaledCanvas.getContext('2d');
+    if (!scaledCtx) return null;
+    // 缩放绘制：关闭抗锯齿保持黑白边界清晰
+    scaledCtx.imageSmoothingEnabled = true;
+    scaledCtx.imageSmoothingQuality = 'high';
+    scaledCtx.drawImage(bwCanvas, 0, 0, targetW, targetH);
+
+    return scaledCanvas.toDataURL('image/png');
+  }, [image]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
