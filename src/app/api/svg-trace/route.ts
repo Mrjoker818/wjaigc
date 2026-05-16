@@ -907,6 +907,33 @@ export async function POST(req: NextRequest) {
 
     console.log(`[svg-trace] mode=${mode}, preset=${body.qualityPreset || 'balanced'}, imageUrl=${imageUrl.substring(0, 100)}`);
 
+    // Pre-check tool availability for trace modes
+    if (mode === 'color') {
+      const vtracerCheck = await new Promise<boolean>((resolve) => {
+        execFile('python3', ['-c', 'import vtracer'], { timeout: 5000 }, (error) => {
+          resolve(!error);
+        });
+      });
+      if (!vtracerCheck) {
+        return NextResponse.json({
+          success: false,
+          error: 'VTracer 未安装，彩色描摹不可用。请联系管理员安装: pip3 install vtracer',
+        }, { status: 503 });
+      }
+    } else if (mode === 'bw') {
+      const potraceCheck = await new Promise<boolean>((resolve) => {
+        execFile('which', ['potrace'], { timeout: 5000 }, (error) => {
+          resolve(!error);
+        });
+      });
+      if (!potraceCheck) {
+        return NextResponse.json({
+          success: false,
+          error: 'Potrace 未安装，黑白描摹不可用。请联系管理员安装: apt-get install potrace',
+        }, { status: 503 });
+      }
+    }
+
     // Resolve image to buffer
     const inputBuffer = await resolveImageUrl(imageUrl);
     if (!inputBuffer || inputBuffer.length === 0) {

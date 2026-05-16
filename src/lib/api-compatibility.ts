@@ -389,16 +389,31 @@ export function adjustRequestForProfile(
   }
 
   // --- Endpoint selection ---
-  // When a source image is present, always try /images/edits first.
-  // This is the standard OpenAI endpoint for image editing where the `image`
-  // field is mandatory — the AI MUST process the source image.
-  // Callers should auto-fallback to /images/generations if /images/edits
-  // is rejected (e.g. by proxy adapters that don't support it).
+  // Respect the profile's editEndpoint when a source image is present.
+  // - For providers like OpenAI that support /images/edits, the profile
+  //   will specify editEndpoint='/images/edits' — the AI MUST process
+  //   the `image` field and treat it as the source to edit.
+  // - For providers that only support /images/generations for everything
+  //   (e.g. async proxy adapters), the profile will specify
+  //   editEndpoint='/images/generations' — reference images are passed
+  //   via `image_urls` and the prompt describes the desired changes.
+  // - If /images/edits is tried and rejected, callers should auto-fallback
+  //   to /images/generations with stripEditsOnlyFields().
   let endpoint: ImageEndpoint;
   if (hasImage || isEditEndpoint) {
-    endpoint = '/images/edits';
+    endpoint = profile.editEndpoint;
   } else {
     endpoint = profile.defaultEndpoint;
+  }
+
+  // When the edit endpoint is /images/generations, strip fields that
+  // are only valid on /images/edits (image, mask, strength).
+  // These fields would cause errors or be ignored on /images/generations.
+  // Reference images should be passed via `image_urls` instead.
+  if (endpoint === '/images/generations') {
+    delete body.image;
+    delete body.mask;
+    delete body.strength;
   }
 
   // --- input_fidelity ---
@@ -419,10 +434,12 @@ export function adjustRequestForProfile(
  * becomes compatible with /images/generations.  Reference images are
  * preserved through `image_urls`.
  */
-export function stripEditsOnlyFields(body: Record<string, unknown>): void {
-  delete body.image;
-  delete body.mask;
-  delete body.strength;
+export function stripEditsOnlyFields(body: Record<string, unknown>): Record<string, unknown> {
+  const cleaned = { ...body };
+  delete cleaned.image;
+  delete cleaned.mask;
+  delete cleaned.strength;
+  return cleaned;
 }
 
 /**
@@ -439,8 +456,10 @@ export function isEditsEndpointRejected(status: number, errorBody: string): bool
     lower.includes('not found') ||
     lower.includes('direct image relay') ||
     lower.includes('task submission flow') ||
-    lower.includes('route') ||
-    (status === 404) // endpoint doesn't exist
+    lower.includes('routed through') ||
+    lower.includes('image relay') ||
+    (status === 404) || // endpoint doesn't exist
+    (status === 405)    // method not allowed on this endpoint
   );
 }
 

@@ -505,7 +505,8 @@ async function submitImageTask(
     } catch { /* ignore */ }
 
     // 自动回退：如果 /images/edits 端点不被支持，回退到 /images/generations
-    if (effectiveEndpoint === '/images/edits' && isEditsEndpointRejected(submitResponse.status, errorMsg)) {
+    // 使用原始响应文本(errorText)进行检测，而非清理后的 errorMsg
+    if (effectiveEndpoint === '/images/edits' && isEditsEndpointRejected(submitResponse.status, errorText)) {
       console.log('[submitImageTask] /images/edits rejected, auto-falling back to /images/generations');
       const fallbackBody = stripEditsOnlyFields(adjustedBody);
       const fallbackEndpoint: ImageEndpoint = '/images/generations';
