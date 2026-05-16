@@ -478,6 +478,12 @@ async function submitImageTask(
     }
   } else {
     // Standard JSON request for /images/generations
+    // 当 /images/generations 携带 image_urls 时，增强 prompt 以确保 AI 使用参考图
+    if (effectiveEndpoint === '/images/generations' && hasImageUrls) {
+      if (!String(adjustedBody.prompt || '').includes('[IMAGE-TO-IMAGE MODE]') && !String(adjustedBody.prompt || '').includes('[REFERENCE IMAGE]')) {
+        adjustedBody.prompt = `[IMAGE-TO-IMAGE MODE] You MUST use the provided reference image as the mandatory source/base for generation. Do NOT generate from scratch. ${String(adjustedBody.prompt || '')}`;
+      }
+    }
     submitResponse = await fetchWithV1Retry(
       apiBaseUrl,
       effectiveEndpoint,
@@ -510,6 +516,14 @@ async function submitImageTask(
       console.log('[submitImageTask] /images/edits rejected, auto-falling back to /images/generations');
       const fallbackBody = stripEditsOnlyFields(adjustedBody);
       const fallbackEndpoint: ImageEndpoint = '/images/generations';
+
+      // 增强 prompt：/images/generations 仅将 image_urls 视为可选参考，
+      // 必须在 prompt 中明确指示 AI 使用参考图作为基础
+      if (fallbackBody.image_urls && Array.isArray(fallbackBody.image_urls) && (fallbackBody.image_urls as string[]).length > 0) {
+        const refCount = (fallbackBody.image_urls as string[]).length;
+        fallbackBody.prompt = `[IMAGE-TO-IMAGE MODE] You MUST use the provided ${refCount > 1 ? `${refCount} reference images` : 'reference image'} as the mandatory source/base for generation. Do NOT generate from scratch. ${String(fallbackBody.prompt || '')}`;
+      }
+
       try {
         const fallbackResponse = await fetchWithV1Retry(
           apiBaseUrl,

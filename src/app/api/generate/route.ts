@@ -404,7 +404,7 @@ export async function POST(request: NextRequest) {
           if (errorMsg.includes('Insufficient balance') || errorMsg.includes('insufficient') || errorMsg.includes('余额')) {
             throw new Error(`API 余额不足，请联系管理员充值`);
           }
-          if (errorMsg.includes('Rate limit') || errorMsg.includes('rate_limit') || errorMsg.includes('Too many requests')) {
+          if (errorMsg.includes('Rate limit') || errorMsg.includes('rate_limit') || errorMsg.includes('Too many requests') || errorMsg.includes('请稍等') || errorMsg.includes('稍后再试') || errorMsg.includes('请求过于频繁')) {
             throw new Error(`请求过于频繁，请稍后再试`);
           }
           if (errorMsg.includes('Invalid API key') || errorMsg.includes('invalid api_key') || errorMsg.includes('Incorrect API key')) {
@@ -511,6 +511,21 @@ export async function POST(request: NextRequest) {
             const fallbackTimeoutId = setTimeout(() => fallbackController.abort(), timeoutMs);
 
             const fallbackBody = stripEditsOnlyFields(adjustedBody);
+
+            // 增强 prompt：/images/generations 仅将 image_urls 视为可选参考，
+            // 必须在 prompt 中明确指示 AI 使用参考图作为基础，否则 AI 可能忽略参考图
+            if (fallbackBody.image_urls && Array.isArray(fallbackBody.image_urls) && (fallbackBody.image_urls as string[]).length > 0) {
+              const refCount = (fallbackBody.image_urls as string[]).length;
+              const hasImg2ImgHint = String(fallbackBody.prompt || '').includes('[img2img]');
+              if (hasImg2ImgHint) {
+                // 图生图场景：更强的约束，确保 AI 基于 reference image 生成
+                fallbackBody.prompt = `[IMAGE-TO-IMAGE MODE] You MUST use the provided ${refCount > 1 ? `${refCount} reference images` : 'reference image'} as the mandatory source/base for generation. Do NOT generate from scratch. ${String(fallbackBody.prompt || '').replace('[img2img]', '')}`;
+              } else {
+                // 参考图场景：指示 AI 参考这些图片
+                fallbackBody.prompt = `[REFERENCE IMAGE] Use the provided ${refCount > 1 ? `${refCount} reference images` : 'reference image'} as visual reference for generation. ${String(fallbackBody.prompt || '')}`;
+              }
+            }
+
             submitResponse = await fetchWithV1Retry(
               currentApiBaseUrl,
               '/images/generations',
@@ -566,6 +581,15 @@ export async function POST(request: NextRequest) {
         }
       } else {
         // /images/generations 或无 image 字段：标准 JSON 编码
+        // 当 /images/generations 携带 image_urls 时，增强 prompt 以确保 AI 使用参考图
+        if (endpoint === '/images/generations' && hasRefImages && adjustedBody.image_urls) {
+          const hasImg2ImgHint = String(adjustedBody.prompt || '').includes('[img2img]');
+          if (hasImg2ImgHint) {
+            adjustedBody.prompt = `[IMAGE-TO-IMAGE MODE] You MUST use the provided reference image as the mandatory source/base for generation. Do NOT generate from scratch. ${String(adjustedBody.prompt || '').replace('[img2img]', '')}`;
+          } else if (!String(adjustedBody.prompt || '').includes('[IMAGE-TO-IMAGE MODE]') && !String(adjustedBody.prompt || '').includes('[REFERENCE IMAGE]')) {
+            adjustedBody.prompt = `[REFERENCE IMAGE] Use the provided reference image as visual reference for generation. ${String(adjustedBody.prompt || '')}`;
+          }
+        }
         submitResponse = await fetchWithV1Retry(
           currentApiBaseUrl,
           endpoint,

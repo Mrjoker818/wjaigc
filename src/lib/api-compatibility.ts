@@ -159,8 +159,8 @@ export const PROFILE_AUTO: ApiCompatProfile = {
   responseMode: 'direct',       // will be overridden by actual response
   sizeFormat: 'pixel',          // safe default: convert to pixel format
   defaultEndpoint: '/images/generations',
-  editEndpoint: '/images/generations',  // Use /images/generations by default for max compatibility
-  editEncoding: 'json-first',          // JSON-first for /images/generations compatibility
+  editEndpoint: '/images/edits',        // /images/edits forces AI to process the image field (mandatory)
+  editEncoding: 'json-first',          // JSON-first, fallback to multipart if needed
   supportsInputFidelity: true,
   pollMode: 'path',
   pollPathTemplate: '/tasks/{taskId}',
