@@ -96,6 +96,8 @@ export async function POST(request: NextRequest) {
       aspectRatio = '1:1', 
       referenceImages, 
       referenceMode, 
+      referenceCategories,
+      referenceStrengths,
       imageCategory, 
       productCategory, 
       stylePreset, 
@@ -275,6 +277,79 @@ export async function POST(request: NextRequest) {
     // 融合模式增强提示词 - 明确指导模型如何融合参考图
     if (referenceMode === 'fusion' && referenceImages && referenceImages.length > 1) {
       enhancedPrompt = `[FUSION MODE] Combine and merge ${referenceImages.length} reference images into a single cohesive composition. ${enhancedPrompt}. Seamlessly blend all visual elements together, maintaining the key characteristics of each reference while creating a unified, natural result.`;
+    }
+
+    // 参考图分类增强 - 基于前端传递的分类和强度，增强提示词让AI正确理解参考意图
+    if (referenceImages && referenceImages.length > 0 && referenceCategories) {
+      // 规范化分类键：中文→英文
+      const normalizeCategory = (key: string): string => {
+        const cnToEn: Record<string, string> = {
+          '风格': 'style', '构图': 'composition', '场景': 'scene',
+          '色彩': 'color', '主体': 'subject', '细节': 'detail',
+        };
+        return cnToEn[key] || key;
+      };
+
+      // 英文分类描述
+      const categoryDescMap: Record<string, string> = {
+        'style': 'artistic style and visual aesthetics',
+        'composition': 'composition and layout structure',
+        'scene': 'scene and environment setting',
+        'color': 'color palette and tone',
+        'subject': 'main subject and focal point',
+        'detail': 'fine details and textures',
+      };
+
+      // 收集所有激活的规范分类及其最大强度
+      const activeCatStrengths: Record<string, number> = {};
+      const strengths = referenceStrengths as number[] | undefined;
+
+      for (const [imgIdx, cats] of Object.entries(referenceCategories as Record<string, string[]>)) {
+        if (Array.isArray(cats)) {
+          const imgStrength = strengths?.[Number(imgIdx)] ?? 50;
+          for (const cat of cats) {
+            const normKey = normalizeCategory(cat);
+            activeCatStrengths[normKey] = Math.max(activeCatStrengths[normKey] || 0, imgStrength);
+          }
+        }
+      }
+
+      const activeKeys = Object.keys(activeCatStrengths);
+      if (activeKeys.length > 0) {
+        // 构建保留方面的指令
+        const preserveParts: string[] = [];
+        const freeParts: string[] = [];
+
+        for (const [catKey, catDesc] of Object.entries(categoryDescMap)) {
+          if (activeCatStrengths[catKey] !== undefined) {
+            const s = activeCatStrengths[catKey];
+            if (s >= 80) preserveParts.push(`strictly preserve the ${catDesc} of the reference image`);
+            else if (s >= 50) preserveParts.push(`maintain the ${catDesc} of the reference image`);
+            else if (s >= 20) preserveParts.push(`subtly reference the ${catDesc} of the reference image`);
+            else preserveParts.push(`lightly hint at the ${catDesc} of the reference image`);
+          } else {
+            freeParts.push(catDesc);
+          }
+        }
+
+        // 判断是否包含"主体"保留
+        const hasSubjectPreserve = activeCatStrengths['subject'] !== undefined;
+        const subjectPrefix = hasSubjectPreserve
+          ? 'CRITICAL: The main subject (product/object/person) must remain EXACTLY the same as in the reference image — same item, same identity, same appearance. Do NOT replace or change the subject to a different object. '
+          : '';
+
+        let categoryEnhancement = '';
+        if (preserveParts.length > 0) {
+          categoryEnhancement += `${subjectPrefix}You MUST use the provided reference image(s) as the mandatory source. ${preserveParts.join('. ')}.`;
+        }
+        if (freeParts.length > 0) {
+          categoryEnhancement += ` You may reimagine the ${freeParts.join(', ')}.`;
+        }
+
+        if (categoryEnhancement) {
+          enhancedPrompt = `[REFERENCE MODE] ${categoryEnhancement} ${enhancedPrompt}`;
+        }
+      }
     }
 
     // 验证尺寸是否支持
