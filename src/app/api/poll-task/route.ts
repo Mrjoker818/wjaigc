@@ -16,6 +16,50 @@ export async function POST(request: NextRequest) {
     const sessionUser = await getSessionUser(request);
     const userId = (sessionUser?.id || "anonymous") || requestUserId;
 
+    // 检查是否为本地语言修图任务
+    if (taskId.startsWith('edit_')) {
+      const { getEditTask, deleteEditTask } = await import('@/app/api/edit/route');
+      const task = getEditTask(taskId);
+      if (!task) {
+        return NextResponse.json({
+          success: false,
+          status: 'error',
+          error: '任务不存在或已过期',
+          retryable: false,
+        }, { status: 200 });
+      }
+
+      if (task.status === 'completed') {
+        // 任务完成，延迟清除存储（保留5分钟后自动清理）
+        setTimeout(() => deleteEditTask(taskId), 5 * 60 * 1000);
+        return NextResponse.json({
+          success: true,
+          status: 'completed',
+          stage: task.stage,
+          result: task.result,
+        }, { status: 200 });
+      }
+
+      if (task.status === 'failed') {
+        setTimeout(() => deleteEditTask(taskId), 5 * 60 * 1000);
+        return NextResponse.json({
+          success: false,
+          status: 'failed',
+          stage: task.stage,
+          error: task.error || '处理失败',
+          retryable: false,
+        }, { status: 200 });
+      }
+
+      // 进行中
+      return NextResponse.json({
+        success: true,
+        status: 'processing',
+        stage: task.stage,
+        progress: task.progress,
+      }, { status: 200 });
+    }
+
     if (!taskId) {
       return NextResponse.json({ 
         success: false, 

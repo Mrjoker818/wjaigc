@@ -4,7 +4,76 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 
 // 允许大请求体（base64图片可能很大，50MB限制）
 export const runtime = 'nodejs';
-export const maxDuration = 120;
+export const maxDuration = 300;
+
+// ============================================================
+// 本地任务存储（语言修图异步提交+轮询模式）
+// ============================================================
+interface EditTaskResult {
+  success: boolean;
+  image?: { url: string; revisedPrompt?: string };
+  images?: Array<{ url: string; revisedPrompt?: string }>;
+  model?: string;
+  provider?: string;
+  llmInstruction?: string;
+  editRegions?: Array<{ label: string; bounds: { x: number; y: number; width: number; height: number } }>;
+  autoMaskGenerated?: boolean;
+  error?: string;
+  networkError?: boolean;
+  requiresApiKey?: boolean;
+  status?: number;
+}
+
+interface EditTask {
+  id: string;
+  status: 'processing' | 'completed' | 'failed';
+  progress: number; // 0-100
+  stage: string; // 当前阶段描述
+  result?: EditTaskResult;
+  error?: string;
+  createdAt: number;
+  completedAt?: number;
+}
+
+const editTaskStore = new Map<string, EditTask>();
+
+// 定期清理过期任务（>30分钟）
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, task] of editTaskStore) {
+    if (now - task.createdAt > 30 * 60 * 1000) {
+      editTaskStore.delete(id);
+    }
+  }
+}, 5 * 60 * 1000);
+
+export function getEditTask(taskId: string): EditTask | undefined {
+  return editTaskStore.get(taskId);
+}
+
+export function deleteEditTask(taskId: string): boolean {
+  return editTaskStore.delete(taskId);
+}
+
+function updateTaskStage(taskId: string, stage: string) {
+  const task = editTaskStore.get(taskId);
+  if (task) {
+    task.stage = stage;
+  }
+}
+
+function failTask(taskId: string, error: string, networkError = false) {
+  editTaskStore.set(taskId, {
+    id: taskId,
+    status: 'failed',
+    progress: 0,
+    stage: '失败',
+    error,
+    result: { success: false, error, networkError },
+    createdAt: editTaskStore.get(taskId)?.createdAt || Date.now(),
+    completedAt: Date.now(),
+  });
+}
 
 // 支持编辑的模型列表（用于降级静态列表）
 export const EDITABLE_MODELS = [
@@ -261,9 +330,16 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // ========== 2. 解析原图为 Buffer ==========
-    let imageBuffer: Buffer;
-    let mimeType = 'image/png';
+    // ========== 1.5 创建异步任务（提交+轮询模式，避免CDN/FaaS代理超时） ==========
+    const taskId = `edit_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    editTaskStore.set(taskId, { id: taskId, status: 'processing', progress: 0, stage: '初始化', createdAt: Date.now() });
+
+    // 后台异步执行编辑流程
+    (async () => {
+      try {
+        // ========== 2. 解析原图为 Buffer ==========
+        let imageBuffer: Buffer;
+        let mimeType = 'image/png';
 
     if (image.startsWith('data:')) {
       const commaIndex = image.indexOf(',');
@@ -282,7 +358,8 @@ export async function POST(request: NextRequest) {
         if (contentType) mimeType = contentType;
       } catch (fetchError: unknown) {
         const errMsg = fetchError instanceof Error ? fetchError.message : 'Unknown error';
-        return NextResponse.json({ success: false, error: `无法下载图片: ${errMsg}` }, { status: 400 });
+        failTask(taskId, `无法下载图片: ${errMsg}`);
+        return;
       }
     } else if (image.startsWith('/')) {
       const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
@@ -298,7 +375,8 @@ export async function POST(request: NextRequest) {
         if (contentType) mimeType = contentType;
       } catch (fetchError: unknown) {
         const errMsg = fetchError instanceof Error ? fetchError.message : 'Unknown error';
-        return NextResponse.json({ success: false, error: `无法下载图片: ${errMsg}` }, { status: 400 });
+        failTask(taskId, `无法下载图片: ${errMsg}`);
+        return;
       }
     } else {
       imageBuffer = Buffer.from(image, 'base64');
@@ -316,7 +394,8 @@ export async function POST(request: NextRequest) {
           maskBuffer = Buffer.from(await response.arrayBuffer());
         } catch (fetchError: unknown) {
           const errMsg = fetchError instanceof Error ? fetchError.message : 'Unknown error';
-          return NextResponse.json({ success: false, error: `无法下载mask: ${errMsg}` }, { status: 400 });
+          failTask(taskId, `无法下载mask: ${errMsg}`);
+          return;
         }
       } else {
         maskBuffer = Buffer.from(mask, 'base64');
@@ -337,6 +416,7 @@ export async function POST(request: NextRequest) {
 
     if (llmModelId && llmProviderId) {
       try {
+        updateTaskStage(taskId, 'analyzing');
         const llmProvider = await findProviderById(llmProviderId);
         if (llmProvider?.apiKey && llmProvider?.baseUrl) {
           const llmBaseUrl = normalizeApiBaseUrl(llmProvider.baseUrl);
@@ -382,6 +462,7 @@ export async function POST(request: NextRequest) {
           }
 
           // ===== 阶段2: LLM 分析参考图（如有） =====
+          updateTaskStage(taskId, 'analyzing_reference');
           let refDescription = '';
           if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
             const refParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
@@ -424,6 +505,7 @@ export async function POST(request: NextRequest) {
           }
 
           // ===== 阶段3: LLM 生成精准编辑指令 =====
+          updateTaskStage(taskId, 'optimizing_prompt');
           // 将原图分析 + 参考图分析 + 用户意图 + 蒙版语义 + 编辑历史 → 组合成精准编辑指令
           let maskContext = '';
           if (maskBuffer) {
@@ -572,6 +654,7 @@ ${prompt}
     const editInstruction = `Edit this image according to the following instruction: ${effectivePrompt}. Maintain the overall composition and style while making the requested changes.`;
 
     // ========== 6. 调用 API（全兼容模式） ==========
+    updateTaskStage(taskId, 'editing');
 
     // 路径A: OpenAI images.edit 端点（仅 OpenAI 官方 + 支持 mask 的场景）
     // 第三方代理即使模型名是 gpt-image-2，也不走 images.edit（因为代理通常不支持）
@@ -625,16 +708,26 @@ ${prompt}
           const editData = await editResponse.json();
           const resultUrl = extractImageFromResponse(editData);
           if (resultUrl) {
-            return NextResponse.json({
-              success: true,
-              image: { url: resultUrl, revisedPrompt: effectivePrompt },
-              images: [{ url: resultUrl, revisedPrompt: effectivePrompt }],
-              model,
-              provider: 'openai-images-edit',
-              llmInstruction,
-              editRegions: llmEditRegions,
-              autoMaskGenerated: llmEditRegions.length > 0,
+            const images = [{ url: resultUrl, revisedPrompt: effectivePrompt }];
+            editTaskStore.set(taskId, {
+              id: taskId,
+              status: 'completed',
+              progress: 100,
+              stage: '完成',
+              result: {
+                success: true,
+                image: images[0],
+                images,
+                model,
+                provider: 'openai-images-edit',
+                llmInstruction,
+                editRegions: llmEditRegions,
+                autoMaskGenerated: llmEditRegions.length > 0,
+              },
+              createdAt: editTaskStore.get(taskId)?.createdAt || Date.now(),
+              completedAt: Date.now(),
             });
+            return;
           }
           // 提取失败，降级到 chat/completions
           console.warn('images/edit response parsed but no image found, falling back to chat/completions');
@@ -740,37 +833,53 @@ ${prompt}
 
       // 特定错误码处理
       if (chatResponse.status === 401 || chatResponse.status === 403) {
-        return NextResponse.json({
-          success: false,
-          error: `API Key 无效或权限不足: ${errorMsg}`,
-          requiresApiKey: true,
-        }, { status: chatResponse.status });
+        failTask(taskId, `API Key 无效或权限不足: ${errorMsg}`);
+        return;
       }
       if (chatResponse.status === 429) {
-        return NextResponse.json({ success: false, error: '请求频率超限，请稍后再试' }, { status: 429 });
+        failTask(taskId, '请求频率超限，请稍后再试');
+        return;
       }
       if (chatResponse.status === 404) {
-        return NextResponse.json({
-          success: false,
-          error: `模型 ${model} 在当前 API 端点不可用，请检查模型名称或更换 API 提供商`,
-        }, { status: 404 });
+        failTask(taskId, `模型 ${model} 在当前 API 端点不可用，请检查模型名称或更换 API 提供商`);
+        return;
       }
       if (chatResponse.status === 400) {
         // 400 可能是模型不支持图片输入，尝试降级到 /images/edits
         if (isOpenaiImageModel && !supportsNativeMask) {
           // 尝试 images/generations 端点
           try {
-            const genResult = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, count);
-            if (genResult) return genResult;
+            const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, count);
+            if (genUrl) {
+              const images = [{ url: genUrl, revisedPrompt: effectivePrompt }];
+              editTaskStore.set(taskId, {
+                id: taskId,
+                status: 'completed',
+                progress: 100,
+                stage: '完成',
+                result: {
+                  success: true,
+                  image: images[0],
+                  images,
+                  model,
+                  provider: 'images-generations-fallback',
+                  llmInstruction,
+                  editRegions: llmEditRegions,
+                  autoMaskGenerated: false,
+                },
+                createdAt: editTaskStore.get(taskId)?.createdAt || Date.now(),
+                completedAt: Date.now(),
+              });
+              return;
+            }
           } catch { /* 忽略 */ }
         }
-        return NextResponse.json({
-          success: false,
-          error: `请求参数错误: ${errorMsg}`,
-        }, { status: 400 });
+        failTask(taskId, `请求参数错误: ${errorMsg}`);
+        return;
       }
 
-      return NextResponse.json({ success: false, error: errorMsg }, { status: chatResponse.status });
+      failTask(taskId, errorMsg);
+      return;
     }
 
     // 解析响应（兼容流式和非流式，部分代理忽略 stream:false 强制流式返回）
@@ -785,10 +894,8 @@ ${prompt}
       try {
         chatData = JSON.parse(chatText);
       } catch {
-        return NextResponse.json({
-          success: false,
-          error: `API 响应解析失败: ${chatText.substring(0, 200)}`,
-        }, { status: 502 });
+        failTask(taskId, `API 响应解析失败: ${chatText.substring(0, 200)}`);
+        return;
       }
     }
 
@@ -797,8 +904,8 @@ ${prompt}
     // chat/completions 未提取到图片，尝试降级到 images/generations
     if (!resultImageUrl && isOpenaiImageModel) {
       try {
-        const genResult = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, count);
-        if (genResult) return genResult;
+        const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, count);
+        if (genUrl) resultImageUrl = genUrl;
       } catch { /* 忽略 */ }
     }
 
@@ -809,49 +916,61 @@ ${prompt}
         ? ((chatChoices[0].message as Record<string, unknown>).content as string)
         : undefined;
       if (typeof textContent === 'string' && textContent.length > 0 && !textContent.includes('data:image')) {
-        return NextResponse.json({
-          success: false,
-          error: '模型未返回编辑后的图片，仅返回了文本描述。请尝试更换模型或 API 提供商',
-          textResponse: textContent.substring(0, 500),
-        }, { status: 500 });
+        failTask(taskId, '模型未返回编辑后的图片，仅返回了文本描述。请尝试更换模型或 API 提供商');
+        return;
       }
 
-      return NextResponse.json({
-        success: false,
-        error: '图片编辑失败，未返回有效结果',
-      }, { status: 500 });
+      failTask(taskId, '图片编辑失败，未返回有效结果');
+      return;
     }
 
     const images = count > 1
       ? Array.from({ length: count }, () => ({ url: resultImageUrl, revisedPrompt: effectivePrompt }))
       : [{ url: resultImageUrl, revisedPrompt: effectivePrompt }];
 
-    return NextResponse.json({
-      success: true,
-      image: images[0],
-      images,
-      model,
-      provider: effectiveBaseUrl || 'unknown',
-      llmInstruction,
-      editRegions: llmEditRegions,
-      autoMaskGenerated: llmEditRegions.length > 0,
+    // 存储成功结果到任务
+    editTaskStore.set(taskId, {
+      id: taskId,
+      status: 'completed',
+      progress: 100,
+      stage: '完成',
+      result: {
+        success: true,
+        image: images[0],
+        images,
+        model,
+        provider: effectiveBaseUrl || 'unknown',
+        llmInstruction,
+        editRegions: llmEditRegions,
+        autoMaskGenerated: llmEditRegions.length > 0,
+      },
+      createdAt: editTaskStore.get(taskId)?.createdAt || Date.now(),
+      completedAt: Date.now(),
     });
 
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : 'Unknown error';
     console.error('Image edit error:', error);
 
-    if (errMsg.includes('fetch failed') || errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND')) {
-      return NextResponse.json({
-        success: false,
-        error: `网络连接失败：无法访问 API 服务`,
-        networkError: true,
-      }, { status: 503 });
-    }
-
-    return NextResponse.json({ success: false, error: errMsg || '图片编辑失败' }, { status: 500 });
+    // 存储错误结果到任务
+    const isNetworkError = errMsg.includes('fetch failed') || errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND');
+    failTask(taskId, isNetworkError ? '网络连接失败：无法访问 API 服务' : (errMsg || '图片编辑失败'), isNetworkError);
   }
-}
+  })();
+
+  // ========== 立即返回 taskId（提交+轮询模式） ==========
+  return NextResponse.json({
+    success: true,
+    mode: 'polling',
+    taskId,
+    estimatedTime: 60,
+  });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error(`[edit] Task creation error: ${message}`);
+    return NextResponse.json({ success: false, error: `任务创建失败: ${message}` }, { status: 500 });
+  }
+} // end POST
 
 /**
  * 降级：尝试 /images/generations 端点
@@ -865,7 +984,7 @@ async function tryImagesGenerations(
   size: string,
   quality: string,
   count: number,
-): Promise<NextResponse | null> {
+): Promise<string | null> {
   const sizeMap: Record<string, string> = {
     '1:1': '1024x1024', '16:9': '1792x1024', '9:16': '1024x1792',
     '4:3': '1024x768', '3:4': '768x1024', '2:3': '768x1024', '3:2': '1024x768',
@@ -899,20 +1018,7 @@ async function tryImagesGenerations(
   if (!genResponse.ok) return null;
 
   const genData = await genResponse.json();
-  const resultUrl = extractImageFromResponse(genData);
-  if (!resultUrl) return null;
-
-  const images = [{ url: resultUrl, revisedPrompt: prompt }];
-  return NextResponse.json({
-    success: true,
-    image: images[0],
-    images,
-    model,
-    provider: 'images-generations-fallback',
-    llmInstruction: prompt,
-    editRegions: [],
-    autoMaskGenerated: false,
-  });
+  return extractImageFromResponse(genData) || null;
 }
 
 // ============================================================

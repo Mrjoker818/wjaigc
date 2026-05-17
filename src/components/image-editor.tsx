@@ -777,57 +777,125 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         editHistory: editContextHistory.slice(-5),
       };
 
-      // ★ 多图模式：并行发起 outputCount 次请求
+      // ★ 提交+轮询模式：先快速提交获取taskId，再轮询结果
       const requestCount = Math.max(1, Math.min(outputCount, 4));
-      const fetchPromises = Array.from({ length: requestCount }, () =>
-        fetch('/api/edit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(baseRequestBody),
-        }).then(r => r.json().then(data => ({ ok: r.ok, data })))
-      );
+      const taskIds: string[] = [];
 
-      const results = await Promise.allSettled(fetchPromises);
-
-      clearInterval(progressInterval);
-      setLoadingProgress(100);
-
-      // ★ 收集所有成功的图片
-      const collectedUrls: string[] = [];
-      let firstError = '';
-      let collectedLlmInstruction = ''; // 记录LLM优化指令，用于多轮上下文
-      let collectedEditRegions: Array<{ label: string; bounds: { x: number; y: number; width: number; height: number } }> = [];
-
-      for (const result of results) {
-        if (result.status === 'fulfilled') {
-          const { data } = result.value;
-          if (data.success && data.image?.url) {
-            collectedUrls.push(data.image.url);
-            if (!collectedLlmInstruction && data.llmInstruction) {
-              collectedLlmInstruction = data.llmInstruction;
-            }
-            if (collectedEditRegions.length === 0 && data.editRegions && Array.isArray(data.editRegions) && data.editRegions.length > 0) {
-              collectedEditRegions = data.editRegions;
-            }
-          } else if (data.images) {
-            collectedUrls.push(...data.images.map((img: { url: string }) => img.url));
-            if (!collectedLlmInstruction && data.llmInstruction) {
-              collectedLlmInstruction = data.llmInstruction;
-            }
-            if (collectedEditRegions.length === 0 && data.editRegions && Array.isArray(data.editRegions) && data.editRegions.length > 0) {
-              collectedEditRegions = data.editRegions;
-            }
-          } else if (!firstError && data.error) {
-            firstError = data.error;
+      // 提交所有任务
+      for (let i = 0; i < requestCount; i++) {
+        try {
+          const submitResp = await fetch('/api/edit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(baseRequestBody),
+          });
+          const submitData = await submitResp.json();
+          if (submitData.success && submitData.taskId) {
+            taskIds.push(submitData.taskId);
+          } else if (!submitData.success) {
+            // 提交本身就失败了（如参数校验失败），直接报错
+            clearInterval(progressInterval);
+            setIsResultLoading(false);
+            setError(submitData.error || '提交失败');
+            setIsLoading(false);
+            return;
           }
-        } else {
-          if (!firstError) firstError = result.reason?.message || '请求失败';
+        } catch (submitErr: unknown) {
+          clearInterval(progressInterval);
+          setIsResultLoading(false);
+          const errMsg = submitErr instanceof Error ? submitErr.message : '提交失败，请重试';
+          setError(errMsg);
+          setIsLoading(false);
+          return;
         }
       }
 
+      if (taskIds.length === 0) {
+        clearInterval(progressInterval);
+        setIsResultLoading(false);
+        setError('提交失败，未获得任务ID');
+        setIsLoading(false);
+        return;
+      }
+
+      // ★ 轮询所有任务直到完成
+      const collectedUrls: string[] = [];
+      let firstError = '';
+      let collectedLlmInstruction = '';
+      let collectedEditRegions: Array<{ label: string; bounds: { x: number; y: number; width: number; height: number } }> = [];
+      const completedTasks = new Set<string>();
+      const maxPollTime = 300000; // 5分钟超时
+      const pollStart = Date.now();
+      const pollInterval = 2000; // 2秒轮询间隔
+
+      while (completedTasks.size < taskIds.length && (Date.now() - pollStart) < maxPollTime) {
+        // 并行轮询所有未完成的任务
+        const pendingTaskIds = taskIds.filter(id => !completedTasks.has(id));
+        const pollPromises = pendingTaskIds.map(async (taskId) => {
+          try {
+            const pollResp = await fetch('/api/poll-task', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId }),
+            });
+            const pollData = await pollResp.json();
+            return { taskId, pollData };
+          } catch (err) {
+            return { taskId, pollData: null };
+          }
+        });
+
+        const pollResults = await Promise.all(pollPromises);
+
+        for (const { taskId, pollData } of pollResults) {
+          if (!pollData) continue;
+
+          if (pollData.status === 'completed' && pollData.result) {
+            completedTasks.add(taskId);
+            const data = pollData.result;
+            if (data.success && data.image?.url) {
+              collectedUrls.push(data.image.url);
+              if (!collectedLlmInstruction && data.llmInstruction) {
+                collectedLlmInstruction = data.llmInstruction;
+              }
+              if (collectedEditRegions.length === 0 && data.editRegions && Array.isArray(data.editRegions) && data.editRegions.length > 0) {
+                collectedEditRegions = data.editRegions;
+              }
+            } else if (data.images) {
+              collectedUrls.push(...data.images.map((img: { url: string }) => img.url));
+              if (!collectedLlmInstruction && data.llmInstruction) {
+                collectedLlmInstruction = data.llmInstruction;
+              }
+              if (collectedEditRegions.length === 0 && data.editRegions && Array.isArray(data.editRegions) && data.editRegions.length > 0) {
+                collectedEditRegions = data.editRegions;
+              }
+            } else if (!firstError && data.error) {
+              firstError = data.error;
+            }
+          } else if (pollData.status === 'failed') {
+            completedTasks.add(taskId);
+            if (!firstError) firstError = pollData.error || pollData.message || '编辑失败';
+          }
+
+          // 更新进度条（基于已完成任务数）
+          const progress = Math.round((completedTasks.size / taskIds.length) * 100);
+          setLoadingProgress(progress);
+        }
+
+        // 如果还有未完成的任务，等待后继续轮询
+        if (completedTasks.size < taskIds.length) {
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+        }
+      }
+
+      clearInterval(progressInterval);
+      setLoadingProgress(100);
       setIsResultLoading(false);
 
-      if (collectedUrls.length > 0) {
+      // 处理超时
+      if (completedTasks.size < taskIds.length && collectedUrls.length === 0) {
+        setError(firstError || '编辑超时，请稍后重试');
+      } else if (collectedUrls.length > 0) {
         setResultImages(collectedUrls);
         setSelectedResultIndexes(new Set(collectedUrls.map((_, i) => i)));
 
