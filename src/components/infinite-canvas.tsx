@@ -274,6 +274,7 @@ export interface CanvasImage {
     error?: string;
   };
   threeDModelUrl?: string;
+  svgDataUrl?: string; // 保存SVG数据用于下载（画布显示PNG预览时）
   threeDModelUrls?: Record<string, string>;
 }
 
@@ -2980,6 +2981,36 @@ export function InfiniteCanvas({
       setSelectedIds(new Set([selectedCompleted.id]));
       onSelectImage(selectedCompleted);
     }
+    // 预加载验证：如果图片 URL 无法加载，自动通过 /api/save-image 兜底
+    if (newUrl && !newUrl.startsWith('data:')) {
+      const testImg = new window.Image();
+      testImg.onload = () => {}; // 加载成功，无需处理
+      testImg.onerror = () => {
+        console.warn('[Canvas] Image URL failed to load, attempting save-image fallback:', newUrl);
+        // 通过 /api/save-image 将图片持久化为可靠的 data URL
+        fetch('/api/save-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: newUrl }),
+        })
+        .then(r => r.json())
+        .then(data => {
+          if (data.success && data.url) {
+            // 更新图片 URL 为持久化后的 URL
+            const fallbackImages = imagesRef.current.map(img => {
+              if (img.id === id) {
+                return { ...img, url: data.url };
+              }
+              return img;
+            });
+            imagesRef.current = fallbackImages;
+            onImagesChange(fallbackImages);
+          }
+        })
+        .catch(err => console.warn('[Canvas] save-image fallback failed:', err));
+      };
+      testImg.src = newUrl;
+    }
     return completedImage;
   }, [onImagesChange, onSelectImage]);
 
@@ -4216,13 +4247,16 @@ export function InfiniteCanvas({
         updateProcessingFrame(placeholderId, { progress: 88, status: '正在渲染预览...' });
 
         if (svgTraceMode === 'color' || svgTraceMode === 'bw') {
-          // SVG result - use data URL for canvas display
-          const displayUrl = data.dataUrl || data.url;
+          // SVG结果 - 优先使用PNG预览图用于画布显示，保留SVG数据用于下载
+          const displayUrl = data.pngPreviewUrl || data.dataUrl || data.url;
+          const svgDataUrl = data.svgDataUrl || (data.dataUrl && !data.isSvgPreview ? data.dataUrl : undefined);
           const engineLabel = data.engine === 'vtracer' ? 'VTracer' : data.engine === 'potrace' ? 'Potrace' : data.engine;
           completeProcessingFrame(placeholderId, displayUrl, img.width, img.height, {
             originalWidth: img.originalWidth || Math.round(img.width),
             originalHeight: img.originalHeight || Math.round(img.height),
             modifyPrompt: `${modeLabel} (${engineLabel})`,
+            // 保存SVG数据URL用于下载（如果PNG预览被使用）
+            ...(svgDataUrl && data.isSvgPreview ? { svgDataUrl } : {}),
           });
         } else {
           // Compress / thumbnail result - use data URL for display
@@ -5294,11 +5328,13 @@ export function InfiniteCanvas({
         return;
       }
       if (format === 'svg') {
+        // 优先使用svgDataUrl（画布显示PNG预览时保留的完整SVG数据）
+        const svgSource = image.svgDataUrl || image.url;
         // If image URL is already an SVG data URL (from SVG描摹), download directly
-        if (image.url.startsWith('data:image/svg+xml')) {
+        if (svgSource.startsWith('data:image/svg+xml')) {
           setDownloadProgress('正在导出矢量图...');
           try {
-            let svgContent = decodeURIComponent(image.url.replace(/^data:image\/svg\+xml;charset=utf-8,/, ''));
+            let svgContent = decodeURIComponent(svgSource.replace(/^data:image\/svg\+xml;charset=utf-8,/, ''));
             // Apply AI-compatible sanitization: add viewBox, ensure proper namespaces
             svgContent = ensureSvgAiCompatible(svgContent);
             const blob = new Blob([svgContent], { type: 'image/svg+xml' });
@@ -5313,7 +5349,7 @@ export function InfiniteCanvas({
           } catch {
             // Fallback to re-vectorize if data URL parsing fails
             const { downloadSVG } = await import('@/lib/svg-export');
-            await downloadSVG(image.url, svgMode);
+            await downloadSVG(svgSource, svgMode);
           }
           setDownloadProgress(null);
           setShowDownloadPopup(false);

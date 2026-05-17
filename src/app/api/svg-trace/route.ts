@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import sharp from 'sharp';
 import { execFile } from 'child_process';
-import { writeFile, unlink, mkdir } from 'fs/promises';
+import { unlink, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { getServerDataRoot, saveImageFile } from '@/lib/server-data-root';
@@ -1073,6 +1073,20 @@ export async function POST(req: NextRequest) {
 
         const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
 
+        // 生成 PNG 预览图用于画布显示（SVG data URL 在 <img> 中渲染有限制）
+        let pngPreviewUrl: string | undefined;
+        try {
+          const sharp = require('sharp');
+          const pngBuffer = await sharp(Buffer.from(svgContent))
+            .resize(Math.min(imgW, 2048), Math.min(imgH, 2048), { fit: 'inside', withoutEnlargement: true })
+            .png({ quality: 90 })
+            .toBuffer();
+          const pngBase64 = pngBuffer.toString('base64');
+          pngPreviewUrl = `data:image/png;base64,${pngBase64}`;
+        } catch (pngErr) {
+          console.warn('[svg-trace] PNG preview generation failed, falling back to SVG dataUrl:', pngErr);
+        }
+
         const pathCount = (svgContent.match(/<path/g) || []).length;
         const groupCount = (svgContent.match(/<g\b/g) || []).length;
 
@@ -1082,7 +1096,9 @@ export async function POST(req: NextRequest) {
           engine: 'vtracer',
           svg: svgContent,
           url,
-          dataUrl: svgDataUrl,
+          dataUrl: pngPreviewUrl || svgDataUrl,
+          svgDataUrl,
+          isSvgPreview: !!pngPreviewUrl,
           stats: {
             svgSize: new Blob([svgContent]).size,
             pathCount,
@@ -1110,13 +1126,29 @@ export async function POST(req: NextRequest) {
 
         const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
 
+        // 生成 PNG 预览图
+        let pngPreviewUrl: string | undefined;
+        try {
+          const sharp = require('sharp');
+          const pngBuffer = await sharp(Buffer.from(svgContent))
+            .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
+            .png({ quality: 90 })
+            .toBuffer();
+          const pngBase64 = pngBuffer.toString('base64');
+          pngPreviewUrl = `data:image/png;base64,${pngBase64}`;
+        } catch (pngErr) {
+          console.warn('[svg-trace] BW PNG preview generation failed:', pngErr);
+        }
+
         return NextResponse.json({
           success: true,
           mode: 'bw',
           engine: 'potrace',
           svg: svgContent,
           url,
-          dataUrl: svgDataUrl,
+          dataUrl: pngPreviewUrl || svgDataUrl,
+          svgDataUrl,
+          isSvgPreview: !!pngPreviewUrl,
           stats: {
             svgSize: new Blob([svgContent]).size,
             pathCount: (svgContent.match(/<path/g) || []).length,

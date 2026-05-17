@@ -91,6 +91,49 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'blob: URL cannot be saved server-side. Convert to data URL first.' }, { status: 400 });
     }
 
+    // 本地 /api/serve-upload/ 路径 — 通过 localhost fetch 获取后保存
+    if (imageUrl.startsWith('/api/serve-upload/') || imageUrl.startsWith('/')) {
+      try {
+        const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || 'http://localhost:5000';
+        const baseUrl = domain.startsWith('http') ? domain : `https://${domain}`;
+        const fullUrl = `${baseUrl}${imageUrl}`;
+        const response = await fetch(fullUrl, { signal: AbortSignal.timeout(15000) });
+        if (!response.ok) {
+          return NextResponse.json({ error: `Failed to fetch local image: ${response.status}` }, { status: 400 });
+        }
+        const contentType = response.headers.get('content-type') || 'image/png';
+        const buffer = Buffer.from(await response.arrayBuffer());
+        if (buffer.length > 20 * 1024 * 1024) {
+          return NextResponse.json({ error: 'Image too large (max 20MB)' }, { status: 400 });
+        }
+        const extFromCt = contentType.split('/')[1]?.replace('jpeg', 'jpg').replace('svg+xml', 'svg');
+        const ext = extFromCt || 'png';
+        const filename = `gen-${timestamp}-${random}.${ext}`;
+        const filePath = path.join(uploadDir, filename);
+        await writeFile(filePath, buffer);
+        if (isProd) {
+          const publicDir = path.join(process.cwd(), 'public', 'uploads');
+          if (!existsSync(publicDir)) await mkdir(publicDir, { recursive: true });
+          try { await copyFile(filePath, path.join(publicDir, filename)); } catch { /* ignore */ }
+        }
+        // S3 backup
+        let s3Key: string | null = null;
+        if (isS3Available()) {
+          s3Key = await uploadImageToS3(buffer, filename, contentType);
+          if (s3Key) console.log(`[save-image] S3 backup: ${s3Key}`);
+        }
+        return NextResponse.json({
+          success: true,
+          url: `${webPath}/${filename}`,
+          filename,
+          size: buffer.length,
+          s3Key,
+        });
+      } catch (fetchError) {
+        return NextResponse.json({ error: 'Failed to fetch local image path' }, { status: 400 });
+      }
+    }
+
     // 远程 HTTP(S) URL — 下载后保存
     if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
       const controller = new AbortController();

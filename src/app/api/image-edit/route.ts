@@ -13,6 +13,34 @@ import { isS3Available, uploadImageToS3 } from '@/lib/s3-storage';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
+/** 将图片 Buffer 转为 data URL，确保前端 100% 可渲染 */
+function imageBufferToDataUrl(buffer: Buffer, mimeType: string = 'image/png'): string {
+  return `data:${mimeType};base64,${buffer.toString('base64')}`;
+}
+
+/** 将图片 Buffer 持久化保存，优先 S3 → 本地文件 → base64 data URL 兜底 */
+async function persistImageBuffer(buffer: Buffer, filename: string, subDir: string, mimeType: string = 'image/png'): Promise<string> {
+  // 1. 优先上传到 S3（最可靠的公开访问方式）
+  if (await isS3Available()) {
+    try {
+      const s3Url = await uploadImageToS3(buffer, filename, mimeType);
+      if (s3Url) return s3Url;
+    } catch (e) {
+      console.warn(`[image-edit] S3 upload failed for ${filename}:`, e);
+    }
+  }
+  // 2. 保存到本地文件（通过 /api/serve-upload/ 可访问）
+  try {
+    const localUrl = saveImageFile(buffer, filename, subDir);
+    if (localUrl) return localUrl;
+  } catch (e) {
+    console.warn(`[image-edit] Local save failed for ${filename}:`, e);
+  }
+  // 3. 最终兜底：base64 data URL（始终可渲染，但体积约大 33%）
+  console.log(`[image-edit] Using base64 data URL fallback for ${filename}`);
+  return imageBufferToDataUrl(buffer, mimeType);
+}
+
 function findClosestAspectRatio(aspectRatio: string): string {
   if (SUPPORTED_RATIOS.includes(aspectRatio)) return aspectRatio;
   const parts = aspectRatio.split(':').map(Number);
@@ -1141,8 +1169,8 @@ async function saveBufferToPublic(buffer: Buffer, filename: string): Promise<str
     const s3Url = await uploadImageToS3(buffer, filename, 'image/png');
     if (s3Url) return s3Url;
   }
-  const url = await saveImageFile(buffer, filename, 'upscaled');
-  return url || `/api/serve-upload/upscaled/${filename}`;
+  // 直接返回 base64 data URL，彻底避免文件路径可达性问题
+  return `data:image/png;base64,${buffer.toString('base64')}`;
 }
 
 export async function POST(request: NextRequest) {
@@ -1554,15 +1582,18 @@ export async function POST(request: NextRequest) {
         const filename = `upscale_${timestamp}_${randomSuffix}.png`;
         const savedPath = await saveBufferToPublic(mergedBuffer, filename);
 
-        const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-        const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
-        const fullUrl = `${domainBase}${savedPath}`;
+        // saveBufferToPublic 返回 data URL 或 S3 URL，直接使用
+        const resultUrl = savedPath.startsWith('data:') ? savedPath : (() => {
+          const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+          const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
+          return `${domainBase}${savedPath}`;
+        })();
 
-        console.log(`[image-edit] upscale: upscayl tile upscale complete. Output: ${savedPath} (${(mergedBuffer.length / 1024).toFixed(0)}KB)`);
+        console.log(`[image-edit] upscale: upscayl tile upscale complete. (${(mergedBuffer.length / 1024).toFixed(0)}KB)`);
 
         return NextResponse.json({
           success: true,
-          imageUrl: fullUrl,
+          imageUrl: resultUrl,
           action,
           engine: 'upscayl-tile',
           usedModel: upscaylModel,
@@ -1740,15 +1771,11 @@ export async function POST(request: NextRequest) {
 
           const resultBuffer = await createLocalEraseInpaint(imageBuffer, maskGrayData, origW, origH, cropInfo);
 
-          const resultFileName = `erase_${Date.now()}.png`;
-          let resultUrl: string;
-          if (isS3Available()) {
-            resultUrl = (await uploadImageToS3(resultBuffer, resultFileName, 'image/png')) || '';
-          } else {
-            resultUrl = (await saveImageFile(resultBuffer, resultFileName, 'inpaint')) || `/api/serve-upload/inpaint/${resultFileName}`;
-          }
-          console.log(`[inpaint] Local erase result saved: ${resultFileName}`);
-          return NextResponse.json({ success: true, imageUrl: resultUrl, action, engine: 'local-erase' });
+          // 直接返回 base64 data URL，彻底避免文件路径可达性问题
+          // 前端通过 /api/save-image 持久化（该 API 经过充分验证）
+          const resultDataUrl = `data:image/png;base64,${resultBuffer.toString('base64')}`;
+          console.log(`[inpaint] Local erase result: base64 data URL (${(resultBuffer.length / 1024).toFixed(0)}KB)`);
+          return NextResponse.json({ success: true, imageUrl: resultDataUrl, action, engine: 'local-erase' });
         } catch (localErr) {
           console.error('[inpaint] Local erase failed:', localErr);
           return NextResponse.json({ success: false, error: '擦除修复失败，请重试' }, { status: 500 });
@@ -1885,19 +1912,21 @@ export async function POST(request: NextRequest) {
             .toBuffer();
 
           const resultFileName = `inpaint_${Date.now()}.png`;
-          let compositeUrl: string;
 
-          if (isS3Available()) {
-            compositeUrl = (await uploadImageToS3(compositeResult, resultFileName, 'image/png')) || '';
-          } else {
-            compositeUrl = (await saveImageFile(compositeResult, resultFileName, 'inpaint')) || `/api/serve-upload/inpaint/${resultFileName}`;
-          }
-          console.log(`[inpaint] AI composite result saved: ${resultFileName}`);
+          // 直接返回 base64 data URL，彻底避免文件路径可达性问题
+          const compositeDataUrl = `data:image/png;base64,${compositeResult.toString('base64')}`;
+          console.log(`[inpaint] AI composite result: base64 data URL (${(compositeResult.length / 1024).toFixed(0)}KB)`);
 
-          return NextResponse.json({ success: true, imageUrl: compositeUrl, action, engine: 'ai-crop-composite', cropInfo });
+          return NextResponse.json({ success: true, imageUrl: compositeDataUrl, action, engine: 'ai-crop-composite', cropInfo });
         } catch (compositeErr) {
-          console.error('[inpaint] Composite failed, returning raw AI result:', compositeErr);
-          return NextResponse.json({ success: true, imageUrl: result.directUrl, action, engine: 'ai-raw' });
+          console.error('[inpaint] Composite failed, returning raw AI result as base64:', compositeErr);
+          try {
+            const rawBuf = await fetchImageBuffer(result.directUrl);
+            const rawDataUrl = `data:image/png;base64,${rawBuf.toString('base64')}`;
+            return NextResponse.json({ success: true, imageUrl: rawDataUrl, action, engine: 'ai-raw' });
+          } catch {
+            return NextResponse.json({ success: true, imageUrl: result.directUrl, action, engine: 'ai-raw' });
+          }
         }
       }
 
@@ -2210,7 +2239,8 @@ export async function POST(request: NextRequest) {
           if (isS3Available()) {
             compositeResultUrl = (await uploadImageToS3(finalBuffer, resultFileName, 'image/png')) || '';
           } else {
-            compositeResultUrl = (await saveImageFile(finalBuffer, resultFileName, 'outpaint')) || `/api/serve-upload/outpaint/${resultFileName}`;
+          // 直接返回 base64 data URL，彻底避免文件路径可达性问题
+          compositeResultUrl = `data:image/png;base64,${finalBuffer.toString('base64')}`;
           }
           console.log(`[outpaint] Sync result saved: ${resultFileName}`);
 

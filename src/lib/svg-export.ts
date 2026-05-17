@@ -67,195 +67,7 @@ function quantizePixel(r: number, g: number, b: number, precision: number): [num
   ];
 }
 
-interface ColorBox {
-  colors: [number, number, number][];
-  count: number;
-  rMin: number; rMax: number;
-  gMin: number; gMax: number;
-  bMin: number; bMax: number;
-}
-
 /**
- * Median-Cut 色彩分割：将像素空间递归分割，产生更自然的颜色聚类
- * 比简单 bit-shift 更好地保留视觉重要颜色，减少碎片感
- */
-function medianCutQuantize(
-  data: Uint8ClampedArray,
-  width: number,
-  height: number,
-  maxColors: number,
-  gradientStep: number
-): { palette: [number,number,number][]; indexed: Uint16Array } {
-  const total = width * height;
-  const indexed = new Uint16Array(total);
-
-  // 1. 收集所有不透明像素
-  const pixelCounts = new Map<string, { color: [number,number,number]; count: number }>();
-  for (let i = 0; i < total; i++) {
-    const a = data[i * 4 + 3];
-    if (a < 128) { indexed[i] = 0; continue; }
-    const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
-    const key = `${r},${g},${b}`;
-    const existing = pixelCounts.get(key);
-    if (existing) {
-      existing.count++;
-    } else {
-      pixelCounts.set(key, { color: [r, g, b], count: 1 });
-    }
-  }
-
-  // 2. 初始化第一个 ColorBox
-  const allEntries = Array.from(pixelCounts.values());
-  function createBox(entries: { color: [number,number,number]; count: number }[]): ColorBox {
-    let rMin = 255, rMax = 0, gMin = 255, gMax = 0, bMin = 255, bMax = 0;
-    let totalCount = 0;
-    const colors: [number,number,number][] = [];
-    for (const e of entries) {
-      colors.push(e.color);
-      totalCount += e.count;
-      rMin = Math.min(rMin, e.color[0]); rMax = Math.max(rMax, e.color[0]);
-      gMin = Math.min(gMin, e.color[1]); gMax = Math.max(gMax, e.color[1]);
-      bMin = Math.min(bMin, e.color[2]); bMax = Math.max(bMax, e.color[2]);
-    }
-    return { colors, count: totalCount, rMin, rMax, gMin, gMax, bMin, bMax };
-  }
-
-  // 3. 递归分割
-  function splitBox(box: ColorBox): [ColorBox, ColorBox] | null {
-    if (box.colors.length < 2) return null;
-
-    // 找到范围最大的通道
-    const rRange = box.rMax - box.rMin;
-    const gRange = box.gMax - box.gMin;
-    const bRange = box.bMax - box.bMin;
-
-    let channel: 'r' | 'g' | 'b';
-    if (rRange >= gRange && rRange >= bRange) channel = 'r';
-    else if (gRange >= rRange && gRange >= bRange) channel = 'g';
-    else channel = 'b';
-
-    // 按该通道排序
-    const chIdx = channel === 'r' ? 0 : channel === 'g' ? 1 : 2;
-    box.colors.sort((a, b) => a[chIdx] - b[chIdx]);
-
-    // 找到中位数位置（按像素计数加权）
-    const halfCount = box.count / 2;
-    let splitIdx = 0;
-    let accCount = 0;
-    // 重建 entries 以便分割
-    const entries = box.colors.map(c => {
-      const key = `${c[0]},${c[1]},${c[2]}`;
-      return { color: c, count: pixelCounts.get(key)?.count || 1 };
-    });
-
-    for (let i = 0; i < entries.length; i++) {
-      accCount += entries[i].count;
-      if (accCount >= halfCount) {
-        splitIdx = i + 1;
-        break;
-      }
-    }
-    if (splitIdx === 0) splitIdx = 1;
-    if (splitIdx >= entries.length) splitIdx = entries.length - 1;
-
-    const leftEntries = entries.slice(0, splitIdx);
-    const rightEntries = entries.slice(splitIdx);
-    if (leftEntries.length === 0 || rightEntries.length === 0) return null;
-
-    return [createBox(leftEntries), createBox(rightEntries)];
-  }
-
-  const boxes: ColorBox[] = [createBox(allEntries)];
-
-  // 分割直到达到 maxColors
-  while (boxes.length < maxColors) {
-    // 找到体积×像素数最大的 box 进行分割
-    let bestIdx = -1;
-    let bestScore = -1;
-    for (let i = 0; i < boxes.length; i++) {
-      const box = boxes[i];
-      const volume = (box.rMax - box.rMin + 1) * (box.gMax - box.gMin + 1) * (box.bMax - box.bMin + 1);
-      const score = volume * box.count;
-      if (score > bestScore && box.colors.length >= 2) {
-        bestScore = score;
-        bestIdx = i;
-      }
-    }
-    if (bestIdx === -1) break;
-
-    const split = splitBox(boxes[bestIdx]);
-    if (!split) {
-      boxes.splice(bestIdx, 1);
-      continue;
-    }
-    boxes.splice(bestIdx, 1, split[0], split[1]);
-  }
-
-  // 4. 计算每个 box 的平均颜色
-  let palette: [number,number,number][] = [[0, 0, 0]]; // index 0 = transparent
-  const boxColors: [number,number,number][] = [];
-
-  for (const box of boxes) {
-    let rSum = 0, gSum = 0, bSum = 0, count = 0;
-    for (const c of box.colors) {
-      const key = `${c[0]},${c[1]},${c[2]}`;
-      const w = pixelCounts.get(key)?.count || 1;
-      rSum += c[0] * w;
-      gSum += c[1] * w;
-      bSum += c[2] * w;
-      count += w;
-    }
-    const avg: [number,number,number] = [
-      Math.round(rSum / count),
-      Math.round(gSum / count),
-      Math.round(bSum / count),
-    ];
-    palette.push(avg);
-    boxColors.push(avg);
-  }
-
-  // 5. 如果 gradientStep > 0，合并过近的颜色
-  if (gradientStep > 0 && palette.length > 2) {
-    const merged: [number,number,number][] = [[0, 0, 0]];
-    const used = new Set<number>();
-    for (let i = 0; i < boxColors.length; i++) {
-      if (used.has(i)) continue;
-      let avg: [number,number,number] = [...boxColors[i]] as [number,number,number];
-      let count = 1;
-      for (let j = i + 1; j < boxColors.length; j++) {
-        if (used.has(j)) continue;
-        if (colorDistance(avg, boxColors[j]) < gradientStep) {
-          avg = [
-            Math.round((avg[0] * count + boxColors[j][0]) / (count + 1)),
-            Math.round((avg[1] * count + boxColors[j][1]) / (count + 1)),
-            Math.round((avg[2] * count + boxColors[j][2]) / (count + 1)),
-          ];
-          count++;
-          used.add(j);
-        }
-      }
-      merged.push(avg);
-    }
-    palette = merged;
-  }
-
-  // 6. 将每个像素映射到最近的 palette 颜色
-  for (let i = 0; i < total; i++) {
-    const a = data[i * 4 + 3];
-    if (a < 128) { indexed[i] = 0; continue; }
-    const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
-    let minDist = Infinity;
-    let idx = 1;
-    for (let j = 1; j < palette.length; j++) {
-      const d = colorDistance([r, g, b], palette[j]);
-      if (d < minDist) { minDist = d; idx = j; }
-    }
-    indexed[i] = idx;
-  }
-
-  return { palette, indexed };
-}
-
 /**
  * 保留旧的 buildPalette 作为 fast 模式的快速路径
  */
@@ -498,8 +310,6 @@ function traceContour(
 
     const leftIsTarget = hasPixel(leftPx, leftPy);
     const rightIsTarget = hasPixel(rightPx, rightPy);
-    const oldDir = dir;
-
     if (rightIsTarget && !leftIsTarget) {
       ex += dxd[dir]; ey += dyd[dir];
     } else if (rightIsTarget && leftIsTarget) {
@@ -510,19 +320,6 @@ function traceContour(
     } else {
       dir = (dir + 3) % 4;
       ex += dxd[dir]; ey += dyd[dir];
-    }
-
-    // Insert diagonal interpolation point when direction changes
-    // This produces smoother contours by adding sub-pixel points at corners
-    if (oldDir !== dir && points.length > 0) {
-      const dirDiff = (dir - oldDir + 4) % 4;
-      if (dirDiff === 1 || dirDiff === 3) {
-        // Direction changed by 90° — add a diagonal midpoint for smoother curves
-        const lastPt = points[points.length - 1];
-        const midX = (lastPt.x + (ex - 0.5)) / 2;
-        const midY = (lastPt.y + (ey - 0.5)) / 2;
-        points.push({ x: midX, y: midY });
-      }
     }
 
     steps++;
@@ -933,17 +730,10 @@ export async function exportAsSVG(
   let palette: number[][];
   let indexed: Uint16Array;
 
-  if (mode === 'fast') {
-    const result = buildPaletteFast(data, width, height, colorPrecision, gradientStep);
-    palette = result.palette;
-    indexed = result.indexed;
-  } else {
-    // Median-Cut produces more natural color clusters
-    const maxColors = mode === 'pro' ? 64 : 128;
-    const result = medianCutQuantize(data, width, height, maxColors, gradientStep);
-    palette = result.palette;
-    indexed = result.indexed;
-  }
+  // 统一使用 buildPaletteFast（稳定可靠），medianCutQuantize 作为备选保留但不调用
+  const result = buildPaletteFast(data, width, height, colorPrecision, gradientStep);
+  palette = result.palette;
+  indexed = result.indexed;
 
   // Stage 1.5: Filter speckle
   filterSpeckle(indexed, width, height, speckleThreshold);
