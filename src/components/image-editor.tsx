@@ -762,7 +762,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           )
         : undefined;
 
-      // ★ 构建请求体（不含 count，单次请求只生成1张图）
+      // ★ 构建请求体（含 count，后端仅做1次LLM协作 + count次图像生成）
       const baseRequestBody: Record<string, unknown> = {
         image: imageAsDataUrl,
         prompt: prompt,
@@ -775,39 +775,36 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         llmProviderId: llmProviderId || undefined,
         referenceImages: refDataUrls,
         editHistory: editContextHistory.slice(-5),
+        count: Math.max(1, Math.min(outputCount, 4)),
       };
 
-      // ★ 提交+轮询模式：先快速提交获取taskId，再轮询结果
-      const requestCount = Math.max(1, Math.min(outputCount, 4));
+      // ★ 提交+轮询模式：提交单个任务（后端内部处理多张输出）
       const taskIds: string[] = [];
 
-      // 提交所有任务
-      for (let i = 0; i < requestCount; i++) {
-        try {
-          const submitResp = await fetch('/api/edit', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(baseRequestBody),
-          });
-          const submitData = await submitResp.json();
-          if (submitData.success && submitData.taskId) {
-            taskIds.push(submitData.taskId);
-          } else if (!submitData.success) {
-            // 提交本身就失败了（如参数校验失败），直接报错
-            clearInterval(progressInterval);
-            setIsResultLoading(false);
-            setError(submitData.error || '提交失败');
-            setIsLoading(false);
-            return;
-          }
-        } catch (submitErr: unknown) {
+      // 提交任务
+      try {
+        const submitResp = await fetch('/api/edit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(baseRequestBody),
+        });
+        const submitData = await submitResp.json();
+        if (submitData.success && submitData.taskId) {
+          taskIds.push(submitData.taskId);
+        } else if (!submitData.success) {
           clearInterval(progressInterval);
           setIsResultLoading(false);
-          const errMsg = submitErr instanceof Error ? submitErr.message : '提交失败，请重试';
-          setError(errMsg);
+          setError(submitData.error || '提交失败');
           setIsLoading(false);
           return;
         }
+      } catch (submitErr: unknown) {
+        clearInterval(progressInterval);
+        setIsResultLoading(false);
+        const errMsg = submitErr instanceof Error ? submitErr.message : '提交失败，请重试';
+        setError(errMsg);
+        setIsLoading(false);
+        return;
       }
 
       if (taskIds.length === 0) {
@@ -948,8 +945,8 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           }
         }
 
-        if (collectedUrls.length < requestCount && firstError) {
-          setError(`已生成 ${collectedUrls.length}/${requestCount} 张，部分失败: ${firstError}`);
+        if (collectedUrls.length < outputCount && firstError) {
+          setError(`已生成 ${collectedUrls.length}/${outputCount} 张，部分失败: ${firstError}`);
         }
       } else if (firstError) {
         setError(firstError);

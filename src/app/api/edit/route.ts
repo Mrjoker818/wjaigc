@@ -4,7 +4,7 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 
 // 允许大请求体（base64图片可能很大，50MB限制）
 export const runtime = 'nodejs';
-export const maxDuration = 300;
+export const maxDuration = 600;
 
 // ============================================================
 // 本地任务存储（语言修图异步提交+轮询模式）
@@ -36,6 +36,7 @@ interface EditTask {
 }
 
 const editTaskStore = new Map<string, EditTask>();
+const MAX_EDIT_TASKS = 100; // 内存防御上限
 
 // 定期清理过期任务（>30分钟）
 setInterval(() => {
@@ -58,7 +59,7 @@ export function deleteEditTask(taskId: string): boolean {
 function updateTaskStage(taskId: string, stage: string) {
   const task = editTaskStore.get(taskId);
   if (task) {
-    task.stage = stage;
+    editTaskStore.set(taskId, { ...task, stage });
   }
 }
 
@@ -331,6 +332,9 @@ export async function POST(request: NextRequest) {
     }
 
     // ========== 1.5 创建异步任务（提交+轮询模式，避免CDN/FaaS代理超时） ==========
+    if (editTaskStore.size >= MAX_EDIT_TASKS) {
+      return NextResponse.json({ success: false, error: '当前任务队列已满，请稍后再试' }, { status: 429 });
+    }
     const taskId = `edit_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     editTaskStore.set(taskId, { id: taskId, status: 'processing', progress: 0, stage: '初始化', createdAt: Date.now() });
 
@@ -849,9 +853,19 @@ ${prompt}
         if (isOpenaiImageModel && !supportsNativeMask) {
           // 尝试 images/generations 端点
           try {
-            const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, count);
+            const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, 1);
             if (genUrl) {
-              const images = [{ url: genUrl, revisedPrompt: effectivePrompt }];
+              const images: Array<{ url: string; revisedPrompt: string }> = [{ url: genUrl, revisedPrompt: effectivePrompt }];
+              // count > 1 时额外并行生成
+              if (count > 1) {
+                const extraPromises = Array.from({ length: count - 1 }, () =>
+                  tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, 1)
+                    .then(url => url ? { url, revisedPrompt: effectivePrompt } : null)
+                    .catch(() => null)
+                );
+                const extraResults = await Promise.all(extraPromises);
+                for (const r of extraResults) { if (r) images.push(r); }
+              }
               editTaskStore.set(taskId, {
                 id: taskId,
                 status: 'completed',
@@ -904,7 +918,7 @@ ${prompt}
     // chat/completions 未提取到图片，尝试降级到 images/generations
     if (!resultImageUrl && isOpenaiImageModel) {
       try {
-        const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, count);
+        const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, 1);
         if (genUrl) resultImageUrl = genUrl;
       } catch { /* 忽略 */ }
     }
@@ -924,9 +938,20 @@ ${prompt}
       return;
     }
 
-    const images = count > 1
-      ? Array.from({ length: count }, () => ({ url: resultImageUrl, revisedPrompt: effectivePrompt }))
-      : [{ url: resultImageUrl, revisedPrompt: effectivePrompt }];
+    // ★ count > 1 时，仅做1次LLM协作，多次图像生成（并行调用，节省LLM开销）
+    const images: Array<{ url: string; revisedPrompt: string }> = [{ url: resultImageUrl, revisedPrompt: effectivePrompt }];
+    if (count > 1 && isOpenaiImageModel) {
+      const extraCount = count - 1;
+      const extraPromises = Array.from({ length: extraCount }, () =>
+        tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, 1)
+          .then(url => url ? { url, revisedPrompt: effectivePrompt } : null)
+          .catch(() => null)
+      );
+      const extraResults = await Promise.all(extraPromises);
+      for (const r of extraResults) {
+        if (r) images.push(r);
+      }
+    }
 
     // 存储成功结果到任务
     editTaskStore.set(taskId, {

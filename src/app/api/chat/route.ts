@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
           'Authorization': `Bearer ${chatApiKey}`,
         },
         body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(30000),
+        signal: AbortSignal.timeout(60000),
       }
     );
 

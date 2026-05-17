@@ -6,6 +6,16 @@ import { resolveCompatProfile, buildPollUrl, type ApiCompatProfile } from '@/lib
 
 export const dynamic = 'force-dynamic';
 
+// 模块级缓存：避免高频轮询时重复动态导入
+type EditModule = typeof import('@/app/api/edit/route');
+let _editModule: EditModule | null = null;
+async function getEditModule(): Promise<EditModule> {
+  if (!_editModule) {
+    _editModule = await import('@/app/api/edit/route');
+  }
+  return _editModule;
+}
+
 // 轮询异步任务状态 - 由前端调用
 // 通用化设计：支持不同提供商的任务状态查询格式
 export async function POST(request: NextRequest) {
@@ -18,7 +28,7 @@ export async function POST(request: NextRequest) {
 
     // 检查是否为本地语言修图任务
     if (taskId.startsWith('edit_')) {
-      const { getEditTask, deleteEditTask } = await import('@/app/api/edit/route');
+      const { getEditTask, deleteEditTask } = await getEditModule();
       const task = getEditTask(taskId);
       if (!task) {
         return NextResponse.json({

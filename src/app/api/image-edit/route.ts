@@ -1266,31 +1266,62 @@ export async function POST(request: NextRequest) {
     // Helper: resolve local/blob/external image URL to base64 data URL
     const resolveImageToBase64 = async (url: string): Promise<string> => {
       if (url.startsWith('data:')) return url;
-      if (url.startsWith('http://') || url.startsWith('https://')) {
+
+      // 本地 API 路径（/api/serve-upload/xxx 或 /uploads/xxx）优先走 localhost fetch
+      // 这与顶层 resolveImage 函数保持一致，避免文件系统路径映射问题
+      const localApiPrefixes = ['/api/serve-upload/', '/uploads/'];
+      const isLocalApiPath = !url.startsWith('http') && localApiPrefixes.some(p => url.startsWith(p));
+      const isLocalDomainUrl = url.startsWith('http') && (() => {
         const rawDomain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
         const domainBase = rawDomain.replace(/\/+$/, '');
-        const localPrefix = `${domainBase}/`;
-        if (url.startsWith(localPrefix)) {
-          const localPath = url.replace(localPrefix, '');
-          // Search multiple possible locations: dataRoot/localPath, dataRoot/public/localPath, devWorkspace/public/localPath
-          const dataRoot = await getServerDataRoot();
-          const searchPaths = [
-            path.join(dataRoot, localPath),
-            path.join(dataRoot, 'public', localPath),
-            path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'public', localPath),
-          ];
-          for (const fp of searchPaths) {
-            try { const buf = await fs.readFile(fp); const ext = localPath.split('.').pop()?.toLowerCase() || 'png'; const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png'; return `data:${mime};base64,${buf.toString('base64')}`; } catch {}
-          }
-          throw new Error(`Local file not found: ${localPath} (searched ${searchPaths.join(', ')})`);
+        return url.startsWith(`${domainBase}/api/serve-upload/`) || url.startsWith(`${domainBase}/uploads/`);
+      })();
+
+      if (isLocalApiPath || isLocalDomainUrl) {
+        // Extract the relative path
+        let relPath = url;
+        if (url.startsWith('http')) {
+          const rawDomain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+          const domainBase = rawDomain.replace(/\/+$/, '');
+          relPath = url.replace(`${domainBase}`, '');
         }
+        // 优先尝试文件系统直接读取（/api/serve-upload/xxx → {dataRoot}/uploads/xxx）
+        const dataRoot = await getServerDataRoot();
+        const fsPath = relPath.replace(/^\/api\/serve-upload\//, '/uploads/').replace(/^\//, '');
+        const fsSearchPaths = [
+          path.join(dataRoot, fsPath),
+          path.join(dataRoot, 'uploads', path.basename(relPath)),
+        ];
+        for (const fp of fsSearchPaths) {
+          try {
+            const buf = await fs.readFile(fp);
+            const ext = path.extname(fp).slice(1).toLowerCase() || 'png';
+            const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png';
+            return `data:${mime};base64,${buf.toString('base64')}`;
+          } catch {}
+        }
+        // 文件系统未找到则走 localhost fetch（兼容所有环境）
+        const port = process.env.DEPLOY_RUN_PORT || 5000;
+        const fetchUrl = relPath.startsWith('/') ? `http://localhost:${port}${relPath}` : `http://localhost:${port}/${relPath}`;
+        try {
+          const res = await fetch(fetchUrl, { signal: AbortSignal.timeout(15000) });
+          if (res.ok) {
+            const buf = Buffer.from(await res.arrayBuffer());
+            const ct = res.headers.get('content-type') || 'image/png';
+            return `data:${ct};base64,${buf.toString('base64')}`;
+          }
+        } catch {}
+        throw new Error(`Local image not found: ${url} (tried fs: ${fsSearchPaths.join(', ')}, fetch: ${fetchUrl})`);
+      }
+
+      if (url.startsWith('http://') || url.startsWith('https://')) {
         // External URL: fetch it
         const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
         const buf = Buffer.from(await res.arrayBuffer());
         const ct = res.headers.get('content-type') || 'image/png';
         return `data:${ct};base64,${buf.toString('base64')}`;
       }
-      // Relative path like /uploads/xxx.png or /outpaint/xxx.png
+      // Other relative paths (e.g. /outpaint/xxx.png)
       const dataRoot = await getServerDataRoot();
       const relPath = url.startsWith('/') ? url.slice(1) : url;
       const searchPaths = [
@@ -1301,7 +1332,18 @@ export async function POST(request: NextRequest) {
       for (const fp of searchPaths) {
         try { const buf = await fs.readFile(fp); const ext = relPath.split('.').pop()?.toLowerCase() || 'png'; const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png'; return `data:${mime};base64,${buf.toString('base64')}`; } catch {}
       }
-      throw new Error(`File not found: ${url} (searched ${searchPaths.join(', ')})`);
+      // 文件系统未找到，尝试 localhost fetch 兜底
+      const port = process.env.DEPLOY_RUN_PORT || 5000;
+      const fetchUrl = url.startsWith('/') ? `http://localhost:${port}${url}` : `http://localhost:${port}/${url}`;
+      try {
+        const res = await fetch(fetchUrl, { signal: AbortSignal.timeout(15000) });
+        if (res.ok) {
+          const buf = Buffer.from(await res.arrayBuffer());
+          const ct = res.headers.get('content-type') || 'image/png';
+          return `data:${ct};base64,${buf.toString('base64')}`;
+        }
+      } catch {}
+      throw new Error(`File not found: ${url} (searched ${searchPaths.join(', ')}, fetch: ${fetchUrl})`);
     };
 
     if (action === 'multi_angle') {
@@ -1513,7 +1555,7 @@ export async function POST(request: NextRequest) {
         const savedPath = await saveBufferToPublic(mergedBuffer, filename);
 
         const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-        const domainBase = domain.replace(/\/+$/, '');
+        const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
         const fullUrl = `${domainBase}${savedPath}`;
 
         console.log(`[image-edit] upscale: upscayl tile upscale complete. Output: ${savedPath} (${(mergedBuffer.length / 1024).toFixed(0)}KB)`);
