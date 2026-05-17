@@ -332,7 +332,9 @@ async function fetchImageBuffer(url: string): Promise<Buffer> {
     // 6. Try current domain fetch
     const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT;
     if (domain) {
-      const fullUrl = `${domain}${url}`;
+      const domainBase = domain.replace(/\/+$/, '');
+      const base = domainBase.startsWith('http') ? domainBase : `https://${domainBase}`;
+      const fullUrl = `${base}${url}`;
       const domainRes = await fetch(fullUrl, { signal: AbortSignal.timeout(10000) });
       if (domainRes.ok) return Buffer.from(await domainRes.arrayBuffer());
     }
@@ -1265,8 +1267,9 @@ export async function POST(request: NextRequest) {
     const resolveImageToBase64 = async (url: string): Promise<string> => {
       if (url.startsWith('data:')) return url;
       if (url.startsWith('http://') || url.startsWith('https://')) {
-        const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-        const localPrefix = `${domain}/`;
+        const rawDomain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+        const domainBase = rawDomain.replace(/\/+$/, '');
+        const localPrefix = `${domainBase}/`;
         if (url.startsWith(localPrefix)) {
           const localPath = url.replace(localPrefix, '');
           // Search multiple possible locations: dataRoot/localPath, dataRoot/public/localPath, devWorkspace/public/localPath
@@ -1510,7 +1513,8 @@ export async function POST(request: NextRequest) {
         const savedPath = await saveBufferToPublic(mergedBuffer, filename);
 
         const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-        const fullUrl = `${domain}${savedPath}`;
+        const domainBase = domain.replace(/\/+$/, '');
+        const fullUrl = `${domainBase}${savedPath}`;
 
         console.log(`[image-edit] upscale: upscayl tile upscale complete. Output: ${savedPath} (${(mergedBuffer.length / 1024).toFixed(0)}KB)`);
 

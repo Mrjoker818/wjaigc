@@ -31,7 +31,9 @@ async function resolveImageToBuffer(imageSrc: string): Promise<{ buffer: Buffer;
     return { buffer: Buffer.from(arrayBuffer), mimeType: contentType || 'image/png' };
   } else if (imageSrc.startsWith('/')) {
     const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
-    const fullUrl = domain ? `https://${domain}${imageSrc}` : `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageSrc}`;
+    const domainBase = domain.replace(/\/+$/, '');
+    const base = domainBase.startsWith('http') ? domainBase : (domainBase ? `https://${domainBase}` : '');
+    const fullUrl = base ? `${base}${imageSrc}` : `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageSrc}`;
     const response = await fetch(fullUrl);
     if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
     const arrayBuffer = await response.arrayBuffer();
@@ -284,7 +286,9 @@ export async function POST(request: NextRequest) {
       }
     } else if (image.startsWith('/')) {
       const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
-      const fullUrl = domain ? `https://${domain}${image}` : `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${image}`;
+      const domainBase = domain.replace(/\/+$/, '');
+      const base = domainBase.startsWith('http') ? domainBase : (domainBase ? `https://${domainBase}` : '');
+      const fullUrl = base ? `${base}${image}` : `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${image}`;
       try {
         const response = await fetch(fullUrl);
         if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);

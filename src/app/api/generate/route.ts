@@ -118,16 +118,20 @@ export async function POST(request: NextRequest) {
     // 优化：并行处理所有参考图，加速提交
     const accessibleReferenceImages: string[] = [];
     if (referenceImages && Array.isArray(referenceImages)) {
-      const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT;
-      
+      // 确保域名不重复包含协议：COZE_PROJECT_DOMAIN_DEFAULT 可能已含 https://
+      const rawDomain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
+      const domainBase = rawDomain.replace(/\/+$/, ''); // 去掉尾部斜杠
+
       const resolveImage = async (rawImg: unknown): Promise<string | null> => {
         const img = typeof rawImg === 'string' ? rawImg : (rawImg as { url?: string })?.url || String(rawImg);
         if (!img || typeof img !== 'string' || !img.trim()) return null;
 
         // 1. 相对路径 → 公网 URL 或 base64
         if (img.startsWith('/')) {
-          if (domain) {
-            return `https://${domain}${img}`;
+          if (domainBase) {
+            // 确保不重复添加协议
+            const base = domainBase.startsWith('http') ? domainBase : `https://${domainBase}`;
+            return `${base}${img}`;
           }
           try {
             const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
@@ -153,7 +157,11 @@ export async function POST(request: NextRequest) {
             if (saveResp.ok) {
               const saveData = await saveResp.json();
               if (saveData.url) {
-                return domain ? `https://${domain}${saveData.url}` : saveData.url;
+                if (domainBase) {
+                  const base = domainBase.startsWith('http') ? domainBase : `https://${domainBase}`;
+                  return `${base}${saveData.url}`;
+                }
+                return saveData.url;
               }
             }
           } catch { /* S3 not available */ }
@@ -162,8 +170,13 @@ export async function POST(request: NextRequest) {
         // 3. 外部 URL 直接传递
         if (img.startsWith('http')) return img;
 
-        // 4. 兜底
-        return domain ? `${domain}${img}` : img;
+        // 4. 兜底 — 确保 URL 有协议前缀且不重复
+        if (domainBase) {
+          const base = domainBase.startsWith('http') ? domainBase : `https://${domainBase}`;
+          const path = img.startsWith('/') ? img : `/${img}`;
+          return `${base}${path}`;
+        }
+        return img;
       };
       
       // 并行处理所有参考图（而非串行）
@@ -425,11 +438,11 @@ export async function POST(request: NextRequest) {
       }
 
       // 使用兼容性层自动调整请求（size格式、端点选择等）
-      // hasImage=hasRefImages: 当有参考图时使用 profile 的 editEndpoint
-      //   PROFILE_AUTO → /images/edits (image 字段保留，AI 必须处理)
-      //   APImart 等 → /images/generations (image 字段被移除，但 image_urls + 增强prompt 引导AI)
+      // hasImage 基于 requestBody.image 是否实际存在（而非仅有 image_urls）
+      // 当有 image 字段时：使用 editEndpoint，AI 必须处理源图
+      // 当仅有 image_urls 时：使用默认端点，image_urls 作为可选参考
       const { body: adjustedBody, endpoint } = adjustRequestForProfile(requestBody, profile, {
-        hasImage: hasRefImages,
+        hasImage: !!requestBody.image,
       });
 
       console.log('Submitting image task:', {
