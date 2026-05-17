@@ -3413,23 +3413,32 @@ export function InfiniteCanvas({
 
     if (cropInfo) {
       // 裁剪策略：结果图像需要覆盖 (cropX, cropY, cropW, cropH) 区域
-      // AI返回的结果可能是固定尺寸(如1024x1024)，需保持比例居中裁切后放置
+      // 使用 inside 模式：等比缩放保留 AI 完整内容，居中放置，避免 cover 裁切导致错位
       const resultAspect = resultImg.naturalWidth / resultImg.naturalHeight;
       const cropAspect = cropInfo.cropW / cropInfo.cropH;
-      let sx = 0, sy = 0, sw = resultImg.naturalWidth, sh = resultImg.naturalHeight;
+      let drawW: number, drawH: number, drawX: number, drawY: number;
       if (resultAspect > cropAspect) {
-        // 结果更宽，裁掉左右
-        sw = Math.round(resultImg.naturalHeight * cropAspect);
-        sx = Math.round((resultImg.naturalWidth - sw) / 2);
+        // 结果更宽，以高度为准缩放
+        drawH = cropInfo.cropH;
+        drawW = Math.round(cropInfo.cropH * resultAspect);
+        drawX = cropInfo.cropX + Math.round((cropInfo.cropW - drawW) / 2);
+        drawY = cropInfo.cropY;
       } else if (resultAspect < cropAspect) {
-        // 结果更高，裁掉上下
-        sh = Math.round(resultImg.naturalWidth / cropAspect);
-        sy = Math.round((resultImg.naturalHeight - sh) / 2);
+        // 结果更高，以宽度为准缩放
+        drawW = cropInfo.cropW;
+        drawH = Math.round(cropInfo.cropW / resultAspect);
+        drawX = cropInfo.cropX;
+        drawY = cropInfo.cropY + Math.round((cropInfo.cropH - drawH) / 2);
+      } else {
+        drawW = cropInfo.cropW;
+        drawH = cropInfo.cropH;
+        drawX = cropInfo.cropX;
+        drawY = cropInfo.cropY;
       }
-      resultCtx.drawImage(resultImg, sx, sy, sw, sh, cropInfo.cropX, cropInfo.cropY, cropInfo.cropW, cropInfo.cropH);
+      resultCtx.drawImage(resultImg, drawX, drawY, drawW, drawH);
       // 蒙版修图模式：对裁剪边缘做羽化处理
       if (!isErase) {
-        const edgeFeather = 36;
+        const edgeFeather = 24;
         const patchData = resultCtx.getImageData(0, 0, origW, origH);
         const cropRight = cropInfo.cropX + cropInfo.cropW - 1;
         const cropBottom = cropInfo.cropY + cropInfo.cropH - 1;
@@ -3465,8 +3474,8 @@ export function InfiniteCanvas({
     // 5. 应用蒙版作为 alpha 通道（IOPaint sd_mask_blur 风格）
     // 模糊后的蒙版提供更平滑的边界过渡
     // 擦除模式：WHITE_START=210, BLACK_START=24 → 保留更多原图边界
-    // 蒙版模式：WHITE_START=120, BLACK_START=4 → 更清晰的修图边界
-    const WHITE_START = isErase ? 210 : 120;
+    // 蒙版模式：WHITE_START=160, BLACK_START=4 → 更自然的过渡边界
+    const WHITE_START = isErase ? 210 : 160;
     const BLACK_START = isErase ? 24 : 4;
     for (let i = 0; i < maskData.data.length; i += 4) {
       const maskValue = maskData.data[i]; // R channel (模糊后)

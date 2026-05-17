@@ -161,12 +161,8 @@ export function saveImageFile(
   const data = typeof buffer === 'string' ? Buffer.from(buffer, 'base64') : buffer;
   fs.writeFileSync(filePath, data);
   
-  // 生产环境通过 serve-upload API 访问，开发环境通过 public 目录访问
-  const isProd = process.env.COZE_PROJECT_ENV === 'PROD';
-  if (isProd) {
-    return `/api/serve-upload/${subDir}/${filename}`;
-  }
-  return `/${subDir}/${filename}`;
+  // 统一通过 serve-upload API 访问，确保开发和生产环境路径一致可达
+  return `/api/serve-upload/${subDir}/${filename}`;
 }
 
 /**

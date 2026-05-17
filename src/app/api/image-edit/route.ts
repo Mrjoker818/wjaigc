@@ -1834,18 +1834,40 @@ export async function POST(request: NextRequest) {
           const resultBuffer = await fetchImageBuffer(result.directUrl);
           const resultMeta = await sharp(resultBuffer).metadata();
 
-          // 将 AI 结果缩放到裁剪区域尺寸（保持比例，cover模式避免拉伸变形）
-          const resizedResult = (resultMeta.width !== cropInfo.cropW || resultMeta.height !== cropInfo.cropH)
-            ? await sharp(resultBuffer)
-                .resize(cropInfo.cropW, cropInfo.cropH, { fit: 'cover', position: 'center' })
+          // 将 AI 结果等比缩放到裁剪区域内（inside模式保留完整内容，避免cover裁切导致错位）
+          let resizedResult: Buffer;
+          if (resultMeta.width !== cropInfo.cropW || resultMeta.height !== cropInfo.cropH) {
+            const innerResult = await sharp(resultBuffer)
+              .resize(cropInfo.cropW, cropInfo.cropH, { fit: 'inside', withoutEnlargement: true })
+              .png()
+              .toBuffer();
+            // 如果缩放后尺寸仍小于裁剪区域，用原图背景色填充边缘（居中放置）
+            const innerMeta = await sharp(innerResult).metadata();
+            const padX = Math.floor((cropInfo.cropW - (innerMeta.width || cropInfo.cropW)) / 2);
+            const padY = Math.floor((cropInfo.cropH - (innerMeta.height || cropInfo.cropH)) / 2);
+            if (padX > 0 || padY > 0) {
+              resizedResult = await sharp({
+                create: {
+                  width: cropInfo.cropW,
+                  height: cropInfo.cropH,
+                  channels: 4,
+                  background: { r: 0, g: 0, b: 0, alpha: 0 },
+                }
+              })
+                .composite([{ input: innerResult, left: padX, top: padY, blend: 'over' }])
                 .png()
-                .toBuffer()
-            : resultBuffer;
+                .toBuffer();
+            } else {
+              resizedResult = innerResult;
+            }
+          } else {
+            resizedResult = resultBuffer;
+          }
 
-          // 用裁剪区域的蒙版做柔边合成
+          // 用裁剪区域的蒙版做柔边合成（增大模糊半径使过渡更自然，避免硬边错位感）
           const croppedSoftMask = await sharp(croppedMaskBuffer)
             .threshold(127)
-            .blur(8)
+            .blur(12)
             .grayscale()
             .raw()
             .toBuffer();

@@ -56,7 +56,7 @@ function colorDistance(c1: [number,number,number], c2: [number,number,number]): 
   return Math.sqrt(dr*dr*0.3 + dg*dg*0.59 + db*db*0.11);
 }
 
-// ─── Stage 1: Color Quantization ────────────────────────────────
+// ─── Stage 1: Color Quantization (Median-Cut) ───────────────────
 
 function quantizePixel(r: number, g: number, b: number, precision: number): [number,number,number] {
   const shift = 8 - precision;
@@ -67,7 +67,199 @@ function quantizePixel(r: number, g: number, b: number, precision: number): [num
   ];
 }
 
-function buildPalette(
+interface ColorBox {
+  colors: [number, number, number][];
+  count: number;
+  rMin: number; rMax: number;
+  gMin: number; gMax: number;
+  bMin: number; bMax: number;
+}
+
+/**
+ * Median-Cut 色彩分割：将像素空间递归分割，产生更自然的颜色聚类
+ * 比简单 bit-shift 更好地保留视觉重要颜色，减少碎片感
+ */
+function medianCutQuantize(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  maxColors: number,
+  gradientStep: number
+): { palette: [number,number,number][]; indexed: Uint16Array } {
+  const total = width * height;
+  const indexed = new Uint16Array(total);
+
+  // 1. 收集所有不透明像素
+  const pixelCounts = new Map<string, { color: [number,number,number]; count: number }>();
+  for (let i = 0; i < total; i++) {
+    const a = data[i * 4 + 3];
+    if (a < 128) { indexed[i] = 0; continue; }
+    const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
+    const key = `${r},${g},${b}`;
+    const existing = pixelCounts.get(key);
+    if (existing) {
+      existing.count++;
+    } else {
+      pixelCounts.set(key, { color: [r, g, b], count: 1 });
+    }
+  }
+
+  // 2. 初始化第一个 ColorBox
+  const allEntries = Array.from(pixelCounts.values());
+  function createBox(entries: { color: [number,number,number]; count: number }[]): ColorBox {
+    let rMin = 255, rMax = 0, gMin = 255, gMax = 0, bMin = 255, bMax = 0;
+    let totalCount = 0;
+    const colors: [number,number,number][] = [];
+    for (const e of entries) {
+      colors.push(e.color);
+      totalCount += e.count;
+      rMin = Math.min(rMin, e.color[0]); rMax = Math.max(rMax, e.color[0]);
+      gMin = Math.min(gMin, e.color[1]); gMax = Math.max(gMax, e.color[1]);
+      bMin = Math.min(bMin, e.color[2]); bMax = Math.max(bMax, e.color[2]);
+    }
+    return { colors, count: totalCount, rMin, rMax, gMin, gMax, bMin, bMax };
+  }
+
+  // 3. 递归分割
+  function splitBox(box: ColorBox): [ColorBox, ColorBox] | null {
+    if (box.colors.length < 2) return null;
+
+    // 找到范围最大的通道
+    const rRange = box.rMax - box.rMin;
+    const gRange = box.gMax - box.gMin;
+    const bRange = box.bMax - box.bMin;
+
+    let channel: 'r' | 'g' | 'b';
+    if (rRange >= gRange && rRange >= bRange) channel = 'r';
+    else if (gRange >= rRange && gRange >= bRange) channel = 'g';
+    else channel = 'b';
+
+    // 按该通道排序
+    const chIdx = channel === 'r' ? 0 : channel === 'g' ? 1 : 2;
+    box.colors.sort((a, b) => a[chIdx] - b[chIdx]);
+
+    // 找到中位数位置（按像素计数加权）
+    const halfCount = box.count / 2;
+    let splitIdx = 0;
+    let accCount = 0;
+    // 重建 entries 以便分割
+    const entries = box.colors.map(c => {
+      const key = `${c[0]},${c[1]},${c[2]}`;
+      return { color: c, count: pixelCounts.get(key)?.count || 1 };
+    });
+
+    for (let i = 0; i < entries.length; i++) {
+      accCount += entries[i].count;
+      if (accCount >= halfCount) {
+        splitIdx = i + 1;
+        break;
+      }
+    }
+    if (splitIdx === 0) splitIdx = 1;
+    if (splitIdx >= entries.length) splitIdx = entries.length - 1;
+
+    const leftEntries = entries.slice(0, splitIdx);
+    const rightEntries = entries.slice(splitIdx);
+    if (leftEntries.length === 0 || rightEntries.length === 0) return null;
+
+    return [createBox(leftEntries), createBox(rightEntries)];
+  }
+
+  const boxes: ColorBox[] = [createBox(allEntries)];
+
+  // 分割直到达到 maxColors
+  while (boxes.length < maxColors) {
+    // 找到体积×像素数最大的 box 进行分割
+    let bestIdx = -1;
+    let bestScore = -1;
+    for (let i = 0; i < boxes.length; i++) {
+      const box = boxes[i];
+      const volume = (box.rMax - box.rMin + 1) * (box.gMax - box.gMin + 1) * (box.bMax - box.bMin + 1);
+      const score = volume * box.count;
+      if (score > bestScore && box.colors.length >= 2) {
+        bestScore = score;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx === -1) break;
+
+    const split = splitBox(boxes[bestIdx]);
+    if (!split) {
+      boxes.splice(bestIdx, 1);
+      continue;
+    }
+    boxes.splice(bestIdx, 1, split[0], split[1]);
+  }
+
+  // 4. 计算每个 box 的平均颜色
+  let palette: [number,number,number][] = [[0, 0, 0]]; // index 0 = transparent
+  const boxColors: [number,number,number][] = [];
+
+  for (const box of boxes) {
+    let rSum = 0, gSum = 0, bSum = 0, count = 0;
+    for (const c of box.colors) {
+      const key = `${c[0]},${c[1]},${c[2]}`;
+      const w = pixelCounts.get(key)?.count || 1;
+      rSum += c[0] * w;
+      gSum += c[1] * w;
+      bSum += c[2] * w;
+      count += w;
+    }
+    const avg: [number,number,number] = [
+      Math.round(rSum / count),
+      Math.round(gSum / count),
+      Math.round(bSum / count),
+    ];
+    palette.push(avg);
+    boxColors.push(avg);
+  }
+
+  // 5. 如果 gradientStep > 0，合并过近的颜色
+  if (gradientStep > 0 && palette.length > 2) {
+    const merged: [number,number,number][] = [[0, 0, 0]];
+    const used = new Set<number>();
+    for (let i = 0; i < boxColors.length; i++) {
+      if (used.has(i)) continue;
+      let avg: [number,number,number] = [...boxColors[i]] as [number,number,number];
+      let count = 1;
+      for (let j = i + 1; j < boxColors.length; j++) {
+        if (used.has(j)) continue;
+        if (colorDistance(avg, boxColors[j]) < gradientStep) {
+          avg = [
+            Math.round((avg[0] * count + boxColors[j][0]) / (count + 1)),
+            Math.round((avg[1] * count + boxColors[j][1]) / (count + 1)),
+            Math.round((avg[2] * count + boxColors[j][2]) / (count + 1)),
+          ];
+          count++;
+          used.add(j);
+        }
+      }
+      merged.push(avg);
+    }
+    palette = merged;
+  }
+
+  // 6. 将每个像素映射到最近的 palette 颜色
+  for (let i = 0; i < total; i++) {
+    const a = data[i * 4 + 3];
+    if (a < 128) { indexed[i] = 0; continue; }
+    const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
+    let minDist = Infinity;
+    let idx = 1;
+    for (let j = 1; j < palette.length; j++) {
+      const d = colorDistance([r, g, b], palette[j]);
+      if (d < minDist) { minDist = d; idx = j; }
+    }
+    indexed[i] = idx;
+  }
+
+  return { palette, indexed };
+}
+
+/**
+ * 保留旧的 buildPalette 作为 fast 模式的快速路径
+ */
+function buildPaletteFast(
   data: Uint8ClampedArray,
   width: number,
   height: number,
@@ -306,6 +498,7 @@ function traceContour(
 
     const leftIsTarget = hasPixel(leftPx, leftPy);
     const rightIsTarget = hasPixel(rightPx, rightPy);
+    const oldDir = dir;
 
     if (rightIsTarget && !leftIsTarget) {
       ex += dxd[dir]; ey += dyd[dir];
@@ -317,6 +510,19 @@ function traceContour(
     } else {
       dir = (dir + 3) % 4;
       ex += dxd[dir]; ey += dyd[dir];
+    }
+
+    // Insert diagonal interpolation point when direction changes
+    // This produces smoother contours by adding sub-pixel points at corners
+    if (oldDir !== dir && points.length > 0) {
+      const dirDiff = (dir - oldDir + 4) % 4;
+      if (dirDiff === 1 || dirDiff === 3) {
+        // Direction changed by 90° — add a diagonal midpoint for smoother curves
+        const lastPt = points[points.length - 1];
+        const midX = (lastPt.x + (ex - 0.5)) / 2;
+        const midY = (lastPt.y + (ey - 0.5)) / 2;
+        points.push({ x: midX, y: midY });
+      }
     }
 
     steps++;
@@ -640,25 +846,25 @@ function pathToSVGPath(path: Point[], cornerThreshold: number, precision: number
       // Both corners: straight line
       d += ` L${p2.x.toFixed(p)} ${p2.y.toFixed(p)}`;
     } else {
-      // Catmull-Rom to cubic Bezier conversion
-      // alpha = 1/6 gives good curve approximation
-      const alpha = 1 / 6;
+      // Adaptive Catmull-Rom to cubic Bezier conversion
+      // alpha=1/3 for smooth segments (fuller curves), 1/6 near corners (tighter)
+      const alpha = (isCorner || isNextCorner) ? 1 / 6 : 1 / 3;
       let cp1x: number, cp1y: number, cp2x: number, cp2y: number;
 
       if (isCorner) {
         // Start from corner: control point extends from corner towards p2
-        cp1x = p1.x + (p2.x - p1.x) * alpha * 3;
-        cp1y = p1.y + (p2.y - p1.y) * alpha * 3;
+        cp1x = p1.x + (p2.x - p1.x) * alpha * 2;
+        cp1y = p1.y + (p2.y - p1.y) * alpha * 2;
         cp2x = p2.x - (p3.x - p1.x) * alpha;
         cp2y = p2.y - (p3.y - p1.y) * alpha;
       } else if (isNextCorner) {
         // End at corner: control point approaches corner from p1 direction
         cp1x = p1.x + (p2.x - p0.x) * alpha;
         cp1y = p1.y + (p2.y - p0.y) * alpha;
-        cp2x = p2.x - (p2.x - p1.x) * alpha * 3;
-        cp2y = p2.y - (p2.y - p1.y) * alpha * 3;
+        cp2x = p2.x - (p2.x - p1.x) * alpha * 2;
+        cp2y = p2.y - (p2.y - p1.y) * alpha * 2;
       } else {
-        // Standard Catmull-Rom to Bezier
+        // Standard Catmull-Rom to Bezier — use fuller alpha for smoother curves
         cp1x = p1.x + (p2.x - p0.x) * alpha;
         cp1y = p1.y + (p2.y - p0.y) * alpha;
         cp2x = p2.x - (p3.x - p1.x) * alpha;
@@ -723,8 +929,21 @@ export async function exportAsSVG(
   const imageData = ctx.getImageData(0, 0, width, height);
   const data = imageData.data;
 
-  // Stage 1: Color Quantization
-  const { palette, indexed } = buildPalette(data, width, height, colorPrecision, gradientStep);
+  // Stage 1: Color Quantization — Median-Cut for pro/studio, bit-shift for fast
+  let palette: number[][];
+  let indexed: Uint16Array;
+
+  if (mode === 'fast') {
+    const result = buildPaletteFast(data, width, height, colorPrecision, gradientStep);
+    palette = result.palette;
+    indexed = result.indexed;
+  } else {
+    // Median-Cut produces more natural color clusters
+    const maxColors = mode === 'pro' ? 64 : 128;
+    const result = medianCutQuantize(data, width, height, maxColors, gradientStep);
+    palette = result.palette;
+    indexed = result.indexed;
+  }
 
   // Stage 1.5: Filter speckle
   filterSpeckle(indexed, width, height, speckleThreshold);
@@ -767,8 +986,8 @@ export async function exportAsSVG(
 
       // Stage 4: Path Smoothing
       if (mode !== 'fast' && path.length >= 3) {
-        // More iterations = smoother curves. 4-6 iterations eliminates pixel jaggedness.
-        const smoothIterations = mode === 'pro' ? 4 : 6;
+        // More iterations = smoother curves. Pro: 6, Studio: 8 iterations for near-perfect smoothness.
+        const smoothIterations = mode === 'pro' ? 6 : 8;
         path = chaikinSmooth(path, cornerThreshold, smoothIterations);
       }
 
@@ -783,25 +1002,45 @@ export async function exportAsSVG(
   // Sort by area descending (painter's algorithm — largest first = background layer)
   segments.sort((a, b) => b.area - a.area);
 
-  // Build SVG
-  const paths: string[] = [];
+  // Group segments by color for Adobe Illustrator compatibility
+  const colorGroups = new Map<string, PathSegment[]>();
   for (const seg of segments) {
-    const pathD = mode === 'fast'
-      ? pathToPolygonPath(seg.points, pathPrecision)
-      : pathToSVGPath(seg.points, cornerThreshold, pathPrecision);
-
-    if (pathD) {
-      paths.push(`  <path d="${pathD}" fill="${seg.color}" stroke="none" />`);
+    if (!colorGroups.has(seg.color)) {
+      colorGroups.set(seg.color, []);
     }
+    colorGroups.get(seg.color)!.push(seg);
+  }
+
+  // Build SVG with AI-compatible structure
+  const paths: string[] = [];
+  let groupIdx = 0;
+
+  for (const [color, segs] of colorGroups) {
+    const groupLabel = `color-group-${groupIdx++}`;
+    paths.push(`  <g id="${groupLabel}" data-name="Color ${color}">`);
+    for (const seg of segs) {
+      const pathD = mode === 'fast'
+        ? pathToPolygonPath(seg.points, pathPrecision)
+        : pathToSVGPath(seg.points, cornerThreshold, pathPrecision);
+
+      if (pathD) {
+        const pathIdx = paths.length;
+        paths.push(`    <path id="path-${pathIdx}" d="${pathD}" fill="${color}" stroke="none" shape-rendering="geometricPrecision" />`);
+      }
+    }
+    paths.push(`  </g>`);
   }
 
   // Background: most common color (largest area) or white
   const bgColor = segments.length > 0 ? segments[0].color : '#ffffff';
 
+  // Adobe Illustrator compatible SVG output
   const svgString = [
     `<?xml version="1.0" encoding="UTF-8"?>`,
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
-    `  <rect x="0" y="0" width="${width}" height="${height}" fill="${bgColor}" />`,
+    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" enable-background="new 0 0 ${width} ${height}" shape-rendering="geometricPrecision" text-rendering="geometricPrecision" image-rendering="optimizeQuality">`,
+    `  <title>Vectorized Image</title>`,
+    `  <desc>Generated by WujieAI SVG Engine — ${mode} mode, ${colorGroups.size} colors, ${paths.length} paths</desc>`,
+    `  <rect x="0" y="0" width="${width}" height="${height}" fill="${bgColor}" stroke="none" />`,
     ...paths,
     `</svg>`,
   ].join('\n');
