@@ -425,8 +425,10 @@ export async function POST(request: NextRequest) {
       }
 
       // 使用兼容性层自动调整请求（size格式、端点选择等）
+      // 只有当 image 字段实际存在时才强制 /images/edits（image 下载失败时不应强制）
+      const hasActualImageField = !!requestBody.image;
       const { body: adjustedBody, endpoint } = adjustRequestForProfile(requestBody, profile, {
-        hasImage: hasRefImages,
+        hasImage: hasActualImageField,
       });
 
       console.log('Submitting image task:', {

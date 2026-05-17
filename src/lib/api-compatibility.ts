@@ -389,18 +389,21 @@ export function adjustRequestForProfile(
   }
 
   // --- Endpoint selection ---
-  // Respect the profile's editEndpoint when a source image is present.
-  // - For providers like OpenAI that support /images/edits, the profile
-  //   will specify editEndpoint='/images/edits' — the AI MUST process
-  //   the `image` field and treat it as the source to edit.
-  // - For providers that only support /images/generations for everything
-  //   (e.g. async proxy adapters), the profile will specify
-  //   editEndpoint='/images/generations' — reference images are passed
-  //   via `image_urls` and the prompt describes the desired changes.
-  // - If /images/edits is tried and rejected, callers should auto-fallback
-  //   to /images/generations with stripEditsOnlyFields().
+  // When the request carries an `image` field (img2img / erase / outpaint / mask),
+  // we MUST try /images/edits first — this is the standard OpenAI endpoint that
+  // forces the model to process the source image.  Falling back to
+  // /images/generations (where `image` is stripped and only `image_urls` remain)
+  // causes the model to treat the reference as optional and ignore it, producing
+  // completely unrelated results.
+  //
+  // Callers that already know their provider doesn't support /images/edits can
+  // set isEditEndpoint=false to skip this behaviour.
   let endpoint: ImageEndpoint;
-  if (hasImage || isEditEndpoint) {
+  if (hasImage) {
+    // Always prefer /images/edits when an image must be processed.
+    // If the provider rejects it, callers auto-fallback to /images/generations.
+    endpoint = '/images/edits';
+  } else if (isEditEndpoint) {
     endpoint = profile.editEndpoint;
   } else {
     endpoint = profile.defaultEndpoint;
