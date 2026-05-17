@@ -425,10 +425,11 @@ export async function POST(request: NextRequest) {
       }
 
       // 使用兼容性层自动调整请求（size格式、端点选择等）
-      // 只有当 image 字段实际存在时才强制 /images/edits（image 下载失败时不应强制）
-      const hasActualImageField = !!requestBody.image;
+      // hasImage=hasRefImages: 当有参考图时使用 profile 的 editEndpoint
+      //   PROFILE_AUTO → /images/edits (image 字段保留，AI 必须处理)
+      //   APImart 等 → /images/generations (image 字段被移除，但 image_urls + 增强prompt 引导AI)
       const { body: adjustedBody, endpoint } = adjustRequestForProfile(requestBody, profile, {
-        hasImage: hasActualImageField,
+        hasImage: hasRefImages,
       });
 
       console.log('Submitting image task:', {

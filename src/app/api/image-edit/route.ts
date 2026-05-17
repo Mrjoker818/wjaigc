@@ -860,7 +860,7 @@ async function autoTryChatVisionFallback(
       size: '1024x1024',
       image_urls: [imageDataUrl],
       strength: 0.6,
-    }), `${operation}(vision-fallback)`);
+    }), `${operation}(vision-fallback)`, '/images/generations');
     return { ...result, usedModel: result.usedModel };
   } catch {
     return null;
@@ -1767,6 +1767,7 @@ export async function POST(request: NextRequest) {
           candidateModels,
           (m: string) => ({ ...requestBody, model: m }),
           '蒙版修图',
+          '/images/edits',
         );
       } catch (autoTryErr: unknown) {
         console.log(`[inpaint] All image models failed, trying chat-vision fallback...`);

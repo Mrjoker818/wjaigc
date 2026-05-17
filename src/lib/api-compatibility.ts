@@ -389,31 +389,30 @@ export function adjustRequestForProfile(
   }
 
   // --- Endpoint selection ---
-  // When the request carries an `image` field (img2img / erase / outpaint / mask),
-  // we MUST try /images/edits first — this is the standard OpenAI endpoint that
-  // forces the model to process the source image.  Falling back to
-  // /images/generations (where `image` is stripped and only `image_urls` remain)
-  // causes the model to treat the reference as optional and ignore it, producing
-  // completely unrelated results.
-  //
-  // Callers that already know their provider doesn't support /images/edits can
-  // set isEditEndpoint=false to skip this behaviour.
+  // Use profile's editEndpoint when image editing is needed (img2img / erase / outpaint / mask).
+  // Each profile declares which endpoint it supports for image edits:
+  //   - PROFILE_AUTO / PROFILE_OPENAI: editEndpoint = /images/edits  → image field preserved, AI must process it
+  //   - PROFILE_APIMART:             editEndpoint = /images/generations → image/mask/strength preserved for img2img
+  // If /images/edits is rejected by the provider at runtime, callers auto-fallback to /images/generations.
   let endpoint: ImageEndpoint;
-  if (hasImage) {
-    // Always prefer /images/edits when an image must be processed.
-    // If the provider rejects it, callers auto-fallback to /images/generations.
-    endpoint = '/images/edits';
-  } else if (isEditEndpoint) {
+  if (hasImage || isEditEndpoint) {
     endpoint = profile.editEndpoint;
   } else {
     endpoint = profile.defaultEndpoint;
   }
 
-  // When the edit endpoint is /images/generations, strip fields that
-  // are only valid on /images/edits (image, mask, strength).
-  // These fields would cause errors or be ignored on /images/generations.
-  // Reference images should be passed via `image_urls` instead.
-  if (endpoint === '/images/generations') {
+  // When the edit endpoint is /images/generations AND there is NO image
+  // field in the body, strip fields that are only valid on /images/edits.
+  // However, when hasImage=true (reference image / img2img / inpaint),
+  // we KEEP image/mask/strength fields because:
+  //   1. Many API proxies (including APImart) accept these fields on
+  //      /images/generations for img2img workflows
+  //   2. Stripping them would make AI unable to see the source image,
+  //      causing "blank image" or "unrecognized subject" issues
+  //   3. If a specific API truly rejects these fields, the caller's
+  //      fallback logic (isEditsEndpointRejected → stripEditsOnlyFields)
+  //      will handle it gracefully
+  if (endpoint === '/images/generations' && !hasImage) {
     delete body.image;
     delete body.mask;
     delete body.strength;
