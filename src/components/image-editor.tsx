@@ -872,6 +872,10 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           } else if (pollData.status === 'failed') {
             completedTasks.add(taskId);
             if (!firstError) firstError = pollData.error || pollData.message || '编辑失败';
+          } else if (pollData.status === 'error') {
+            // 任务不存在或已过期（可能是服务重启导致内存清空）
+            completedTasks.add(taskId);
+            if (!firstError) firstError = pollData.error || '任务已过期，请重新提交';
           }
 
           // 更新进度条（基于已完成任务数）

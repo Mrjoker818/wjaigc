@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderById, normalizeApiBaseUrl, getApiProviders } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import type { ApiProvider } from '@/lib/universal-api-types';
 
 // 允许大请求体（base64图片可能很大，50MB限制）
 export const runtime = 'nodejs';
@@ -269,6 +270,31 @@ function extractImageFromResponse(responseData: Record<string, unknown>): string
   return '';
 }
 
+/** 从 API 响应中提取所有图片（支持 images/edits 返回多张） */
+function extractAllImagesFromResponse(responseData: Record<string, unknown>, fallbackPrompt: string): Array<{ url: string; revisedPrompt: string }> {
+  const images: Array<{ url: string; revisedPrompt: string }> = [];
+
+  // 格式1: OpenAI images/edits 标准响应 { data: [{ url, b64_json, revised_prompt }] }
+  if (responseData.data && Array.isArray(responseData.data)) {
+    for (const item of responseData.data as Array<Record<string, unknown>>) {
+      const url = item.url as string || (item.b64_json ? `data:image/png;base64,${item.b64_json}` : '');
+      if (url) {
+        images.push({ url, revisedPrompt: (item.revised_prompt as string) || fallbackPrompt });
+      }
+    }
+  }
+
+  // 格式2: 单张图片响应
+  if (images.length === 0) {
+    const singleUrl = extractImageFromResponse(responseData);
+    if (singleUrl) {
+      images.push({ url: singleUrl, revisedPrompt: fallbackPrompt });
+    }
+  }
+
+  return images;
+}
+
 // ============================================================
 // POST: 执行语言修图
 // ============================================================
@@ -287,7 +313,6 @@ export async function POST(request: NextRequest) {
       llmModelId,    // 可选，LLM辅助模型ID
       llmProviderId, // 可选，LLM辅助模型提供商ID
       referenceImages, // 可选，参考图URL数组（多图模式）
-      editHistory = [], // 可选，多轮编辑历史 [{userPrompt, llmInstruction}]
     } = await request.json();
 
     if (!image) {
@@ -300,7 +325,6 @@ export async function POST(request: NextRequest) {
     // ========== 1. 获取 API 凭证（与 /api/generate 一致） ==========
     let effectiveApiKey = apiKey || '';
     let effectiveBaseUrl = '';
-    let effectiveProviderId = providerId || '';
 
     if (!effectiveApiKey && providerId) {
       try {
@@ -318,7 +342,6 @@ export async function POST(request: NextRequest) {
         if (provider?.apiKey) {
           effectiveApiKey = provider.apiKey;
           effectiveBaseUrl = normalizeApiBaseUrl(provider.baseUrl || '');
-          effectiveProviderId = provider.id;
         }
       } catch { /* 忽略 */ }
     }
@@ -338,8 +361,17 @@ export async function POST(request: NextRequest) {
     const taskId = `edit_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     editTaskStore.set(taskId, { id: taskId, status: 'processing', progress: 0, stage: '初始化', createdAt: Date.now() });
 
-    // 后台异步执行编辑流程
+    // 后台异步执行编辑流程（5分钟全局超时兜底）
+    const EDIT_GLOBAL_TIMEOUT_MS = 5 * 60 * 1000;
     (async () => {
+      // 全局超时：确保 IIFE 不会无限运行
+      const timeoutId = setTimeout(() => {
+        const task = editTaskStore.get(taskId);
+        if (task && task.status === 'processing') {
+          failTask(taskId, '编辑超时，请稍后重试');
+        }
+      }, EDIT_GLOBAL_TIMEOUT_MS);
+
       try {
         // ========== 2. 解析原图为 Buffer ==========
         let imageBuffer: Buffer;
@@ -418,247 +450,179 @@ export async function POST(request: NextRequest) {
     let llmInstruction = prompt; // LLM 生成的精准指令，无 LLM 参与时等于原始 prompt
     let llmEditRegions: Array<{ label: string; bounds: { x: number; y: number; width: number; height: number } }> = []; // LLM 识别的编辑区域
 
-    if (llmModelId && llmProviderId) {
-      try {
-        updateTaskStage(taskId, 'analyzing');
-        const llmProvider = await findProviderById(llmProviderId);
-        if (llmProvider?.apiKey && llmProvider?.baseUrl) {
-          const llmBaseUrl = normalizeApiBaseUrl(llmProvider.baseUrl);
-          const llmHeaders = {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${llmProvider.apiKey}`,
-          };
+    // ===== 单次 LLM 协作：合并分析+指令生成为1次调用 =====
+    try {
+      updateTaskStage(taskId, '分析中');
+      // 查找 LLM 提供商：优先使用 llmProviderId，否则查找 chat 类型提供商
+      let llmProvider: Awaited<ReturnType<typeof findProviderById>> = null;
+      if (llmModelId && llmProviderId) {
+        llmProvider = await findProviderById(llmProviderId);
+      }
+      if (!llmProvider) {
+        // fallback: 查找有 chat 能力的提供商
+        const allProviders = await getApiProviders();
+        const chatProvider = allProviders.find((p: ApiProvider) =>
+          p.modelType === 'chat' || (p.selectedModels as string[])?.some((m: string) => m.includes('gemini') || m.includes('gpt'))
+        );
+        if (chatProvider) llmProvider = chatProvider;
+      }
+      if (llmProvider) {
+        const llmBaseUrl = normalizeApiBaseUrl(llmProvider.baseUrl);
+        const llmHeaders = {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${llmProvider.apiKey}`,
+        };
+        const llmModel = (llmProvider.selectedModels as string[])?.[0] || llmProvider.selectedModel || '';
 
-          // ===== 阶段1: LLM 分析原图内容 =====
-          let imageDescription = '';
-          const analyzeParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
-            { type: 'text', text: '请仔细观察这张图片，简要描述图片中的：1.主要主体 2.背景环境 3.色彩风格 4.构图特征。用中文回答，不超过80字：' },
-            { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBuffer.toString('base64')}` } },
-          ];
+        const collaborationMessages: Array<Record<string, unknown>> = [];
+        const contentParts: Array<Record<string, unknown>> = [];
 
-          try {
-            const analyzeResponse = await fetchWithV1Retry(llmBaseUrl, '/chat/completions', {
-              method: 'POST',
-              headers: llmHeaders,
-              body: JSON.stringify({
-                model: llmModelId,
-                messages: [{ role: 'user', content: analyzeParts }],
-                max_tokens: 200,
-                stream: false,
-              }),
-            });
-            if (analyzeResponse.ok) {
-              const analyzeText = await analyzeResponse.text();
-              let analyzeData: Record<string, unknown>;
-              if (analyzeText.trimStart().startsWith('data:')) {
-                analyzeData = parseSSEToJSON(analyzeText);
-              } else {
-                try { analyzeData = JSON.parse(analyzeText); } catch { analyzeData = {}; }
-              }
-              const analyzeChoices = (analyzeData as Record<string, unknown>).choices as Array<Record<string, unknown>> | undefined;
-              const analyzeContent = analyzeChoices?.[0]?.message
-                ? ((analyzeChoices[0].message as Record<string, unknown>).content)
-                : undefined;
-              if (analyzeContent) imageDescription = String(analyzeContent);
-            }
-          } catch (analyzeErr) {
-            console.warn('LLM image analysis failed:', analyzeErr);
-          }
+        // 构建多模态消息（原图 + 参考图）
+        const promptText = `You are an expert image editing assistant. Analyze the provided image(s) and generate optimal editing instructions.
 
-          // ===== 阶段2: LLM 分析参考图（如有） =====
-          updateTaskStage(taskId, 'analyzing_reference');
-          let refDescription = '';
-          if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
-            const refParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
-              { type: 'text', text: '请简要描述以下参考图片的风格、构图和主体特征，用于指导图片编辑。用中文回答，不超过80字：' },
-            ];
-            for (const refUrl of referenceImages.slice(0, 4)) {
-              try {
-                const ref = await resolveImageToBuffer(refUrl);
-                refParts.push({ type: 'image_url', image_url: { url: `data:${ref.mimeType};base64,${ref.buffer.toString('base64')}` } });
-              } catch { /* 跳过失败的参考图 */ }
-            }
-            try {
-              const refResponse = await fetchWithV1Retry(llmBaseUrl, '/chat/completions', {
-                method: 'POST',
-                headers: llmHeaders,
-                body: JSON.stringify({
-                  model: llmModelId,
-                  messages: [{ role: 'user', content: refParts }],
-                  max_tokens: 200,
-                  stream: false,
-                }),
-              });
-              if (refResponse.ok) {
-                const refText = await refResponse.text();
-                let refData: Record<string, unknown>;
-                if (refText.trimStart().startsWith('data:')) {
-                  refData = parseSSEToJSON(refText);
-                } else {
-                  try { refData = JSON.parse(refText); } catch { refData = {}; }
-                }
-                const refChoices = (refData as Record<string, unknown>).choices as Array<Record<string, unknown>> | undefined;
-                const refContent = refChoices?.[0]?.message
-                  ? ((refChoices[0].message as Record<string, unknown>).content)
-                  : undefined;
-                if (refContent) refDescription = String(refContent);
-              }
-            } catch (refErr) {
-              console.warn('LLM reference image analysis failed:', refErr);
-            }
-          }
+TASK: User wants to "${prompt}" the image.
 
-          // ===== 阶段3: LLM 生成精准编辑指令 =====
-          updateTaskStage(taskId, 'optimizing_prompt');
-          // 将原图分析 + 参考图分析 + 用户意图 + 蒙版语义 + 编辑历史 → 组合成精准编辑指令
-          let maskContext = '';
-          if (maskBuffer) {
-            maskContext = '\n\n[蒙版信息：用户用画笔标记了需要修改的区域（蒙版白色区域），请重点关注标记区域进行修改，未标记区域尽量保持原样。]';
-          }
+INSTRUCTIONS:
+1. Analyze the original image: describe its content, composition, style, colors, and key elements
+2. ${referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0 ? 'Analyze the reference image(s): describe how they relate to the editing goal and what aspects should be referenced (style, composition, character, etc.)' : 'No reference image provided.'}
+3. Generate a detailed editing instruction that will produce the best result for the user's request
 
-          // 构建历史编辑记录（最近5轮）
-          let historyContext = '';
-          if (Array.isArray(editHistory) && editHistory.length > 0) {
-            const recentHistory = editHistory.slice(-5);
-            const historyLines = recentHistory.map((h: { userPrompt?: string; llmInstruction?: string }) =>
-              `用户指令: ${h.userPrompt || ''} → AI优化指令: ${h.llmInstruction || ''}`
-            ).join('\n');
-            historyContext = `\n## 历史编辑记录（供上下文参考，避免与之前操作矛盾）\n${historyLines}\n`;
-          }
-
-          const optimizeParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
-            {
-              type: 'text',
-              text: `你是一个专业的AI图片编辑指令优化师。请根据以下信息，生成一条精准的英文图片编辑指令。
-${historyContext}
-## 原图内容分析
-${imageDescription || '（未能分析原图）'}
-
-## 参考图特征
-${refDescription || '（无参考图）'}
-${maskContext}
-## 用户的编辑意图
-${prompt}
-
-## 要求
-1. 将用户的中文意图翻译为精准的英文编辑指令
-2. 结合原图内容分析，明确指出需要修改和保持的部分
-3. 如果有参考图特征，融入参考图的风格/构图/主体元素
-4. 如果有蒙版信息，强调只在标记区域修改
-5. 如果有历史编辑记录，保持与之前修改的一致性和连贯性
-6. 指令要具体、可执行，包含视觉细节（颜色、纹理、光影等）
-7. 如果编辑仅涉及图片的局部区域（如背景、某个物体、某个区域），在指令末尾用\`\`\`json代码块输出edit_regions，格式如下：
-\`\`\`json
+OUTPUT FORMAT (respond with ONLY a JSON object, no markdown):
 {
-  "edit_regions": [
-    { "label": "区域描述", "bounds": { "x": 0.1, "y": 0.2, "width": 0.5, "height": 0.6 } }
-  ]
+  "originalAnalysis": "Brief description of the original image",
+  "referenceAnalysis": ${referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0 ? '"Brief description of reference image aspects to apply"' : 'null'},
+  "editInstruction": "Detailed editing instruction optimized for image generation AI",
+  "suggestedRegions": ["optional: regions that should be modified"],
+  "autoMaskPrompt": "optional: description of regions to mask for precise editing"
 }
-\`\`\`
-   其中bounds为0-1相对坐标（x=左, y=上, width=宽, height=高），表示需要修改的区域范围。
-8. 如果编辑是全局性的（如整体色调、整体风格），不需要输出edit_regions，留空即可
-9. 输出格式：先输出英文编辑指令，然后如果有局部区域则附上\`\`\`json代码块
 
-请输出：`,
-            },
-          ];
-          // 让LLM也看到原图，辅助理解
-          if (imageDescription) {
-            optimizeParts.push({ type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBuffer.toString('base64')}` } });
-          }
+Make the editInstruction specific, detailed, and optimized for AI image editing. Include style, composition, and quality guidance.`;
 
-          try {
-            const optimizeResponse = await fetchWithV1Retry(llmBaseUrl, '/chat/completions', {
-              method: 'POST',
-              headers: llmHeaders,
-              body: JSON.stringify({
-                model: llmModelId,
-                messages: [{ role: 'user', content: optimizeParts }],
-                max_tokens: 500,
-                stream: false,
-              }),
-            });
-            if (optimizeResponse.ok) {
-              const optimizeText = await optimizeResponse.text();
-              let optimizeData: Record<string, unknown>;
-              if (optimizeText.trimStart().startsWith('data:')) {
-                optimizeData = parseSSEToJSON(optimizeText);
+        contentParts.push({ type: 'text', text: promptText });
+
+        // 添加原图到消息
+        if (imageBuffer) {
+          const imageBase64 = `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
+          contentParts.push({
+            type: 'image_url',
+            image_url: { url: imageBase64, detail: 'high' }
+          });
+        }
+
+        // 添加参考图到消息
+        if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
+          for (const refImg of referenceImages.slice(0, 3)) {
+            try {
+              let refBase64: string;
+              const refImgUrl = typeof refImg === 'string' ? refImg : refImg?.url || '';
+              if (!refImgUrl) continue;
+              if (refImgUrl.startsWith('data:')) {
+                refBase64 = refImgUrl;
               } else {
-                try { optimizeData = JSON.parse(optimizeText); } catch { optimizeData = {}; }
+                const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
+                const refDomainBase = domain.replace(/\/+$/, '');
+                const refFullUrl = refImgUrl.startsWith('/')
+                  ? `${refDomainBase.startsWith('http') ? refDomainBase : 'https://' + refDomainBase}${refImgUrl}`
+                  : refImgUrl;
+                const refImgResp = await fetch(refFullUrl);
+                const refImgBuf = Buffer.from(await refImgResp.arrayBuffer());
+                refBase64 = `data:image/jpeg;base64,${refImgBuf.toString('base64')}`;
               }
-              const optimizeChoices = (optimizeData as Record<string, unknown>).choices as Array<Record<string, unknown>> | undefined;
-              const optimizeContent = optimizeChoices?.[0]?.message
-                ? ((optimizeChoices[0].message as Record<string, unknown>).content)
-                : undefined;
-              if (optimizeContent && String(optimizeContent).trim()) {
-                const rawContent = String(optimizeContent).trim();
-                // 解析 edit_regions（从 ```json 代码块或正则提取）
-                let parsedRegions: Array<{ label: string; bounds: { x: number; y: number; width: number; height: number } }> = [];
-                try {
-                  // 方式1: 尝试从 ```json 代码块提取
-                  const jsonBlockMatch = rawContent.match(/```json\s*\n?([\s\S]*?)\n?\s*```/);
-                  if (jsonBlockMatch) {
-                    const parsed = JSON.parse(jsonBlockMatch[1]);
-                    if (parsed.edit_regions && Array.isArray(parsed.edit_regions)) {
-                      parsedRegions = parsed.edit_regions;
-                    }
-                  }
-                  // 方式2: 正则提取 JSON 对象
-                  if (parsedRegions.length === 0) {
-                    const jsonObjectMatch = rawContent.match(/\{[\s\S]*"edit_regions"[\s\S]*\}/);
-                    if (jsonObjectMatch) {
-                      const parsed = JSON.parse(jsonObjectMatch[0]);
-                      if (parsed.edit_regions && Array.isArray(parsed.edit_regions)) {
-                        parsedRegions = parsed.edit_regions;
-                      }
-                    }
-                  }
-                  // 坐标校验裁剪到 0-1 范围
-                  parsedRegions = parsedRegions.filter((r: { label?: string; bounds?: { x: number; y: number; width: number; height: number } }) =>
-                    r.bounds && typeof r.bounds.x === 'number' && typeof r.bounds.y === 'number' &&
-                    typeof r.bounds.width === 'number' && typeof r.bounds.height === 'number'
-                  ).map((r: { label: string; bounds: { x: number; y: number; width: number; height: number } }) => ({
-                    label: r.label || '',
-                    bounds: {
-                      x: Math.max(0, Math.min(1, r.bounds.x)),
-                      y: Math.max(0, Math.min(1, r.bounds.y)),
-                      width: Math.max(0, Math.min(1 - Math.max(0, Math.min(1, r.bounds.x)), r.bounds.width)),
-                      height: Math.max(0, Math.min(1 - Math.max(0, Math.min(1, r.bounds.y)), r.bounds.height)),
-                    },
-                  }));
-                } catch (parseErr) {
-                  console.warn('Failed to parse edit_regions, defaulting to empty:', parseErr);
-                  parsedRegions = [];
-                }
-                // 从指令文本中移除 json 代码块，保留纯编辑指令
-                effectivePrompt = rawContent.replace(/```json\s*\n?[\s\S]*?\n?\s*```/g, '').trim();
-                llmInstruction = effectivePrompt;
-                // 存储解析结果供后续返回使用
-                llmEditRegions = parsedRegions;
-                console.log(`[LLM协作] 原始prompt: "${prompt}" → 优化后: "${effectivePrompt.substring(0, 100)}..." edit_regions: ${parsedRegions.length}个`);
-              }
+              contentParts.push({
+                type: 'image_url',
+                image_url: { url: refBase64, detail: 'high' }
+              });
+            } catch (refErr) {
+              console.warn('[edit] Failed to load reference image for collaboration:', refErr);
             }
-          } catch (optimizeErr) {
-            console.warn('LLM prompt optimization failed, using original prompt:', optimizeErr);
           }
         }
-      } catch (llmErr) {
-        console.warn('LLM collaboration failed, using original prompt:', llmErr);
+
+        collaborationMessages.push({ role: 'user', content: contentParts });
+
+        const collabResp = await fetchWithV1Retry(llmBaseUrl, '/chat/completions', {
+          method: 'POST',
+          headers: llmHeaders,
+          body: JSON.stringify({
+            model: llmModel,
+            messages: collaborationMessages,
+            max_tokens: 2000,
+            temperature: 0.7,
+          }),
+          signal: AbortSignal.timeout(60000),
+        });
+
+        if (collabResp.ok) {
+          // 兼容 SSE 和非 SSE 响应格式
+          const collabText = await collabResp.text();
+          let collabData: Record<string, unknown>;
+          if (collabText.trimStart().startsWith('data:')) {
+            collabData = parseSSEToJSON(collabText);
+          } else {
+            try {
+              collabData = JSON.parse(collabText);
+            } catch {
+              console.warn('[edit] LLM collaboration response parse failed, skipping LLM enhancement');
+              collabData = {};
+            }
+          }
+          const llmResponse = (collabData.choices as Array<Record<string, unknown>>)?.[0]?.message
+            ? ((collabData.choices as Array<Record<string, unknown>>)[0].message as Record<string, unknown>).content as string
+            : '';
+          updateTaskStage(taskId, '优化指令中');
+
+          // 尝试解析 JSON 响应
+          let parsed: Record<string, unknown> | null = null;
+          try {
+            const jsonMatch = llmResponse.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              parsed = JSON.parse(jsonMatch[0]);
+            }
+          } catch {}
+
+          if (parsed?.editInstruction) {
+            effectivePrompt = parsed.editInstruction;
+            llmInstruction = parsed.editInstruction;
+            if (parsed?.suggestedRegions && Array.isArray(parsed.suggestedRegions)) {
+              llmEditRegions = parsed.suggestedRegions.map((r: string) => ({
+                label: r,
+                bounds: { x: 0, y: 0, width: 100, height: 100 }
+              }));
+            }
+            console.log('[edit] LLM generated edit instruction:', effectivePrompt.substring(0, 100));
+          } else {
+            // 如果 JSON 解析失败，尝试使用 LLM 原始响应
+            const cleanedResponse = llmResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').replace(/^[\s\S]*?\{/m, '{').replace(/\}[\s\S]*$/m, '}');
+            if (cleanedResponse.length > 20) {
+              try {
+                const retryParsed = JSON.parse(cleanedResponse);
+                if (retryParsed?.editInstruction) {
+                  effectivePrompt = retryParsed.editInstruction;
+                  llmInstruction = retryParsed.editInstruction;
+                }
+              } catch {
+                if (llmResponse.length > prompt.length) {
+                  effectivePrompt = llmResponse.substring(0, 1000);
+                  llmInstruction = effectivePrompt;
+                }
+              }
+            } else if (llmResponse.length > prompt.length) {
+              effectivePrompt = llmResponse.substring(0, 1000);
+              llmInstruction = effectivePrompt;
+            }
+          }
+        } else {
+          console.warn('[edit] LLM collaboration request failed:', collabResp.status);
+        }
       }
-    } else {
-      // 没有配置LLM模型时，仅做简单处理
-      if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
-        effectivePrompt = `有${referenceImages.length}张参考图作为风格/构图参考。${prompt}`;
-      }
-      if (maskBuffer) {
-        effectivePrompt = `${prompt}（仅修改涂抹标记的区域，其他区域保持不变）`;
-      }
+    } catch (llmErr) {
+      console.warn('LLM collaboration failed, using original prompt:', llmErr);
     }
 
     const editInstruction = `Edit this image according to the following instruction: ${effectivePrompt}. Maintain the overall composition and style while making the requested changes.`;
 
     // ========== 6. 调用 API（全兼容模式） ==========
-    updateTaskStage(taskId, 'editing');
+    updateTaskStage(taskId, '编辑中');
 
     // 路径A: OpenAI images.edit 端点（仅 OpenAI 官方 + 支持 mask 的场景）
     // 第三方代理即使模型名是 gpt-image-2，也不走 images.edit（因为代理通常不支持）
@@ -700,19 +664,17 @@ ${prompt}
               ...form.getHeaders(),
             },
             body: form as unknown as BodyInit,
+            signal: AbortSignal.timeout(120000),
           },
         );
 
         if (!editResponse.ok) {
           const errText = await editResponse.text().catch(() => '');
-          // images.edit 失败，降级到 chat/completions 路径
           console.warn(`images.edit failed (${editResponse.status}), falling back to chat/completions: ${errText.substring(0, 200)}`);
-          // 不 return，继续走下面的 chat/completions 路径
         } else {
           const editData = await editResponse.json();
-          const resultUrl = extractImageFromResponse(editData);
-          if (resultUrl) {
-            const images = [{ url: resultUrl, revisedPrompt: effectivePrompt }];
+          const images = extractAllImagesFromResponse(editData, effectivePrompt);
+          if (images.length > 0) {
             editTaskStore.set(taskId, {
               id: taskId,
               status: 'completed',
@@ -733,12 +695,10 @@ ${prompt}
             });
             return;
           }
-          // 提取失败，降级到 chat/completions
           console.warn('images/edit response parsed but no image found, falling back to chat/completions');
         }
       } catch (editErr) {
         console.warn('images.edit error, falling back to chat/completions:', editErr instanceof Error ? editErr.message : editErr);
-        // 降级到 chat/completions
       }
     }
 
@@ -772,9 +732,6 @@ ${prompt}
     }
 
     // 蒙版参考图（将蒙版作为参考图发送给AI）
-    // 白色区域=需要修改的区域，黑色区域=保持不变的区域
-    // 无论是否支持原生mask，都通过chat/completions参考图模式发送蒙版
-    // （如果路径A成功则不会走到这里，路径A失败降级时也能正确处理）
     if (maskBuffer) {
       contentParts.push({
         type: 'image_url',
@@ -789,7 +746,7 @@ ${prompt}
     // 编辑指令
     contentParts.push({ type: 'text', text: editInstruction });
 
-    // 构建 chat/completions 请求体（必须 stream:false，第三方代理默认可能流式返回）
+    // 构建 chat/completions 请求体
     const chatRequestBody: Record<string, unknown> = {
       model,
       messages: [{
@@ -799,12 +756,6 @@ ${prompt}
       max_tokens: 4096,
       stream: false,
     };
-
-    // 对于图像生成类模型，添加响应格式提示（部分代理支持）
-    if (isOpenaiImageModel || isImageEditModel(model)) {
-      // 部分代理/模型需要通过特定参数要求返回图片
-      // 不影响不支持此参数的代理（会被忽略）
-    }
 
     const chatResponse = await fetchWithV1Retry(
       effectiveBaseUrl,
@@ -816,14 +767,14 @@ ${prompt}
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(chatRequestBody),
+        signal: AbortSignal.timeout(120000),
       },
     );
 
     if (!chatResponse.ok) {
       const errText = await chatResponse.text().catch(() => '');
       let errorMsg = `API 调用失败 (${chatResponse.status})`;
-      
-      // 尝试解析错误信息
+
       try {
         const errJson = JSON.parse(errText);
         if (errJson.error?.message) {
@@ -835,7 +786,6 @@ ${prompt}
         if (errText) errorMsg += `: ${errText.substring(0, 200)}`;
       }
 
-      // 特定错误码处理
       if (chatResponse.status === 401 || chatResponse.status === 403) {
         failTask(taskId, `API Key 无效或权限不足: ${errorMsg}`);
         return;
@@ -849,9 +799,8 @@ ${prompt}
         return;
       }
       if (chatResponse.status === 400) {
-        // 400 可能是模型不支持图片输入，尝试降级到 /images/edits
-        if (isOpenaiImageModel && !supportsNativeMask) {
-          // 尝试 images/generations 端点
+        // 400 可能是模型不支持图片输入，尝试降级到 /images/generations
+        if (isOpenaiImageModel || isImageEditModel(model)) {
           try {
             const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, 1);
             if (genUrl) {
@@ -896,12 +845,11 @@ ${prompt}
       return;
     }
 
-    // 解析响应（兼容流式和非流式，部分代理忽略 stream:false 强制流式返回）
+    // 解析响应（兼容流式和非流式）
     const chatText = await chatResponse.text();
     let chatData: Record<string, unknown>;
 
     if (chatText.trimStart().startsWith('data:')) {
-      // SSE 流式响应 — 拼接所有 delta content
       console.info('[edit] API returned SSE stream despite stream:false, parsing SSE events');
       chatData = parseSSEToJSON(chatText);
     } else {
@@ -916,7 +864,7 @@ ${prompt}
     let resultImageUrl = extractImageFromResponse(chatData);
 
     // chat/completions 未提取到图片，尝试降级到 images/generations
-    if (!resultImageUrl && isOpenaiImageModel) {
+    if (!resultImageUrl && (isOpenaiImageModel || isImageEditModel(model))) {
       try {
         const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, 1);
         if (genUrl) resultImageUrl = genUrl;
@@ -924,7 +872,6 @@ ${prompt}
     }
 
     if (!resultImageUrl) {
-      // 最后的降级：检查响应中是否有文本内容，可能模型只返回了文字描述
       const chatChoices = (chatData as Record<string, unknown>).choices as Array<Record<string, unknown>> | undefined;
       const textContent = chatChoices?.[0]?.message
         ? ((chatChoices[0].message as Record<string, unknown>).content as string)
@@ -938,15 +885,49 @@ ${prompt}
       return;
     }
 
-    // ★ count > 1 时，仅做1次LLM协作，多次图像生成（并行调用，节省LLM开销）
+    // ★ count > 1 时，多次图像生成（并行调用，节省LLM开销）
     const images: Array<{ url: string; revisedPrompt: string }> = [{ url: resultImageUrl, revisedPrompt: effectivePrompt }];
-    if (count > 1 && isOpenaiImageModel) {
+    if (count > 1) {
+      // 对于 Gemini 模型，重复调用 chat/completions（无需 LLM 协作，直接使用优化后的 prompt）
+      // 对于 OpenAI 模型，使用 images/generations
       const extraCount = count - 1;
-      const extraPromises = Array.from({ length: extraCount }, () =>
-        tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, 1)
-          .then(url => url ? { url, revisedPrompt: effectivePrompt } : null)
-          .catch(() => null)
-      );
+      const extraPromises = Array.from({ length: extraCount }, async () => {
+        try {
+          if (isImageEditModel(model) && !isOpenaiImageModel) {
+            // Gemini 模型：再次调用 chat/completions（不带 LLM 协作）
+            const extraResp = await fetchWithV1Retry(effectiveBaseUrl, '/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${effectiveApiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                model,
+                messages: [{ role: 'user', content: contentParts }],
+                max_tokens: 4096,
+                stream: false,
+              }),
+              signal: AbortSignal.timeout(120000),
+            });
+            if (extraResp.ok) {
+              const extraText = await extraResp.text();
+              let extraData: Record<string, unknown>;
+              if (extraText.trimStart().startsWith('data:')) {
+                extraData = parseSSEToJSON(extraText);
+              } else {
+                try { extraData = JSON.parse(extraText); } catch { return null; }
+              }
+              const extraUrl = extractImageFromResponse(extraData);
+              return extraUrl ? { url: extraUrl, revisedPrompt: effectivePrompt } : null;
+            }
+            return null;
+          } else {
+            // OpenAI 模型：使用 images/generations
+            const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, 1);
+            return genUrl ? { url: genUrl, revisedPrompt: effectivePrompt } : null;
+          }
+        } catch { return null; }
+      });
       const extraResults = await Promise.all(extraPromises);
       for (const r of extraResults) {
         if (r) images.push(r);
@@ -973,15 +954,16 @@ ${prompt}
       completedAt: Date.now(),
     });
 
-  } catch (error: unknown) {
-    const errMsg = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Image edit error:', error);
+      } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : 'Unknown error';
+        console.error('Image edit error:', error);
 
-    // 存储错误结果到任务
-    const isNetworkError = errMsg.includes('fetch failed') || errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND');
-    failTask(taskId, isNetworkError ? '网络连接失败：无法访问 API 服务' : (errMsg || '图片编辑失败'), isNetworkError);
-  }
-  })();
+        const isNetworkError = errMsg.includes('fetch failed') || errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND');
+        failTask(taskId, isNetworkError ? '网络连接失败：无法访问 API 服务' : (errMsg || '图片编辑失败'), isNetworkError);
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    })();
 
   // ========== 立即返回 taskId（提交+轮询模式） ==========
   return NextResponse.json({
@@ -1035,7 +1017,7 @@ async function tryImagesGenerations(
         size: outputSize,
         quality,
         n: Math.min(count, 4),
-        response_format: 'b64_json',
+        response_format: 'url',
       }),
     },
   );
