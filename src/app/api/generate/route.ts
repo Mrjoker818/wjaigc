@@ -665,6 +665,11 @@ export async function POST(request: NextRequest) {
               clearTimeout(multipartTimeoutId);
             } else {
               clearTimeout(timeoutId);
+              // 重建 Response，因为 body 已在第594行被 .text() 读取
+              submitResponse = new Response(errorText, {
+                status: submitResponse.status,
+                headers: submitResponse.headers,
+              });
             }
           }
         } else {
