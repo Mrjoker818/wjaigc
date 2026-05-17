@@ -62,6 +62,23 @@ const MODEL_HINTS: Record<string, string> = {
   'gemini-3.1-flash-image': '快速文字修图，平衡速度与质量',
 };
 
+// 模型市场统称映射（按模型ID关键词匹配，仅前端显示）
+const MODEL_DISPLAY_NAMES: Record<string, string> = {
+  'gpt-image-2': 'GPT Image 2',
+  'dall-e-3': 'DALL-E 3',
+  'gemini-2.5-flash-image': 'Nano Banana',
+  'gemini-3-pro-image': 'Nano Banana Pro',
+  'gemini-3.1-flash-image': 'Nano Banana 2',
+};
+
+/** 获取模型市场统称，未匹配则返回原始 modelId */
+function getModelDisplayName(modelId: string): string {
+  for (const [key, name] of Object.entries(MODEL_DISPLAY_NAMES)) {
+    if (modelId.includes(key)) return name;
+  }
+  return modelId;
+}
+
 function getModelHint(modelId: string): string {
   for (const [key, hint] of Object.entries(MODEL_HINTS)) {
     if (modelId.includes(key)) return hint;
@@ -135,7 +152,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
   // 当前选中的图像模型名称
   const currentModelName = currentImageModel
-    ? `${currentImageModel.name}${imageModels.filter(m => m.id === currentImageModel.id).length > 1 ? ` (${currentImageModel.providerName})` : ''}`
+    ? `${getModelDisplayName(currentImageModel.id)}${imageModels.filter(m => m.id === currentImageModel.id).length > 1 ? ` (${currentImageModel.providerName})` : ''}`
     : '选择图像模型';
 
   // 当前选中的LLM模型
@@ -1010,7 +1027,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       >
         <div className="flex-1 min-w-0">
           <div className="font-medium flex items-center gap-1.5">
-            {model.name}
+            {getModelDisplayName(model.id)}
             {hasDuplicate && <span className="text-[8px] px-1 py-0.5 bg-[#d4af37]/20 text-[#d4af37] rounded">{model.providerName}</span>}
             <span className="text-[8px] px-1 py-0.5 bg-green-500/20 text-green-400 rounded">支持涂抹</span>
           </div>
