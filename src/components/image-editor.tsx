@@ -260,17 +260,42 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   const [previewZoom, setPreviewZoom] = useState(1);
   const [isSpaceHeld, setIsSpaceHeld] = useState(false);
   const [isPanDragging, setIsPanDragging] = useState(false);
+  const isPanDraggingRef = useRef(false);
   const panStartRef = useRef({ x: 0, y: 0, scrollX: 0, scrollY: 0 });
   const previewContainerRef = useRef<HTMLDivElement>(null);
 
   const handlePreviewWheel = useCallback((e: React.WheelEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    setPreviewZoom(prev => Math.min(5, Math.max(0.5, prev + delta)));
-  }, []);
+    const container = previewContainerRef.current;
+    if (!container) return;
 
-  // 空格键 + 鼠标左键拖动平移
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    const newZoom = Math.min(5, Math.max(0.5, previewZoom + delta));
+    if (newZoom === previewZoom) return;
+
+    // 以鼠标位置为中心缩放：保持鼠标下方的图片点不变
+    const rect = container.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left; // 鼠标在容器中的位置
+    const mouseY = e.clientY - rect.top;
+
+    // 鼠标在当前滚动视口中的绝对坐标
+    const absX = container.scrollLeft + mouseX;
+    const absY = container.scrollTop + mouseY;
+
+    // 缩放后该点的绝对坐标
+    const scaledAbsX = absX * (newZoom / previewZoom);
+    const scaledAbsY = absY * (newZoom / previewZoom);
+
+    // 调整滚动，使鼠标点保持不变
+    container.scrollLeft = scaledAbsX - mouseX;
+    container.scrollTop = scaledAbsY - mouseY;
+
+    setPreviewZoom(newZoom);
+  }, [previewZoom]);
+
+  // 空格键 + 鼠标左键拖动平移（使用 ref 避免重新渲染导致跳动）
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' && !e.repeat) {
@@ -281,6 +306,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
         setIsSpaceHeld(false);
+        isPanDraggingRef.current = false;
         setIsPanDragging(false);
       }
     };
@@ -292,38 +318,38 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     };
   }, []);
 
-  // 全局平移拖动事件
-  useEffect(() => {
-    if (!isPanDragging) return;
-    const onMove = (e: MouseEvent) => {
-      const container = previewContainerRef.current;
-      if (!container) return;
-      const dx = e.clientX - panStartRef.current.x;
-      const dy = e.clientY - panStartRef.current.y;
-      container.scrollLeft = panStartRef.current.scrollX - dx;
-      container.scrollTop = panStartRef.current.scrollY - dy;
-    };
-    const onUp = () => { setIsPanDragging(false); };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-  }, [isPanDragging]);
-
   const handlePanStart = useCallback((e: React.MouseEvent) => {
     if (!isSpaceHeld) return;
     e.preventDefault();
     e.stopPropagation();
-    setIsPanDragging(true);
     const container = previewContainerRef.current;
-    panStartRef.current = {
-      x: e.clientX,
-      y: e.clientY,
-      scrollX: container?.scrollLeft ?? 0,
-      scrollY: container?.scrollTop ?? 0,
+    if (!container) return;
+
+    // 在 mousedown 时立即捕获滚动位置，避免 React 重渲染导致跳动
+    const scrollX = container.scrollLeft;
+    const scrollY = container.scrollTop;
+    panStartRef.current = { x: e.clientX, y: e.clientY, scrollX, scrollY };
+    isPanDraggingRef.current = true;
+    setIsPanDragging(true);
+
+    // 直接在 mousedown 时绑定 window 级别事件，避免 useEffect 延迟
+    const onMove = (me: MouseEvent) => {
+      if (!isPanDraggingRef.current) return;
+      const c = previewContainerRef.current;
+      if (!c) return;
+      const dx = me.clientX - panStartRef.current.x;
+      const dy = me.clientY - panStartRef.current.y;
+      c.scrollLeft = panStartRef.current.scrollX - dx;
+      c.scrollTop = panStartRef.current.scrollY - dy;
     };
+    const onUp = () => {
+      isPanDraggingRef.current = false;
+      setIsPanDragging(false);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
   }, [isSpaceHeld]);
 
   const resetPreviewView = useCallback(() => {
