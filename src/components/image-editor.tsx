@@ -1416,6 +1416,16 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               <span className={`text-[9px] px-1.5 py-0.5 ${isMonochrome ? 'bg-gray-800 text-white' : 'bg-[#d4af37]/80 text-black'} rounded font-medium`}>原图</span>
             </div>
 
+            {/* 画笔涂抹提示 - 固定在容器底部 */}
+            {currentModelSupportsMask && !isSpaceHeld && (
+            <div className="absolute bottom-1 left-1 right-1 z-20 flex items-center justify-center pointer-events-none">
+              <div className={`flex items-center gap-1 px-2 py-0.5 ${isMonochrome ? 'bg-white/80 border border-gray-200' : 'bg-[#1a1a1a]/80 border border-[#2a2a2a]'} rounded`}>
+                <Pencil className={`h-3 w-3 ${thAccentIcon}`} />
+                <span className={`text-[9px] ${thAccent}`}>涂抹区域 + 文字描述 = 精准修图</span>
+              </div>
+            </div>
+            )}
+
             {/* 滚动容器 - 仅图片内容滚动 */}
             <div
               className="w-full h-full overflow-auto rounded-lg"
@@ -1450,13 +1460,6 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                   onMouseUp={!isSpaceHeld ? handleMouseUp : undefined}
                   onMouseLeave={!isSpaceHeld ? handleMouseUp : undefined}
                 />
-                {/* 画笔涂抹提示 */}
-                <div className="absolute bottom-1 left-1 right-1 flex items-center justify-center pointer-events-none">
-                  <div className={`flex items-center gap-1 px-2 py-0.5 ${isMonochrome ? 'bg-white/80 border border-gray-200' : 'bg-[#1a1a1a]/80 border border-[#2a2a2a]'} rounded`}>
-                    <Pencil className={`h-3 w-3 ${thAccentIcon}`} />
-                    <span className={`text-[9px] ${thAccent}`}>涂抹区域 + 文字描述 = 精准修图</span>
-                  </div>
-                </div>
               </div>
             </div>
             </div>
