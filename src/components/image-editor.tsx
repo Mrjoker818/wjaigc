@@ -262,6 +262,8 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   const [isPanDragging, setIsPanDragging] = useState(false);
   const isPanDraggingRef = useRef(false);
   const panStartRef = useRef({ x: 0, y: 0, scrollX: 0, scrollY: 0 });
+  // 缩放后待设置的滚动位置（React DOM 更新后生效）
+  const pendingScrollRef = useRef<{ left: number; top: number } | null>(null);
   const previewContainerRef = useRef<HTMLDivElement>(null);
 
   const handlePreviewWheel = useCallback((e: React.WheelEvent) => {
@@ -274,24 +276,38 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     const newZoom = Math.min(5, Math.max(0.5, previewZoom + delta));
     if (newZoom === previewZoom) return;
 
-    // 以鼠标位置为中心缩放：保持鼠标下方的图片点不变
+    // 以鼠标位置为中心缩放：计算缩放后应设置的滚动位置
     const rect = container.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left; // 鼠标在容器中的位置
+    const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    // 鼠标在当前滚动视口中的绝对坐标
     const absX = container.scrollLeft + mouseX;
     const absY = container.scrollTop + mouseY;
 
-    // 缩放后该点的绝对坐标
     const scaledAbsX = absX * (newZoom / previewZoom);
     const scaledAbsY = absY * (newZoom / previewZoom);
 
-    // 调整滚动，使鼠标点保持不变
-    container.scrollLeft = scaledAbsX - mouseX;
-    container.scrollTop = scaledAbsY - mouseY;
+    // 先保存目标滚动位置，等 React DOM 更新后再应用
+    pendingScrollRef.current = {
+      left: scaledAbsX - mouseX,
+      top: scaledAbsY - mouseY,
+    };
 
     setPreviewZoom(newZoom);
+  }, [previewZoom]);
+
+  // 缩放后 DOM 更新完毕再设置滚动位置，避免跳动
+  useEffect(() => {
+    const pending = pendingScrollRef.current;
+    if (pending === null) return;
+    pendingScrollRef.current = null;
+    const container = previewContainerRef.current;
+    if (!container) return;
+    // 使用 requestAnimationFrame 确保浏览器已完成布局计算
+    requestAnimationFrame(() => {
+      container.scrollLeft = pending.left;
+      container.scrollTop = pending.top;
+    });
   }, [previewZoom]);
 
   // 空格键 + 鼠标左键拖动平移（使用 ref 避免重新渲染导致跳动）
