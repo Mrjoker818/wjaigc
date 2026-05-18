@@ -266,6 +266,77 @@ async function createLocalEraseInpaint(
     .toBuffer();
 }
 
+/**
+ * AI 结果蒙版合成：将裁剪区域的 AI 结果精确合成到原图中
+ * 仅在蒙版区域（白色）使用 AI 结果，非蒙版区域（黑色）保持原图不变
+ * 蒙版边界做羽化过渡，避免硬边
+ */
+async function compositeAIResultToOriginal(
+  origImageBuffer: Buffer,
+  aiResultBuffer: Buffer,   // 裁剪区域尺寸的 AI 结果
+  fullMaskBuffer: Buffer,   // 全尺寸蒙版（白色=修改区域）
+  origW: number,
+  origH: number,
+  cropInfo: InpaintCropInfo,
+): Promise<Buffer> {
+  const src = await sharp(origImageBuffer).ensureAlpha().raw().toBuffer();
+  const maskRaw = await sharp(fullMaskBuffer).ensureAlpha().raw().toBuffer();
+  const aiRaw = await sharp(aiResultBuffer).ensureAlpha().raw().toBuffer();
+  const aiMeta = await sharp(aiResultBuffer).metadata();
+  const aiW = aiMeta.width || cropInfo.cropW;
+  const aiH = aiMeta.height || cropInfo.cropH;
+
+  // 将 AI 结果放到裁剪区域位置
+  const result = Buffer.from(src);
+
+  for (let cy = 0; cy < cropInfo.cropH; cy++) {
+    for (let cx = 0; cx < cropInfo.cropW; cx++) {
+      const origX = cropInfo.cropX + cx;
+      const origY = cropInfo.cropY + cy;
+      if (origX < 0 || origX >= origW || origY < 0 || origY >= origH) continue;
+
+      const origP = (origY * origW + origX);
+      const maskIdx = origP * 4;
+      const maskBrightness = (maskRaw[maskIdx] + maskRaw[maskIdx + 1] + maskRaw[maskIdx + 2]) / 3;
+
+      // 非蒙版区域完全保留原图
+      if (maskBrightness < 20) continue;
+
+      // AI 结果坐标（AI结果可能和裁剪区域尺寸不完全一致）
+      const aiX = Math.min(Math.round(cx * aiW / cropInfo.cropW), aiW - 1);
+      const aiY = Math.min(Math.round(cy * aiH / cropInfo.cropH), aiH - 1);
+      const aiP = (aiY * aiW + aiX);
+
+      const origIdx = origP * 4;
+      const aiIdx = aiP * 4;
+
+      // 蒙版边界羽化：20像素过渡区
+      // 计算到蒙版边界的距离
+      const featherRadius = 20;
+      let minDistToEdge = featherRadius;
+      // 简化：直接用蒙版亮度作为混合权重
+      // maskBrightness: 0=黑(保留原图) 255=白(AI结果)
+      let blend: number;
+      if (maskBrightness >= 200) {
+        blend = 1.0;
+      } else if (maskBrightness <= 40) {
+        blend = 0.0;
+      } else {
+        blend = (maskBrightness - 40) / 160;
+      }
+
+      result[origIdx] = Math.round(aiRaw[aiIdx] * blend + src[origIdx] * (1 - blend));
+      result[origIdx + 1] = Math.round(aiRaw[aiIdx + 1] * blend + src[origIdx + 1] * (1 - blend));
+      result[origIdx + 2] = Math.round(aiRaw[aiIdx + 2] * blend + src[origIdx + 2] * (1 - blend));
+      result[origIdx + 3] = 255;
+    }
+  }
+
+  return sharp(result, { raw: { width: origW, height: origH, channels: 4 } })
+    .png()
+    .toBuffer();
+}
+
 // 图像编辑 API - 支持放大、擦除、蒙版修复、扩图、移除背景
 export const maxDuration = 600; // 10分钟 - token link等API生图最久可达600s
 export const dynamic = 'force-dynamic';
@@ -1760,19 +1831,136 @@ export async function POST(request: NextRequest) {
 
       // ★★★ 路径分叉：擦除走本地修复，蒙版修图走 AI 模型 ★★★
       if (isErase) {
-        // ─── 擦除路径：本地 BFS 边界扩散 + 高斯平滑，无需 AI 模型 ───
-        try {
-          const maskGrayData = Buffer.alloc(origW * origH, 0);
-          for (let p = 0; p < origW * origH; p++) {
-            const idx = p * 4;
-            const brightness = (maskRawData[idx] + maskRawData[idx + 1] + maskRawData[idx + 2]) / 3;
-            maskGrayData[p] = brightness > 127 ? 255 : 0;
-          }
+        // ─── 擦除路径：优先使用 AI 模型智能擦除，本地 BFS 作为兜底 ───
+        // 用户反馈：BFS 边界扩散效果不理想，结果与原图几乎一样
+        // 改为优先使用 AI 模型（去除蒙版区域内容 + 周围纹理推断），AI 不可用时才降级到本地 BFS
+        const maskGrayData = Buffer.alloc(origW * origH, 0);
+        for (let p = 0; p < origW * origH; p++) {
+          const idx = p * 4;
+          const brightness = (maskRawData[idx] + maskRawData[idx + 1] + maskRawData[idx + 2]) / 3;
+          maskGrayData[p] = brightness > 127 ? 255 : 0;
+        }
 
+        // 统计灰度蒙版信息
+        let grayMaskPixels = 0;
+        for (let p = 0; p < origW * origH; p++) { if (maskGrayData[p] > 127) grayMaskPixels++; }
+        console.log(`[inpaint] ERASE path: grayMaskPixels=${grayMaskPixels}, totalPixels=${origW * origH}, ratio=${(grayMaskPixels / (origW * origH) * 100).toFixed(1)}%`);
+
+        // 生成标准黑白蒙版（白色=需要修复区域，黑色=保留区域）— 供 AI 模型使用
+        const binaryMaskPixels = Buffer.alloc(maskRawData.length);
+        for (let i = 0; i < maskRawData.length; i += 4) {
+          const brightness = (maskRawData[i] + maskRawData[i + 1] + maskRawData[i + 2]) / 3;
+          const isMasked = brightness > 127;
+          const val = isMasked ? 255 : 0;
+          binaryMaskPixels[i] = val;
+          binaryMaskPixels[i + 1] = val;
+          binaryMaskPixels[i + 2] = val;
+          binaryMaskPixels[i + 3] = 255;
+        }
+        const eraseBinaryMaskBuffer = await sharp(binaryMaskPixels, { raw: { width: origW, height: origH, channels: 4 } })
+          .png()
+          .toBuffer();
+
+        // 裁剪原图和蒙版到蒙版边界框区域，减少 AI 模型计算面积
+        const eraseCroppedImageBuffer = await sharp(imageBuffer)
+          .extract({ left: cropInfo.cropX, top: cropInfo.cropY, width: cropInfo.cropW, height: cropInfo.cropH })
+          .png()
+          .toBuffer();
+        const eraseCroppedMaskBuffer = await sharp(eraseBinaryMaskBuffer)
+          .extract({ left: cropInfo.cropX, top: cropInfo.cropY, width: cropInfo.cropW, height: cropInfo.cropH })
+          .png()
+          .toBuffer();
+
+        const eraseCroppedImageDataUrl = `data:image/png;base64,${eraseCroppedImageBuffer.toString('base64')}`;
+        const eraseCroppedMaskDataUrl = `data:image/png;base64,${eraseCroppedMaskBuffer.toString('base64')}`;
+
+        // 计算裁剪区域的宽高比
+        const eraseCropGcd = gcd(cropInfo.cropW, cropInfo.cropH);
+        const eraseCropAspectStr = `${cropInfo.cropW / eraseCropGcd}:${cropInfo.cropH / eraseCropGcd}`;
+        const eraseEffectiveSize = aspectRatio ? findClosestAspectRatio(aspectRatio) : eraseCropAspectStr;
+
+        // 尝试使用 AI 模型擦除（提供空提示词让模型根据周围纹理推断填充内容）
+        let eraseUsedAI = false;
+        if (candidateModels.length > 0) {
+          try {
+            const eraseRequestBody: Record<string, unknown> = {
+              prompt: 'clean empty background, seamlessly fill the masked area with surrounding texture and context, remove the object completely',
+              negative_prompt: 'object, person, text, watermark, artifact, distortion, blurry',
+              size: eraseEffectiveSize,
+              n: 1,
+              image_urls: [eraseCroppedImageDataUrl],
+              mask_image: eraseCroppedMaskDataUrl,
+              strength: 0.85,
+            };
+
+            console.log(`[inpaint] AI erase attempt: crop ${cropInfo.cropW}x${cropInfo.cropH}, size=${eraseEffectiveSize}, strength=0.85`);
+
+            const eraseResult = await autoTrySubmitImageTask(
+              candidateModels,
+              (m: string) => ({ ...eraseRequestBody, model: m }),
+              '擦除(AI)',
+              '/images/edits',
+            );
+
+            // AI 模型成功：合成结果到原图
+            if (eraseResult.directUrl) {
+              const resultBuffer = await fetchImageBuffer(eraseResult.directUrl);
+              const resultMeta = await sharp(resultBuffer).metadata();
+
+              // 将 AI 结果等比缩放到裁剪区域内
+              let resizedResult: Buffer;
+              if (resultMeta.width !== cropInfo.cropW || resultMeta.height !== cropInfo.cropH) {
+                const innerResult = await sharp(resultBuffer)
+                  .resize(cropInfo.cropW, cropInfo.cropH, { fit: 'inside', withoutEnlargement: true })
+                  .png()
+                  .toBuffer();
+                const innerMeta = await sharp(innerResult).metadata();
+                const padX = Math.floor((cropInfo.cropW - (innerMeta.width || cropInfo.cropW)) / 2);
+                const padY = Math.floor((cropInfo.cropH - (innerMeta.height || cropInfo.cropH)) / 2);
+                if (padX > 0 || padY > 0) {
+                  resizedResult = await sharp({
+                    create: {
+                      width: cropInfo.cropW,
+                      height: cropInfo.cropH,
+                      channels: 3,
+                      background: { r: 128, g: 128, b: 128 },
+                    },
+                  })
+                    .composite([{ input: innerResult, left: padX, top: padY }])
+                    .png()
+                    .toBuffer();
+                } else {
+                  resizedResult = innerResult;
+                }
+              } else {
+                resizedResult = resultBuffer;
+              }
+
+              // 蒙版合成：仅将 AI 结果应用到蒙版区域，保留非蒙版区域
+              const compositeResult = await compositeAIResultToOriginal(
+                imageBuffer, resizedResult, eraseBinaryMaskBuffer, origW, origH, cropInfo
+              );
+
+              const resultDataUrl = `data:image/png;base64,${compositeResult.toString('base64')}`;
+              console.log(`[inpaint] AI erase result: base64 data URL (${(compositeResult.length / 1024).toFixed(0)}KB)`);
+              eraseUsedAI = true;
+              return NextResponse.json({ success: true, imageUrl: resultDataUrl, action, engine: 'ai-erase' });
+            } else if (eraseResult.taskId) {
+              // 异步模式：返回 taskId 让前端轮询
+              console.log(`[inpaint] AI erase async: taskId=${eraseResult.taskId}`);
+              eraseUsedAI = true;
+              return NextResponse.json({ success: true, taskId: eraseResult.taskId, action, engine: 'ai-erase', cropInfo, usedModel: eraseResult.usedModel });
+            }
+          } catch (aiErr) {
+            console.warn(`[inpaint] AI erase failed, falling back to local BFS:`, aiErr instanceof Error ? aiErr.message : aiErr);
+          }
+        }
+
+        // AI 模型不可用或失败时，降级到本地 BFS 边界扩散
+        console.log(`[inpaint] Using local BFS erase fallback (no AI models available or all failed)`);
+        try {
           const resultBuffer = await createLocalEraseInpaint(imageBuffer, maskGrayData, origW, origH, cropInfo);
 
-          // 直接返回 base64 data URL，彻底避免文件路径可达性问题
-          // 前端通过 /api/save-image 持久化（该 API 经过充分验证）
           const resultDataUrl = `data:image/png;base64,${resultBuffer.toString('base64')}`;
           console.log(`[inpaint] Local erase result: base64 data URL (${(resultBuffer.length / 1024).toFixed(0)}KB)`);
           return NextResponse.json({ success: true, imageUrl: resultDataUrl, action, engine: 'local-erase' });

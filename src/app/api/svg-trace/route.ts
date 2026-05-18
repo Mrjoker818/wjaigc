@@ -64,52 +64,52 @@ interface VtracerParams {
 
 const QUALITY_PRESETS: Record<QualityPreset, VtracerParams> = {
   fast: {
-    colorPrecision: 4,
-    filterSpeckle: 8,
+    colorPrecision: 2,        // 4色: 适合简单图形/图标
+    filterSpeckle: 12,
     cornerThreshold: 1,
-    lengthThreshold: 8,
+    lengthThreshold: 10,
     spliceThreshold: 45,
     pathPrecision: 2,
     hierarchical: 'stacked',
     curveMode: 'polygon',
-    layerDifference: 16,
+    layerDifference: 24,
     maxIterations: 1,
   },
   balanced: {
-    colorPrecision: 6,
+    colorPrecision: 3,        // 8色: 适合插画/线条画，颜色干净
+    filterSpeckle: 6,
+    cornerThreshold: 1,
+    lengthThreshold: 6,
+    spliceThreshold: 45,
+    pathPrecision: 4,
+    hierarchical: 'stacked',
+    curveMode: 'spline',
+    layerDifference: 16,
+    maxIterations: 2,
+  },
+  high: {
+    colorPrecision: 4,        // 16色: 适合复杂图形/照片简化
     filterSpeckle: 4,
     cornerThreshold: 1,
     lengthThreshold: 4,
     spliceThreshold: 45,
-    pathPrecision: 5,
+    pathPrecision: 6,
     hierarchical: 'stacked',
-    curveMode: 'polygon',
+    curveMode: 'spline',
     layerDifference: 8,
-    maxIterations: 3,
+    maxIterations: 4,
   },
-  high: {
-    colorPrecision: 8,
+  max: {
+    colorPrecision: 6,        // 64色: 适合需要丰富色彩的场景
     filterSpeckle: 2,
     cornerThreshold: 1,
     lengthThreshold: 2,
     spliceThreshold: 45,
     pathPrecision: 8,
-    hierarchical: 'stacked',
-    curveMode: 'spline',
-    layerDifference: 4,
-    maxIterations: 6,
-  },
-  max: {
-    colorPrecision: 10,
-    filterSpeckle: 1,
-    cornerThreshold: 1,
-    lengthThreshold: 1,
-    spliceThreshold: 45,
-    pathPrecision: 8,
     hierarchical: 'cutout',
     curveMode: 'spline',
-    layerDifference: 1,
-    maxIterations: 10,
+    layerDifference: 4,
+    maxIterations: 8,
   },
 };
 
@@ -433,6 +433,159 @@ async function runPotrace(
     try { await unlink(pbmPath); } catch { /* ignore */ }
     try { await unlink(outputPath); } catch { /* ignore */ }
   }
+}
+
+// ─── SVG Color Merging ──────────────────────────────────
+// Merge similar colors to reduce color count and produce cleaner output.
+// Especially important for line art: all dark colors → pure black #000000.
+
+interface ColorInfo {
+  hex: string;
+  r: number;
+  g: number;
+  b: number;
+  count: number;  // number of paths using this color
+}
+
+/**
+ * 合并 SVG 中的相似颜色，减少色块数量
+ * 1. 所有暗色（亮度 < 50）合并为纯黑 #000000
+ * 2. 亮度差 < threshold 的颜色合并
+ * 3. 保留使用最多的颜色作为代表色
+ */
+function mergeSvgColors(svg: string, maxColors?: number, mergeThreshold: number = 40): string {
+  // 1. 提取所有 fill 颜色
+  const fillRegex = /fill="(#[0-9a-fA-F]{3,8})"/g;
+  const colorMap = new Map<string, ColorInfo>();
+  let match: RegExpExecArray | null;
+
+  while ((match = fillRegex.exec(svg)) !== null) {
+    const hex = match[1].toLowerCase();
+    if (!colorMap.has(hex)) {
+      const rgb = hexToRgb(hex);
+      if (rgb) {
+        colorMap.set(hex, { hex, ...rgb, count: 1 });
+      }
+    } else {
+      colorMap.get(hex)!.count++;
+    }
+  }
+
+  if (colorMap.size <= 1) return svg;
+
+  // 2. 构建合并映射表
+  const mergeMap = new Map<string, string>(); // old hex → new hex
+  const colors = Array.from(colorMap.values());
+
+  // 按使用次数降序排序（使用多的颜色优先保留）
+  colors.sort((a, b) => b.count - a.count);
+
+  // 3. 暗色合并：将亮度 < 50 的颜色合并为纯黑
+  const BLACK = '#000000';
+  for (const c of colors) {
+    const brightness = (c.r * 299 + c.g * 587 + c.b * 114) / 1000;
+    if (brightness < 50 && c.hex !== BLACK) {
+      mergeMap.set(c.hex, BLACK);
+    }
+  }
+
+  // 4. 相似色合并：将亮度差 < threshold 的颜色合并到使用最多的颜色
+  const alreadyMerged = new Set<string>(mergeMap.keys());
+  const representativeColors: ColorInfo[] = colors.filter(c => !alreadyMerged.has(c.hex));
+
+  for (const c of colors) {
+    if (alreadyMerged.has(c.hex)) continue;
+    if (mergeMap.has(c.hex)) continue;
+
+    // 找最相似的已保留颜色
+    let bestMatch: ColorInfo | null = null;
+    let bestDist = Infinity;
+    for (const rep of representativeColors) {
+      if (rep.hex === c.hex) continue;
+      const dist = colorDistance(c, rep);
+      if (dist < mergeThreshold && dist < bestDist) {
+        bestDist = dist;
+        bestMatch = rep;
+      }
+    }
+
+    if (bestMatch) {
+      mergeMap.set(c.hex, bestMatch.hex);
+      // 从 representativeColors 中移除被合并的颜色
+      const idx = representativeColors.findIndex(r => r.hex === c.hex);
+      if (idx >= 0) representativeColors.splice(idx, 1);
+    } else {
+      representativeColors.push(c);
+    }
+  }
+
+  // 5. 如果设置了 maxColors，强制合并到最多 maxColors 种颜色
+  if (maxColors && maxColors > 0 && representativeColors.length > maxColors) {
+    // 保留使用最多的 maxColors 种颜色
+    const keptColors = new Set(
+      representativeColors
+        .sort((a, b) => b.count - a.count)
+        .slice(0, maxColors)
+        .map(c => c.hex)
+    );
+
+    for (const c of colors) {
+      if (keptColors.has(c.hex)) continue;
+      if (mergeMap.has(c.hex)) continue;
+
+      // 找最近的保留颜色
+      let bestMatch: ColorInfo | null = null;
+      let bestDist = Infinity;
+      for (const rep of representativeColors.filter(r => keptColors.has(r.hex))) {
+        const dist = colorDistance(c, rep);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestMatch = rep;
+        }
+      }
+      if (bestMatch) {
+        mergeMap.set(c.hex, bestMatch.hex);
+      }
+    }
+  }
+
+  // 6. 应用合并映射
+  if (mergeMap.size === 0) return svg;
+
+  let result = svg;
+  for (const [oldHex, newHex] of mergeMap) {
+    // 替换所有 fill="oldHex" 为 fill="newHex"
+    const re = new RegExp(`fill="${oldHex.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`, 'gi');
+    result = result.replace(re, `fill="${newHex}"`);
+  }
+
+  console.log(`[svg-trace] Color merge: ${colorMap.size} → ${colorMap.size - mergeMap.size} colors merged, ${mergeMap.size} replacements`);
+
+  return result;
+}
+
+/** 将 hex 颜色转为 RGB */
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  let h = hex.replace('#', '');
+  if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+  if (h.length === 4) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2]+h[3]+h[3]; // with alpha
+  if (h.length >= 6) {
+    return {
+      r: parseInt(h.substring(0, 2), 16),
+      g: parseInt(h.substring(2, 4), 16),
+      b: parseInt(h.substring(4, 6), 16),
+    };
+  }
+  return null;
+}
+
+/** 计算两个颜色的欧几里得距离 */
+function colorDistance(a: ColorInfo, b: ColorInfo): number {
+  return Math.sqrt(
+    (a.r - b.r) ** 2 +
+    (a.g - b.g) ** 2 +
+    (a.b - b.b) ** 2
+  );
 }
 
 // ─── SVG Sanitization for Adobe Illustrator ─────────────
@@ -1067,6 +1220,12 @@ export async function POST(req: NextRequest) {
 
         // Sanitize SVG for Adobe Illustrator compatibility
         svgContent = sanitizeSvgForIllustrator(svgContent, imgW, imgH);
+
+        // ─── 颜色合并：减少色块，合并暗色为纯黑 ───
+        // balanced/high/max 预设颜色过多，线条画中黑色会被拆成多种深色
+        const maxColors = vtracerParams.colorPrecision <= 3 ? undefined : 16;  // 低精度(≤3bit=8色)不限制
+        const mergeThreshold = 45;  // RGB 距离 < 45 的颜色合并
+        svgContent = mergeSvgColors(svgContent, maxColors, mergeThreshold);
 
         const filename = `svg-color-${uid}.svg`;
         const { url } = await saveResult(svgContent, filename, 'svg-trace', 'image/svg+xml');

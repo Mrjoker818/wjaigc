@@ -7259,33 +7259,33 @@ export function InfiniteCanvas({
                       </div>
                       <div className="flex items-center justify-between">
                         <label className="text-xs text-[#888]">颜色精度</label>
-                        <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceColorPrecision ?? (svgTraceQualityPreset === 'fast' ? 4 : svgTraceQualityPreset === 'balanced' ? 6 : svgTraceQualityPreset === 'high' ? 8 : 10)}bit</span>
+                        <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceColorPrecision ?? (svgTraceQualityPreset === 'fast' ? 2 : svgTraceQualityPreset === 'balanced' ? 3 : svgTraceQualityPreset === 'high' ? 4 : 6)}bit</span>
                       </div>
-                      <input type="range" min={2} max={12} step={1} value={svgTraceColorPrecision ?? (svgTraceQualityPreset === 'fast' ? 4 : svgTraceQualityPreset === 'balanced' ? 6 : svgTraceQualityPreset === 'high' ? 8 : 10)}
+                      <input type="range" min={2} max={12} step={1} value={svgTraceColorPrecision ?? (svgTraceQualityPreset === 'fast' ? 2 : svgTraceQualityPreset === 'balanced' ? 3 : svgTraceQualityPreset === 'high' ? 4 : 6)}
                         onChange={e => setSvgTraceColorPrecision(Number(e.target.value))}
                         onClick={e => e.stopPropagation()}
                         className="w-full h-1 accent-[#d4af37] cursor-pointer" />
                       <div className="flex items-center justify-between">
                         <label className="text-xs text-[#888]">去斑</label>
-                        <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceFilterSpeckle ?? (svgTraceQualityPreset === 'fast' ? 8 : svgTraceQualityPreset === 'balanced' ? 4 : svgTraceQualityPreset === 'high' ? 2 : 1)}px</span>
+                        <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceFilterSpeckle ?? (svgTraceQualityPreset === 'fast' ? 12 : svgTraceQualityPreset === 'balanced' ? 6 : svgTraceQualityPreset === 'high' ? 4 : 2)}px</span>
                       </div>
-                      <input type="range" min={0} max={20} step={1} value={svgTraceFilterSpeckle ?? (svgTraceQualityPreset === 'fast' ? 8 : svgTraceQualityPreset === 'balanced' ? 4 : svgTraceQualityPreset === 'high' ? 2 : 1)}
+                      <input type="range" min={0} max={20} step={1} value={svgTraceFilterSpeckle ?? (svgTraceQualityPreset === 'fast' ? 12 : svgTraceQualityPreset === 'balanced' ? 6 : svgTraceQualityPreset === 'high' ? 4 : 2)}
                         onChange={e => setSvgTraceFilterSpeckle(Number(e.target.value))}
                         onClick={e => e.stopPropagation()}
                         className="w-full h-1 accent-[#d4af37] cursor-pointer" />
                       <div className="flex items-center justify-between">
                         <label className="text-xs text-[#888]">角点阈值</label>
-                        <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceCornerThreshold ?? (svgTraceQualityPreset === 'fast' ? 1 : svgTraceQualityPreset === 'balanced' ? 1 : svgTraceQualityPreset === 'high' ? 0.5 : 0.3)}</span>
+                        <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceCornerThreshold ?? (svgTraceQualityPreset === 'fast' ? 1 : svgTraceQualityPreset === 'balanced' ? 1 : svgTraceQualityPreset === 'high' ? 1 : 1)}</span>
                       </div>
-                      <input type="range" min={0} max={5} step={0.1} value={svgTraceCornerThreshold ?? (svgTraceQualityPreset === 'fast' ? 1 : svgTraceQualityPreset === 'balanced' ? 1 : svgTraceQualityPreset === 'high' ? 0.5 : 0.3)}
+                      <input type="range" min={0} max={5} step={0.1} value={svgTraceCornerThreshold ?? (svgTraceQualityPreset === 'fast' ? 1 : svgTraceQualityPreset === 'balanced' ? 1 : svgTraceQualityPreset === 'high' ? 1 : 1)}
                         onChange={e => setSvgTraceCornerThreshold(Number(e.target.value))}
                         onClick={e => e.stopPropagation()}
                         className="w-full h-1 accent-[#d4af37] cursor-pointer" />
                       <div className="flex items-center justify-between">
                         <label className="text-xs text-[#888]">长度阈值</label>
-                        <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceLengthThreshold ?? (svgTraceQualityPreset === 'fast' ? 8 : svgTraceQualityPreset === 'balanced' ? 4 : svgTraceQualityPreset === 'high' ? 2 : 1)}</span>
+                        <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceLengthThreshold ?? (svgTraceQualityPreset === 'fast' ? 10 : svgTraceQualityPreset === 'balanced' ? 6 : svgTraceQualityPreset === 'high' ? 4 : 2)}</span>
                       </div>
-                      <input type="range" min={1} max={20} step={1} value={svgTraceLengthThreshold ?? (svgTraceQualityPreset === 'fast' ? 8 : svgTraceQualityPreset === 'balanced' ? 4 : svgTraceQualityPreset === 'high' ? 2 : 1)}
+                      <input type="range" min={1} max={20} step={1} value={svgTraceLengthThreshold ?? (svgTraceQualityPreset === 'fast' ? 10 : svgTraceQualityPreset === 'balanced' ? 6 : svgTraceQualityPreset === 'high' ? 4 : 2)}
                         onChange={e => setSvgTraceLengthThreshold(Number(e.target.value))}
                         onClick={e => e.stopPropagation()}
                         className="w-full h-1 accent-[#d4af37] cursor-pointer" />
