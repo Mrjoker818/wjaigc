@@ -3,9 +3,9 @@ requires = ["nodejs-24"]
 template = "nextjs"
 
 [dev]
-build = ["bash", "./scripts/prepare.sh"]
+build = ["pnpm", "install"]
 run = ["pnpm", "run", "dev"]
 
 [deploy]
-build = ["bash", "./scripts/build.sh"]
-run = ["bash", "./scripts/start.sh"]
+build = ["pnpm", "run", "build"]
+run = ["pnpm", "run", "start"]
