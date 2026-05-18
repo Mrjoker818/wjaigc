@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerDataRoot } from '@/lib/server-data-root';
-import { downloadImageFromS3, getS3PresignedUrl, deriveS3Key, s3FileExists } from '@/lib/s3-storage';
+import { downloadImageFromS3, getS3PresignedUrl, deriveS3Key, resolveS3Key } from '@/lib/s3-storage';
 import { getImageSourceUrl } from '@/lib/image-source-map';
 import path from 'path';
 import fs from 'fs';
@@ -101,8 +101,9 @@ export async function GET(
     
     // 4. 最后尝试生成 S3 presigned URL 重定向
     const s3Key = deriveS3Key(filePath);
-    if (await s3FileExists(s3Key)) {
-      const presignedUrl = await getS3PresignedUrl(s3Key);
+    const resolvedKey = await resolveS3Key(s3Key);
+    if (resolvedKey) {
+      const presignedUrl = await getS3PresignedUrl(resolvedKey);
       if (presignedUrl) {
         return NextResponse.redirect(presignedUrl);
       }

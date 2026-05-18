@@ -6139,6 +6139,22 @@ export function InfiniteCanvas({
                     alt={image.prompt || 'canvas image'}
                     className="w-full h-full object-cover pointer-events-none"
                     draggable={false}
+                    onError={(e) => {
+                      const img = e.currentTarget;
+                      if (img.dataset.retried) return; // 已重试过，不再循环
+                      img.dataset.retried = '1';
+                      const url = image.url;
+                      // /uploads/xxx → /api/serve-upload/xxx (S3回退恢复)
+                      if (url.startsWith('/uploads/')) {
+                        img.src = '/api/serve-upload/' + url.replace('/uploads/', '');
+                      }
+                      // 外部URL → 尝试 /api/serve-upload/ (通过save-image持久化过的)
+                      else if (url.startsWith('http') && !url.includes('localhost')) {
+                        // 从URL提取文件名
+                        const filename = url.split('/').pop()?.split('?')[0];
+                        if (filename) img.src = '/api/serve-upload/' + filename;
+                      }
+                    }}
                   />
                 )}
                 {/* 3D model badge - click to open 3D viewer */}

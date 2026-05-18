@@ -145,9 +145,55 @@ export async function s3FileExists(key: string): Promise<boolean> {
   if (!storage) return false;
   
   try {
-    return await storage.fileExists({ fileKey: key });
+    // SDK uploadFile adds hash suffix, so exact match may fail
+    // Use listFiles with prefix to find matching files
+    const baseName = key.replace(/\.[^.]+$/, ''); // e.g. "images/gen-123" from "images/gen-123.jpg"
+    const result = await storage.listFiles({ prefix: baseName });
+    const keys: string[] = result?.keys || [];
+    // Check if any key starts with our baseName (ignoring hash suffix)
+    return keys.some(k => {
+      const kBase = k.replace(/\.[^.]+$/, '');
+      return kBase === baseName || k.startsWith(baseName + '_');
+    });
   } catch (e) {
     return false;
+  }
+}
+
+/**
+ * Find the actual S3 key for a filename (accounting for hash suffix added by SDK)
+ * e.g. deriveS3Key gives "images/gen-123.jpg", but actual key may be "images/gen-123_49b583ab.jpg"
+ */
+export async function resolveS3Key(baseKey: string): Promise<string | null> {
+  const storage = getStorage();
+  if (!storage) return null;
+
+  try {
+    // First try exact match (fast path for files uploaded without hash)
+    const exists = await storage.fileExists({ fileKey: baseKey });
+    if (exists) return baseKey;
+
+    // Extract base name without extension for prefix search
+    const lastDot = baseKey.lastIndexOf('.');
+    const prefix = lastDot > 0 ? baseKey.substring(0, lastDot) : baseKey;
+    const ext = lastDot > 0 ? baseKey.substring(lastDot) : '';
+
+    // List files with prefix to find hash-suffixed version
+    const result = await storage.listFiles({ prefix });
+    const keys: string[] = result?.keys || [];
+
+    // Find key that matches: prefix + _hash + ext
+    for (const k of keys) {
+      const kLastDot = k.lastIndexOf('.');
+      const kBase = kLastDot > 0 ? k.substring(0, kLastDot) : k;
+      const kExt = kLastDot > 0 ? k.substring(kLastDot) : '';
+      if (kExt === ext && (kBase === prefix || kBase.startsWith(prefix + '_'))) {
+        return k;
+      }
+    }
+    return null;
+  } catch (e) {
+    return null;
   }
 }
 
@@ -179,7 +225,9 @@ export async function getS3FallbackUrl(localPath: string): Promise<string | null
  */
 export async function downloadImageFromS3(filenameOrPath: string): Promise<Buffer | null> {
   const key = deriveS3Key(filenameOrPath);
-  return readImageFromS3(key);
+  const resolvedKey = await resolveS3Key(key);
+  if (!resolvedKey) return null;
+  return readImageFromS3(resolvedKey);
 }
 
 /**
@@ -188,9 +236,9 @@ export async function downloadImageFromS3(filenameOrPath: string): Promise<Buffe
  */
 export async function getS3ImageUrl(filenameOrPath: string): Promise<string | null> {
   const key = deriveS3Key(filenameOrPath);
-  const exists = await s3FileExists(key);
-  if (!exists) return null;
-  return getS3PresignedUrl(key);
+  const resolvedKey = await resolveS3Key(key);
+  if (!resolvedKey) return null;
+  return getS3PresignedUrl(resolvedKey);
 }
 
 /**
