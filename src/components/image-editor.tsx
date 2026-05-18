@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { X, Pencil, Eraser, Trash2, Loader2, Check, Sparkles, History, Image as ImageIcon, ChevronDown, ChevronUp, Hand, Plus, Minus, Maximize2, GripVertical, Upload } from 'lucide-react';
+import { X, Pencil, Eraser, Trash2, Loader2, Check, Sparkles, History, Image as ImageIcon, ChevronDown, ChevronUp, Plus, Minus, Maximize2, GripVertical, Upload } from 'lucide-react';
 import type { CanvasImage } from './infinite-canvas';
 
 interface EditHistoryItem {
@@ -258,10 +258,10 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
   // 图片预览区缩放/平移状态
   const [previewZoom, setPreviewZoom] = useState(1);
-  const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
-  const [isPanning, setIsPanning] = useState(false);
+  const [isSpaceHeld, setIsSpaceHeld] = useState(false);
   const [isPanDragging, setIsPanDragging] = useState(false);
-  const panStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+  const panStartRef = useRef({ x: 0, y: 0, scrollX: 0, scrollY: 0 });
+  const previewContainerRef = useRef<HTMLDivElement>(null);
 
   const handlePreviewWheel = useCallback((e: React.WheelEvent) => {
     e.stopPropagation();
@@ -270,28 +270,68 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     setPreviewZoom(prev => Math.min(5, Math.max(0.5, prev + delta)));
   }, []);
 
-  const handlePanStart = useCallback((e: React.MouseEvent) => {
-    if (!isPanning) return;
-    e.stopPropagation();
-    setIsPanDragging(true);
-    panStartRef.current = { x: e.clientX, y: e.clientY, panX: previewPan.x, panY: previewPan.y };
-  }, [isPanning, previewPan]);
+  // 空格键 + 鼠标左键拖动平移
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat) {
+        e.preventDefault();
+        setIsSpaceHeld(true);
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setIsSpaceHeld(false);
+        setIsPanDragging(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, []);
 
-  const handlePanMove = useCallback((e: React.MouseEvent) => {
+  // 全局平移拖动事件
+  useEffect(() => {
     if (!isPanDragging) return;
-    e.stopPropagation();
-    const dx = e.clientX - panStartRef.current.x;
-    const dy = e.clientY - panStartRef.current.y;
-    setPreviewPan({ x: panStartRef.current.panX + dx, y: panStartRef.current.panY + dy });
+    const onMove = (e: MouseEvent) => {
+      const container = previewContainerRef.current;
+      if (!container) return;
+      const dx = e.clientX - panStartRef.current.x;
+      const dy = e.clientY - panStartRef.current.y;
+      container.scrollLeft = panStartRef.current.scrollX - dx;
+      container.scrollTop = panStartRef.current.scrollY - dy;
+    };
+    const onUp = () => { setIsPanDragging(false); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
   }, [isPanDragging]);
 
-  const handlePanEnd = useCallback(() => {
-    setIsPanDragging(false);
-  }, []);
+  const handlePanStart = useCallback((e: React.MouseEvent) => {
+    if (!isSpaceHeld) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setIsPanDragging(true);
+    const container = previewContainerRef.current;
+    panStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      scrollX: container?.scrollLeft ?? 0,
+      scrollY: container?.scrollTop ?? 0,
+    };
+  }, [isSpaceHeld]);
 
   const resetPreviewView = useCallback(() => {
     setPreviewZoom(1);
-    setPreviewPan({ x: 0, y: 0 });
+    if (previewContainerRef.current) {
+      previewContainerRef.current.scrollLeft = 0;
+      previewContainerRef.current.scrollTop = 0;
+    }
   }, []);
 
   // Refs
@@ -1338,26 +1378,19 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             </div>
           ) : (
           <div
-            className={`relative ${thBg} rounded-lg ${previewZoom > 1 ? 'overflow-auto' : 'overflow-hidden'}`}
+            className={`relative ${thBg} rounded-lg overflow-auto`}
+            ref={previewContainerRef}
             onWheel={handlePreviewWheel}
-            onMouseMove={isPanning ? handlePanMove : undefined}
-            onMouseUp={isPanning ? handlePanEnd : undefined}
-            onMouseLeave={isPanning ? handlePanEnd : undefined}
-            onMouseDown={e => e.stopPropagation()}
+            onMouseDown={handlePanStart}
             style={{ 
               height: Math.min(imageDisplaySize.height + 32, 280),
               minHeight: 200,
+              cursor: isSpaceHeld ? (isPanDragging ? 'grabbing' : 'grab') : 'default',
             }}
           >
             {/* 缩放/平移工具 */}
             <div className="absolute top-1 right-1 z-10 flex items-center gap-0.5" onMouseDown={e => e.stopPropagation()}>
-              <button
-                onClick={(e) => { e.stopPropagation(); setIsPanning(!isPanning); }}
-                className={`p-1 rounded transition-colors ${isPanning ? `${thAccentBg} ${thAccentBgText}` : isMonochrome ? 'bg-gray-200/80 text-gray-500 hover:text-gray-800' : 'bg-[#2a2a2a]/80 text-[#888] hover:text-white'}`}
-                title="手掌工具：拖动画面"
-              >
-                <Hand className="h-3 w-3" />
-              </button>
+
               <button
                 onClick={(e) => { e.stopPropagation(); setPreviewZoom(prev => Math.min(5, prev + 0.25)); }}
                 className={`p-1 rounded ${isMonochrome ? 'bg-gray-200/80 text-gray-500 hover:text-gray-800' : 'bg-[#2a2a2a]/80 text-[#888] hover:text-white'} transition-colors`}
@@ -1388,29 +1421,28 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             </div>
 
             <div
-              className={`w-full h-full flex items-center justify-center ${previewZoom > 1 ? 'overflow-visible' : 'overflow-hidden'}`}
-              style={{ cursor: isPanning ? (isPanDragging ? 'grabbing' : 'grab') : 'default' }}
-              onMouseDown={isPanning ? (e) => { e.stopPropagation(); handlePanStart(e); } : undefined}
+              className="flex items-center justify-center"
+              style={{ 
+                minWidth: previewZoom > 1 ? `${imageDisplaySize.width * previewZoom}px` : '100%',
+                minHeight: previewZoom > 1 ? `${imageDisplaySize.height * previewZoom}px` : '100%',
+              }}
             >
               <div
-                className="relative"
+                className="relative flex-shrink-0"
                 style={{
                   width: imageDisplaySize.width * previewZoom,
                   height: imageDisplaySize.height * previewZoom,
-                  transform: `translate(${previewPan.x}px, ${previewPan.y}px)`,
-                  transformOrigin: 'center center',
-                  transition: isPanning ? 'none' : 'transform 0.15s ease-out',
                 }}
               >
                 <img src={currentImageUrl} alt="编辑" className="absolute top-0 left-0 w-full h-full object-contain rounded" crossOrigin="anonymous" />
                 <canvas
                   ref={canvasRef}
-                  className={`absolute top-0 left-0 w-full h-full ${currentModelSupportsMask && !isPanning ? 'cursor-crosshair' : 'pointer-events-none'}`}
+                  className={`absolute top-0 left-0 w-full h-full ${currentModelSupportsMask && !isSpaceHeld ? 'cursor-crosshair' : 'pointer-events-none'}`}
                   style={{ width: imageDisplaySize.width * previewZoom, height: imageDisplaySize.height * previewZoom }}
-                  onMouseDown={!isPanning ? handleMouseDown : undefined}
-                  onMouseMove={!isPanning ? handleMouseMove : undefined}
-                  onMouseUp={!isPanning ? handleMouseUp : undefined}
-                  onMouseLeave={!isPanning ? handleMouseUp : undefined}
+                  onMouseDown={!isSpaceHeld ? handleMouseDown : undefined}
+                  onMouseMove={!isSpaceHeld ? handleMouseMove : undefined}
+                  onMouseUp={!isSpaceHeld ? handleMouseUp : undefined}
+                  onMouseLeave={!isSpaceHeld ? handleMouseUp : undefined}
                 />
                 {/* 画笔涂抹提示 */}
                 <div className="absolute bottom-1 left-1 right-1 flex items-center justify-center pointer-events-none">
