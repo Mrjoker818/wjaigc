@@ -1210,7 +1210,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           <defs>
             <linearGradient id="editLineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
               <stop offset="0%" stopColor={isMonochrome ? "#374151" : "#d4af37"} />
-              <stop offset="100%" stopColor="#b8860b" />
+              <stop offset="100%" stopColor={isMonochrome ? "#6b7280" : "#b8860b"} />
             </linearGradient>
             <style>{`
               @keyframes editFlow { from { stroke-dashoffset: 16; } to { stroke-dashoffset: 0; } }
@@ -1469,19 +1469,19 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                     </div>
                     {/* 拖拽手柄 */}
                     <div className="absolute top-0 left-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <GripVertical className="h-2.5 w-2.5 text-white drop-shadow" />
+                      <GripVertical className={`h-2.5 w-2.5 ${isMonochrome ? "text-gray-400 drop-shadow" : "text-white drop-shadow"}`} />
                     </div>
                     {/* 删除按钮 */}
                     <button
                       onClick={(e) => { e.stopPropagation(); handleRemoveRef(ref.id); }}
                       className="absolute top-0 right-0 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 bg-red-500/80 rounded-bl-lg"
                     >
-                      <X className="h-2.5 w-2.5 text-white" />
+                      <X className={`h-2.5 w-2.5 ${isMonochrome ? "text-gray-500" : "text-white"}`} />
                     </button>
                     {/* prompt提示 */}
                     {ref.prompt && (
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all flex items-center justify-center pointer-events-none">
-                        <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[7px] text-white text-center px-0.5 line-clamp-2 max-h-full overflow-hidden">{ref.prompt.slice(0, 30)}</span>
+                        <span className={`opacity-0 group-hover:opacity-100 transition-opacity text-[7px] ${isMonochrome ? "text-gray-800" : "text-white"} text-center px-0.5 line-clamp-2 max-h-full overflow-hidden`}>{ref.prompt.slice(0, 30)}</span>
                       </div>
                     )}
                   </div>
@@ -1793,7 +1793,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           style={{ left: position.x + 360 + 40, top: position.y, maxHeight: '85vh', width: resultImages.length > 1 ? '440px' : '380px' }}
         >
           <div className={`flex items-center justify-between px-3 py-2 border-b ${thBorder}`}>
-            <h3 className="text-[11px] font-medium text-white flex items-center gap-1.5">
+            <h3 className={`text-[11px] font-medium ${thText} flex items-center gap-1.5`}>
               <ImageIcon className={`h-3.5 w-3.5 ${isMonochrome ? "text-gray-700" : "text-[#d4af37]"}`} />
               修图结果
             </h3>
@@ -1884,7 +1884,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                         }`}>
                           {isSelected && (
                             <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                              <path d="M4 8L7 11L12 5" stroke="black" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                              <path d="M4 8L7 11L12 5" stroke={isMonochrome ? "#111827" : "black"} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
                             </svg>
                           )}
                         </div>
@@ -1915,7 +1915,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                   </div>
                   <button
                     onClick={() => { setPendingAutoRegions([]); setAutoMaskPreview(null); }}
-                    className={`${thTextMuted} hover:${isMonochrome ? "text-gray-700" : "text-[#999]"} text-[10px]`}
+                    className={`${isMonochrome ? "text-gray-400 hover:text-gray-700" : "text-[#666] hover:text-[#999]"} text-[10px]`}
                   >✕</button>
                 </div>
                 <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
