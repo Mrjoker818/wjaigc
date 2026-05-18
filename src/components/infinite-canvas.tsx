@@ -5672,11 +5672,8 @@ export function InfiniteCanvas({
           style={
             isMonochrome
               ? {
-                  // 浅灰方格线条，方便查看图片边缘
-                  backgroundImage: `
-                    linear-gradient(to right, #e5e5e5 1px, transparent 1px),
-                    linear-gradient(to bottom, #e5e5e5 1px, transparent 1px)
-                  `,
+                  // 灰色网点，方便查看图片边缘
+                  backgroundImage: 'radial-gradient(circle, #e5e5e5 1px, transparent 1px)',
                   backgroundSize: '12px 12px',
                   transform: `translate(${viewOffset.x % 12}px, ${viewOffset.y % 12}px)`,
                 }
