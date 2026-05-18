@@ -64,7 +64,7 @@ interface VtracerParams {
 
 const QUALITY_PRESETS: Record<QualityPreset, VtracerParams> = {
   fast: {
-    colorPrecision: 2,        // 4色: 适合简单图形/图标
+    colorPrecision: 6,        // 64色: 快速但保留主要色彩
     filterSpeckle: 12,
     cornerThreshold: 1,
     lengthThreshold: 10,
@@ -76,7 +76,7 @@ const QUALITY_PRESETS: Record<QualityPreset, VtracerParams> = {
     maxIterations: 1,
   },
   balanced: {
-    colorPrecision: 3,        // 8色: 适合插画/线条画，颜色干净
+    colorPrecision: 8,        // 256色: 接近原图色彩，参考Vector Magic全彩描摹
     filterSpeckle: 6,
     cornerThreshold: 1,
     lengthThreshold: 6,
@@ -88,7 +88,7 @@ const QUALITY_PRESETS: Record<QualityPreset, VtracerParams> = {
     maxIterations: 2,
   },
   high: {
-    colorPrecision: 4,        // 16色: 适合复杂图形/照片简化
+    colorPrecision: 10,       // 1024色: 高保真色彩还原
     filterSpeckle: 4,
     cornerThreshold: 1,
     lengthThreshold: 4,
@@ -100,7 +100,7 @@ const QUALITY_PRESETS: Record<QualityPreset, VtracerParams> = {
     maxIterations: 4,
   },
   max: {
-    colorPrecision: 6,        // 64色: 适合需要丰富色彩的场景
+    colorPrecision: 12,       // 4096色: 极致色彩精度
     filterSpeckle: 2,
     cornerThreshold: 1,
     lengthThreshold: 2,
@@ -453,7 +453,10 @@ interface ColorInfo {
  * 2. 亮度差 < threshold 的颜色合并
  * 3. 保留使用最多的颜色作为代表色
  */
-function mergeSvgColors(svg: string, maxColors?: number, mergeThreshold: number = 40): string {
+function mergeSvgColors(svg: string, mergeThreshold: number = 12): string {
+  // 参考Vector Magic的理念：保留真实颜色，只合并视觉上完全无法区分的颜色
+  // 不做激进的暗色合并或颜色数限制——那会破坏色彩还原度
+
   // 1. 提取所有 fill 颜色
   const fillRegex = /fill="(#[0-9a-fA-F]{3,8})"/g;
   const colorMap = new Map<string, ColorInfo>();
@@ -473,35 +476,23 @@ function mergeSvgColors(svg: string, maxColors?: number, mergeThreshold: number 
 
   if (colorMap.size <= 1) return svg;
 
-  // 2. 构建合并映射表
+  // 2. 仅合并 RGB 距离极近的颜色（阈值 12，约 5% 差异）
+  // 这是视觉上几乎完全相同的颜色，合并后用户看不出差别
   const mergeMap = new Map<string, string>(); // old hex → new hex
   const colors = Array.from(colorMap.values());
 
   // 按使用次数降序排序（使用多的颜色优先保留）
   colors.sort((a, b) => b.count - a.count);
 
-  // 3. 暗色合并：将亮度 < 50 的颜色合并为纯黑
-  const BLACK = '#000000';
-  for (const c of colors) {
-    const brightness = (c.r * 299 + c.g * 587 + c.b * 114) / 1000;
-    if (brightness < 50 && c.hex !== BLACK) {
-      mergeMap.set(c.hex, BLACK);
-    }
-  }
-
-  // 4. 相似色合并：将亮度差 < threshold 的颜色合并到使用最多的颜色
-  const alreadyMerged = new Set<string>(mergeMap.keys());
-  const representativeColors: ColorInfo[] = colors.filter(c => !alreadyMerged.has(c.hex));
+  const kept: ColorInfo[] = []; // 保留的代表色
 
   for (const c of colors) {
-    if (alreadyMerged.has(c.hex)) continue;
     if (mergeMap.has(c.hex)) continue;
 
-    // 找最相似的已保留颜色
+    // 在已保留的颜色中找最近的
     let bestMatch: ColorInfo | null = null;
     let bestDist = Infinity;
-    for (const rep of representativeColors) {
-      if (rep.hex === c.hex) continue;
+    for (const rep of kept) {
       const dist = colorDistance(c, rep);
       if (dist < mergeThreshold && dist < bestDist) {
         bestDist = dist;
@@ -510,46 +501,15 @@ function mergeSvgColors(svg: string, maxColors?: number, mergeThreshold: number 
     }
 
     if (bestMatch) {
+      // 合并到已有的代表色
       mergeMap.set(c.hex, bestMatch.hex);
-      // 从 representativeColors 中移除被合并的颜色
-      const idx = representativeColors.findIndex(r => r.hex === c.hex);
-      if (idx >= 0) representativeColors.splice(idx, 1);
     } else {
-      representativeColors.push(c);
+      // 保留此颜色作为新的代表色
+      kept.push(c);
     }
   }
 
-  // 5. 如果设置了 maxColors，强制合并到最多 maxColors 种颜色
-  if (maxColors && maxColors > 0 && representativeColors.length > maxColors) {
-    // 保留使用最多的 maxColors 种颜色
-    const keptColors = new Set(
-      representativeColors
-        .sort((a, b) => b.count - a.count)
-        .slice(0, maxColors)
-        .map(c => c.hex)
-    );
-
-    for (const c of colors) {
-      if (keptColors.has(c.hex)) continue;
-      if (mergeMap.has(c.hex)) continue;
-
-      // 找最近的保留颜色
-      let bestMatch: ColorInfo | null = null;
-      let bestDist = Infinity;
-      for (const rep of representativeColors.filter(r => keptColors.has(r.hex))) {
-        const dist = colorDistance(c, rep);
-        if (dist < bestDist) {
-          bestDist = dist;
-          bestMatch = rep;
-        }
-      }
-      if (bestMatch) {
-        mergeMap.set(c.hex, bestMatch.hex);
-      }
-    }
-  }
-
-  // 6. 应用合并映射
+  // 3. 应用合并映射
   if (mergeMap.size === 0) return svg;
 
   let result = svg;
@@ -1221,11 +1181,9 @@ export async function POST(req: NextRequest) {
         // Sanitize SVG for Adobe Illustrator compatibility
         svgContent = sanitizeSvgForIllustrator(svgContent, imgW, imgH);
 
-        // ─── 颜色合并：减少色块，合并暗色为纯黑 ───
-        // balanced/high/max 预设颜色过多，线条画中黑色会被拆成多种深色
-        const maxColors = vtracerParams.colorPrecision <= 3 ? undefined : 16;  // 低精度(≤3bit=8色)不限制
-        const mergeThreshold = 45;  // RGB 距离 < 45 的颜色合并
-        svgContent = mergeSvgColors(svgContent, maxColors, mergeThreshold);
+        // ─── 温和颜色合并：仅合并视觉上无法区分的近色 ───
+        // 参考Vector Magic：保留真实颜色，不做激进的暗色合并或颜色数限制
+        svgContent = mergeSvgColors(svgContent);
 
         const filename = `svg-color-${uid}.svg`;
         const { url } = await saveResult(svgContent, filename, 'svg-trace', 'image/svg+xml');

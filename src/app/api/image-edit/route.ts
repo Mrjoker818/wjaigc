@@ -1861,25 +1861,42 @@ export async function POST(request: NextRequest) {
           .png()
           .toBuffer();
 
-        // 裁剪原图和蒙版到蒙版边界框区域，减少 AI 模型计算面积
-        const eraseCroppedImageBuffer = await sharp(imageBuffer)
-          .extract({ left: cropInfo.cropX, top: cropInfo.cropY, width: cropInfo.cropW, height: cropInfo.cropH })
-          .png()
-          .toBuffer();
-        const eraseCroppedMaskBuffer = await sharp(eraseBinaryMaskBuffer)
-          .extract({ left: cropInfo.cropX, top: cropInfo.cropY, width: cropInfo.cropW, height: cropInfo.cropH })
-          .png()
-          .toBuffer();
+        // ─── 全图模式发送给 AI ───
+        // 不裁剪！裁剪会导致 AI 看不到完整画面上下文，重新理解构图导致变形
+        // 如果图片过大，等比缩放到 2048 以内，保证 AI 模型能处理
+        const AI_MAX_DIM = 2048;
+        let aiInputImageBuffer = imageBuffer;
+        let aiInputMaskBuffer = eraseBinaryMaskBuffer;
+        let aiInputW = origW;
+        let aiInputH = origH;
 
-        const eraseCroppedImageDataUrl = `data:image/png;base64,${eraseCroppedImageBuffer.toString('base64')}`;
-        const eraseCroppedMaskDataUrl = `data:image/png;base64,${eraseCroppedMaskBuffer.toString('base64')}`;
+        if (origW > AI_MAX_DIM || origH > AI_MAX_DIM) {
+          const scale = Math.min(AI_MAX_DIM / origW, AI_MAX_DIM / origH);
+          aiInputW = Math.round(origW * scale);
+          aiInputH = Math.round(origH * scale);
+          // 确保尺寸为偶数（某些模型要求）
+          aiInputW = aiInputW % 2 === 0 ? aiInputW : aiInputW - 1;
+          aiInputH = aiInputH % 2 === 0 ? aiInputH : aiInputH - 1;
+          aiInputImageBuffer = await sharp(imageBuffer)
+            .resize(aiInputW, aiInputH, { fit: 'fill' })
+            .png()
+            .toBuffer();
+          aiInputMaskBuffer = await sharp(eraseBinaryMaskBuffer)
+            .resize(aiInputW, aiInputH, { fit: 'fill', kernel: 'nearest' })
+            .png()
+            .toBuffer();
+          console.log(`[inpaint] Scaled down for AI: ${origW}x${origH} → ${aiInputW}x${aiInputH}`);
+        }
 
-        // 计算裁剪区域的宽高比
-        const eraseCropGcd = gcd(cropInfo.cropW, cropInfo.cropH);
-        const eraseCropAspectStr = `${cropInfo.cropW / eraseCropGcd}:${cropInfo.cropH / eraseCropGcd}`;
-        const eraseEffectiveSize = aspectRatio ? findClosestAspectRatio(aspectRatio) : eraseCropAspectStr;
+        const eraseImageDataUrl = `data:image/png;base64,${aiInputImageBuffer.toString('base64')}`;
+        const eraseMaskDataUrl = `data:image/png;base64,${aiInputMaskBuffer.toString('base64')}`;
 
-        // 尝试使用 AI 模型擦除（提供空提示词让模型根据周围纹理推断填充内容）
+        // 使用原图宽高比（不裁剪，保持完整上下文）
+        const eraseGcd = gcd(origW, origH);
+        const eraseAspectStr = `${origW / eraseGcd}:${origH / eraseGcd}`;
+        const eraseEffectiveSize = aspectRatio ? findClosestAspectRatio(aspectRatio) : eraseAspectStr;
+
+        // 尝试使用 AI 模型擦除
         let eraseUsedAI = false;
         if (candidateModels.length > 0) {
           try {
@@ -1888,12 +1905,12 @@ export async function POST(request: NextRequest) {
               negative_prompt: 'object, person, text, watermark, artifact, distortion, blurry',
               size: eraseEffectiveSize,
               n: 1,
-              image_urls: [eraseCroppedImageDataUrl],
-              mask_image: eraseCroppedMaskDataUrl,
+              image_urls: [eraseImageDataUrl],
+              mask_image: eraseMaskDataUrl,
               strength: 0.85,
             };
 
-            console.log(`[inpaint] AI erase attempt: crop ${cropInfo.cropW}x${cropInfo.cropH}, size=${eraseEffectiveSize}, strength=0.85`);
+            console.log(`[inpaint] AI erase attempt: full image ${aiInputW}x${aiInputH}, size=${eraseEffectiveSize}, strength=0.85`);
 
             const eraseResult = await autoTrySubmitImageTask(
               candidateModels,
@@ -1907,38 +1924,39 @@ export async function POST(request: NextRequest) {
               const resultBuffer = await fetchImageBuffer(eraseResult.directUrl);
               const resultMeta = await sharp(resultBuffer).metadata();
 
-              // 将 AI 结果等比缩放到裁剪区域内
-              let resizedResult: Buffer;
-              if (resultMeta.width !== cropInfo.cropW || resultMeta.height !== cropInfo.cropH) {
-                const innerResult = await sharp(resultBuffer)
-                  .resize(cropInfo.cropW, cropInfo.cropH, { fit: 'inside', withoutEnlargement: true })
-                  .png()
-                  .toBuffer();
-                const innerMeta = await sharp(innerResult).metadata();
-                const padX = Math.floor((cropInfo.cropW - (innerMeta.width || cropInfo.cropW)) / 2);
-                const padY = Math.floor((cropInfo.cropH - (innerMeta.height || cropInfo.cropH)) / 2);
-                if (padX > 0 || padY > 0) {
-                  resizedResult = await sharp({
-                    create: {
-                      width: cropInfo.cropW,
-                      height: cropInfo.cropH,
-                      channels: 3,
-                      background: { r: 128, g: 128, b: 128 },
-                    },
-                  })
-                    .composite([{ input: innerResult, left: padX, top: padY }])
+              // 将 AI 结果等比缩放回原图尺寸
+              let resultOrigSize: Buffer;
+              const resW = resultMeta.width || aiInputW;
+              const resH = resultMeta.height || aiInputH;
+              if (resW !== origW || resH !== origH) {
+                // 先缩放到 aiInputW×aiInputH（等比），再放大到 origW×origH
+                let step1: Buffer;
+                if (resW !== aiInputW || resH !== aiInputH) {
+                  step1 = await sharp(resultBuffer)
+                    .resize(aiInputW, aiInputH, { fit: 'fill' })
                     .png()
                     .toBuffer();
                 } else {
-                  resizedResult = innerResult;
+                  step1 = resultBuffer;
+                }
+                // 如果 AI 输入是缩放过的，需要放大回原图尺寸
+                if (aiInputW !== origW || aiInputH !== origH) {
+                  resultOrigSize = await sharp(step1)
+                    .resize(origW, origH, { fit: 'fill' })
+                    .png()
+                    .toBuffer();
+                } else {
+                  resultOrigSize = step1;
                 }
               } else {
-                resizedResult = resultBuffer;
+                resultOrigSize = resultBuffer;
               }
 
               // 蒙版合成：仅将 AI 结果应用到蒙版区域，保留非蒙版区域
+              // 全图模式：cropInfo 覆盖整个图片
+              const fullCropInfo: InpaintCropInfo = { cropX: 0, cropY: 0, cropW: origW, cropH: origH, origW, origH };
               const compositeResult = await compositeAIResultToOriginal(
-                imageBuffer, resizedResult, eraseBinaryMaskBuffer, origW, origH, cropInfo
+                imageBuffer, resultOrigSize, eraseBinaryMaskBuffer, origW, origH, fullCropInfo
               );
 
               const resultDataUrl = `data:image/png;base64,${compositeResult.toString('base64')}`;
@@ -1949,7 +1967,7 @@ export async function POST(request: NextRequest) {
               // 异步模式：返回 taskId 让前端轮询
               console.log(`[inpaint] AI erase async: taskId=${eraseResult.taskId}`);
               eraseUsedAI = true;
-              return NextResponse.json({ success: true, taskId: eraseResult.taskId, action, engine: 'ai-erase', cropInfo, usedModel: eraseResult.usedModel });
+              return NextResponse.json({ success: true, taskId: eraseResult.taskId, action, engine: 'ai-erase', cropInfo: { cropX: 0, cropY: 0, cropW: origW, cropH: origH, origW, origH }, usedModel: eraseResult.usedModel });
             }
           } catch (aiErr) {
             console.warn(`[inpaint] AI erase failed, falling back to local BFS:`, aiErr instanceof Error ? aiErr.message : aiErr);

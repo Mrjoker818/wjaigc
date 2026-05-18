@@ -7259,9 +7259,9 @@ export function InfiniteCanvas({
                       </div>
                       <div className="flex items-center justify-between">
                         <label className="text-xs text-[#888]">颜色精度</label>
-                        <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceColorPrecision ?? (svgTraceQualityPreset === 'fast' ? 2 : svgTraceQualityPreset === 'balanced' ? 3 : svgTraceQualityPreset === 'high' ? 4 : 6)}bit</span>
+                        <span className="text-xs tabular-nums font-mono text-[#d4af37]">{svgTraceColorPrecision ?? (svgTraceQualityPreset === 'fast' ? 6 : svgTraceQualityPreset === 'balanced' ? 8 : svgTraceQualityPreset === 'high' ? 10 : 12)}bit</span>
                       </div>
-                      <input type="range" min={2} max={12} step={1} value={svgTraceColorPrecision ?? (svgTraceQualityPreset === 'fast' ? 2 : svgTraceQualityPreset === 'balanced' ? 3 : svgTraceQualityPreset === 'high' ? 4 : 6)}
+                      <input type="range" min={2} max={12} step={1} value={svgTraceColorPrecision ?? (svgTraceQualityPreset === 'fast' ? 6 : svgTraceQualityPreset === 'balanced' ? 8 : svgTraceQualityPreset === 'high' ? 10 : 12)}
                         onChange={e => setSvgTraceColorPrecision(Number(e.target.value))}
                         onClick={e => e.stopPropagation()}
                         className="w-full h-1 accent-[#d4af37] cursor-pointer" />
