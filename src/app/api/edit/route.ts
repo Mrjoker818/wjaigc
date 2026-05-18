@@ -2,13 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl, getApiProviders } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import type { ApiProvider } from '@/lib/universal-api-types';
+import { getEditTask, deleteEditTask, setEditTask, updateTaskStage, failEditTask } from '@/lib/edit-task-store';
+import type { EditTask } from '@/lib/edit-task-store';
 
 // 允许大请求体（base64图片可能很大，50MB限制）
 export const runtime = 'nodejs';
 export const maxDuration = 600;
 
 // ============================================================
-// 本地任务存储（语言修图异步提交+轮询模式）
+// 本地任务存储已迁移到 @/lib/edit-task-store（避免 HMR 隔离）
 // ============================================================
 interface EditTaskResult {
   success: boolean;
@@ -25,56 +27,12 @@ interface EditTaskResult {
   status?: number;
 }
 
-interface EditTask {
-  id: string;
-  status: 'processing' | 'completed' | 'failed';
-  progress: number; // 0-100
-  stage: string; // 当前阶段描述
-  result?: EditTaskResult;
-  error?: string;
-  createdAt: number;
-  completedAt?: number;
-}
+// 重新导出供 poll-task 使用（保持兼容）
+export { getEditTask, deleteEditTask };
 
-const editTaskStore = new Map<string, EditTask>();
-const MAX_EDIT_TASKS = 100; // 内存防御上限
-
-// 定期清理过期任务（>30分钟）
-setInterval(() => {
-  const now = Date.now();
-  for (const [id, task] of editTaskStore) {
-    if (now - task.createdAt > 30 * 60 * 1000) {
-      editTaskStore.delete(id);
-    }
-  }
-}, 5 * 60 * 1000);
-
-export function getEditTask(taskId: string): EditTask | undefined {
-  return editTaskStore.get(taskId);
-}
-
-export function deleteEditTask(taskId: string): boolean {
-  return editTaskStore.delete(taskId);
-}
-
-function updateTaskStage(taskId: string, stage: string) {
-  const task = editTaskStore.get(taskId);
-  if (task) {
-    editTaskStore.set(taskId, { ...task, stage });
-  }
-}
-
+/** 本地便捷：失败任务 */
 function failTask(taskId: string, error: string, networkError = false) {
-  editTaskStore.set(taskId, {
-    id: taskId,
-    status: 'failed',
-    progress: 0,
-    stage: '失败',
-    error,
-    result: { success: false, error, networkError },
-    createdAt: editTaskStore.get(taskId)?.createdAt || Date.now(),
-    completedAt: Date.now(),
-  });
+  failEditTask(taskId, error, networkError);
 }
 
 // 支持编辑的模型列表（用于降级静态列表）
@@ -355,18 +313,15 @@ export async function POST(request: NextRequest) {
     }
 
     // ========== 1.5 创建异步任务（提交+轮询模式，避免CDN/FaaS代理超时） ==========
-    if (editTaskStore.size >= MAX_EDIT_TASKS) {
-      return NextResponse.json({ success: false, error: '当前任务队列已满，请稍后再试' }, { status: 429 });
-    }
     const taskId = `edit_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    editTaskStore.set(taskId, { id: taskId, status: 'processing', progress: 0, stage: '初始化', createdAt: Date.now() });
+    setEditTask(taskId, { id: taskId, status: 'processing', progress: 0, stage: '初始化', createdAt: Date.now() });
 
     // 后台异步执行编辑流程（5分钟全局超时兜底）
     const EDIT_GLOBAL_TIMEOUT_MS = 5 * 60 * 1000;
     (async () => {
       // 全局超时：确保 IIFE 不会无限运行
       const timeoutId = setTimeout(() => {
-        const task = editTaskStore.get(taskId);
+        const task = getEditTask(taskId);
         if (task && task.status === 'processing') {
           failTask(taskId, '编辑超时，请稍后重试');
         }
@@ -675,7 +630,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           const editData = await editResponse.json();
           const images = extractAllImagesFromResponse(editData, effectivePrompt);
           if (images.length > 0) {
-            editTaskStore.set(taskId, {
+            setEditTask(taskId, {
               id: taskId,
               status: 'completed',
               progress: 100,
@@ -690,7 +645,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                 editRegions: llmEditRegions,
                 autoMaskGenerated: llmEditRegions.length > 0,
               },
-              createdAt: editTaskStore.get(taskId)?.createdAt || Date.now(),
+              createdAt: getEditTask(taskId)?.createdAt || Date.now(),
               completedAt: Date.now(),
             });
             return;
@@ -815,7 +770,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                 const extraResults = await Promise.all(extraPromises);
                 for (const r of extraResults) { if (r) images.push(r); }
               }
-              editTaskStore.set(taskId, {
+              setEditTask(taskId, {
                 id: taskId,
                 status: 'completed',
                 progress: 100,
@@ -830,7 +785,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                   editRegions: llmEditRegions,
                   autoMaskGenerated: false,
                 },
-                createdAt: editTaskStore.get(taskId)?.createdAt || Date.now(),
+                createdAt: getEditTask(taskId)?.createdAt || Date.now(),
                 completedAt: Date.now(),
               });
               return;
@@ -935,7 +890,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     }
 
     // 存储成功结果到任务
-    editTaskStore.set(taskId, {
+    setEditTask(taskId, {
       id: taskId,
       status: 'completed',
       progress: 100,
@@ -950,7 +905,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         editRegions: llmEditRegions,
         autoMaskGenerated: llmEditRegions.length > 0,
       },
-      createdAt: editTaskStore.get(taskId)?.createdAt || Date.now(),
+      createdAt: getEditTask(taskId)?.createdAt || Date.now(),
       completedAt: Date.now(),
     });
 

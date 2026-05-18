@@ -825,6 +825,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       const pollStart = Date.now();
       const pollInterval = 2000; // 2秒轮询间隔
 
+      // 等待500ms让后端完成任务创建，避免首次轮询时任务尚未存储
+      await new Promise(r => setTimeout(r, 500));
+
       while (completedTasks.size < taskIds.length && (Date.now() - pollStart) < maxPollTime) {
         // 并行轮询所有未完成的任务
         const pendingTaskIds = taskIds.filter(id => !completedTasks.has(id));
