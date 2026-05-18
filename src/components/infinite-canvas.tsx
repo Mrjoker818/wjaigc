@@ -5677,8 +5677,8 @@ export function InfiniteCanvas({
                     linear-gradient(to right, #e5e5e5 1px, transparent 1px),
                     linear-gradient(to bottom, #e5e5e5 1px, transparent 1px)
                   `,
-                  backgroundSize: '20px 20px',
-                  transform: `translate(${viewOffset.x % 20}px, ${viewOffset.y % 20}px)`,
+                  backgroundSize: '12px 12px',
+                  transform: `translate(${viewOffset.x % 12}px, ${viewOffset.y % 12}px)`,
                 }
               : {
                   // 金色模式：白点网格
