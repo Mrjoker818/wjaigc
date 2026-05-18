@@ -1138,16 +1138,31 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
   // 拖拽
   const handleDragStart = useCallback((e: React.MouseEvent) => {
+    // 只允许从header区域拖拽面板
+    const target = e.target as HTMLElement;
+    const header = target.closest('[data-panel-header]');
+    if (!header) return;
+    e.preventDefault();
+    e.stopPropagation();
     setIsDragging(true);
     setDragOffset({ x: e.clientX - position.x, y: e.clientY - position.y });
   }, [position]);
 
-  const handleDrag = useCallback((e: React.MouseEvent) => {
+  // 全局鼠标事件：拖动面板时在window上监听，避免鼠标移出header后丢失事件
+  useEffect(() => {
     if (!isDragging) return;
-    setPosition({ x: e.clientX - dragOffset.x, y: e.clientY - dragOffset.y });
+    const onMove = (e: MouseEvent) => {
+      e.preventDefault();
+      setPosition({ x: e.clientX - dragOffset.x, y: e.clientY - dragOffset.y });
+    };
+    const onUp = () => { setIsDragging(false); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
   }, [isDragging, dragOffset]);
-
-  const handleDragEnd = useCallback(() => { setIsDragging(false); }, []);
 
   // SVG连接线计算
   const getLineStart = useCallback(() => {
@@ -1249,12 +1264,10 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         ref={containerRef}
         className={`fixed z-[200] w-[360px] ${thPanel} border rounded-xl shadow-2xl overflow-hidden`}
         style={{ left: position.x, top: position.y, maxHeight: '85vh' }}
-        onMouseMove={handleDrag}
-        onMouseUp={handleDragEnd}
-        onMouseLeave={handleDragEnd}
       >
         {/* Header - 可拖拽 */}
         <div
+          data-panel-header
           className={`flex items-center justify-between px-4 py-3 border-b ${thHeader} cursor-move`}
           onMouseDown={handleDragStart}
         >
@@ -1325,24 +1338,28 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             </div>
           ) : (
           <div
-            className={`relative ${thBg} rounded-lg overflow-hidden`}
+            className={`relative ${thBg} rounded-lg ${previewZoom > 1 ? 'overflow-auto' : 'overflow-hidden'}`}
             onWheel={handlePreviewWheel}
             onMouseMove={isPanning ? handlePanMove : undefined}
             onMouseUp={isPanning ? handlePanEnd : undefined}
             onMouseLeave={isPanning ? handlePanEnd : undefined}
-            style={{ height: Math.min(imageDisplaySize.height + 32, 280) }}
+            onMouseDown={e => e.stopPropagation()}
+            style={{ 
+              height: Math.min(imageDisplaySize.height + 32, 280),
+              minHeight: 200,
+            }}
           >
             {/* 缩放/平移工具 */}
-            <div className="absolute top-1 right-1 z-10 flex items-center gap-0.5">
+            <div className="absolute top-1 right-1 z-10 flex items-center gap-0.5" onMouseDown={e => e.stopPropagation()}>
               <button
-                onClick={() => setIsPanning(!isPanning)}
+                onClick={(e) => { e.stopPropagation(); setIsPanning(!isPanning); }}
                 className={`p-1 rounded transition-colors ${isPanning ? `${thAccentBg} ${thAccentBgText}` : isMonochrome ? 'bg-gray-200/80 text-gray-500 hover:text-gray-800' : 'bg-[#2a2a2a]/80 text-[#888] hover:text-white'}`}
                 title="手掌工具：拖动画面"
               >
                 <Hand className="h-3 w-3" />
               </button>
               <button
-                onClick={() => setPreviewZoom(prev => Math.min(5, prev + 0.25))}
+                onClick={(e) => { e.stopPropagation(); setPreviewZoom(prev => Math.min(5, prev + 0.25)); }}
                 className={`p-1 rounded ${isMonochrome ? 'bg-gray-200/80 text-gray-500 hover:text-gray-800' : 'bg-[#2a2a2a]/80 text-[#888] hover:text-white'} transition-colors`}
                 title="放大"
               >
@@ -1350,14 +1367,14 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               </button>
               <span className={`text-[9px] ${thAccent} font-mono px-0.5 min-w-[32px] text-center`}>{Math.round(previewZoom * 100)}%</span>
               <button
-                onClick={() => setPreviewZoom(prev => Math.max(0.2, prev - 0.25))}
+                onClick={(e) => { e.stopPropagation(); setPreviewZoom(prev => Math.max(0.2, prev - 0.25)); }}
                 className={`p-1 rounded ${isMonochrome ? 'bg-gray-200/80 text-gray-500 hover:text-gray-800' : 'bg-[#2a2a2a]/80 text-[#888] hover:text-white'} transition-colors`}
                 title="缩小"
               >
                 <Minus className="h-3 w-3" />
               </button>
               <button
-                onClick={resetPreviewView}
+                onClick={(e) => { e.stopPropagation(); resetPreviewView(); }}
                 className={`p-1 rounded ${isMonochrome ? 'bg-gray-200/80 text-gray-500 hover:text-gray-800' : 'bg-[#2a2a2a]/80 text-[#888] hover:text-white'} transition-colors`}
                 title="重置视图"
               >
@@ -1366,14 +1383,14 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             </div>
 
             {/* 主图标记 */}
-            <div className="absolute top-1 left-1 z-10">
+            <div className="absolute top-1 left-1 z-10" onMouseDown={e => e.stopPropagation()}>
               <span className={`text-[9px] px-1.5 py-0.5 ${isMonochrome ? 'bg-gray-800 text-white' : 'bg-[#d4af37]/80 text-black'} rounded font-medium`}>原图</span>
             </div>
 
             <div
-              className="w-full h-full flex items-center justify-center overflow-hidden"
+              className={`w-full h-full flex items-center justify-center ${previewZoom > 1 ? 'overflow-visible' : 'overflow-hidden'}`}
               style={{ cursor: isPanning ? (isPanDragging ? 'grabbing' : 'grab') : 'default' }}
-              onMouseDown={isPanning ? (e) => { handlePanStart(e); } : undefined}
+              onMouseDown={isPanning ? (e) => { e.stopPropagation(); handlePanStart(e); } : undefined}
             >
               <div
                 className="relative"
