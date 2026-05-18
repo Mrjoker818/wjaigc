@@ -53,13 +53,18 @@ const QUALITIES = [
 // 生图数量选项
 const COUNTS = [1, 2, 3, 4];
 
-// 模型功能描述映射（按模型ID关键词匹配，全兼容模式）
+// 模型功能描述映射（按模型ID关键词匹配）
+// 支持涂抹 = 模型原生支持 mask 参数或通过 chat/completions 可靠理解蒙版参考图
+// 不支持涂抹 = 模型无法可靠理解蒙版，仅支持文字描述修图
 const MODEL_HINTS: Record<string, string> = {
-  'gpt-image-2': '高精度修图，AI智能理解编辑意图',
-  'dall-e-3': '文字描述修图，创意风格变换',
-  'gemini-2.5-flash-image': '快速文字修图，响应更快',
-  'gemini-3-pro-image': '高精度文字修图，细节还原更好',
-  'gemini-3.1-flash-image': '快速文字修图，平衡速度与质量',
+  'gpt-image-2': '支持涂抹+文字修图，AI精准理解蒙版区域',
+  'dall-e-3': '支持涂抹+文字修图，创意风格变换',
+  'gemini-2.5-flash-image': '仅文字修图，不支持画笔涂抹',
+  'gemini-3-pro-image': '仅文字修图，不支持画笔涂抹，细节还原更好',
+  'gemini-3.1-flash-image': '仅文字修图，不支持画笔涂抹，平衡速度与质量',
+  'flux': '支持涂抹+文字修图，高质量图像生成',
+  'sdxl': '支持涂抹+文字修图，Stable Diffusion系列',
+  'stable-diffusion': '支持涂抹+文字修图，Stable Diffusion系列',
 };
 
 import { getModelDisplayName } from '@/lib/model-name-map';
@@ -126,13 +131,13 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   })();
 
   // 当前选中的图像模型是否支持蒙版涂抹
-  // 全兼容模式：所有模型都支持涂抹（蒙版作为参考图+文本指令发送给AI）
-  // OpenAI 官方端点走 images.edit 原生 mask，第三方代理走 chat/completions 参考图模式
+  // - supportsMask=true: OpenAI/Flux/SD 系列，支持原生 mask 或可靠理解蒙版参考图
+  // - supportsMask=false: Gemini 系列，AI 无法可靠理解蒙版语义，仅支持文字修图
   const currentModelSupportsMask = (() => {
     if (!currentImageModel) return false;
     if (currentImageModel.supportsMask !== undefined) return currentImageModel.supportsMask;
-    // 降级判断：默认所有图像模型都支持涂抹
-    return true;
+    // 降级判断：默认不支持（需后端明确告知）
+    return false;
   })();
 
   // 当前选中的图像模型名称
@@ -1069,9 +1074,10 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   }, [position, resultImages]);
 
   // 模型列表项组件
-  const renderModelItem = (model: ServerModel, modelKey: string, isSelected: boolean, _supportsMask?: boolean) => {
+  const renderModelItem = (model: ServerModel, modelKey: string, isSelected: boolean, supportsMask?: boolean) => {
     const hint = getModelHint(model.id);
     const hasDuplicate = imageModels.filter(m => m.id === model.id).length > 1;
+    const maskSupported = supportsMask ?? model.supportsMask ?? false;
     return (
       <button
         key={modelKey}
@@ -1086,7 +1092,10 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           <div className="font-medium flex items-center gap-1.5">
             {getModelDisplayName(model.id)}
             {hasDuplicate && <span className="text-[8px] px-1 py-0.5 bg-[#d4af37]/20 text-[#d4af37] rounded">{model.providerName}</span>}
-            <span className="text-[8px] px-1 py-0.5 bg-green-500/20 text-green-400 rounded">支持涂抹</span>
+            {maskSupported
+              ? <span className="text-[8px] px-1 py-0.5 bg-green-500/20 text-green-400 rounded">支持涂抹</span>
+              : <span className="text-[8px] px-1 py-0.5 bg-orange-500/20 text-orange-400 rounded">仅文字修图</span>
+            }
           </div>
           <div className="text-[10px] text-[#666] truncate">{model.providerName}{hint ? ` · ${hint}` : ''}</div>
         </div>

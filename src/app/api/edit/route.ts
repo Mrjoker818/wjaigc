@@ -1004,14 +1004,28 @@ export async function GET() {
         // 排除不支持编辑的模型类型
         if (id.includes('3d') || id.includes('vectoriz') || id.includes('layer') || id.includes('segment')) continue;
 
-        // 全兼容模式：所有图像模型都支持编辑（通过 chat/completions 多模态）
-        // 所有模型都支持涂抹（蒙版作为参考图发送，AI 理解白色区域为编辑范围）
+        // 涂抹支持判断：
+        // - OpenAI gpt-image-2 / dall-e-3：支持原生 images.edit mask 参数（仅 api.openai.com）
+        // - 第三方代理的 gpt-image-2 / dall-e-3：不支持原生 mask，但走 chat/completions 参考图模式
+        // - Gemini 系列：不支持涂抹（AI 无法可靠理解蒙版参考图语义）
+        // - 其他模型：不支持原生 mask，走 chat/completions 参考图模式（效果不稳定）
+        let supportsMask = false;
+        const providerBaseUrl = (provider.baseUrl || '').toLowerCase();
+        if (id.includes('gpt-image') || id.includes('dall-e')) {
+          // OpenAI 模型：官方端点原生支持，第三方代理参考图模式也基本可用
+          supportsMask = true;
+        } else if (id.includes('flux') || id.includes('sdxl') || id.includes('stable-diffusion')) {
+          // SD/Flux 系列：通过 img2img + 蒙版可以较好地支持
+          supportsMask = true;
+        }
+        // Gemini 系列不支持涂抹（AI 无法可靠理解蒙版参考图）
+
         editModels.push({
           id: modelId,
           name: modelId,
           providerId: provider.id,
           providerName: provider.name || provider.id,
-          supportsMask: true,
+          supportsMask,
         });
       }
     }
@@ -1029,7 +1043,7 @@ export async function GET() {
         name: model,
         providerId: '',
         providerName: '',
-        supportsMask: true,
+        supportsMask: model.includes('gpt-image') || model.includes('dall-e'),
       })),
     });
   }
