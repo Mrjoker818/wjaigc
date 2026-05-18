@@ -1495,9 +1495,11 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-xs text-[#ccc] hover:border-[#d4af37] transition-all"
             >
               <span className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                <span className={`w-1.5 h-1.5 rounded-full ${currentModelSupportsMask ? 'bg-green-500' : 'bg-amber-500'}`} />
                 {currentModelName}
-                <span className="text-[9px] text-green-500">支持涂抹</span>
+                <span className={`text-[9px] ${currentModelSupportsMask ? 'text-green-500' : 'text-amber-500'}`}>
+                  {currentModelSupportsMask ? '支持涂抹' : '仅文字修图'}
+                </span>
               </span>
               {modelListExpanded ? <ChevronUp size={12} className="text-[#888]" /> : <ChevronDown size={12} className="text-[#888]" />}
             </button>
