@@ -9797,7 +9797,7 @@ export function InfiniteCanvas({
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>底部工具栏</div>
                       <div className="space-y-2">
-                        {[['选择工具', '默认模式，点击/框选图片'], ['抓手工具', '平移画布'], ['图片上传', '上传本地图片到画布'], ['图像生成器', 'AI图像生成（金色按钮）'], ['图层', '打开Layer Graph设计工程'], ['缩放控制', '放大/缩小/百分比/重置视图']].map(([k, v]) => (
+                        {[['选择工具', '默认模式，点击/框选图片'], ['抓手工具', '平移画布'], ['图片上传', '上传本地图片到画布'], ['图像生成器', 'AI图像生成（金色按钮）'], ['语言修图', '自然语言描述修改图片'], ['图层', '打开Layer Graph设计工程'], ['缩放控制', '放大/缩小/百分比/重置视图']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
                         ))}
                       </div>
@@ -9811,9 +9811,10 @@ export function InfiniteCanvas({
                         '12大图片工具：放大/移除背景/SVG智能描摹/擦除/蒙版/编辑元素/多角度/转3D/扩展/裁切/图生图/下载',
                         '放大：智能补细节把图片变大变高清，不改画面内容',
                         '移除背景：一键删除背景，生成透明底主体图',
-                        'SVG智能描摹：Sharp+VTracer彩色矢量化 / ImageMagick+Potrace黑白描摹 / Sharp压缩与缩略图',
-                        '擦除：画笔涂抹消除 + AI自动补全画面，Alt键反向涂抹',
-                        '蒙版：精准遮罩控制 + AI重新生成指定区域',
+                        'SVG智能描摹：彩色/黑白矢量化，多级质量预设，自定义参数，兼容Adobe Illustrator',
+                        '擦除：画笔涂抹消除 + AI智能修复（全图发送避免变形），Alt键反向涂抹',
+                        '蒙版：精准遮罩控制 + AI重新生成指定区域 + 后端精确蒙版合成',
+                        '语言修图：自然语言描述修改意图，支持OpenAI（蒙版涂抹）+ Gemini（智能理解）',
                         '编辑元素：根据图片元素进行智能分层，独立编辑',
                         '多角度：多视角生成图片',
                         '转3D：生成3D模型并可在线预览旋转',
@@ -9824,11 +9825,13 @@ export function InfiniteCanvas({
                         '组功能：多图右键创建组，支持折叠/展开，长按标题栏拖动',
                         '框选：左键拖拽空白区域直接框选，显示选择矩形',
                         'Ctrl+Z无限撤回：纯ref同步管理，流畅操作',
-                        '右键菜单：图片右键可复制/下载/发送参考图/提取关键词',
+                        '右键菜单：图片右键可复制/下载/发送参考图/提取关键词/语言修图',
                         '下载：PNG/SVG/PSD三种格式，PSD支持Basic/Pro/Studio模式',
                         '服务器端API密钥管理：管理员统一配置，用户无需输入Key',
                         '通用模型类型：API管理支持通用模型，自动识别所有可用模型',
                         '高级参数与连接测试：添加固定API时支持高级参数和测试连接',
+                        '矢量化多策略降级：矢量模型API → LLM视觉fallback → 本地vtracer兜底',
+                        'API兼容层：通用多提供商适配，自动推断请求格式',
                       ].map((item, i) => (
                         <div key={i} className="flex items-start gap-2"><span className={`mt-1.5 w-1 h-1 rounded-full flex-shrink-0 ${isMonochrome ? 'bg-gray-400' : 'bg-[#d4af37]'}`} /><span>{item}</span></div>
                       ))}

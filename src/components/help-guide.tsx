@@ -5,13 +5,13 @@ import {
   Move, Sparkles, MessageSquare, Layers, Keyboard, Lightbulb,
   BookOpen, X, Info, Pen, Wand2, ImagePlus, GitMerge, ImageIcon,
   ZoomIn, Eraser, Maximize, Download, Shapes, Settings, Database,
-  FileBox, ChevronRight, Check
+  FileBox, ChevronRight, Check, PenTool, Pencil
 } from 'lucide-react';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
 
 // ─── Types ──────────────────────────────────────────────────────
 
-type SectionId = 'canvas' | 'generate' | 'img2img' | 'chat' | 'tools' | 'project' | 'admin' | 'shortcuts' | 'tips' | 'changelog';
+type SectionId = 'canvas' | 'generate' | 'img2img' | 'chat' | 'tools' | 'svg-trace' | 'lang-edit' | 'project' | 'admin' | 'shortcuts' | 'tips' | 'changelog';
 
 interface Section {
   id: SectionId;
@@ -31,6 +31,8 @@ const SECTIONS: Section[] = [
   { id: 'img2img', title: '图生图', icon: <ImagePlus size={16} /> },
   { id: 'chat', title: '智能对话', icon: <MessageSquare size={16} /> },
   { id: 'tools', title: '图片编辑工具', icon: <Eraser size={16} /> },
+  { id: 'svg-trace', title: 'SVG智能描摹', icon: <PenTool size={16} /> },
+  { id: 'lang-edit', title: '语言修图', icon: <Pencil size={16} /> },
   { id: 'project', title: '项目与文件', icon: <FileBox size={16} /> },
   { id: 'admin', title: '管理员系统', icon: <Settings size={16} /> },
   { id: 'shortcuts', title: '快捷键', icon: <Keyboard size={16} /> },
@@ -360,11 +362,13 @@ function ToolsSection({ themeStyle }: { themeStyle: string }) {
           {[
             { icon: <ZoomIn size={14} />, title: '放大', desc: 'AI 无损放大，支持 upscayl 分块放大（有 GPU 时自动启用）或 AI 整图放大（兜底方案），保持原图元素和风格不变，增大尺寸并增加细节', tags: ['AI增强', '分块'] },
             { icon: <Eraser size={14} />, title: '移除背景', desc: '自动把主体和背景分开，一键删掉杂乱背景', tags: ['AI分割'] },
-            { icon: <Eraser size={14} />, title: '擦除', desc: '画笔涂抹消除并自动无缝补上新的画面，支持画笔大小调节', tags: ['画笔', 'AI修复'] },
-            { icon: <Shapes size={14} />, title: '蒙版', desc: '给图片加"透明遮罩膜"，精准控制编辑范围，支持画笔/橡皮擦/撤销', tags: ['画笔', '提示词'] },
+            { icon: <Eraser size={14} />, title: '擦除', desc: '画笔涂抹消除并自动无缝补上新的画面，AI 模型优先智能修复，BFS 边界扩散兜底', tags: ['画笔', 'AI修复'] },
+            { icon: <Shapes size={14} />, title: '蒙版', desc: '给图片加"透明遮罩膜"，精准控制编辑范围，AI 模型根据提示词重新生成指定区域', tags: ['画笔', '提示词'] },
             { icon: <Layers size={14} />, title: '编辑元素', desc: '根据图片元素进行分层处理，支持导出 PSD', tags: ['分层', 'PSD'] },
             { icon: <Maximize size={14} />, title: '扩展', desc: '往图片四周延伸画面，支持缩放比例(1x-4x)和画面比例选择', tags: ['比例', '扩展'] },
             { icon: <ImagePlus size={14} />, title: '图生图', desc: '6大参考类别 + 独立强度滑块，精准控制生成效果', tags: ['参考', '强度'] },
+            { icon: <PenTool size={14} />, title: 'SVG智能描摹', desc: '彩色/黑白矢量化，图片压缩，缩略图生成', tags: ['矢量', 'SVG'] },
+            { icon: <Pencil size={14} />, title: '语言修图', desc: '用自然语言描述修改意图，AI 智能理解并修改图片', tags: ['自然语言', 'AI编辑'] },
             { icon: <Download size={14} />, title: '下载', desc: 'PNG/SVG/PSD 多格式，PSD 支持基础/专业/工作室模式', tags: ['多格式'] },
           ].map(item => (
             <Card key={item.title} themeStyle={themeStyle} className="p-3">
@@ -397,6 +401,104 @@ function ToolsSection({ themeStyle }: { themeStyle: string }) {
             </div>
           </div>
         </CardHighlight>
+      </div>
+    </div>
+  );
+}
+
+function SvgTraceSection({ themeStyle }: { themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
+  const accent = isGold ? 'text-amber-400' : 'text-foreground';
+  const cardBg = isGold ? 'bg-amber-950/20' : 'bg-muted';
+  return (
+    <div className="space-y-4 text-sm text-muted-foreground leading-relaxed">
+      <p>SVG 智能描摹将位图图片转换为矢量 SVG 图形，支持缩放无损、可编辑路径，适用于 Adobe Illustrator 等矢量编辑软件。</p>
+      <div className="space-y-2">
+        <h4 className={`font-semibold ${accent}`}>描摹模式</h4>
+        <div className="grid grid-cols-2 gap-2">
+          <div className={`rounded-lg p-3 ${cardBg}`}>
+            <div className="font-medium text-foreground">彩色模式</div>
+            <div className="text-xs mt-1">保留原图颜色，使用 vtracer 全彩矢量化算法，支持 64~4096 色精度</div>
+          </div>
+          <div className={`rounded-lg p-3 ${cardBg}`}>
+            <div className="font-medium text-foreground">黑白模式</div>
+            <div className="text-xs mt-1">转换为纯黑白轮廓线，使用 potrace 算法追踪边缘，适合线稿和徽标</div>
+          </div>
+        </div>
+      </div>
+      <div className="space-y-2">
+        <h4 className={`font-semibold ${accent}`}>质量预设</h4>
+        <div className="space-y-1">
+          <div><span className="text-foreground font-medium">快速</span> — 64色精度，适合快速预览</div>
+          <div><span className="text-foreground font-medium">均衡</span> — 256色精度，颜色与细节平衡（推荐）</div>
+          <div><span className="text-foreground font-medium">高清</span> — 1024色精度，细节丰富</div>
+          <div><span className="text-foreground font-medium">极致</span> — 4096色精度，最高还原度</div>
+        </div>
+      </div>
+      <div className="space-y-2">
+        <h4 className={`font-semibold ${accent}`}>自定义参数</h4>
+        <div className="space-y-1 text-xs">
+          <div><span className="text-foreground">颜色精度</span> — 控制颜色量化精度，值越高颜色越多（2~12）</div>
+          <div><span className="text-foreground">杂点过滤</span> — 移除小于阈值的独立色块（1~100）</div>
+          <div><span className="text-foreground">转角阈值</span> — 控制路径拐点的灵敏度（0~180）</div>
+          <div><span className="text-foreground">线段长度</span> — 路径简化阈值，值越大路径越简洁（1~200）</div>
+        </div>
+      </div>
+      <div className="space-y-2">
+        <h4 className={`font-semibold ${accent}`}>使用方式</h4>
+        <div className="space-y-1 text-xs">
+          <div>1. 选中画布上的图片，点击顶部工具栏 &quot;SVG描摹&quot; 按钮</div>
+          <div>2. 或右键菜单选择 &quot;SVG智能描摹&quot;</div>
+          <div>3. 选择描摹模式和参数后点击 &quot;开始描摹&quot;</div>
+          <div>4. 描摹完成后画布显示 PNG 预览，下载时输出完整 SVG 文件</div>
+          <div>5. 矢量模型 API 优先，LLM 视觉模型 fallback，本地 vtracer 兜底</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LangEditSection({ themeStyle }: { themeStyle: string }) {
+  const isGold = themeStyle !== 'monochrome';
+  const accent = isGold ? 'text-amber-400' : 'text-foreground';
+  const cardBg = isGold ? 'bg-amber-950/20' : 'bg-muted';
+  return (
+    <div className="space-y-4 text-sm text-muted-foreground leading-relaxed">
+      <p>语言修图是用自然语言描述修改意图，AI 智能理解并修改图片的功能。无需复杂操作，一句话即可完成编辑。</p>
+      <div className="space-y-2">
+        <h4 className={`font-semibold ${accent}`}>支持的模型</h4>
+        <div className="grid grid-cols-1 gap-2">
+          <div className={`rounded-lg p-3 ${cardBg}`}>
+            <div className="font-medium text-foreground">OpenAI 系列</div>
+            <div className="text-xs mt-1">GPT Image 2、DALL-E 3 — 支持画笔涂抹指定修改区域（蒙版），结合文字描述精准修改</div>
+          </div>
+          <div className={`rounded-lg p-3 ${cardBg}`}>
+            <div className="font-medium text-foreground">Google Gemini 系列</div>
+            <div className="text-xs mt-1">Gemini Flash/Pro — 仅文字描述，AI 自动理解修改意图，无需区域涂抹</div>
+          </div>
+        </div>
+      </div>
+      <div className="space-y-2">
+        <h4 className={`font-semibold ${accent}`}>使用方式</h4>
+        <div className="space-y-1 text-xs">
+          <div>1. 右键菜单选择 &quot;语言修图&quot;，或底部工具栏点击 &quot;语言修图&quot; 按钮</div>
+          <div>2. 进入选择模式，点击要编辑的图片</div>
+          <div>3. 在弹出的编辑器中选择模型</div>
+          <div>4. OpenAI 模型可用画笔涂抹指定修改区域</div>
+          <div>5. 输入自然语言描述修改意图（如 &quot;把背景换成星空&quot;）</div>
+          <div>6. 选择尺寸和质量，点击生成</div>
+          <div>7. 编辑结果替换原图，支持查看编辑历史</div>
+        </div>
+      </div>
+      <div className="space-y-2">
+        <h4 className={`font-semibold ${accent}`}>编辑器功能</h4>
+        <div className="space-y-1 text-xs">
+          <div><span className="text-foreground">画笔/橡皮擦</span> — 涂抹指定修改区域（仅 OpenAI 模型可用）</div>
+          <div><span className="text-foreground">尺寸选择</span> — 1024 / 1536 / 2048 像素</div>
+          <div><span className="text-foreground">质量选择</span> — 低 / 中 / 高</div>
+          <div><span className="text-foreground">编辑历史</span> — 查看和对比历史编辑结果</div>
+          <div><span className="text-foreground">结果预览</span> — 实时预览编辑效果，支持拖拽移动</div>
+        </div>
       </div>
     </div>
   );
@@ -609,11 +711,41 @@ function ChangelogSection({ themeStyle }: { themeStyle: string }) {
       </SectionTitle>
 
       <div className="space-y-4">
-        {/* v2.7.0 */}
+        {/* v2.8.0 */}
         <CardHighlight themeStyle={themeStyle}>
           <div className="flex items-center gap-2 mb-3">
-            <span className={`px-2 py-0.5 rounded text-xs font-bold ${isGold ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'bg-yellow-100 text-yellow-700'}`}>v2.7.0</span>
+            <span className={`px-2 py-0.5 rounded text-xs font-bold ${isGold ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'bg-yellow-100 text-yellow-700'}`}>v2.8.0</span>
             <span className={`text-xs ${isGold ? 'text-[#888]' : 'text-gray-500'}`}>当前版本</span>
+          </div>
+          <div className="space-y-2">
+            {[
+              { type: 'feat', text: 'SVG 智能描摹 — 彩色/黑白矢量化，多级质量预设，自定义参数调节' },
+              { type: 'feat', text: '语言修图 — 自然语言描述修改意图，支持 OpenAI + Gemini 多模型' },
+              { type: 'feat', text: '擦除功能 AI 增强 — AI 模型优先智能修复（全图发送避免变形），BFS 兜底' },
+              { type: 'feat', text: '蒙版修图 AI 增强 — AI 模型优先生成，后端精确蒙版合成' },
+              { type: 'feat', text: '图片编辑异步任务 — 擦除/蒙版/放大/扩展支持提交+轮询模式' },
+              { type: 'feat', text: 'API 兼容层升级 — 通用多提供商适配，自动推断请求格式' },
+              { type: 'feat', text: '矢量化多策略降级 — 矢量模型API → LLM视觉fallback → 本地vtracer兜底' },
+              { type: 'feat', text: 'SVG 颜色优化 — 温和颜色合并，保留真实色彩还原' },
+              { type: 'fix', text: '擦除变形修复 — 全图发送AI + 蒙版精确合成，避免裁剪导致变形' },
+              { type: 'fix', text: '图生图 URL 可访问性修复 — data URL 和本地路径自动转换' },
+              { type: 'fix', text: '语言修图异步模式 — 提交+轮询替代同步等待，避免超时' },
+            ].map((item, idx) => (
+              <div key={idx} className="flex items-start gap-2">
+                <span className={`px-1.5 py-0.5 rounded text-xs font-bold flex-shrink-0 mt-0.5 ${
+                  item.type === 'feat'
+                    ? (isGold ? 'bg-green-500/15 text-green-400' : 'bg-green-100 text-green-700')
+                    : (isGold ? 'bg-blue-500/15 text-blue-400' : 'bg-blue-100 text-blue-700')
+                }`}>{item.type === 'feat' ? '功能' : '修复'}</span>
+                <span className={`text-xs ${isGold ? 'text-[#999]' : 'text-gray-600'}`}>{item.text}</span>
+              </div>
+            ))}
+          </div>
+        </CardHighlight>
+        <CardHighlight themeStyle={themeStyle}>
+          <div className="flex items-center gap-2 mb-3">
+            <span className={`px-2 py-0.5 rounded text-xs font-bold ${isGold ? 'bg-[#2a2a2a] text-[#888]' : 'bg-gray-200 text-gray-600'}`}>v2.7.0</span>
+            <span className={`text-xs ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>历史版本</span>
           </div>
           <div className="space-y-2">
             {[
@@ -805,6 +937,8 @@ export function HelpGuide({ isOpen, onClose, themeStyle = 'gold' }: HelpGuidePro
                 case 'img2img': return <Img2ImgSection themeStyle={themeStyle} />;
                 case 'chat': return <ChatSection themeStyle={themeStyle} />;
                 case 'tools': return <ToolsSection themeStyle={themeStyle} />;
+                case 'svg-trace': return <SvgTraceSection themeStyle={themeStyle} />;
+                case 'lang-edit': return <LangEditSection themeStyle={themeStyle} />;
                 case 'project': return <ProjectSection themeStyle={themeStyle} />;
                 case 'admin': return <AdminSection themeStyle={themeStyle} />;
                 case 'shortcuts': return <ShortcutsSection themeStyle={themeStyle} />;

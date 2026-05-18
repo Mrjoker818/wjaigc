@@ -10,7 +10,7 @@
 - **语言**: TypeScript 5
 - **AI 集成**: 通用 API 兼容层（支持 OpenAI / Gemini / 任意兼容格式 API）
 - **图像生成**: DALL-E 3、Midjourney、Stable Diffusion 等多种模型
-- **特色功能**: 无限画布、图生图、PSD/SVG 导出、3D 模型预览、本地图像编辑(upscayl/IOPaint)、Ctrl+Z 撤回
+- **特色功能**: 无限画布、图生图、PSD/SVG 导出、3D 模型预览、语言修图、SVG智能描摹、Ctrl+Z 撤回
 
 ### 项目结构
 ```
@@ -30,7 +30,9 @@ src/
 │       ├── vision-prompt/route.ts  # 图片识词 API (SSE流+JSON双模式)
 │       ├── poll-3d-task/route.ts   # 3D 模型任务轮询 API
 │       ├── segment-elements/route.ts  # 元素分层 API (支持管理员配置的分层模型)
-│       ├── edit/route.ts             # 语言修图 API (OpenAI + Gemini，自然语言描述修改图片)
+│       ├── edit/route.ts             # 语言修图 API (OpenAI + Gemini，自然语言描述修改图片，异步提交+轮询)
+│       ├── image-edit/route.ts       # 图片编辑 API (擦除/蒙版/放大/扩展，AI优先+BFS兜底，异步提交+轮询)
+│       ├── svg-trace/route.ts        # SVG智能描摹 API (vtracer彩色+potrace黑白，多级质量预设)
 │       ├── upscayl/route.ts        # [旧] 无损放大 API (向后兼容)
 │       ├── image/
 │       │   ├── health/route.ts     # 本地图像工具健康检测 API
@@ -92,10 +94,10 @@ scripts/
   - 上传图片
   - 放大/缩小/缩放百分比/重置视图
 - **图片操作工具栏** (选中图片后顶部显示):
-  - 放大、移除背景、栅格化、擦除、蒙版、扩展、图生图、裁切、下载
+  - 放大、移除背景、SVG智能描摹、擦除、蒙版、编辑元素、扩展、图生图、裁切、下载
 - **编辑模式**:
-  - 擦除: 画笔大小+确认擦除
-  - 蒙版: 画笔+提示词输入+生成
+  - 擦除: 画笔大小+确认擦除，AI模型优先智能修复（全图发送避免变形），BFS边界扩散兜底
+  - 蒙版: 画笔+提示词输入+生成，AI模型优先生成+后端精确蒙版合成
   - 扩展: 缩放比例选项(原始比例/1x/1.5x/2x/3x/4x) + 画面比例(原始比例+固定比例) + 确认扩展
   - 图生图: 黑金配色浮动面板，详见下方
   - 裁切: 自由/预设比例+确认裁切
@@ -187,7 +189,37 @@ scripts/
 - 双模式解析: stream: false 优先 + SSE流回退解析
 - 快速识别图片关键词用于提示词生成
 
-### 10. 本地图像编辑 (image-editor/ + image-tools/)
+### 10. SVG 智能描摹 (svg-trace/route.ts)
+
+基于 vtracer + potrace 的位图转矢量图功能，支持彩色和黑白两种模式。
+
+- **彩色模式**: 使用 Python vtracer 库全彩矢量化，支持 64~4096 色精度
+- **黑白模式**: 使用 potrace 追踪轮廓线，纯黑白输出，适合线稿和徽标
+- **质量预设**: 快速(64色) / 均衡(256色) / 高清(1024色) / 极致(4096色)
+- **自定义参数**: colorPrecision / filterSpeckle / cornerThreshold / lengthThreshold
+- **颜色优化**: 温和颜色合并（仅合并 RGB 距离 < 12 的极近色），保留真实色彩还原
+- **多策略降级**: 矢量模型 API → LLM 视觉模型 fallback → 本地 vtracer 兜底
+- **PNG 预览**: 彩色模式用 sharp 光栅化 SVG→PNG，黑白模式用 potrace→BMP→PNG
+- **画布显示**: 显示 PNG 预览，`svgDataUrl` 字段存储完整 SVG 用于下载
+- **入口**: 选中图片顶部工具栏"SVG描摹" / 右键菜单"SVG智能描摹"
+
+### 11. 图片编辑 API (image-edit/route.ts)
+
+统一架构的图片编辑能力，AI 模型优先 + 本地算法兜底，支持异步提交+轮询模式。
+
+- **擦除功能**: AI 模型优先（全图发送+蒙版合成避免变形），BFS 边界扩散兜底
+- **蒙版修图**: AI 模型优先生成 + 后端精确蒙版合成（仅替换蒙版区域）
+- **无损放大**: upscayl-node (NCNN) + AI 整图放大兜底
+- **移除背景**: AI 模型自动分割
+- **扩展画面**: AI 模型向四周延伸，支持缩放比例和画面比例选择
+- **异步任务**: 擦除/蒙版/放大/扩展均支持提交+轮询模式（`taskId` + `/api/poll-task`）
+- **持久化**: `persistImageBuffer` 三级 fallback（S3 → save-image API → base64 data URL）
+- **蒙版合成**: `compositeAIResultToOriginal` 精确合成 AI 结果到原图蒙版区域
+- **API 接口**:
+  - POST `/api/image-edit` - 图片编辑（action: erase/mask/upscale/extend/removebg）
+  - GET `/api/image/health` - 本地图像工具健康检测
+
+### 12. 本地图像编辑 (image-editor/ + image-tools/)
 
 统一架构的本地图像编辑能力，不依赖云端 API，使用 upscayl-node (放大) 和 IOPaint+LaMa (涂抹消除/蒙版修图)。
 
@@ -214,7 +246,7 @@ scripts/
 - **配置**: 通过环境变量控制 (LOCAL_AI_ENABLED, IOPAINT_BASE_URL, UPSCAYL_MODELS_DIR 等)
 - **启动脚本**: `scripts/start-iopaint-lama.sh`
 
-### 11. 语言修图 (image-editor.tsx + api/edit)
+### 13. 语言修图 (image-editor.tsx + api/edit)
 
 基于自然语言描述的图片编辑功能，支持 OpenAI 和 Google Gemini 两种模型提供商。
 
@@ -419,7 +451,43 @@ UPSCALE_TIMEOUT_MS=300000
 
 ## 更新日志
 
-### v2.7.0 (当前版本)
+### v2.8.0 (当前版本)
+
+**SVG 智能描摹**
+- 新增 `/api/svg-trace` API：彩色模式（vtracer 全彩矢量化）+ 黑白模式（potrace 轮廓追踪）
+- 多级质量预设：快速(64色) / 均衡(256色) / 高清(1024色) / 极致(4096色)
+- 自定义参数：colorPrecision / filterSpeckle / cornerThreshold / lengthThreshold
+- 温和颜色合并后处理：仅合并 RGB 距离 < 12 的极近色，保留真实色彩
+- 多策略降级：矢量模型 API → LLM 视觉模型 fallback → 本地 vtracer 兜底
+- PNG 预览生成：sharp 光栅化 SVG→PNG（彩色）/ potrace→BMP→PNG（黑白）
+- CanvasImage 新增 `svgDataUrl` 字段，画布显示 PNG 预览，下载输出完整 SVG
+
+**语言修图**
+- 新增 `/api/edit` API：支持 OpenAI（GPT Image 2/DALL-E 3 + 蒙版）和 Gemini（纯文字描述）
+- 异步提交+轮询模式：editTaskStore 内存 Map 管理任务（100 上限 + 30 分钟清理）
+- LLM 协作 3→1 合并：3 次 chat/completions 调用合并为 1 次，节省 API 费用
+- SSE 响应兼容解析
+- IIFE 全局 5 分钟超时兜底
+
+**擦除功能 AI 增强**
+- AI 模型优先智能修复：全图发送 AI（不裁剪避免变形）+ 蒙版精确合成
+- `compositeAIResultToOriginal` 函数：仅替换蒙版区域像素，保留非蒙版区域
+- 图片 > 2048px 时等比缩放，AI 结果缩放回原图尺寸
+- BFS 边界扩散作为兜底方案
+
+**蒙版修图 AI 增强**
+- AI 模型优先生成 + 后端精确蒙版合成
+- 蒙版羽化边缘 20px 渐变过渡
+
+**图片编辑异步任务**
+- 擦除/蒙版/放大/扩展支持提交+轮询模式
+- `persistImageBuffer` 三级 fallback：S3 → save-image API → base64 data URL
+
+**API 兼容层升级**
+- 通用多提供商适配（openai / openai-async / apimart / auto / custom）
+- `fetchWithV1Retry` 自动重试带 /v1 的 URL
+
+### v2.7.0
 
 **客户端数据服务器同步**
 - `UserManagerCore` 新增 `syncToServer()` / `loadProjectsFromServer()` 方法
