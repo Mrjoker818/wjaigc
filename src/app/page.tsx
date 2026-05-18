@@ -1915,6 +1915,7 @@ function CanvasApp() {
           image={editingImage}
           canvasImages={images}
           onClose={handleEditCancel}
+          themeStyle={themeStyle}
           onConfirm={(result) => {
             // Always add a new image to canvas (preserve the original)
             const ar = result.aspectRatio || '1:1';
