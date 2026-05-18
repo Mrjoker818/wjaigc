@@ -5668,12 +5668,26 @@ export function InfiniteCanvas({
       >
         {/* Grid background */}
         <div
-          className="absolute inset-0 opacity-10"
-          style={{
-            backgroundImage: 'radial-gradient(circle, #ffffff 1px, transparent 1px)',
-            backgroundSize: '20px 20px',
-            transform: `translate(${viewOffset.x % 20}px, ${viewOffset.y % 20}px)`,
-          }}
+          className="absolute inset-0 pointer-events-none"
+          style={
+            isMonochrome
+              ? {
+                  // 浅灰方格线条，方便查看图片边缘
+                  backgroundImage: `
+                    linear-gradient(to right, #e5e5e5 1px, transparent 1px),
+                    linear-gradient(to bottom, #e5e5e5 1px, transparent 1px)
+                  `,
+                  backgroundSize: '20px 20px',
+                  transform: `translate(${viewOffset.x % 20}px, ${viewOffset.y % 20}px)`,
+                }
+              : {
+                  // 金色模式：白点网格
+                  backgroundImage: 'radial-gradient(circle, #ffffff 1px, transparent 1px)',
+                  backgroundSize: '20px 20px',
+                  opacity: 0.1,
+                  transform: `translate(${viewOffset.x % 20}px, ${viewOffset.y % 20}px)`,
+                }
+          }
         />
 
         {/* Collapsible toolbar - top left */}
