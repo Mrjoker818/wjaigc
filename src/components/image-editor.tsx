@@ -1378,18 +1378,14 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             </div>
           ) : (
           <div
-            className={`relative ${thBg} rounded-lg overflow-auto`}
-            ref={previewContainerRef}
-            onWheel={handlePreviewWheel}
-            onMouseDown={handlePanStart}
+            className={`relative ${thBg} rounded-lg`}
             style={{ 
               height: Math.min(imageDisplaySize.height + 32, 280),
               minHeight: 200,
-              cursor: isSpaceHeld ? (isPanDragging ? 'grabbing' : 'grab') : 'default',
             }}
           >
-            {/* 缩放/平移工具 */}
-            <div className="absolute top-1 right-1 z-10 flex items-center gap-0.5" onMouseDown={e => e.stopPropagation()}>
+            {/* 缩放工具 - 固定在容器右上角 */}
+            <div className="absolute top-1 right-1 z-20 flex items-center gap-0.5" onMouseDown={e => e.stopPropagation()}>
 
               <button
                 onClick={(e) => { e.stopPropagation(); setPreviewZoom(prev => Math.min(5, prev + 0.25)); }}
@@ -1415,11 +1411,21 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               </button>
             </div>
 
-            {/* 主图标记 */}
-            <div className="absolute top-1 left-1 z-10" onMouseDown={e => e.stopPropagation()}>
+            {/* 主图标记 - 固定在容器左上角 */}
+            <div className="absolute top-1 left-1 z-20" onMouseDown={e => e.stopPropagation()}>
               <span className={`text-[9px] px-1.5 py-0.5 ${isMonochrome ? 'bg-gray-800 text-white' : 'bg-[#d4af37]/80 text-black'} rounded font-medium`}>原图</span>
             </div>
 
+            {/* 滚动容器 - 仅图片内容滚动 */}
+            <div
+              className="w-full h-full overflow-auto rounded-lg"
+              ref={previewContainerRef}
+              onWheel={handlePreviewWheel}
+              onMouseDown={handlePanStart}
+              style={{ 
+                cursor: isSpaceHeld ? (isPanDragging ? 'grabbing' : 'grab') : 'default',
+              }}
+            >
             <div
               className="flex items-center justify-center"
               style={{ 
@@ -1452,6 +1458,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                   </div>
                 </div>
               </div>
+            </div>
             </div>
           </div>
           )}
