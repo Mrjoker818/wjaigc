@@ -147,21 +147,41 @@ export async function POST(request: NextRequest) {
 
       if (completedStatuses.includes(taskStatus || '')) {
         // 提取图片URL - 通用格式兼容
+        let sourceImageUrl: string | null = null;
         const images = (taskData?.result as Record<string, unknown>)?.images as Array<Record<string, unknown>> | undefined;
         if (images && images.length > 0) {
           const firstImage = images[0];
           const rawUrl = firstImage.url || firstImage.image_url || firstImage.src;
-          const imageUrl = Array.isArray(rawUrl) ? rawUrl[0] : (typeof rawUrl === 'string' ? rawUrl : null);
-          
-          if (imageUrl) {
-            pollResult.imageUrl = imageUrl;
-            await appendUserJsonl(userId, 'images', { type: 'completed', providerId: provider?.id || 'env', model, taskId, imageUrl });
-          }
+          sourceImageUrl = Array.isArray(rawUrl) ? rawUrl[0] : (typeof rawUrl === 'string' ? rawUrl : null);
         }
         // 兜底：b64_json格式
         const taskResult = taskData?.result as Record<string, unknown> | undefined;
-        if (!pollResult.imageUrl && taskResult?.b64_json) {
-          pollResult.imageUrl = `data:image/png;base64,${taskResult.b64_json}`;
+        if (!sourceImageUrl && taskResult?.b64_json) {
+          sourceImageUrl = `data:image/png;base64,${taskResult.b64_json}`;
+        }
+
+        // ★ 持久化图片：下载远程/b64图片 → 保存本地 + 上传S3 → 返回持久化URL
+        if (sourceImageUrl) {
+          try {
+            const { persistRemoteImage } = await import('@/lib/s3-storage');
+            const persistedUrl = await persistRemoteImage(sourceImageUrl, `generate/${taskId}`);
+            if (persistedUrl) {
+              pollResult.imageUrl = persistedUrl;
+              // 记录 sourceUrl→persistedUrl 映射，部署后可从 S3 恢复
+              try {
+                const { saveImageDataMapping } = await import('@/lib/image-source-map');
+                const filename = persistedUrl.split('/').pop() || persistedUrl;
+                await saveImageDataMapping(filename, sourceImageUrl);
+              } catch {}
+            } else {
+              // 持久化失败，返回原始URL
+              pollResult.imageUrl = sourceImageUrl;
+            }
+          } catch (persistErr) {
+            console.warn('[poll-task] persistRemoteImage failed, using raw URL:', persistErr);
+            pollResult.imageUrl = sourceImageUrl;
+          }
+          await appendUserJsonl(userId, 'images', { type: 'completed', providerId: provider?.id || 'env', model, taskId, imageUrl: pollResult.imageUrl });
         }
         // 任务完成但未提取到图片URL（模型返回文本而非图像），标记为可重试
         if (!pollResult.imageUrl) {

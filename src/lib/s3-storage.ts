@@ -192,3 +192,93 @@ export async function getS3ImageUrl(filenameOrPath: string): Promise<string | nu
   if (!exists) return null;
   return getS3PresignedUrl(key);
 }
+
+/**
+ * Persist a remote/base64 image: download → save local + upload S3 → return stable URL
+ * 
+ * This is the core function for ensuring images survive redeployment.
+ * - Downloads the image from a remote URL or decodes from base64 data URL
+ * - Saves to local public/uploads/ directory
+ * - Uploads to S3 for long-term storage
+ * - Returns the local serve-upload URL (/api/serve-upload/filename)
+ * 
+ * @param imageUrl Remote URL or base64 data URL
+ * @param subfolder Optional subfolder (e.g. "generate/taskId")
+ * @returns Stable local URL (/api/serve-upload/...) or null on failure
+ */
+export async function persistRemoteImage(
+  imageUrl: string,
+  subfolder: string = ''
+): Promise<string | null> {
+  const path = await import('path');
+  const fs = await import('fs/promises');
+  const { getServerDataRoot } = await import('./server-data-root');
+  const dataRoot = getServerDataRoot();
+  
+  try {
+    let imageBuffer: Buffer;
+    let ext = '.png';
+    let contentType = 'image/png';
+    
+    if (imageUrl.startsWith('data:')) {
+      // Base64 data URL
+      const match = imageUrl.match(/^data:image\/(png|jpeg|jpg|webp|gif);base64,(.+)$/);
+      if (!match) {
+        console.warn('[s3-storage] Invalid data URL format');
+        return null;
+      }
+      ext = match[1] === 'jpeg' ? '.jpg' : `.${match[1]}`;
+      contentType = `image/${match[1] === 'jpg' ? 'jpeg' : match[1]}`;
+      imageBuffer = Buffer.from(match[2], 'base64');
+    } else {
+      // Remote URL - download
+      const resp = await fetch(imageUrl, { signal: AbortSignal.timeout(30000) });
+      if (!resp.ok) {
+        console.warn(`[s3-storage] Failed to download ${imageUrl}: ${resp.status}`);
+        return null;
+      }
+      imageBuffer = Buffer.from(await resp.arrayBuffer());
+      
+      // Detect content type and extension
+      const ct = resp.headers.get('content-type') || '';
+      if (ct.includes('jpeg') || ct.includes('jpg')) { ext = '.jpg'; contentType = 'image/jpeg'; }
+      else if (ct.includes('webp')) { ext = '.webp'; contentType = 'image/webp'; }
+      else if (ct.includes('gif')) { ext = '.gif'; contentType = 'image/gif'; }
+      else { ext = '.png'; contentType = 'image/png'; }
+      
+      // Also check URL path for extension hints
+      try {
+        const urlPath = new URL(imageUrl).pathname;
+        if (urlPath.endsWith('.jpg') || urlPath.endsWith('.jpeg')) { ext = '.jpg'; contentType = 'image/jpeg'; }
+        else if (urlPath.endsWith('.webp')) { ext = '.webp'; contentType = 'image/webp'; }
+        else if (urlPath.endsWith('.gif')) { ext = '.gif'; contentType = 'image/gif'; }
+      } catch {}
+    }
+    
+    // Generate unique filename
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).slice(2, 8);
+    const baseName = subfolder ? `${subfolder.replace(/\//g, '_')}_${timestamp}` : `img_${timestamp}`;
+    const filename = `${baseName}_${random}${ext}`;
+    
+    // Save to local filesystem
+    const uploadsDir = path.join(dataRoot, 'public', 'uploads');
+    await fs.mkdir(uploadsDir, { recursive: true });
+    const localPath = path.join(uploadsDir, filename);
+    await fs.writeFile(localPath, imageBuffer);
+    
+    // Upload to S3 (best-effort, don't block on failure)
+    const s3Key = await uploadImageToS3(imageBuffer, filename, contentType).catch(e => {
+      console.warn('[s3-storage] S3 upload failed during persistRemoteImage:', e);
+      return null;
+    });
+    
+    console.log(`[s3-storage] Persisted image: ${filename} (${(imageBuffer.length / 1024).toFixed(0)}KB, S3: ${s3Key ? 'yes' : 'no'})`);
+    
+    // Return stable local URL
+    return `/api/serve-upload/${filename}`;
+  } catch (e) {
+    console.error('[s3-storage] persistRemoteImage failed:', e);
+    return null;
+  }
+}

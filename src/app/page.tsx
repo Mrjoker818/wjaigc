@@ -1092,8 +1092,8 @@ function CanvasApp() {
         } catch { /* conversion failed, keep blob URL */ }
       }
       
-      // 将 data: URL 持久化到服务器（避免 base64 数据丢失）
-      if (rawUrl.startsWith('data:')) {
+      // 将 data: URL 和外部 HTTP URL 持久化到服务器（避免数据丢失和外部 URL 过期）
+      if (rawUrl.startsWith('data:') || rawUrl.startsWith('http')) {
         try {
           const saveResp = await fetch('/api/save-image', {
             method: 'POST',
@@ -1104,7 +1104,7 @@ function CanvasApp() {
           if (saveData.success && saveData.url) {
             rawUrl = saveData.url;
           }
-        } catch { /* save failed, keep data URL */ }
+        } catch { /* save failed, keep original URL */ }
       }
       
       // 跳过已存在的图片
