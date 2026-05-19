@@ -10,6 +10,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { isS3Available, uploadImageToS3 } from '@/lib/s3-storage';
+import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -2168,6 +2169,8 @@ export async function POST(request: NextRequest) {
               // 异步模式：返回 taskId 让前端轮询
               console.log(`[inpaint] AI erase async: taskId=${eraseResult.taskId}`);
               eraseUsedAI = true;
+              // ★ 注册异步擦除任务
+              registerTask(eraseResult.taskId, 'erase', '擦除');
               return NextResponse.json({ success: true, taskId: eraseResult.taskId, action, engine: 'ai-erase', cropInfo: { cropX: 0, cropY: 0, cropW: origW, cropH: origH, origW, origH }, usedModel: eraseResult.usedModel });
             }
           } catch (aiErr) {
@@ -2338,6 +2341,8 @@ export async function POST(request: NextRequest) {
       }
 
       // 异步结果 - 返回 taskId 给前端轮询，前端做蒙版合成
+      // ★ 注册异步蒙版修图任务
+      if (result.taskId) registerTask(result.taskId, 'mask', '蒙版修图');
       return NextResponse.json({
         success: true,
         taskId: result.taskId,

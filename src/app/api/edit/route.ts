@@ -4,6 +4,7 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { getEditTask, deleteEditTask, setEditTask, updateTaskStage, failEditTask } from '@/lib/edit-task-store';
 import type { EditTask } from '@/lib/edit-task-store';
+import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 
 // 允许大请求体（base64图片可能很大，50MB限制）
 export const runtime = 'nodejs';
@@ -33,6 +34,8 @@ export { getEditTask, deleteEditTask };
 /** 本地便捷：失败任务 */
 function failTask(taskId: string, error: string, networkError = false) {
   failEditTask(taskId, error, networkError);
+  // ★ 同步更新任务注册中心
+  updateTaskProgress(taskId, { status: 'failed', error });
 }
 
 // 支持编辑的模型列表（用于降级静态列表）
@@ -315,6 +318,8 @@ export async function POST(request: NextRequest) {
     // ========== 1.5 创建异步任务（提交+轮询模式，避免CDN/FaaS代理超时） ==========
     const taskId = `edit_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     setEditTask(taskId, { id: taskId, status: 'processing', progress: 0, stage: '初始化', createdAt: Date.now() });
+    // ★ 注册到统一任务中心（SSE推送 + 取消支持）
+    registerTask(taskId, 'edit', '语言修图');
 
     // 后台异步执行编辑流程（5分钟全局超时兜底）
     const EDIT_GLOBAL_TIMEOUT_MS = 5 * 60 * 1000;
@@ -328,6 +333,11 @@ export async function POST(request: NextRequest) {
       }, EDIT_GLOBAL_TIMEOUT_MS);
 
       try {
+        // ★ 检查任务是否已被取消
+        if (isTaskCancelled(taskId)) {
+          failTask(taskId, '任务已被取消');
+          return;
+        }
         // ========== 2. 解析原图为 Buffer ==========
         let imageBuffer: Buffer;
         let mimeType = 'image/png';
@@ -630,6 +640,8 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           const editData = await editResponse.json();
           const images = extractAllImagesFromResponse(editData, effectivePrompt);
           if (images.length > 0) {
+            // ★ 更新任务注册中心
+            updateTaskProgress(taskId, { status: 'completed', progress: 100 });
             setEditTask(taskId, {
               id: taskId,
               status: 'completed',
@@ -770,6 +782,8 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                 const extraResults = await Promise.all(extraPromises);
                 for (const r of extraResults) { if (r) images.push(r); }
               }
+              // ★ 更新任务注册中心
+              updateTaskProgress(taskId, { status: 'completed', progress: 100 });
               setEditTask(taskId, {
                 id: taskId,
                 status: 'completed',
@@ -890,6 +904,8 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     }
 
     // 存储成功结果到任务
+    // ★ 更新任务注册中心
+    updateTaskProgress(taskId, { status: 'completed', progress: 100 });
     setEditTask(taskId, {
       id: taskId,
       status: 'completed',

@@ -10,7 +10,7 @@
 - **语言**: TypeScript 5
 - **AI 集成**: 通用 API 兼容层（支持 OpenAI / Gemini / 任意兼容格式 API）
 - **图像生成**: DALL-E 3、Midjourney、Stable Diffusion 等多种模型
-- **特色功能**: 无限画布、图生图、PSD/SVG 导出、3D 模型预览、语言修图、SVG智能描摹、Ctrl+Z 撤回
+- **特色功能**: 无限画布、图生图、PSD/SVG 导出、3D 模型预览、语言修图、SVG智能描摹、Agent编排、Ctrl+Z 撤回
 
 ### 项目结构
 ```
@@ -33,6 +33,11 @@ src/
 │       ├── edit/route.ts             # 语言修图 API (OpenAI + Gemini，自然语言描述修改图片，异步提交+轮询)
 │       ├── image-edit/route.ts       # 图片编辑 API (擦除/蒙版/放大/扩展，AI优先+BFS兜底，异步提交+轮询)
 │       ├── svg-trace/route.ts        # SVG智能描摹 API (vtracer彩色+potrace黑白，多级质量预设)
+│       ├── agent-edit/route.ts       # Agent编排编辑 API (智能选择工具，多轮编辑)
+│       ├── cancel-task/route.ts      # 任务取消 API (支持所有异步任务取消)
+│       ├── task-events/route.ts      # SSE任务事件推送 API (替代轮询，实时推送)
+│       ├── queue-position/route.ts   # 队列位置查询 API (排队中任务的位置)
+│       ├── verify-protocol/route.ts  # API协议验证 API (管理员面板一键验证提供商协议)
 │       ├── upscayl/route.ts        # [旧] 无损放大 API (向后兼容)
 │       ├── image/
 │       │   ├── health/route.ts     # 本地图像工具健康检测 API
@@ -48,6 +53,7 @@ src/
 │   ├── chat-panel.tsx              # AI 聊天面板
 │   ├── image-preview.tsx           # 图片预览组件
 │   ├── image-editor.tsx             # 语言修图编辑器组件 (自然语言描述修改图片)
+│   ├── agent-editor.tsx             # Agent编排编辑器组件 (智能选择工具，多轮编辑)
 │   ├── model-viewer-3d.tsx         # 3D 模型预览组件
 │   ├── image-editor/
 │   │   ├── ImageEditPanel.tsx      # 擦除/蒙版修图浮窗面板 (黑金UI)
@@ -58,6 +64,10 @@ src/
 ├── lib/
 │   ├── db-client.ts                # PostgreSQL 连接池（使用 PGDATABASE_URL 环境变量）
 │   ├── db-storage.ts               # 数据库持久化存储（用户/API提供商/用户数据/系统设置）
+│   ├── task-registry.ts            # 任务注册中心（统一任务管理、SSE推送、取消、队列）
+│   ├── task-events-client.ts       # SSE任务事件客户端（前端连接SSE、取消任务）
+│   ├── agent-engine.ts             # Agent编排引擎（工具注册表、Agent循环、多轮决策）
+│   ├── image-compress.ts           # 图片压缩工具（前端canvas压缩+尺寸限制）
 │   ├── api-helpers.ts              # API 辅助函数（fetchWithV1Retry 智能 /v1 重试）
 │   ├── psd-export.ts               # PSD 导出功能
 │   ├── svg-export.ts               # SVG 矢量化导出
@@ -249,6 +259,88 @@ scripts/
 ### 13. 语言修图 (image-editor.tsx + api/edit)
 
 基于自然语言描述的图片编辑功能，支持 OpenAI 和 Google Gemini 两种模型提供商。
+
+（保留原有文档，此处省略）
+
+### 14. 任务注册中心 (task-registry.ts)
+
+统一任务管理系统，为所有异步任务（生成、编辑、修图、Agent等）提供注册、状态追踪、SSE推送和取消能力。
+
+- **核心数据结构**: `TaskInfo` — taskId, type, status(queued/processing/completed/failed/cancelled), progress, label, result, error
+- **任务注册**: `registerTask(taskId, type, label)` — 注册新任务到内存 Map
+- **进度更新**: `updateTaskProgress(taskId, partial)` — 更新进度/标签/状态，自动触发 SSE 推送
+- **取消检查**: `isTaskCancelled(taskId)` — 后台任务循环中检查是否已取消
+- **SSE推送**: `onTaskProgressUpdate(handler)` — 注册进度变化回调，供 SSE 端点使用
+- **队列管理**: 内置排队机制，`getQueuePosition(taskId)` 查询排队位置
+- **内存限制**: 最多保存 500 条任务记录，30 分钟自动清理过期任务
+- **API 接口**:
+  - POST `/api/cancel-task` — 取消任务 (taskId)
+  - GET `/api/task-events?taskId=xxx` — SSE 事件流 (实时推送进度)
+  - GET/POST `/api/queue-position` — 查询排队位置 (taskId)
+- **集成路由**: generate, image-edit, edit, agent-edit 均已集成任务注册
+
+### 15. SSE 任务推送 (task-events/route.ts + task-events-client.ts)
+
+替代前端轮询的实时任务进度推送机制，保留轮询作为兜底。
+
+- **服务端**: `/api/task-events?taskId=xxx` — SSE 长连接，实时推送任务进度变化
+- **客户端**: `taskEventsClient` — 自动连接/重连，支持注册处理器 `onTaskEvent(handler)`
+- **消息格式**: `{ type: 'connected'|'progress'|'completed'|'failed'|'cancelled', taskId, task, timestamp }`
+- **降级策略**: SSE 连接失败时自动回退到 `/api/poll-task` 轮询
+- **取消任务**: `taskEventsClient.cancelTask(taskId)` — 调用 cancel API 并等待确认
+
+### 16. 图片压缩 (image-compress.ts + save-image/route.ts)
+
+前端和后端双重图片压缩，减少上传带宽和存储空间。
+
+- **前端压缩**: `compressImage(file, options)` — canvas 压缩 + 尺寸限制
+  - 支持 JPEG/WebP 格式，可配置质量 (0-1) 和最大边长
+  - 大图自动缩放：超过 maxWidth/maxHeight 时等比缩放
+  - 小图跳过压缩：低于 maxSizeKB 的文件直接返回
+- **后端压缩**: `/api/save-image` 新增 `compress` 参数
+  - 使用 sharp 进行高质量压缩和尺寸调整
+  - 支持 `maxWidth/maxHeight/quality/format` 参数
+  - 自动转换格式：PNG→JPEG（非透明图）或 WebP
+
+### 17. API 协议验证 (verify-protocol/route.ts + admin-system.tsx)
+
+管理员面板新增"验证协议"按钮，一键检测 API 提供商的协议兼容性。
+
+- **POST `/api/verify-protocol`**: 验证 API 端点是否可达、支持的协议格式
+- **检测项目**: 模型列表(/models)、图片生成(/images/generations)、对话(/chat/completions)
+- **结果分类**: pass(通过) / warn(警告) / fail(失败)
+- **自动推断**: `resolveCompatProfile` 自动识别 openai/apimart/auto 等协议
+- **UI 集成**: 管理员面板每个提供商旁新增"验证"按钮，显示检测结果
+
+### 18. Agent 编排 (agent-engine.ts + agent-editor.tsx + api/agent-edit)
+
+基于 LLM 的智能编排系统，自动选择和组合工具完成用户指令。语言修图的扩展版本。
+
+- **核心架构**:
+  - `agent-engine.ts`: 工具注册表 + Agent 循环（LLM思考→选工具→执行→再思考）
+  - `agent-editor.tsx`: 前端编辑器组件（黑金/单色双主题）
+  - `api/agent-edit/route.ts`: 后端 API（异步提交+轮询模式）
+- **注册工具**:
+  - `image_edit`: 自然语言修图（OpenAI images/edits + Gemini）
+  - `generate_image`: 从零生成新图片
+  - `analyze_image`: 图片内容分析
+  - `adjust_color`: 色彩/亮度/对比度调整
+- **Agent 循环**:
+  1. LLM 接收用户指令 + 工具列表，选择工具和参数
+  2. 执行工具调用，获取结果
+  3. 将结果反馈给 LLM，决定是否继续
+  4. 重复直到任务完成或达到最大轮次
+- **安全限制**: 最大 10 轮，单轮 60 秒超时，全局 5 分钟超时
+- **前端 UI**:
+  - 右侧浮动面板，黑金/单色双主题适配
+  - 进度条 + 执行步骤展示（成功/失败标记）
+  - 最大轮次选择（3/5/8）
+  - 取消按钮 + 错误重试
+- **入口**:
+  - 选中图片工具栏"Agent编排"按钮
+  - 右键菜单"Agent编排"
+  - 底部工具栏"Agent"按钮
+- **与语言修图的关系**: 语言修图是 Agent 的固定 2 步子集（1 个工具，无循环），Agent 支持多工具 + 动态循环
 
 - **入口**:
   - 无限画布右键菜单"语言修图"
@@ -451,7 +543,40 @@ UPSCALE_TIMEOUT_MS=300000
 
 ## 更新日志
 
-### v2.8.0 (当前版本)
+### v2.9.0 (当前版本)
+
+**P0: 任务基础设施升级**
+- 新增 `task-registry.ts`: 统一任务注册中心，支持状态追踪、SSE推送、取消、队列管理
+- 新增 `/api/cancel-task`: 任务取消 API，支持所有异步任务取消
+- 新增 `/api/task-events`: SSE 实时任务事件推送，替代前端轮询（保留轮询兜底）
+- 新增 `/api/queue-position`: 队列位置查询 API
+- 新增 `task-events-client.ts`: 前端 SSE 客户端，自动连接/重连/降级
+- 集成到 generate、image-edit、edit 路由：注册任务、推送进度、检查取消
+- 前端无限画布 processing frame 新增取消按钮（黑金+单色双主题）
+
+**P0: 图片压缩上传**
+- 新增 `image-compress.ts`: 前端 canvas 压缩 + 尺寸限制
+- `save-image/route.ts` 新增后端 sharp 压缩（compress 参数）
+- 上传图片自动压缩：超过 4MB 或 2048px 自动缩放压缩
+
+**P1: API 协议验证**
+- 新增 `/api/verify-protocol`: 一键验证 API 提供商协议兼容性
+- 管理员面板每个提供商旁新增"验证"按钮
+- 自动推断 openai/apimart/auto 协议，检测模型列表/图片生成/对话端点
+
+**P1: 任务队列**
+- task-registry 内置排队机制：按用户限并发，超额任务自动排队
+- 队列位置查询 API，前端可显示"排队第N位"
+
+**P2: Agent 编排**
+- 新增 `agent-engine.ts`: 工具注册表 + Agent 循环（LLM思考→选工具→执行→再思考）
+- 新增 `agent-editor.tsx`: 前端编辑器组件（黑金/单色双主题）
+- 新增 `/api/agent-edit`: Agent 编排 API（异步提交+轮询）
+- 注册工具: image_edit / generate_image / analyze_image / adjust_color
+- 入口: 选中图片工具栏 + 右键菜单 + 底部工具栏
+- 安全限制: 最大 10 轮，单轮 60s 超时，全局 5min 超时
+
+### v2.8.0
 
 **SVG 智能描摹**
 - 新增 `/api/svg-trace` API：彩色模式（vtracer 全彩矢量化）+ 黑白模式（potrace 轮廓追踪）

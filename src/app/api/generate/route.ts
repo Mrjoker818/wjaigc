@@ -5,6 +5,7 @@ import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile } from '@/lib/api-compatibility';
+import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
@@ -824,6 +825,10 @@ export async function POST(request: NextRequest) {
     }
 
     // 返回task_ids给前端，由前端负责轮询
+    // ★ 注册任务到统一注册中心（SSE推送 + 取消支持）
+    for (const tid of taskIds) {
+      registerTask(tid, 'generate', '生成图片');
+    }
     return NextResponse.json({
       success: true,
       mode: 'polling',

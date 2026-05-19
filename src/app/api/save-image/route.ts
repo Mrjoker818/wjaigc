@@ -5,6 +5,7 @@ import path from 'path';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { uploadImageToS3, isS3Available } from '@/lib/s3-storage';
 import { saveImageDataMapping, getImageSourceUrl } from '@/lib/image-source-map';
+import sharp from 'sharp';
 
 /**
  * 将 base64 data URL 或远程图片 URL 保存到持久化目录，
@@ -17,11 +18,14 @@ import { saveImageDataMapping, getImageSourceUrl } from '@/lib/image-source-map'
  */
 export async function POST(request: NextRequest) {
   try {
-    const { imageUrl, userId } = await request.json();
+    const { imageUrl, userId, compress } = await request.json();
 
     if (!imageUrl || typeof imageUrl !== 'string') {
       return NextResponse.json({ error: 'No imageUrl provided' }, { status: 400 });
     }
+
+    // ★ 是否启用后端压缩（默认不压缩，前端压缩优先）
+    const shouldCompress = compress === true;
 
     const isProd = process.env.COZE_PROJECT_ENV === 'PROD';
     const timestamp = Date.now();
@@ -57,10 +61,36 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Image too large (max 20MB)' }, { status: 400 });
       }
 
-      const ext = mimeType === 'jpeg' ? 'jpg' : mimeType === 'svg' ? 'svg' : mimeType;
+      // ★ 后端压缩：大图自动缩放 + JPEG 质量 85
+      let finalBuffer: Buffer = buffer;
+      let finalMimeType = mimeType;
+      if (shouldCompress && mimeType !== 'svg') {
+        try {
+          const metadata = await sharp(buffer).metadata();
+          const maxEdge = 2048;
+          if ((metadata.width || 0) > maxEdge || (metadata.height || 0) > maxEdge) {
+            finalBuffer = await sharp(buffer)
+              .resize(maxEdge, maxEdge, { fit: 'inside', withoutEnlargement: true })
+              .jpeg({ quality: 85 })
+              .toBuffer();
+            finalMimeType = 'jpeg';
+          } else if (buffer.length > 1024 * 1024) {
+            // 不超尺寸但超1MB，也压缩
+            finalBuffer = await sharp(buffer)
+              .jpeg({ quality: 85 })
+              .toBuffer();
+            finalMimeType = 'jpeg';
+          }
+        } catch (compressErr) {
+          console.warn('[save-image] Sharp compress failed, using original:', compressErr);
+          finalBuffer = buffer;
+        }
+      }
+
+      const ext = finalMimeType === 'jpeg' ? 'jpg' : finalMimeType === 'svg' ? 'svg' : finalMimeType;
       const filename = `gen-${timestamp}-${random}.${ext}`;
       const filePath = path.join(uploadDir, filename);
-      await writeFile(filePath, buffer);
+      await writeFile(filePath, finalBuffer);
       // 开发环境也写入 public/uploads 以便 Next.js 静态服务
       if (isProd) {
         const publicDir = path.join(process.cwd(), 'public', 'uploads');
@@ -71,7 +101,7 @@ export async function POST(request: NextRequest) {
       // 上传到 S3 对象存储（持久化，重部署不丢失）
       let s3Key: string | null = null;
       if (isS3Available()) {
-        s3Key = await uploadImageToS3(buffer, filename, `image/${mimeType}`);
+        s3Key = await uploadImageToS3(finalBuffer, filename, `image/${finalMimeType}`);
         if (s3Key) {
           console.log(`[save-image] S3 backup: ${s3Key}`);
         }
@@ -81,7 +111,7 @@ export async function POST(request: NextRequest) {
         success: true,
         url: `${webPath}/${filename}`,
         filename,
-        size: buffer.length,
+        size: finalBuffer.length,
         s3Key,
       });
     }

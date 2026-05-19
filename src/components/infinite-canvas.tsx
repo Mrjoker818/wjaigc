@@ -8,7 +8,7 @@ import {
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
-  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, ChevronsLeft, ChevronsRight, Settings2, ChevronUp
+  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, ChevronsLeft, ChevronsRight, Settings2, ChevronUp, Bot
 } from 'lucide-react';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
 import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
@@ -22,6 +22,7 @@ import dynamic from 'next/dynamic';
 const ModelViewer3D = dynamic(() => import('@/components/model-viewer-3d'), { ssr: false });
 
 const PsdLayerEditor = lazy(() => import('@/components/psd-editor/PsdLayerEditor'));
+const AgentEditor = lazy(() => import('@/components/agent-editor'));
 
 
 /* ====== Multi-Angle Sphere Preview (Canvas 2D) ====== */
@@ -373,6 +374,10 @@ export function InfiniteCanvas({
 }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
+  // Agent editor state
+  const [showAgentEditor, setShowAgentEditor] = useState(false);
+  const [agentEditImage, setAgentEditImage] = useState<CanvasImage | null>(null);
+
   // View state
   const [viewOffset, setViewOffset] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
@@ -556,7 +561,7 @@ export function InfiniteCanvas({
     if (typeof window !== 'undefined') {
       try { const saved = localStorage.getItem('wujie_toolbar_order'); if (saved) return JSON.parse(saved); } catch {}
     }
-    return ['放大','移除背景','SVG智能描摹','擦除','蒙版','编辑元素','多角度','转3D','扩展','裁切','图生图','语言修图','下载'];
+    return ['放大','移除背景','SVG智能描摹','擦除','蒙版','编辑元素','多角度','转3D','扩展','裁切','图生图','语言修图','Agent编排','下载'];
   });
   const [toolbarHiddenItems, setToolbarHiddenItems] = useState<Set<string>>(() => {
     if (typeof window !== 'undefined') {
@@ -2095,13 +2100,36 @@ export function InfiniteCanvas({
   const handleCanvasImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      const promises = Array.from(files).map(file =>
-        new Promise<string>(resolve => {
-          const reader = new FileReader();
-          reader.onload = event => resolve((event.target?.result as string) || '');
-          reader.readAsDataURL(file);
-        })
-      );
+      // ★ 大文件自动压缩（>1MB 的图片压缩到 2048px 以内）
+      const promises = Array.from(files).map(async file => {
+        try {
+          if (file.size > 1024 * 1024) {
+            // 大于 1MB，先压缩
+            const { compressImage } = await import('@/lib/image-compress');
+            const result = await compressImage(file, {
+              maxWidth: 2048,
+              maxHeight: 2048,
+              quality: 0.85,
+              format: 'jpeg',
+              maxSizeKB: 1024,
+            });
+            return result.dataUrl;
+          }
+          // 小文件直接读取
+          return await new Promise<string>(resolve => {
+            const reader = new FileReader();
+            reader.onload = event => resolve((event.target?.result as string) || '');
+            reader.readAsDataURL(file);
+          });
+        } catch {
+          // 压缩失败，回退到直接读取
+          return await new Promise<string>(resolve => {
+            const reader = new FileReader();
+            reader.onload = event => resolve((event.target?.result as string) || '');
+            reader.readAsDataURL(file);
+          });
+        }
+      });
       try {
         const results = await Promise.all(promises);
         const validUrls = results.filter(url => url);
@@ -3661,6 +3689,9 @@ export function InfiniteCanvas({
   // 存储最近一次 pollForResult 的错误信息，供调用方展示更精准的错误提示
   const lastPollErrorRef = useRef<string>('');
 
+  // ★ 取消控制器：当前正在轮询的任务可通过 cancelTask 取消
+  const pollingAbortRef = useRef<AbortController | null>(null);
+
   const pollForResult = useCallback(async (
     taskId: string,
     apiKeyOrModel: string,
@@ -3676,7 +3707,18 @@ export function InfiniteCanvas({
       return 2000;
     };
     lastPollErrorRef.current = '';
+
+    // ★ 创建取消控制器
+    const abortController = new AbortController();
+    pollingAbortRef.current = abortController;
+
     for (let i = 0; i < maxAttempts; i++) {
+      // ★ 检查是否被取消
+      if (abortController.signal.aborted) {
+        lastPollErrorRef.current = '任务已被取消';
+        return null;
+      }
+
       onProgress?.(
         Math.min(95, 18 + Math.round((i / Math.max(1, maxAttempts - 1)) * 76)),
         i < 2 ? '任务已提交，等待模型响应...' : 'AI 正在生成结果...'
@@ -3687,8 +3729,16 @@ export function InfiniteCanvas({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ taskId, model: currentModelInfo.model, providerId: getCurrentProviderId() }),
+          signal: abortController.signal,
         });
         const data = await res.json();
+
+        // ★ 检查服务端取消状态
+        if (data.status === 'cancelled') {
+          lastPollErrorRef.current = '任务已被取消';
+          return null;
+        }
+
         if (data.status === 'completed' && data.imageUrl) {
           return data.imageUrl;
         }
@@ -3702,7 +3752,12 @@ export function InfiniteCanvas({
           lastPollErrorRef.current = data.error || '任务不可重试';
           return null;
         }
-      } catch (e) {
+      } catch (e: unknown) {
+        // ★ 取消导致的abort不重试
+        if (e instanceof DOMException && e.name === 'AbortError') {
+          lastPollErrorRef.current = '任务已被取消';
+          return null;
+        }
         // Network/polling errors — continue polling
         console.error('Poll error:', e);
       }
@@ -5500,6 +5555,7 @@ export function InfiniteCanvas({
     { icon: <Scissors size={14} />, label: '裁切', desc: '自由/预设比例裁切', action: handleOpenCrop },
     { icon: <ImagePlus size={14} />, label: '图生图', desc: '基于当前图生成新图', action: () => { if (selectedImage) setEditImageId(selectedImage.id); setEditMode('img2img'); } },
     { icon: <Pencil size={14} />, label: '语言修图', desc: '用自然语言描述修改图片', action: () => { if (selectedImage) onEditImage?.(selectedImage); else onEditImage?.(null); } },
+    { icon: <Bot size={14} />, label: 'Agent编排', desc: '智能编排多工具编辑图片', action: () => { const img = selectedImageData || selectedImage; if (img) { setAgentEditImage(img); setShowAgentEditor(true); } } },
     { icon: <Download size={14} />, label: '下载', desc: 'PNG/SVG/PSD下载', action: handleOpenDownload },
   ];
 
@@ -5640,6 +5696,7 @@ export function InfiniteCanvas({
     { label: '发送参考图', action: () => { const img = selectedImageData; if (img) onGenerateVariation(img); } },
     { label: '提取关键词', action: () => { const img = selectedImageData; if (img) onExtractKeywords(img); } },
     { label: '语言修图', action: () => { const img = selectedImageData; if (img) onEditImage?.(img); else onEditImage?.(null); } },
+    { label: 'Agent编排', action: () => { const img = selectedImageData; if (img) { setAgentEditImage(img); setShowAgentEditor(true); } } },
   ];
 
   const ratioOptions = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9'];
@@ -6159,6 +6216,20 @@ export function InfiniteCanvas({
                           <div className="text-xs text-[#d4af37]/70 font-mono">
                             {Math.round(image.processing.progress)}%
                           </div>
+                          {/* ★ 取消按钮 */}
+                          <button
+                            className="pointer-events-auto mt-1 px-3 py-1 rounded-full bg-red-500/70 hover:bg-red-500/90 text-white text-xs font-medium transition-colors backdrop-blur-sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (pollingAbortRef.current) {
+                                pollingAbortRef.current.abort();
+                                pollingAbortRef.current = null;
+                              }
+                              removeProcessingFrame(image.id);
+                            }}
+                          >
+                            取消
+                          </button>
                         </>
                       ) : (
                         /* 通用进度UI */
@@ -6175,6 +6246,20 @@ export function InfiniteCanvas({
                           <div className="text-xs text-white/70 text-center px-3">
                             {image.processing.status} {Math.round(image.processing.progress)}%
                           </div>
+                          {/* ★ 取消按钮 */}
+                          <button
+                            className="pointer-events-auto mt-1 px-3 py-1 rounded-full bg-red-500/70 hover:bg-red-500/90 text-white text-xs font-medium transition-colors backdrop-blur-sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (pollingAbortRef.current) {
+                                pollingAbortRef.current.abort();
+                                pollingAbortRef.current = null;
+                              }
+                              removeProcessingFrame(image.id);
+                            }}
+                          >
+                            取消
+                          </button>
                         </>
                       )}
                     </div>
@@ -9078,6 +9163,26 @@ export function InfiniteCanvas({
           />
         )}
 
+        {/* ====== AGENT EDITOR ====== */}
+        {showAgentEditor && agentEditImage && (
+          <Suspense fallback={null}>
+            <AgentEditor
+              imageUrl={agentEditImage.url}
+              themeStyle={isMonochrome ? 'monochrome' : 'gold'}
+              onComplete={(resultUrl: string) => {
+                // 更新图片URL
+                const updated = images.map(img =>
+                  img.id === agentEditImage.id ? { ...img, url: resultUrl } : img
+                );
+                onImagesChange(updated);
+                setShowAgentEditor(false);
+                setAgentEditImage(null);
+              }}
+              onClose={() => { setShowAgentEditor(false); setAgentEditImage(null); }}
+            />
+          </Suspense>
+        )}
+
 
         {/* ====== PSD LAYER EDITOR MODAL ====== */}
         {showPsdEditor && psdEditorImageUrl && (
@@ -9832,7 +9937,7 @@ export function InfiniteCanvas({
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>图片操作工具栏</div>
                       <div className="space-y-2">
-                        {[['放大', '智能补细节，变大变高清'], ['移除背景', '一键去背景，生成透明底图'], ['SVG智能描摹', '彩色/黑白矢量化，图片压缩，缩略图'], ['擦除', '画笔涂抹消除，AI自动补全'], ['蒙版', '精准遮罩控制，AI重新生成'], ['编辑元素', '按元素智能分层，独立编辑'], ['多角度', '多视角生成图片'], ['转3D', '生成3D模型预览'], ['扩展', '向四周延伸画面，自动补齐'], ['裁切', '自由/预设比例裁切'], ['图生图', '6大类别参考，基于当前图生成新图'], ['下载', 'PNG/SVG/PSD多格式下载']].map(([k, v]) => (
+                        {[['放大', '智能补细节，变大变高清'], ['移除背景', '一键去背景，生成透明底图'], ['SVG智能描摹', '彩色/黑白矢量化，图片压缩，缩略图'], ['擦除', '画笔涂抹消除，AI自动补全'], ['蒙版', '精准遮罩控制，AI重新生成'], ['编辑元素', '按元素智能分层，独立编辑'], ['多角度', '多视角生成图片'], ['转3D', '生成3D模型预览'], ['扩展', '向四周延伸画面，自动补齐'], ['裁切', '自由/预设比例裁切'], ['图生图', '6大类别参考，基于当前图生成新图'], ['Agent编排', '智能编排多工具，自动选择最佳方案'], ['下载', 'PNG/SVG/PSD多格式下载']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
                         ))}
                       </div>
@@ -10199,6 +10304,20 @@ export function InfiniteCanvas({
         >
           <Pencil className="h-4 w-4" />
           <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-gray-900 text-white' : 'bg-black/90 text-white'}`}>修图</span>
+        </button>
+
+        {/* Agent Edit - Agent编排 */}
+        <button
+          onClick={() => { const firstImg = images[0]; if (firstImg) { setAgentEditImage(firstImg); setShowAgentEditor(true); } }}
+          className={`p-2 rounded-xl transition-all relative group ${
+            isMonochrome
+              ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              : 'text-[#888] hover:text-white hover:bg-white/10'
+          }`}
+          title="Agent编排"
+        >
+          <Bot className="h-4 w-4" />
+          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-gray-900 text-white' : 'bg-black/90 text-white'}`}>Agent</span>
         </button>
 
         <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#2a2a2a]'}`} />

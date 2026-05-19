@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { X, UserPlus, Trash2, Ban, CheckCircle2, KeyRound, Plug, RefreshCw, Activity, Wallet, Pencil, Zap, CheckCircle, XCircle, Loader2, Search, Settings, ChevronDown, Plus } from 'lucide-react';
+import { X, UserPlus, Trash2, Ban, CheckCircle2, KeyRound, Plug, RefreshCw, Activity, Wallet, Pencil, Zap, CheckCircle, XCircle, Loader2, Search, Settings, ChevronDown, Plus, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { User } from '@/lib/user-types';
 import { ConfirmDialog } from './custom-dialogs';
 import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
@@ -70,6 +70,8 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
   const [isTesting, setIsTesting] = useState(false);
   const [isTestingNew, setIsTestingNew] = useState(false);
   const [testNewResult, setTestNewResult] = useState<{ success: boolean; message: string; modelCount?: number; error?: string } | null>(null);
+  const [verifyResult, setVerifyResult] = useState<{ providerId: string; success: boolean; summary: string; tests: Array<{ name: string; status: string; detail: string }> } | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
   const [apiBalances, setApiBalances] = useState<Array<{
     providerId: string; providerName: string; providerType: string;
     balance: number | null; currency: string; totalUsage: number; dailyUsage: number;
@@ -373,6 +375,35 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
       });
     } finally {
       setIsTesting(false);
+    }
+  };
+
+  const handleVerifyProtocol = async (provider: AdminProvider) => {
+    setIsVerifying(true);
+    setVerifyResult(null);
+    try {
+      const response = await fetch('/api/verify-protocol', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ providerId: provider.id }),
+      });
+      const data = await response.json();
+      setVerifyResult({
+        providerId: provider.id,
+        success: data.success,
+        summary: data.summary || '',
+        tests: data.tests || [],
+      });
+    } catch {
+      setVerifyResult({
+        providerId: provider.id,
+        success: false,
+        summary: '验证请求失败',
+        tests: [],
+      });
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -808,6 +839,9 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                       <button aria-label={`测试 ${provider.displayName || provider.name} 的连接`} onClick={() => void handleTestConnection(provider)} disabled={isTesting} className={`p-1.5 rounded-lg ${isGold ? 'hover:bg-[#222]' : 'hover:bg-gray-100'}`} title="测试连接">
                         {isTesting && testResult?.providerId === provider.id ? <Loader2 className="w-3.5 h-3.5 animate-spin text-yellow-500" /> : <Zap className="w-3.5 h-3.5 text-yellow-500" />}
                       </button>
+                      <button aria-label={`验证 ${provider.displayName || provider.name} 的协议`} onClick={() => void handleVerifyProtocol(provider)} disabled={isVerifying} className={`p-1.5 rounded-lg ${isGold ? 'hover:bg-[#222]' : 'hover:bg-gray-100'}`} title="协议验证">
+                        {isVerifying && verifyResult?.providerId === provider.id ? <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400" /> : <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />}
+                      </button>
                       <button onClick={() => void handleToggleApi(provider)} className={`p-1.5 rounded-lg ${isGold ? 'hover:bg-[#222]' : 'hover:bg-gray-100'}`} title={provider.isEnabled ? '停用' : '启用'}>
                         {provider.isEnabled ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> : <XCircle className="w-3.5 h-3.5 text-gray-500" />}
                       </button>
@@ -824,6 +858,25 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                         {testResult.success ? <CheckCircle className="w-3.5 h-3.5 shrink-0" /> : <XCircle className="w-3.5 h-3.5 shrink-0" />}
                         <span>{testResult.message}</span>
                         <button onClick={() => setTestResult(null)} className="ml-auto opacity-50 hover:opacity-100"><X size={12} /></button>
+                      </div>
+                    )}
+                    {/* Protocol verification result */}
+                    {verifyResult && verifyResult.providerId === provider.id && (
+                      <div className={`mt-2 px-3 py-2 rounded-lg text-xs ${isGold ? 'bg-cyan-900/20 text-cyan-300' : 'bg-cyan-50 text-cyan-800'}`}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                          <span className="font-medium">协议验证: {verifyResult.summary}</span>
+                          <button onClick={() => setVerifyResult(null)} className="ml-auto opacity-50 hover:opacity-100"><X size={12} /></button>
+                        </div>
+                        <div className="space-y-1 ml-5">
+                          {verifyResult.tests.map((test, i) => (
+                            <div key={i} className="flex items-center gap-1.5">
+                              {test.status === 'pass' ? <CheckCircle className="w-3 h-3 text-green-400 shrink-0" /> : test.status === 'warn' ? <AlertTriangle className="w-3 h-3 text-yellow-400 shrink-0" /> : <XCircle className="w-3 h-3 text-red-400 shrink-0" />}
+                              <span className="opacity-80">{test.name}:</span>
+                              <span className="opacity-60">{test.detail}</span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
                     {/* Edit mode highlight */}

@@ -4,6 +4,7 @@ import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/l
 import { getSessionUser } from '@/lib/server-auth';
 import { resolveCompatProfile, buildPollUrl, type ApiCompatProfile } from '@/lib/api-compatibility';
 import { getEditTask, deleteEditTask } from '@/lib/edit-task-store';
+import { isTaskCancelled, updateTaskProgress } from '@/lib/task-registry';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,6 +66,16 @@ export async function POST(request: NextRequest) {
         success: false, 
         error: 'Missing taskId' 
       }, { status: 400 });
+    }
+
+    // ★ 检查任务是否已被取消
+    if (isTaskCancelled(taskId)) {
+      return NextResponse.json({
+        success: false,
+        status: 'cancelled',
+        error: '任务已被取消',
+        retryable: false,
+      }, { status: 200 });
     }
 
     const provider = providerId ? await findProviderById(providerId)
@@ -146,6 +157,8 @@ export async function POST(request: NextRequest) {
       };
 
       if (completedStatuses.includes(taskStatus || '')) {
+        // ★ 更新任务注册中心状态
+        updateTaskProgress(taskId, { status: 'completed', progress: 100 });
         // 提取图片URL - 通用格式兼容
         let sourceImageUrl: string | null = null;
         const images = (taskData?.result as Record<string, unknown>)?.images as Array<Record<string, unknown>> | undefined;
@@ -192,6 +205,8 @@ export async function POST(request: NextRequest) {
           pollResult.retryable = true;
         }
       } else if (taskStatus === 'failed') {
+        // ★ 更新任务注册中心状态
+        updateTaskProgress(taskId, { status: 'failed' });
         const taskError = taskData?.error as Record<string, unknown> | undefined;
         const rawError = (taskError?.message as string) || '图像生成任务失败';
         // 清理常见 API 错误
