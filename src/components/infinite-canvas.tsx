@@ -4143,13 +4143,40 @@ export function InfiniteCanvas({
       updateProcessingFrame(placeholderId, { progress: 22, status: data.engine === 'local-background-alpha' ? '正在生成透明背景...' : 'AI 正在识别主体边缘...' });
 
       // 兼容两种后端返回：
-      // 1) 同步返回 imageUrl（本地透明化 / 部分中转站直接出图）
-      // 2) 异步返回 taskId（需要轮询）
+      // 1) 同步返回 imageUrl（本地透明化 / AI直接出图 — 后端已做限时轮询）
+      // 2) 异步返回 taskId（极少情况，后端轮询超时但AI仍在处理）
       let resultUrl: string | null = data.imageUrl || null;
       if (!resultUrl && data.taskId) {
-        resultUrl = await pollForResult(data.taskId, apiKey, (progress, status) => {
-          updateProcessingFrame(placeholderId, { progress, status });
-        });
+        // 移除背景前端轮询限制较短（30次 ≈ 60秒），超时后提示用户
+        const maxRemoveBgAttempts = 30;
+        // 使用较短的轮询上限
+        resultUrl = await (async () => {
+          const taskId = data.taskId;
+          const modelInfo = getCurrentModel();
+          const getEditPollInterval = (attempt: number) => {
+            if (attempt <= 2) return 800;
+            if (attempt <= 5) return 1000;
+            return 2000;
+          };
+          for (let i = 0; i < maxRemoveBgAttempts; i++) {
+            updateProcessingFrame(placeholderId, {
+              progress: Math.min(90, 22 + Math.round((i / maxRemoveBgAttempts) * 68)),
+              status: i < 3 ? '等待 AI 模型响应...' : 'AI 正在处理背景...'
+            });
+            await new Promise(r => setTimeout(r, getEditPollInterval(i)));
+            try {
+              const res = await fetch('/api/poll-task', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ taskId, model: modelInfo.model, providerId: getCurrentProviderId() }),
+              });
+              const pollData = await res.json();
+              if (pollData.status === 'completed' && pollData.imageUrl) return pollData.imageUrl;
+              if (pollData.status === 'failed' || pollData.status === 'error' || pollData.retryable === false) return null;
+            } catch { /* continue */ }
+          }
+          return null;
+        })();
       }
 
       if (resultUrl) {

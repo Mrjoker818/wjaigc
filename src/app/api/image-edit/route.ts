@@ -1807,31 +1807,112 @@ export async function POST(request: NextRequest) {
     if (action === 'remove_background') {
       const bgSize = aspectRatio ? findClosestAspectRatio(aspectRatio) : '1:1';
       const imageBase64ForBg = await resolveImageToBase64(imageUrl).catch(() => null);
+      
+      // 移除背景：AI 优先但限时，超时快速降级到本地透明化
+      // 避免前端长时间轮询导致"生成超时"
+      const AI_REMOVEBG_TIMEOUT_MS = 45000; // AI 路径总限时 45 秒
+      const aiStart = Date.now();
+      let aiSucceeded = false;
+      
+      // 使用 Promise.race 限制 AI 提交时间，避免 submitImageTask 长时间阻塞
+      const aiSubmitPromise = autoTrySubmitImageTask(candidateModels, (m) => ({
+        model: m,
+        prompt: 'Remove the background from this image. Keep the main subject exactly unchanged. Return a PNG with a real transparent alpha channel. Do not add white, gray, checkerboard, shadow, frame, text, watermark, or new background.',
+        negative_prompt: 'white background, gray background, checkerboard, solid background, new background, shadow, border, watermark, text, changed subject, distorted edges, halo, white fringe',
+        size: bgSize,
+        n: 1,
+        image: imageBase64ForBg || undefined,
+        image_urls: [imageBase64ForBg || imageUrl],
+        response_format: 'url',
+      }), '移除背景');
+      
+      const aiTimeoutPromise = new Promise<null>((resolve) => {
+        setTimeout(() => {
+          console.log(`[remove_background] AI submit timed out after ${AI_REMOVEBG_TIMEOUT_MS}ms`);
+          resolve(null);
+        }, AI_REMOVEBG_TIMEOUT_MS);
+      });
+      
       try {
-        const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
-          model: m,
-          prompt: 'Remove the background from this image. Keep the main subject exactly unchanged. Return a PNG with a real transparent alpha channel. Do not add white, gray, checkerboard, shadow, frame, text, watermark, or new background.',
-          negative_prompt: 'white background, gray background, checkerboard, solid background, new background, shadow, border, watermark, text, changed subject, distorted edges, halo, white fringe',
-          size: bgSize,
-          n: 1,
-          image: imageBase64ForBg || undefined,
-          image_urls: [imageBase64ForBg || imageUrl],
-          response_format: 'url',
-        }), '移除背景');
-        if (result.directUrl) {
+        const result = await Promise.race([aiSubmitPromise, aiTimeoutPromise]);
+        
+        if (result && result.directUrl) {
+          // 同步模式：直接返回结果
+          aiSucceeded = true;
           return NextResponse.json({ success: true, imageUrl: result.directUrl, action, usedModel: result.usedModel, engine: 'ai-background-remove' });
         }
-        if (result.taskId) {
-          return NextResponse.json({ success: true, taskId: result.taskId, action, usedModel: result.usedModel, engine: 'ai-background-remove' });
+        
+        if (result && result.taskId) {
+          // 异步模式：后端限时轮询，不推给前端长轮询
+          console.log(`[remove_background] AI returned taskId=${result.taskId}, polling with ${AI_REMOVEBG_TIMEOUT_MS}ms timeout...`);
+          try {
+            const provider = await findProviderForModel(result.usedModel || '', 'image')
+              || await findProviderForModel(result.usedModel || '', 'imageEdit')
+              || await findProviderForModel(result.usedModel || '', 'universal');
+            const apiKey = provider?.apiKey;
+            const apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || '');
+            const profile = resolveCompatProfile(provider);
+            const pollUrl = buildPollUrl(apiBaseUrl, result.taskId, profile);
+            
+            if (pollUrl && apiKey && apiBaseUrl) {
+              const pollIntervalMs = 2000;
+              while (Date.now() - aiStart < AI_REMOVEBG_TIMEOUT_MS) {
+                await new Promise(r => setTimeout(r, pollIntervalMs));
+                try {
+                  const pollRes = await fetch(pollUrl, {
+                    headers: { 'Authorization': `Bearer ${apiKey}` },
+                    signal: AbortSignal.timeout(10000),
+                  });
+                  if (pollRes.ok) {
+                    const pollText = await pollRes.text();
+                    let pollJson: Record<string, unknown>;
+                    try { pollJson = JSON.parse(pollText); } catch { continue; }
+                    const taskData = pollJson.data as Record<string, unknown> | undefined;
+                    const taskStatus = taskData?.status as string | undefined;
+                    const completedStatuses = ['completed', 'succeeded', 'success', 'done'];
+                    
+                    if (completedStatuses.includes(taskStatus || '')) {
+                      const images = (taskData?.result as Record<string, unknown>)?.images as Array<Record<string, unknown>> | undefined;
+                      let sourceUrl: string | null = null;
+                      if (images && images.length > 0) {
+                        const rawUrl = images[0].url || images[0].image_url || images[0].src;
+                        sourceUrl = Array.isArray(rawUrl) ? rawUrl[0] : (typeof rawUrl === 'string' ? rawUrl : null);
+                      }
+                      const taskResult = taskData?.result as Record<string, unknown> | undefined;
+                      if (!sourceUrl && taskResult?.b64_json) {
+                        sourceUrl = `data:image/png;base64,${taskResult.b64_json}`;
+                      }
+                      if (sourceUrl) {
+                        aiSucceeded = true;
+                        return NextResponse.json({ success: true, imageUrl: sourceUrl, action, usedModel: result.usedModel, engine: 'ai-background-remove' });
+                      }
+                    }
+                    if (taskStatus === 'failed') {
+                      console.warn(`[remove_background] AI task failed, falling back to local`);
+                      break;
+                    }
+                  }
+                } catch {
+                  // 单次轮询失败，继续重试
+                }
+              }
+              console.log(`[remove_background] AI polling timed out after ${Date.now() - aiStart}ms, falling back to local`);
+            }
+          } catch (pollErr) {
+            console.warn('[remove_background] AI polling error:', pollErr instanceof Error ? pollErr.message : pollErr);
+          }
         }
       } catch (bgErr) {
         console.warn('[remove_background] AI remove failed, using local background-alpha fallback:', bgErr instanceof Error ? bgErr.message : bgErr);
       }
 
+      // AI 失败或超时 → 本地透明化兜底（秒级完成）
       try {
         const sourceBuffer = await fetchImageBuffer(imageUrl);
         const localBuffer = await createLocalBackgroundAlpha(sourceBuffer);
         const dataUrl = `data:image/png;base64,${localBuffer.toString('base64')}`;
+        const elapsed = Date.now() - aiStart;
+        console.log(`[remove_background] Local fallback completed, total time: ${elapsed}ms${aiSucceeded ? '' : ' (AI failed/timeout)'}`);
         return NextResponse.json({ success: true, imageUrl: dataUrl, action, engine: 'local-background-alpha' });
       } catch (localErr) {
         console.error('[remove_background] local fallback failed:', localErr);
