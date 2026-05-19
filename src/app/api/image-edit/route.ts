@@ -131,6 +131,72 @@ function calculateInpaintCrop(
  * 本地擦除修复：BFS 边界扩散 + 高斯平滑，无需调用 AI 模型。
  * 适用于无提示词的纯擦除场景，速度快且无黑白块/笔刷痕迹。
  */
+
+/**
+ * 本地背景透明化兜底：适合白底/纯色底/轻微渐变背景。
+ * 逻辑：取四周边缘背景色 → 计算每个像素与背景色的距离 → 生成柔边 alpha。
+ * AI 去背景不可用或中转站不支持透明 PNG 时，至少保证商品图、海报素材白底图可用。
+ */
+async function createLocalBackgroundAlpha(imageBuffer: Buffer): Promise<Buffer> {
+  const meta = await sharp(imageBuffer).ensureAlpha().metadata();
+  const width = meta.width || 1;
+  const height = meta.height || 1;
+  const raw = await sharp(imageBuffer).ensureAlpha().raw().toBuffer();
+  const samples: Array<[number, number, number]> = [];
+  const stepX = Math.max(1, Math.floor(width / 60));
+  const stepY = Math.max(1, Math.floor(height / 60));
+
+  const addSample = (x: number, y: number) => {
+    const i = (y * width + x) * 4;
+    samples.push([raw[i], raw[i + 1], raw[i + 2]]);
+  };
+
+  for (let x = 0; x < width; x += stepX) {
+    addSample(x, 0);
+    addSample(x, height - 1);
+  }
+  for (let y = 0; y < height; y += stepY) {
+    addSample(0, y);
+    addSample(width - 1, y);
+  }
+
+  const median = (idx: number) => {
+    const arr = samples.map(s => s[idx]).sort((a, b) => a - b);
+    return arr[Math.floor(arr.length / 2)] || 255;
+  };
+  const bgR = median(0), bgG = median(1), bgB = median(2);
+
+  // 背景色越接近白色，阈值稍微放宽；深色/彩色背景保持谨慎，避免误删主体。
+  const bgLuma = 0.2126 * bgR + 0.7152 * bgG + 0.0722 * bgB;
+  const transparentThreshold = bgLuma > 230 ? 34 : 26;
+  const opaqueThreshold = bgLuma > 230 ? 118 : 96;
+  const out = Buffer.from(raw);
+
+  for (let p = 0; p < width * height; p++) {
+    const i = p * 4;
+    const dr = raw[i] - bgR;
+    const dg = raw[i + 1] - bgG;
+    const db = raw[i + 2] - bgB;
+    const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+    let alpha: number;
+    if (dist <= transparentThreshold) alpha = 0;
+    else if (dist >= opaqueThreshold) alpha = raw[i + 3];
+    else {
+      const t = (dist - transparentThreshold) / (opaqueThreshold - transparentThreshold);
+      alpha = Math.round(raw[i + 3] * Math.min(1, Math.max(0, t * t * (3 - 2 * t))));
+    }
+    out[i + 3] = alpha;
+  }
+
+  // 轻微羽化 alpha 边缘，减少白边/硬边。
+  const alpha = Buffer.alloc(width * height);
+  for (let p = 0; p < width * height; p++) alpha[p] = out[p * 4 + 3];
+  const softAlpha = await sharp(alpha, { raw: { width, height, channels: 1 } }).blur(0.8).raw().toBuffer();
+  for (let p = 0; p < width * height; p++) out[p * 4 + 3] = softAlpha[p];
+
+  return sharp(out, { raw: { width, height, channels: 4 } }).png().toBuffer();
+}
+
 async function createLocalEraseInpaint(
   imageBuffer: Buffer,
   maskRawData: Buffer,
@@ -1740,17 +1806,37 @@ export async function POST(request: NextRequest) {
 
     if (action === 'remove_background') {
       const bgSize = aspectRatio ? findClosestAspectRatio(aspectRatio) : '1:1';
-      const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
-        model: m,
-        prompt: 'Remove the background from this image, keep only the main subject with transparent background. Output PNG format.',
-        size: bgSize,
-        n: 1,
-        image_urls: [imageUrl],
-      }), '移除背景');
-      if (result.directUrl) {
-        return NextResponse.json({ success: true, imageUrl: result.directUrl, action, usedModel: result.usedModel });
+      const imageBase64ForBg = await resolveImageToBase64(imageUrl).catch(() => null);
+      try {
+        const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
+          model: m,
+          prompt: 'Remove the background from this image. Keep the main subject exactly unchanged. Return a PNG with a real transparent alpha channel. Do not add white, gray, checkerboard, shadow, frame, text, watermark, or new background.',
+          negative_prompt: 'white background, gray background, checkerboard, solid background, new background, shadow, border, watermark, text, changed subject, distorted edges, halo, white fringe',
+          size: bgSize,
+          n: 1,
+          image: imageBase64ForBg || undefined,
+          image_urls: [imageBase64ForBg || imageUrl],
+          response_format: 'url',
+        }), '移除背景');
+        if (result.directUrl) {
+          return NextResponse.json({ success: true, imageUrl: result.directUrl, action, usedModel: result.usedModel, engine: 'ai-background-remove' });
+        }
+        if (result.taskId) {
+          return NextResponse.json({ success: true, taskId: result.taskId, action, usedModel: result.usedModel, engine: 'ai-background-remove' });
+        }
+      } catch (bgErr) {
+        console.warn('[remove_background] AI remove failed, using local background-alpha fallback:', bgErr instanceof Error ? bgErr.message : bgErr);
       }
-      return NextResponse.json({ success: true, taskId: result.taskId, action, usedModel: result.usedModel });
+
+      try {
+        const sourceBuffer = await fetchImageBuffer(imageUrl);
+        const localBuffer = await createLocalBackgroundAlpha(sourceBuffer);
+        const dataUrl = `data:image/png;base64,${localBuffer.toString('base64')}`;
+        return NextResponse.json({ success: true, imageUrl: dataUrl, action, engine: 'local-background-alpha' });
+      } catch (localErr) {
+        console.error('[remove_background] local fallback failed:', localErr);
+        return NextResponse.json({ success: false, error: '移除背景失败：AI模型不可用，且本地透明化兜底失败' }, { status: 500 });
+      }
     }
 
     if (action === 'inpaint') {
@@ -1860,13 +1946,21 @@ export async function POST(request: NextRequest) {
         const eraseBinaryMaskBuffer = await sharp(binaryMaskPixels, { raw: { width: origW, height: origH, channels: 4 } })
           .png()
           .toBuffer();
+        // 擦除场景扩大 2-4px 蒙版并轻微柔化，减少物体残影、白边和硬边。
+        const eraseMaskForAI = await sharp(eraseBinaryMaskBuffer)
+          .grayscale()
+          .threshold(127)
+          .blur(2.2)
+          .threshold(10)
+          .png()
+          .toBuffer();
 
         // ─── 全图模式发送给 AI ───
         // 不裁剪！裁剪会导致 AI 看不到完整画面上下文，重新理解构图导致变形
         // 如果图片过大，等比缩放到 2048 以内，保证 AI 模型能处理
         const AI_MAX_DIM = 2048;
         let aiInputImageBuffer = imageBuffer;
-        let aiInputMaskBuffer = eraseBinaryMaskBuffer;
+        let aiInputMaskBuffer = eraseMaskForAI;
         let aiInputW = origW;
         let aiInputH = origH;
 
@@ -1881,7 +1975,7 @@ export async function POST(request: NextRequest) {
             .resize(aiInputW, aiInputH, { fit: 'fill' })
             .png()
             .toBuffer();
-          aiInputMaskBuffer = await sharp(eraseBinaryMaskBuffer)
+          aiInputMaskBuffer = await sharp(eraseMaskForAI)
             .resize(aiInputW, aiInputH, { fit: 'fill', kernel: 'nearest' })
             .png()
             .toBuffer();
@@ -1901,16 +1995,16 @@ export async function POST(request: NextRequest) {
         if (candidateModels.length > 0) {
           try {
             const eraseRequestBody: Record<string, unknown> = {
-              prompt: 'clean empty background, seamlessly fill the masked area with surrounding texture and context, remove the object completely',
-              negative_prompt: 'object, person, text, watermark, artifact, distortion, blurry',
+              prompt: 'Remove only the white masked area. Completely erase the selected object/text/mark and naturally reconstruct the original background texture, lighting, perspective and pattern. Preserve every unmasked pixel and composition exactly.',
+              negative_prompt: 'remaining object, ghost, shadow, duplicate, text, watermark, artifact, distortion, blurry, changed unmasked area, color shift, seam, hard edge',
               size: eraseEffectiveSize,
               n: 1,
               image_urls: [eraseImageDataUrl],
               mask_image: eraseMaskDataUrl,
-              strength: 0.85,
+              strength: 0.72,
             };
 
-            console.log(`[inpaint] AI erase attempt: full image ${aiInputW}x${aiInputH}, size=${eraseEffectiveSize}, strength=0.85`);
+            console.log(`[inpaint] AI erase attempt: full image ${aiInputW}x${aiInputH}, size=${eraseEffectiveSize}, strength=0.72`);
 
             const eraseResult = await autoTrySubmitImageTask(
               candidateModels,
@@ -1956,7 +2050,7 @@ export async function POST(request: NextRequest) {
               // 全图模式：cropInfo 覆盖整个图片
               const fullCropInfo: InpaintCropInfo = { cropX: 0, cropY: 0, cropW: origW, cropH: origH, origW, origH };
               const compositeResult = await compositeAIResultToOriginal(
-                imageBuffer, resultOrigSize, eraseBinaryMaskBuffer, origW, origH, fullCropInfo
+                imageBuffer, resultOrigSize, eraseMaskForAI, origW, origH, fullCropInfo
               );
 
               const resultDataUrl = `data:image/png;base64,${compositeResult.toString('base64')}`;

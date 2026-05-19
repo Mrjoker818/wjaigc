@@ -4140,10 +4140,18 @@ export function InfiniteCanvas({
         return;
       }
 
-      updateProcessingFrame(placeholderId, { progress: 22, status: 'AI 正在识别主体边缘...' });
-      const resultUrl = await pollForResult(data.taskId, apiKey, (progress, status) => {
-        updateProcessingFrame(placeholderId, { progress, status });
-      });
+      updateProcessingFrame(placeholderId, { progress: 22, status: data.engine === 'local-background-alpha' ? '正在生成透明背景...' : 'AI 正在识别主体边缘...' });
+
+      // 兼容两种后端返回：
+      // 1) 同步返回 imageUrl（本地透明化 / 部分中转站直接出图）
+      // 2) 异步返回 taskId（需要轮询）
+      let resultUrl: string | null = data.imageUrl || null;
+      if (!resultUrl && data.taskId) {
+        resultUrl = await pollForResult(data.taskId, apiKey, (progress, status) => {
+          updateProcessingFrame(placeholderId, { progress, status });
+        });
+      }
+
       if (resultUrl) {
         const w = img.originalWidth || Math.round(img.width);
         const h = img.originalHeight || Math.round(img.height);
@@ -4152,10 +4160,10 @@ export function InfiniteCanvas({
         completeProcessingFrame(placeholderId, stableUrl, img.width, img.height, {
           originalWidth: w,
           originalHeight: h,
-          modifyPrompt: '背景移除',
+          modifyPrompt: data.engine === 'local-background-alpha' ? '背景移除（本地透明化）' : '背景移除',
         });
       } else {
-        alert(lastPollErrorRef.current || '移除背景超时，请重试');
+        alert(lastPollErrorRef.current || data.error || '移除背景超时，请重试');
       }
     } catch (e) {
       console.error('Remove background error:', e);
@@ -4226,11 +4234,11 @@ export function InfiniteCanvas({
         requestBody.alphaMax = svgTraceBwAlphaMax;
       } else if (svgTraceMode === 'compress') {
         requestBody.quality = svgTraceCompressQuality;
-        requestBody.outputFormat = svgTraceCompressFormat;
+        requestBody.compressFormat = svgTraceCompressFormat;
       } else if (svgTraceMode === 'thumbnail') {
-        requestBody.thumbWidth = svgTraceThumbWidth;
-        requestBody.thumbHeight = svgTraceThumbHeight;
-        requestBody.fit = svgTraceThumbFit;
+        requestBody.thumbnailWidth = svgTraceThumbWidth;
+        requestBody.thumbnailHeight = svgTraceThumbHeight;
+        requestBody.thumbnailFit = svgTraceThumbFit;
       }
 
       const response = await fetch('/api/svg-trace', {

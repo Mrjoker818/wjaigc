@@ -1110,6 +1110,43 @@ async function saveResult(
   return { url, s3Key };
 }
 
+
+async function tryDesignVectorizeFallback(req: NextRequest, imageUrl: string, mode: TraceMode): Promise<NextResponse | null> {
+  try {
+    const fallbackMode = mode === 'bw' ? 'line-art' : 'logo';
+    const res = await fetch(new URL('/api/design/vectorize', req.url), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') || '' },
+      body: JSON.stringify({ imageUrl, mode: fallbackMode, layerId: `svg-trace-${Date.now()}` }),
+      signal: AbortSignal.timeout(90000),
+    });
+    const data = await res.json().catch(() => null) as { success?: boolean; svg?: string; engine?: string; error?: string } | null;
+    if (!res.ok || !data?.success || !data.svg) return null;
+
+    const svgContent = sanitizeSvgForIllustrator(String(data.svg));
+    const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
+    let pngPreviewUrl: string | undefined;
+    try {
+      const pngBuffer = await sharp(Buffer.from(svgContent)).resize(2048, 2048, { fit: 'inside', withoutEnlargement: true }).png({ quality: 90 }).toBuffer();
+      pngPreviewUrl = `data:image/png;base64,${pngBuffer.toString('base64')}`;
+    } catch {}
+    return NextResponse.json({
+      success: true,
+      mode,
+      engine: data.engine || 'design-vectorize-fallback',
+      svg: svgContent,
+      dataUrl: pngPreviewUrl || svgDataUrl,
+      svgDataUrl,
+      isSvgPreview: !!pngPreviewUrl,
+      fallback: true,
+      stats: { svgSize: Buffer.byteLength(svgContent, 'utf-8'), pathCount: (svgContent.match(/<path/g) || []).length },
+    });
+  } catch (e) {
+    console.warn('[svg-trace] design/vectorize fallback failed:', e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
 // ─── POST handler ──────────────────────────────────────
 
 export async function POST(req: NextRequest) {
@@ -1136,9 +1173,11 @@ export async function POST(req: NextRequest) {
         });
       });
       if (!vtracerCheck) {
+        const fallback = await tryDesignVectorizeFallback(req, imageUrl, mode);
+        if (fallback) return fallback;
         return NextResponse.json({
           success: false,
-          error: 'VTracer 未安装，彩色描摹不可用。请联系管理员安装: pip3 install vtracer',
+          error: 'VTracer 未安装，且AI矢量化兜底不可用。请安装: pip3 install vtracer，或在管理员系统配置可视觉理解的LLM/矢量模型。',
         }, { status: 503 });
       }
     } else if (mode === 'bw') {
@@ -1148,9 +1187,11 @@ export async function POST(req: NextRequest) {
         });
       });
       if (!potraceCheck) {
+        const fallback = await tryDesignVectorizeFallback(req, imageUrl, mode);
+        if (fallback) return fallback;
         return NextResponse.json({
           success: false,
-          error: 'Potrace 未安装，黑白描摹不可用。请联系管理员安装: apt-get install potrace',
+          error: 'Potrace 未安装，且AI矢量化兜底不可用。请安装: apt-get install potrace，或在管理员系统配置可视觉理解的LLM/矢量模型。',
         }, { status: 503 });
       }
     }
@@ -1217,7 +1258,7 @@ export async function POST(req: NextRequest) {
           svgDataUrl,
           isSvgPreview: !!pngPreviewUrl,
           stats: {
-            svgSize: new Blob([svgContent]).size,
+            svgSize: Buffer.byteLength(svgContent, 'utf-8'),
             pathCount,
             groupCount,
             preset: body.qualityPreset || 'balanced',
@@ -1267,7 +1308,7 @@ export async function POST(req: NextRequest) {
           svgDataUrl,
           isSvgPreview: !!pngPreviewUrl,
           stats: {
-            svgSize: new Blob([svgContent]).size,
+            svgSize: Buffer.byteLength(svgContent, 'utf-8'),
             pathCount: (svgContent.match(/<path/g) || []).length,
           },
         });
