@@ -1813,17 +1813,43 @@ export async function POST(request: NextRequest) {
       const AI_REMOVEBG_TIMEOUT_MS = 45000; // AI 路径总限时 45 秒
       const aiStart = Date.now();
       let aiSucceeded = false;
-      
+
+      // 结构化提示词：参考 OpenAI 官方指南，明确"保留什么/改变什么/不要添加什么"
+      // 1. 主体锁定：逐字描述"所有前景内容保持不变"
+      // 2. 背景目标：明确输出透明 PNG alpha 通道
+      // 3. 护栏约束：禁止 AI 重绘、添加新元素、替换主体
+      const removeBgPrompt = [
+        'Remove the background from this image.',
+        'Preserve: All foreground subjects exactly as-is — every pixel of the main subject(s), including edges, colors, textures, details, proportions, and pose.',
+        'Change only: The background becomes fully transparent (alpha = 0).',
+        'Do not: Redraw, repaint, stylize, or modify the subject in any way. Do not add white fill, gray fill, checkerboard pattern, shadow, reflection, border, frame, text, watermark, vignette, or any new background.',
+        'Output a PNG image with a real transparent alpha channel.',
+      ].join(' ');
+
+      const removeBgNegativePrompt = [
+        'white background', 'gray background', 'solid color background', 'checkerboard',
+        'new background', 'shadow', 'reflection', 'border', 'frame', 'watermark', 'text',
+        'changed subject', 'distorted edges', 'halo', 'white fringe', 'repainted subject',
+        'stylized subject', 'redrawn subject', 'low quality', 'blurry', 'artifact',
+      ].join(', ');
+
       // 使用 Promise.race 限制 AI 提交时间，避免 submitImageTask 长时间阻塞
+      // 关键参数：
+      //   background: 'transparent' — GPT Image API 原生支持透明背景输出
+      //   output_format: 'png' — 透明通道需要 PNG 格式
+      //   input_fidelity: 'high' — 尽可能忠实于原图主体
       const aiSubmitPromise = autoTrySubmitImageTask(candidateModels, (m) => ({
         model: m,
-        prompt: 'Remove the background from this image. Keep the main subject exactly unchanged. Return a PNG with a real transparent alpha channel. Do not add white, gray, checkerboard, shadow, frame, text, watermark, or new background.',
-        negative_prompt: 'white background, gray background, checkerboard, solid background, new background, shadow, border, watermark, text, changed subject, distorted edges, halo, white fringe',
+        prompt: removeBgPrompt,
+        negative_prompt: removeBgNegativePrompt,
         size: bgSize,
         n: 1,
         image: imageBase64ForBg || undefined,
         image_urls: [imageBase64ForBg || imageUrl],
         response_format: 'url',
+        background: 'transparent',     // OpenAI gpt-image-1/2 原生支持
+        output_format: 'png',          // 透明背景需要 PNG
+        input_fidelity: 'high',        // 保持主体忠实度
       }), '移除背景');
       
       const aiTimeoutPromise = new Promise<null>((resolve) => {
