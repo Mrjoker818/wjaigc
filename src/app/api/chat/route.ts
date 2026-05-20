@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
   try {
     const { model, messages, stream = true, providerId, userId: requestUserId } = await request.json();
     const sessionUser = await getSessionUser(request);
-    const userId = (sessionUser?.id || "anonymous") || requestUserId;
+    const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
 
     if (!model || !messages) {
       return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });

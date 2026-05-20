@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
     const model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');
 
     const sessionUser = await getSessionUser(request);
-    const userId = (sessionUser?.id || "anonymous") || requestUserId;
+    const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
 
     // 解析参考图片 URL（转换为 API 可访问的格式）
     // 优化：并行处理所有参考图，加速提交
@@ -464,6 +464,10 @@ export async function POST(request: NextRequest) {
       const controller = new AbortController();
       const timeoutMs = isDirectMode ? 600000 : 30000;
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      let timeoutCleared = false;
+      const clearTimeoutSafely = () => {
+        if (!timeoutCleared) { clearTimeout(timeoutId); timeoutCleared = true; }
+      };
 
       // 构建提交请求 - 通用策略，适配所有 API 提供商
       const isEditsEndpoint = endpoint === '/images/edits';
@@ -597,7 +601,7 @@ export async function POST(request: NextRequest) {
           // 检查是否是不支持 /images/edits 端点的错误 → 自动回退到 /images/generations
           if (isEditsEndpointRejected(submitResponse.status, errorText)) {
             console.info('[generate] /images/edits rejected by API, auto-falling back to /images/generations with image_urls only...');
-            clearTimeout(timeoutId);
+            clearTimeoutSafely();
 
             const fallbackController = new AbortController();
             const fallbackTimeoutId = setTimeout(() => fallbackController.abort(), timeoutMs);
@@ -645,7 +649,7 @@ export async function POST(request: NextRequest) {
 
             if (needsMultipart) {
               console.info('[generate] JSON failed for edits endpoint, retrying with multipart form data...');
-              clearTimeout(timeoutId);
+              clearTimeoutSafely();
 
               const multipartController = new AbortController();
               const multipartTimeoutId = setTimeout(() => multipartController.abort(), timeoutMs);
@@ -665,7 +669,7 @@ export async function POST(request: NextRequest) {
 
               clearTimeout(multipartTimeoutId);
             } else {
-              clearTimeout(timeoutId);
+              clearTimeoutSafely();
               // 重建 Response，因为 body 已在第594行被 .text() 读取
               submitResponse = new Response(errorText, {
                 status: submitResponse.status,
@@ -701,10 +705,14 @@ export async function POST(request: NextRequest) {
           }
         );
 
-        clearTimeout(timeoutId);
+        clearTimeoutSafely();
       }
 
-      return parseSubmitResponse(submitResponse);
+      try {
+        return parseSubmitResponse(submitResponse);
+      } finally {
+        clearTimeoutSafely();
+      }
     };
 
     const taskIds: string[] = [];
@@ -727,13 +735,17 @@ export async function POST(request: NextRequest) {
         }
         usedModelId = result.usedModel;
         usedProviderId = result.usedProviderId;
-        await appendUserJsonl(userId, 'images', {
-          type: 'submit',
-          providerId: usedProviderId,
-          model: usedModelId,
-          taskId: result.taskId,
-          prompt: enhancedPrompt,
-        });
+        try {
+          await appendUserJsonl(userId, 'images', {
+            type: 'submit',
+            providerId: usedProviderId,
+            model: usedModelId,
+            taskId: result.taskId,
+            prompt: enhancedPrompt,
+          });
+        } catch (logErr) {
+          console.warn('[generate] 日志写入失败', logErr);
+        }
         submitted = true;
       } catch (singleError: unknown) {
         const errMsg = singleError instanceof Error ? singleError.message : String(singleError);
@@ -758,13 +770,17 @@ export async function POST(request: NextRequest) {
               usedModelId = result.usedModel;
               usedModelName = candidateConfig.name;
               usedProviderId = result.usedProviderId;
-              await appendUserJsonl(userId, 'images', {
-                type: 'submit',
-                providerId: usedProviderId,
-                model: usedModelId,
-                taskId: result.taskId || 'direct',
-                prompt: enhancedPrompt,
-              });
+              try {
+                await appendUserJsonl(userId, 'images', {
+                  type: 'submit',
+                  providerId: usedProviderId,
+                  model: usedModelId,
+                  taskId: result.taskId || 'direct',
+                  prompt: enhancedPrompt,
+                });
+              } catch (logErr) {
+                console.warn('[generate] 日志写入失败(fallback)', logErr);
+              }
               submitted = true;
               console.log(`备选模型 ${candidate.modelId} 提交成功`);
               break;

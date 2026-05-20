@@ -354,6 +354,9 @@ async function compositeAIResultToOriginal(
   const aiMeta = await sharp(aiResultBuffer).metadata();
   const aiW = aiMeta.width || cropInfo.cropW;
   const aiH = aiMeta.height || cropInfo.cropH;
+  if (!aiW || !aiH || aiW <= 0 || aiH <= 0) {
+    throw new Error('AI返回图片尺寸无效，无法合成');
+  }
 
   // 将 AI 结果放到裁剪区域位置
   const result = Buffer.from(src);
@@ -451,19 +454,23 @@ async function fetchImageBuffer(url: string): Promise<Buffer> {
   }
   // local path (e.g., /api/serve-upload/xxx, /uploads/xxx)
   if (url.startsWith('/')) {
+    // Sanitize path to prevent directory traversal attacks
+    const sanitizedUrl = url.replace(/\.\./g, '').replace(/\/\//g, '/');
     // 1. Try local public directory (dev)
     const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
-    const localPath = path.join(workspacePath, 'public', url);
-    if (fsSync.existsSync(localPath)) return fsSync.readFileSync(localPath);
+    const localPath = path.normalize(path.join(workspacePath, 'public', sanitizedUrl));
+    const allowedPublicDir = path.normalize(path.join(workspacePath, 'public'));
+    if (localPath.startsWith(allowedPublicDir) && fsSync.existsSync(localPath)) return fsSync.readFileSync(localPath);
     // 2. Try persistent data directory
     const { getServerDataRoot } = await import('@/lib/server-data-root');
     const dataRoot = await getServerDataRoot();
+    const normalizedDataRoot = path.normalize(dataRoot);
     // Try exact path under dataRoot
-    const persistentPath = path.join(dataRoot, url.replace(/^\//, ''));
-    if (fsSync.existsSync(persistentPath)) return fsSync.readFileSync(persistentPath);
+    const persistentPath = path.normalize(path.join(dataRoot, sanitizedUrl.replace(/^\//, '')));
+    if (persistentPath.startsWith(normalizedDataRoot) && fsSync.existsSync(persistentPath)) return fsSync.readFileSync(persistentPath);
     // Try uploads/ prefix under dataRoot
-    const uploadPath = path.join(dataRoot, 'uploads', url.replace(/^\//, ''));
-    if (fsSync.existsSync(uploadPath)) return fsSync.readFileSync(uploadPath);
+    const uploadPath = path.normalize(path.join(dataRoot, 'uploads', sanitizedUrl.replace(/^\//, '')));
+    if (uploadPath.startsWith(normalizedDataRoot) && fsSync.existsSync(uploadPath)) return fsSync.readFileSync(uploadPath);
     // 3. Try S3 object storage fallback (try both 'images/' and 'uploads/' prefixes)
     const { isS3Available, downloadImageFromS3 } = await import('@/lib/s3-storage');
     if (isS3Available()) {

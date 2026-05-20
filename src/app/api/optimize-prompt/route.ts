@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
       userId: requestUserId,
     } = await request.json();
     const sessionUser = await getSessionUser(request);
-    const userId = (sessionUser?.id || "anonymous") || requestUserId;
+    const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
 
     if (!prompt) {
       return NextResponse.json({ error: '缺少必要参数：prompt' }, { status: 400 });

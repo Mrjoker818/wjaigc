@@ -57,7 +57,8 @@ function MultiAngleSpherePreview({
       const offscreen = document.createElement('canvas');
       offscreen.width = w;
       offscreen.height = h;
-      const octx = offscreen.getContext('2d')!;
+      const octx = offscreen.getContext('2d');
+      if (!octx) { imgLoadingRef.current = false; return; }
       octx.drawImage(img, 0, 0, w, h);
       try {
         imgDataRef.current = octx.getImageData(0, 0, w, h);
@@ -68,6 +69,13 @@ function MultiAngleSpherePreview({
     };
     img.onerror = () => { imgLoadingRef.current = false; };
     img.src = imageUrl;
+    return () => {
+      // Cancel pending image load on cleanup to prevent stale updates
+      img.onload = null;
+      img.onerror = null;
+      img.src = '';
+      imgLoadingRef.current = false;
+    };
   }, [imageUrl]);
 
   // Render sphere on canvas
@@ -178,7 +186,8 @@ function MultiAngleSpherePreview({
     const offCanvas = document.createElement('canvas');
     offCanvas.width = rW;
     offCanvas.height = rH;
-    offCanvas.getContext('2d')!.putImageData(outImg, 0, 0);
+    const offCtx = offCanvas.getContext('2d');
+    if (offCtx) offCtx.putImageData(outImg, 0, 0);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(offCanvas, 0, 0, rW, rH, 0, 0, W, H);
@@ -795,7 +804,7 @@ export function InfiniteCanvas({
     if (!hasProcessing) return;
     const timer = setInterval(() => setGenGroupTick(t => t + 1), 1000);
     return () => clearInterval(timer);
-  }, [genGroups.some(g => g.resultPlaceholder.isProcessing)]);
+  }, [genGroups]);
   // GenGroup 拖动状态
   const [genGroupDragTarget, setGenGroupDragTarget] = useState<string | null>(null);
   const [genGroupDragStart, setGenGroupDragStart] = useState({ x: 0, y: 0 });
@@ -2107,8 +2116,8 @@ export function InfiniteCanvas({
           reader.readAsDataURL(file);
         })
       );
-      Promise.all(promises).then(results => {
-        const validUrls = results.filter(url => url);
+      Promise.allSettled(promises).then(results => {
+        const validUrls = results.filter(r => r.status === 'fulfilled' && r.value).map(r => (r as PromiseFulfilledResult<string>).value);
         if (validUrls.length > 0) onAddImages(validUrls);
       });
     }
@@ -2148,8 +2157,8 @@ export function InfiniteCanvas({
         }
       });
       try {
-        const results = await Promise.all(promises);
-        const validUrls = results.filter(url => url);
+        const results = await Promise.allSettled(promises);
+        const validUrls = results.filter(r => r.status === 'fulfilled' && r.value).map(r => (r as PromiseFulfilledResult<string>).value);
         if (validUrls.length > 0) onAddImages(validUrls);
       } catch (error) {
         console.error('Failed to read images:', error);
@@ -3450,7 +3459,8 @@ export function InfiniteCanvas({
     const canvas = document.createElement('canvas');
     canvas.width = origW;
     canvas.height = origH;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas 2D context unavailable');
 
     // 1. 加载所有图像
     const [origImg, maskImg, resultImg] = await Promise.all([
@@ -3466,12 +3476,14 @@ export function InfiniteCanvas({
     const maskCanvas = document.createElement('canvas');
     maskCanvas.width = origW;
     maskCanvas.height = origH;
-    const maskCtx = maskCanvas.getContext('2d')!;
+    const maskCtx = maskCanvas.getContext('2d');
+    if (!maskCtx) throw new Error('Canvas 2D context unavailable');
     maskCtx.drawImage(maskImg, 0, 0, origW, origH);
     const blurMaskCanvas = document.createElement('canvas');
     blurMaskCanvas.width = origW;
     blurMaskCanvas.height = origH;
-    const blurMaskCtx = blurMaskCanvas.getContext('2d')!;
+    const blurMaskCtx = blurMaskCanvas.getContext('2d');
+    if (!blurMaskCtx) throw new Error('Canvas 2D context unavailable');
     try {
       blurMaskCtx.filter = `blur(${isErase ? 12 : 18}px)`;
     } catch {
@@ -3485,7 +3497,8 @@ export function InfiniteCanvas({
     const resultCanvas = document.createElement('canvas');
     resultCanvas.width = origW;
     resultCanvas.height = origH;
-    const resultCtx = resultCanvas.getContext('2d')!;
+    const resultCtx = resultCanvas.getContext('2d');
+    if (!resultCtx) throw new Error('Canvas 2D context unavailable');
 
     if (cropInfo) {
       // 裁剪策略：结果图像需要覆盖 (cropX, cropY, cropW, cropH) 区域

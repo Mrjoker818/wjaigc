@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
     const { taskId, model: rawModel, userId: requestUserId, providerId } = await request.json();
     const model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');
     const sessionUser = await getSessionUser(request);
-    const userId = (sessionUser?.id || "anonymous") || requestUserId;
+    const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
 
     // 检查是否为本地语言修图任务
     if (taskId.startsWith('edit_')) {

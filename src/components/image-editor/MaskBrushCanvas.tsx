@@ -135,7 +135,8 @@ const MaskBrushCanvas = forwardRef<MaskBrushCanvasRef, MaskBrushCanvasProps>(
           const canvas = document.createElement('canvas');
           canvas.width = imageWidth;
           canvas.height = imageHeight;
-          const ctx = canvas.getContext('2d')!;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
 
           // 黑色背景（保留区域）
           ctx.fillStyle = '#000000';

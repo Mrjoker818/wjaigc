@@ -50,7 +50,8 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
         const h = Math.round(img.height * scale);
         c.width = w;
         c.height = h;
-        const ctx = c.getContext('2d')!;
+        const ctx = c.getContext('2d');
+        if (!ctx) return;
         ctx.drawImage(img, 0, 0, w, h);
         const data = ctx.getImageData(0, 0, w, h).data;
         imgDataRef.current = { data, w, h };
@@ -72,7 +73,8 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
               const h = Math.round(img2.height * scale);
               c.width = w;
               c.height = h;
-              const ctx = c.getContext('2d')!;
+              const ctx = c.getContext('2d');
+              if (!ctx) return;
               ctx.drawImage(img2, 0, 0, w, h);
               const data = ctx.getImageData(0, 0, w, h).data;
               imgDataRef.current = { data, w, h };
@@ -99,7 +101,8 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
             const h = Math.round(img2.height * scale);
             c.width = w;
             c.height = h;
-            const ctx = c.getContext('2d')!;
+            const ctx = c.getContext('2d');
+            if (!ctx) return;
             ctx.drawImage(img2, 0, 0, w, h);
             const data = ctx.getImageData(0, 0, w, h).data;
             imgDataRef.current = { data, w, h };
@@ -164,7 +167,8 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
     const offCanvas = document.createElement('canvas');
     offCanvas.width = rw;
     offCanvas.height = rh;
-    const offCtx = offCanvas.getContext('2d')!;
+    const offCtx = offCanvas.getContext('2d');
+    if (!offCtx) return;
     const imageData = offCtx.createImageData(rw, rh);
     const data = imageData.data;
     const rcx = rw / 2;
