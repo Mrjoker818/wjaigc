@@ -1,21 +1,17 @@
 'use client';
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Bot, X, Loader2, ChevronDown, ChevronRight, Sparkles, Image as ImageIcon, CheckCircle, XCircle, AlertTriangle, Plus, GripVertical, RefreshCw } from 'lucide-react';
-import { taskEventsClient } from '@/lib/task-events-client';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { X, GripVertical, RefreshCw, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle, ImagePlus, Minus } from 'lucide-react';
 
 interface AgentEditorProps {
-  /** 初始图片 URL，为空时显示添加图片按钮 */
   imageUrl?: string;
-  /** 主题风格 */
-  themeStyle?: 'gold' | 'monochrome';
-  /** 完成回调 */
-  onComplete: (resultImageUrl: string) => void;
-  /** 关闭回调 */
+  imagePrompt?: string;
+  imageWidth?: number;
+  imageHeight?: number;
+  isMonochrome?: boolean;
   onClose: () => void;
-  /** 选择图片回调（从画布选择） */
+  onApply: (resultUrl: string, resultPrompt?: string) => void;
   onSelectImage?: () => void;
-  /** 更换图片回调（从画布选择替换） */
   onChangeImage?: () => void;
 }
 
@@ -23,319 +19,457 @@ interface AgentStep {
   round: number;
   toolName: string;
   params: Record<string, unknown>;
-  result: string;
+  result?: string;
   success: boolean;
+  detail?: string;
 }
 
-export default function AgentEditor({ imageUrl, themeStyle = 'gold', onComplete, onClose, onSelectImage, onChangeImage }: AgentEditorProps) {
-  const isGold = themeStyle === 'gold';
+// 主题色
+const GOLD = '#d4af37';
+const GOLD_DIM = '#a88a2a';
+const MONO_BG = '#f5f5f5';
+const MONO_BORDER = '#d4d4d4';
+const MONO_TEXT = '#333333';
+const MONO_MUTED = '#888888';
+
+export function AgentEditor({
+  imageUrl,
+  imagePrompt,
+  imageWidth,
+  imageHeight,
+  isMonochrome,
+  onClose,
+  onApply,
+  onSelectImage,
+  onChangeImage,
+}: AgentEditorProps) {
+  // 状态
   const [prompt, setPrompt] = useState('');
-  const [maxRounds, setMaxRounds] = useState(5);
+  const [maxRounds, setMaxRounds] = useState(3);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [taskId, setTaskId] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
   const [steps, setSteps] = useState<AgentStep[]>([]);
-  const [finalResponse, setFinalResponse] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [showSteps, setShowSteps] = useState(false);
-  const [resultImageUrl, setResultImageUrl] = useState<string | null>(null);
-  const unsubscribeRef = useRef<(() => void) | null>(null);
+  const [stepsExpanded, setStepsExpanded] = useState(false);
+  const [error, setError] = useState('');
+  const [resultImageUrl, setResultImageUrl] = useState('');
+  const [resultPrompt, setResultPrompt] = useState('');
+  const [taskId, setTaskId] = useState<string | null>(null);
 
-  // 图片比例检测
-  const [imgRatio, setImgRatio] = useState<number | null>(null);
-  const imgRef = useRef<HTMLImageElement | null>(null);
+  // 拖动状态
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [hasPosition, setHasPosition] = useState(false);
+  const isDragging = useRef(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+  const panelRef = useRef<HTMLDivElement>(null);
 
-  // 拖拽状态（面板移动）
-  const [isDragging, setIsDragging] = useState(false);
-  const dragOffsetRef = useRef({ x: 0, y: 0 });
-  const [position, setPosition] = useState({ x: 80, y: 80 });
-
-  // 输入框高度调整状态
+  // 输入框拖动调整高度
   const [textareaHeight, setTextareaHeight] = useState(56);
-  const [isResizing, setIsResizing] = useState(false);
-  const resizeStartYRef = useRef(0);
-  const resizeStartHeightRef = useRef(0);
+  const isResizing = useRef(false);
+  const resizeStart = useRef({ y: 0, height: 0 });
 
-  const currentImage = resultImageUrl || imageUrl;
+  // 图片显示尺寸（自适应比例）
+  const [imgDisplaySize, setImgDisplaySize] = useState({ w: 280, h: 180 });
 
-  // 根据图片比例计算预览区高度（宽度=296px即320-24padding）
-  const previewWidth = 296;
-  const imageBoxHeight = imgRatio ? Math.round(previewWidth / imgRatio) : 120;
-  const clampedHeight = Math.max(80, Math.min(220, imageBoxHeight));
-
-  // 全局鼠标事件：拖动面板
+  // 计算图片显示尺寸
   useEffect(() => {
-    if (!isDragging) return;
-    const onMove = (e: MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setPosition({ x: e.clientX - dragOffsetRef.current.x, y: e.clientY - dragOffsetRef.current.y });
-    };
-    const onUp = (e: MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setIsDragging(false);
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-  }, [isDragging]);
+    if (imageUrl && imageWidth && imageHeight) {
+      const maxW = 280, maxH = 200;
+      const ratio = imageWidth / imageHeight;
+      let w = maxW, h = maxW / ratio;
+      if (h > maxH) { h = maxH; w = maxH * ratio; }
+      setImgDisplaySize({ w: Math.round(w), h: Math.round(h) });
+    } else if (imageUrl) {
+      // 没有尺寸信息时，加载图片获取
+      const img = new Image();
+      img.onload = () => {
+        const maxW = 280, maxH = 200;
+        const ratio = img.naturalWidth / img.naturalHeight;
+        let w = maxW, h = maxW / ratio;
+        if (h > maxH) { h = maxH; w = maxH * ratio; }
+        setImgDisplaySize({ w: Math.round(w), h: Math.round(h) });
+      };
+      img.src = imageUrl;
+    }
+  }, [imageUrl, imageWidth, imageHeight]);
 
-  // 全局鼠标事件：调整输入框高度
-  useEffect(() => {
-    if (!isResizing) return;
-    const onMove = (e: MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const delta = e.clientY - resizeStartYRef.current;
-      const newHeight = Math.max(36, Math.min(300, resizeStartHeightRef.current + delta));
-      setTextareaHeight(newHeight);
-    };
-    const onUp = (e: MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setIsResizing(false);
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-  }, [isResizing]);
+  // 主题色变量
+  const accentColor = isMonochrome ? MONO_TEXT : GOLD;
+  const accentDim = isMonochrome ? MONO_MUTED : GOLD_DIM;
+  const bgPanel = isMonochrome ? MONO_BG : '#1a1a1a';
+  const bgInput = isMonochrome ? '#ffffff' : '#222222';
+  const textColor = isMonochrome ? MONO_TEXT : '#e0e0e0';
+  const mutedColor = isMonochrome ? MONO_MUTED : '#999999';
+  const borderColor = isMonochrome ? MONO_BORDER : '#333333';
 
-  const handleDragStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(true);
-    dragOffsetRef.current = { x: e.clientX - position.x, y: e.clientY - position.y };
-  }, [position]);
+  // 轮询任务状态
+  const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollAttempts = useRef(0);
 
-  const handleResizeStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsResizing(true);
-    resizeStartYRef.current = e.clientY;
-    resizeStartHeightRef.current = textareaHeight;
-  }, [textareaHeight]);
+  const startPolling = useCallback((tid: string) => {
+    if (pollInterval.current) clearInterval(pollInterval.current);
+    pollAttempts.current = 0;
 
-  // 阻止面板上的事件穿透到画布
-  const handlePanelPointerDown = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    e.stopPropagation();
-  }, []);
-
-  // 连接 SSE
-  useEffect(() => {
-    taskEventsClient.connect();
-    return () => {
-      unsubscribeRef.current?.();
-    };
-  }, []);
-
-  // 监听任务事件
-  useEffect(() => {
-    if (!taskId) return;
-
-    const unsub = taskEventsClient.onTaskEvent((event) => {
-      if (event.taskId !== taskId) return;
-
-      const task = event.task;
-      setProgress(task.progress || 0);
-      setProgressLabel(task.label || '');
-
-      if (task.status === 'completed' && task.result) {
-        const result = task.result as { imageUrl?: string; steps?: AgentStep[]; finalResponse?: string };
+    pollInterval.current = setInterval(async () => {
+      pollAttempts.current++;
+      if (pollAttempts.current > 120) {
+        // 2分钟超时
+        if (pollInterval.current) clearInterval(pollInterval.current);
         setIsProcessing(false);
-        setResultImageUrl(result.imageUrl || null);
-        setSteps(result.steps || []);
-        setFinalResponse(result.finalResponse || null);
-        if (result.imageUrl) {
-          onComplete(result.imageUrl);
-        }
-      } else if (task.status === 'failed') {
-        setIsProcessing(false);
-        setError(task.error || '任务失败');
-      } else if (task.status === 'cancelled') {
-        setIsProcessing(false);
-        setError('任务已取消');
+        setError('任务超时，请重试');
+        return;
       }
-    });
 
-    unsubscribeRef.current = unsub;
-    return () => { unsub(); };
-  }, [taskId, onComplete]);
+      try {
+        const resp = await fetch(`/api/poll-task`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskId: tid }),
+        });
+        if (!resp.ok) return;
 
-  const handleSubmit = useCallback(async () => {
-    if (!prompt.trim() || isProcessing || !currentImage) return;
+        const data = await resp.json() as Record<string, unknown>;
+        const taskData = data.task as Record<string, unknown> | undefined;
+        if (!taskData) return;
+
+        const status = String(taskData.status || '');
+        const prog = Number(taskData.progress || 0);
+        const label = String(taskData.label || '');
+        const result = taskData.result as Record<string, unknown> | undefined;
+        const taskError = String(taskData.error || '');
+
+        // 更新进度
+        setProgress(prog);
+        setProgressLabel(label);
+
+        // 更新步骤
+        if (result?.steps) {
+          setSteps(result.steps as AgentStep[]);
+        }
+
+        if (status === 'completed') {
+          if (pollInterval.current) clearInterval(pollInterval.current);
+          setIsProcessing(false);
+          setProgress(100);
+          setProgressLabel('完成');
+
+          if (result?.imageUrl) {
+            setResultImageUrl(String(result.imageUrl));
+          }
+          if (result?.prompt) {
+            setResultPrompt(String(result.prompt));
+          }
+        } else if (status === 'failed') {
+          if (pollInterval.current) clearInterval(pollInterval.current);
+          setIsProcessing(false);
+          setError(taskError || '任务执行失败');
+        } else if (status === 'cancelled') {
+          if (pollInterval.current) clearInterval(pollInterval.current);
+          setIsProcessing(false);
+          setError('任务已取消');
+        }
+      } catch {
+        // 轮询失败，继续重试
+      }
+    }, 2000);
+  }, []);
+
+  // 清理轮询
+  useEffect(() => {
+    return () => {
+      if (pollInterval.current) clearInterval(pollInterval.current);
+    };
+  }, []);
+
+  // 提交任务
+  const handleSubmit = async () => {
+    if (!prompt.trim() && !imageUrl) return;
 
     setIsProcessing(true);
     setProgress(5);
     setProgressLabel('提交任务...');
+    setError('');
     setSteps([]);
-    setFinalResponse(null);
-    setError(null);
-    setResultImageUrl(null);
+    setResultImageUrl('');
+    setResultPrompt('');
+    setTaskId(null);
 
     try {
       const resp = await fetch('/api/agent-edit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          image: currentImage,
+          image: imageUrl || '',
           prompt: prompt.trim(),
+          maskDataUrl: '',
           maxRounds,
+          size: '1024',
+          quality: 'medium',
         }),
       });
 
-      const data = await resp.json() as { success: boolean; taskId?: string; error?: string };
-      if (data.success && data.taskId) {
-        setTaskId(data.taskId);
+      const data = await resp.json() as Record<string, unknown>;
+
+      if (!resp.ok) {
+        throw new Error(String(data.error || '提交失败'));
+      }
+
+      const tid = String(data.taskId || '');
+      if (tid) {
+        setTaskId(tid);
+        setProgress(10);
+        setProgressLabel('任务已提交，等待处理...');
+        // 开始轮询
+        startPolling(tid);
       } else {
+        // 没有taskId，可能是同步返回
+        if (data.result) {
+          const result = data.result as Record<string, unknown>;
+          if (result.imageUrl) setResultImageUrl(String(result.imageUrl));
+          if (result.prompt) setResultPrompt(String(result.prompt));
+        }
         setIsProcessing(false);
-        setError(data.error || '提交失败');
+        setProgress(100);
       }
     } catch (err) {
       setIsProcessing(false);
-      setError(err instanceof Error ? err.message : '网络错误');
+      setError(err instanceof Error ? err.message : '提交任务失败');
     }
-  }, [prompt, currentImage, maxRounds, isProcessing]);
+  };
 
-  const handleCancel = useCallback(async () => {
-    if (!taskId) return;
-    await taskEventsClient.cancelTask(taskId);
+  // 取消任务
+  const handleCancel = async () => {
+    if (taskId) {
+      try {
+        await fetch('/api/cancel-task', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskId }),
+        });
+      } catch { /* ignore */ }
+    }
+    if (pollInterval.current) clearInterval(pollInterval.current);
     setIsProcessing(false);
-    setError('任务已取消');
-  }, [taskId]);
-
-  const handleRetry = useCallback(() => {
-    setError(null);
-    setTaskId(null);
     setProgress(0);
-    setProgressLabel('');
-    setSteps([]);
-    setFinalResponse(null);
-    setResultImageUrl(null);
-  }, []);
+    setError('任务已取消');
+  };
 
-  // 样式
-  const bg = isGold ? 'bg-[#1a1a1a]' : 'bg-gray-900';
-  const text = isGold ? 'text-[#e5e5e5]' : 'text-gray-100';
-  const muted = isGold ? 'text-[#888]' : 'text-gray-500';
-  const accent = isGold ? 'text-[#d4af37]' : 'text-blue-400';
-  const btnPrimary = isGold
-    ? 'bg-[#d4af37] text-black hover:bg-[#c4a030]'
-    : 'bg-blue-500 text-white hover:bg-blue-600';
-  const border = isGold ? 'border-[#2a2a2a]' : 'border-gray-700';
-  const inputBg = isGold ? 'bg-[#111]' : 'bg-gray-950';
+  // 应用结果
+  const handleApplyResult = () => {
+    if (resultImageUrl) {
+      onApply(resultImageUrl, resultPrompt);
+    }
+  };
+
+  // 面板拖动
+  const handlePanelDragStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    isDragging.current = true;
+    // 如果还没有设置过位置，先从当前面板位置计算
+    if (!hasPosition && panelRef.current) {
+      const rect = panelRef.current.getBoundingClientRect();
+      setPosition({ x: rect.left, y: rect.top });
+      setHasPosition(true);
+      dragStart.current = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      };
+    } else {
+      dragStart.current = {
+        x: e.clientX - position.x,
+        y: e.clientY - position.y,
+      };
+    }
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isDragging.current) return;
+      ev.stopPropagation();
+      setPosition({
+        x: ev.clientX - dragStart.current.x,
+        y: ev.clientY - dragStart.current.y,
+      });
+    };
+    const onMouseUp = (ev: MouseEvent) => {
+      ev.stopPropagation();
+      isDragging.current = false;
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
+  // 输入框高度调整
+  const handleResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    isResizing.current = true;
+    resizeStart.current = { y: e.clientY, height: textareaHeight };
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isResizing.current) return;
+      ev.stopPropagation();
+      const delta = resizeStart.current.height + (ev.clientY - resizeStart.current.y);
+      setTextareaHeight(Math.max(36, Math.min(300, delta)));
+    };
+    const onMouseUp = (ev: MouseEvent) => {
+      ev.stopPropagation();
+      isResizing.current = false;
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
+  // 阻止事件穿透
+  const stopPropagation = (e: React.MouseEvent | React.PointerEvent) => {
+    e.stopPropagation();
+  };
 
   return (
     <div
-      className={`fixed ${bg} border ${border} rounded-xl shadow-2xl flex flex-col z-[150] overflow-hidden`}
-      style={{ left: position.x, top: position.y, width: 320 }}
-      data-popup
-      onMouseDown={handlePanelPointerDown}
-      onPointerDown={handlePanelPointerDown}
+      ref={panelRef}
+      className="fixed z-[150]"
+      style={{
+        left: hasPosition ? position.x : 'auto',
+        top: hasPosition ? position.y : 80,
+        right: hasPosition ? undefined : 20,
+        width: 320,
+        maxHeight: '85vh',
+        backgroundColor: bgPanel,
+        border: `1px solid ${borderColor}`,
+        borderRadius: 10,
+        boxShadow: isMonochrome ? '0 4px 20px rgba(0,0,0,0.1)' : '0 4px 20px rgba(0,0,0,0.5)',
+        color: textColor,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}
+      onMouseDown={stopPropagation}
+      onPointerDown={stopPropagation}
+      data-popup="agent-editor"
     >
-      {/* Header - 可拖拽移动 */}
+      {/* Header - 可拖动 */}
       <div
-        className={`px-3 py-2 border-b ${border} flex items-center gap-2 cursor-move select-none shrink-0`}
-        onMouseDown={handleDragStart}
+        className="flex items-center gap-2 px-3 py-2 cursor-move select-none shrink-0"
+        style={{ borderBottom: `1px solid ${borderColor}` }}
+        onMouseDown={handlePanelDragStart}
       >
-        <GripVertical className="w-3.5 h-3.5 text-gray-600" />
-        <Bot className={`w-4 h-4 ${accent}`} />
-        <span className={`text-sm font-semibold ${text} flex-1`}>Agent 编排</span>
-        <button onClick={(e) => { e.stopPropagation(); onClose(); }} className={`p-1 rounded ${isGold ? 'hover:bg-[#222]' : 'hover:bg-gray-800'}`}>
-          <X className="w-3.5 h-3.5 text-gray-500" />
+        <GripVertical size={14} style={{ color: mutedColor }} />
+        <span className="text-sm font-semibold flex-1" style={{ color: accentColor }}>
+          Agent 编排
+        </span>
+        <button
+          onClick={(e) => { e.stopPropagation(); onClose(); }}
+          className="p-1 rounded hover:bg-white/10 transition-colors"
+          style={{ color: mutedColor }}
+        >
+          <X size={14} />
         </button>
       </div>
 
-      {/* 可滚动内容区域 - 图片/进度/步骤 */}
-      <div className="overflow-y-auto overflow-x-hidden" style={{ maxHeight: 240 }}>
+      {/* 可滚动内容区 */}
+      <div className="overflow-y-auto shrink-0" style={{ maxHeight: 240 }}>
         {/* 图片区域 */}
-        <div className="px-3 pt-2 pb-1">
-          {currentImage ? (
-            <div className={`w-full rounded-lg overflow-hidden border ${border} relative group`} style={{ height: clampedHeight }}>
+        {imageUrl ? (
+          <div className="px-3 pt-2 pb-1">
+            <div
+              className="relative rounded overflow-hidden"
+              style={{
+                width: imgDisplaySize.w,
+                height: imgDisplaySize.h,
+                margin: '0 auto',
+                backgroundColor: isMonochrome ? '#e5e5e5' : '#111111',
+              }}
+            >
               <img
-                ref={imgRef}
-                src={resultImageUrl || imageUrl}
-                alt={resultImageUrl ? 'Result' : 'Original'}
-                className={`w-full h-full object-contain ${!resultImageUrl ? 'opacity-70' : ''}`}
-                onLoad={(e) => {
-                  const img = e.currentTarget;
-                  if (img.naturalWidth && img.naturalHeight) {
-                    setImgRatio(img.naturalWidth / img.naturalHeight);
-                  }
-                }}
+                src={imageUrl}
+                alt="编辑图片"
+                className="w-full h-full object-contain"
+                draggable={false}
               />
               {/* 更换图片按钮 */}
-              {!resultImageUrl && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); onChangeImage?.(); }}
-                  className={`absolute top-1 right-1 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity ${isGold ? 'bg-black/70 hover:bg-black/90 text-[#d4af37]' : 'bg-black/70 hover:bg-black/90 text-blue-400'}`}
-                  title="更换图片"
-                >
-                  <RefreshCw className="w-3 h-3" />
-                </button>
-              )}
-              {resultImageUrl && (
-                <div className={`absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[10px] ${isGold ? 'bg-black/70 text-[#d4af37]' : 'bg-black/70 text-blue-400'}`}>
-                  {finalResponse || '编辑完成'}
-                </div>
-              )}
+              <button
+                onClick={(e) => { e.stopPropagation(); onChangeImage?.(); }}
+                className="absolute top-1.5 right-1.5 p-1 rounded transition-colors"
+                style={{
+                  backgroundColor: isMonochrome ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.65)',
+                  color: accentColor,
+                }}
+                title="更换图片"
+              >
+                <RefreshCw size={12} />
+              </button>
             </div>
-          ) : (
+            {imagePrompt && (
+              <p className="text-[10px] mt-1 truncate" style={{ color: mutedColor }}>
+                {imagePrompt}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="px-3 pt-2 pb-1">
             <button
               onClick={(e) => { e.stopPropagation(); onSelectImage?.(); }}
-              className={`w-full rounded-lg border-2 border-dashed ${border} flex flex-col items-center justify-center gap-1.5 transition-colors ${isGold ? 'hover:border-[#d4af37]/50 hover:bg-[#111]' : 'hover:border-blue-500/50 hover:bg-gray-950'}`}
-              style={{ height: clampedHeight }}
+              className="w-full py-6 rounded border-2 border-dashed flex flex-col items-center gap-1 transition-colors"
+              style={{
+                borderColor: `${accentColor}40`,
+                color: accentDim,
+                backgroundColor: 'transparent',
+              }}
             >
-              <Plus className={`w-6 h-6 ${muted}`} />
-              <span className={`text-xs ${muted}`}>从画布选择图片</span>
+              <ImagePlus size={20} />
+              <span className="text-[10px]">从画布选择图片</span>
             </button>
-          )}
-        </div>
-
-        {/* 进度条 */}
-        {isProcessing && (
-          <div className="px-3 pb-1.5">
-            <div className={`w-full h-1 rounded-full ${isGold ? 'bg-[#252525]' : 'bg-gray-800'}`}>
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${isGold ? 'bg-[#d4af37]' : 'bg-blue-500'}`}
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <div className={`mt-0.5 text-[10px] ${muted} text-center`}>{progressLabel}</div>
           </div>
         )}
 
-        {/* 步骤折叠 - 默认收起 */}
+        {/* 进度条 - 紧跟图片下方 */}
+        {isProcessing && (
+          <div className="px-3 py-1.5">
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: isMonochrome ? '#e0e0e0' : '#333' }}>
+                <div
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{ width: `${Math.max(progress, 2)}%`, backgroundColor: accentColor }}
+                />
+              </div>
+              <span className="text-[10px] shrink-0" style={{ color: mutedColor }}>
+                {progress}%
+              </span>
+            </div>
+            {progressLabel && (
+              <p className="text-[10px] mt-0.5 truncate" style={{ color: mutedColor }}>
+                {progressLabel}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* 执行步骤 (折叠) */}
         {steps.length > 0 && (
-          <div className="px-3 pb-1">
+          <div className="px-3">
             <button
-              onClick={(e) => { e.stopPropagation(); setShowSteps(!showSteps); }}
-              className={`flex items-center gap-1 text-[10px] ${muted} transition-colors`}
-              style={{ color: isGold ? '#aaa' : undefined }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = isGold ? '#e5e5e5' : '#e5e7eb'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = isGold ? '#aaa' : ''; }}
+              onClick={(e) => { e.stopPropagation(); setStepsExpanded(!stepsExpanded); }}
+              className="flex items-center gap-1 text-[10px] w-full py-1"
+              style={{ color: accentDim }}
             >
-              {showSteps ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-              执行步骤 ({steps.length})
+              {stepsExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+              <span>执行步骤 ({steps.length})</span>
             </button>
-            {showSteps && (
-              <div className={`mt-1 space-y-0.5 max-h-24 overflow-y-auto`}>
+            {stepsExpanded && (
+              <div className="space-y-0.5 pb-1">
                 {steps.map((step, i) => (
-                  <div key={i} className={`flex items-center gap-1 text-[10px] ${inputBg} rounded px-1.5 py-0.5`}>
+                  <div key={i} className="flex items-start gap-1 text-[10px]" style={{ color: mutedColor }}>
                     {step.success ? (
-                      <CheckCircle className="w-2.5 h-2.5 text-green-400 shrink-0" />
+                      <CheckCircle2 size={10} className="shrink-0 mt-0.5" style={{ color: '#4caf50' }} />
                     ) : (
-                      <XCircle className="w-2.5 h-2.5 text-red-400 shrink-0" />
+                      <XCircle size={10} className="shrink-0 mt-0.5" style={{ color: '#ef5350' }} />
                     )}
-                    <span className={accent}>{step.toolName}</span>
-                    <span className={`${muted} truncate`}>{step.result}</span>
+                    <span>
+                      R{step.round}: {step.toolName}
+                      {step.detail ? ` - ${step.detail}` : ''}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -343,89 +477,120 @@ export default function AgentEditor({ imageUrl, themeStyle = 'gold', onComplete,
           </div>
         )}
 
+        {/* 结果预览 */}
+        {resultImageUrl && (
+          <div className="px-3 pb-1">
+            <div className="rounded overflow-hidden" style={{ border: `1px solid ${accentColor}40` }}>
+              <img
+                src={resultImageUrl}
+                alt="结果"
+                className="w-full object-contain"
+                style={{ maxHeight: 120 }}
+                draggable={false}
+              />
+            </div>
+          </div>
+        )}
+
         {/* 错误提示 */}
         {error && (
-          <div className={`mx-3 mb-1.5 px-2 py-1.5 rounded text-[10px] flex items-center gap-1.5 ${isGold ? 'bg-red-900/20 text-red-400' : 'bg-red-950 text-red-400'}`}>
-            <AlertTriangle className="w-3 h-3 shrink-0" />
-            <span className="truncate flex-1">{error}</span>
-            <button onClick={(e) => { e.stopPropagation(); handleRetry(); }} className="opacity-60 hover:opacity-100 underline shrink-0">重试</button>
+          <div className="px-3 pb-1">
+            <p className="text-[10px] px-2 py-1 rounded" style={{ color: '#ef5350', backgroundColor: isMonochrome ? '#fff0f0' : 'rgba(239,83,80,0.1)' }}>
+              {error}
+            </p>
           </div>
         )}
       </div>
 
-      {/* 固定底部：控制区域 */}
-      <div className={`shrink-0 border-t ${border}`}>
+      {/* 固定底部区域：轮次 + 输入框 + 按钮 + 拖拽手柄 */}
+      <div className="shrink-0 flex flex-col" style={{ borderTop: `1px solid ${borderColor}` }}>
         {/* 轮次选择 */}
-        <div className={`px-3 pt-2 pb-1 flex items-center gap-2`}>
-          <span className={`text-[10px] ${muted} shrink-0`}>轮次</span>
-          <div className="flex gap-1">
-            {[3, 5, 8].map(n => (
-              <button
-                key={n}
-                onClick={(e) => { e.stopPropagation(); setMaxRounds(n); }}
-                className={`px-1.5 py-0.5 rounded text-[10px] ${
-                  maxRounds === n ? btnPrimary : isGold ? 'bg-[#252525] text-[#999]' : 'bg-gray-800 text-gray-400'
-                }`}
-              >
-                {n}
-              </button>
-            ))}
-          </div>
+        <div className="flex items-center gap-1.5 px-3 pt-2 pb-1">
+          <span className="text-[10px]" style={{ color: mutedColor }}>轮次:</span>
+          {[3, 5, 8].map(r => (
+            <button
+              key={r}
+              onClick={(e) => { e.stopPropagation(); setMaxRounds(r); }}
+              className="px-1.5 py-0.5 rounded text-[10px] transition-colors"
+              style={{
+                backgroundColor: maxRounds === r ? accentColor : 'transparent',
+                color: maxRounds === r ? (isMonochrome ? '#fff' : '#1a1a1a') : mutedColor,
+                border: `1px solid ${maxRounds === r ? accentColor : borderColor}`,
+              }}
+            >
+              {r}
+            </button>
+          ))}
         </div>
 
-        {/* 输入框 - 高度可拖拽调整 */}
-        <div className="px-3 pb-1.5">
+        {/* 输入框 */}
+        <div className="px-3 pb-1">
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            onMouseDown={(e) => e.stopPropagation()}
-            placeholder="描述你想对图片做什么..."
-            disabled={isProcessing || !currentImage}
-            className={`w-full rounded-lg px-2.5 py-1.5 text-xs resize-none ${inputBg} ${text} border ${border} focus:outline-none focus:ring-1 ${isGold ? 'focus:ring-[#d4af37]/20 placeholder:text-[#444]' : 'focus:ring-blue-500/20 placeholder:text-gray-600'} transition-colors disabled:opacity-50`}
-            style={{ height: textareaHeight }}
+            placeholder="描述你想要的编辑效果..."
+            className="w-full rounded px-2 py-1.5 text-xs resize-none focus:outline-none"
+            style={{
+              height: textareaHeight,
+              backgroundColor: bgInput,
+              color: textColor,
+              border: `1px solid ${borderColor}`,
+            }}
+            rows={2}
+            disabled={isProcessing}
+            onClick={stopPropagation}
+            onPointerDown={stopPropagation}
           />
         </div>
 
-        {/* 执行/取消按钮 */}
-        <div className="px-3 pb-1.5 flex gap-2">
+        {/* 执行按钮 */}
+        <div className="flex items-center gap-1.5 px-3 pb-1.5">
           {isProcessing ? (
             <button
               onClick={(e) => { e.stopPropagation(); handleCancel(); }}
-              className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 transition-colors"
+              className="flex-1 py-1.5 rounded text-xs font-medium transition-colors flex items-center justify-center gap-1"
+              style={{
+                backgroundColor: '#ef5350',
+                color: '#fff',
+              }}
             >
-              <Loader2 className="w-3 h-3 animate-spin" />
-              取消
+              <Minus size={12} /> 取消
             </button>
           ) : (
-            <>
-              <button
-                onClick={(e) => { e.stopPropagation(); handleSubmit(); }}
-                disabled={!prompt.trim() || !currentImage}
-                className={`flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium ${btnPrimary} disabled:opacity-40 disabled:cursor-not-allowed transition-colors`}
-              >
-                <Sparkles className="w-3 h-3" />
-                执行
-              </button>
-              {resultImageUrl && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); resultImageUrl && onComplete(resultImageUrl); }}
-                  className={`flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs ${isGold ? 'bg-[#252525] text-[#999] hover:bg-[#333]' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'} transition-colors`}
-                >
-                  <ImageIcon className="w-3 h-3" />
-                  应用
-                </button>
-              )}
-            </>
+            <button
+              onClick={(e) => { e.stopPropagation(); handleSubmit(); }}
+              disabled={!prompt.trim() && !imageUrl}
+              className="flex-1 py-1.5 rounded text-xs font-medium transition-colors"
+              style={{
+                backgroundColor: accentColor,
+                color: isMonochrome ? '#fff' : '#1a1a1a',
+                opacity: (!prompt.trim() && !imageUrl) ? 0.5 : 1,
+              }}
+            >
+              执行
+            </button>
+          )}
+          {resultImageUrl && !isProcessing && (
+            <button
+              onClick={(e) => { e.stopPropagation(); handleApplyResult(); }}
+              className="px-3 py-1.5 rounded text-xs font-medium transition-colors"
+              style={{
+                backgroundColor: '#4caf50',
+                color: '#fff',
+              }}
+            >
+              应用
+            </button>
           )}
         </div>
 
-        {/* 拖拽调整输入框高度手柄 */}
+        {/* 拖拽手柄 - 调整输入框高度 */}
         <div
-          className={`h-4 flex items-center justify-center cursor-ns-resize select-none border-t ${border} transition-colors ${isGold ? 'hover:bg-[#252525]' : 'hover:bg-gray-800'}`}
+          className="flex items-center justify-center py-0.5 cursor-ns-resize select-none"
+          style={{ borderTop: `1px solid ${borderColor}` }}
           onMouseDown={handleResizeStart}
-          title="拖动调整输入框大小"
         >
-          <div className={`w-8 h-1 rounded-full ${isGold ? 'bg-[#444]' : 'bg-gray-600'}`} />
+          <div className="w-8 h-1 rounded-full" style={{ backgroundColor: mutedColor, opacity: 0.5 }} />
         </div>
       </div>
     </div>

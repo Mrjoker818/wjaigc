@@ -22,7 +22,7 @@ import dynamic from 'next/dynamic';
 const ModelViewer3D = dynamic(() => import('@/components/model-viewer-3d'), { ssr: false });
 
 const PsdLayerEditor = lazy(() => import('@/components/psd-editor/PsdLayerEditor'));
-const AgentEditor = lazy(() => import('@/components/agent-editor'));
+const AgentEditor = lazy(() => import('@/components/agent-editor').then(m => ({ default: m.AgentEditor })));
 
 
 /* ====== Multi-Angle Sphere Preview (Canvas 2D) ====== */
@@ -9195,8 +9195,8 @@ export function InfiniteCanvas({
           <Suspense fallback={null}>
             <AgentEditor
               imageUrl={agentEditImage?.url}
-              themeStyle={isMonochrome ? 'monochrome' : 'gold'}
-              onComplete={(resultUrl: string) => {
+              isMonochrome={isMonochrome}
+              onApply={(resultUrl: string) => {
                 if (agentEditImage) {
                   const updated = images.map(img =>
                     img.id === agentEditImage.id ? { ...img, url: resultUrl } : img

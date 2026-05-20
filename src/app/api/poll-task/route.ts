@@ -4,7 +4,7 @@ import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/l
 import { getSessionUser } from '@/lib/server-auth';
 import { resolveCompatProfile, buildPollUrl, type ApiCompatProfile } from '@/lib/api-compatibility';
 import { getEditTask, deleteEditTask } from '@/lib/edit-task-store';
-import { isTaskCancelled, updateTaskProgress } from '@/lib/task-registry';
+import { isTaskCancelled, updateTaskProgress, getTaskInfo } from '@/lib/task-registry';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,7 +13,6 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: NextRequest) {
   try {
     const { taskId, model: rawModel, userId: requestUserId, providerId } = await request.json();
-    // 防御性处理：确保 model 是字符串（前端可能误传对象）
     const model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');
     const sessionUser = await getSessionUser(request);
     const userId = (sessionUser?.id || "anonymous") || requestUserId;
@@ -31,7 +30,6 @@ export async function POST(request: NextRequest) {
       }
 
       if (task.status === 'completed') {
-        // 任务完成，延迟清除存储（保留5分钟后自动清理）
         setTimeout(() => deleteEditTask(taskId), 5 * 60 * 1000);
         return NextResponse.json({
           success: true,
@@ -52,12 +50,48 @@ export async function POST(request: NextRequest) {
         }, { status: 200 });
       }
 
-      // 进行中
       return NextResponse.json({
         success: true,
         status: 'processing',
         stage: task.stage,
         progress: task.progress,
+      }, { status: 200 });
+    }
+
+    // ★ 检查 task-registry 中的任务（agent-edit/image-edit 等注册的任务）
+    const registryTask = getTaskInfo(taskId);
+    if (registryTask) {
+      if (registryTask.status === 'completed') {
+        return NextResponse.json({
+          success: true,
+          status: 'completed',
+          progress: registryTask.progress,
+          result: registryTask.result,
+        }, { status: 200 });
+      }
+      if (registryTask.status === 'failed') {
+        return NextResponse.json({
+          success: false,
+          status: 'failed',
+          progress: registryTask.progress,
+          error: registryTask.error || '处理失败',
+          retryable: false,
+        }, { status: 200 });
+      }
+      if (registryTask.status === 'cancelled') {
+        return NextResponse.json({
+          success: false,
+          status: 'cancelled',
+          error: '任务已被取消',
+          retryable: false,
+        }, { status: 200 });
+      }
+      // queued / processing
+      return NextResponse.json({
+        success: true,
+        status: registryTask.status,
+        progress: registryTask.progress,
+        label: registryTask.label,
       }, { status: 200 });
     }
 
