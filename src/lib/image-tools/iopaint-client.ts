@@ -50,30 +50,15 @@ const LAMA_MODEL_PATH = path.join(
 );
 
 /**
- * IOPaint RemoveBG 支持的全部模型 (与 IOPaint 最新版 RemoveBGModel 一致)
- * - birefnet 系列: 精度最高，需要 rembg >= 2.0.59
- * - briaai 系列: 商用级 PyTorch 原生模型
- * - rembg 系列: rembg 开源模型
+ * IOPaint RemoveBG 支持的模型 (精简为 3 个，覆盖通用/轻量/人像场景)
+ * - birefnet-general-lite: 精度最高，通用去背景首选 (224MB ONNX)
+ * - u2netp: 极轻量快速备选 (4.5MB ONNX)
+ * - silueta: 轻量人像备选 (45MB ONNX)
  */
 export const REMOVEBG_MODELS = [
-  // BiRefNet 系列 (推荐, 精度最高)
-  { id: 'birefnet-general-lite', label: 'BiRefNet 轻量通用', group: 'birefnet', recommended: true },
-  { id: 'birefnet-general', label: 'BiRefNet 通用', group: 'birefnet' },
-  { id: 'birefnet-portrait', label: 'BiRefNet 人像', group: 'birefnet' },
-  { id: 'birefnet-dis', label: 'BiRefNet 显著性', group: 'birefnet' },
-  { id: 'birefnet-hrsod', label: 'BiRefNet 高精度', group: 'birefnet' },
-  { id: 'birefnet-cod', label: 'BiRefNet 伪装检测', group: 'birefnet' },
-  { id: 'birefnet-massive', label: 'BiRefNet 大规模', group: 'birefnet' },
-  // BriaAI 系列 (商用级)
-  { id: 'briaai/RMBG-1.4', label: 'RMBG 1.4', group: 'briaai' },
-  { id: 'briaai/RMBG-2.0', label: 'RMBG 2.0', group: 'briaai' },
-  // rembg 系列 (经典模型)
-  { id: 'u2net', label: 'U2Net 通用', group: 'rembg' },
-  { id: 'u2netp', label: 'U2Net 轻量', group: 'rembg' },
-  { id: 'u2net_human_seg', label: 'U2Net 人体', group: 'rembg' },
-  { id: 'u2net_cloth_seg', label: 'U2Net 衣服', group: 'rembg' },
-  { id: 'silueta', label: 'Silueta', group: 'rembg' },
-  { id: 'isnet-general-use', label: 'ISNet 通用', group: 'rembg' },
+  { id: 'birefnet-general-lite', label: 'BiRefNet 通用', group: 'recommended', recommended: true, description: '精度最高，覆盖绝大多数场景', size: '224MB' },
+  { id: 'u2netp', label: 'U2Net 轻量', group: 'lightweight', description: '极轻量快速备选，速度最快', size: '4.5MB' },
+  { id: 'silueta', label: 'Silueta 人像', group: 'portrait', description: '轻量人像去背景', size: '45MB' },
 ] as const;
 
 /** 默认 RemoveBG 模型 */

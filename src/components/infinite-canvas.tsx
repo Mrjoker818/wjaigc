@@ -8120,28 +8120,10 @@ export function InfiniteCanvas({
 
         {/* ====== REMOVE BACKGROUND MODEL PICKER ====== */}
         {showRemoveBgPicker && (() => {
-          const removeBgGroups = [
-            { key: 'birefnet', label: 'BiRefNet 系列', desc: '精度最高', models: [
-              { id: 'birefnet-general-lite', label: 'BiRefNet 轻量通用', recommended: true },
-              { id: 'birefnet-general', label: 'BiRefNet 通用' },
-              { id: 'birefnet-portrait', label: 'BiRefNet 人像' },
-              { id: 'birefnet-dis', label: 'BiRefNet 显著性' },
-              { id: 'birefnet-hrsod', label: 'BiRefNet 高精度' },
-              { id: 'birefnet-cod', label: 'BiRefNet 伪装检测' },
-              { id: 'birefnet-massive', label: 'BiRefNet 大规模' },
-            ]},
-            { key: 'briaai', label: 'BriaAI 系列', desc: '商用级', models: [
-              { id: 'briaai/RMBG-1.4', label: 'RMBG 1.4' },
-              { id: 'briaai/RMBG-2.0', label: 'RMBG 2.0' },
-            ]},
-            { key: 'rembg', label: 'rembg 系列', desc: '经典模型', models: [
-              { id: 'u2net', label: 'U2Net 通用' },
-              { id: 'u2netp', label: 'U2Net 轻量' },
-              { id: 'u2net_human_seg', label: 'U2Net 人体' },
-              { id: 'u2net_cloth_seg', label: 'U2Net 衣服' },
-              { id: 'silueta', label: 'Silueta' },
-              { id: 'isnet-general-use', label: 'ISNet 通用' },
-            ]},
+          const removeBgModels = [
+            { id: 'birefnet-general-lite', label: 'BiRefNet 通用', recommended: true, description: '精度最高，覆盖绝大多数场景', size: '224MB' },
+            { id: 'u2netp', label: 'U2Net 轻量', description: '极轻量快速备选，速度最快', size: '4.5MB' },
+            { id: 'silueta', label: 'Silueta 人像', description: '轻量人像去背景', size: '45MB' },
           ];
           return (
             <div className="fixed inset-0 z-[200] flex items-center justify-center" onMouseDown={(e) => e.stopPropagation()}>
@@ -8157,44 +8139,41 @@ export function InfiniteCanvas({
                     <X size={16} />
                   </button>
                 </div>
-                {/* Model groups */}
-                <div className="overflow-y-auto p-4 space-y-4" style={{ maxHeight: 'calc(80vh - 120px)' }}>
-                  {removeBgGroups.map(group => (
-                    <div key={group.key}>
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className={`text-xs font-medium ${isMonochrome ? 'text-gray-700' : 'text-[#ccc]'}`}>{group.label}</span>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${isMonochrome ? 'bg-gray-200 text-gray-500' : 'bg-[#252525] text-[#888]'}`}>{group.desc}</span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {group.models.map(m => (
-                          <button
-                            key={m.id}
-                            onClick={() => setRemoveBgModelId(m.id)}
-                            className={`relative flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg transition-all text-left ${
+                {/* Model list */}
+                <div className="p-3 space-y-2">
+                  {removeBgModels.map(m => (
+                    <button
+                      key={m.id}
+                      onClick={() => setRemoveBgModelId(m.id)}
+                      className={`relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-left ${
+                        removeBgModelId === m.id
+                          ? 'bg-[#d4af37] text-black'
+                          : isMonochrome
+                            ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                      }`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium">{m.label}</span>
+                          {'recommended' in m && m.recommended && (
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
                               removeBgModelId === m.id
-                                ? 'bg-[#d4af37] text-black font-medium'
+                                ? 'bg-black/20 text-black/70'
                                 : isMonochrome
-                                  ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                  : 'bg-[#252525] text-[#999] hover:bg-[#333]'
-                            }`}
-                          >
-                            <span>{m.label}</span>
-                            {'recommended' in m && m.recommended && (
-                              <span className={`ml-auto text-[9px] px-1 py-0.5 rounded-full ${
-                                removeBgModelId === m.id
-                                  ? 'bg-black/20 text-black/70'
-                                  : isMonochrome
-                                    ? 'bg-gray-200 text-gray-500'
-                                    : 'bg-[#333] text-[#888]'
-                              }`}>推荐</span>
-                            )}
-                            {removeBgModelId === m.id && (
-                              <Check size={12} className="absolute top-1 right-1" />
-                            )}
-                          </button>
-                        ))}
+                                  ? 'bg-gray-200 text-gray-500'
+                                  : 'bg-[#333] text-[#888]'
+                            }`}>推荐</span>
+                          )}
+                        </div>
+                        <div className={`text-[11px] mt-0.5 ${removeBgModelId === m.id ? 'text-black/60' : isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>
+                          {m.description} · {m.size}
+                        </div>
                       </div>
-                    </div>
+                      {removeBgModelId === m.id && (
+                        <Check size={16} className="flex-shrink-0" />
+                      )}
+                    </button>
                   ))}
                 </div>
                 {/* Footer with confirm */}
@@ -8202,7 +8181,7 @@ export function InfiniteCanvas({
                   <div className="flex items-center gap-2 mb-2">
                     <span className={`text-xs ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>当前选择:</span>
                     <span className={`text-xs font-medium ${isMonochrome ? 'text-gray-800' : 'text-[#d4af37]'}`}>
-                      {removeBgGroups.flatMap(g => g.models).find(m => m.id === removeBgModelId)?.label || removeBgModelId}
+                      {removeBgModels.find(m => m.id === removeBgModelId)?.label || removeBgModelId}
                     </span>
                   </div>
                   <button

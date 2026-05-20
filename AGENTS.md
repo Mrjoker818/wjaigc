@@ -78,7 +78,7 @@ src/
 │       ├── file.ts                 # 文件工具 (读取/缩放/保存/清理)
 │       ├── mask.ts                 # 蒙版工具 (校验/归一化/反转)
 │       ├── upscayl.ts              # upscayl-node 放大引擎
-│       └── iopaint-client.ts       # IOPaint 客户端 (多模型擦除LaMa/ZITS/Anime-Lama + RemoveBG 15模型, Python子进程+HTTP双模式)
+│       └── iopaint-client.ts       # IOPaint 客户端 (多模型擦除LaMa/ZITS/Anime-Lama + RemoveBG 3模型, Python子进程+HTTP双模式)
 ├── types/
 │   └── image-tools.ts              # 本地图像工具类型定义
 scripts/
@@ -223,7 +223,7 @@ scripts/
 - **擦除功能**: IOPaint 多模型优先（LaMa 通用/ZITS 结构保持/Anime-Lama 动漫），AI 模型兜底（全图发送+蒙版合成避免变形），BFS 边界扩散最终兜底
 - **蒙版修图**: AI 模型优先生成 + 后端精确蒙版合成（仅替换蒙版区域）
 - **无损放大**: upscayl-node (NCNN) + AI 整图放大兜底
-- **移除背景**: IOPaint RemoveBG 优先（支持 15 个模型：BiRefNet 系列 7 个 + BriaAI 系列 2 个 + rembg 系列 6 个），默认 birefnet-general-lite，AI 模型兜底，本地透明化最终兜底
+- **移除背景**: IOPaint RemoveBG 优先（支持 3 个模型：BiRefNet通用 + U2Net轻量快速 + Silueta轻量人像），默认 birefnet-general-lite，AI 模型兜底，本地透明化最终兜底
 - **扩展画面**: AI 模型向四周延伸，支持缩放比例和画面比例选择
 - **异步任务**: 擦除/蒙版/放大/扩展均支持提交+轮询模式（`taskId` + `/api/poll-task`）
 - **持久化**: `persistImageBuffer` 三级 fallback（S3 → save-image API → base64 data URL）
@@ -260,7 +260,7 @@ scripts/
 - **启动脚本**: `scripts/start-iopaint-lama.sh` (HTTP 服务模式，兼容旧版)
 - **Python 子进程模式** (推荐):
   - `scripts/iopaint_erase.py` — 多模型擦除（LaMa/ZITS/Anime-Lama），被 Node.js child_process 调用
-  - `scripts/iopaint_removebg.py` — RemoveBG 去背景（15个模型），被 Node.js child_process 调用
+  - `scripts/iopaint_removebg.py` — RemoveBG 去背景（3个模型：BiRefNet/U2Net/Silueta），被 Node.js child_process 调用
   - `scripts/download-iopaint-models.sh` — 下载擦除+去背景模型
 - **擦除模型**: LaMa (默认推荐) / ZITS (结构保持) / Anime-Lama (动漫专用)
 - **降级策略**: IOPaint 本地 → AI API → 本地算法兜底
@@ -598,11 +598,11 @@ UPSCALE_TIMEOUT_MS=300000
   - LaMa: 默认推荐，精准抹除与智能修复
   - ZITS: 结构感知修复，保持线条和结构更好
   - Anime-Lama: 动漫/漫画专用擦除
-- 去背景功能升级：IOPaint RemoveBG 优先（支持 15 个模型：BiRefNet/BriaAI/rembg 三大系列），默认 birefnet-general-lite，AI 模型兜底，本地透明化最终兜底
+- 去背景功能升级：IOPaint RemoveBG 优先（3个精选模型：BiRefNet通用推荐 + U2Net轻量快速 + Silueta轻量人像），默认 birefnet-general-lite，AI 模型兜底，本地透明化最终兜底
 - 新增 Python 子进程模式：直接调用 `iopaint_erase.py` / `iopaint_removebg.py`，无需启动独立服务
 - 保留 HTTP 服务模式兼容旧版
 - 新增 `scripts/download-iopaint-models.sh` 模型下载脚本（支持 LaMa/ZITS/Anime-Lama + RemoveBG 模型）
-- `iopaint-client.ts` 重构：支持多模型擦除（LaMa/ZITS/Anime-Lama） + RemoveBG 去背景（15个模型），Python 子进程 + HTTP 双模式
+- `iopaint-client.ts` 重构：支持多模型擦除（LaMa/ZITS/Anime-Lama） + RemoveBG 去背景（3个精选模型），Python 子进程 + HTTP 双模式
 - 健康检测 API 增强：报告擦除模型可用性（LaMa/ZITS/Anime-Lama）、RemoveBG 模型列表、Python 脚本状态
 
 ### v2.8.0

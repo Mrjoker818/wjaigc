@@ -84,7 +84,7 @@ export async function GET() {
       scriptAvailable: scripts.removebg,
       // RemoveBG 模型首次使用时自动下载
       modelAutoDownload: true,
-      supportedModels: REMOVEBG_MODELS.map(m => ({ id: m.id, label: m.label, group: m.group, recommended: 'recommended' in m ? m.recommended : false })),
+      supportedModels: REMOVEBG_MODELS.map(m => ({ id: m.id, label: m.label, group: m.group, recommended: 'recommended' in m ? m.recommended : false, description: m.description, size: m.size })),
     },
     scripts: {
       erase: scripts.erase,
