@@ -8,7 +8,7 @@ import {
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
-  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, ChevronsLeft, ChevronsRight, Settings2, ChevronUp, Bot
+  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot
 } from 'lucide-react';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
 import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
@@ -555,7 +555,7 @@ export function InfiniteCanvas({
   const [showExpandRatios, setShowExpandRatios] = useState(false);
   const [showCropRatios, setShowCropRatios] = useState(false);
   // 图片工具栏折叠状态
-  const [toolbarExpanded, setToolbarExpanded] = useState(true);
+  const [toolbarExpanded, setToolbarExpanded] = useState(false);
   const [showToolbarCustomize, setShowToolbarCustomize] = useState(false);
   // 工具栏自定义排序/可见性（从 localStorage 读取）
   const [toolbarItemOrder, setToolbarItemOrder] = useState<string[]>(() => {
@@ -9819,7 +9819,8 @@ export function InfiniteCanvas({
                     }`}
                     title={toolbarExpanded ? '收起工具栏' : '展开更多工具'}
                   >
-                    {toolbarExpanded ? <ChevronsLeft size={14} /> : <ChevronsRight size={14} />}
+                    {toolbarExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    <span className="text-[10px]">{toolbarExpanded ? '收起' : `+${visibleImageActions.length - 5}`}</span>
                   </button>
                 )}
                 {/* 自定义按钮 */}

@@ -1235,9 +1235,14 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     if (!isDragging) return;
     const onMove = (e: MouseEvent) => {
       e.preventDefault();
+      e.stopPropagation();
       setPosition({ x: e.clientX - dragOffset.x, y: e.clientY - dragOffset.y });
     };
-    const onUp = () => { setIsDragging(false); };
+    const onUp = (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(false);
+    };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => {
@@ -1346,6 +1351,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         ref={containerRef}
         className={`fixed z-[200] w-[360px] ${thPanel} border rounded-xl shadow-2xl overflow-hidden`}
         style={{ left: position.x, top: position.y, maxHeight: '85vh' }}
+        onMouseDown={e => e.stopPropagation()}
+        onPointerDown={e => e.stopPropagation()}
+        data-popup
       >
         {/* Header - 可拖拽 */}
         <div
@@ -1892,6 +1900,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           ref={resultContainerRef}
           className={`fixed z-[200] ${isMonochrome ? "bg-white border border-gray-200" : "bg-[#141414] border border-[#2a2a2a]"} rounded-xl shadow-2xl overflow-hidden`}
           style={{ left: position.x + 360 + 40, top: position.y, maxHeight: '85vh', width: resultImages.length > 1 ? '440px' : '380px' }}
+          onMouseDown={e => e.stopPropagation()}
+          onPointerDown={e => e.stopPropagation()}
+          data-popup
         >
           <div className={`flex items-center justify-between px-3 py-2 border-b ${thBorder}`}>
             <h3 className={`text-[11px] font-medium ${thText} flex items-center gap-1.5`}>
