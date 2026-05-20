@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { X, Pencil, Eraser, Trash2, Loader2, Check, Sparkles, History, Image as ImageIcon, ChevronDown, ChevronUp, Plus, Minus, Maximize2, GripVertical, Upload } from 'lucide-react';
+import { X, Pencil, Eraser, Trash2, Loader2, Check, Sparkles, History, Image as ImageIcon, ChevronDown, ChevronUp, Plus, Minus, Maximize2, GripVertical, Upload, RefreshCw } from 'lucide-react';
 import type { CanvasImage } from './infinite-canvas';
 
 interface EditHistoryItem {
@@ -1461,9 +1461,46 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               </button>
             </div>
 
-            {/* 主图标记 - 固定在容器左上角 */}
-            <div className="absolute top-1 left-1 z-20" onMouseDown={e => e.stopPropagation()}>
+            {/* 更换图片按钮 - 固定在容器左上角，主图标记右侧 */}
+            <div className="absolute top-1 left-1 z-20 flex items-center gap-1" onMouseDown={e => e.stopPropagation()}>
               <span className={`text-[9px] px-1.5 py-0.5 ${isMonochrome ? 'bg-gray-800 text-white' : 'bg-[#d4af37]/80 text-black'} rounded font-medium`}>原图</span>
+              <button
+                onClick={(e) => { e.stopPropagation(); setMainPickerOpen(!mainPickerOpen); }}
+                className={`p-0.5 rounded ${isMonochrome ? 'bg-gray-200/80 text-gray-500 hover:text-gray-800' : 'bg-[#2a2a2a]/80 text-[#888] hover:text-[#d4af37]'} transition-colors`}
+                title="更换图片"
+              >
+                <RefreshCw className="h-3 w-3" />
+              </button>
+              {mainPickerOpen && (
+                <div className={`absolute top-full left-0 mt-1 min-w-[180px] max-h-48 overflow-y-auto rounded-lg border ${thDropdown} z-30`}>
+                  <div className={`px-2 py-1 text-[9px] ${thTextMuted} uppercase tracking-wider border-b ${thBorderLight} sticky top-0 ${thBgDeep}`}>更换图片</div>
+                  {canvasImages && canvasImages.length > 0 && canvasImages.filter(ci => ci.url !== currentImageUrl).map(ci => (
+                    <button
+                      key={ci.id}
+                      onClick={() => { handleSelectMainFromCanvas(ci); setMainPickerOpen(false); }}
+                      className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs ${thDropdownItem} transition-all border-b ${thBorderLight} last:border-b-0`}
+                    >
+                      <img src={ci.url} alt="" className="w-8 h-8 object-cover rounded flex-shrink-0" crossOrigin="anonymous" />
+                      <div className="flex-1 min-w-0">
+                        <div className={`truncate text-[11px]`}>{ci.prompt || ci.url.split('/').pop() || '图片'}</div>
+                        <div className={`text-[9px] ${thTextMuted}`}>{ci.originalWidth || 0}x{ci.originalHeight || 0}</div>
+                      </div>
+                    </button>
+                  ))}
+                  {(!canvasImages || canvasImages.filter(ci => ci.url !== currentImageUrl).length === 0) && (
+                    <div className={`px-2 py-3 text-[10px] ${thTextMuted} text-center`}>画布上没有其他图片</div>
+                  )}
+                  <button
+                    onClick={() => { mainFileInputRef.current?.click(); setMainPickerOpen(false); }}
+                    className={`w-full flex items-center gap-2 px-2 py-2 text-left text-xs ${thDropdownItem} ${isMonochrome ? 'hover:text-gray-900' : 'hover:text-[#d4af37]'} transition-all`}
+                  >
+                    <div className={`w-8 h-8 rounded ${isMonochrome ? 'bg-gray-200' : 'bg-[#2a2a2a]'} flex items-center justify-center flex-shrink-0`}>
+                      <Upload className={`h-3.5 w-3.5 ${thTextMuted}`} />
+                    </div>
+                    <span className="text-[11px]">上传本地图片</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* 画笔涂抹提示 - 固定在容器底部 */}

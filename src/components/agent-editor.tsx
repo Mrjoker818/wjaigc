@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Bot, X, Loader2, ChevronDown, ChevronRight, Sparkles, Image as ImageIcon, CheckCircle, XCircle, AlertTriangle, Plus, GripVertical } from 'lucide-react';
+import { Bot, X, Loader2, ChevronDown, ChevronRight, Sparkles, Image as ImageIcon, CheckCircle, XCircle, AlertTriangle, Plus, GripVertical, RefreshCw } from 'lucide-react';
 import { taskEventsClient } from '@/lib/task-events-client';
 
 interface AgentEditorProps {
@@ -15,6 +15,8 @@ interface AgentEditorProps {
   onClose: () => void;
   /** 选择图片回调（从画布选择） */
   onSelectImage?: () => void;
+  /** 更换图片回调（从画布选择替换） */
+  onChangeImage?: () => void;
 }
 
 interface AgentStep {
@@ -25,7 +27,7 @@ interface AgentStep {
   success: boolean;
 }
 
-export default function AgentEditor({ imageUrl, themeStyle = 'gold', onComplete, onClose, onSelectImage }: AgentEditorProps) {
+export default function AgentEditor({ imageUrl, themeStyle = 'gold', onComplete, onClose, onSelectImage, onChangeImage }: AgentEditorProps) {
   const isGold = themeStyle === 'gold';
   const [prompt, setPrompt] = useState('');
   const [maxRounds, setMaxRounds] = useState(5);
@@ -40,6 +42,10 @@ export default function AgentEditor({ imageUrl, themeStyle = 'gold', onComplete,
   const [resultImageUrl, setResultImageUrl] = useState<string | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
+  // 图片比例检测
+  const [imgRatio, setImgRatio] = useState<number | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+
   // 拖拽状态（面板移动）
   const [isDragging, setIsDragging] = useState(false);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
@@ -52,6 +58,11 @@ export default function AgentEditor({ imageUrl, themeStyle = 'gold', onComplete,
   const resizeStartHeightRef = useRef(0);
 
   const currentImage = resultImageUrl || imageUrl;
+
+  // 根据图片比例计算预览区高度（宽度=296px即320-24padding）
+  const previewWidth = 296;
+  const imageBoxHeight = imgRatio ? Math.round(previewWidth / imgRatio) : 120;
+  const clampedHeight = Math.max(80, Math.min(220, imageBoxHeight));
 
   // 全局鼠标事件：拖动面板
   useEffect(() => {
@@ -247,12 +258,29 @@ export default function AgentEditor({ imageUrl, themeStyle = 'gold', onComplete,
         {/* 图片区域 */}
         <div className="px-3 pt-2 pb-1">
           {currentImage ? (
-            <div className={`w-full rounded-lg overflow-hidden border ${border} relative`} style={{ height: 120 }}>
+            <div className={`w-full rounded-lg overflow-hidden border ${border} relative group`} style={{ height: clampedHeight }}>
               <img
+                ref={imgRef}
                 src={resultImageUrl || imageUrl}
                 alt={resultImageUrl ? 'Result' : 'Original'}
                 className={`w-full h-full object-contain ${!resultImageUrl ? 'opacity-70' : ''}`}
+                onLoad={(e) => {
+                  const img = e.currentTarget;
+                  if (img.naturalWidth && img.naturalHeight) {
+                    setImgRatio(img.naturalWidth / img.naturalHeight);
+                  }
+                }}
               />
+              {/* 更换图片按钮 */}
+              {!resultImageUrl && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onChangeImage?.(); }}
+                  className={`absolute top-1 right-1 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity ${isGold ? 'bg-black/70 hover:bg-black/90 text-[#d4af37]' : 'bg-black/70 hover:bg-black/90 text-blue-400'}`}
+                  title="更换图片"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                </button>
+              )}
               {resultImageUrl && (
                 <div className={`absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[10px] ${isGold ? 'bg-black/70 text-[#d4af37]' : 'bg-black/70 text-blue-400'}`}>
                   {finalResponse || '编辑完成'}
@@ -263,7 +291,7 @@ export default function AgentEditor({ imageUrl, themeStyle = 'gold', onComplete,
             <button
               onClick={(e) => { e.stopPropagation(); onSelectImage?.(); }}
               className={`w-full rounded-lg border-2 border-dashed ${border} flex flex-col items-center justify-center gap-1.5 transition-colors ${isGold ? 'hover:border-[#d4af37]/50 hover:bg-[#111]' : 'hover:border-blue-500/50 hover:bg-gray-950'}`}
-              style={{ height: 120 }}
+              style={{ height: clampedHeight }}
             >
               <Plus className={`w-6 h-6 ${muted}`} />
               <span className={`text-xs ${muted}`}>从画布选择图片</span>
