@@ -4205,7 +4205,7 @@ export function InfiniteCanvas({
         return;
       }
 
-      updateProcessingFrame(placeholderId, { progress: 22, status: data.engine === 'local-background-alpha' ? '正在生成透明背景...' : 'AI 正在识别主体边缘...' });
+      updateProcessingFrame(placeholderId, { progress: 22, status: data.engine === 'local-background-alpha' ? '正在生成透明背景...' : data.engine?.includes('iopaint') ? 'IOPaint 正在去除背景...' : 'AI 正在识别主体边缘...' });
 
       // 兼容两种后端返回：
       // 1) 同步返回 imageUrl（本地透明化 / AI直接出图 — 后端已做限时轮询）
@@ -4895,7 +4895,7 @@ export function InfiniteCanvas({
 
         let resultUrl: string | null = null;
 
-        updateProcessingFrame(placeholderId, { progress: 8, status: '正在提交到 AI 模型...' });
+        updateProcessingFrame(placeholderId, { progress: 8, status: '正在提交编辑请求...' });
 
         const modelInfo = getCurrentModel();
         const requestBody = {
@@ -4966,7 +4966,8 @@ export function InfiniteCanvas({
         const cropInfo = data.cropInfo || null;
 
         if (syncResultUrl) {
-          updateProcessingFrame(placeholderId, { progress: 80, status: '正在载入编辑结果...' });
+          const engineLabel = data.engine?.includes('iopaint') ? 'IOPaint 正在处理' : data.engine === 'local-erase' ? '本地修复完成' : '正在载入编辑结果';
+          updateProcessingFrame(placeholderId, { progress: 80, status: engineLabel + '...' });
           resultUrl = syncResultUrl;
         } else if (data.taskId) {
           updateProcessingFrame(placeholderId, { progress: 24, status: 'AI 正在重绘选区...' });

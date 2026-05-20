@@ -78,11 +78,14 @@ src/
 │       ├── file.ts                 # 文件工具 (读取/缩放/保存/清理)
 │       ├── mask.ts                 # 蒙版工具 (校验/归一化/反转)
 │       ├── upscayl.ts              # upscayl-node 放大引擎
-│       └── iopaint-client.ts       # IOPaint+LaMa 修图客户端
+│       └── iopaint-client.ts       # IOPaint 客户端 (LaMa擦除 + RemoveBG去背景, Python子进程+HTTP双模式)
 ├── types/
 │   └── image-tools.ts              # 本地图像工具类型定义
 scripts/
-└── start-iopaint-lama.sh           # IOPaint LaMa 启动脚本
+├── start-iopaint-lama.sh           # IOPaint LaMa 启动脚本（兼容旧版 HTTP 服务模式）
+├── iopaint_erase.py               # IOPaint LaMa 擦除脚本（Python 子进程模式）
+├── iopaint_removebg.py            # IOPaint RemoveBG 去背景脚本（Python 子进程模式）
+└── download-iopaint-models.sh     # IOPaint 模型下载脚本
 ```
 
 ## 核心功能说明
@@ -106,7 +109,7 @@ scripts/
 - **图片操作工具栏** (选中图片后顶部显示):
   - 放大、移除背景、SVG智能描摹、擦除、蒙版、编辑元素、扩展、图生图、裁切、下载
 - **编辑模式**:
-  - 擦除: 画笔大小+确认擦除，AI模型优先智能修复（全图发送避免变形），BFS边界扩散兜底
+  - 擦除: 画笔大小+确认擦除，IOPaint LaMa优先精准抹除，AI模型智能修复兜底，BFS边界扩散最终兜底
   - 蒙版: 画笔+提示词输入+生成，AI模型优先生成+后端精确蒙版合成
   - 扩展: 缩放比例选项(原始比例/1x/1.5x/2x/3x/4x) + 画面比例(原始比例+固定比例) + 确认扩展
   - 图生图: 黑金配色浮动面板，详见下方
@@ -217,10 +220,10 @@ scripts/
 
 统一架构的图片编辑能力，AI 模型优先 + 本地算法兜底，支持异步提交+轮询模式。
 
-- **擦除功能**: AI 模型优先（全图发送+蒙版合成避免变形），BFS 边界扩散兜底
+- **擦除功能**: IOPaint LaMa 优先（本地精准抹除），AI 模型兜底（全图发送+蒙版合成避免变形），BFS 边界扩散最终兜底
 - **蒙版修图**: AI 模型优先生成 + 后端精确蒙版合成（仅替换蒙版区域）
 - **无损放大**: upscayl-node (NCNN) + AI 整图放大兜底
-- **移除背景**: AI 模型自动分割
+- **移除背景**: IOPaint RemoveBG 优先（本地 u2net 模型精准分割），AI 模型兜底，本地透明化最终兜底
 - **扩展画面**: AI 模型向四周延伸，支持缩放比例和画面比例选择
 - **异步任务**: 擦除/蒙版/放大/扩展均支持提交+轮询模式（`taskId` + `/api/poll-task`）
 - **持久化**: `persistImageBuffer` 三级 fallback（S3 → save-image API → base64 data URL）
@@ -254,7 +257,12 @@ scripts/
   - POST `/api/image/inpaint` - 涂抹消除/蒙版修图 (imageUrl, maskDataUrl, prompt)
   - GET `/api/image/health` - 健康检测
 - **配置**: 通过环境变量控制 (LOCAL_AI_ENABLED, IOPAINT_BASE_URL, UPSCAYL_MODELS_DIR 等)
-- **启动脚本**: `scripts/start-iopaint-lama.sh`
+- **启动脚本**: `scripts/start-iopaint-lama.sh` (HTTP 服务模式，兼容旧版)
+- **Python 子进程模式** (推荐):
+  - `scripts/iopaint_erase.py` — LaMa 擦除，被 Node.js child_process 调用
+  - `scripts/iopaint_removebg.py` — RemoveBG 去背景，被 Node.js child_process 调用
+  - `scripts/download-iopaint-models.sh` — 下载 LaMa 模型 (~200MB)
+- **降级策略**: IOPaint 本地 → AI API → 本地算法兜底
 
 ### 13. 语言修图 (image-editor.tsx + api/edit)
 
@@ -441,7 +449,8 @@ PY_VECTORIZE_ENDPOINT=http://localhost:8000/vectorize
 # 是否启用本地 AI 工具 (upscayl / IOPaint)
 LOCAL_AI_ENABLED=true
 
-# IOPaint (LaMa) 本地修图服务
+# IOPaint (LaMa + RemoveBG) 本地图像工具
+# 支持 Python 子进程模式（推荐，无需启动独立服务）和 HTTP 服务模式（兼容旧版）
 IOPAINT_BASE_URL=http://127.0.0.1:8080
 IOPAINT_TIMEOUT_MS=300000
 
@@ -541,6 +550,13 @@ UPSCALE_TIMEOUT_MS=300000
 - Chaikin 平滑迭代次数建议 ≤ 5 次
 - 大图(>2000px)处理时间较长属正常现象
 
+### IOPaint 擦除/去背景不工作
+- 检查 `LOCAL_AI_ENABLED` 是否为 `true`（开发环境默认开启，生产环境默认关闭）
+- 检查 LaMa 模型文件是否存在且 >1MB：`~/.cache/torch/hub/checkpoints/big-lama.pt`
+- 运行 `bash scripts/download-iopaint-models.sh` 下载模型
+- RemoveBG 模型（u2net）首次使用时自动下载，需网络连接
+- IOPaint 不可用时会自动降级到 AI API → 本地算法兜底
+
 ## 更新日志
 
 ### v2.9.0 (当前版本)
@@ -575,6 +591,15 @@ UPSCALE_TIMEOUT_MS=300000
 - 注册工具: image_edit / generate_image / analyze_image / adjust_color
 - 入口: 选中图片工具栏 + 右键菜单 + 底部工具栏
 - 安全限制: 最大 10 轮，单轮 60s 超时，全局 5min 超时
+
+**IOPaint 本地集成**
+- 擦除功能升级：IOPaint LaMa 优先（本地精准抹除），AI 模型兜底，BFS 边界扩散最终兜底
+- 去背景功能升级：IOPaint RemoveBG 优先（本地 u2net 模型精准分割），AI 模型兜底，本地透明化最终兜底
+- 新增 Python 子进程模式：直接调用 `iopaint_erase.py` / `iopaint_removebg.py`，无需启动独立服务
+- 保留 HTTP 服务模式兼容旧版
+- 新增 `scripts/download-iopaint-models.sh` 模型下载脚本
+- `iopaint-client.ts` 重构：支持 LaMa 擦除 + RemoveBG 去背景双功能，Python 子进程 + HTTP 双模式
+- 健康检测 API 增强：报告 LaMa 模型可用性、Python 脚本状态
 
 ### v2.8.0
 

@@ -11,6 +11,8 @@ import path from 'path';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { isS3Available, uploadImageToS3 } from '@/lib/s3-storage';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
+import { eraseWithLama, removeBgWithIOPaint } from '@/lib/image-tools/iopaint-client';
+import { LOCAL_AI_ENABLED } from '@/lib/image-tools/config';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -1809,6 +1811,34 @@ export async function POST(request: NextRequest) {
       const bgSize = aspectRatio ? findClosestAspectRatio(aspectRatio) : '1:1';
       const imageBase64ForBg = await resolveImageToBase64(imageUrl).catch(() => null);
       
+      // ─── 优先路径：IOPaint RemoveBG 本地去背景 ───
+      // RemoveBG 是专业去背景模型，效果优于 AI 生成式去背景和本地透明化
+      // 仅在 LOCAL_AI_ENABLED 时尝试
+      if (LOCAL_AI_ENABLED) {
+        try {
+          console.log(`[remove_background] Attempting IOPaint RemoveBG...`);
+          const sourceBuffer = await fetchImageBuffer(imageUrl);
+          const sourceMeta = await sharp(sourceBuffer).metadata();
+          const srcW = sourceMeta.width || 512;
+          const srcH = sourceMeta.height || 512;
+          
+          const rmbgResult = await removeBgWithIOPaint(sourceBuffer, srcW, srcH, 'u2net');
+          if (rmbgResult.success && rmbgResult.imageUrl) {
+            console.log(`[remove_background] IOPaint RemoveBG succeeded: ${rmbgResult.imageUrl}`);
+            return NextResponse.json({
+              success: true,
+              imageUrl: rmbgResult.imageUrl,
+              action,
+              engine: rmbgResult.engine || 'iopaint-removebg',
+            });
+          }
+          console.log(`[remove_background] IOPaint RemoveBG failed: ${rmbgResult.error}, falling back to AI API`);
+        } catch (rmbgErr) {
+          console.warn(`[remove_background] IOPaint RemoveBG error:`, rmbgErr instanceof Error ? rmbgErr.message : rmbgErr);
+        }
+      }
+
+      // ─── 降级路径：AI 模型去背景 ───
       // 移除背景：AI 优先但限时，超时快速降级到本地透明化
       // 避免前端长时间轮询导致"生成超时"
       const AI_REMOVEBG_TIMEOUT_MS = 45000; // AI 路径总限时 45 秒
@@ -2063,7 +2093,34 @@ export async function POST(request: NextRequest) {
           .png()
           .toBuffer();
 
-        // ─── 全图模式发送给 AI ───
+        // ─── 优先路径：IOPaint LaMa 本地擦除 ───
+        // LaMa 是专业修复模型，效果优于 AI 生成式擦除和 BFS 边界扩散
+        // 仅在 LOCAL_AI_ENABLED 且模型可用时尝试
+        if (LOCAL_AI_ENABLED) {
+          try {
+            console.log(`[inpaint] Attempting IOPaint LaMa erase: ${origW}x${origH}, mask pixels ${maskPixelCount}`);
+            const lamaResult = await eraseWithLama(
+              imageBuffer,
+              eraseBinaryMaskBuffer,
+              origW,
+              origH,
+            );
+            if (lamaResult.success && lamaResult.imageUrl) {
+              console.log(`[inpaint] IOPaint LaMa erase succeeded: ${lamaResult.imageUrl}`);
+              return NextResponse.json({
+                success: true,
+                imageUrl: lamaResult.imageUrl,
+                action,
+                engine: lamaResult.engine || 'iopaint-lama',
+              });
+            }
+            console.log(`[inpaint] IOPaint LaMa erase failed: ${lamaResult.error}, falling back to AI API`);
+          } catch (lamaErr) {
+            console.warn(`[inpaint] IOPaint LaMa error:`, lamaErr instanceof Error ? lamaErr.message : lamaErr);
+          }
+        }
+
+        // ─── 降级路径：AI 模型智能擦除 ───
         // 不裁剪！裁剪会导致 AI 看不到完整画面上下文，重新理解构图导致变形
         // 如果图片过大，等比缩放到 2048 以内，保证 AI 模型能处理
         const AI_MAX_DIM = 2048;
