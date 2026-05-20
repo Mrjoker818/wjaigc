@@ -29,6 +29,20 @@ const SCRIPTS_DIR = path.join(process.cwd(), 'scripts');
 const ERASE_SCRIPT = path.join(SCRIPTS_DIR, 'iopaint_erase.py');
 const REMOVEBG_SCRIPT = path.join(SCRIPTS_DIR, 'iopaint_removebg.py');
 
+// ============================================================
+// 擦除模型列表 (与 IOPaint 最新版一致)
+// ============================================================
+
+export const ERASE_MODELS = [
+  { id: 'lama' as const, label: 'LaMa 通用擦除', description: '默认推荐，精准抹除与智能修复', recommended: true, files: ['big-lama.pt'] },
+  { id: 'zits' as const, label: 'ZITS 结构保持', description: '结构感知修复，保持线条和结构更好', files: ['zits-inpaint-0717.pt', 'zits-edge-line-0717.pt', 'zits-structure-upsample-0717.pt', 'zits-wireframe-0717.pt'] },
+  { id: 'anime-lama' as const, label: 'Anime LaMa', description: '动漫专用擦除，适合二次元图片', files: ['anime-manga-big-lama.pt'] },
+];
+
+export type EraseModelId = (typeof ERASE_MODELS)[number]['id'];
+export const DEFAULT_ERASE_MODEL: EraseModelId = 'lama';
+export const VALID_ERASE_MODELS: readonly string[] = ERASE_MODELS.map((m) => m.id);
+
 /** LaMa 模型文件路径 */
 const LAMA_MODEL_PATH = path.join(
   process.env.HOME || '/root',
@@ -101,7 +115,7 @@ export interface RemoveBgResult {
 // ============================================================
 
 /**
- * 调用 Python 脚本执行 IOPaint LaMa 擦除
+ * 调用 Python 脚本执行 IOPaint 擦除（支持 lama / zits / anime-lama 模型）
  * 优点：无需启动额外服务，模型按需加载
  * 缺点：首次调用需要加载模型（~5-15秒 CPU），后续调用更快
  */
@@ -110,6 +124,7 @@ export async function eraseWithLama(
   maskBuffer: Buffer,
   imageWidth: number,
   imageHeight: number,
+  eraseModel: string = 'lama',
 ): Promise<InpaintResult> {
   if (!LOCAL_AI_ENABLED) {
     return { success: false, error: 'LOCAL_AI_ENABLED 未启用' };
@@ -143,10 +158,12 @@ export async function eraseWithLama(
     const imageBase64 = `data:image/png;base64,${imageBuffer.toString('base64')}`;
     const maskBase64 = `data:image/png;base64,${normalizedMask.toString('base64')}`;
 
-    // 调用 Python 脚本
+    // 调用 Python 脚本（传递 model 参数）
+    const validModel = ERASE_MODELS.find(m => m.id === eraseModel) ? eraseModel : 'lama';
     const result = await callPythonScript(ERASE_SCRIPT, {
       image: imageBase64,
       mask: maskBase64,
+      model: validModel,
     });
 
     if (!result.success || !result.image) {
@@ -174,7 +191,7 @@ export async function eraseWithLama(
         width: outputMeta.width || imageWidth,
         height: outputMeta.height || imageHeight,
       },
-      engine: 'iopaint-lama',
+      engine: `iopaint-${validModel}`,
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -385,9 +402,9 @@ export interface InpaintParams {
  * 执行本地 IOPaint 修复 (HTTP 服务模式)
  */
 export async function performInpaint(
-  params: InpaintParams,
+  params: InpaintParams & { eraseModel?: string },
 ): Promise<InpaintResult> {
-  const { imageBuffer, maskBuffer, prompt, imageWidth, imageHeight } = params;
+  const { imageBuffer, maskBuffer, prompt, imageWidth, imageHeight, eraseModel } = params;
 
   // 优先使用 Python 子进程模式
   const pythonResult = await eraseWithLama(
@@ -395,6 +412,7 @@ export async function performInpaint(
     maskBuffer,
     imageWidth,
     imageHeight,
+    eraseModel,
   );
   if (pythonResult.success) return pythonResult;
 

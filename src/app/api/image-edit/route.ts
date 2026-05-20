@@ -433,6 +433,7 @@ interface EditRequest {
   scale?: number; // 放大倍率 2/4/8
   model?: string;
   providerId?: string;
+  eraseModel?: string; // IOPaint erase model: lama/zits/anime-lama
 }
 
 // Helper: fetch image as Buffer (supports external URLs, data URLs, and local paths)
@@ -2098,15 +2099,18 @@ export async function POST(request: NextRequest) {
         // 仅在 LOCAL_AI_ENABLED 且模型可用时尝试
         if (LOCAL_AI_ENABLED) {
           try {
-            console.log(`[inpaint] Attempting IOPaint LaMa erase: ${origW}x${origH}, mask pixels ${maskPixelCount}`);
+            // 支持 lama / zits / anime-lama 模型选择
+            const eraseModel = (body.eraseModel || 'lama') as string;
+            console.log(`[inpaint] Attempting IOPaint erase (${eraseModel}): ${origW}x${origH}, mask pixels ${maskPixelCount}`);
             const lamaResult = await eraseWithLama(
               imageBuffer,
               eraseBinaryMaskBuffer,
               origW,
               origH,
+              eraseModel,
             );
             if (lamaResult.success && lamaResult.imageUrl) {
-              console.log(`[inpaint] IOPaint LaMa erase succeeded: ${lamaResult.imageUrl}`);
+              console.log(`[inpaint] IOPaint ${lamaResult.engine || 'iopaint'} erase succeeded: ${lamaResult.imageUrl}`);
               return NextResponse.json({
                 success: true,
                 imageUrl: lamaResult.imageUrl,
@@ -2114,7 +2118,7 @@ export async function POST(request: NextRequest) {
                 engine: lamaResult.engine || 'iopaint-lama',
               });
             }
-            console.log(`[inpaint] IOPaint LaMa erase failed: ${lamaResult.error}, falling back to AI API`);
+            console.log(`[inpaint] IOPaint erase failed: ${lamaResult.error}, falling back to AI API`);
           } catch (lamaErr) {
             console.warn(`[inpaint] IOPaint LaMa error:`, lamaErr instanceof Error ? lamaErr.message : lamaErr);
           }
