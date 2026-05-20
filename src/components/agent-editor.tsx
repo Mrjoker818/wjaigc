@@ -96,11 +96,11 @@ export function AgentEditor({
   // 主题色变量
   const accentColor = isMonochrome ? MONO_TEXT : GOLD;
   const accentDim = isMonochrome ? MONO_MUTED : GOLD_DIM;
-  const bgPanel = isMonochrome ? MONO_BG : 'rgba(255,255,255,0.04)';
-  const bgInput = isMonochrome ? '#ffffff' : 'rgba(255,255,255,0.06)';
+  const bgPanel = isMonochrome ? MONO_BG : 'rgba(20,20,20,0.85)';
+  const bgInput = isMonochrome ? '#ffffff' : 'rgba(26,26,26,0.85)';
   const textColor = isMonochrome ? MONO_TEXT : '#e0e0e0';
   const mutedColor = isMonochrome ? MONO_MUTED : '#999999';
-  const borderColor = isMonochrome ? MONO_BORDER : 'rgba(255,255,255,0.08)';
+  const borderColor = isMonochrome ? MONO_BORDER : 'rgba(255,255,255,0.12)';
 
   // 轮询任务状态
   const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);

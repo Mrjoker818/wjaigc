@@ -2007,7 +2007,7 @@ function CanvasApp() {
                     : 'text-[#d4af37] font-semibold'
                   : themeStyle === 'monochrome'
                     ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-50/50'
-                    : 'text-[#888] hover:text-white hover:bg-white/[0.03]'
+                    : 'text-[#888] hover:text-white hover:bg-[#1a1a1a]/70'
               }`}
             >
               <ImageIcon size={15} />
@@ -2025,7 +2025,7 @@ function CanvasApp() {
                     : 'text-[#d4af37] font-semibold'
                   : themeStyle === 'monochrome'
                     ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-50/50'
-                    : 'text-[#888] hover:text-white hover:bg-white/[0.03]'
+                    : 'text-[#888] hover:text-white hover:bg-[#1a1a1a]/70'
               }`}
             >
               <MessageSquare size={15} />
