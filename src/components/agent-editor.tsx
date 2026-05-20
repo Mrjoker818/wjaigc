@@ -96,11 +96,11 @@ export function AgentEditor({
   // 主题色变量
   const accentColor = isMonochrome ? MONO_TEXT : GOLD;
   const accentDim = isMonochrome ? MONO_MUTED : GOLD_DIM;
-  const bgPanel = isMonochrome ? MONO_BG : '#1a1a1a';
-  const bgInput = isMonochrome ? '#ffffff' : '#222222';
+  const bgPanel = isMonochrome ? MONO_BG : 'rgba(255,255,255,0.04)';
+  const bgInput = isMonochrome ? '#ffffff' : 'rgba(255,255,255,0.06)';
   const textColor = isMonochrome ? MONO_TEXT : '#e0e0e0';
   const mutedColor = isMonochrome ? MONO_MUTED : '#999999';
-  const borderColor = isMonochrome ? MONO_BORDER : '#333333';
+  const borderColor = isMonochrome ? MONO_BORDER : 'rgba(255,255,255,0.08)';
 
   // 轮询任务状态
   const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -340,6 +340,8 @@ export function AgentEditor({
         border: `1px solid ${borderColor}`,
         borderRadius: 10,
         boxShadow: isMonochrome ? '0 4px 20px rgba(0,0,0,0.1)' : '0 4px 20px rgba(0,0,0,0.5)',
+        backdropFilter: isMonochrome ? 'none' : 'blur(24px)',
+        WebkitBackdropFilter: isMonochrome ? 'none' : 'blur(24px)',
         color: textColor,
         display: 'flex',
         flexDirection: 'column',

@@ -5786,13 +5786,13 @@ export function InfiniteCanvas({
   const ratioOptions = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9'];
 
   // Floating panel style helpers
-  const panelBaseClass = `flex items-center gap-1.5 px-3 py-2 rounded-xl border shadow-xl ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-[#1a1a1a]/95 border-[#333] backdrop-blur-sm'}`;
+  const panelBaseClass = `flex items-center gap-1.5 px-3 py-2 rounded-xl border shadow-xl ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-white/[0.06]/95 border-white/[0.08] backdrop-blur-sm'}`;
   const panelLabelClass = `text-xs font-medium ${isMonochrome ? 'text-gray-700' : 'text-[#ccc]'}`;
   const panelSmallLabelClass = `text-xs ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`;
   const panelDividerClass = `w-px h-4 ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'} mx-1`;
   const panelBtnClass = `px-3 py-1.5 text-xs font-medium bg-[#d4af37] text-black rounded-lg hover:bg-[#e5c049] transition-colors`;
-  const panelCancelBtnClass = `px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-[#252525] text-[#999] hover:bg-[#333]'}`;
-  const panelInputClass = `w-16 px-2 py-1 text-xs rounded-lg border text-center ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-[#111] border-[#333] text-white'}`;
+  const panelCancelBtnClass = `px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-[#252525] text-[#999] hover:bg-white/[0.12]'}`;
+  const panelInputClass = `w-16 px-2 py-1 text-xs rounded-lg border text-center ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-white/[0.04] border-white/[0.08] text-white'}`;
 
   // Get toolbar position for selected image
   const getToolbarPosition = () => {
@@ -5871,7 +5871,7 @@ export function InfiniteCanvas({
               className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium shadow-lg border transition-all ${
                 isMonochrome
                   ? 'bg-white/80 border-gray-200/80 text-gray-500'
-                  : 'bg-[#1a1a1a]/90 border-[#2a2a2a]/80 text-[#666]'
+                  : 'bg-white/[0.06]/90 border-white/[0.06]/80 text-[#666]'
               }`}
               title="展开工具栏"
             >
@@ -5891,7 +5891,7 @@ export function InfiniteCanvas({
                   ? 'bg-[#d4af37]/20 border-[#d4af37]/50 text-[#d4af37] hover:bg-[#d4af37]/30'
                   : isMonochrome
                     ? 'bg-white/80 border-gray-200/80 text-gray-500 hover:text-gray-700 hover:bg-white/90'
-                    : 'bg-[#1a1a1a]/90 border-[#2a2a2a]/80 text-[#666] hover:text-[#999] hover:bg-[#222]'
+                    : 'bg-white/[0.06]/90 border-white/[0.06]/80 text-[#666] hover:text-[#999] hover:bg-white/[0.08]'
               }`}
               title="Oh My Prompt - 提示词管理与图片识词"
             >
@@ -5909,7 +5909,7 @@ export function InfiniteCanvas({
                   ? 'bg-[#d4af37]/20 border-[#d4af37]/50 text-[#d4af37] hover:bg-[#d4af37]/30'
                   : isMonochrome
                     ? 'bg-white/80 border-gray-200/80 text-gray-500 hover:text-gray-700 hover:bg-white/90'
-                    : 'bg-[#1a1a1a]/90 border-[#2a2a2a]/80 text-[#666] hover:text-[#999] hover:bg-[#222]'
+                    : 'bg-white/[0.06]/90 border-white/[0.06]/80 text-[#666] hover:text-[#999] hover:bg-white/[0.08]'
               }`}
               title="Ctrl+Click 画布图片选择参考融合"
             >
@@ -5927,7 +5927,7 @@ export function InfiniteCanvas({
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-lg border ${
                 isMonochrome
                   ? 'bg-white/80 border-gray-200/80 text-gray-500 hover:text-gray-700 hover:bg-white/90'
-                  : 'bg-[#1a1a1a]/90 border-[#2a2a2a]/80 text-[#666] hover:text-[#999] hover:bg-[#222]'
+                  : 'bg-white/[0.06]/90 border-white/[0.06]/80 text-[#666] hover:text-[#999] hover:bg-white/[0.08]'
               }`}
               title="设置"
             >
@@ -5943,7 +5943,7 @@ export function InfiniteCanvas({
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-lg border ${
                 isMonochrome
                   ? 'bg-white/80 border-gray-200/80 text-gray-500 hover:text-gray-700 hover:bg-white/90'
-                  : 'bg-[#1a1a1a]/90 border-[#2a2a2a]/80 text-[#666] hover:text-[#999] hover:bg-[#222]'
+                  : 'bg-white/[0.06]/90 border-white/[0.06]/80 text-[#666] hover:text-[#999] hover:bg-white/[0.08]'
               }`}
               title="UI 主题切换"
             >
@@ -5956,7 +5956,7 @@ export function InfiniteCanvas({
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-lg border ${
                 isMonochrome
                   ? 'bg-white/80 border-gray-200/80 text-gray-500 hover:text-gray-700 hover:bg-white/90'
-                  : 'bg-[#1a1a1a]/90 border-[#2a2a2a]/80 text-[#666] hover:text-[#999] hover:bg-[#222]'
+                  : 'bg-white/[0.06]/90 border-white/[0.06]/80 text-[#666] hover:text-[#999] hover:bg-white/[0.08]'
               }`}
               title="用户管理"
             >
@@ -5969,7 +5969,7 @@ export function InfiniteCanvas({
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-lg border ${
                 isMonochrome
                   ? 'bg-white/80 border-gray-200/80 text-gray-500 hover:text-gray-700 hover:bg-white/90'
-                  : 'bg-[#1a1a1a]/90 border-[#2a2a2a]/80 text-[#666] hover:text-[#999] hover:bg-[#222]'
+                  : 'bg-white/[0.06]/90 border-white/[0.06]/80 text-[#666] hover:text-[#999] hover:bg-white/[0.08]'
               }`}
               title="项目数据"
             >
@@ -5982,7 +5982,7 @@ export function InfiniteCanvas({
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-lg border ${
                   isMonochrome
                     ? 'bg-white/80 border-gray-200/80 text-gray-500 hover:text-gray-700 hover:bg-white/90'
-                    : 'bg-[#1a1a1a]/90 border-[#d4af37]/30 text-[#d4af37] hover:bg-[#222]'
+                    : 'bg-white/[0.06]/90 border-[#d4af37]/30 text-[#d4af37] hover:bg-white/[0.08]'
                 }`}
                 title="管理员系统"
               >
@@ -5996,7 +5996,7 @@ export function InfiniteCanvas({
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-lg border ${
                 isMonochrome
                   ? 'bg-white/80 border-gray-200/80 text-gray-500 hover:text-gray-700 hover:bg-white/90'
-                  : 'bg-[#1a1a1a]/90 border-[#2a2a2a]/80 text-[#666] hover:text-[#999] hover:bg-[#222]'
+                  : 'bg-white/[0.06]/90 border-white/[0.06]/80 text-[#666] hover:text-[#999] hover:bg-white/[0.08]'
               }`}
               title="使用说明"
             >
@@ -6082,10 +6082,10 @@ export function InfiniteCanvas({
             <div className="text-center space-y-4 max-w-xs">
               <div className={`text-2xl font-light ${isMonochrome ? 'text-gray-400' : 'text-gray-300'}`}>无限画布</div>
               <div className="flex items-center justify-center gap-3 pointer-events-auto">
-                <button onClick={() => setShowHelpModal('instructions')} className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-all border ${isMonochrome ? 'text-gray-600 border-gray-200 hover:text-gray-900 hover:border-gray-400' : 'text-[#888] border-[#2a2a2a] hover:text-[#d4af37] hover:border-[#d4af37]/40'}`}>
+                <button onClick={() => setShowHelpModal('instructions')} className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-all border ${isMonochrome ? 'text-gray-600 border-gray-200 hover:text-gray-900 hover:border-gray-400' : 'text-[#888] border-white/[0.06] hover:text-[#d4af37] hover:border-[#d4af37]/40'}`}>
                   <Info size={14} /> 操作说明
                 </button>
-                <button onClick={() => setShowHelpModal('updates')} className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-all border ${isMonochrome ? 'text-gray-600 border-gray-200 hover:text-gray-900 hover:border-gray-400' : 'text-[#888] border-[#2a2a2a] hover:text-[#d4af37] hover:border-[#d4af37]/40'}`}>
+                <button onClick={() => setShowHelpModal('updates')} className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-all border ${isMonochrome ? 'text-gray-600 border-gray-200 hover:text-gray-900 hover:border-gray-400' : 'text-[#888] border-white/[0.06] hover:text-[#d4af37] hover:border-[#d4af37]/40'}`}>
                   <FileText size={14} /> 更新内容
                 </button>
               </div>
@@ -6128,7 +6128,7 @@ export function InfiniteCanvas({
               >
                 {/* Title bar */}
                 <div
-                  className={`flex items-center gap-2 px-3 ${isMonochrome ? 'bg-amber-50/80' : 'bg-[#1a1a1a]/90'} rounded-t-lg h-[36px] select-none ${groupDragTarget === group.id && groupDragReadyRef.current ? 'cursor-grabbing' : 'cursor-grab'}`}
+                  className={`flex items-center gap-2 px-3 ${isMonochrome ? 'bg-amber-50/80' : 'bg-white/[0.06]/90'} rounded-t-lg h-[36px] select-none ${groupDragTarget === group.id && groupDragReadyRef.current ? 'cursor-grabbing' : 'cursor-grab'}`}
                   onClick={(e) => { e.stopPropagation(); }}
                   onDoubleClick={() => {
                     if (editingGroupId === group.id) return; // already editing
@@ -6199,7 +6199,7 @@ export function InfiniteCanvas({
                 {isEditing && (
                   <div className="px-3 py-1">
                     <input
-                      className={`w-full text-xs bg-transparent border-b outline-none ${isMonochrome ? 'text-gray-500 border-gray-200' : 'text-[#888] border-[#333]'}`}
+                      className={`w-full text-xs bg-transparent border-b outline-none ${isMonochrome ? 'text-gray-500 border-gray-200' : 'text-[#888] border-white/[0.08]'}`}
                       placeholder="添加备注..."
                       value={groupEditNote}
                       onChange={(e) => setGroupEditNote(e.target.value)}
@@ -6265,7 +6265,7 @@ export function InfiniteCanvas({
                 }}
               >
                 {image.isProcessingPlaceholder && image.processing ? (
-                  <div className={`relative w-full h-full overflow-hidden border ${isMonochrome ? 'border-gray-200 bg-gray-100' : 'border-[#2a2a2a] bg-[#0f0f0f]'}`}>
+                  <div className={`relative w-full h-full overflow-hidden border ${isMonochrome ? 'border-gray-200 bg-gray-100' : 'border-white/[0.06] bg-[#0f0f0f]'}`}>
                     <img
                       src={image.processing.sourceUrl || image.url}
                       alt=""
@@ -7011,7 +7011,7 @@ export function InfiniteCanvas({
                     <div className="relative">
                       <span className="text-xs font-medium shrink-0 mb-1 block" style={{ color: `${accentColor}cc` }}>模型</span>
                       <button
-                        className={`w-full text-left text-sm px-2.5 py-1.5 rounded-lg border flex items-center justify-between ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#1f1f1f] border-[#444] text-[#ddd]'}`}
+                        className={`w-full text-left text-sm px-2.5 py-1.5 rounded-lg border flex items-center justify-between ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#1f1f1f] border-white/[0.10] text-[#ddd]'}`}
                         onMouseDown={(e) => { e.stopPropagation(); }}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -7025,7 +7025,7 @@ export function InfiniteCanvas({
                       {openModelDropdownGroupId === group.id && (
                         <div
                           className="absolute left-0 right-0 top-full mt-1 rounded-lg shadow-xl overflow-hidden z-50 max-h-64 overflow-y-auto"
-                          style={{ background: isMonochrome ? '#fff' : '#1a1a1a', border: isMonochrome ? '1px solid #ddd' : '1px solid #444' }}
+                          style={{ background: isMonochrome ? '#fff' : 'rgba(255,255,255,0.06)', border: isMonochrome ? '1px solid #ddd' : '1px solid rgba(255,255,255,0.10)', backdropFilter: isMonochrome ? 'none' : 'blur(24px)', WebkitBackdropFilter: isMonochrome ? 'none' : 'blur(24px)' }}
                           onMouseDown={(e) => e.stopPropagation()}
                         >
                           {canvasGenModels.map((m, mi) => {
@@ -7067,7 +7067,7 @@ export function InfiniteCanvas({
                       return (
                     <div className="flex items-center gap-2">
                       <select
-                        className={`flex-1 text-sm px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#1f1f1f] border-[#444] text-[#ddd]'}`}
+                        className={`flex-1 text-sm px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#1f1f1f] border-white/[0.10] text-[#ddd]'}`}
                         value={group.toolbar.aspectRatio}
                         onChange={(e) => {
                           const newAr = e.target.value;
@@ -7082,7 +7082,7 @@ export function InfiniteCanvas({
                         ))}
                       </select>
                       <select
-                        className={`text-sm px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#1f1f1f] border-[#444] text-[#ddd]'}`}
+                        className={`text-sm px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#1f1f1f] border-white/[0.10] text-[#ddd]'}`}
                         value={group.toolbar.quality}
                         onChange={(e) => {
                           const newQ = e.target.value;
@@ -7097,7 +7097,7 @@ export function InfiniteCanvas({
                         ))}
                       </select>
                       <select
-                        className={`text-sm px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#1f1f1f] border-[#444] text-[#ddd]'}`}
+                        className={`text-sm px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-[#1f1f1f] border-white/[0.10] text-[#ddd]'}`}
                         value={group.toolbar.outputCount || group.toolbar.n || 1}
                         onChange={(e) => {
                           const val = Number(e.target.value);
@@ -7119,7 +7119,7 @@ export function InfiniteCanvas({
                     {/* Row 3: Prompt textarea with resize handle */}
                     <div className="relative">
                       <textarea
-                        className={`w-full text-sm px-3 py-2 pr-10 rounded-lg border resize-y min-h-[60px] max-h-[160px] ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700 placeholder:text-gray-400 focus:ring-amber-400/30' : 'bg-[#1f1f1f] border-[#444] text-[#ddd] placeholder:text-[#666] focus:ring-[#d4af37]/30'} focus:outline-none focus:ring-2 transition-all`}
+                        className={`w-full text-sm px-3 py-2 pr-10 rounded-lg border resize-y min-h-[60px] max-h-[160px] ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700 placeholder:text-gray-400 focus:ring-amber-400/30' : 'bg-[#1f1f1f] border-white/[0.10] text-[#ddd] placeholder:text-[#666] focus:ring-[#d4af37]/30'} focus:outline-none focus:ring-2 transition-all`}
                         placeholder={isRef ? '描述你想要生成的图片，用自然语言说明如何参考以上图片...' : '描述你想要融合生成的图片效果...'}
                         value={group.toolbar.prompt}
                         rows={2}
@@ -7145,7 +7145,7 @@ export function InfiniteCanvas({
                     {/* Row 4: Optimize + Generate + Cancel */}
                     <div className="flex items-center gap-2">
                       <button
-                        className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${isMonochrome ? 'bg-gray-100 hover:bg-gray-200 text-gray-600' : 'bg-[#252525] hover:bg-[#333] text-[#aaa]'}`}
+                        className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${isMonochrome ? 'bg-gray-100 hover:bg-gray-200 text-gray-600' : 'bg-[#252525] hover:bg-white/[0.12] text-[#aaa]'}`}
                         onClick={() => handleOptimizeGroupPrompt(group.id)}
                         disabled={optimizingGroupId === group.id || !group.toolbar.prompt.trim()}
                         title="调用AI优化提示词"
@@ -7166,7 +7166,7 @@ export function InfiniteCanvas({
                         {group.resultPlaceholder.isProcessing ? '生成中...' : '生成'}
                       </button>
                       <button
-                        className={`px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${isMonochrome ? 'bg-gray-100 hover:bg-gray-200 text-gray-500' : 'bg-[#252525] hover:bg-[#333] text-[#888]'}`}
+                        className={`px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${isMonochrome ? 'bg-gray-100 hover:bg-gray-200 text-gray-500' : 'bg-[#252525] hover:bg-white/[0.12] text-[#888]'}`}
                         onClick={() => deleteGenGroup(group.id)}
                         title="取消并删除组"
                       >
@@ -7300,14 +7300,14 @@ export function InfiniteCanvas({
                   <button
                     onClick={(e) => { e.stopPropagation(); setShowUpscalePresetMenu(!showUpscalePresetMenu); }}
                     className={`px-2.5 py-1 text-xs rounded-md transition-all flex items-center gap-1 font-semibold ${
-                      isMonochrome ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-[#252525] text-[#ccc] hover:bg-[#333]'
+                      isMonochrome ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-[#252525] text-[#ccc] hover:bg-white/[0.12]'
                     }`}
                   >
                     {upscalePreset === '2k' ? '2×' : upscalePreset === '4k' ? '4×' : '8×'}
                     <ChevronDown size={10} />
                   </button>
                   {showUpscalePresetMenu && (
-                    <div className={`absolute top-full left-0 mt-1 py-1 rounded-lg border shadow-xl z-50 min-w-[100px] ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#333]'}`}>
+                    <div className={`absolute top-full left-0 mt-1 py-1 rounded-lg border shadow-xl z-50 min-w-[100px] ${isMonochrome ? 'bg-white border-gray-200' : 'bg-white/[0.06] border-white/[0.08]'}`}>
                       {(['2k', '4k', '8k'] as const).map(p => {
                         const pMul = p === '2k' ? 2 : p === '4k' ? 4 : 8;
                         const pTarget = getUpscaleTargetDimensions(origW, origH, p);
@@ -7375,7 +7375,7 @@ export function InfiniteCanvas({
             >
               <div
                 className="flex flex-col items-stretch gap-2.5 p-3 min-w-[280px] max-w-[320px] rounded-xl border shadow-2xl"
-                style={{ background: '#1a1a1a', borderColor: `${activeAccent}40`, borderWidth: '1px' }}
+                style={{ background: 'rgba(255,255,255,0.06)', borderColor: `${activeAccent}40`, borderWidth: '1px', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)' }}
                 onMouseDown={(e) => e.stopPropagation()}
               >
                 {/* Header */}
@@ -7499,7 +7499,7 @@ export function InfiniteCanvas({
                     </div>
 
                     {/* Fine-tuning sliders (override preset values) */}
-                    <div className="border-t border-[#333] pt-2 mt-1">
+                    <div className="border-t border-white/[0.08] pt-2 mt-1">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-[10px] text-[#666]">精细调节（覆盖预设值）</span>
                       </div>
@@ -7620,14 +7620,14 @@ export function InfiniteCanvas({
                         <input type="number" min={16} max={4096} value={svgTraceThumbWidth}
                           onChange={e => setSvgTraceThumbWidth(Math.max(16, Number(e.target.value)))}
                           onClick={e => e.stopPropagation()}
-                          className="w-full mt-1 px-2 py-1 rounded text-xs tabular-nums border bg-[#111] border-[#333] text-[#ccc]" />
+                          className="w-full mt-1 px-2 py-1 rounded text-xs tabular-nums border bg-white/[0.04] border-white/[0.08] text-[#ccc]" />
                       </div>
                       <div>
                         <label className="text-xs text-[#aaa]">高度</label>
                         <input type="number" min={16} max={4096} value={svgTraceThumbHeight}
                           onChange={e => setSvgTraceThumbHeight(Math.max(16, Number(e.target.value)))}
                           onClick={e => e.stopPropagation()}
-                          className="w-full mt-1 px-2 py-1 rounded text-xs tabular-nums border bg-[#111] border-[#333] text-[#ccc]" />
+                          className="w-full mt-1 px-2 py-1 rounded text-xs tabular-nums border bg-white/[0.04] border-white/[0.08] text-[#ccc]" />
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5">
@@ -7693,7 +7693,7 @@ export function InfiniteCanvas({
                   <button
                     onClick={(e) => { e.stopPropagation(); exitEditMode(); }}
                     className="px-3 py-1.5 rounded-lg text-xs border transition-all"
-                    style={{ background: '#252520', color: '#999', borderColor: '#444' }}
+                    style={{ background: 'rgba(255,255,255,0.08)', color: '#999', borderColor: '#444' }}
                   >
                     取消
                   </button>
@@ -7737,11 +7737,11 @@ export function InfiniteCanvas({
               <div className="absolute inset-0 bg-black/40" onClick={exitEditMode} />
               {/* Window */}
               <div
-                className={`relative rounded-2xl border shadow-2xl overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-300' : 'bg-[#1a1a1a] border-[#2a2a2a]'}`}
+                className={`relative rounded-2xl border shadow-2xl overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-300' : 'bg-white/[0.06] border-white/[0.06]'}`}
                 style={{ width: winW, height: winH, cursor: 'default' }}
               >
                 {/* Title bar */}
-                <div className={`flex items-center justify-between px-4 py-2.5 border-b ${isMonochrome ? 'border-gray-200 bg-white' : 'border-[#2a2a2a] bg-[#111]'}`}>
+                <div className={`flex items-center justify-between px-4 py-2.5 border-b ${isMonochrome ? 'border-gray-200 bg-white' : 'border-white/[0.06] bg-white/[0.04]'}`}>
                   <div className="flex items-center gap-2">
                     {isErase ? <Paintbrush size={14} className="text-[#d4af37]" /> : <Wand2 size={14} className="text-[#d4af37]" />}
                     <span className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>
@@ -7751,7 +7751,7 @@ export function InfiniteCanvas({
                       涂抹区域后点击&apos;开始修复&apos; · Shift+左键擦除涂抹
                     </span>
                   </div>
-                  <button onClick={exitEditMode} className={`p-1 rounded-lg transition-colors ${isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-[#666] hover:text-white hover:bg-[#333]'}`}>
+                  <button onClick={exitEditMode} className={`p-1 rounded-lg transition-colors ${isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-[#666] hover:text-white hover:bg-white/[0.12]'}`}>
                     <X size={16} />
                   </button>
                 </div>
@@ -7967,7 +7967,7 @@ export function InfiniteCanvas({
                       />
                     </div>
                     {/* Zoom controls overlay */}
-                    <div className={`absolute bottom-3 left-3 flex items-center gap-1 px-2 py-1 rounded-lg text-xs ${isMonochrome ? 'bg-white/80 text-gray-600' : 'bg-[#111]/80 text-[#999]'}`} style={{ cursor: 'default' }}>
+                    <div className={`absolute bottom-3 left-3 flex items-center gap-1 px-2 py-1 rounded-lg text-xs ${isMonochrome ? 'bg-white/80 text-gray-600' : 'bg-white/[0.04]/80 text-[#999]'}`} style={{ cursor: 'default' }}>
                       <button onClick={(e) => { e.stopPropagation(); setEditCanvasZoom(z => Math.max(0.25, z / 1.2)); }} className="p-0.5 hover:text-[#d4af37]"><Minus size={12} /></button>
                       <span className="w-10 text-center tabular-nums">{Math.round(editCanvasZoom * 100)}%</span>
                       <button onClick={(e) => { e.stopPropagation(); setEditCanvasZoom(z => Math.min(5, z * 1.2)); }} className="p-0.5 hover:text-[#d4af37]"><Plus size={12} /></button>
@@ -7976,7 +7976,7 @@ export function InfiniteCanvas({
                     </div>
 
                   {/* Right: Sidebar controls */}
-                  <div className={`flex flex-col border-l ${isMonochrome ? 'border-gray-200 bg-white' : 'border-[#2a2a2a] bg-[#111]'}`} style={{ width: sidebarW }}>
+                  <div className={`flex flex-col border-l ${isMonochrome ? 'border-gray-200 bg-white' : 'border-white/[0.06] bg-white/[0.04]'}`} style={{ width: sidebarW }}>
                     {/* Brush mode toggle */}
                     <div className="px-3 pt-3 pb-2">
                       <div className="flex gap-1">
@@ -7987,7 +7987,7 @@ export function InfiniteCanvas({
                               ? 'bg-[#d4af37] text-black font-medium'
                               : isMonochrome
                                 ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                                : 'bg-[#252525] text-[#999] hover:bg-white/[0.12]'
                           }`}
                         >
                           <Paintbrush size={12} />
@@ -8000,7 +8000,7 @@ export function InfiniteCanvas({
                               ? 'bg-[#d4af37] text-black font-medium'
                               : isMonochrome
                                 ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                                : 'bg-[#252525] text-[#999] hover:bg-white/[0.12]'
                           }`}
                         >
                           <Eraser size={12} />
@@ -8044,7 +8044,7 @@ export function InfiniteCanvas({
                                   ? 'bg-[#d4af37] text-black font-medium'
                                   : isMonochrome
                                     ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                    : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                                    : 'bg-[#252525] text-[#999] hover:bg-white/[0.12]'
                               }`}
                             >
                               <span className="font-medium">{m.label}</span>
@@ -8077,7 +8077,7 @@ export function InfiniteCanvas({
                             ? 'opacity-40 cursor-not-allowed'
                             : isMonochrome
                               ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                              : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                              : 'bg-[#252525] text-[#999] hover:bg-white/[0.12]'
                         }`}
                       >
                         <RotateCcw size={12} />
@@ -8096,7 +8096,7 @@ export function InfiniteCanvas({
                             ? 'opacity-40 cursor-not-allowed'
                             : isMonochrome
                               ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                              : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                              : 'bg-[#252525] text-[#999] hover:bg-white/[0.12]'
                         }`}
                       >
                         <Trash2 size={12} />
@@ -8116,7 +8116,7 @@ export function InfiniteCanvas({
                           className={`w-full px-2.5 py-2 text-xs rounded-xl border resize-none ${
                             isMonochrome
                               ? 'bg-gray-50 border-gray-200 text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#d4af37]/30'
-                              : 'bg-[#0a0a0a] border-[#2a2a2a] text-white placeholder:text-[#555] focus:outline-none focus:ring-2 focus:ring-[#d4af37]/30'
+                              : 'bg-black/[0.3] border-white/[0.06] text-white placeholder:text-[#555] focus:outline-none focus:ring-2 focus:ring-[#d4af37]/30'
                           }`}
                         />
                       </div>
@@ -8155,14 +8155,14 @@ export function InfiniteCanvas({
           return (
             <div className="fixed inset-0 z-[200] flex items-center justify-center" onMouseDown={(e) => e.stopPropagation()}>
               <div className="absolute inset-0 bg-black/40" onClick={() => setShowRemoveBgPicker(false)} />
-              <div className={`relative rounded-2xl border shadow-2xl overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-300' : 'bg-[#1a1a1a] border-[#2a2a2a]'}`} style={{ width: 420, maxHeight: '80vh' }}>
+              <div className={`relative rounded-2xl border shadow-2xl overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-300' : 'bg-white/[0.06] border-white/[0.06]'}`} style={{ width: 420, maxHeight: '80vh' }}>
                 {/* Title */}
-                <div className={`flex items-center justify-between px-4 py-3 border-b ${isMonochrome ? 'border-gray-200 bg-white' : 'border-[#2a2a2a] bg-[#111]'}`}>
+                <div className={`flex items-center justify-between px-4 py-3 border-b ${isMonochrome ? 'border-gray-200 bg-white' : 'border-white/[0.06] bg-white/[0.04]'}`}>
                   <div className="flex items-center gap-2">
                     <Eraser size={14} className="text-[#d4af37]" />
                     <span className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>选择去背景模型</span>
                   </div>
-                  <button onClick={() => setShowRemoveBgPicker(false)} className={`p-1 rounded-lg transition-colors ${isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-[#666] hover:text-white hover:bg-[#333]'}`}>
+                  <button onClick={() => setShowRemoveBgPicker(false)} className={`p-1 rounded-lg transition-colors ${isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-[#666] hover:text-white hover:bg-white/[0.12]'}`}>
                     <X size={16} />
                   </button>
                 </div>
@@ -8177,7 +8177,7 @@ export function InfiniteCanvas({
                           ? 'bg-[#d4af37] text-black'
                           : isMonochrome
                             ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                            : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                            : 'bg-[#252525] text-[#999] hover:bg-white/[0.12]'
                       }`}
                     >
                       <div className="flex-1 min-w-0">
@@ -8204,7 +8204,7 @@ export function InfiniteCanvas({
                   ))}
                 </div>
                 {/* Footer with confirm */}
-                <div className={`px-4 py-3 border-t ${isMonochrome ? 'border-gray-200 bg-white' : 'border-[#2a2a2a] bg-[#111]'}`}>
+                <div className={`px-4 py-3 border-t ${isMonochrome ? 'border-gray-200 bg-white' : 'border-white/[0.06] bg-white/[0.04]'}`}>
                   <div className="flex items-center gap-2 mb-2">
                     <span className={`text-xs ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>当前选择:</span>
                     <span className={`text-xs font-medium ${isMonochrome ? 'text-gray-800' : 'text-[#d4af37]'}`}>
@@ -8547,7 +8547,7 @@ export function InfiniteCanvas({
                         key={r.label}
                         onClick={() => handleExpandToRatio(r.w, r.h)}
                         className={`px-2 py-1 text-xs rounded-md transition-all ${
-                          isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                          isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-[#252525] text-[#999] hover:bg-white/[0.12]'
                         }`}
                       >
                         {r.label}
@@ -8560,7 +8560,7 @@ export function InfiniteCanvas({
                     <button
                       onClick={() => handleExpandEqualPadding(256)}
                       className={`px-2 py-1 text-xs rounded-md transition-all ${
-                        isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                        isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-[#252525] text-[#999] hover:bg-white/[0.12]'
                       }`}
                     >
                       +256
@@ -8568,7 +8568,7 @@ export function InfiniteCanvas({
                     <button
                       onClick={() => handleExpandEqualPadding(512)}
                       className={`px-2 py-1 text-xs rounded-md transition-all ${
-                        isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                        isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-[#252525] text-[#999] hover:bg-white/[0.12]'
                       }`}
                     >
                       +512
@@ -8618,7 +8618,7 @@ export function InfiniteCanvas({
                           ? 'bg-[#d4af37] text-black font-medium'
                           : isMonochrome
                             ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                            : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                            : 'bg-[#252525] text-[#999] hover:bg-white/[0.12]'
                       }`}
                     >
                       自由
@@ -8632,7 +8632,7 @@ export function InfiniteCanvas({
                             ? 'bg-[#d4af37] text-black font-medium'
                             : isMonochrome
                               ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                              : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                              : 'bg-[#252525] text-[#999] hover:bg-white/[0.12]'
                         }`}
                       >
                         {r}
@@ -8641,12 +8641,12 @@ export function InfiniteCanvas({
                     <div className="relative">
                       <button
                         onClick={(e) => { e.stopPropagation(); setShowCropRatios(!showCropRatios); }}
-                        className={`px-2 py-1 text-xs rounded-md transition-all ${isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-[#252525] text-[#999] hover:bg-[#333]'}`}
+                        className={`px-2 py-1 text-xs rounded-md transition-all ${isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-[#252525] text-[#999] hover:bg-white/[0.12]'}`}
                       >
                         <ChevronDown size={10} />
                       </button>
                       {showCropRatios && (
-                        <div className={`absolute top-full left-0 mt-1 py-1 rounded-lg border shadow-xl z-50 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#333]'}`}>
+                        <div className={`absolute top-full left-0 mt-1 py-1 rounded-lg border shadow-xl z-50 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-white/[0.06] border-white/[0.08]'}`}>
                           {ratioOptions.slice(4).map(r => (
                             <button key={r} onClick={(e) => { e.stopPropagation(); setCropRatio(r); setShowCropRatios(false); }} className={`w-full px-3 py-1.5 text-xs text-left hover:bg-[#d4af37]/10 ${cropRatio === r ? 'text-[#d4af37]' : isMonochrome ? 'text-gray-600' : 'text-[#ccc]'}`}>
                               {r} {cropRatio === r && '✓'}
@@ -8710,7 +8710,7 @@ export function InfiniteCanvas({
             >
               <div
                 className="flex flex-col items-stretch gap-2 p-3 min-w-[300px] rounded-xl border shadow-2xl"
-                style={{ background: '#1a1a1a', borderColor: '#d4af3740', borderWidth: '1px' }}
+                style={{ background: 'rgba(255,255,255,0.06)', borderColor: '#d4af3740', borderWidth: '1px', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)' }}
                 onMouseDown={(e) => e.stopPropagation()}
               >
                 {/* Header */}
@@ -8726,7 +8726,7 @@ export function InfiniteCanvas({
                     const strength = img2imgStrengths[cat] ?? 50;
                     const isActive = activeCategories.has(cat);
                     return (
-                      <div key={cat} className="flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all" style={{ background: isActive ? '#252520' : 'transparent' }}>
+                      <div key={cat} className="flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all" style={{ background: isActive ? 'rgba(212,175,55,0.15)' : 'transparent' }}>
                         {/* Toggle Button */}
                         <button
                           onClick={(e) => {
@@ -8787,7 +8787,7 @@ export function InfiniteCanvas({
                     placeholder="输入关键词描述你想要的效果，如：蒙娜丽莎"
                     rows={2}
                     className="w-full px-2.5 py-1.5 text-xs rounded-lg border-none outline-none focus:ring-1 focus:ring-[#d4af37]/50 resize-y min-h-[36px] max-h-[120px]"
-                    style={{ background: '#252520', color: '#e0e0e0' }}
+                    style={{ background: 'rgba(255,255,255,0.08)', color: '#e0e0e0' }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.nativeEvent.isComposing && !e.shiftKey) {
                         e.preventDefault();
@@ -8805,7 +8805,7 @@ export function InfiniteCanvas({
                       if (selectedImageData?.prompt) setImg2imgKeyword(selectedImageData.prompt);
                     }}
                     className="flex-1 py-1 text-xs rounded-lg transition-all text-left px-2 truncate"
-                    style={{ background: '#252520', color: '#999', borderLeft: '2px solid #d4af37' }}
+                    style={{ background: 'rgba(255,255,255,0.08)', color: '#999', borderLeft: '2px solid #d4af37' }}
                     onMouseEnter={(e) => { (e.target as HTMLButtonElement).style.color = '#d4af37'; }}
                     onMouseLeave={(e) => { (e.target as HTMLButtonElement).style.color = '#999'; }}
                   >
@@ -8820,7 +8820,7 @@ export function InfiniteCanvas({
                       }
                     }}
                     className="flex-1 py-1 text-xs rounded-lg transition-all text-left px-2 truncate"
-                    style={{ background: '#252520', color: img2imgShowNegative ? '#d4af37' : '#999', borderLeft: img2imgShowNegative ? '2px solid #d4af37' : '2px solid #555' }}
+                    style={{ background: 'rgba(255,255,255,0.08)', color: img2imgShowNegative ? '#d4af37' : '#999', borderLeft: img2imgShowNegative ? '2px solid #d4af37' : '2px solid rgba(255,255,255,0.20)' }}
                     onMouseEnter={(e) => { (e.target as HTMLButtonElement).style.color = '#d4af37'; }}
                     onMouseLeave={(e) => { (e.target as HTMLButtonElement).style.color = img2imgShowNegative ? '#d4af37' : '#999'; }}
                   >
@@ -8837,7 +8837,7 @@ export function InfiniteCanvas({
                       placeholder="输入不想出现的元素，如: 模糊, 变形, 水印..."
                       rows={2}
                       className="w-full px-2.5 py-1.5 text-xs rounded-lg border-none outline-none focus:ring-1 focus:ring-red-500/50 resize-y min-h-[36px] max-h-[120px]"
-                      style={{ background: '#252520', color: '#e0e0e0', borderLeft: '2px solid #ef4444' }}
+                      style={{ background: 'rgba(255,255,255,0.08)', color: '#e0e0e0', borderLeft: '2px solid #ef4444' }}
                     />
                   </div>
                 )}
@@ -8879,7 +8879,7 @@ export function InfiniteCanvas({
                   </button>
                 </div>
 
-                <div className={`grid grid-cols-2 gap-1 p-1 rounded-xl ${isMonochrome ? 'bg-gray-100' : 'bg-[#111]'}`}>
+                <div className={`grid grid-cols-2 gap-1 p-1 rounded-xl ${isMonochrome ? 'bg-gray-100' : 'bg-white/[0.04]'}`}>
                   {([
                     { mode: 'image' as const, label: '主体', icon: <Sparkles size={12} /> },
                     { mode: 'camera' as const, label: '摄像头', icon: <Camera size={12} /> },
@@ -8922,23 +8922,23 @@ export function InfiniteCanvas({
                           <img src={selectedImageData.url} alt="front" className="w-full h-full object-cover" />
                         </div>
                         {/* Back face */}
-                        <div className={`absolute inset-0 rounded-lg border flex items-center justify-center ${isMonochrome ? 'bg-gray-200 border-gray-300' : 'bg-[#1a1a1a] border-[#333]'}`} style={{ transform: 'rotateY(180deg) translateZ(55px)' }}>
+                        <div className={`absolute inset-0 rounded-lg border flex items-center justify-center ${isMonochrome ? 'bg-gray-200 border-gray-300' : 'bg-white/[0.06] border-white/[0.08]'}`} style={{ transform: 'rotateY(180deg) translateZ(55px)' }}>
                           <span className={`text-xs ${isMonochrome ? 'text-gray-500' : 'text-[#555]'}`}>背面</span>
                         </div>
                         {/* Right face */}
-                        <div className={`absolute inset-0 rounded-lg border flex items-center justify-center ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-[#2a2a2a]'}`} style={{ transform: 'rotateY(90deg) translateZ(55px)' }}>
+                        <div className={`absolute inset-0 rounded-lg border flex items-center justify-center ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-white/[0.06]'}`} style={{ transform: 'rotateY(90deg) translateZ(55px)' }}>
                           <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#444]'}`}>右侧</span>
                         </div>
                         {/* Left face */}
-                        <div className={`absolute inset-0 rounded-lg border flex items-center justify-center ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-[#2a2a2a]'}`} style={{ transform: 'rotateY(-90deg) translateZ(55px)' }}>
+                        <div className={`absolute inset-0 rounded-lg border flex items-center justify-center ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-white/[0.06]'}`} style={{ transform: 'rotateY(-90deg) translateZ(55px)' }}>
                           <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#444]'}`}>左侧</span>
                         </div>
                         {/* Top face */}
-                        <div className={`absolute inset-0 rounded-lg border flex items-center justify-center ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-[#2a2a2a]'}`} style={{ transform: 'rotateX(90deg) translateZ(55px)' }}>
+                        <div className={`absolute inset-0 rounded-lg border flex items-center justify-center ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-white/[0.06]'}`} style={{ transform: 'rotateX(90deg) translateZ(55px)' }}>
                           <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#444]'}`}>顶部</span>
                         </div>
                         {/* Bottom face */}
-                        <div className={`absolute inset-0 rounded-lg border flex items-center justify-center ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-[#2a2a2a]'}`} style={{ transform: 'rotateX(-90deg) translateZ(55px)' }}>
+                        <div className={`absolute inset-0 rounded-lg border flex items-center justify-center ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-white/[0.06]'}`} style={{ transform: 'rotateX(-90deg) translateZ(55px)' }}>
                           <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#444]'}`}>底部</span>
                         </div>
                       </div>
@@ -8961,7 +8961,7 @@ export function InfiniteCanvas({
                   )}
                 </div>
 
-                <div className={`text-xs leading-relaxed rounded-xl px-3 py-2 ${isMonochrome ? 'bg-gray-50 text-gray-500' : 'bg-[#0a0a0a] text-[#888]'}`}>
+                <div className={`text-xs leading-relaxed rounded-xl px-3 py-2 ${isMonochrome ? 'bg-gray-50 text-gray-500' : 'bg-black/[0.3] text-[#888]'}`}>
                   {multiAngleMode === 'image'
                     ? '主体模式：拖动立方体或调整滑块设定角度，AI 会推断隐藏侧面并生成转角后的摄影棚图。'
                     : '摄像头模式：拖动球体或调整滑块设定视角，AI 会移动虚拟相机生成新机位、俯仰和推进效果。'}
@@ -9003,7 +9003,7 @@ export function InfiniteCanvas({
                             ? 'bg-[#d4af37] text-black'
                             : isMonochrome
                               ? 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                              : 'bg-[#1a1a1a] text-[#888] hover:bg-[#222]'
+                              : 'bg-white/[0.06] text-[#888] hover:bg-white/[0.08]'
                         }`}
                       >
                         {label}
@@ -9058,7 +9058,7 @@ export function InfiniteCanvas({
                       className={`flex items-center justify-between px-3 py-2 rounded-lg transition-all text-left ${
                         downloadFormat === item.format
                           ? (isMonochrome ? 'bg-[#d4af37]/10 border border-[#d4af37]/30' : 'bg-[#d4af37]/10 border border-[#d4af37]/30')
-                          : (isMonochrome ? 'bg-gray-50 hover:bg-gray-100 border border-gray-100' : 'bg-[#111] hover:bg-[#1a1a1a] border border-[#2a2a2a]')
+                          : (isMonochrome ? 'bg-gray-50 hover:bg-gray-100 border border-gray-100' : 'bg-white/[0.04] hover:bg-white/[0.06] border border-white/[0.06]')
                       }`}
                     >
                       <div>
@@ -9072,7 +9072,7 @@ export function InfiniteCanvas({
 
                 {/* SVG Mode Selection */}
                 {downloadFormat === 'svg' && (
-                  <div className={`flex flex-col gap-1 pt-1 border-t ${isMonochrome ? 'border-gray-100' : 'border-[#2a2a2a]'}`}>
+                  <div className={`flex flex-col gap-1 pt-1 border-t ${isMonochrome ? 'border-gray-100' : 'border-white/[0.06]'}`}>
                     <span className={`text-xs font-medium ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>矢量化模式</span>
                     {([
                       { mode: 'pro' as const, label: 'Pro', desc: '分组优化，32色' },
@@ -9084,7 +9084,7 @@ export function InfiniteCanvas({
                         className={`flex items-center justify-between px-2 py-1.5 rounded-md transition-all text-left ${
                           svgMode === item.mode
                             ? (isMonochrome ? 'bg-[#d4af37]/10 border border-[#d4af37]/30' : 'bg-[#d4af37]/10 border border-[#d4af37]/30')
-                            : (isMonochrome ? 'bg-gray-50 hover:bg-gray-100 border border-transparent' : 'bg-[#111] hover:bg-[#1a1a1a] border border-transparent')
+                            : (isMonochrome ? 'bg-gray-50 hover:bg-gray-100 border border-transparent' : 'bg-white/[0.04] hover:bg-white/[0.06] border border-transparent')
                         }`}
                       >
                         <div>
@@ -9099,7 +9099,7 @@ export function InfiniteCanvas({
 
                 {/* PSD Mode Selection */}
                 {downloadFormat === 'psd' && (
-                  <div className={`flex flex-col gap-1 pt-1 border-t ${isMonochrome ? 'border-gray-100' : 'border-[#2a2a2a]'}`}>
+                  <div className={`flex flex-col gap-1 pt-1 border-t ${isMonochrome ? 'border-gray-100' : 'border-white/[0.06]'}`}>
                     <span className={`text-xs font-medium ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>分层模式</span>
                     {([
                       { mode: 'pro' as const, label: 'Pro', desc: '元素级分割+语义命名' },
@@ -9111,7 +9111,7 @@ export function InfiniteCanvas({
                         className={`flex items-center justify-between px-2 py-1.5 rounded-md transition-all text-left ${
                           psdMode === item.mode
                             ? (isMonochrome ? 'bg-[#d4af37]/10 border border-[#d4af37]/30' : 'bg-[#d4af37]/10 border border-[#d4af37]/30')
-                            : (isMonochrome ? 'bg-gray-50 hover:bg-gray-100 border border-transparent' : 'bg-[#111] hover:bg-[#1a1a1a] border border-transparent')
+                            : (isMonochrome ? 'bg-gray-50 hover:bg-gray-100 border border-transparent' : 'bg-white/[0.04] hover:bg-white/[0.06] border border-transparent')
                         }`}
                       >
                         <div>
@@ -9126,7 +9126,7 @@ export function InfiniteCanvas({
 
                 {/* 3D Format Selection */}
                 {downloadFormat === '3d' && selectedImageData?.threeDModelUrls && Object.keys(selectedImageData.threeDModelUrls).length > 0 && (
-                  <div className={`flex flex-col gap-1 pt-1 border-t ${isMonochrome ? 'border-gray-100' : 'border-[#2a2a2a]'}`}>
+                  <div className={`flex flex-col gap-1 pt-1 border-t ${isMonochrome ? 'border-gray-100' : 'border-white/[0.06]'}`}>
                     <span className={`text-xs font-medium ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>模型格式</span>
                     {Object.entries(selectedImageData.threeDModelUrls).map(([format, url]) => (
                       <button
@@ -9135,7 +9135,7 @@ export function InfiniteCanvas({
                         className={`flex items-center justify-between px-2 py-1.5 rounded-md transition-all text-left ${
                           threeDDownloadFormat === format
                             ? (isMonochrome ? 'bg-[#d4af37]/10 border border-[#d4af37]/30' : 'bg-[#d4af37]/10 border border-[#d4af37]/30')
-                            : (isMonochrome ? 'bg-gray-50 hover:bg-gray-100 border border-transparent' : 'bg-[#111] hover:bg-[#1a1a1a] border border-transparent')
+                            : (isMonochrome ? 'bg-gray-50 hover:bg-gray-100 border border-transparent' : 'bg-white/[0.04] hover:bg-white/[0.06] border border-transparent')
                         }`}
                       >
                         <div>
@@ -9150,7 +9150,7 @@ export function InfiniteCanvas({
 
                 {/* Progress */}
                 {downloadProgress && (
-                  <div className={`flex items-center gap-2 px-2 py-1.5 rounded-md ${isMonochrome ? 'bg-gray-50' : 'bg-[#111]'}`}>
+                  <div className={`flex items-center gap-2 px-2 py-1.5 rounded-md ${isMonochrome ? 'bg-gray-50' : 'bg-white/[0.04]'}`}>
                     <div className="w-3 h-3 border-2 border-[#d4af37] border-t-transparent rounded-full animate-spin" />
                     <span className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#999]'}`}>{downloadProgress}</span>
                   </div>
@@ -9196,8 +9196,8 @@ export function InfiniteCanvas({
                 }
               }}
             >
-              <div className={`w-[520px] max-h-[86vh] overflow-hidden rounded-2xl border shadow-2xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#111] border-[#2a2a2a]'}`}>
-                <div className={`flex items-center justify-between px-4 py-3 border-b ${isMonochrome ? 'border-gray-100' : 'border-[#2a2a2a]'}`}>
+              <div className={`w-[520px] max-h-[86vh] overflow-hidden rounded-2xl border shadow-2xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-white/[0.04] border-white/[0.06]'}`}>
+                <div className={`flex items-center justify-between px-4 py-3 border-b ${isMonochrome ? 'border-gray-100' : 'border-white/[0.06]'}`}>
                   <div className="flex items-center gap-2">
                     <Box size={16} className="text-[#d4af37]" />
                     <div>
@@ -9216,11 +9216,11 @@ export function InfiniteCanvas({
 
                 <div className="p-4 space-y-4 overflow-y-auto max-h-[70vh]">
                   {/* Source image thumbnail - larger display */}
-                  <div className={`rounded-2xl overflow-hidden flex items-center justify-center p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-[#0a0a0a]'}`}>
+                  <div className={`rounded-2xl overflow-hidden flex items-center justify-center p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-black/[0.3]'}`}>
                     <img src={selectedImageData.url} alt="3D source" className="max-w-full max-h-[200px] object-contain rounded-lg" />
                   </div>
 
-                  <div className={`grid grid-cols-2 gap-2 p-1 rounded-xl ${isMonochrome ? 'bg-gray-100' : 'bg-[#0a0a0a]'}`}>
+                  <div className={`grid grid-cols-2 gap-2 p-1 rounded-xl ${isMonochrome ? 'bg-gray-100' : 'bg-black/[0.3]'}`}>
                     {([
                       { value: 'api' as const, label: 'API 大模型' },
                       { value: 'local' as const, label: '本地模型' },
@@ -9248,7 +9248,7 @@ export function InfiniteCanvas({
                       <select
                         value={threeDProviderId}
                         onChange={(e) => setThreeDProviderId(e.target.value)}
-                        className={`w-full px-3 py-2 rounded-xl text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a] border-[#2a2a2a] text-white'}`}
+                        className={`w-full px-3 py-2 rounded-xl text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-black/[0.3] border-white/[0.06] text-white'}`}
                       >
                         <option value="">选择 3D 模型</option>
                         {(() => {
@@ -9294,14 +9294,14 @@ export function InfiniteCanvas({
                       <input
                         value={threeDLocalEndpoint}
                         onChange={(e) => setThreeDLocalEndpoint(e.target.value)}
-                        className={`w-full px-3 py-2 rounded-xl text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a] border-[#2a2a2a] text-white'}`}
+                        className={`w-full px-3 py-2 rounded-xl text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-black/[0.3] border-white/[0.06] text-white'}`}
                         placeholder="http://127.0.0.1:7860/api/image-to-3d"
                       />
                       <label className={panelSmallLabelClass}>本地模型</label>
                       <select
                         value={threeDLocalModel}
                         onChange={(e) => setThreeDLocalModel(e.target.value)}
-                        className={`w-full px-3 py-2 rounded-xl text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a] border-[#2a2a2a] text-white'}`}
+                        className={`w-full px-3 py-2 rounded-xl text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-black/[0.3] border-white/[0.06] text-white'}`}
                       >
                         <option>Hunyuan3D-2.1</option>
                         <option>TripoSR</option>
@@ -9315,7 +9315,7 @@ export function InfiniteCanvas({
                   <div className="grid grid-cols-3 gap-2">
                     <div>
                       <label className={panelSmallLabelClass}>质量</label>
-                      <select value={threeDQuality} onChange={(e) => setThreeDQuality(e.target.value)} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a] border-[#2a2a2a] text-white'}`}>
+                      <select value={threeDQuality} onChange={(e) => setThreeDQuality(e.target.value)} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-black/[0.3] border-white/[0.06] text-white'}`}>
                         {threeDCapabilities.qualities.map((q: { value: string; label: string }) => (
                           <option key={q.value} value={q.value}>{q.label}</option>
                         ))}
@@ -9323,7 +9323,7 @@ export function InfiniteCanvas({
                     </div>
                     <div>
                       <label className={panelSmallLabelClass}>纹理</label>
-                      <select value={threeDTexture} onChange={(e) => setThreeDTexture(e.target.value)} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a] border-[#2a2a2a] text-white'}`}>
+                      <select value={threeDTexture} onChange={(e) => setThreeDTexture(e.target.value)} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-black/[0.3] border-white/[0.06] text-white'}`}>
                         {threeDCapabilities.textures.map((t: { value: string; label: string }) => (
                           <option key={t.value} value={t.value}>{t.label}</option>
                         ))}
@@ -9331,7 +9331,7 @@ export function InfiniteCanvas({
                     </div>
                     <div>
                       <label className={panelSmallLabelClass}>格式</label>
-                      <select value={threeDFormat} onChange={(e) => setThreeDFormat(e.target.value)} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a] border-[#2a2a2a] text-white'}`}>
+                      <select value={threeDFormat} onChange={(e) => setThreeDFormat(e.target.value)} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-black/[0.3] border-white/[0.06] text-white'}`}>
                         {threeDCapabilities.formats.map((f: { value: string; label: string }) => (
                           <option key={f.value} value={f.value}>{f.label}</option>
                         ))}
@@ -9340,14 +9340,14 @@ export function InfiniteCanvas({
                   </div>
 
                   {threeDProgress && (
-                    <div className={`flex items-center gap-2 px-3 py-2 rounded-xl ${isMonochrome ? 'bg-gray-50 text-gray-600' : 'bg-[#0a0a0a] text-[#aaa]'}`}>
+                    <div className={`flex items-center gap-2 px-3 py-2 rounded-xl ${isMonochrome ? 'bg-gray-50 text-gray-600' : 'bg-black/[0.3] text-[#aaa]'}`}>
                       <div className="w-3 h-3 rounded-full border-2 border-[#d4af37] border-t-transparent animate-spin" />
                       <span className="text-xs">{threeDProgress}</span>
                     </div>
                   )}
                 </div>
 
-                <div className={`flex items-center justify-end gap-2 px-4 py-3 border-t ${isMonochrome ? 'border-gray-100' : 'border-[#2a2a2a]'}`}>
+                <div className={`flex items-center justify-end gap-2 px-4 py-3 border-t ${isMonochrome ? 'border-gray-100' : 'border-white/[0.06]'}`}>
                   <button
                     onClick={() => { setShow3DModal(false); setActiveTool('none'); setThreeDProgress(null); }}
                     className={panelCancelBtnClass}
@@ -9596,7 +9596,7 @@ export function InfiniteCanvas({
                           width: previewSize,
                           height: previewSize,
                           background: isMonochrome ? '#f3f4f6' : '#0d0d0d',
-                          border: `1px solid ${isMonochrome ? '#e5e7eb' : '#333'}`,
+                          border: `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)'}`,
                           perspective: '600px',
                         }}
                         onMouseDown={(e) => {
@@ -9632,7 +9632,7 @@ export function InfiniteCanvas({
                                 {frontFace?.imageUrl ? (
                                   <img src={frontFace.imageUrl} alt="front" className="w-full h-full object-cover" />
                                 ) : (
-                                  <div className={`w-full h-full flex items-center justify-center ${isMonochrome ? 'bg-gray-200' : 'bg-[#1a1a1a]'}`}>
+                                  <div className={`w-full h-full flex items-center justify-center ${isMonochrome ? 'bg-gray-200' : 'bg-white/[0.06]'}`}>
                                     <span className={`text-xs font-bold ${isMonochrome ? 'text-gray-500' : 'text-[#555]'}`}>前</span>
                                   </div>
                                 )}
@@ -9643,7 +9643,7 @@ export function InfiniteCanvas({
                           {(() => {
                             const backFace = hcg.faces.find(f => f.face === 'back');
                             return (
-                              <div className={`absolute inset-0 rounded-lg border flex items-center justify-center overflow-hidden ${isMonochrome ? 'bg-gray-200 border-gray-300' : 'bg-[#1a1a1a] border-[#333]'}`} style={{ transform: 'rotateY(180deg) translateZ(55px)' }}>
+                              <div className={`absolute inset-0 rounded-lg border flex items-center justify-center overflow-hidden ${isMonochrome ? 'bg-gray-200 border-gray-300' : 'bg-white/[0.06] border-white/[0.08]'}`} style={{ transform: 'rotateY(180deg) translateZ(55px)' }}>
                                 {backFace?.imageUrl ? (
                                   <img src={backFace.imageUrl} alt="back" className="w-full h-full object-cover" />
                                 ) : (
@@ -9656,7 +9656,7 @@ export function InfiniteCanvas({
                           {(() => {
                             const rightFace = hcg.faces.find(f => f.face === 'right');
                             return (
-                              <div className={`absolute inset-0 rounded-lg border flex items-center justify-center overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-[#2a2a2a]'}`} style={{ transform: 'rotateY(90deg) translateZ(55px)' }}>
+                              <div className={`absolute inset-0 rounded-lg border flex items-center justify-center overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-white/[0.06]'}`} style={{ transform: 'rotateY(90deg) translateZ(55px)' }}>
                                 {rightFace?.imageUrl ? (
                                   <img src={rightFace.imageUrl} alt="right" className="w-full h-full object-cover" />
                                 ) : (
@@ -9669,7 +9669,7 @@ export function InfiniteCanvas({
                           {(() => {
                             const leftFace = hcg.faces.find(f => f.face === 'left');
                             return (
-                              <div className={`absolute inset-0 rounded-lg border flex items-center justify-center overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-[#2a2a2a]'}`} style={{ transform: 'rotateY(-90deg) translateZ(55px)' }}>
+                              <div className={`absolute inset-0 rounded-lg border flex items-center justify-center overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-white/[0.06]'}`} style={{ transform: 'rotateY(-90deg) translateZ(55px)' }}>
                                 {leftFace?.imageUrl ? (
                                   <img src={leftFace.imageUrl} alt="left" className="w-full h-full object-cover" />
                                 ) : (
@@ -9682,7 +9682,7 @@ export function InfiniteCanvas({
                           {(() => {
                             const topFace = hcg.faces.find(f => f.face === 'top');
                             return (
-                              <div className={`absolute inset-0 rounded-lg border flex items-center justify-center overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-[#2a2a2a]'}`} style={{ transform: 'rotateX(90deg) translateZ(55px)' }}>
+                              <div className={`absolute inset-0 rounded-lg border flex items-center justify-center overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-white/[0.06]'}`} style={{ transform: 'rotateX(90deg) translateZ(55px)' }}>
                                 {topFace?.imageUrl ? (
                                   <img src={topFace.imageUrl} alt="top" className="w-full h-full object-cover" />
                                 ) : (
@@ -9695,7 +9695,7 @@ export function InfiniteCanvas({
                           {(() => {
                             const bottomFace = hcg.faces.find(f => f.face === 'bottom');
                             return (
-                              <div className={`absolute inset-0 rounded-lg border flex items-center justify-center overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-[#2a2a2a]'}`} style={{ transform: 'rotateX(-90deg) translateZ(55px)' }}>
+                              <div className={`absolute inset-0 rounded-lg border flex items-center justify-center overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-white/[0.06]'}`} style={{ transform: 'rotateX(-90deg) translateZ(55px)' }}>
                                 {bottomFace?.imageUrl ? (
                                   <img src={bottomFace.imageUrl} alt="bottom" className="w-full h-full object-cover" />
                                 ) : (
@@ -9745,7 +9745,7 @@ export function InfiniteCanvas({
                           {(['close-up', 'standard', 'wide'] as ZoomLevel[]).map(z => (
                             <button
                               key={z}
-                              className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all ${hcg.toolbar.zoom === z ? 'bg-[#d4af37] text-black' : isMonochrome ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-[#252525] text-[#888] hover:bg-[#333]'}`}
+                              className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all ${hcg.toolbar.zoom === z ? 'bg-[#d4af37] text-black' : isMonochrome ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-[#252525] text-[#888] hover:bg-white/[0.12]'}`}
                               onClick={() => setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, zoom: z } } : g))}
                             >{ZOOM_LEVEL_LABELS[z]}</button>
                           ))}
@@ -9761,7 +9761,7 @@ export function InfiniteCanvas({
                       <div className="relative">
                         <button
                           className="px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-all"
-                          style={{ background: isMonochrome ? '#f3f4f6' : '#252525', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : '#444'}` }}
+                          style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
                           onClick={(e) => {
                             e.stopPropagation();
                             setOpenModelDropdownGroupId(openModelDropdownGroupId === `hex-${hcg.id}` ? null : `hex-${hcg.id}`);
@@ -9774,7 +9774,7 @@ export function InfiniteCanvas({
                           <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
                         </button>
                         {openModelDropdownGroupId === `hex-${hcg.id}` && (
-                          <div className="absolute top-full left-0 mt-1 rounded-lg overflow-hidden z-50 max-h-64 overflow-y-auto" style={{ background: isMonochrome ? '#fff' : '#1a1a1a', border: `1px solid ${isMonochrome ? '#e5e7eb' : '#333'}`, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
+                          <div className="absolute top-full left-0 mt-1 rounded-lg overflow-hidden z-50 max-h-64 overflow-y-auto" style={{ background: isMonochrome ? '#fff' : 'rgba(255,255,255,0.06)', border: `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)'}`, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.5)', backdropFilter: isMonochrome ? 'none' : 'blur(24px)', WebkitBackdropFilter: isMonochrome ? 'none' : 'blur(24px)' }}>
                             {models.map(m => (
                               <div
                                 key={`${m.providerId}-${m.id}`}
@@ -9785,7 +9785,7 @@ export function InfiniteCanvas({
                                     : 'transparent',
                                   color: isMonochrome ? '#374151' : '#ccc',
                                 }}
-                                onMouseEnter={(e) => { (e.target as HTMLElement).style.background = isMonochrome ? '#f3f4f6' : '#252525'; }}
+                                onMouseEnter={(e) => { (e.target as HTMLElement).style.background = isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.10)'; }}
                                 onMouseLeave={(e) => { (e.target as HTMLElement).style.background = hcg.toolbar.model === m.id && hcg.toolbar.providerId === m.providerId ? (isMonochrome ? '#dbeafe' : 'rgba(212,175,55,0.2)') : 'transparent'; }}
                                 onClick={() => {
                                   // 获取新模型支持的参数，重置质量和比例
@@ -9814,7 +9814,7 @@ export function InfiniteCanvas({
                         return (<>
                       <select
                         className="px-2 py-1.5 rounded-lg text-xs"
-                        style={{ background: isMonochrome ? '#f3f4f6' : '#252525', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : '#444'}` }}
+                        style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
                         value={hcg.toolbar.aspectRatio}
                         onChange={(e) => {
                           const newAr = e.target.value;
@@ -9827,7 +9827,7 @@ export function InfiniteCanvas({
                       {/* 质量 */}
                       <select
                         className="px-2 py-1.5 rounded-lg text-xs"
-                        style={{ background: isMonochrome ? '#f3f4f6' : '#252525', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : '#444'}` }}
+                        style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
                         value={hcg.toolbar.quality}
                         onChange={(e) => {
                           const newQ = e.target.value;
@@ -9842,7 +9842,7 @@ export function InfiniteCanvas({
                       {/* 数量 */}
                       <select
                         className="px-2 py-1.5 rounded-lg text-xs"
-                        style={{ background: isMonochrome ? '#f3f4f6' : '#252525', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : '#444'}` }}
+                        style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
                         value={hcg.toolbar.outputCount}
                         onChange={(e) => setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, outputCount: parseInt(e.target.value) } } : g))}
                       >
@@ -9853,7 +9853,7 @@ export function InfiniteCanvas({
                     <div className="relative">
                       <textarea
                         className="w-full rounded-lg px-3 py-2.5 text-sm resize-y"
-                        style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', color: isMonochrome ? '#111' : '#eee', border: `1px solid ${isMonochrome ? '#d1d5db' : '#444'}`, minHeight: 60, maxHeight: 160 }}
+                        style={{ background: isMonochrome ? '#f9fafb' : 'rgba(255,255,255,0.06)', color: isMonochrome ? '#111' : '#eee', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}`, minHeight: 60, maxHeight: 160 }}
                         placeholder="描述你想要生成的产品效果..."
                         value={hcg.toolbar.prompt}
                         onChange={(e) => setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, prompt: e.target.value } } : g))}
@@ -9866,7 +9866,7 @@ export function InfiniteCanvas({
                     <div className="flex items-center gap-2 mt-2">
                       <button
                         className="px-3 py-2 rounded-lg text-xs font-medium transition-all"
-                        style={{ background: isMonochrome ? '#f3f4f6' : '#252525', color: isMonochrome ? '#6b7280' : '#888', border: `1px solid ${isMonochrome ? '#d1d5db' : '#444'}` }}
+                        style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#6b7280' : '#888', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
                         onClick={async () => {
                           if (!hcg.toolbar.prompt.trim()) return;
                           setOptimizingGroupId(`hex-${hcg.id}`);
@@ -9985,7 +9985,7 @@ export function InfiniteCanvas({
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
             >
-              <div className={`flex items-center gap-0.5 px-1 py-1 rounded-xl border shadow-xl ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-[#1a1a1a]/95 border-[#333] backdrop-blur-sm'}`}>
+              <div className={`flex items-center gap-0.5 px-1 py-1 rounded-xl border shadow-xl ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-white/[0.06]/95 border-white/[0.08] backdrop-blur-sm'}`}>
                 {displayedActions.map((action, idx) => (
                   <div key={action.label} className="relative">
                     <button
@@ -10035,7 +10035,7 @@ export function InfiniteCanvas({
               {/* 工具栏自定义弹窗 */}
               {showToolbarCustomize && (
                 <div
-                  className={`absolute top-full mt-2 left-1/2 -translate-x-1/2 w-72 p-3 rounded-xl border shadow-2xl z-50 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#333]'}`}
+                  className={`absolute top-full mt-2 left-1/2 -translate-x-1/2 w-72 p-3 rounded-xl border shadow-2xl z-50 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-white/[0.06] border-white/[0.08]'}`}
                   onMouseDown={(e) => e.stopPropagation()}
                   data-popup="toolbar-customize"
                 >
@@ -10054,7 +10054,7 @@ export function InfiniteCanvas({
                               if (isHidden) newHidden.delete(label); else newHidden.add(label);
                               setToolbarHiddenItems(newHidden);
                             }}
-                            className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-colors ${isHidden ? (isMonochrome ? 'border-gray-300' : 'border-[#444]') : 'bg-[#d4af37] border-[#d4af37]'}`}
+                            className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-colors ${isHidden ? (isMonochrome ? 'border-gray-300' : 'border-white/[0.10]') : 'bg-[#d4af37] border-[#d4af37]'}`}
                           >
                             {!isHidden && <Check size={10} className="text-black" />}
                           </button>
@@ -10098,7 +10098,7 @@ export function InfiniteCanvas({
         {/* Image context menu */}
         {showContextMenu && (
           <div
-            className={`fixed z-50 py-1.5 rounded-xl border shadow-2xl min-w-[160px] ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-[#1a1a1a]/95 border-[#333] backdrop-blur-sm'}`}
+            className={`fixed z-50 py-1.5 rounded-xl border shadow-2xl min-w-[160px] ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-white/[0.06]/95 border-white/[0.08] backdrop-blur-sm'}`}
             data-popup="context-menu"
             style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
             onClick={(e) => e.stopPropagation()}
@@ -10122,7 +10122,7 @@ export function InfiniteCanvas({
         {/* Canvas context menu */}
         {showCanvasMenu && (
           <div
-            className={`fixed z-50 py-1.5 rounded-xl border shadow-2xl min-w-[200px] ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-[#1a1a1a]/95 border-[#333] backdrop-blur-sm'}`}
+            className={`fixed z-50 py-1.5 rounded-xl border shadow-2xl min-w-[200px] ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-white/[0.06]/95 border-white/[0.08] backdrop-blur-sm'}`}
             style={{ left: canvasMenuPos.x, top: canvasMenuPos.y }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -10145,8 +10145,8 @@ export function InfiniteCanvas({
         {showHelpModal && (
           <div className="absolute inset-0 z-50 flex items-center justify-center" onClick={() => setShowHelpModal(null)}>
             <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-            <div className={`relative w-[360px] max-h-[70vh] rounded-2xl border shadow-2xl overflow-hidden ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#111] border-[#2a2a2a]'}`} onClick={(e) => e.stopPropagation()}>
-              <div className={`flex items-center justify-between px-5 py-3.5 border-b ${isMonochrome ? 'border-gray-100' : 'border-[#2a2a2a]'}`}>
+            <div className={`relative w-[360px] max-h-[70vh] rounded-2xl border shadow-2xl overflow-hidden ${isMonochrome ? 'bg-white border-gray-200' : 'bg-white/[0.04] border-white/[0.06]'}`} onClick={(e) => e.stopPropagation()}>
+              <div className={`flex items-center justify-between px-5 py-3.5 border-b ${isMonochrome ? 'border-gray-100' : 'border-white/[0.06]'}`}>
                 <div className="flex items-center gap-2">
                   {showHelpModal === 'instructions' ? <Info size={16} className={isMonochrome ? 'text-gray-700' : 'text-[#d4af37]'} /> : <FileText size={16} className={isMonochrome ? 'text-gray-700' : 'text-[#d4af37]'} />}
                   <span className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>{showHelpModal === 'instructions' ? '操作说明' : '更新内容'}</span>
@@ -10164,7 +10164,7 @@ export function InfiniteCanvas({
                         ))}
                       </div>
                     </div>
-                    <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-[#1a1a1a]'}`} />
+                    <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-white/[0.06]'}`} />
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>图片操作工具栏</div>
                       <div className="space-y-2">
@@ -10173,7 +10173,7 @@ export function InfiniteCanvas({
                         ))}
                       </div>
                     </div>
-                    <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-[#1a1a1a]'}`} />
+                    <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-white/[0.06]'}`} />
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>组与参考图</div>
                       <div className="space-y-2">
@@ -10182,7 +10182,7 @@ export function InfiniteCanvas({
                         ))}
                       </div>
                     </div>
-                    <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-[#1a1a1a]'}`} />
+                    <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-white/[0.06]'}`} />
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>左上角工具栏</div>
                       <div className="space-y-2">
@@ -10191,7 +10191,7 @@ export function InfiniteCanvas({
                         ))}
                       </div>
                     </div>
-                    <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-[#1a1a1a]'}`} />
+                    <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-white/[0.06]'}`} />
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>底部工具栏</div>
                       <div className="space-y-2">
@@ -10258,11 +10258,11 @@ export function InfiniteCanvas({
             <div className={`rounded-2xl border shadow-2xl overflow-hidden ${
               isMonochrome
                 ? 'bg-white/95 border-gray-200'
-                : 'bg-gradient-to-b from-[#181818] to-[#111111] border-[#2a2a2a] shadow-[0_8px_32px_rgba(0,0,0,0.6)]'
+                : 'bg-gradient-to-b from-[#181818] to-[#111111] border-white/[0.06] shadow-[0_8px_32px_rgba(0,0,0,0.6)]'
             }`}>
               {/* Header */}
               <div className={`flex items-center justify-between px-4 py-2.5 border-b ${
-                isMonochrome ? 'border-gray-100' : 'border-[#2a2a2a]'
+                isMonochrome ? 'border-gray-100' : 'border-white/[0.06]'
               }`}>
                 <div className="flex items-center gap-2.5">
                   <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${
@@ -10290,7 +10290,7 @@ export function InfiniteCanvas({
                     className={`flex-1 text-xs rounded-lg px-3 py-2 border outline-none transition-colors ${
                       isMonochrome
                         ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
-                        : 'bg-[#0d0d0d] border-[#333] text-[#ddd] focus:border-[#d4af37]/40'
+                        : 'bg-[#0d0d0d] border-white/[0.08] text-[#ddd] focus:border-[#d4af37]/40'
                     }`}
                   >
                     {canvasGenModels.length === 0 && <option value="">暂无可用模型</option>}
@@ -10310,7 +10310,7 @@ export function InfiniteCanvas({
                     className={`flex-1 text-xs rounded-lg px-3 py-2 border outline-none transition-colors ${
                       isMonochrome
                         ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
-                        : 'bg-[#0d0d0d] border-[#333] text-[#ddd] focus:border-[#d4af37]/40'
+                        : 'bg-[#0d0d0d] border-white/[0.08] text-[#ddd] focus:border-[#d4af37]/40'
                     }`}
                   >
                     {['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'].map(r => (
@@ -10324,7 +10324,7 @@ export function InfiniteCanvas({
                     className={`flex-1 text-xs rounded-lg px-3 py-2 border outline-none transition-colors ${
                       isMonochrome
                         ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
-                        : 'bg-[#0d0d0d] border-[#333] text-[#ddd] focus:border-[#d4af37]/40'
+                        : 'bg-[#0d0d0d] border-white/[0.08] text-[#ddd] focus:border-[#d4af37]/40'
                     }`}
                   >
                     <option value="standard">标准</option>
@@ -10345,7 +10345,7 @@ export function InfiniteCanvas({
                             ? 'bg-gradient-to-b from-[#d4af37] to-[#b8860b] text-black shadow-md shadow-[#d4af37]/20'
                             : isMonochrome
                               ? 'bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200'
-                              : 'bg-[#1a1a1a] text-[#888] hover:bg-[#252525] border border-[#333]'
+                              : 'bg-white/[0.06] text-[#888] hover:bg-[#252525] border border-white/[0.08]'
                         }`}
                       >
                         {n}
@@ -10373,7 +10373,7 @@ export function InfiniteCanvas({
                     className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors border ${
                       isMonochrome
                         ? 'text-gray-500 hover:bg-gray-100 border-gray-200'
-                        : 'text-[#888] hover:bg-[#1a1a1a] hover:text-[#bbb] border-[#333]'
+                        : 'text-[#888] hover:bg-white/[0.06] hover:text-[#bbb] border-white/[0.08]'
                     }`}
                   >
                     <ImagePlus size={12} />
@@ -10387,7 +10387,7 @@ export function InfiniteCanvas({
                   <div className="flex gap-2 flex-wrap">
                     {canvasGenRefImages.map((refUrl, idx) => (
                       <div key={idx} className="relative group">
-                        <img src={refUrl} alt="" className={`w-9 h-9 rounded-lg object-cover border ${isMonochrome ? 'border-gray-200' : 'border-[#333]'}`} />
+                        <img src={refUrl} alt="" className={`w-9 h-9 rounded-lg object-cover border ${isMonochrome ? 'border-gray-200' : 'border-white/[0.08]'}`} />
                         <button
                           onClick={() => setCanvasGenRefImages(prev => prev.filter((_, i) => i !== idx))}
                           className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
@@ -10407,7 +10407,7 @@ export function InfiniteCanvas({
                   className={`w-full text-sm rounded-xl px-3.5 py-2.5 border outline-none resize-none h-[72px] leading-relaxed transition-colors ${
                     isMonochrome
                       ? 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-300 focus:border-gray-400'
-                      : 'bg-[#0d0d0d] border-[#333] text-[#ddd] placeholder:text-[#555] focus:border-[#d4af37]/40'
+                      : 'bg-[#0d0d0d] border-white/[0.08] text-[#ddd] placeholder:text-[#555] focus:border-[#d4af37]/40'
                   } focus:ring-1 focus:ring-[#d4af37]/20`}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -10425,7 +10425,7 @@ export function InfiniteCanvas({
                     canvasGenGenerating || !canvasGenPrompt.trim()
                       ? isMonochrome
                         ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                        : 'bg-[#222] text-[#555] cursor-not-allowed border border-[#333]'
+                        : 'bg-white/[0.08] text-[#555] cursor-not-allowed border border-white/[0.08]'
                       : 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-black hover:from-[#e0bc4a] hover:to-[#cd9b1d] shadow-lg shadow-[#d4af37]/20 active:scale-[0.98]'
                   }`}
                 >
@@ -10452,7 +10452,7 @@ export function InfiniteCanvas({
       <div className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 backdrop-blur-xl border rounded-2xl px-3 py-2 flex items-center gap-1.5 shadow-2xl ${
         isMonochrome 
           ? 'bg-white/85 border-gray-200/60' 
-          : 'bg-[#141414]/85 border-white/[0.06]'
+          : 'bg-white/[0.04]/85 border-white/[0.06]'
       }`} style={{ boxShadow: isMonochrome ? '0 8px 24px rgba(0,0,0,0.08)' : '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04)' }}>
         {/* Select tool */}
         <button

@@ -1957,7 +1957,7 @@ function CanvasApp() {
         <div className={`absolute top-3 right-3 bottom-3 w-[340px] z-30 flex flex-col transition-all duration-300 overflow-hidden panel-slide-in ${
           themeStyle === 'monochrome' 
             ? 'bg-white/95 backdrop-blur-xl border border-gray-200/80 shadow-xl rounded-xl' 
-            : 'bg-[#141414]/90 backdrop-blur-xl border border-[#d4af37]/15 rounded-xl shadow-2xl'
+            : 'bg-[#141414]/80 backdrop-blur-2xl border border-[#d4af37]/15 rounded-xl shadow-2xl'
         }`}>
           {/* 软件标题 - 版本号在下方，项目名在右侧 */}
           <div className={`px-4 py-2.5 flex-shrink-0 flex items-center justify-between ${

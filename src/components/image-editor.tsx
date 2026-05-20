@@ -85,12 +85,12 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   // 面板容器
   const thPanel = isMonochrome
     ? 'bg-white border-gray-200'
-    : 'bg-[#141414] border-[#2a2a2a]';
+    : 'bg-white/[0.04] backdrop-blur-2xl border-white/[0.06]';
 
   // 头部背景
   const thHeader = isMonochrome
     ? 'bg-gradient-to-r from-gray-50 to-white border-gray-200'
-    : 'bg-gradient-to-r from-[#1a1a1a] to-[#141414] border-[#2a2a2a]';
+    : 'bg-gradient-to-r from-[#1a1a1a] to-[#141414] border-white/[0.06]';
 
   // 标题文字
   const thTitle = isMonochrome ? 'text-gray-900' : 'text-white';
@@ -108,10 +108,10 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   const thAccentBorder = isMonochrome ? 'border-gray-400' : 'border-[#d4af37]';
 
   // 次要/背景色
-  const thBg = isMonochrome ? 'bg-gray-50' : 'bg-[#1a1a1a]';
+  const thBg = isMonochrome ? 'bg-gray-50' : 'bg-white/[0.06]';
   const thBgDeep = isMonochrome ? 'bg-white' : 'bg-[#0d0d0d]';
-  const thBgHover = isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-[#1a1a1a]';
-  const thBorder = isMonochrome ? 'border-gray-200' : 'border-[#2a2a2a]';
+  const thBgHover = isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-white/[0.06]';
+  const thBorder = isMonochrome ? 'border-gray-200' : 'border-white/[0.06]';
   const thBorderLight = isMonochrome ? 'border-gray-100' : 'border-[#1a1a1a]';
 
   // 文字色
@@ -124,12 +124,12 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   // 输入框
   const thInput = isMonochrome
     ? 'bg-white border-gray-200 text-gray-800 focus:border-gray-400'
-    : 'bg-[#1a1a1a] border-[#2a2a2a] text-white focus:border-[#d4af37]';
+    : 'bg-white/[0.06] border-white/[0.06] text-white focus:border-[#d4af37]';
 
   // 按钮
   const thBtnSecondary = isMonochrome
     ? 'bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200'
-    : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a]';
+    : 'bg-white/[0.06] text-[#888] hover:text-white border border-white/[0.06]';
 
   // 渐变主按钮
   const thBtnPrimary = isMonochrome
@@ -144,12 +144,12 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   // 下拉菜单
   const thDropdown = isMonochrome
     ? 'bg-white border-gray-200'
-    : 'bg-[#0d0d0d] border-[#2a2a2a]';
+    : 'bg-[#0d0d0d] border-white/[0.06]';
 
   // 下拉选项
   const thDropdownItem = isMonochrome
     ? 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 border-gray-100'
-    : 'text-[#aaa] hover:bg-[#1a1a1a] hover:text-white border-[#1a1a1a]';
+    : 'text-[#aaa] hover:bg-white/[0.06] hover:text-white border-[#1a1a1a]';
 
   // 下拉选项选中
   const thDropdownItemSelected = isMonochrome
@@ -164,7 +164,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   // 虚线边框
   const thBorderDashed = isMonochrome
     ? 'border-dashed border-gray-300'
-    : 'border-dashed border-[#2a2a2a]';
+    : 'border-dashed border-white/[0.06]';
 
   // 进度/加载框
   const thLoadingBorder = isMonochrome
@@ -174,7 +174,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   // 滚动条
   const thSelectOption = isMonochrome
     ? 'text-gray-800 bg-white'
-    : 'text-white bg-[#1a1a1a]';
+    : 'text-white bg-white/[0.06]';
   // 状态管理
   const [isDrawing, setIsDrawing] = useState(false);
   const [brushSize, setBrushSize] = useState(20);
@@ -1506,7 +1506,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             {/* 画笔涂抹提示 - 固定在容器底部 */}
             {currentModelSupportsMask && !isSpaceHeld && (
             <div className="absolute bottom-1 left-1 right-1 z-20 flex items-center justify-center pointer-events-none">
-              <div className={`flex items-center gap-1 px-2 py-0.5 ${isMonochrome ? 'bg-white/80 border border-gray-200' : 'bg-[#1a1a1a]/80 border border-[#2a2a2a]'} rounded`}>
+              <div className={`flex items-center gap-1 px-2 py-0.5 ${isMonochrome ? 'bg-white/80 border border-gray-200' : 'bg-white/[0.06]/80 border border-white/[0.06]'} rounded`}>
                 <Pencil className={`h-3 w-3 ${thAccentIcon}`} />
                 <span className={`text-[9px] ${thAccent}`}>涂抹区域 + 文字描述 = 精准修图</span>
               </div>
@@ -1605,7 +1605,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                     className={`relative flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden border-2 transition-all cursor-grab group ${
                       dragOverIdx === idx ? (isMonochrome ? 'border-gray-600' : 'border-[#d4af37]') + ' scale-105' :
                       dragRefIdx === idx ? (isMonochrome ? 'border-gray-400 opacity-50' : 'border-[#666] opacity-50') :
-                      isMonochrome ? 'border-gray-200 hover:border-gray-400' : 'border-[#2a2a2a] hover:border-[#d4af37]/50'
+                      isMonochrome ? 'border-gray-200 hover:border-gray-400' : 'border-white/[0.06] hover:border-[#d4af37]/50'
                     }`}
                   >
                     <img src={ref.url} alt={`参考${idx + 1}`} className="w-full h-full object-cover" crossOrigin="anonymous" />
@@ -1672,10 +1672,10 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               onClick={() => currentModelSupportsMask && setTool('brush')}
               className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-all ${
                 !currentModelSupportsMask
-                  ? isMonochrome ? 'bg-gray-100 text-gray-300 border border-gray-100 cursor-not-allowed' : 'bg-[#1a1a1a] text-[#444] border border-[#1a1a1a] cursor-not-allowed'
+                  ? isMonochrome ? 'bg-gray-100 text-gray-300 border border-gray-100 cursor-not-allowed' : 'bg-white/[0.06] text-[#444] border border-[#1a1a1a] cursor-not-allowed'
                   : tool === 'brush'
                     ? isMonochrome ? 'bg-gray-900 text-white font-medium' : 'bg-[#d4af37] text-black font-medium'
-                    : isMonochrome ? 'bg-gray-100 text-gray-500 hover:text-gray-900 border border-gray-200' : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a]'
+                    : isMonochrome ? 'bg-gray-100 text-gray-500 hover:text-gray-900 border border-gray-200' : 'bg-white/[0.06] text-[#888] hover:text-white border border-white/[0.06]'
               }`}
             >
               <Pencil className="h-3 w-3" />画笔
@@ -1684,10 +1684,10 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               onClick={() => currentModelSupportsMask && setTool('eraser')}
               className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-all ${
                 !currentModelSupportsMask
-                  ? isMonochrome ? 'bg-gray-100 text-gray-300 border border-gray-100 cursor-not-allowed' : 'bg-[#1a1a1a] text-[#444] border border-[#1a1a1a] cursor-not-allowed'
+                  ? isMonochrome ? 'bg-gray-100 text-gray-300 border border-gray-100 cursor-not-allowed' : 'bg-white/[0.06] text-[#444] border border-[#1a1a1a] cursor-not-allowed'
                   : tool === 'eraser'
                     ? isMonochrome ? 'bg-gray-900 text-white font-medium' : 'bg-[#d4af37] text-black font-medium'
-                    : isMonochrome ? 'bg-gray-100 text-gray-500 hover:text-gray-900 border border-gray-200' : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a]'
+                    : isMonochrome ? 'bg-gray-100 text-gray-500 hover:text-gray-900 border border-gray-200' : 'bg-white/[0.06] text-[#888] hover:text-white border border-white/[0.06]'
               }`}
             >
               <Eraser className="h-3 w-3" />橡皮
@@ -1696,8 +1696,8 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               onClick={() => currentModelSupportsMask && clearMask()}
               className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-all ${
                 !currentModelSupportsMask
-                  ? isMonochrome ? 'bg-gray-100 text-gray-300 border border-gray-100 cursor-not-allowed' : 'bg-[#1a1a1a] text-[#444] border border-[#1a1a1a] cursor-not-allowed'
-                  : isMonochrome ? 'bg-gray-100 text-gray-500 hover:text-gray-900 border border-gray-200' : 'bg-[#1a1a1a] text-[#888] hover:text-white border border-[#2a2a2a]'
+                  ? isMonochrome ? 'bg-gray-100 text-gray-300 border border-gray-100 cursor-not-allowed' : 'bg-white/[0.06] text-[#444] border border-[#1a1a1a] cursor-not-allowed'
+                  : isMonochrome ? 'bg-gray-100 text-gray-500 hover:text-gray-900 border border-gray-200' : 'bg-white/[0.06] text-[#888] hover:text-white border border-white/[0.06]'
               }`}
             >
               <Trash2 className="h-3 w-3" />清除
@@ -1917,7 +1917,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                     className={`w-full text-left px-2 py-1 rounded text-[10px] transition-all flex items-center gap-1 ${
                       index === currentHistoryIndex
                         ? `${isMonochrome ? 'bg-gray-200 text-gray-900' : 'bg-[#d4af37]/20 text-[#d4af37]'}`
-                        : `${isMonochrome ? 'bg-gray-100 text-gray-500 hover:text-gray-900' : 'bg-[#1a1a1a] text-[#888] hover:text-white'}`
+                        : `${isMonochrome ? 'bg-gray-100 text-gray-500 hover:text-gray-900' : 'bg-white/[0.06] text-[#888] hover:text-white'}`
                     }`}
                   >
                     <span>#{index + 1}</span>
@@ -1935,7 +1935,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       {(isResultLoading || resultImages.length > 0) && (
         <div
           ref={resultContainerRef}
-          className={`fixed z-[200] ${isMonochrome ? "bg-white border border-gray-200" : "bg-[#141414] border border-[#2a2a2a]"} rounded-xl shadow-2xl overflow-hidden`}
+          className={`fixed z-[200] ${isMonochrome ? "bg-white border border-gray-200" : "bg-white/[0.04] border border-white/[0.06]"} rounded-xl shadow-2xl overflow-hidden`}
           style={{ left: position.x + 360 + 40, top: position.y, maxHeight: '85vh', width: resultImages.length > 1 ? '440px' : '380px' }}
           onMouseDown={e => e.stopPropagation()}
           onPointerDown={e => e.stopPropagation()}
@@ -1963,11 +1963,11 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                   const ratioW = ratioParts[0] || 1;
                   const ratioH = ratioParts[1] || 1;
                   return (
-                    <div key={i} className={`relative ${isMonochrome ? "bg-gray-50" : "bg-[#1a1a1a]"} rounded-lg border-2 border-dashed ${isMonochrome ? "border-gray-300" : "border-[#d4af37]/30"} flex flex-col items-center justify-center overflow-hidden flex-shrink-0`}
+                    <div key={i} className={`relative ${isMonochrome ? "bg-gray-50" : "bg-white/[0.06]"} rounded-lg border-2 border-dashed ${isMonochrome ? "border-gray-300" : "border-[#d4af37]/30"} flex flex-col items-center justify-center overflow-hidden flex-shrink-0`}
                       style={{ aspectRatio: `${ratioW}/${ratioH}`, width: outputCount > 1 ? '200px' : '320px', maxHeight: '400px' }}
                     >
                       <div className="relative w-8 h-8 mb-1">
-                        <div className={`absolute inset-0 border-2 ${isMonochrome ? "border-gray-200" : "border-[#2a2a2a]"} rounded-full`} />
+                        <div className={`absolute inset-0 border-2 ${isMonochrome ? "border-gray-200" : "border-white/[0.06]"} rounded-full`} />
                         <div className={`absolute inset-0 border-2 ${isMonochrome ? "border-gray-900" : "border-[#d4af37]"} rounded-full animate-spin`} />
                       </div>
                       <span className={`text-[9px] ${thTextMuted}`}>生成中 {outputCount > 1 ? `(${i + 1}/${outputCount})` : `${loadingProgress}%`}</span>
@@ -2010,7 +2010,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                   const ratioH = ratioParts[1] || 1;
                   const isSelected = selectedResultIndexes.has(idx);
                   return (
-                    <div key={idx} className={`relative ${isMonochrome ? "bg-gray-50" : "bg-[#1a1a1a]"} rounded-lg overflow-hidden cursor-pointer group flex-shrink-0 ${isSelected ? `ring-2 ${isMonochrome ? "ring-gray-900" : "ring-[#d4af37]"}` : ''}`}
+                    <div key={idx} className={`relative ${isMonochrome ? "bg-gray-50" : "bg-white/[0.06]"} rounded-lg overflow-hidden cursor-pointer group flex-shrink-0 ${isSelected ? `ring-2 ${isMonochrome ? "ring-gray-900" : "ring-[#d4af37]"}` : ''}`}
                       style={{ aspectRatio: `${ratioW}/${ratioH}`, width: resultImages.length > 1 ? '200px' : '100%', maxHeight: '360px' }}
                       onClick={() => {
                         // 多图时点击切换选中，单图时直接使用
@@ -2054,7 +2054,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             ) : null}
             {/* ★ LLM自动区域识别 - 非阻塞内联卡片，嵌入结果框底部 */}
             {pendingAutoRegions.length > 0 && (
-              <div className={`${isMonochrome ? "bg-gray-50 border border-gray-300" : "bg-[#1a1a1a] border border-[#d4af37]/30"} rounded-lg p-2.5 mt-2`}>
+              <div className={`${isMonochrome ? "bg-gray-50 border border-gray-300" : "bg-white/[0.06] border border-[#d4af37]/30"} rounded-lg p-2.5 mt-2`}>
                 <div className="flex items-center justify-between mb-1.5">
                   <div className="flex items-center gap-1.5">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={isMonochrome ? "#374151" : "#d4af37"} strokeWidth="2">
