@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Bot, X, Loader2, ChevronDown, ChevronRight, Sparkles, Image as ImageIcon, CheckCircle, XCircle, AlertTriangle, Plus, GripVertical, Maximize2 } from 'lucide-react';
+import { Bot, X, Loader2, ChevronDown, ChevronRight, Sparkles, Image as ImageIcon, CheckCircle, XCircle, AlertTriangle, Plus, GripVertical } from 'lucide-react';
 import { taskEventsClient } from '@/lib/task-events-client';
 
 interface AgentEditorProps {
@@ -40,13 +40,13 @@ export default function AgentEditor({ imageUrl, themeStyle = 'gold', onComplete,
   const [resultImageUrl, setResultImageUrl] = useState<string | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
-  // 拖拽状态
+  // 拖拽状态（面板移动）
   const [isDragging, setIsDragging] = useState(false);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
   const [position, setPosition] = useState({ x: 80, y: 80 });
 
-  // 调整大小状态
-  const [panelHeight, setPanelHeight] = useState(480);
+  // 输入框高度调整状态
+  const [textareaHeight, setTextareaHeight] = useState(56);
   const [isResizing, setIsResizing] = useState(false);
   const resizeStartYRef = useRef(0);
   const resizeStartHeightRef = useRef(0);
@@ -74,15 +74,15 @@ export default function AgentEditor({ imageUrl, themeStyle = 'gold', onComplete,
     };
   }, [isDragging]);
 
-  // 全局鼠标事件：调整大小
+  // 全局鼠标事件：调整输入框高度
   useEffect(() => {
     if (!isResizing) return;
     const onMove = (e: MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
       const delta = e.clientY - resizeStartYRef.current;
-      const newHeight = Math.max(320, Math.min(800, resizeStartHeightRef.current + delta));
-      setPanelHeight(newHeight);
+      const newHeight = Math.max(36, Math.min(300, resizeStartHeightRef.current + delta));
+      setTextareaHeight(newHeight);
     };
     const onUp = (e: MouseEvent) => {
       e.preventDefault();
@@ -109,8 +109,8 @@ export default function AgentEditor({ imageUrl, themeStyle = 'gold', onComplete,
     e.stopPropagation();
     setIsResizing(true);
     resizeStartYRef.current = e.clientY;
-    resizeStartHeightRef.current = panelHeight;
-  }, [panelHeight]);
+    resizeStartHeightRef.current = textareaHeight;
+  }, [textareaHeight]);
 
   // 阻止面板上的事件穿透到画布
   const handlePanelPointerDown = useCallback((e: React.MouseEvent | React.TouchEvent) => {
@@ -224,12 +224,12 @@ export default function AgentEditor({ imageUrl, themeStyle = 'gold', onComplete,
   return (
     <div
       className={`fixed ${bg} border ${border} rounded-xl shadow-2xl flex flex-col z-[150] overflow-hidden`}
-      style={{ left: position.x, top: position.y, width: 320, height: panelHeight }}
+      style={{ left: position.x, top: position.y, width: 320 }}
       data-popup
       onMouseDown={handlePanelPointerDown}
       onPointerDown={handlePanelPointerDown}
     >
-      {/* Header - 可拖拽 */}
+      {/* Header - 可拖拽移动 */}
       <div
         className={`px-3 py-2 border-b ${border} flex items-center gap-2 cursor-move select-none shrink-0`}
         onMouseDown={handleDragStart}
@@ -242,8 +242,8 @@ export default function AgentEditor({ imageUrl, themeStyle = 'gold', onComplete,
         </button>
       </div>
 
-      {/* 可滚动内容区域 */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden">
+      {/* 可滚动内容区域 - 图片/进度/步骤 */}
+      <div className="overflow-y-auto overflow-x-hidden" style={{ maxHeight: 240 }}>
         {/* 图片区域 */}
         <div className="px-3 pt-2 pb-1">
           {currentImage ? (
@@ -253,7 +253,6 @@ export default function AgentEditor({ imageUrl, themeStyle = 'gold', onComplete,
                 alt={resultImageUrl ? 'Result' : 'Original'}
                 className={`w-full h-full object-contain ${!resultImageUrl ? 'opacity-70' : ''}`}
               />
-              {/* 切换原图/结果 */}
               {resultImageUrl && (
                 <div className={`absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[10px] ${isGold ? 'bg-black/70 text-[#d4af37]' : 'bg-black/70 text-blue-400'}`}>
                   {finalResponse || '编辑完成'}
@@ -326,7 +325,7 @@ export default function AgentEditor({ imageUrl, themeStyle = 'gold', onComplete,
         )}
       </div>
 
-      {/* 固定底部：控制区域 + 拖拽手柄 */}
+      {/* 固定底部：控制区域 */}
       <div className={`shrink-0 border-t ${border}`}>
         {/* 轮次选择 */}
         <div className={`px-3 pt-2 pb-1 flex items-center gap-2`}>
@@ -346,7 +345,7 @@ export default function AgentEditor({ imageUrl, themeStyle = 'gold', onComplete,
           </div>
         </div>
 
-        {/* 输入框 */}
+        {/* 输入框 - 高度可拖拽调整 */}
         <div className="px-3 pb-1.5">
           <textarea
             value={prompt}
@@ -355,7 +354,7 @@ export default function AgentEditor({ imageUrl, themeStyle = 'gold', onComplete,
             placeholder="描述你想对图片做什么..."
             disabled={isProcessing || !currentImage}
             className={`w-full rounded-lg px-2.5 py-1.5 text-xs resize-none ${inputBg} ${text} border ${border} focus:outline-none focus:ring-1 ${isGold ? 'focus:ring-[#d4af37]/20 placeholder:text-[#444]' : 'focus:ring-blue-500/20 placeholder:text-gray-600'} transition-colors disabled:opacity-50`}
-            rows={2}
+            style={{ height: textareaHeight }}
           />
         </div>
 
@@ -392,11 +391,11 @@ export default function AgentEditor({ imageUrl, themeStyle = 'gold', onComplete,
           )}
         </div>
 
-        {/* 拖拽调整大小手柄 */}
+        {/* 拖拽调整输入框高度手柄 */}
         <div
           className={`h-4 flex items-center justify-center cursor-ns-resize select-none border-t ${border} transition-colors ${isGold ? 'hover:bg-[#252525]' : 'hover:bg-gray-800'}`}
           onMouseDown={handleResizeStart}
-          title="拖动调整大小"
+          title="拖动调整输入框大小"
         >
           <div className={`w-8 h-1 rounded-full ${isGold ? 'bg-[#444]' : 'bg-gray-600'}`} />
         </div>
