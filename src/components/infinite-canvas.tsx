@@ -756,6 +756,12 @@ export function InfiniteCanvas({
   const [isEditProcessing, setIsEditProcessing] = useState(false);
   // Floating window brush tool mode: 'brush' or 'eraser'
   const [editBrushMode, setEditBrushMode] = useState<'brush' | 'eraser'>('brush');
+  // Erase model selection (LaMa / ZITS / Anime-Lama)
+  const [eraseModelId, setEraseModelId] = useState<string>('lama');
+  // RemoveBG model selection
+  const [removeBgModelId, setRemoveBgModelId] = useState<string>('birefnet-general-lite');
+  // RemoveBG model picker dialog
+  const [showRemoveBgPicker, setShowRemoveBgPicker] = useState(false);
   // Floating window canvas zoom/pan
   const [editCanvasZoom, setEditCanvasZoom] = useState(1);
   const [editCanvasPan, setEditCanvasPan] = useState({ x: 0, y: 0 });
@@ -4195,6 +4201,7 @@ export function InfiniteCanvas({
           model: modelInfo.model,
           apiKey,
           providerId: modelInfo.providerId || getCurrentProviderId(),
+          removeBgModel: removeBgModelId,
         }),
       });
 
@@ -4908,6 +4915,7 @@ export function InfiniteCanvas({
           model: modelInfo.model,
           apiKey,
           providerId: modelInfo.providerId || getCurrentProviderId(),
+          ...(currentEditMode === 'erase' ? { eraseModel: eraseModelId } : {}),
         };
 
         const bodyStr = JSON.stringify(requestBody);
@@ -5555,7 +5563,7 @@ export function InfiniteCanvas({
   // Action toolbar items
   const imageActions = [
     { icon: <ZoomIn size={14} />, label: '放大', desc: '智能补细节放大，变大变高清，不改内容', action: handleOpenUpscale },
-    { icon: <Eraser size={14} />, label: '移除背景', desc: '一键删除背景，只剩透明底主体', action: handleRemoveBackground },
+    { icon: <Eraser size={14} />, label: '移除背景', desc: '一键删除背景，只剩透明底主体', action: () => setShowRemoveBgPicker(true) },
     { icon: <PenTool size={14} />, label: 'SVG智能描摹', desc: '矢量描摹/压缩/缩略图', action: handleOpenSvgTrace },
     { icon: <Paintbrush size={14} />, label: '擦除', desc: '涂抹消除，自动无缝补全画面', action: handleOpenErase },
     { icon: <Wand2 size={14} />, label: '蒙版', desc: '精准遮罩控制，只改露出的区域', action: handleOpenMask },
@@ -7955,6 +7963,44 @@ export function InfiniteCanvas({
                       />
                     </div>
 
+                    {/* Erase model selector (only for erase mode) */}
+                    {isErase && (
+                      <div className="px-3 py-2">
+                        <span className={`text-xs mb-1.5 block ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>擦除引擎</span>
+                        <div className="flex flex-col gap-1.5">
+                          {[
+                            { id: 'lama', label: 'LaMa', desc: '通用擦除', recommended: true },
+                            { id: 'zits', label: 'ZITS', desc: '结构保持', recommended: false },
+                            { id: 'anime-lama', label: 'Anime', desc: '动漫专用', recommended: false },
+                          ].map(m => (
+                            <button
+                              key={m.id}
+                              onClick={() => setEraseModelId(m.id)}
+                              className={`flex items-center gap-2 px-3 py-2 text-xs rounded-lg transition-all text-left ${
+                                eraseModelId === m.id
+                                  ? 'bg-[#d4af37] text-black font-medium'
+                                  : isMonochrome
+                                    ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                    : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                              }`}
+                            >
+                              <span className="font-medium">{m.label}</span>
+                              <span className={`text-[10px] ${eraseModelId === m.id ? 'text-black/60' : isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{m.desc}</span>
+                              {m.recommended && (
+                                <span className={`ml-auto text-[9px] px-1.5 py-0.5 rounded-full ${
+                                  eraseModelId === m.id
+                                    ? 'bg-black/20 text-black/70'
+                                    : isMonochrome
+                                      ? 'bg-gray-200 text-gray-500'
+                                      : 'bg-[#333] text-[#888]'
+                                }`}>推荐</span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Undo/Clear buttons */}
                     <div className="px-3 py-2 flex gap-2">
                       <button
@@ -8030,6 +8076,108 @@ export function InfiniteCanvas({
                       </button>
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ====== REMOVE BACKGROUND MODEL PICKER ====== */}
+        {showRemoveBgPicker && (() => {
+          const removeBgGroups = [
+            { key: 'birefnet', label: 'BiRefNet 系列', desc: '精度最高', models: [
+              { id: 'birefnet-general-lite', label: 'BiRefNet 轻量通用', recommended: true },
+              { id: 'birefnet-general', label: 'BiRefNet 通用' },
+              { id: 'birefnet-portrait', label: 'BiRefNet 人像' },
+              { id: 'birefnet-dis', label: 'BiRefNet 显著性' },
+              { id: 'birefnet-hrsod', label: 'BiRefNet 高精度' },
+              { id: 'birefnet-cod', label: 'BiRefNet 伪装检测' },
+              { id: 'birefnet-massive', label: 'BiRefNet 大规模' },
+            ]},
+            { key: 'briaai', label: 'BriaAI 系列', desc: '商用级', models: [
+              { id: 'briaai/RMBG-1.4', label: 'RMBG 1.4' },
+              { id: 'briaai/RMBG-2.0', label: 'RMBG 2.0' },
+            ]},
+            { key: 'rembg', label: 'rembg 系列', desc: '经典模型', models: [
+              { id: 'u2net', label: 'U2Net 通用' },
+              { id: 'u2netp', label: 'U2Net 轻量' },
+              { id: 'u2net_human_seg', label: 'U2Net 人体' },
+              { id: 'u2net_cloth_seg', label: 'U2Net 衣服' },
+              { id: 'silueta', label: 'Silueta' },
+              { id: 'isnet-general-use', label: 'ISNet 通用' },
+            ]},
+          ];
+          return (
+            <div className="fixed inset-0 z-[200] flex items-center justify-center" onMouseDown={(e) => e.stopPropagation()}>
+              <div className="absolute inset-0 bg-black/40" onClick={() => setShowRemoveBgPicker(false)} />
+              <div className={`relative rounded-2xl border shadow-2xl overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-300' : 'bg-[#1a1a1a] border-[#2a2a2a]'}`} style={{ width: 420, maxHeight: '80vh' }}>
+                {/* Title */}
+                <div className={`flex items-center justify-between px-4 py-3 border-b ${isMonochrome ? 'border-gray-200 bg-white' : 'border-[#2a2a2a] bg-[#111]'}`}>
+                  <div className="flex items-center gap-2">
+                    <Eraser size={14} className="text-[#d4af37]" />
+                    <span className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>选择去背景模型</span>
+                  </div>
+                  <button onClick={() => setShowRemoveBgPicker(false)} className={`p-1 rounded-lg transition-colors ${isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-[#666] hover:text-white hover:bg-[#333]'}`}>
+                    <X size={16} />
+                  </button>
+                </div>
+                {/* Model groups */}
+                <div className="overflow-y-auto p-4 space-y-4" style={{ maxHeight: 'calc(80vh - 120px)' }}>
+                  {removeBgGroups.map(group => (
+                    <div key={group.key}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className={`text-xs font-medium ${isMonochrome ? 'text-gray-700' : 'text-[#ccc]'}`}>{group.label}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${isMonochrome ? 'bg-gray-200 text-gray-500' : 'bg-[#252525] text-[#888]'}`}>{group.desc}</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {group.models.map(m => (
+                          <button
+                            key={m.id}
+                            onClick={() => setRemoveBgModelId(m.id)}
+                            className={`relative flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg transition-all text-left ${
+                              removeBgModelId === m.id
+                                ? 'bg-[#d4af37] text-black font-medium'
+                                : isMonochrome
+                                  ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                  : 'bg-[#252525] text-[#999] hover:bg-[#333]'
+                            }`}
+                          >
+                            <span>{m.label}</span>
+                            {'recommended' in m && m.recommended && (
+                              <span className={`ml-auto text-[9px] px-1 py-0.5 rounded-full ${
+                                removeBgModelId === m.id
+                                  ? 'bg-black/20 text-black/70'
+                                  : isMonochrome
+                                    ? 'bg-gray-200 text-gray-500'
+                                    : 'bg-[#333] text-[#888]'
+                              }`}>推荐</span>
+                            )}
+                            {removeBgModelId === m.id && (
+                              <Check size={12} className="absolute top-1 right-1" />
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {/* Footer with confirm */}
+                <div className={`px-4 py-3 border-t ${isMonochrome ? 'border-gray-200 bg-white' : 'border-[#2a2a2a] bg-[#111]'}`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className={`text-xs ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>当前选择:</span>
+                    <span className={`text-xs font-medium ${isMonochrome ? 'text-gray-800' : 'text-[#d4af37]'}`}>
+                      {removeBgGroups.flatMap(g => g.models).find(m => m.id === removeBgModelId)?.label || removeBgModelId}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowRemoveBgPicker(false);
+                      handleRemoveBackground();
+                    }}
+                    className="w-full py-2.5 text-sm font-semibold rounded-xl bg-[#d4af37] text-black hover:bg-[#e5c047] active:scale-[0.98] transition-all"
+                  >
+                    开始去背景
+                  </button>
                 </div>
               </div>
             </div>

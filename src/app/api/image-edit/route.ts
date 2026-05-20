@@ -11,7 +11,7 @@ import path from 'path';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { isS3Available, uploadImageToS3 } from '@/lib/s3-storage';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
-import { eraseWithLama, removeBgWithIOPaint, DEFAULT_REMOVEBG_MODEL } from '@/lib/image-tools/iopaint-client';
+import { eraseWithLama, removeBgWithIOPaint, DEFAULT_REMOVEBG_MODEL, VALID_ERASE_MODELS, REMOVEBG_MODELS } from '@/lib/image-tools/iopaint-client';
 import { LOCAL_AI_ENABLED } from '@/lib/image-tools/config';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
@@ -434,6 +434,7 @@ interface EditRequest {
   model?: string;
   providerId?: string;
   eraseModel?: string; // IOPaint erase model: lama/zits/anime-lama
+  removeBgModel?: string; // IOPaint RemoveBG model: birefnet-general-lite / u2net / etc.
 }
 
 // Helper: fetch image as Buffer (supports external URLs, data URLs, and local paths)
@@ -1823,7 +1824,10 @@ export async function POST(request: NextRequest) {
           const srcW = sourceMeta.width || 512;
           const srcH = sourceMeta.height || 512;
           
-          const rmbgResult = await removeBgWithIOPaint(sourceBuffer, srcW, srcH, DEFAULT_REMOVEBG_MODEL);
+          const validRemoveBgModels: readonly string[] = REMOVEBG_MODELS.map(m => m.id);
+          const rmbgModelName: string = validRemoveBgModels.includes(body.removeBgModel || '') ? body.removeBgModel! : DEFAULT_REMOVEBG_MODEL;
+          console.log(`[remove_background] Using RemoveBG model: ${rmbgModelName}`);
+          const rmbgResult = await removeBgWithIOPaint(sourceBuffer, srcW, srcH, rmbgModelName);
           if (rmbgResult.success && rmbgResult.imageUrl) {
             console.log(`[remove_background] IOPaint RemoveBG succeeded: ${rmbgResult.imageUrl}`);
             return NextResponse.json({
@@ -2100,7 +2104,7 @@ export async function POST(request: NextRequest) {
         if (LOCAL_AI_ENABLED) {
           try {
             // 支持 lama / zits / anime-lama 模型选择
-            const eraseModel = (body.eraseModel || 'lama') as string;
+            const eraseModel: string = VALID_ERASE_MODELS.includes(body.eraseModel || '') ? body.eraseModel! : 'lama';
             console.log(`[inpaint] Attempting IOPaint erase (${eraseModel}): ${origW}x${origH}, mask pixels ${maskPixelCount}`);
             const lamaResult = await eraseWithLama(
               imageBuffer,
