@@ -377,6 +377,7 @@ export function InfiniteCanvas({
   // Agent editor state
   const [showAgentEditor, setShowAgentEditor] = useState(false);
   const [agentEditImage, setAgentEditImage] = useState<CanvasImage | null>(null);
+  const [agentSelectingImage, setAgentSelectingImage] = useState(false);
 
   // View state
   const [viewOffset, setViewOffset] = useState({ x: 0, y: 0 });
@@ -944,10 +945,15 @@ export function InfiniteCanvas({
     if (id) {
       const img = images.find(i => i.id === id);
       onSelectImage(img || null);
+      // Agent选择图片模式：点击图片后将其设为Agent编辑器的图片
+      if (agentSelectingImage && img) {
+        setAgentEditImage(img);
+        setAgentSelectingImage(false);
+      }
     } else {
       onSelectImage(null);
     }
-  }, [images, onSelectImage]);
+  }, [images, onSelectImage, agentSelectingImage]);
 
   // Create a group from selected images
   const handleCreateGroup = useCallback(() => {
@@ -1133,6 +1139,10 @@ export function InfiniteCanvas({
         setIsSpacePressed(true);
       }
       if (e.code === 'Escape') {
+        // 退出Agent选择图片模式
+        if (agentSelectingImage) {
+          setAgentSelectingImage(false);
+        }
         if (editMode === 'upscale' || editMode === 'erase' || editMode === 'mask') {
         }
         if (editMode !== 'none') {
@@ -5555,12 +5565,18 @@ export function InfiniteCanvas({
     { icon: <Scissors size={14} />, label: '裁切', desc: '自由/预设比例裁切', action: handleOpenCrop },
     { icon: <ImagePlus size={14} />, label: '图生图', desc: '基于当前图生成新图', action: () => { if (selectedImage) setEditImageId(selectedImage.id); setEditMode('img2img'); } },
     { icon: <Pencil size={14} />, label: '语言修图', desc: '用自然语言描述修改图片', action: () => { if (selectedImage) onEditImage?.(selectedImage); else onEditImage?.(null); } },
-    { icon: <Bot size={14} />, label: 'Agent编排', desc: '智能编排多工具编辑图片', action: () => { const img = selectedImageData || selectedImage; if (img) { setAgentEditImage(img); setShowAgentEditor(true); } } },
+    { icon: <Bot size={14} />, label: 'Agent编排', desc: '智能编排多工具编辑图片', action: () => { const img = selectedImageData || selectedImage; if (img) { setAgentEditImage(img); } else { setAgentEditImage(null); } setShowAgentEditor(true); } },
     { icon: <Download size={14} />, label: '下载', desc: 'PNG/SVG/PSD下载', action: handleOpenDownload },
   ];
 
   // 根据 toolbarItemOrder 和 toolbarHiddenItems 过滤/排序工具栏
-  const visibleImageActions = toolbarItemOrder
+  // 确保新增的工具项（localStorage中可能没有）也能显示
+  const allActionLabels = imageActions.map(a => a.label);
+  const fullOrder = [...toolbarItemOrder];
+  for (const label of allActionLabels) {
+    if (!fullOrder.includes(label)) fullOrder.push(label);
+  }
+  const visibleImageActions = fullOrder
     .filter(label => !toolbarHiddenItems.has(label))
     .map(label => imageActions.find(a => a.label === label))
     .filter((a): a is typeof imageActions[number] => a !== undefined);
@@ -5977,6 +5993,17 @@ export function InfiniteCanvas({
             <div className="px-3 py-1 rounded-full bg-[#d4af37]/90 text-black text-xs font-medium shadow-lg flex items-center gap-1.5">
               <span className="text-xs">Ctrl+Click</span>
               <span className="opacity-70">选择参考图片</span>
+            </div>
+          </div>
+        )}
+
+        {/* Agent 选择图片提示 (top center) */}
+        {agentSelectingImage && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+            <div className={`px-3 py-1 rounded-full text-xs font-medium shadow-lg flex items-center gap-1.5 ${isMonochrome ? 'bg-blue-500/90 text-white' : 'bg-[#d4af37]/90 text-black'}`}>
+              <Bot className="w-3 h-3" />
+              <span>点击图片进行 Agent 编排</span>
+              <span className="opacity-70">· ESC 取消</span>
             </div>
           </div>
         )}
@@ -9164,21 +9191,29 @@ export function InfiniteCanvas({
         )}
 
         {/* ====== AGENT EDITOR ====== */}
-        {showAgentEditor && agentEditImage && (
+        {showAgentEditor && (
           <Suspense fallback={null}>
             <AgentEditor
-              imageUrl={agentEditImage.url}
+              imageUrl={agentEditImage?.url}
               themeStyle={isMonochrome ? 'monochrome' : 'gold'}
               onComplete={(resultUrl: string) => {
-                // 更新图片URL
-                const updated = images.map(img =>
-                  img.id === agentEditImage.id ? { ...img, url: resultUrl } : img
-                );
-                onImagesChange(updated);
+                if (agentEditImage) {
+                  const updated = images.map(img =>
+                    img.id === agentEditImage.id ? { ...img, url: resultUrl } : img
+                  );
+                  onImagesChange(updated);
+                } else {
+                  // 没有原图时，将结果作为新图片添加到画布
+                  onAddImages?.([resultUrl]);
+                }
                 setShowAgentEditor(false);
                 setAgentEditImage(null);
               }}
               onClose={() => { setShowAgentEditor(false); setAgentEditImage(null); }}
+              onSelectImage={() => {
+                // 进入画布选择图片模式
+                setAgentSelectingImage(true);
+              }}
             />
           </Suspense>
         )}
@@ -10308,7 +10343,7 @@ export function InfiniteCanvas({
 
         {/* Agent Edit - Agent编排 */}
         <button
-          onClick={() => { const firstImg = images[0]; if (firstImg) { setAgentEditImage(firstImg); setShowAgentEditor(true); } }}
+          onClick={() => { setAgentEditImage(null); setShowAgentEditor(true); }}
           className={`p-2 rounded-xl transition-all relative group ${
             isMonochrome
               ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
