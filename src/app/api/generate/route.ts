@@ -3,6 +3,7 @@ import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, normalizeApiBaseUrl, findAllProvidersForType, findProviderById } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
@@ -111,6 +112,15 @@ export async function POST(request: NextRequest) {
     } = await request.json();
     // 防御性处理：确保 model 是字符串（前端可能误传对象）
     const model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');
+
+    // Content safety check
+    const safetyResult = checkPromptSafety(prompt || '');
+    if (safetyResult.level === 'block') {
+      return NextResponse.json({ success: false, error: safetyResult.reason }, { status: 400 });
+    }
+    if (safetyResult.level === 'warning') {
+      logSafetyWarning(prompt, safetyResult);
+    }
 
     const sessionUser = await getSessionUser(request);
     const userId = sessionUser?.id ?? requestUserId ?? "anonymous";

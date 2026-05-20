@@ -3,6 +3,7 @@ import { findProviderForFeature, findProviderById } from '@/lib/server-api-confi
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 import { executeAgentLoop, getToolsForLLM, type AgentContext, type AgentResult } from '@/lib/agent-engine';
+import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 
 export const runtime = 'nodejs';
 export const maxDuration = 600;
@@ -27,6 +28,15 @@ export async function POST(request: NextRequest) {
 
     if (!image || !prompt) {
       return NextResponse.json({ success: false, error: '缺少图片或描述' }, { status: 400 });
+    }
+
+    // Content safety check
+    const safetyResult = checkPromptSafety(prompt);
+    if (safetyResult.level === 'block') {
+      return NextResponse.json({ success: false, error: safetyResult.reason }, { status: 400 });
+    }
+    if (safetyResult.level === 'warning') {
+      logSafetyWarning(prompt, safetyResult);
     }
 
     // 生成任务 ID

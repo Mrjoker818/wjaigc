@@ -48,12 +48,19 @@ export async function fetchWithV1Retry(
   baseUrl: string,
   path: string,
   options: RequestInit,
-  retryWithV1 = true
+  retryWithV1 = true,
+  defaultTimeoutMs = 180_000 // 3min default timeout for all external API calls
 ): Promise<Response> {
   const cleanBase = baseUrl.replace(/\/+$/, '');
   const url = `${cleanBase}${path}`;
+
+  // Apply default timeout if no signal is already set
+  const effectiveOptions = { ...options };
+  if (!effectiveOptions.signal) {
+    effectiveOptions.signal = AbortSignal.timeout(defaultTimeoutMs);
+  }
   
-  const response = await fetch(url, options);
+  const response = await fetch(url, effectiveOptions);
   
   // Determine if we need to retry with /v1:
   // 1. Response is not OK (4xx/5xx)
@@ -68,14 +75,9 @@ export async function fetchWithV1Retry(
     const reason = !response.ok ? `${response.status}` : `non-JSON response (${response.headers.get('content-type') || 'unknown'})`;
     console.log(`[api-helpers] ${url} needs retry (${reason}), retrying with ${retryUrl}`);
     try {
-      // Create fresh options for retry - if original used AbortSignal.timeout, create a new one
+      // Create fresh options for retry with a fresh timeout signal
       const retryOptions: RequestInit = { ...options };
-      if (options.signal && options.signal instanceof AbortSignal) {
-        // Create a fresh timeout signal for the retry
-        // Direct mode APIs (like tokln.com GPT Image 2) need up to 600s to generate images
-        const remainingMs = 600000; // 10分钟 - 兼容token link等慢速API
-        retryOptions.signal = AbortSignal.timeout(remainingMs);
-      }
+      retryOptions.signal = AbortSignal.timeout(defaultTimeoutMs);
       const retryResponse = await fetch(retryUrl, retryOptions);
       // Accept retry response if it's JSON (even if status is 4xx like 401 - means API is reachable)
       // or if it's a successful response
@@ -88,4 +90,57 @@ export async function fetchWithV1Retry(
   }
   
   return response;
+}
+
+/**
+ * Timeout presets for different API operation types
+ */
+export const API_TIMEOUTS = {
+  /** Chat/completions: 60s */
+  chat: 60_000,
+  /** Image generation: 180s (some models take >2min) */
+  imageGeneration: 180_000,
+  /** Image editing (inpaint/mask): 120s */
+  imageEdit: 120_000,
+  /** Vision/analyze: 60s */
+  vision: 60_000,
+  /** Model list/test: 15s */
+  quick: 15_000,
+  /** Vectorize/SVG trace: 120s */
+  vectorize: 120_000,
+  /** Default: 60s */
+  default: 60_000,
+} as const;
+
+export type ApiTimeoutCategory = keyof typeof API_TIMEOUTS;
+
+/**
+ * Fetch with automatic timeout control.
+ * Wraps native fetch with AbortSignal.timeout, combining gracefully with any
+ * existing signal in options.
+ *
+ * @param url - Request URL
+ * @param options - Standard fetch options
+ * @param timeoutMs - Timeout in milliseconds (default: 60s). Can also pass a category string from API_TIMEOUTS.
+ */
+export async function fetchWithTimeout(
+  url: string | URL,
+  options: RequestInit = {},
+  timeoutMs: number | ApiTimeoutCategory = API_TIMEOUTS.default
+): Promise<Response> {
+  const ms = typeof timeoutMs === 'string' ? API_TIMEOUTS[timeoutMs] : timeoutMs;
+
+  // Combine with existing signal if present
+  const existingSignal = options.signal;
+  const timeoutSignal = AbortSignal.timeout(ms);
+
+  let combinedSignal: AbortSignal;
+  if (existingSignal) {
+    // Use AbortSignal.any to combine — aborts when either signal aborts
+    combinedSignal = AbortSignal.any([existingSignal, timeoutSignal]);
+  } else {
+    combinedSignal = timeoutSignal;
+  }
+
+  return fetch(url, { ...options, signal: combinedSignal });
 }

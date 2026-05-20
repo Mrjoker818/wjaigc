@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import sharp from 'sharp';
 import { execFile } from 'child_process';
-import { unlink, mkdir } from 'fs/promises';
+import { unlink, mkdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { getServerDataRoot, saveImageFile } from '@/lib/server-data-root';
@@ -157,20 +157,20 @@ async function resolveImageUrl(imageUrl: string): Promise<Buffer> {
     if (serveUploadMatch) {
       const filePath = path.join(dataRoot, serveUploadMatch[1]);
       if (existsSync(filePath)) {
-        return require('fs').readFileSync(filePath);
+        return await readFile(filePath);
       }
     }
 
     // Try public directory
     const publicPath = path.join(workspacePath, 'public', imageUrl);
     if (existsSync(publicPath)) {
-      return require('fs').readFileSync(publicPath);
+      return await readFile(publicPath);
     }
 
     // Try data root
     const dataPath = path.join(dataRoot, imageUrl.replace(/^\//, ''));
     if (existsSync(dataPath)) {
-      return require('fs').readFileSync(dataPath);
+      return await readFile(dataPath);
     }
 
     // Fallback: fetch from localhost
@@ -314,7 +314,7 @@ async function runVTracer(
       throw new Error('VTracer did not produce output');
     }
 
-    const svgContent = require('fs').readFileSync(outputPath, 'utf-8');
+    const svgContent = await readFile(outputPath, 'utf-8');
     return svgContent;
   } finally {
     try { await unlink(inputPath); } catch { /* ignore */ }
@@ -422,7 +422,7 @@ async function runPotrace(
       throw new Error('Potrace did not produce output');
     }
 
-    let svgContent = require('fs').readFileSync(outputPath, 'utf-8');
+    let svgContent = await readFile(outputPath, 'utf-8');
 
     // Sanitize for Illustrator
     svgContent = sanitizeSvgForIllustrator(svgContent, meta.width, meta.height);

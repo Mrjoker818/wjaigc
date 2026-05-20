@@ -23,7 +23,7 @@ export async function GET(
     for (const dir of possibleDirs) {
       const fullPath = path.join(dir, filePath);
       if (fs.existsSync(fullPath)) {
-        const buffer = fs.readFileSync(fullPath);
+        const buffer = await fs.promises.readFile(fullPath);
         const ext = path.extname(filePath).toLowerCase();
         const contentType = getContentType(ext);
         return new NextResponse(buffer, {

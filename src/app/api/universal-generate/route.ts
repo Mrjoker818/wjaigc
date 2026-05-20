@@ -3,6 +3,7 @@ import { findProviderForModel, normalizeApiBaseUrl } from '@/lib/server-api-conf
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
+import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 
 // 通用API生成路由 - 支持第三方OpenAI兼容API的图像生成
 // 当用户使用非 APIMart 管理的第三方模型时，图像生成请求会被路由到这里
@@ -36,6 +37,15 @@ export async function POST(request: NextRequest) {
     } = body;
 
     const sessionUser = await getSessionUser(request);
+
+    // Content safety check
+    const safetyResult = checkPromptSafety(prompt || '');
+    if (safetyResult.level === 'block') {
+      return NextResponse.json({ success: false, error: safetyResult.reason }, { status: 400 });
+    }
+    if (safetyResult.level === 'warning') {
+      logSafetyWarning(prompt, safetyResult);
+    }
 
     const resolvedModel = model.includes('::') ? model.split('::').slice(1).join('::') : model;
     const provider = await findProviderForModel(resolvedModel, 'image');

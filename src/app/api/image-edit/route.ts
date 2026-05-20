@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderById, findProviderForFeature, findAllProvidersForType, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, convertAspectRatioToSize, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, type ApiCompatProfile, type ImageEndpoint } from '@/lib/api-compatibility';
 import { saveImageFile } from '@/lib/server-data-root';
 import sharp from 'sharp';
@@ -460,17 +461,17 @@ async function fetchImageBuffer(url: string): Promise<Buffer> {
     const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
     const localPath = path.normalize(path.join(workspacePath, 'public', sanitizedUrl));
     const allowedPublicDir = path.normalize(path.join(workspacePath, 'public'));
-    if (localPath.startsWith(allowedPublicDir) && fsSync.existsSync(localPath)) return fsSync.readFileSync(localPath);
+    if (localPath.startsWith(allowedPublicDir) && fsSync.existsSync(localPath)) return await fs.readFile(localPath);
     // 2. Try persistent data directory
     const { getServerDataRoot } = await import('@/lib/server-data-root');
     const dataRoot = await getServerDataRoot();
     const normalizedDataRoot = path.normalize(dataRoot);
     // Try exact path under dataRoot
     const persistentPath = path.normalize(path.join(dataRoot, sanitizedUrl.replace(/^\//, '')));
-    if (persistentPath.startsWith(normalizedDataRoot) && fsSync.existsSync(persistentPath)) return fsSync.readFileSync(persistentPath);
+    if (persistentPath.startsWith(normalizedDataRoot) && fsSync.existsSync(persistentPath)) return await fs.readFile(persistentPath);
     // Try uploads/ prefix under dataRoot
     const uploadPath = path.normalize(path.join(dataRoot, 'uploads', sanitizedUrl.replace(/^\//, '')));
-    if (uploadPath.startsWith(normalizedDataRoot) && fsSync.existsSync(uploadPath)) return fsSync.readFileSync(uploadPath);
+    if (uploadPath.startsWith(normalizedDataRoot) && fsSync.existsSync(uploadPath)) return await fs.readFile(uploadPath);
     // 3. Try S3 object storage fallback (try both 'images/' and 'uploads/' prefixes)
     const { isS3Available, downloadImageFromS3 } = await import('@/lib/s3-storage');
     if (isS3Available()) {
@@ -1348,6 +1349,17 @@ export async function POST(request: NextRequest) {
 
     // 防御性处理：确保 model 是字符串（前端可能误传对象）
     const modelStr = typeof rawModel === 'string' ? rawModel : (rawModel as any)?.model || String(rawModel);
+
+    // Content safety check (for actions that accept prompt input)
+    if (prompt && typeof prompt === 'string') {
+      const safetyResult = checkPromptSafety(prompt);
+      if (safetyResult.level === 'block') {
+        return NextResponse.json({ success: false, error: safetyResult.reason }, { status: 400 });
+      }
+      if (safetyResult.level === 'warning') {
+        logSafetyWarning(prompt, safetyResult);
+      }
+    }
 
     // 放大/擦除/蒙版 均使用管理员系统的 image 类型模型
     // 策略：自动识别管理员配置的所有可用 image 模型，按优先级逐一尝试

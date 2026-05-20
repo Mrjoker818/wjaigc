@@ -56,7 +56,7 @@ export async function readImageToBuffer(
     if (!fs.existsSync(localPath)) {
       throw new Error(`图片文件不存在: ${localPath}`);
     }
-    buffer = fs.readFileSync(localPath);
+    buffer = await fs.promises.readFile(localPath);
   }
 
   // 校验大小

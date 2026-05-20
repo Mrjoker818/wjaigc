@@ -43,7 +43,7 @@ async function resolveImageToBuffer(imageUrl: string): Promise<Buffer | null> {
       // Try direct public path
       const localPath = path.join(workspacePath, 'public', imageUrl);
       if (fsSync.existsSync(localPath)) {
-        return fsSync.readFileSync(localPath);
+        return await fsSync.promises.readFile(localPath);
       }
 
       // /api/serve-upload/filename → search upload directories
@@ -58,7 +58,7 @@ async function resolveImageToBuffer(imageUrl: string): Promise<Buffer | null> {
         for (const dir of uploadDirs) {
           const filePath = path.join(dir, filename);
           if (fsSync.existsSync(filePath)) {
-            return fsSync.readFileSync(filePath);
+            return await fsSync.promises.readFile(filePath);
           }
         }
       }

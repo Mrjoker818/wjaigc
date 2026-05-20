@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl, getApiProviders } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { getEditTask, deleteEditTask, setEditTask, updateTaskStage, failEditTask } from '@/lib/edit-task-store';
 import type { EditTask } from '@/lib/edit-task-store';
@@ -281,6 +282,15 @@ export async function POST(request: NextRequest) {
     }
     if (!prompt) {
       return NextResponse.json({ success: false, error: '请输入编辑指令' }, { status: 400 });
+    }
+
+    // Content safety check
+    const safetyResult = checkPromptSafety(prompt);
+    if (safetyResult.level === 'block') {
+      return NextResponse.json({ success: false, error: safetyResult.reason }, { status: 400 });
+    }
+    if (safetyResult.level === 'warning') {
+      logSafetyWarning(prompt, safetyResult);
     }
 
     // ========== 1. 获取 API 凭证（与 /api/generate 一致） ==========

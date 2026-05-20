@@ -43,7 +43,7 @@ async function resolveImageToBase64(imageUrl: string): Promise<string | null> {
       // Try direct public path
       const localPath = path.join(workspacePath, 'public', imageUrl);
       if (fsSync.existsSync(localPath)) {
-        return fsSync.readFileSync(localPath).toString('base64');
+        return (await fsSync.promises.readFile(localPath)).toString('base64');
       }
 
       // /api/serve-upload/filename → search upload directories
@@ -58,7 +58,7 @@ async function resolveImageToBase64(imageUrl: string): Promise<string | null> {
         for (const dir of uploadDirs) {
           const filePath = path.join(dir, filename);
           if (fsSync.existsSync(filePath)) {
-            return fsSync.readFileSync(filePath).toString('base64');
+            return (await fsSync.promises.readFile(filePath)).toString('base64');
           }
         }
       }

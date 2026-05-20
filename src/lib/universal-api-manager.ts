@@ -1,5 +1,6 @@
 // 第三方模型管理器
 import { fetchWithV1Retry } from './api-helpers';
+import { encryptValue, decryptValue } from './client-crypto';
 import {
   ApiProvider, 
   ModelInfo, 
@@ -40,6 +41,8 @@ export class UniversalApiManager {
       const storedProviders = localStorage.getItem(STORAGE_KEY);
       if (storedProviders) {
         this.providers = JSON.parse(storedProviders);
+        // Decrypt apiKey for each provider (async, but we handle it)
+        this.decryptProviderKeys();
       }
 
       const storedCache = localStorage.getItem(MODELS_CACHE_KEY);
@@ -53,16 +56,66 @@ export class UniversalApiManager {
     }
   }
 
+  private decryptedKeys: Map<string, string> = new Map(); // id -> decrypted apiKey
+
+  /** Decrypt API keys for all providers (handles migration from unencrypted storage) */
+  private decryptProviderKeys(): void {
+    for (const provider of this.providers) {
+      if (provider.apiKey && provider.apiKey.startsWith('__enc__')) {
+        const encryptedPart = provider.apiKey.slice(7);
+        decryptValue(encryptedPart).then(decrypted => {
+          this.decryptedKeys.set(provider.id, decrypted);
+        }).catch(() => {
+          // If decryption fails, keep the raw value (might be legacy unencrypted)
+        });
+      } else if (provider.apiKey) {
+        // Unencrypted (legacy or __plain__ prefix)
+        this.decryptedKeys.set(provider.id, provider.apiKey.replace(/^__plain__/, ''));
+      }
+    }
+  }
+
+  /** Get decrypted API key for a provider */
+  private getDecryptedKey(providerId: string): string {
+    return this.decryptedKeys.get(providerId) || 
+           this.providers.find(p => p.id === providerId)?.apiKey?.replace(/^__enc__/, '').replace(/^__plain__/, '') || 
+           '';
+  }
+
   private saveData(): void {
     try {
       if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
         return;
       }
       
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.providers));
-      localStorage.setItem(MODELS_CACHE_KEY, JSON.stringify(this.modelsCache));
+      // Encrypt API keys before saving (async with fire-and-forget for simplicity)
+      this._saveEncryptedData();
     } catch (error) {
       console.error('Failed to save universal API data:', error);
+    }
+  }
+
+  private async _saveEncryptedData(): Promise<void> {
+    try {
+      const encryptedProviders = await Promise.all(
+        this.providers.map(async (p) => {
+          // Use decrypted key if available, otherwise use raw apiKey (strip any __enc__/__plain__ prefix)
+          const rawKey = this.decryptedKeys.get(p.id) || 
+                         p.apiKey?.replace(/^__enc__/, '').replace(/^__plain__/, '') || '';
+          return {
+            ...p,
+            apiKey: rawKey ? `__enc__${await encryptValue(rawKey)}` : '',
+          };
+        })
+      );
+      
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(encryptedProviders));
+      localStorage.setItem(MODELS_CACHE_KEY, JSON.stringify(this.modelsCache));
+    } catch (error) {
+      // Fallback: save unencrypted if encryption fails
+      console.warn('[universal-api] Encryption failed, saving unencrypted:', error);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.providers));
+      localStorage.setItem(MODELS_CACHE_KEY, JSON.stringify(this.modelsCache));
     }
   }
 
@@ -150,7 +203,7 @@ export class UniversalApiManager {
       
       const response = await fetchWithV1Retry(baseUrl, '/models', {
         headers: {
-          'Authorization': `Bearer ${provider.apiKey}`,
+          'Authorization': `Bearer ${this.getDecryptedKey(provider.id)}`,
           'Content-Type': 'application/json',
         },
         signal: AbortSignal.timeout(15000),
@@ -213,6 +266,8 @@ export class UniversalApiManager {
     };
 
     this.providers.unshift(provider);
+    // Cache the decrypted key
+    this.decryptedKeys.set(provider.id, apiKey);
     this.saveData();
     this.loadAllModels();
 
@@ -252,6 +307,12 @@ export class UniversalApiManager {
       ...updates,
       updatedAt: Date.now(),
     };
+
+    // Update decrypted keys cache if apiKey is being updated
+    if (updates.apiKey) {
+      const rawKey = updates.apiKey.replace(/^__enc__/, '').replace(/^__plain__/, '');
+      this.decryptedKeys.set(providerId, rawKey);
+    }
 
     this.saveData();
     
@@ -324,7 +385,7 @@ export class UniversalApiManager {
       
       const response = await fetchWithV1Retry(baseUrl, '/models', {
         headers: {
-          'Authorization': `Bearer ${provider.apiKey}`,
+          'Authorization': `Bearer ${this.getDecryptedKey(provider.id)}`,
           'Content-Type': 'application/json',
         },
         signal: AbortSignal.timeout(15000),
@@ -412,10 +473,11 @@ export class UniversalApiManager {
       'Content-Type': 'application/json',
     };
 
+    const decryptedKey = this.getDecryptedKey(provider.id);
     if (config.authType === 'bearer') {
-      headers['Authorization'] = `Bearer ${provider.apiKey}`;
+      headers['Authorization'] = `Bearer ${decryptedKey}`;
     } else if (config.authType === 'header' && config.apiKeyHeader) {
-      headers[config.apiKeyHeader] = provider.apiKey;
+      headers[config.apiKeyHeader] = decryptedKey;
     }
 
     const body = config.imageGenerateBody 
@@ -464,10 +526,11 @@ export class UniversalApiManager {
       'Content-Type': 'application/json',
     };
 
+    const decryptedKey = this.getDecryptedKey(provider.id);
     if (config.authType === 'bearer') {
-      headers['Authorization'] = `Bearer ${provider.apiKey}`;
+      headers['Authorization'] = `Bearer ${decryptedKey}`;
     } else if (config.authType === 'header' && config.apiKeyHeader) {
-      headers[config.apiKeyHeader] = provider.apiKey;
+      headers[config.apiKeyHeader] = decryptedKey;
     }
 
     const body = config.chatBody 

@@ -3,6 +3,7 @@ import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 
 export const maxDuration = 60;
 
@@ -14,6 +15,19 @@ export async function POST(request: NextRequest) {
 
     if (!model || !messages) {
       return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
+    }
+
+    // Content safety check on the latest user message
+    const lastUserMsg = messages.filter((m: { role: string }) => m.role === 'user').pop();
+    if (lastUserMsg) {
+      const promptText = typeof lastUserMsg.content === 'string' ? lastUserMsg.content : JSON.stringify(lastUserMsg.content);
+      const safetyResult = checkPromptSafety(promptText);
+      if (safetyResult.level === 'block') {
+        return NextResponse.json({ error: safetyResult.reason }, { status: 400 });
+      }
+      if (safetyResult.level === 'warning') {
+        logSafetyWarning(promptText, safetyResult);
+      }
     }
 
     // 检查是否是第三方模型

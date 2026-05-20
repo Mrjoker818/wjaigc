@@ -475,7 +475,7 @@ export async function POST(request: NextRequest) {
       const { inputPath } = await downloadImageToTemp(imageUrl, tmpDir);
 
       // 获取原始图片尺寸
-      const imageBuffer = fs.readFileSync(inputPath);
+      const imageBuffer = await fs.promises.readFile(inputPath);
       const metadata = await sharp(imageBuffer).metadata();
       const origWidth = metadata.width || 0;
       const origHeight = metadata.height || 0;
@@ -510,7 +510,7 @@ export async function POST(request: NextRequest) {
         throw new Error('Upscayl output file not found');
       }
 
-      const resultBuffer = fs.readFileSync(resultPath);
+      const resultBuffer = await fs.promises.readFile(resultPath);
       const resultMetadata = await sharp(resultBuffer).metadata();
 
       // 转换输出格式（如果需要）

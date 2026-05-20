@@ -339,7 +339,7 @@ export async function performUpscale(
       return { success: false, error: '放大输出文件未生成' };
     }
 
-    let outputBuffer = fs.readFileSync(tmpOutput);
+    let outputBuffer = await fs.promises.readFile(tmpOutput);
     const outputMeta = await sharp(outputBuffer).metadata();
     const outW = outputMeta.width || procW * scale;
     const outH = outputMeta.height || procH * scale;

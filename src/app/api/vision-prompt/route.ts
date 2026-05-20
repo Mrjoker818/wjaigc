@@ -66,13 +66,14 @@ async function imageUrlToBase64(imageUrl: string): Promise<string> {
   // Relative path (e.g., /uploads/xxx.png) — read from local filesystem
   if (imageUrl.startsWith('/')) {
     const fsSync = await import('fs');
+    const fsPromises = fsSync.promises;
     const path = await import('path');
     const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
 
     // 1. Try local public directory
     const localPath = path.join(workspacePath, 'public', imageUrl);
     if (fsSync.existsSync(localPath)) {
-      const buffer = fsSync.readFileSync(localPath);
+      const buffer = await fsPromises.readFile(localPath);
       const ext = path.extname(localPath).toLowerCase();
       const mimeMap: Record<string, string> = {
         '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
@@ -89,7 +90,7 @@ async function imageUrlToBase64(imageUrl: string): Promise<string> {
         const dataRoot = await getServerDataRoot();
         const persistentPath = path.join(dataRoot, imageUrl.replace(/^\//, ''));
         if (fsSync.existsSync(persistentPath)) {
-          const buffer = fsSync.readFileSync(persistentPath);
+          const buffer = await fsPromises.readFile(persistentPath);
           const ext = path.extname(persistentPath).toLowerCase();
           const mimeMap: Record<string, string> = {
             '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',

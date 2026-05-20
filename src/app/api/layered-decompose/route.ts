@@ -142,7 +142,7 @@ async function decomposeViaAI(
     const filename = imageUrl.split('/').pop() || '';
     const localPath = path.join(dataRoot, 'public', 'uploads', filename);
     if (fs.existsSync(localPath)) {
-      const buffer = fs.readFileSync(localPath);
+      const buffer = await fs.promises.readFile(localPath);
       const base64 = buffer.toString('base64');
       resolvedImageUrl = `data:image/png;base64,${base64}`;
     }

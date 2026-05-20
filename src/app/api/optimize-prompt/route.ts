@@ -3,6 +3,7 @@ import { findProviderForModel, getApiProviders } from '@/lib/server-api-config';
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -53,6 +54,15 @@ export async function POST(request: NextRequest) {
 
     if (!prompt) {
       return NextResponse.json({ error: '缺少必要参数：prompt' }, { status: 400 });
+    }
+
+    // Content safety check
+    const safetyResult = checkPromptSafety(prompt);
+    if (safetyResult.level === 'block') {
+      return NextResponse.json({ error: safetyResult.reason }, { status: 400 });
+    }
+    if (safetyResult.level === 'warning') {
+      logSafetyWarning(prompt, safetyResult);
     }
 
     const resolved = splitProviderModel(model, providerId);

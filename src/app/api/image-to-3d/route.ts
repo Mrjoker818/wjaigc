@@ -62,7 +62,7 @@ async function imageUrlToBase64(imageUrl: string): Promise<string | null> {
       // Try direct public path
       const localPath = path.join(workspacePath, 'public', imageUrl);
       if (fsSync.existsSync(localPath)) {
-        const buffer = fsSync.readFileSync(localPath);
+        const buffer = await fsSync.promises.readFile(localPath);
         return buffer.toString('base64');
       }
 
@@ -78,7 +78,7 @@ async function imageUrlToBase64(imageUrl: string): Promise<string | null> {
         for (const dir of uploadDirs) {
           const filePath = path.join(dir, filename);
           if (fsSync.existsSync(filePath)) {
-            const buffer = fsSync.readFileSync(filePath);
+            const buffer = await fsSync.promises.readFile(filePath);
             return buffer.toString('base64');
           }
         }
