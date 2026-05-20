@@ -83,6 +83,10 @@ export async function POST(request: NextRequest) {
     }
 
     // 非流式响应
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      return NextResponse.json({ error: `LLM API 错误: ${response.status}`, detail: errText.slice(0, 200) }, { status: response.status });
+    }
     const data = await response.json();
     await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: false });
     return NextResponse.json(data);

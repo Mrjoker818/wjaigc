@@ -639,6 +639,7 @@ export function InfiniteCanvas({
     (async () => {
       try {
         const res = await fetch('/api/upscayl');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setUpscaylAvailable(data.available ?? false);
         if (data.available && data.models) {
@@ -3747,6 +3748,7 @@ export function InfiniteCanvas({
           body: JSON.stringify({ taskId, model: currentModelInfo.model, providerId: getCurrentProviderId() }),
           signal: abortController.signal,
         });
+        if (!res.ok) throw new Error(`Poll HTTP ${res.status}`);
         const data = await res.json();
 
         // ★ 检查服务端取消状态
@@ -4278,6 +4280,7 @@ export function InfiniteCanvas({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ taskId, model: modelInfo.model, providerId: getCurrentProviderId() }),
               });
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
               const pollData = await res.json();
               if (pollData.status === 'completed' && pollData.imageUrl) return pollData.imageUrl;
               if (pollData.status === 'failed' || pollData.status === 'error' || pollData.retryable === false) return null;
@@ -4382,6 +4385,11 @@ export function InfiniteCanvas({
         body: JSON.stringify(requestBody),
       });
 
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        throw new Error(`SVG描摹失败: ${errText || response.status}`);
+      }
+
       updateProcessingFrame(placeholderId, { progress: 60, status: '正在处理结果...' });
 
       const data = await response.json();
@@ -4467,6 +4475,7 @@ export function InfiniteCanvas({
           providerId: modelInfo.providerId || getCurrentProviderId(),
         }),
       });
+      if (!res.ok) throw new Error(`多角度生成失败: HTTP ${res.status}`);
       const data = await res.json();
       if (!data.success) {
         alert(data.error || '多角度生成失败');
@@ -4563,6 +4572,7 @@ export function InfiniteCanvas({
           },
         }),
       });
+      if (!res.ok) throw new Error(`3D任务创建失败: HTTP ${res.status}`);
       const data = await res.json();
       console.log('[3D] API response:', JSON.stringify(data).slice(0, 500));
       if (!data.success) {
@@ -9534,6 +9544,7 @@ export function InfiniteCanvas({
                                   formData.append('file', file);
                                   try {
                                     const res = await fetch('/api/save-image', { method: 'POST', body: formData });
+                                    if (!res.ok) throw new Error(`上传失败: HTTP ${res.status}`);
                                     const data = await res.json();
                                     if (data.url) {
                                       updateHexCubeFace(hcg.id, face, data.url, null);
@@ -9848,6 +9859,7 @@ export function InfiniteCanvas({
                           try {
                             // 不传 model/providerId，让服务端自动查找可用的 LLM (chat) 模型
                             const res = await fetch('/api/optimize-prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: hcg.toolbar.prompt, mode: 'enhance' }) });
+                            if (!res.ok) throw new Error(`优化提示词失败: HTTP ${res.status}`);
                             const data = await res.json();
                             if (data.optimized || data.optimizedPrompt) {
                               let optimizedPrompt = data.optimized || data.optimizedPrompt;
@@ -9892,6 +9904,7 @@ export function InfiniteCanvas({
                                 referenceImageUrls: hcg.faces.filter(f => f.imageUrl).map(f => f.imageUrl!),
                               }),
                             });
+                            if (!res.ok) throw new Error(`HexCube生成失败: HTTP ${res.status}`);
                             const data = await res.json();
                             if (data.taskId || data.taskIds) {
                               const taskId = data.taskId || data.taskIds?.[0];

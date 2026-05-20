@@ -347,6 +347,14 @@ export async function POST(request: NextRequest) {
       }
     } else {
       // Standard JSON response
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        console.error('[vision-prompt] API error:', response.status, errText.slice(0, 200));
+        return NextResponse.json(
+          { error: `API 错误: ${response.status}`, detail: errText.slice(0, 200) },
+          { status: response.status }
+        );
+      }
       try {
         const raw = await response.json() as Record<string, unknown>;
         data = (raw.Response ? raw.Response : raw) as Record<string, unknown>;

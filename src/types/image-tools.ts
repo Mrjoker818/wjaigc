@@ -86,14 +86,6 @@ export interface MaskBrushCanvasProps {
   onMaskChange?: (maskDataUrl: string) => void;
 }
 
-/** ImageEditPanel 属性 */
-export interface ImageEditPanelProps {
-  imageUrl: string;
-  mode: 'erase' | 'mask';
-  onClose: () => void;
-  onSuccess: (resultImageUrl: string) => void;
-}
-
 /** UpscaleDialog 属性 */
 export interface UpscaleDialogProps {
   imageUrl: string;

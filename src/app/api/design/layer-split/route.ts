@@ -48,13 +48,15 @@ export async function POST(req: NextRequest) {
     });
     clearTimeout(timeout);
 
-    const data = await response.json();
     if (!response.ok) {
+      const errText = await response.text().catch(() => '');
       return NextResponse.json({
         success: false,
-        error: data?.error || `图层分离服务调用失败: ${response.status}`,
+        error: `图层分离服务调用失败: ${response.status}`,
+        detail: errText.slice(0, 200),
       }, { status: response.status });
     }
+    const data = await response.json();
 
     const rawLayers = data.layers || data.rgba_layers || data.images || data.outputs || [];
     const layers = Array.isArray(rawLayers)

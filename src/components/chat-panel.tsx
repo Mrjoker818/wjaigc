@@ -961,6 +961,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isThinkingMode, setIsThinkingMode] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showChatSettings, setShowChatSettings] = useState(true);
   // 提示词大师相关状态
@@ -1367,11 +1368,16 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
         content: input.trim()
       });
 
+      // 创建 AbortController 以支持取消
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
+        signal: controller.signal,
         body: JSON.stringify({
           model: actualModel,
           messages: requestMessages,
@@ -1572,6 +1578,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
       setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
+      abortControllerRef.current = null;
     }
   }, [input, isLoading, messages, model, systemPrompt, isThinkingMode, saveSession]);
 

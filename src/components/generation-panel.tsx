@@ -782,6 +782,7 @@ export function GenerationPanel(
                         providerName: provider.name,
                     }),
                 });
+                if (!response.ok) throw new Error(`模型发现失败: HTTP ${response.status}`);
                 const data = await response.json();
                 if (data.success && data.models) {
                     setDiscoveredModels(prev => [...prev, ...data.models]);

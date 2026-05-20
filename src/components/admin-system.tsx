@@ -81,6 +81,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
   const refresh = useCallback(async () => {
     try {
       const response = await fetch('/api/admin/users', { cache: 'no-store', credentials: 'include' });
+      if (!response.ok) throw new Error(`获取用户列表失败: HTTP ${response.status}`);
       const data = await response.json();
       if (data.success && Array.isArray(data.users)) {
         setUsers(data.users);
@@ -93,6 +94,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     }
     try {
       const response = await fetch('/api/admin/apis', { cache: 'no-store', credentials: 'include' });
+      if (!response.ok) throw new Error(`获取API配置失败: HTTP ${response.status}`);
       const data = await response.json();
       if (data.success) setProviders(data.providers || []);
       else setProviders([]);
@@ -104,6 +106,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
   const refreshBalances = useCallback(async () => {
     try {
       const response = await fetch('/api/admin/api-balance', { credentials: 'include' });
+      if (!response.ok) throw new Error(`获取余额失败: HTTP ${response.status}`);
       const data = await response.json();
       if (data.success) setApiBalances(data.balances || []);
     } catch {
@@ -216,9 +219,9 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'discover', baseUrl: apiBaseUrl.trim(), apiKey: apiKey.trim(), modelType: apiKind }),
       });
+      if (!response.ok) throw new Error(`模型发现失败: HTTP ${response.status}`);
       const data = await response.json();
-      if (!data.success && data.error) {
-        setTestNewResult({ success: false, message: data.error });
+      if (!data.success && data.error) {  setTestNewResult({ success: false, message: data.error });
         setDiscoveredModels([]);
         return;
       }
@@ -361,6 +364,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
         credentials: 'include',
         body: JSON.stringify({ providerId: provider.id }),
       });
+      if (!response.ok) throw new Error(`测试连接失败: HTTP ${response.status}`);
       const data = await response.json();
       setTestResult({
         providerId: provider.id,
@@ -388,6 +392,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
         credentials: 'include',
         body: JSON.stringify({ providerId: provider.id }),
       });
+      if (!response.ok) throw new Error(`协议验证失败: HTTP ${response.status}`);
       const data = await response.json();
       setVerifyResult({
         providerId: provider.id,
@@ -425,6 +430,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
           advancedParams: advParams,
         }),
       });
+      if (!response.ok) throw new Error(`测试连接失败: HTTP ${response.status}`);
       const data = await response.json();
       setTestNewResult({
         success: data.success,

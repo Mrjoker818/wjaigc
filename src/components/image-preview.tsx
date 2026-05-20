@@ -35,11 +35,9 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
   const sphereCanvasRef = useRef<HTMLCanvasElement>(null);
   const imgDataRef = useRef<{ data: Uint8ClampedArray; w: number; h: number } | null>(null);
 
-  if (!image) return null;
-
   // Preload image pixel data for sphere rendering
   useEffect(() => {
-    if (viewMode !== '3d') return;
+    if (viewMode !== '3d' || !image) return;
     imgDataRef.current = null;
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -110,7 +108,7 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
         })
         .catch(() => {});
     };
-    img.src = image.url;
+    img.src = image!.url;
   }, [viewMode, image?.url]);
 
   // Auto rotation
@@ -287,6 +285,9 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
   const handle3DPointerUp = useCallback(() => {
     setIsDragging3D(false);
   }, []);
+
+  // Early return after all hooks
+  if (!image) return null;
 
   const getViewAngle = () => {
     const y = ((rotRef3D.current.y % 360) + 360) % 360;
