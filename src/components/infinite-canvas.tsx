@@ -5786,7 +5786,7 @@ export function InfiniteCanvas({
   const ratioOptions = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9'];
 
   // Floating panel style helpers
-  const panelBaseClass = `flex items-center gap-1.5 px-3 py-2 rounded-xl border shadow-xl ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-[#1a1a1a]/85/95 border-white/[0.12] backdrop-blur-sm'}`;
+  const panelBaseClass = `flex items-center gap-1.5 px-3 py-2 rounded-xl border shadow-xl ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-[#1a1a1a]/95 border-[#2a2a2a]'}`;
   const panelLabelClass = `text-xs font-medium ${isMonochrome ? 'text-gray-700' : 'text-[#ccc]'}`;
   const panelSmallLabelClass = `text-xs ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`;
   const panelDividerClass = `w-px h-4 ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'} mx-1`;
@@ -7004,7 +7004,6 @@ export function InfiniteCanvas({
                     style={{
                       background: isMonochrome ? 'rgba(255,255,255,0.95)' : 'rgba(26,26,26,0.96)',
                       border: isMonochrome ? '1px solid rgba(200,200,200,0.5)' : `1px solid ${accentBorder}`,
-                      backdropFilter: 'blur(8px)',
                     }}
                     onMouseDown={(e) => e.stopPropagation()}
                   >
@@ -7026,7 +7025,7 @@ export function InfiniteCanvas({
                       {openModelDropdownGroupId === group.id && (
                         <div
                           className="absolute left-0 right-0 top-full mt-1 rounded-lg shadow-xl overflow-hidden z-50 max-h-64 overflow-y-auto"
-                          style={{ background: isMonochrome ? '#fff' : 'rgba(255,255,255,0.06)', border: isMonochrome ? '1px solid #ddd' : '1px solid rgba(255,255,255,0.14)', backdropFilter: isMonochrome ? 'none' : 'blur(24px)', WebkitBackdropFilter: isMonochrome ? 'none' : 'blur(24px)' }}
+                          style={{ background: isMonochrome ? '#fff' : 'rgba(20,20,20,0.95)', border: isMonochrome ? '1px solid #ddd' : '1px solid #333' }}
                           onMouseDown={(e) => e.stopPropagation()}
                         >
                           {canvasGenModels.map((m, mi) => {
@@ -7376,7 +7375,7 @@ export function InfiniteCanvas({
             >
               <div
                 className="flex flex-col items-stretch gap-2.5 p-3 min-w-[280px] max-w-[320px] rounded-xl border shadow-2xl"
-                style={{ background: 'rgba(20,20,20,0.85)', borderColor: `${activeAccent}40`, borderWidth: '1px', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)' }}
+                style={{ background: 'rgba(20,20,20,0.85)', borderColor: `${activeAccent}40`, borderWidth: '1px' }}
                 onMouseDown={(e) => e.stopPropagation()}
               >
                 {/* Header */}
@@ -8711,7 +8710,7 @@ export function InfiniteCanvas({
             >
               <div
                 className="flex flex-col items-stretch gap-2 p-3 min-w-[300px] rounded-xl border shadow-2xl"
-                style={{ background: 'rgba(20,20,20,0.85)', borderColor: '#d4af3740', borderWidth: '1px', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)' }}
+                style={{ background: 'rgba(20,20,20,0.85)', borderColor: '#d4af3740', borderWidth: '1px' }}
                 onMouseDown={(e) => e.stopPropagation()}
               >
                 {/* Header */}
@@ -9464,7 +9463,6 @@ export function InfiniteCanvas({
                   background: isMonochrome ? 'rgba(255,255,255,0.97)' : 'rgba(20,20,20,0.96)',
                   border: `2px solid ${isThisGroupDragging ? '#d4af37' : isMonochrome ? '#e5e7eb' : '#333'}`,
                   boxShadow: isThisGroupDragging ? '0 0 24px rgba(212,175,55,0.3)' : '0 8px 32px rgba(0,0,0,0.4)',
-                  backdropFilter: 'blur(12px)',
                   minWidth: netW + previewSize + 80,
                 }}
                 onMouseDown={(e) => e.stopPropagation()}
@@ -9775,7 +9773,7 @@ export function InfiniteCanvas({
                           <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
                         </button>
                         {openModelDropdownGroupId === `hex-${hcg.id}` && (
-                          <div className="absolute top-full left-0 mt-1 rounded-lg overflow-hidden z-50 max-h-64 overflow-y-auto" style={{ background: isMonochrome ? '#fff' : 'rgba(255,255,255,0.06)', border: `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)'}`, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.5)', backdropFilter: isMonochrome ? 'none' : 'blur(24px)', WebkitBackdropFilter: isMonochrome ? 'none' : 'blur(24px)' }}>
+                          <div className="absolute top-full left-0 mt-1 rounded-lg overflow-hidden z-50 max-h-64 overflow-y-auto" style={{ background: isMonochrome ? '#fff' : 'rgba(20,20,20,0.95)', border: `1px solid ${isMonochrome ? '#e5e7eb' : '#333'}`, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
                             {models.map(m => (
                               <div
                                 key={`${m.providerId}-${m.id}`}
@@ -9986,7 +9984,7 @@ export function InfiniteCanvas({
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
             >
-              <div className={`flex items-center gap-0.5 px-1 py-1 rounded-xl border shadow-xl ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-[#1a1a1a]/85/95 border-white/[0.12] backdrop-blur-sm'}`}>
+              <div className={`flex items-center gap-0.5 px-1 py-1 rounded-xl border shadow-xl ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-[#1a1a1a]/95 border-[#2a2a2a]'}`}>
                 {displayedActions.map((action, idx) => (
                   <div key={action.label} className="relative">
                     <button
@@ -10099,7 +10097,7 @@ export function InfiniteCanvas({
         {/* Image context menu */}
         {showContextMenu && (
           <div
-            className={`fixed z-50 py-1.5 rounded-xl border shadow-2xl min-w-[160px] ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-[#1a1a1a]/85/95 border-white/[0.12] backdrop-blur-sm'}`}
+            className={`fixed z-50 py-1.5 rounded-xl border shadow-2xl min-w-[160px] ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-[#1a1a1a]/95 border-[#2a2a2a]'}`}
             data-popup="context-menu"
             style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
             onClick={(e) => e.stopPropagation()}
@@ -10123,7 +10121,7 @@ export function InfiniteCanvas({
         {/* Canvas context menu */}
         {showCanvasMenu && (
           <div
-            className={`fixed z-50 py-1.5 rounded-xl border shadow-2xl min-w-[200px] ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-[#1a1a1a]/85/95 border-white/[0.12] backdrop-blur-sm'}`}
+            className={`fixed z-50 py-1.5 rounded-xl border shadow-2xl min-w-[200px] ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-[#1a1a1a]/95 border-[#2a2a2a]'}`}
             style={{ left: canvasMenuPos.x, top: canvasMenuPos.y }}
             onClick={(e) => e.stopPropagation()}
           >
