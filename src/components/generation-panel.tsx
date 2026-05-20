@@ -883,8 +883,8 @@ export function GenerationPanel(
     const dot = <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${mc ? 'bg-gray-700' : 'bg-[#d4af37]'}`} />;
     // Input/Select style - comfortable padding
     const inputStl = mc
-        ? "w-full px-3 py-2 rounded-md text-sm bg-gray-50 text-gray-900 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-300 transition-all hover:border-gray-300"
-        : "w-full px-3 py-2 rounded-md text-sm bg-[#1a1a1a] text-[#e0e0e0] border border-[#2a2a2a] focus:outline-none focus:ring-2 focus:ring-[#d4af37]/30 transition-all hover:border-[#3a3a3a]";
+        ? "w-full px-3 py-2 rounded-lg text-sm bg-gray-50 text-gray-900 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-300 focus:shadow-sm transition-all hover:border-gray-300"
+        : "w-full px-3 py-2 rounded-lg text-sm bg-[#1a1a1a] text-[#e0e0e0] border border-[#2a2a2a] focus:outline-none focus:ring-2 focus:ring-[#d4af37]/30 focus:shadow-[0_0_12px_rgba(212,175,55,0.08)] transition-all hover:border-[#3a3a3a]";
     // Grid button unselected/selected
     const gridBtnBase = "py-1.5 px-2 text-xs rounded-md transition-all duration-200 border";
     const gridBtnOff = mc
@@ -1038,7 +1038,7 @@ export function GenerationPanel(
                             }}
                             placeholder={altRefMarkers.length > 0 ? "用 R1、R2... 引用参考图来控制生成效果..." : "描述你想要创建的图像..."}
                             style={{ height: prompt ? promptHeight : undefined, minHeight: 80 }}
-                            className={`w-full px-3 py-2.5 text-sm resize-none ${mc ? 'bg-gray-50 text-gray-900 placeholder:text-gray-400' : 'bg-[#1a1a1a] text-[#e0e0e0] placeholder:text-[#555]'} leading-relaxed focus:outline-none`}
+                            className={`w-full px-3 py-2.5 text-sm resize-none ${mc ? 'bg-gray-50 text-gray-900 placeholder:text-gray-400' : 'bg-[#1a1a1a] text-[#e0e0e0] placeholder:text-[#555]'} leading-relaxed focus:outline-none focus:ring-1 ${mc ? 'focus:ring-gray-300' : 'focus:ring-[#d4af37]/30'} rounded-lg transition-shadow`}
                         />
                         {/* 拖动手柄 - 仅在有内容时显示 */}
                         {prompt && (

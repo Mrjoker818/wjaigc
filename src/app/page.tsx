@@ -1954,79 +1954,92 @@ function CanvasApp() {
 
       {/* Floating Panel */}
       {!panelCollapsed && (
-        <div className={`absolute top-3 right-3 bottom-3 w-[340px] z-30 flex flex-col transition-all duration-300 overflow-hidden ${
+        <div className={`absolute top-3 right-3 bottom-3 w-[340px] z-30 flex flex-col transition-all duration-300 overflow-hidden panel-slide-in ${
           themeStyle === 'monochrome' 
-            ? 'bg-white/98 backdrop-blur-xl border border-gray-200 shadow-2xl rounded-xl' 
-            : 'bg-[#141414]/95 backdrop-blur-xl border border-[#d4af37]/20 rounded-xl shadow-2xl'
+            ? 'bg-white/95 backdrop-blur-xl border border-gray-200/80 shadow-xl rounded-xl' 
+            : 'bg-[#141414]/90 backdrop-blur-xl border border-[#d4af37]/15 rounded-xl shadow-2xl'
         }`}>
           {/* 软件标题 - 版本号在下方，项目名在右侧 */}
-          <div className={`px-4 py-2 border-b flex-shrink-0 flex items-center justify-between ${
-            themeStyle === 'monochrome' ? 'border-gray-200 bg-gray-50/50' : 'border-[#2a2a2a]'
+          <div className={`px-4 py-2.5 flex-shrink-0 flex items-center justify-between ${
+            themeStyle === 'monochrome' ? 'bg-gray-50/50' : ''
           }`}>
             <div className="flex items-center gap-3">
               <div className="flex flex-col">
-                <h1 className={`text-lg font-bold leading-tight ${
-                  themeStyle === 'monochrome' ? 'text-gray-900' : 'text-white'
-                }`}>
-                  {APP_NAME}
-                </h1>
-                <span className={`text-[10px] leading-tight ${
+                <div className="flex items-center gap-2">
+                  <h1 className={`text-lg font-bold leading-tight tracking-tight ${
+                    themeStyle === 'monochrome' ? 'text-gray-900' : 'text-white'
+                  }`}>
+                    {APP_NAME}
+                  </h1>
+                  {themeStyle !== 'monochrome' && (
+                    <div className="w-1.5 h-1.5 rounded-full bg-[#d4af37] shadow-[0_0_6px_rgba(212,175,55,0.5)]" />
+                  )}
+                </div>
+                <span className={`text-[10px] leading-tight font-mono ${
                   themeStyle === 'monochrome' ? 'text-gray-400' : 'text-[#555]'
                 }`}>
                   {APP_FULL_VERSION_LABEL}
                 </span>
               </div>
               {currentProject && (
-                <span className={`text-xs px-2 py-0.5 rounded ${
+                <span className={`text-xs px-2.5 py-0.5 rounded-lg font-medium transition-colors ${
                   themeStyle === 'monochrome' 
                     ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' 
-                    : 'bg-[#d4af37]/15 text-[#d4af37] border border-[#d4af37]/30'
+                    : 'bg-[#d4af37]/10 text-[#d4af37] border border-[#d4af37]/20 hover:bg-[#d4af37]/15'
                 }`}>
                   {currentProject.name}
                 </span>
               )}
             </div>
           </div>
+          <div className="panel-divider" />
 
           {/* Panel Tabs - 紧凑化 */}
-          <div className={`flex border-b flex-shrink-0 ${
-            themeStyle === 'monochrome' ? 'border-gray-200' : 'border-[#2a2a2a]'
+          <div className={`flex flex-shrink-0 ${
+            themeStyle === 'monochrome' ? 'bg-gray-50/30' : ''
           }`}>
             <button
               onClick={() => setActivePanel('generate')}
-              className={`flex-1 py-1.5 px-3 flex items-center justify-center gap-1.5 transition-all text-sm ${
+              className={`flex-1 py-2 px-3 flex items-center justify-center gap-1.5 transition-all text-sm relative ${
                 activePanel === 'generate'
                   ? themeStyle === 'monochrome'
-                    ? 'text-gray-900 border-b-2 border-yellow-400 bg-white'
-                    : 'text-[#d4af37] border-b-2 border-[#d4af37]'
+                    ? 'text-gray-900 font-semibold'
+                    : 'text-[#d4af37] font-semibold'
                   : themeStyle === 'monochrome'
-                    ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-                    : 'text-[#888] hover:text-white'
+                    ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-50/50'
+                    : 'text-[#888] hover:text-white hover:bg-white/[0.03]'
               }`}
             >
               <ImageIcon size={15} />
-              <span className="text-sm font-medium">图像生成</span>
+              <span className="text-sm">图像生成</span>
+              {activePanel === 'generate' && (
+                <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-yellow-400' : 'bg-[#d4af37] shadow-[0_0_6px_rgba(212,175,55,0.5)]'}`} />
+              )}
             </button>
             <button
               onClick={() => setActivePanel('chat')}
-              className={`flex-1 py-1.5 px-3 flex items-center justify-center gap-1.5 transition-all text-sm ${
+              className={`flex-1 py-2 px-3 flex items-center justify-center gap-1.5 transition-all text-sm relative ${
                 activePanel === 'chat'
                   ? themeStyle === 'monochrome'
-                    ? 'text-gray-900 border-b-2 border-yellow-400 bg-white'
-                    : 'text-[#d4af37] border-b-2 border-[#d4af37]'
+                    ? 'text-gray-900 font-semibold'
+                    : 'text-[#d4af37] font-semibold'
                   : themeStyle === 'monochrome'
-                    ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-                    : 'text-[#888] hover:text-white'
+                    ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-50/50'
+                    : 'text-[#888] hover:text-white hover:bg-white/[0.03]'
               }`}
             >
               <MessageSquare size={15} />
-              <span className="text-sm font-medium">智能对话</span>
+              <span className="text-sm">智能对话</span>
+              {activePanel === 'chat' && (
+                <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-yellow-400' : 'bg-[#d4af37] shadow-[0_0_6px_rgba(212,175,55,0.5)]'}`} />
+              )}
             </button>
           </div>
+          <div className="panel-divider" />
 
           {/* Panel Content */}
           <div className="flex-1 overflow-hidden flex flex-col">
-            <div className={activePanel === 'generate' ? 'flex-1 overflow-y-auto' : 'hidden'} style={{
+            <div className={activePanel === 'generate' ? 'flex-1 overflow-y-auto scroll-smooth' : 'hidden'} style={{
               scrollbarWidth: 'thin',
               scrollbarColor: themeStyle === 'monochrome' ? '#d1d5db transparent' : '#444 transparent'
             }}>
@@ -2067,13 +2080,12 @@ function CanvasApp() {
 
             {/* 固定在底部的开始生成按钮 */}
             {activePanel === 'generate' && (
-              <div className={`border-t px-4 py-3 flex-shrink-0 ${
-                themeStyle === 'monochrome' ? 'border-gray-200 bg-gray-50' : 'border-[#2a2a2a]'
-              }`}>
+              <div className={`px-4 py-3 flex-shrink-0`}>
+                <div className="panel-divider mb-3" />
                 {/* 进度条和耗时 */}
                 {isGenerating && (
-                  <div className="mb-1">
-                    <div className="flex items-center justify-between mb-0.5">
+                  <div className="mb-2">
+                    <div className="flex items-center justify-between mb-1">
                       <span className={`text-xs font-medium ${
                         themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'
                       }`}>
@@ -2092,11 +2104,11 @@ function CanvasApp() {
                         </span>
                       )}
                     </div>
-                    <div className={`w-full h-1 rounded-full overflow-hidden ${
+                    <div className={`w-full h-1.5 rounded-full overflow-hidden ${
                       themeStyle === 'monochrome' ? 'bg-gray-200' : 'bg-[#2a2a2a]'
                     }`}>
                       <div 
-                        className={`h-full rounded-full transition-all duration-500 ease-out ${
+                        className={`h-full rounded-full progress-bar ${
                           themeStyle === 'monochrome' 
                             ? 'bg-gradient-to-r from-yellow-400 to-yellow-500' 
                             : 'bg-gradient-to-r from-[#d4af37] to-[#daa520]'
@@ -2109,14 +2121,14 @@ function CanvasApp() {
                 <button
                   onClick={() => document.dispatchEvent(new CustomEvent('trigger-generate'))}
                   disabled={isGenerating}
-                  className={`w-full py-2 px-4 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                  className={`btn-press w-full py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
                     isGenerating
                       ? themeStyle === 'monochrome'
                         ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
                         : 'bg-[#2a2a2a] text-[#666] cursor-not-allowed'
                       : themeStyle === 'monochrome'
-                        ? 'bg-gradient-to-r from-yellow-400 to-yellow-500 text-white hover:from-yellow-500 hover:to-yellow-600 shadow-md hover:shadow-lg'
-                        : 'bg-gradient-to-r from-[#d4af37] to-[#daa520] text-black hover:from-[#daa520] hover:to-[#d4af37] shadow-md hover:shadow-lg'
+                        ? 'bg-gradient-to-r from-yellow-400 to-yellow-500 text-white hover:from-yellow-500 hover:to-yellow-600 shadow-md hover:shadow-lg active:shadow-sm'
+                        : 'bg-gradient-to-r from-[#d4af37] to-[#daa520] text-black hover:from-[#daa520] hover:to-[#d4af37] shadow-md hover:shadow-lg active:shadow-sm'
                   }`}
                 >
                   {isGenerating ? (
@@ -2166,8 +2178,12 @@ function CanvasApp() {
         position="top-center" 
         toastOptions={{
           className: themeStyle === 'monochrome' 
-            ? 'bg-white border border-gray-200 text-gray-900' 
-            : 'bg-[#141414] border border-[#2a2a2a] text-white',
+            ? 'bg-white border border-gray-200 text-gray-900 shadow-lg shadow-gray-200/50' 
+            : 'bg-[#1a1a1a] border border-[#2a2a2a] text-white shadow-lg shadow-black/30',
+          style: {
+            borderRadius: '12px',
+            fontSize: '13px',
+          },
         }}
       />
 
@@ -2539,13 +2555,16 @@ function CanvasApp() {
         </div>
       )}
       {authChecked && !currentUser && !showUserManager && (
-        <div className="fixed inset-0 flex items-center justify-center z-[90] bg-[#0a0a0a]">
-          <div className="flex flex-col items-center gap-6">
-            <h1 className="text-2xl font-bold text-white">无界 AI</h1>
-            <p className="text-white/50 text-sm">请先登录以使用画布</p>
+        <div className="fixed inset-0 flex items-center justify-center z-[90] bg-gradient-to-br from-[#0a0a0a] via-[#111] to-[#0d0d0d]">
+          <div className="flex flex-col items-center gap-8">
+            <div className="relative">
+              <div className="absolute -inset-4 bg-[#d4af37]/10 rounded-3xl blur-2xl" />
+              <h1 className="relative text-3xl font-bold text-white tracking-wide">无界 AI</h1>
+            </div>
+            <p className="text-white/40 text-sm tracking-wider">请先登录以使用画布</p>
             <button
               onClick={() => setShowUserManager(true)}
-              className="px-6 py-2.5 bg-[#d4af37] text-black font-medium rounded-lg hover:bg-[#c4a030] transition-colors"
+              className="btn-press px-8 py-3 bg-gradient-to-r from-[#d4af37] to-[#daa520] text-black font-semibold rounded-xl hover:from-[#daa520] hover:to-[#d4af37] shadow-lg shadow-[#d4af37]/20 hover:shadow-xl hover:shadow-[#d4af37]/30 transition-all"
             >
               登录 / 注册
             </button>

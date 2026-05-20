@@ -2137,8 +2137,8 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                 className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 {message.role === 'assistant' && (
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
-                    isGold ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'bg-gray-100 text-gray-600'
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 shadow-sm ${
+                    isGold ? 'bg-[#d4af37]/10 text-[#d4af37] ring-1 ring-[#d4af37]/20' : 'bg-gray-100 text-gray-600'
                   }`}>
                     <Bot size={14} />
                   </div>
@@ -2183,14 +2183,14 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                       <span>正在生成图片...</span>
                     </div>
                   )}
-                  <div className={`rounded-xl px-3 py-2 ${
+                  <div className={`rounded-2xl px-3.5 py-2.5 ${
                     message.role === 'user'
                       ? isGold
-                        ? 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-black'
-                        : 'bg-gray-900 text-white'
+                        ? 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-black shadow-sm'
+                        : 'bg-gray-900 text-white shadow-sm'
                       : isGold
-                        ? 'bg-[#1a1a1a] text-[#e0e0e0] border border-[#2a2a2a]'
-                        : 'bg-white text-gray-800 border border-gray-200'
+                        ? 'bg-[#1a1a1a] text-[#e0e0e0] border border-[#2a2a2a]/60'
+                        : 'bg-white text-gray-800 border border-gray-100 shadow-sm'
                   }`}>
                     <div className="text-xs leading-relaxed">
                       {message.role === 'assistant'
@@ -2319,7 +2319,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
             >
               <ImageIcon size={14} />
             </button>
-            <div className={`flex-1 relative rounded-lg overflow-hidden ${isGold ? 'bg-[#141414] border border-[#2a2a2a] focus-within:border-[#d4af37]/40' : 'bg-white border border-gray-200 focus-within:border-gray-400'} transition-colors`}>
+            <div className={`flex-1 relative rounded-xl overflow-hidden ${isGold ? 'bg-[#141414] border border-[#2a2a2a] focus-within:border-[#d4af37]/40 focus-within:shadow-[0_0_12px_rgba(212,175,55,0.1)]' : 'bg-white border border-gray-200 focus-within:border-gray-400 focus-within:shadow-sm'} transition-all`}>
               <Textarea
                 ref={textareaRef}
                 value={input}

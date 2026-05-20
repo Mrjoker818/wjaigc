@@ -6269,10 +6269,10 @@ export function InfiniteCanvas({
                     <img
                       src={image.processing.sourceUrl || image.url}
                       alt=""
-                      className="absolute inset-0 w-full h-full object-cover blur-xl scale-110 opacity-45 pointer-events-none"
+                      className="absolute inset-0 w-full h-full object-cover blur-xl scale-110 opacity-40 pointer-events-none"
                       draggable={false}
                     />
-                    <div className="absolute inset-0 bg-black/45 pointer-events-none" />
+                    <div className="absolute inset-0 bg-black/50 pointer-events-none" />
                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 pointer-events-none">
                       {image.processing.label.includes('3D') ? (
                         /* 3D专属进度UI：旋转立方体图标 + 金色脉冲 */
@@ -6285,7 +6285,6 @@ export function InfiniteCanvas({
                                   <stop offset="100%" style={{ stopColor: '#f4e18f' }} />
                                 </linearGradient>
                               </defs>
-                              {/* 立方体线框 */}
                               <path d="M20 4 L36 13 L36 27 L20 36 L4 27 L4 13 Z" fill="none" stroke="url(#cubeGrad)" strokeWidth="1.5" opacity="0.8" />
                               <path d="M20 4 L20 18 M20 36 L20 22 M4 13 L18 18 M36 13 L22 18" fill="none" stroke="url(#cubeGrad)" strokeWidth="1" opacity="0.5" />
                               <path d="M20 18 L20 22" fill="none" stroke="#d4af37" strokeWidth="2" opacity="0.9" />
@@ -6297,10 +6296,11 @@ export function InfiniteCanvas({
                           </div>
                           <div className="w-40 max-w-[75%] h-2 rounded-full bg-white/10 overflow-hidden shadow-inner">
                             <div
-                              className="h-full rounded-full transition-all duration-700 ease-out"
+                              className="h-full rounded-full progress-shimmer transition-all duration-700 ease-out"
                               style={{
                                 width: `${image.processing.progress}%`,
-                                background: 'linear-gradient(90deg, #d4af37, #f4e18f)',
+                                background: 'linear-gradient(90deg, #d4af37, #f4e18f, #d4af37)',
+                                backgroundSize: '200% 100%',
                                 boxShadow: '0 0 8px rgba(212,175,55,0.4)',
                               }}
                             />
@@ -6329,13 +6329,17 @@ export function InfiniteCanvas({
                       ) : (
                         /* 通用进度UI */
                         <>
-                          <div className="px-4 py-2 rounded-full bg-black/45 backdrop-blur-md text-white text-sm font-medium shadow-lg">
+                          <div className="px-4 py-2 rounded-full bg-black/55 backdrop-blur-md text-white text-sm font-medium shadow-lg border border-white/10">
                             {image.processing.label}
                           </div>
                           <div className="w-36 max-w-[70%] h-1.5 rounded-full bg-white/15 overflow-hidden">
                             <div
-                              className="h-full bg-[#d4af37] rounded-full transition-all duration-500"
-                              style={{ width: `${image.processing.progress}%` }}
+                              className="h-full rounded-full progress-shimmer transition-all duration-500"
+                              style={{
+                                width: `${image.processing.progress}%`,
+                                background: 'linear-gradient(90deg, #d4af37, #f4e18f, #d4af37)',
+                                backgroundSize: '200% 100%',
+                              }}
                             />
                           </div>
                           <div className="text-xs text-white/70 text-center px-3">
@@ -8841,10 +8845,7 @@ export function InfiniteCanvas({
                 {/* Generate Button */}
                 <button
                   onClick={handleEditConfirm}
-                  className="w-full py-1.5 text-xs rounded-lg font-medium transition-all"
-                  style={{ background: '#d4af37', color: '#000' }}
-                  onMouseEnter={(e) => { (e.target as HTMLButtonElement).style.background = '#c4a030'; }}
-                  onMouseLeave={(e) => { (e.target as HTMLButtonElement).style.background = '#d4af37'; }}
+                  className="btn-press w-full py-1.5 text-xs rounded-lg font-medium bg-[#d4af37] text-black hover:bg-[#c4a030] active:bg-[#b8960f] shadow-md shadow-[#d4af37]/20 hover:shadow-lg transition-all"
                 >
                   生成
                 </button>
@@ -10448,14 +10449,14 @@ export function InfiniteCanvas({
       })()}
 
       {/* Floating pill toolbar - always on top (z-50) */}
-      <div className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 backdrop-blur-md border rounded-2xl px-3 py-2 flex items-center gap-1.5 shadow-2xl ${
+      <div className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 backdrop-blur-xl border rounded-2xl px-3 py-2 flex items-center gap-1.5 shadow-2xl ${
         isMonochrome 
-          ? 'bg-white/90 border-gray-200/80 shadow-gray-200/50' 
-          : 'bg-[#141414]/90 border-[#2a2a2a]/80 shadow-black/50'
-      }`}>
+          ? 'bg-white/85 border-gray-200/60' 
+          : 'bg-[#141414]/85 border-white/[0.06]'
+      }`} style={{ boxShadow: isMonochrome ? '0 8px 24px rgba(0,0,0,0.08)' : '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04)' }}>
         {/* Select tool */}
         <button
-          className={`p-2 rounded-xl transition-all relative group ${
+          className={`tool-btn p-2 rounded-xl transition-all relative group ${
             isMonochrome
               ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
               : 'text-[#888] hover:text-white hover:bg-white/10'
@@ -10468,7 +10469,7 @@ export function InfiniteCanvas({
 
         {/* Hand/Pan tool */}
         <button
-          className={`p-2 rounded-xl transition-all relative group ${
+          className={`tool-btn p-2 rounded-xl transition-all relative group ${
             isPanning || isSpacePressed
               ? 'bg-[#d4af37]/20 text-[#d4af37]'
               : isMonochrome
@@ -10497,7 +10498,7 @@ export function InfiniteCanvas({
         <input ref={uploadFileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleCanvasImageUpload} />
         <button
           onClick={() => uploadFileInputRef.current?.click()}
-          className={`p-2 rounded-xl transition-all relative group ${
+          className={`tool-btn p-2 rounded-xl transition-all relative group ${
             isMonochrome
               ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
               : 'text-[#888] hover:text-white hover:bg-white/10'
@@ -10525,7 +10526,7 @@ export function InfiniteCanvas({
         {/* Language Edit - 修图 */}
         <button
           onClick={() => { onEditImage?.(null); }}
-          className={`p-2 rounded-xl transition-all relative group ${
+          className={`tool-btn p-2 rounded-xl transition-all relative group ${
             isMonochrome
               ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
               : 'text-[#888] hover:text-white hover:bg-white/10'
@@ -10539,7 +10540,7 @@ export function InfiniteCanvas({
         {/* Agent Edit - Agent编排 */}
         <button
           onClick={() => { setAgentEditImage(null); setShowAgentEditor(true); }}
-          className={`p-2 rounded-xl transition-all relative group ${
+          className={`tool-btn p-2 rounded-xl transition-all relative group ${
             isMonochrome
               ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
               : 'text-[#888] hover:text-white hover:bg-white/10'
@@ -10555,7 +10556,7 @@ export function InfiniteCanvas({
         {/* HexCube 六面体 */}
         <button
           onClick={handleCreateHexCube}
-          className={`p-2 rounded-xl transition-all relative group ${
+          className={`tool-btn p-2 rounded-xl transition-all relative group ${
             isMonochrome
               ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
               : 'text-[#888] hover:text-white hover:bg-white/10'
@@ -10598,7 +10599,7 @@ export function InfiniteCanvas({
         {/* Reset view */}
         <button
           onClick={() => { setZoom(1); setViewOffset({ x: 0, y: 0 }); }}
-          className={`p-2 rounded-xl transition-all relative group ${
+          className={`tool-btn p-2 rounded-xl transition-all relative group ${
             isMonochrome
               ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
               : 'text-[#888] hover:text-white hover:bg-white/10'
@@ -10614,10 +10615,13 @@ export function InfiniteCanvas({
           <>
             <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#2a2a2a]'}`} />
             <div className="flex items-center gap-1.5">
-              <div className={`w-14 h-1 rounded-full overflow-hidden ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`}>
-                <div className="h-full bg-[#d4af37] rounded-full transition-all" style={{ width: `${generationProgress ? (generationProgress.current / generationProgress.total * 100) : 0}%` }} />
+              <div className={`w-14 h-1.5 rounded-full overflow-hidden ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`}>
+                <div className="h-full rounded-full progress-bar shimmer" style={{ 
+                  width: `${generationProgress ? (generationProgress.current / generationProgress.total * 100) : 0}%`,
+                  background: 'linear-gradient(90deg, #d4af37, #f0d060, #d4af37)'
+                }} />
               </div>
-              <span className={`text-xs ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>生成中</span>
+              <span className={`text-xs ${isMonochrome ? 'text-gray-500' : 'text-[#d4af37]/80'}`}>生成中</span>
             </div>
           </>
         )}
