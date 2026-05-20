@@ -35,6 +35,36 @@ const LAMA_MODEL_PATH = path.join(
   '.cache/torch/hub/checkpoints/big-lama.pt',
 );
 
+/**
+ * IOPaint RemoveBG 支持的全部模型 (与 IOPaint 最新版 RemoveBGModel 一致)
+ * - birefnet 系列: 精度最高，需要 rembg >= 2.0.59
+ * - briaai 系列: 商用级 PyTorch 原生模型
+ * - rembg 系列: rembg 开源模型
+ */
+export const REMOVEBG_MODELS = [
+  // BiRefNet 系列 (推荐, 精度最高)
+  { id: 'birefnet-general-lite', label: 'BiRefNet 轻量通用', group: 'birefnet', recommended: true },
+  { id: 'birefnet-general', label: 'BiRefNet 通用', group: 'birefnet' },
+  { id: 'birefnet-portrait', label: 'BiRefNet 人像', group: 'birefnet' },
+  { id: 'birefnet-dis', label: 'BiRefNet 显著性', group: 'birefnet' },
+  { id: 'birefnet-hrsod', label: 'BiRefNet 高精度', group: 'birefnet' },
+  { id: 'birefnet-cod', label: 'BiRefNet 伪装检测', group: 'birefnet' },
+  { id: 'birefnet-massive', label: 'BiRefNet 大规模', group: 'birefnet' },
+  // BriaAI 系列 (商用级)
+  { id: 'briaai/RMBG-1.4', label: 'RMBG 1.4', group: 'briaai' },
+  { id: 'briaai/RMBG-2.0', label: 'RMBG 2.0', group: 'briaai' },
+  // rembg 系列 (经典模型)
+  { id: 'u2net', label: 'U2Net 通用', group: 'rembg' },
+  { id: 'u2netp', label: 'U2Net 轻量', group: 'rembg' },
+  { id: 'u2net_human_seg', label: 'U2Net 人体', group: 'rembg' },
+  { id: 'u2net_cloth_seg', label: 'U2Net 衣服', group: 'rembg' },
+  { id: 'silueta', label: 'Silueta', group: 'rembg' },
+  { id: 'isnet-general-use', label: 'ISNet 通用', group: 'rembg' },
+] as const;
+
+/** 默认 RemoveBG 模型 */
+export const DEFAULT_REMOVEBG_MODEL = 'birefnet-general-lite';
+
 /** 检查 LaMa 模型文件是否存在且有效 (>1MB) */
 function isLamaModelAvailable(): boolean {
   try {
@@ -163,7 +193,7 @@ export async function removeBgWithIOPaint(
   imageBuffer: Buffer,
   imageWidth: number,
   imageHeight: number,
-  model: string = 'u2net',
+  model: string = DEFAULT_REMOVEBG_MODEL,
 ): Promise<RemoveBgResult> {
   if (!LOCAL_AI_ENABLED) {
     return { success: false, error: 'LOCAL_AI_ENABLED 未启用' };
@@ -228,6 +258,7 @@ export async function removeBgWithIOPaint(
 interface PythonScriptResult {
   success: boolean;
   image?: string;
+  model?: string;
   error?: string;
 }
 
@@ -513,7 +544,7 @@ export async function inpaintFromUrls(
  */
 export async function removeBgFromUrl(
   imageUrl: string,
-  model: string = 'u2net',
+  model: string = DEFAULT_REMOVEBG_MODEL,
 ): Promise<RemoveBgResult> {
   const { buffer: imageBuffer, width, height } =
     await readImageToBuffer(imageUrl);

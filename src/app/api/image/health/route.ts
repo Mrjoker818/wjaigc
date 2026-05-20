@@ -4,7 +4,7 @@
 
 import { NextResponse } from 'next/server';
 import { isUpscaylAvailable } from '@/lib/image-tools/upscayl';
-import { checkIOPaintHealth } from '@/lib/image-tools/iopaint-client';
+import { checkIOPaintHealth, REMOVEBG_MODELS } from '@/lib/image-tools/iopaint-client';
 import { LOCAL_AI_ENABLED } from '@/lib/image-tools/config';
 import fs from 'fs';
 import path from 'path';
@@ -63,8 +63,9 @@ export async function GET() {
     },
     removebg: {
       scriptAvailable: scripts.removebg,
-      // RemoveBG 模型首次使用时自动下载（rembg/u2net ~176MB）
+      // RemoveBG 模型首次使用时自动下载
       modelAutoDownload: true,
+      supportedModels: REMOVEBG_MODELS.map(m => ({ id: m.id, label: m.label, group: m.group, recommended: 'recommended' in m ? m.recommended : false })),
     },
     scripts: {
       erase: scripts.erase,

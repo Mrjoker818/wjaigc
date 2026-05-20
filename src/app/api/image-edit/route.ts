@@ -11,7 +11,7 @@ import path from 'path';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { isS3Available, uploadImageToS3 } from '@/lib/s3-storage';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
-import { eraseWithLama, removeBgWithIOPaint } from '@/lib/image-tools/iopaint-client';
+import { eraseWithLama, removeBgWithIOPaint, DEFAULT_REMOVEBG_MODEL } from '@/lib/image-tools/iopaint-client';
 import { LOCAL_AI_ENABLED } from '@/lib/image-tools/config';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
@@ -1822,7 +1822,7 @@ export async function POST(request: NextRequest) {
           const srcW = sourceMeta.width || 512;
           const srcH = sourceMeta.height || 512;
           
-          const rmbgResult = await removeBgWithIOPaint(sourceBuffer, srcW, srcH, 'u2net');
+          const rmbgResult = await removeBgWithIOPaint(sourceBuffer, srcW, srcH, DEFAULT_REMOVEBG_MODEL);
           if (rmbgResult.success && rmbgResult.imageUrl) {
             console.log(`[remove_background] IOPaint RemoveBG succeeded: ${rmbgResult.imageUrl}`);
             return NextResponse.json({

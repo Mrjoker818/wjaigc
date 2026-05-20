@@ -223,7 +223,7 @@ scripts/
 - **擦除功能**: IOPaint LaMa 优先（本地精准抹除），AI 模型兜底（全图发送+蒙版合成避免变形），BFS 边界扩散最终兜底
 - **蒙版修图**: AI 模型优先生成 + 后端精确蒙版合成（仅替换蒙版区域）
 - **无损放大**: upscayl-node (NCNN) + AI 整图放大兜底
-- **移除背景**: IOPaint RemoveBG 优先（本地 u2net 模型精准分割），AI 模型兜底，本地透明化最终兜底
+- **移除背景**: IOPaint RemoveBG 优先（支持 15 个模型：BiRefNet 系列 7 个 + BriaAI 系列 2 个 + rembg 系列 6 个），默认 birefnet-general-lite，AI 模型兜底，本地透明化最终兜底
 - **扩展画面**: AI 模型向四周延伸，支持缩放比例和画面比例选择
 - **异步任务**: 擦除/蒙版/放大/扩展均支持提交+轮询模式（`taskId` + `/api/poll-task`）
 - **持久化**: `persistImageBuffer` 三级 fallback（S3 → save-image API → base64 data URL）
@@ -594,7 +594,7 @@ UPSCALE_TIMEOUT_MS=300000
 
 **IOPaint 本地集成**
 - 擦除功能升级：IOPaint LaMa 优先（本地精准抹除），AI 模型兜底，BFS 边界扩散最终兜底
-- 去背景功能升级：IOPaint RemoveBG 优先（本地 u2net 模型精准分割），AI 模型兜底，本地透明化最终兜底
+- 去背景功能升级：IOPaint RemoveBG 优先（支持 15 个模型：BiRefNet/BriaAI/rembg 三大系列），默认 birefnet-general-lite，AI 模型兜底，本地透明化最终兜底
 - 新增 Python 子进程模式：直接调用 `iopaint_erase.py` / `iopaint_removebg.py`，无需启动独立服务
 - 保留 HTTP 服务模式兼容旧版
 - 新增 `scripts/download-iopaint-models.sh` 模型下载脚本
