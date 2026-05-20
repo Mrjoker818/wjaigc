@@ -9214,6 +9214,10 @@ export function InfiniteCanvas({
                 // 进入画布选择图片模式
                 setAgentSelectingImage(true);
               }}
+              onChangeImage={() => {
+                // 更换图片：进入画布选择模式
+                setAgentSelectingImage(true);
+              }}
             />
           </Suspense>
         )}
