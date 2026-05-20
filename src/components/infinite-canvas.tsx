@@ -4093,12 +4093,30 @@ export function InfiniteCanvas({
         }),
       });
 
-      const data = await res.json();
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => '');
+        const errorMsg = errorText || `服务器错误 (${res.status})`;
+        console.error('[upscale] API error:', res.status, errorText.slice(0, 200));
+        alert(`放大失败: ${errorMsg}`);
+        setIsEditProcessing(false);
+        return;
+      }
+
+      let data: Record<string, unknown>;
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        console.error('[upscale] JSON parse error:', jsonErr);
+        alert('放大失败: 服务器返回了无效的响应');
+        setIsEditProcessing(false);
+        return;
+      }
+
       if (!data.success) {
         updateProcessingFrame(placeholderId, {
           progress: -1,
-          status: `❌ ${data.error || '放大失败'}`,
-          error: data.error || '放大失败',
+          status: `❌ ${String(data.error || '放大失败')}`,
+          error: String(data.error || '放大失败'),
         });
         setTimeout(() => removeProcessingFrame(placeholderId), 5000);
         setIsEditProcessing(false);
@@ -4106,13 +4124,13 @@ export function InfiniteCanvas({
       }
 
       updateProcessingFrame(placeholderId, { progress: 22, status: data.engine === 'tile-upscale' ? 'AI 正在分块放大（更高质量，耗时稍长）...' : 'AI 正在放大细节...' });
-      const usedModel = data.usedModel || modelInfo.model;
-      const resultUrl = data.imageUrl || await pollForResult(data.taskId, usedModel, (progress, status) => {
+      const usedModel = String(data.usedModel || modelInfo.model);
+      const resultUrl = data.imageUrl || await pollForResult((data.taskId as string) || '', usedModel, (progress, status) => {
         updateProcessingFrame(placeholderId, { progress, status });
       });
       if (resultUrl) {
         updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入结果...' });
-        const stableUrl = await toStableImageUrl(resultUrl);
+        const stableUrl = await toStableImageUrl(resultUrl as string);
         completeProcessingFrame(placeholderId, stableUrl, targetW / 2, targetH / 2, {
           originalWidth: targetW,
           originalHeight: targetH,
@@ -4205,25 +4223,43 @@ export function InfiniteCanvas({
         }),
       });
 
-      const data = await res.json();
-      if (!data.success) {
-        alert(data.error || '移除背景失败');
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => '');
+        const errorMsg = errorText || `服务器错误 (${res.status})`;
+        console.error('[removeBg] API error:', res.status, errorText.slice(0, 200));
+        alert(`移除背景失败: ${errorMsg}`);
         setIsEditProcessing(false);
         return;
       }
 
-      updateProcessingFrame(placeholderId, { progress: 22, status: data.engine === 'local-background-alpha' ? '正在生成透明背景...' : data.engine?.includes('iopaint') ? 'IOPaint 正在去除背景...' : 'AI 正在识别主体边缘...' });
+      let data: Record<string, unknown>;
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        console.error('[removeBg] JSON parse error:', jsonErr);
+        alert('移除背景失败: 服务器返回了无效的响应');
+        setIsEditProcessing(false);
+        return;
+      }
+
+      if (!data.success) {
+        alert(String(data.error || '移除背景失败'));
+        setIsEditProcessing(false);
+        return;
+      }
+
+      updateProcessingFrame(placeholderId, { progress: 22, status: data.engine === 'local-background-alpha' ? '正在生成透明背景...' : String(data.engine || '').includes('iopaint') ? 'IOPaint 正在去除背景...' : 'AI 正在识别主体边缘...' });
 
       // 兼容两种后端返回：
       // 1) 同步返回 imageUrl（本地透明化 / AI直接出图 — 后端已做限时轮询）
       // 2) 异步返回 taskId（极少情况，后端轮询超时但AI仍在处理）
-      let resultUrl: string | null = data.imageUrl || null;
+      let resultUrl: string | null = data.imageUrl ? String(data.imageUrl) : null;
       if (!resultUrl && data.taskId) {
         // 移除背景前端轮询限制较短（30次 ≈ 60秒），超时后提示用户
         const maxRemoveBgAttempts = 30;
         // 使用较短的轮询上限
         resultUrl = await (async () => {
-          const taskId = data.taskId;
+          const taskId = data.taskId as string;
           const modelInfo = getCurrentModel();
           const getEditPollInterval = (attempt: number) => {
             if (attempt <= 2) return 800;

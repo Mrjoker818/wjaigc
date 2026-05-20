@@ -1827,8 +1827,17 @@ export async function POST(request: NextRequest) {
           const validRemoveBgModels: readonly string[] = REMOVEBG_MODELS.map(m => m.id);
           const rmbgModelName: string = validRemoveBgModels.includes(body.removeBgModel || '') ? body.removeBgModel! : DEFAULT_REMOVEBG_MODEL;
           console.log(`[remove_background] Using RemoveBG model: ${rmbgModelName}`);
-          const rmbgResult = await removeBgWithIOPaint(sourceBuffer, srcW, srcH, rmbgModelName);
-          if (rmbgResult.success && rmbgResult.imageUrl) {
+          
+          // 限时 30 秒：RemoveBG 首次使用时可能需要下载模型（100MB+），避免长时间阻塞请求
+          const IOPAINT_REMOVEBG_TIMEOUT = 30000;
+          const rmbgResult = await Promise.race([
+            removeBgWithIOPaint(sourceBuffer, srcW, srcH, rmbgModelName),
+            new Promise<null>((resolve) => setTimeout(() => {
+              console.log(`[remove_background] IOPaint RemoveBG timed out after ${IOPAINT_REMOVEBG_TIMEOUT}ms`);
+              resolve(null);
+            }, IOPAINT_REMOVEBG_TIMEOUT)),
+          ]);
+          if (rmbgResult && rmbgResult.success && rmbgResult.imageUrl) {
             console.log(`[remove_background] IOPaint RemoveBG succeeded: ${rmbgResult.imageUrl}`);
             return NextResponse.json({
               success: true,
@@ -1837,7 +1846,7 @@ export async function POST(request: NextRequest) {
               engine: rmbgResult.engine || 'iopaint-removebg',
             });
           }
-          console.log(`[remove_background] IOPaint RemoveBG failed: ${rmbgResult.error}, falling back to AI API`);
+          console.log(`[remove_background] IOPaint RemoveBG ${rmbgResult ? 'failed: ' + rmbgResult.error : 'timed out'}, falling back to AI API`);
         } catch (rmbgErr) {
           console.warn(`[remove_background] IOPaint RemoveBG error:`, rmbgErr instanceof Error ? rmbgErr.message : rmbgErr);
         }
