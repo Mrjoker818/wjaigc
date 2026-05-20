@@ -324,80 +324,82 @@ export default function AgentEditor({ imageUrl, themeStyle = 'gold', onComplete,
             <button onClick={(e) => { e.stopPropagation(); handleRetry(); }} className="opacity-60 hover:opacity-100 underline shrink-0">重试</button>
           </div>
         )}
+      </div>
 
-        {/* 控制区域 */}
-        <div className={`px-3 py-2 border-t ${border} space-y-2`}>
-          {/* 最大轮次 + 执行按钮同行 */}
-          <div className="flex items-center gap-2">
-            <span className={`text-[10px] ${muted} shrink-0`}>轮次</span>
-            <div className="flex gap-1">
-              {[3, 5, 8].map(n => (
-                <button
-                  key={n}
-                  onClick={(e) => { e.stopPropagation(); setMaxRounds(n); }}
-                  className={`px-1.5 py-0.5 rounded text-[10px] ${
-                    maxRounds === n ? btnPrimary : isGold ? 'bg-[#252525] text-[#999]' : 'bg-gray-800 text-gray-400'
-                  }`}
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
+      {/* 固定底部：控制区域 + 拖拽手柄 */}
+      <div className={`shrink-0 border-t ${border}`}>
+        {/* 轮次选择 */}
+        <div className={`px-3 pt-2 pb-1 flex items-center gap-2`}>
+          <span className={`text-[10px] ${muted} shrink-0`}>轮次</span>
+          <div className="flex gap-1">
+            {[3, 5, 8].map(n => (
+              <button
+                key={n}
+                onClick={(e) => { e.stopPropagation(); setMaxRounds(n); }}
+                className={`px-1.5 py-0.5 rounded text-[10px] ${
+                  maxRounds === n ? btnPrimary : isGold ? 'bg-[#252525] text-[#999]' : 'bg-gray-800 text-gray-400'
+                }`}
+              >
+                {n}
+              </button>
+            ))}
           </div>
+        </div>
 
-          {/* 输入框 */}
+        {/* 输入框 */}
+        <div className="px-3 pb-1.5">
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onMouseDown={(e) => e.stopPropagation()}
             placeholder="描述你想对图片做什么..."
             disabled={isProcessing || !currentImage}
-            className={`w-full rounded-lg px-2.5 py-1.5 text-xs resize-y ${inputBg} ${text} border ${border} focus:outline-none focus:ring-1 ${isGold ? 'focus:ring-[#d4af37]/20 placeholder:text-[#444]' : 'focus:ring-blue-500/20 placeholder:text-gray-600'} transition-colors disabled:opacity-50`}
+            className={`w-full rounded-lg px-2.5 py-1.5 text-xs resize-none ${inputBg} ${text} border ${border} focus:outline-none focus:ring-1 ${isGold ? 'focus:ring-[#d4af37]/20 placeholder:text-[#444]' : 'focus:ring-blue-500/20 placeholder:text-gray-600'} transition-colors disabled:opacity-50`}
             rows={2}
           />
-
-          {/* 按钮行 */}
-          <div className="flex gap-2">
-            {isProcessing ? (
-              <button
-                onClick={(e) => { e.stopPropagation(); handleCancel(); }}
-                className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 transition-colors"
-              >
-                <Loader2 className="w-3 h-3 animate-spin" />
-                取消
-              </button>
-            ) : (
-              <>
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleSubmit(); }}
-                  disabled={!prompt.trim() || !currentImage}
-                  className={`flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium ${btnPrimary} disabled:opacity-40 disabled:cursor-not-allowed transition-colors`}
-                >
-                  <Sparkles className="w-3 h-3" />
-                  执行
-                </button>
-                {resultImageUrl && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); resultImageUrl && onComplete(resultImageUrl); }}
-                    className={`flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs ${isGold ? 'bg-[#252525] text-[#999] hover:bg-[#333]' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'} transition-colors`}
-                  >
-                    <ImageIcon className="w-3 h-3" />
-                    应用
-                  </button>
-                )}
-              </>
-            )}
-          </div>
         </div>
-      </div>
 
-      {/* 底部拖拽调整大小手柄 */}
-      <div
-        className={`shrink-0 h-5 flex items-center justify-center cursor-ns-resize select-none border-t ${border} transition-colors ${isGold ? 'hover:bg-[#252525]' : 'hover:bg-gray-800'}`}
-        onMouseDown={handleResizeStart}
-        title="拖动调整大小"
-      >
-        <div className={`w-8 h-1 rounded-full ${isGold ? 'bg-[#444]' : 'bg-gray-600'}`} />
+        {/* 执行/取消按钮 */}
+        <div className="px-3 pb-1.5 flex gap-2">
+          {isProcessing ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); handleCancel(); }}
+              className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 transition-colors"
+            >
+              <Loader2 className="w-3 h-3 animate-spin" />
+              取消
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={(e) => { e.stopPropagation(); handleSubmit(); }}
+                disabled={!prompt.trim() || !currentImage}
+                className={`flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium ${btnPrimary} disabled:opacity-40 disabled:cursor-not-allowed transition-colors`}
+              >
+                <Sparkles className="w-3 h-3" />
+                执行
+              </button>
+              {resultImageUrl && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); resultImageUrl && onComplete(resultImageUrl); }}
+                  className={`flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs ${isGold ? 'bg-[#252525] text-[#999] hover:bg-[#333]' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'} transition-colors`}
+                >
+                  <ImageIcon className="w-3 h-3" />
+                  应用
+                </button>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* 拖拽调整大小手柄 */}
+        <div
+          className={`h-4 flex items-center justify-center cursor-ns-resize select-none border-t ${border} transition-colors ${isGold ? 'hover:bg-[#252525]' : 'hover:bg-gray-800'}`}
+          onMouseDown={handleResizeStart}
+          title="拖动调整大小"
+        >
+          <div className={`w-8 h-1 rounded-full ${isGold ? 'bg-[#444]' : 'bg-gray-600'}`} />
+        </div>
       </div>
     </div>
   );
