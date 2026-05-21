@@ -332,7 +332,8 @@ interface InfiniteCanvasProps {
   onForceSave?: () => void;
   /** Called when user wants to open the language-based image editor (null = open empty) */
   onEditImage?: (image: CanvasImage | null) => void;
-}
+  /** Called when img2img generate is triggered - delegates to page.tsx handleGenerate for reliable polling */
+  }
 
 type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'img2img' | 'upscale' | 'svg-trace';
 type ActiveTool = 'none' | 'upscale' | 'download' | 'multiAngle' | 'to3d';
@@ -5119,91 +5120,70 @@ export function InfiniteCanvas({
     }
 
     if (editMode === 'img2img') {
-      const img2imgModelInfo = getCurrentModel();
-      const img2imgProviderId = img2imgModelInfo.providerId || getCurrentProviderId();
-
-      // 图生图提示词：简洁有效，与生成面板保持一致
-      // 分类增强由后端 referenceCategories 统一处理（不再前端自建长prompt）
+      // ★ 图生图：通过 onImg2Img 回调委托给 page.tsx 的 handleGenerate，
+      // 完全复用生成面板的提交+轮询逻辑，避免重复实现导致的不一致问题
       const keyword = img2imgKeyword.trim();
       let fullPrompt = keyword || 'Generate a creative variation of the reference image.';
-
-      // 附加原图描述信息，帮助AI更好理解参考图内容，提升一致性
       if (editImg.prompt && editImg.prompt.trim()) {
         fullPrompt += ` [Original image description: ${editImg.prompt.trim()}]`;
       }
-
-      // 反向提示词
       if (img2imgNegativePrompt.trim()) {
         fullPrompt += ` [negative: ${img2imgNegativePrompt.trim()}]`;
       }
 
-      // strength 计算：与生成面板对齐，由后端 referenceCategories 增强 prompt
-      // 保留方面多/强 → strength 低（更接近原图）
+      // strength 计算
       const hasSubjectPreserve = img2imgActiveCategories.has('主体') && (img2imgStrengths['主体'] || 0) > 0;
       const totalPreserveScore = Array.from(img2imgActiveCategories)
         .reduce((sum, cat) => sum + (img2imgStrengths[cat] || 0), 0);
-      const maxPossibleScore = 600; // 6个类别 * 100
-      const preserveRatio = totalPreserveScore / maxPossibleScore;
+      const preserveRatio = totalPreserveScore / 600;
       let img2imgStrength = 0.80 - preserveRatio * 0.60;
       if (hasSubjectPreserve) {
         const subjectStr = img2imgStrengths['主体'] || 0;
-        const subjectReduction = (subjectStr / 100) * 0.25;
-        img2imgStrength = Math.max(0.15, img2imgStrength - subjectReduction);
+        img2imgStrength = Math.max(0.15, img2imgStrength - (subjectStr / 100) * 0.25);
       }
       img2imgStrength = Math.round(img2imgStrength * 100) / 100;
 
-      // 构建与生成面板相同的 referenceCategories 格式
+      // 构建分类参数
       const activeCategories = Array.from(img2imgActiveCategories)
         .filter(cat => (img2imgStrengths[cat] || 0) > 0);
-      const referenceCategories: Record<string, string[]> = {
-        '0': activeCategories, // 第一张参考图(索引0)的分类
-      };
-      // referenceStrengths: 第一张参考图的强度取所有激活类别的平均强度
+      const referenceCategories: Record<string, string[]> = { '0': activeCategories };
       const avgStrength = activeCategories.length > 0
         ? Math.round(activeCategories.reduce((sum, cat) => sum + (img2imgStrengths[cat] || 0), 0) / activeCategories.length)
         : 50;
-      const referenceStrengths = [avgStrength];
 
-      // 计算原图比例（保持与原图一致）
+      // 计算原图比例
       const origW = editImg.originalWidth || Math.round(editImg.width);
       const origH = editImg.originalHeight || Math.round(editImg.height);
-      const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
-      const d = gcd(origW, origH);
+      const gcdVal = (a: number, b: number): number => b === 0 ? a : gcdVal(b, a % b);
+      const d = gcdVal(origW, origH);
       const aspectRatio = `${origW / d}:${origH / d}`;
 
-      const placeholderId = createProcessingFrameRightOf(
-        editImg,
-        '图生图中',
-        editImg.width,
-        editImg.height,
-        '正在创建图生图任务...'
-      );
       exitEditMode();
-      try {
-        // 使用预上传后的 HTTP URL，避免 data URL 巨大请求体
-        let refImageUrl = editImg.url;
-        if (refImageUrl.startsWith('data:') || refImageUrl.startsWith('blob:')) {
-          try {
-            updateProcessingFrame(placeholderId, { progress: 10, status: '正在上传参考图...' });
-            const imgResp = await fetch(refImageUrl);
-            const imgBlob = await imgResp.blob();
-            const formData = new FormData();
-            formData.append('image', imgBlob, 'reference.png');
-            const uploadResp = await fetch('/api/save-image', { method: 'POST', body: formData });
-            if (uploadResp.ok) {
-              const uploadData = await uploadResp.json();
-              if (uploadData.url) {
-                refImageUrl = uploadData.url;
-              }
-            }
-          } catch (uploadErr) {
-            console.warn('参考图上传失败，使用原始URL:', uploadErr);
-          }
-        }
 
-        updateProcessingFrame(placeholderId, { progress: 20, status: '正在提交图生图请求...' });
-        // ★ 与生成面板使用完全相同的参数格式，确保后端走相同的高效路径
-        const res = await fetch('/api/generate', {
+      // ★ 图生图：使用与生成面板(handleGenerate)完全一致的提交+轮询逻辑
+      // 在原图右侧创建processing frame
+      const processingId = `processing-${Date.now()}`;
+      const newW = Math.round(editImg.width);
+      const newH = Math.round(editImg.height);
+      const processingFrame: CanvasImage = {
+        id: processingId,
+        url: '',
+        x: editImg.x + editImg.width + 20,
+        y: editImg.y,
+        width: newW,
+        height: newH,
+        isProcessingPlaceholder: true,
+        processing: { progress: 0, label: '图生图生成中...', status: 'processing', sourceUrl: editImg.url },
+      };
+      const nextImages = [...imagesRef.current, processingFrame];
+      imagesRef.current = nextImages;
+      onImagesChange(nextImages);
+
+      try {
+        // 提交生成请求（与 page.tsx handleGenerate 一致）
+        const img2imgModelInfo = getCurrentModel();
+        const img2imgProviderId = getCurrentProviderId();
+        const response = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -5213,158 +5193,109 @@ export function InfiniteCanvas({
             aspectRatio,
             quality: 'standard',
             count: 1,
-            referenceImages: [refImageUrl],
-            referenceMode: 'style',       // ★ 关键：与生成面板一致，让后端走 image_urls 路径
-            referenceCategories,           // ★ 分类增强由后端统一处理
-            referenceStrengths,            // ★ 参考图强度
+            referenceImages: [editImg.url],
+            referenceMode: 'style',
+            referenceCategories,
+            referenceStrengths: [avgStrength],
             strength: img2imgStrength,
           }),
         });
 
-        let data: Record<string, any>;
-        try {
-          const resText = await res.text();
-          try { data = JSON.parse(resText); } catch {
-            throw new Error(res.status === 413 ? '请求体过大，请减少参考图' : `服务器错误 (${res.status}): ${resText.substring(0, 80)}`);
-          }
-        } catch (parseErr) {
-          alert(String(parseErr instanceof Error ? parseErr.message : parseErr));
-          removeProcessingFrame(placeholderId);
-          return;
-        }
-        if (!res.ok) {
-          alert(data.error || '图生图提交失败');
-          removeProcessingFrame(placeholderId);
-          return;
+        const data = await response.json();
+        console.log('[img2img] generate response:', data.success, data.mode, data.taskIds?.[0]);
+
+        if (!data.success) {
+          throw new Error(data.error || '生成请求失败');
         }
 
-        // === 直接返回模式：API 直接返回图片 ===
-        if (data.success && data.mode === 'direct') {
-          const { imageUrls } = data;
-          for (const imageUrl of imageUrls) {
-            let savedUrl = imageUrl;
+        if (data.imageUrls && data.imageUrls.length > 0) {
+          // 直接返回模式
+          const newUrl = data.imageUrls[0];
+          completeProcessingFrame(processingId, newUrl, newW, newH, {
+            prompt: fullPrompt,
+            aspectRatio,
+            originalWidth: origW,
+            originalHeight: origH,
+          });
+        } else if (data.taskIds && data.taskIds.length > 0) {
+          // 轮询模式（与 page.tsx handleGenerate 完全一致的轮询逻辑）
+          const taskId = data.taskIds[0];
+          const estimatedTime = data.estimatedTime || 30;
+          const maxPollTime = Math.min(600, Math.max(60, estimatedTime * 3 + 30)) * 1000;
+          const startTime = Date.now();
+          let pollCount = 0;
+
+          const pollInterval = () => {
+            if (Date.now() - startTime > estimatedTime * 1000) return 2000;
+            return 1500;
+          };
+
+          while (Date.now() - startTime < maxPollTime) {
+            await new Promise(r => setTimeout(r, pollInterval()));
+            pollCount++;
+
             try {
-              const saveRes = await fetch('/api/save-image', {
+              const pollRes = await fetch('/api/poll-task', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ imageUrl }),
+                body: JSON.stringify({
+                  taskId,
+                  model: img2imgModelInfo.model,
+                  providerId: img2imgProviderId || undefined,
+                }),
               });
-              if (saveRes.ok) {
-                const saveData = await saveRes.json();
-                if (saveData.success && saveData.url) savedUrl = saveData.url;
-              }
-            } catch {}
-            // 直接返回图片模式 — 加载图片获取尺寸后完成
-            const img = new window.Image();
-            img.onload = () => {
-              const natW = img.naturalWidth || 1024;
-              const natH = img.naturalHeight || 1024;
-              const maxDisplaySide = 420;
-              const displayScale = Math.min(maxDisplaySide / natW, maxDisplaySide / natH, 1);
-              const displayW = Math.round(natW * displayScale);
-              const displayH = Math.round(natH * displayScale);
-              completeProcessingFrame(placeholderId, savedUrl, displayW, displayH, { prompt: fullPrompt, originalWidth: natW, originalHeight: natH, aspectRatio });
-            };
-            img.onerror = () => {
-              completeProcessingFrame(placeholderId, savedUrl, 420, 420, { prompt: fullPrompt, originalWidth: 1024, originalHeight: 1024, aspectRatio });
-            };
-            img.src = savedUrl;
-          }
-          return;
-        }
+              const pollData = await pollRes.json();
 
-        const taskId = data.taskIds?.[0] || data.taskId || data.id;
-        const actualModel = data.model || img2imgModelInfo.model;
-        const estimatedTime = data.estimatedTime || 30;
-        if (!taskId) {
-          alert('未获取到任务ID');
-          removeProcessingFrame(placeholderId);
-          return;
-        }
-
-        updateProcessingFrame(placeholderId, { progress: 24, status: 'AI 正在生成...' });
-
-        // ★ 对齐生成面板的轮询策略：quickPoll + 动态间隔 + 最大超时
-        const getImg2ImgPollInterval = (attempt: number, estTime: number) => {
-          const baseInterval = estTime <= 20 ? 1500 : estTime <= 60 ? 2000 : 2500;
-          if (attempt > 20) return baseInterval + 1500;
-          if (attempt > 10) return baseInterval + 500;
-          return baseInterval;
-        };
-        const maxPollTime = Math.min(600, Math.max(60, estimatedTime * 3 + 30)) * 1000;
-        const pollStartTime = Date.now();
-        let pollCount = 0;
-        let taskCompleted = false;
-
-        while (!taskCompleted) {
-          if (Date.now() - pollStartTime > maxPollTime) {
-            alert('图生图超时，请重试');
-            removeProcessingFrame(placeholderId);
-            return;
-          }
-
-          const interval = getImg2ImgPollInterval(pollCount, estimatedTime);
-          await new Promise(r => setTimeout(r, interval));
-          pollCount++;
-
-          try {
-            // ★ 使用 quickPoll 模式：一次请求内部快速轮询3次
-            const pollRes = await fetch('/api/poll-task', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                taskId,
-                model: actualModel,
-                providerId: img2imgProviderId || undefined,
-                quickPoll: true,
-              }),
-            });
-            if (!pollRes.ok) continue;
-            const pollData = await pollRes.json();
-
-            if (pollData.status === 'completed' || pollData.status === 'succeeded') {
-              if (pollData.imageUrl) {
-                updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入结果...' });
-                const stableUrl = await toStableImageUrl(pollData.imageUrl);
-                // ★ 保持原图比例：使用原图的显示尺寸和原始尺寸
-                completeProcessingFrame(placeholderId, stableUrl, editImg.width, editImg.height, {
+              // ★ 完全复用 page.tsx handleGenerate 的轮询判断逻辑
+              if (pollData.status === 'completed' && pollData.imageUrl) {
+                completeProcessingFrame(processingId, pollData.imageUrl, newW, newH, {
+                  prompt: fullPrompt,
+                  aspectRatio,
                   originalWidth: origW,
                   originalHeight: origH,
-                  aspectRatio,
-                  prompt: fullPrompt,
                 });
-              } else {
-                alert(pollData.error || '图生图完成但未返回结果');
-                removeProcessingFrame(placeholderId);
+                return;
               }
-              taskCompleted = true;
-              return;
+
+              if (!pollData.success && !pollData.retryable) {
+                throw new Error(pollData.error || '生成失败');
+              }
+
+              if (!pollData.success && pollData.retryable && pollCount > 15) {
+                throw new Error('重试次数过多，请稍后再试');
+              }
+
+              // 更新进度
+              if (pollData.progress) {
+                const updatedImages = imagesRef.current.map((img: CanvasImage) =>
+                  img.id === processingId
+                    ? { ...img, processing: { progress: pollData.progress, label: `生成中 ${Math.round(pollData.progress)}%`, status: 'processing', sourceUrl: editImg.url } }
+                    : img
+                );
+                imagesRef.current = updatedImages;
+                onImagesChange(updatedImages);
+              }
+            } catch (pollErr: unknown) {
+              if (pollErr instanceof Error && pollErr.message.includes('重试次数过多')) {
+                throw pollErr;
+              }
+              // 轮询单次失败，继续重试
+              console.warn('[img2img] poll error, retrying:', pollErr);
             }
-            // ★ 与生成面板一致：可重试的错误继续轮询，不可重试的才立即失败
-            if (pollData.status === 'failed' || (pollData.status === 'error' && !pollData.retryable)) {
-              // 不可重试错误，立即失败
-              alert(pollData.error || pollData.message || '图生图失败');
-              removeProcessingFrame(placeholderId);
-              taskCompleted = true;
-              return;
-            }
-            // 可重试错误（远端API临时超时/429/poll-task查询失败等），继续轮询直到maxPollTime
-            if (pollData.status === 'error' || pollData.status === 'timeout') {
-              const progress = Math.min(90, 24 + pollCount * 1.5);
-              updateProcessingFrame(placeholderId, { progress, status: '正在重试...' });
-              // continue polling
-            }
-            // Still processing - 更新进度
-            const progress = Math.min(90, 24 + pollCount * 1.5);
-            updateProcessingFrame(placeholderId, { progress, status: pollData.status === 'processing' ? 'AI 正在生成...' : '等待处理中...' });
-          } catch {
-            // continue polling
           }
+
+          throw new Error('图生图超时，请重试');
+        } else {
+          throw new Error('未收到任务ID');
         }
-      } catch (e) {
-        console.error('Img2Img error:', e);
-        alert(`操作失败: ${e instanceof Error ? e.message : '请重试'}`);
-        removeProcessingFrame(placeholderId);
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : '图生图失败';
+        console.error('[img2img] error:', errMsg);
+        // 移除processing frame
+        const cleanedImages = imagesRef.current.filter((img: CanvasImage) => img.id !== processingId);
+        imagesRef.current = cleanedImages;
+        onImagesChange(cleanedImages);
+        alert(errMsg);
       }
 
       return;

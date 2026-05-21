@@ -1823,6 +1823,7 @@ function CanvasApp() {
     });
   }, [handleFusion]);
 
+  // Canvas img2img handler - reuses handleGenerate for reliable submission + polling
   // Language-based image editing handler
   const handleEditImage = useCallback((image: CanvasImage | null) => {
     setEditingImage(image);
