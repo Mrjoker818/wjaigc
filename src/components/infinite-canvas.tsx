@@ -2595,8 +2595,8 @@ export function InfiniteCanvas({
           .map(cat => {
             const s = catStrengthMap[cat];
             const desc = categoryEnMap[cat] || cat;
-            if (s >= 80) return `strictly preserve the ${desc} of the reference image(s) — do NOT change the original ${desc === 'subject/character' ? 'product/object identity' : desc}`;
-            if (s >= 50) return `maintain the ${desc} of the reference image(s) without altering the core ${desc === 'subject/character' ? 'identity' : desc}`;
+            if (s >= 80) return `strictly preserve the ${desc} of the reference image(s) — do NOT change the original ${cat === 'subject' ? 'product/object identity' : desc}`;
+            if (s >= 50) return `maintain the ${desc} of the reference image(s) without altering the core ${cat === 'subject' ? 'identity' : desc}`;
             if (s >= 20) return `subtly reference the ${desc} of the reference image(s)`;
             return `lightly hint at the ${desc} of the reference image(s)`;
           });
@@ -2607,7 +2607,7 @@ export function InfiniteCanvas({
           .map(cat => categoryEnMap[cat]);
 
         // 检查是否有主体保留
-        const hasSubjectInRef = catStrengthMap['主体'] > 0;
+        const hasSubjectInRef = catStrengthMap['subject'] > 0;
 
         // 构建完整提示词
         if (keyword) {
@@ -2636,7 +2636,6 @@ export function InfiniteCanvas({
 
         // 显式告诉模型使用参考图
         fullPrompt = `[ref] Use the provided reference image(s) as the base. ${fullPrompt}`;
-
         // strength 计算：保留方面多/强 → strength 低（更接近原图）
         const totalPreserveScore = activeKeys.reduce((sum, cat) => sum + catStrengthMap[cat], 0);
         const maxScore = activeKeys.length * 100;
@@ -2645,7 +2644,7 @@ export function InfiniteCanvas({
         calculatedStrength = Math.round((0.80 - preserveRatio * 0.60) * 100) / 100;
         // 当保留主体时，额外降低 strength
         if (hasSubjectInRef) {
-          const subjectStr = catStrengthMap['主体'] || 0;
+          const subjectStr = catStrengthMap['subject'] || 0;
           const subjectReduction = (subjectStr / 100) * 0.25;
           calculatedStrength = Math.max(0.15, calculatedStrength - subjectReduction);
         }
