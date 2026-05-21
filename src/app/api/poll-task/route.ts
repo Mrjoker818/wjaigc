@@ -178,12 +178,14 @@ export async function POST(request: NextRequest) {
     const apiKey = provider?.apiKey;
     const apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || '');
     if (!apiKey || !apiBaseUrl) {
+      console.error(`[poll-task] No API provider for taskId=${taskId}, model=${model}, providerId=${providerId}`);
       return NextResponse.json({ success: false, error: 'No API provider configured for image polling' }, { status: 400 });
     }
 
     // 解析兼容性档案 - 确定轮询 URL 格式
     const profile: ApiCompatProfile = resolveCompatProfile(provider);
     const pollUrl = buildPollUrl(apiBaseUrl, taskId, profile);
+    console.log(`[poll-task] Polling taskId=${taskId}, provider=${provider.name}, model=${model}, pollUrl=${pollUrl?.substring(0, 100)}...`);
 
     if (!pollUrl) {
       // 该提供商不支持轮询（直接返回模式），不应该到这里
@@ -196,9 +198,10 @@ export async function POST(request: NextRequest) {
     }
 
     // ★ 短循环模式：服务端内部快速轮询，减少前端→后端往返
-    // 当任务仍在处理中时，在服务端内快速重试最多3次（间隔1秒）
-    const MAX_QUICK_POLLS = 3;
-    const QUICK_POLL_INTERVAL = 1000;
+    // 当任务仍在处理中时，在服务端内快速重试最多5次（间隔1.5秒）
+    // 增加到5次以减少前端轮询往返次数，缓解擦除等长时间任务的超时问题
+    const MAX_QUICK_POLLS = 5;
+    const QUICK_POLL_INTERVAL = 1500;
 
     const doSinglePoll = async (): Promise<{ statusResult: Record<string, unknown>; statusResponse: Response } | null> => {
       const ctrl = new AbortController();
@@ -308,6 +311,9 @@ export async function POST(request: NextRequest) {
 
     const completedStatuses = ['completed', 'succeeded', 'success', 'done'];
     const normalizedStatus = completedStatuses.includes(taskStatus || '') ? 'completed' : taskStatus;
+
+    // ★ 日志：每次轮询结果
+    console.log(`[poll-task] taskId=${taskId} status=${taskStatus} → normalized=${normalizedStatus}, progress=${(taskData?.progress as number) || 0}`);
 
     // 返回完整状态信息给前端（标准化 completed 状态）
     const pollResult: Record<string, unknown> = {

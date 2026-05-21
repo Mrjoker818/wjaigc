@@ -2263,12 +2263,149 @@ export async function POST(request: NextRequest) {
               eraseUsedAI = true;
               return NextResponse.json({ success: true, imageUrl: resultDataUrl, action, engine: 'ai-erase' });
             } else if (eraseResult.taskId) {
-              // 异步模式：返回 taskId 让前端轮询
-              console.log(`[inpaint] AI erase async: taskId=${eraseResult.taskId}`);
-              eraseUsedAI = true;
+              // 异步模式：尝试服务器端轮询（最多3分钟），超时则降级到BFS
+              const ERASE_POLL_TIMEOUT_MS = 180_000; // 3分钟服务器端轮询上限
+              const ERASE_POLL_INTERVAL_MS = 3000; // 3秒轮询间隔
+              console.log(`[inpaint] AI erase async: taskId=${eraseResult.taskId}, server-side polling for up to ${ERASE_POLL_TIMEOUT_MS / 1000}s`);
+
               // ★ 注册异步擦除任务
               registerTask(eraseResult.taskId, 'erase', '擦除');
-              return NextResponse.json({ success: true, taskId: eraseResult.taskId, action, engine: 'ai-erase', cropInfo: { cropX: 0, cropY: 0, cropW: origW, cropH: origH, origW, origH }, usedModel: eraseResult.usedModel });
+
+              // 服务器端轮询：尝试在超时内获取结果
+              let asyncEraseSucceeded = false;
+              const pollStart = Date.now();
+
+              try {
+                // 查找provider用于轮询
+                const eraseProvider = await findProviderForModel(eraseResult.usedModel || '', 'image')
+                  || await findProviderForModel(eraseResult.usedModel || '', 'imageEdit');
+                const eraseApiKey = eraseProvider?.apiKey;
+                const eraseApiBaseUrl = normalizeApiBaseUrl(eraseProvider?.baseUrl || '');
+                const eraseProfile = eraseProvider ? resolveCompatProfile(eraseProvider) : null;
+                const erasePollUrl = eraseApiBaseUrl && eraseProfile ? buildPollUrl(eraseApiBaseUrl, eraseResult.taskId, eraseProfile) : null;
+
+                if (erasePollUrl && eraseApiKey) {
+                  while (Date.now() - pollStart < ERASE_POLL_TIMEOUT_MS) {
+                    // 检查任务是否被取消
+                    if (isTaskCancelled(eraseResult.taskId)) {
+                      console.log(`[inpaint] AI erase task cancelled: ${eraseResult.taskId}`);
+                      return NextResponse.json({ success: false, error: '任务已被取消' }, { status: 200 });
+                    }
+
+                    await new Promise(r => setTimeout(r, ERASE_POLL_INTERVAL_MS));
+
+                    try {
+                      const pollCtrl = new AbortController();
+                      const pollTimer = setTimeout(() => pollCtrl.abort(), 15000);
+                      const pollResp = await fetch(erasePollUrl, {
+                        headers: { 'Authorization': `Bearer ${eraseApiKey}` },
+                        signal: pollCtrl.signal,
+                      });
+                      clearTimeout(pollTimer);
+
+                      if (!pollResp.ok) {
+                        console.warn(`[inpaint] Erase poll HTTP ${pollResp.status}, continuing...`);
+                        continue;
+                      }
+
+                      const pollData = (await pollResp.json()) as Record<string, unknown>;
+                      const innerData = (pollData.data as Record<string, unknown>) || pollData;
+                      const taskStatus = innerData.status as string;
+                      const completedStatuses = ['completed', 'succeeded', 'success', 'done'];
+
+                      if (completedStatuses.includes(taskStatus || '')) {
+                        // 提取图片URL
+                        let sourceUrl: string | null = null;
+                        const images = (innerData.result as Record<string, unknown>)?.images as Array<Record<string, unknown>> | undefined;
+                        if (images && images.length > 0) {
+                          const rawUrl = images[0].url || images[0].image_url;
+                          sourceUrl = Array.isArray(rawUrl) ? rawUrl[0] : (typeof rawUrl === 'string' ? rawUrl : null);
+                        }
+                        if (!sourceUrl) {
+                          const result2 = innerData.result as Record<string, unknown> | undefined;
+                          if (result2?.b64_json) sourceUrl = `data:image/png;base64,${result2.b64_json}`;
+                        }
+
+                        if (sourceUrl) {
+                          console.log(`[inpaint] AI erase async completed in ${((Date.now() - pollStart) / 1000).toFixed(1)}s`);
+                          // 下载结果并合成蒙版
+                          const resultBuffer = await fetchImageBuffer(sourceUrl);
+                          const resultMeta = await sharp(resultBuffer).metadata();
+                          let resultOrigSize: Buffer;
+                          const resW = resultMeta.width || aiInputW;
+                          const resH = resultMeta.height || aiInputH;
+                          if (resW !== origW || resH !== origH) {
+                            let step1: Buffer;
+                            if (resW !== aiInputW || resH !== aiInputH) {
+                              step1 = await sharp(resultBuffer).resize(aiInputW, aiInputH, { fit: 'fill' }).png().toBuffer();
+                            } else {
+                              step1 = resultBuffer;
+                            }
+                            if (aiInputW !== origW || aiInputH !== origH) {
+                              resultOrigSize = await sharp(step1).resize(origW, origH, { fit: 'fill' }).png().toBuffer();
+                            } else {
+                              resultOrigSize = step1;
+                            }
+                          } else {
+                            resultOrigSize = resultBuffer;
+                          }
+
+                          // 蒙版合成
+                          const fullCropInfo: InpaintCropInfo = { cropX: 0, cropY: 0, cropW: origW, cropH: origH, origW, origH };
+                          const compositeResult = await compositeAIResultToOriginal(
+                            imageBuffer, resultOrigSize, eraseMaskForAI, origW, origH, fullCropInfo
+                          );
+                          const compositeJpeg = await sharp(compositeResult).jpeg({ quality: 92 }).toBuffer();
+                          const resultDataUrl = `data:image/jpeg;base64,${compositeJpeg.toString('base64')}`;
+                          console.log(`[inpaint] AI erase async result: JPEG base64 (${(compositeJpeg.length / 1024).toFixed(0)}KB)`);
+
+                          // 更新任务注册中心
+                          updateTaskProgress(eraseResult.taskId, { status: 'completed', progress: 100, result: { imageUrl: resultDataUrl } });
+
+                          asyncEraseSucceeded = true;
+                          eraseUsedAI = true;
+                          return NextResponse.json({ success: true, imageUrl: resultDataUrl, action, engine: 'ai-erase-async' });
+                        }
+                        break; // completed but no URL → fall through to BFS
+                      } else if (taskStatus === 'failed') {
+                        console.warn(`[inpaint] AI erase async task failed: ${JSON.stringify(innerData.error)}`);
+                        break; // fall through to BFS
+                      }
+                      // still processing, continue polling
+                      const elapsed = ((Date.now() - pollStart) / 1000).toFixed(0);
+                      updateTaskProgress(eraseResult.taskId, { progress: Math.min(90, 30 + Math.round((Date.now() - pollStart) / ERASE_POLL_TIMEOUT_MS * 60)), label: `擦除中 (${elapsed}s)` });
+                    } catch (pollErr) {
+                      console.warn(`[inpaint] Erase poll error:`, pollErr instanceof Error ? pollErr.message : pollErr);
+                      // continue polling
+                    }
+                  }
+                }
+              } catch (pollSetupErr) {
+                console.warn(`[inpaint] Erase server-side poll setup error:`, pollSetupErr instanceof Error ? pollSetupErr.message : pollSetupErr);
+              }
+
+              if (!asyncEraseSucceeded) {
+                const elapsed = ((Date.now() - pollStart) / 1000).toFixed(0);
+                console.warn(`[inpaint] AI erase async server-side poll timed out after ${elapsed}s, returning taskId to client for continued polling`);
+
+                // ★ 不再直接降级到BFS，而是将taskId返回给前端继续轮询
+                // 前端会在轮询到结果后进行蒙版合成
+                return NextResponse.json({
+                  success: true,
+                  taskId: eraseResult.taskId,
+                  action,
+                  engine: 'ai-erase-async',
+                  usedModel: eraseResult.usedModel,
+                  // 蒙版合成信息：前端轮询到结果后需要这些信息来合成
+                  compositeInfo: {
+                    aiInputW,
+                    aiInputH,
+                    origW,
+                    origH,
+                    maskDataUrl: eraseMaskDataUrl,
+                  },
+                });
+              }
             }
           } catch (aiErr) {
             console.warn(`[inpaint] AI erase failed, falling back to local BFS:`, aiErr instanceof Error ? aiErr.message : aiErr);

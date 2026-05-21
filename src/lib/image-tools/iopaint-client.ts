@@ -56,13 +56,38 @@ const LAMA_MODEL_PATH = path.join(
  * - silueta: 轻量人像备选 (45MB ONNX)
  */
 export const REMOVEBG_MODELS = [
-  { id: 'birefnet-general-lite', label: 'BiRefNet 通用', group: 'recommended', recommended: true, description: '精度最高，覆盖绝大多数场景', size: '224MB' },
-  { id: 'u2netp', label: 'U2Net 轻量', group: 'lightweight', description: '极轻量快速备选，速度最快', size: '4.5MB' },
+  { id: 'birefnet-general-lite', label: 'BiRefNet 通用', group: 'recommended', description: '精度最高，需要大内存(≥16GB)', size: '224MB' },
+  { id: 'u2netp', label: 'U2Net 轻量', group: 'lightweight', recommended: true, description: '速度快内存低，适合日常使用', size: '4.5MB' },
   { id: 'silueta', label: 'Silueta 人像', group: 'portrait', description: '轻量人像去背景', size: '45MB' },
 ] as const;
 
 /** 默认 RemoveBG 模型 */
-export const DEFAULT_REMOVEBG_MODEL = 'birefnet-general-lite';
+export const DEFAULT_REMOVEBG_MODEL = 'u2netp';
+
+/** 检查 Python + 依赖是否可用（比仅检查模型文件更准确） */
+let _pythonEnvChecked = false;
+let _pythonEnvAvailable = false;
+
+async function checkPythonEnv(): Promise<boolean> {
+  if (_pythonEnvChecked) return _pythonEnvAvailable;
+  _pythonEnvChecked = true;
+
+  try {
+    const { execSync } = await import('child_process');
+    // 检查 python3 是否存在
+    execSync('which python3', { stdio: 'ignore', timeout: 3000 });
+    // 检查 torch 是否安装
+    execSync('python3 -c "import torch"', { stdio: 'ignore', timeout: 10000 });
+    // 检查 iopaint 是否安装
+    execSync('python3 -c "import iopaint"', { stdio: 'ignore', timeout: 10000 });
+    _pythonEnvAvailable = true;
+    console.log('[IOPaint] Python environment check passed (python3 + torch + iopaint available)');
+  } catch {
+    _pythonEnvAvailable = false;
+    console.log('[IOPaint] Python environment check failed (python3/torch/iopaint not available), skipping local IOPaint');
+  }
+  return _pythonEnvAvailable;
+}
 
 /** 检查 LaMa 模型文件是否存在且有效 (>1MB) */
 function isLamaModelAvailable(): boolean {
@@ -113,6 +138,15 @@ export async function eraseWithLama(
 ): Promise<InpaintResult> {
   if (!LOCAL_AI_ENABLED) {
     return { success: false, error: 'LOCAL_AI_ENABLED 未启用' };
+  }
+
+  // ★ 先检查 Python 环境（比检查模型文件更准确）
+  const pythonAvailable = await checkPythonEnv();
+  if (!pythonAvailable) {
+    return {
+      success: false,
+      error: 'Python 环境不可用（缺少 python3/torch/iopaint），无法使用本地 LaMa 擦除，请使用 AI 模型',
+    };
   }
 
   if (!isLamaModelAvailable()) {

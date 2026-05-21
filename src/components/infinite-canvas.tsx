@@ -816,7 +816,7 @@ export function InfiniteCanvas({
   // Erase model selection (LaMa / ZITS / Anime-Lama)
   const [eraseModelId, setEraseModelId] = useState<string>('lama');
   // RemoveBG model selection
-  const [removeBgModelId, setRemoveBgModelId] = useState<string>('birefnet-general-lite');
+  const [removeBgModelId, setRemoveBgModelId] = useState<string>('u2netp');
   // RemoveBG model picker dialog
   const [showRemoveBgPicker, setShowRemoveBgPicker] = useState(false);
   // Floating window canvas zoom/pan
@@ -5101,6 +5101,7 @@ export function InfiniteCanvas({
 
         const syncResultUrl: string | undefined = data.imageUrl;
         const cropInfo = data.cropInfo || null;
+        const compositeInfo = data.compositeInfo || null; // 异步擦除超时后返回的合成信息
 
         if (syncResultUrl) {
           const engineLabel = data.engine?.includes('iopaint') ? 'IOPaint 正在处理' : data.engine === 'local-erase' ? '本地修复完成' : '正在载入编辑结果';
@@ -5119,12 +5120,16 @@ export function InfiniteCanvas({
         // 异步结果前端蒙版合成
         if (resultUrl && !syncResultUrl) {
           try {
+            // 如果有 compositeInfo（服务器端轮询超时后返回），使用其中的蒙版数据
+            const compositeMask = compositeInfo?.maskDataUrl || maskBase64;
+            const compositeOrigW = compositeInfo?.origW || (currentEditImg.originalWidth || Math.round(currentEditImg.width));
+            const compositeOrigH = compositeInfo?.origH || (currentEditImg.originalHeight || Math.round(currentEditImg.height));
             const compositeUrl = await compositeInpaintResult(
               currentEditImg.url,
-              maskBase64,
+              compositeMask,
               resultUrl,
-              currentEditImg.originalWidth || Math.round(currentEditImg.width),
-              currentEditImg.originalHeight || Math.round(currentEditImg.height),
+              compositeOrigW,
+              compositeOrigH,
               cropInfo,
               editMode === 'erase' ? 'erase' : 'mask'
             );
@@ -7982,9 +7987,9 @@ export function InfiniteCanvas({
 
         {/* ====== REMOVE BACKGROUND MODEL PICKER ====== */}
         {showRemoveBgPicker && (() => {
-          const removeBgModels = [
-            { id: 'birefnet-general-lite', label: 'BiRefNet 通用', recommended: true, description: '精度最高，覆盖绝大多数场景', size: '224MB' },
-            { id: 'u2netp', label: 'U2Net 轻量', description: '极轻量快速备选，速度最快', size: '4.5MB' },
+          const removeBgModels: Array<{ id: string; label: string; description: string; size: string; recommended?: boolean }> = [
+            { id: 'birefnet-general-lite', label: 'BiRefNet 通用', description: '精度最高，需要大内存(≥16GB)', size: '224MB' },
+            { id: 'u2netp', label: 'U2Net 轻量', description: '极轻量快速备选，速度最快', size: '4.5MB', recommended: true },
             { id: 'silueta', label: 'Silueta 人像', description: '轻量人像去背景', size: '45MB' },
           ];
           return (

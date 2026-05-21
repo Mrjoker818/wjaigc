@@ -62,9 +62,20 @@ def main():
         image_pil = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
         # 统一使用 IOPaint RemoveBG 处理
+        import torch
         from iopaint.plugins.remove_bg import RemoveBG
         rmbg = RemoveBG(model_name=model_name, device="cpu")
-        result = rmbg(image_pil)
+        # IOPaint RemoveBG 使用 gen_image/gen_mask 方法，需要 numpy RGB 输入
+        import numpy as np
+        rgb_np = np.array(image_pil)
+        from iopaint.schema import RunPluginRequest
+        req = RunPluginRequest(name="remove_bg", image="")
+        if gen_mask:
+            mask_np = rmbg.gen_mask(rgb_np, req)
+            result = Image.fromarray(mask_np, mode="L")
+        else:
+            rgba_np = rmbg.gen_image(rgb_np, req)
+            result = Image.fromarray(rgba_np, mode="RGBA")
 
         if result is None:
             print(json.dumps({"success": False, "error": "RemoveBG 返回空结果"}))
