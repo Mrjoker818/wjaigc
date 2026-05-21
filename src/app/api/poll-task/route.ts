@@ -8,6 +8,26 @@ import { isTaskCancelled, updateTaskProgress, getTaskInfo, releaseQueueSlot } fr
 
 export const dynamic = 'force-dynamic';
 
+// ★ 本地完成缓存：避免同一任务重复查远端API和重复持久化
+// （Next.js dev模式下不同路由可能使用不同的 task-registry 实例，
+//   所以在 poll-task 内部维护自己的缓存更可靠）
+const completedTaskCache = new Map<string, { imageUrl: string; timestamp: number }>();
+const FAILED_CACHE = Symbol('failed');
+const failedTaskCache = new Map<string, { error: string; timestamp: number }>();
+
+// 定期清理过期缓存（5分钟以上的缓存清除）
+if (typeof setInterval !== 'undefined') {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of completedTaskCache) {
+      if (now - v.timestamp > 5 * 60 * 1000) completedTaskCache.delete(k);
+    }
+    for (const [k, v] of failedTaskCache) {
+      if (now - v.timestamp > 5 * 60 * 1000) failedTaskCache.delete(k);
+    }
+  }, 60_000).unref?.();
+}
+
 // 轮询异步任务状态 - 由前端调用
 // 通用化设计：支持不同提供商的任务状态查询格式
 export async function POST(request: NextRequest) {
@@ -76,7 +96,27 @@ export async function POST(request: NextRequest) {
       }, { status: 200 });
     }
 
-    // ★ 检查 task-registry 中的任务（agent-edit/image-edit 等注册的任务）
+    // ★ 优先检查本地完成缓存（避免重复查远端API和重复持久化）
+    const cachedCompleted = completedTaskCache.get(taskId);
+    if (cachedCompleted) {
+      return NextResponse.json({
+        success: true,
+        status: 'completed',
+        progress: 100,
+        imageUrl: cachedCompleted.imageUrl,
+      }, { status: 200 });
+    }
+    const cachedFailed = failedTaskCache.get(taskId);
+    if (cachedFailed) {
+      return NextResponse.json({
+        success: false,
+        status: 'failed',
+        error: cachedFailed.error,
+        retryable: true,
+      }, { status: 200 });
+    }
+
+    // ★ 检查 task-registry 中的任务
     const registryTask = getTaskInfo(taskId);
     if (registryTask) {
       if (registryTask.status === 'completed') {
@@ -87,6 +127,7 @@ export async function POST(request: NextRequest) {
           status: 'completed',
           progress: registryTask.progress,
           result: registryTask.result,
+          imageUrl: (registryTask.result as Record<string, unknown>)?.imageUrl as string | undefined,
         }, { status: 200 });
       }
       if (registryTask.status === 'failed') {
@@ -108,13 +149,19 @@ export async function POST(request: NextRequest) {
           retryable: false,
         }, { status: 200 });
       }
-      // queued / processing
-      return NextResponse.json({
-        success: true,
-        status: registryTask.status,
-        progress: registryTask.progress,
-        label: registryTask.label,
-      }, { status: 200 });
+      // ★ 关键修复：queued / processing 状态不直接返回！
+      // 对于 generate 类型的任务（远端异步），必须继续查询远端API获取真实状态
+      // 否则永远返回内存中的旧状态，导致超时
+      if (registryTask.type !== 'generate') {
+        // 非 generate 类型（agent-edit/image-edit 等）由后端自行更新 registry，直接返回
+        return NextResponse.json({
+          success: true,
+          status: registryTask.status,
+          progress: registryTask.progress,
+          label: registryTask.label,
+        }, { status: 200 });
+      }
+      // generate 类型：继续往下走，查询远端 API 获取真实状态并更新 registry
     }
 
     if (!taskId) {
@@ -272,8 +319,6 @@ export async function POST(request: NextRequest) {
     };
 
     if (completedStatuses.includes(taskStatus || '')) {
-      // ★ 更新任务注册中心状态
-      updateTaskProgress(taskId, { status: 'completed', progress: 100 });
       // 提取图片URL - 通用格式兼容（多种 API 响应格式）
       let sourceImageUrl: string | null = null;
 
@@ -340,6 +385,13 @@ export async function POST(request: NextRequest) {
         }
         await appendUserJsonl(userId, 'images', { type: 'completed', providerId: provider?.id || 'env', model, taskId, imageUrl: pollResult.imageUrl });
       }
+      // ★ 更新任务注册中心状态（包含 result，后续 poll 可直接从 registry 返回）
+      updateTaskProgress(taskId, { status: 'completed', progress: 100, result: { imageUrl: pollResult.imageUrl } });
+      // ★ 同时更新本地完成缓存（Next.js dev模式下 registry 实例可能不一致）
+      const cachedImageUrl = pollResult.imageUrl as string | undefined;
+      if (cachedImageUrl) {
+        completedTaskCache.set(taskId, { imageUrl: cachedImageUrl, timestamp: Date.now() });
+      }
       if (!pollResult.imageUrl) {
         const taskError = taskData?.error as Record<string, unknown> | undefined;
         const errorDetail = (taskError?.message as string) || '';
@@ -348,7 +400,9 @@ export async function POST(request: NextRequest) {
         pollResult.retryable = true;
       }
     } else if (taskStatus === 'failed') {
-      updateTaskProgress(taskId, { status: 'failed' });
+      updateTaskProgress(taskId, { status: 'failed', error: (taskData?.error as Record<string, unknown>)?.message as string || '图像生成任务失败' });
+      failedTaskCache.set(taskId, { error: (taskData?.error as Record<string, unknown>)?.message as string || '图像生成任务失败', timestamp: Date.now() });
+      releaseQueueSlot(taskId);
       const taskError = taskData?.error as Record<string, unknown> | undefined;
       const rawError = (taskError?.message as string) || '图像生成任务失败';
       if (rawError.includes('ratio or price') || rawError.includes('not configured')) {
