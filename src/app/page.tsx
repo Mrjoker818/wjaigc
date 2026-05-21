@@ -624,7 +624,7 @@ function CanvasApp() {
         
         toast.success('生成完成', {
           description: `${data.modelName || model} 已生成 ${imageUrls.length} 张图片`,
-          className: 'bg-[#141414] border border-[#d4af37]/30 text-white',
+          className: themeStyle === 'monochrome' ? 'bg-white border border-blue-200 text-gray-900' : 'bg-[#141414] border border-[#d4af37]/30 text-white',
           duration: 3000,
         });
         return;
@@ -1218,7 +1218,7 @@ function CanvasApp() {
         }
         toast.success('关键词已提取并复制', {
           description: data.prompt.substring(0, 50) + '...',
-          className: 'bg-[#141414] border-[#d4af37] text-white',
+          className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
         });
         return data.prompt;
       }
@@ -1492,7 +1492,7 @@ function CanvasApp() {
         
         toast.success('融合成功', {
           description: `已生成 ${data.images.length} 张融合图片`,
-          className: 'bg-[#141414] border-[#d4af37] text-white',
+          className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
         });
       } else {
         toast.error('融合失败', {
@@ -1604,14 +1604,14 @@ function CanvasApp() {
       if (data.success && data.prompt) {
         toast.success('关键词已提取', {
           description: data.prompt.substring(0, 80) + (data.prompt.length > 80 ? '...' : ''),
-          className: 'bg-[#141414] border-[#d4af37] text-white',
+          className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
         });
         // 同时复制到剪贴板
         if (navigator.clipboard) {
           await navigator.clipboard.writeText(data.prompt);
           toast.info('已复制到剪贴板', {
             description: '可粘贴到右侧图片描述区',
-            className: 'bg-[#141414] border-[#d4af37] text-white',
+            className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
           });
         }
       }
@@ -1703,7 +1703,7 @@ function CanvasApp() {
     try {
       toast.info('正在分析图片...', {
         description: '灵感提示词库正在生成双语提示词',
-        className: 'bg-[#141414] border-[#d4af37] text-white',
+        className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
         duration: 5000,
       });
 
@@ -1754,7 +1754,7 @@ function CanvasApp() {
           setExternalPrompt(promptText);
           toast.success('提示词生成成功', {
             description: data.zh?.title || data.en?.title || '双语提示词已生成',
-            className: 'bg-[#141414] border-[#d4af37] text-white',
+            className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
           });
         } else {
           toast.warning('分析结果为空', {

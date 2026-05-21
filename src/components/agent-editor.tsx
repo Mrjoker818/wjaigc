@@ -31,6 +31,7 @@ const MONO_BG = '#f5f5f5';
 const MONO_BORDER = '#d4d4d4';
 const MONO_TEXT = '#333333';
 const MONO_MUTED = '#888888';
+const MONO_ACCENT = '#3b82f6';
 
 export function AgentEditor({
   imageUrl,
@@ -94,8 +95,8 @@ export function AgentEditor({
   }, [imageUrl, imageWidth, imageHeight]);
 
   // 主题色变量
-  const accentColor = isMonochrome ? MONO_TEXT : GOLD;
-  const accentDim = isMonochrome ? MONO_MUTED : GOLD_DIM;
+  const accentColor = isMonochrome ? MONO_ACCENT : GOLD;
+  const accentDim = isMonochrome ? '#2563eb' : GOLD_DIM;
   const bgPanel = isMonochrome ? MONO_BG : 'rgba(20,20,20,0.85)';
   const bgInput = isMonochrome ? '#ffffff' : 'rgba(26,26,26,0.85)';
   const textColor = isMonochrome ? MONO_TEXT : '#e0e0e0';

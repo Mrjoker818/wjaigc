@@ -923,7 +923,7 @@ ${outputSpec || '1. 设计理念（200字内）\n2. 详细方案描述\n3. 材�
           <button
             onClick={handleSave}
             disabled={!name.trim() || !nameEn.trim()}
-            className="flex-1 h-8 text-xs rounded-lg bg-gradient-to-r from-[#d4af37] to-[#f0c040] text-black font-medium transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+            className={`flex-1 h-8 text-xs rounded-lg ${isGold ? 'bg-gradient-to-r from-[#d4af37] to-[#f0c040] text-black' : 'bg-gradient-to-r from-blue-500 to-blue-600 text-white'} font-medium transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed`}
           >
             {editingAgent ? '保存修改' : '创建智能体'}
           </button>
@@ -1771,7 +1771,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
         border: 'border-gray-200',
         text: 'text-gray-900',
         textMuted: 'text-gray-500',
-        accent: 'from-gray-800 to-gray-600',
+        accent: 'from-blue-500 to-blue-600',
         inputBg: 'bg-gray-50',
         cardBg: 'bg-gray-50/50',
       };

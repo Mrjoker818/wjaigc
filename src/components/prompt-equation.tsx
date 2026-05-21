@@ -161,7 +161,7 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
     const textSecondary = mc ? '#666' : '#888';
     const inputBg = mc ? '#fff' : '#141414';
     const inputBorder = mc ? '#ddd' : '#2a2a2a';
-    const accentColor = mc ? '#333' : '#d4af37';
+    const accentColor = mc ? '#3b82f6' : '#d4af37';
     const accentBg = mc ? 'rgba(0,0,0,0.05)' : 'rgba(212,175,55,0.08)';
     const accentBorder = mc ? '#ccc' : 'rgba(212,175,55,0.25)';
 
@@ -256,7 +256,7 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                             onClick={handleSynthesize}
                             className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 active:scale-[0.98]"
                             style={{
-                                background: mc ? '#1a1a1a' : 'linear-gradient(135deg, #d4af37 0%, #b8942e 100%)',
+                                background: mc ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)' : 'linear-gradient(135deg, #d4af37 0%, #b8942e 100%)',
                                 color: mc ? '#fff' : '#111',
                                 boxShadow: mc ? 'none' : '0 2px 12px rgba(212,175,55,0.25)',
                             }}
@@ -279,7 +279,7 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                                             style={{
                                                 background: !useOptimized ? (mc ? '#1a1a1a' : 'rgba(212,175,55,0.15)') : 'transparent',
                                                 color: !useOptimized ? (mc ? '#fff' : '#d4af37') : textSecondary,
-                                                border: `1px solid ${!useOptimized ? (mc ? '#333' : '#d4af37') : 'transparent'}`,
+                                                border: `1px solid ${!useOptimized ? (mc ? '#3b82f6' : '#d4af37') : 'transparent'}`,
                                             }}
                                         >
                                             <Check className="w-3 h-3" /> 原版
@@ -290,7 +290,7 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                                             style={{
                                                 background: useOptimized ? (mc ? '#1a1a1a' : 'rgba(212,175,55,0.15)') : 'transparent',
                                                 color: useOptimized ? (mc ? '#fff' : '#d4af37') : textSecondary,
-                                                border: `1px solid ${useOptimized ? (mc ? '#333' : '#d4af37') : 'transparent'}`,
+                                                border: `1px solid ${useOptimized ? (mc ? '#3b82f6' : '#d4af37') : 'transparent'}`,
                                             }}
                                         >
                                             <Sparkles className="w-3 h-3" /> 优化版
@@ -391,7 +391,7 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                         className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 active:scale-[0.97]"
                         style={{
                             background: mc ? 'rgba(0,0,0,0.06)' : 'rgba(212,175,55,0.1)',
-                            color: mc ? '#333' : '#d4af37',
+                            color: mc ? '#3b82f6' : '#d4af37',
                             border: `1px solid ${mc ? '#ddd' : 'rgba(212,175,55,0.3)'}`,
                         }}
                     >
@@ -403,7 +403,7 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                         disabled={!resultText.trim() && !synthesize(fields).trim() && !(useOptimized && optimizedText.trim())}
                         className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 active:scale-[0.97]"
                         style={{
-                            background: mc ? '#1a1a1a' : 'linear-gradient(135deg, #d4af37 0%, #b8942e 100%)',
+                            background: mc ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)' : 'linear-gradient(135deg, #d4af37 0%, #b8942e 100%)',
                             color: mc ? '#fff' : '#111',
                         }}
                     >

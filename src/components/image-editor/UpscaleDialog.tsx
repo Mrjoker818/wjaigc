@@ -7,9 +7,10 @@ export interface UpscaleDialogProps {
   imageUrl: string;
   onClose: () => void;
   onSuccess: (resultImageUrl: string) => void;
+  isMonochrome?: boolean;
 }
 
-export default function UpscaleDialog({ imageUrl, onClose, onSuccess }: UpscaleDialogProps) {
+export default function UpscaleDialog({ imageUrl, onClose, onSuccess, isMonochrome = false }: UpscaleDialogProps) {
   const [model, setModel] = useState('');
   const [scale, setScale] = useState<2 | 4>(2);
   const [outputFormat, setOutputFormat] = useState<'png' | 'jpg' | 'webp'>('png');
@@ -17,6 +18,20 @@ export default function UpscaleDialog({ imageUrl, onClose, onSuccess }: UpscaleD
   const [error, setError] = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [serviceReady, setServiceReady] = useState(false);
+
+  // Theme classes
+  const panelBg = isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#d4af37]/30';
+  const accentColor = isMonochrome ? 'text-blue-500' : 'text-[#d4af37]';
+  const headerBorder = isMonochrome ? 'border-gray-200' : 'border-[#d4af37]/20';
+  const footerBorder = isMonochrome ? 'border-gray-200' : 'border-[#d4af37]/20';
+  const labelColor = isMonochrome ? 'text-gray-700' : 'text-gray-300';
+  const titleColor = isMonochrome ? 'text-gray-900' : 'text-white';
+  const inputBg = isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900 focus:ring-blue-300' : 'bg-[#2a2a2a] border-[#d4af37]/20 text-white focus:ring-[#d4af37]/40';
+  const optionSelected = isMonochrome ? 'bg-blue-500 text-white' : 'bg-[#d4af37] text-black';
+  const optionUnselected = isMonochrome ? 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100' : 'bg-[#2a2a2a] text-gray-300 border border-[#d4af37]/20 hover:bg-[#333]';
+  const confirmBtn = isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-[#d4af37] text-black hover:bg-[#e5c349]';
+  const cancelBtn = isMonochrome ? 'text-gray-500 hover:text-gray-900' : 'text-gray-300 hover:text-white';
+  const closeBtn = isMonochrome ? 'hover:bg-gray-100 text-gray-400 hover:text-gray-900' : 'hover:bg-white/10 text-gray-400 hover:text-white';
 
   // 检测服务状态并自动启动
   useEffect(() => {
@@ -28,10 +43,8 @@ export default function UpscaleDialog({ imageUrl, onClose, onSuccess }: UpscaleD
         let upscaylAvailable = health.upscayl?.available ?? false;
 
         if (!upscaylAvailable) {
-          // 尝试自动启动服务
           try {
             await fetch('/api/image/start-services', { method: 'POST' });
-            // 重新检测
             const recheck = await fetch('/api/image/health').then(r => r.json());
             upscaylAvailable = recheck.upscayl?.available ?? false;
             if (!cancelled && upscaylAvailable) {
@@ -48,7 +61,6 @@ export default function UpscaleDialog({ imageUrl, onClose, onSuccess }: UpscaleD
 
         if (!cancelled) {
           setServiceReady(upscaylAvailable);
-          // 默认选择第一个可用模型
           if (upscaylAvailable && health.upscayl?.models?.length > 0 && !model) {
             setModel(health.upscayl.models[0]);
           }
@@ -97,7 +109,6 @@ export default function UpscaleDialog({ imageUrl, onClose, onSuccess }: UpscaleD
     }
   }, [imageUrl, model, scale, outputFormat, onSuccess]);
 
-  // 获取模型的友好名称
   const getModelLabel = (id: string): string => {
     const labels: Record<string, string> = {
       'realesrgan-x4plus': 'RealESRGAN x4+ (写实高清)',
@@ -111,14 +122,12 @@ export default function UpscaleDialog({ imageUrl, onClose, onSuccess }: UpscaleD
     return labels[id] || id;
   };
 
-  // 点击蒙层关闭
   const handleOverlayClick = useCallback((e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
       onClose();
     }
   }, [onClose]);
 
-  // ESC 关闭
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -133,18 +142,18 @@ export default function UpscaleDialog({ imageUrl, onClose, onSuccess }: UpscaleD
       onClick={handleOverlayClick}
     >
       <div
-        className="bg-[#1a1a1a] border border-[#d4af37]/30 rounded-xl shadow-2xl w-[480px] max-h-[80vh] overflow-hidden"
+        className={`border rounded-xl shadow-2xl w-[480px] max-h-[80vh] overflow-hidden ${panelBg}`}
         onClick={e => e.stopPropagation()}
       >
         {/* 标题栏 */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#d4af37]/20">
+        <div className={`flex items-center justify-between px-6 py-4 border-b ${headerBorder}`}>
           <div className="flex items-center gap-2">
-            <ZoomIn className="w-5 h-5 text-[#d4af37]" />
-            <h3 className="text-lg font-semibold text-white">无损放大</h3>
+            <ZoomIn className={`w-5 h-5 ${accentColor}`} />
+            <h3 className={`text-lg font-semibold ${titleColor}`}>无损放大</h3>
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+            className={`p-1 rounded-lg transition-colors ${closeBtn}`}
           >
             <X className="w-5 h-5" />
           </button>
@@ -152,7 +161,6 @@ export default function UpscaleDialog({ imageUrl, onClose, onSuccess }: UpscaleD
 
         {/* 内容区 */}
         <div className="px-6 py-5 space-y-5">
-          {/* 服务状态 */}
           {!serviceReady && (
             <div className="bg-yellow-900/30 border border-yellow-600/40 rounded-lg p-3 text-sm text-yellow-300">
               本地无损放大引擎不可用，请检查 upscayl-node、Vulkan/Mesa 驱动或 upscayl-models 模型目录。
@@ -161,19 +169,19 @@ export default function UpscaleDialog({ imageUrl, onClose, onSuccess }: UpscaleD
 
           {/* 模型选择 */}
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">放大模型</label>
+            <label className={`block text-sm font-medium ${labelColor} mb-2`}>放大模型</label>
             {availableModels.length > 0 ? (
               <select
                 value={model}
                 onChange={e => setModel(e.target.value)}
-                className="w-full bg-[#2a2a2a] border border-[#d4af37]/20 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#d4af37]/40"
+                className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 ${inputBg}`}
               >
                 {availableModels.map(m => (
                   <option key={m} value={m}>{getModelLabel(m)}</option>
                 ))}
               </select>
             ) : (
-              <div className="w-full bg-[#2a2a2a] border border-[#d4af37]/20 text-gray-500 rounded-lg px-3 py-2 text-sm">
+              <div className={`w-full border rounded-lg px-3 py-2 text-sm ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-400' : 'bg-[#2a2a2a] border-[#d4af37]/20 text-gray-500'}`}>
                 {serviceReady ? '正在加载模型...' : '无可用模型'}
               </div>
             )}
@@ -181,16 +189,14 @@ export default function UpscaleDialog({ imageUrl, onClose, onSuccess }: UpscaleD
 
           {/* 放大倍率 */}
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">放大倍率</label>
+            <label className={`block text-sm font-medium ${labelColor} mb-2`}>放大倍率</label>
             <div className="flex gap-3">
               {([2, 4] as const).map(s => (
                 <button
                   key={s}
                   onClick={() => setScale(s)}
                   className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
-                    scale === s
-                      ? 'bg-[#d4af37] text-black'
-                      : 'bg-[#2a2a2a] text-gray-300 border border-[#d4af37]/20 hover:bg-[#333]'
+                    scale === s ? optionSelected : optionUnselected
                   }`}
                 >
                   {s}x
@@ -201,16 +207,14 @@ export default function UpscaleDialog({ imageUrl, onClose, onSuccess }: UpscaleD
 
           {/* 输出格式 */}
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">输出格式</label>
+            <label className={`block text-sm font-medium ${labelColor} mb-2`}>输出格式</label>
             <div className="flex gap-3">
               {(['png', 'jpg', 'webp'] as const).map(f => (
                 <button
                   key={f}
                   onClick={() => setOutputFormat(f)}
                   className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all uppercase ${
-                    outputFormat === f
-                      ? 'bg-[#d4af37] text-black'
-                      : 'bg-[#2a2a2a] text-gray-300 border border-[#d4af37]/20 hover:bg-[#333]'
+                    outputFormat === f ? optionSelected : optionUnselected
                   }`}
                 >
                   {f}
@@ -219,7 +223,6 @@ export default function UpscaleDialog({ imageUrl, onClose, onSuccess }: UpscaleD
             </div>
           </div>
 
-          {/* 错误信息 */}
           {error && (
             <div className="bg-red-900/30 border border-red-600/40 rounded-lg p-3 text-sm text-red-300">
               {error}
@@ -228,17 +231,17 @@ export default function UpscaleDialog({ imageUrl, onClose, onSuccess }: UpscaleD
         </div>
 
         {/* 底部按钮 */}
-        <div className="px-6 py-4 border-t border-[#d4af37]/20 flex justify-end gap-3">
+        <div className={`px-6 py-4 border-t ${footerBorder} flex justify-end gap-3`}>
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-gray-300 hover:text-white transition-colors"
+            className={`px-4 py-2 text-sm transition-colors ${cancelBtn}`}
           >
             取消
           </button>
           <button
             onClick={handleUpscale}
             disabled={isProcessing || !serviceReady || !model}
-            className="px-6 py-2 bg-[#d4af37] text-black text-sm font-semibold rounded-lg hover:bg-[#e5c349] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            className={`px-6 py-2 text-sm font-semibold rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 ${confirmBtn}`}
           >
             {isProcessing ? (
               <>
