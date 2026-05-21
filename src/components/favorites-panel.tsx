@@ -39,6 +39,14 @@ export function FavoritesPanel({ userId, onClose, isMonochrome }: FavoritesPanel
   const [selectedItem, setSelectedItem] = useState<FavoriteItem | null>(null);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
 
+  // localStorage 兜底读写
+  const getLocalFavorites = (): FavoriteItem[] => {
+    try { const raw = localStorage.getItem('wujie-favorites-local'); return raw ? JSON.parse(raw) : []; } catch { return []; }
+  };
+  const saveLocalFavorites = (items: FavoriteItem[]) => {
+    try { localStorage.setItem('wujie-favorites-local', JSON.stringify(items)); } catch { /* ignore */ }
+  };
+
   const fetchFavorites = useCallback(async (p: number) => {
     setLoading(true);
     try {
@@ -48,9 +56,28 @@ export function FavoritesPanel({ userId, onClose, isMonochrome }: FavoritesPanel
         setFavorites(data.favorites);
         setTotalPages(data.pagination.totalPages);
         setTotal(data.pagination.total);
+        // 同步到本地缓存
+        if (p === 1 && data.favorites.length > 0) {
+          saveLocalFavorites(data.favorites);
+        }
+      } else {
+        // API失败 → localStorage兜底
+        const local = getLocalFavorites().filter(f => f.user_id === userId);
+        const start = (p - 1) * 20;
+        const pageItems = local.slice(start, start + 20);
+        setFavorites(pageItems);
+        setTotalPages(Math.max(1, Math.ceil(local.length / 20)));
+        setTotal(local.length);
       }
     } catch (err) {
-      console.error('[Favorites] fetch error:', err);
+      // 网络错误 → localStorage兜底
+      console.error('[Favorites] fetch error, falling back to localStorage:', err);
+      const local = getLocalFavorites().filter(f => f.user_id === userId);
+      const start = (p - 1) * 20;
+      const pageItems = local.slice(start, start + 20);
+      setFavorites(pageItems);
+      setTotalPages(Math.max(1, Math.ceil(local.length / 20)));
+      setTotal(local.length);
     } finally {
       setLoading(false);
     }
@@ -61,13 +88,30 @@ export function FavoritesPanel({ userId, onClose, isMonochrome }: FavoritesPanel
   const handleRemove = async (id: number) => {
     try {
       const res = await fetch(`/api/favorites?id=${id}&userId=${encodeURIComponent(userId)}`, { method: 'DELETE' });
-      if ((await res.json()).success) {
+      const data = await res.json();
+      if (data.success) {
         setFavorites(prev => prev.filter(f => f.id !== id));
         setTotal(prev => prev - 1);
         if (selectedItem?.id === id) setSelectedItem(null);
+        // 同步本地缓存
+        const local = getLocalFavorites();
+        saveLocalFavorites(local.filter(f => f.id !== id));
+      } else {
+        // API失败 → 本地删除
+        setFavorites(prev => prev.filter(f => f.id !== id));
+        setTotal(prev => prev - 1);
+        if (selectedItem?.id === id) setSelectedItem(null);
+        const local = getLocalFavorites();
+        saveLocalFavorites(local.filter(f => f.id !== id));
       }
     } catch (err) {
-      console.error('[Favorites] remove error:', err);
+      // 网络错误 → 本地删除
+      console.error('[Favorites] remove error, falling back to localStorage:', err);
+      setFavorites(prev => prev.filter(f => f.id !== id));
+      setTotal(prev => prev - 1);
+      if (selectedItem?.id === id) setSelectedItem(null);
+      const local = getLocalFavorites();
+      saveLocalFavorites(local.filter(f => f.id !== id));
     }
   };
 

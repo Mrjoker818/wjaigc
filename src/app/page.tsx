@@ -16,6 +16,27 @@ import { ProjectDataPanel } from '@/components/project-data-panel';
 import { AdminSystem } from '@/components/admin-system';
 import { HelpGuide } from '@/components/help-guide';
 import { FavoritesPanel } from '@/components/favorites-panel';
+
+interface FavoriteItem {
+  id: number;
+  user_id: string;
+  username: string;
+  image_url: string;
+  prompt: string;
+  negative_prompt: string;
+  model: string;
+  model_name: string;
+  aspect_ratio: string;
+  quality: string;
+  image_width: number;
+  image_height: number;
+  original_width: number;
+  original_height: number;
+  api_provider: string;
+  api_base_url: string;
+  source_type: string;
+  created_at: number;
+}
 import { User, Project } from '@/lib/user-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { toStableImageUrl } from '@/lib/stable-image-url';
@@ -1785,45 +1806,134 @@ function CanvasApp() {
   }, []);
 
   // Add image to favorites
+  // localStorage 兜底：数据库不可用时用本地存储
+  const getLocalFavorites = useCallback((): FavoriteItem[] => {
+    try {
+      const raw = localStorage.getItem('wujie-favorites-local');
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  }, []);
+
+  const saveLocalFavorites = useCallback((items: FavoriteItem[]) => {
+    try { localStorage.setItem('wujie-favorites-local', JSON.stringify(items)); } catch { /* ignore */ }
+  }, []);
+
   const handleAddToFavorites = useCallback(async (image: CanvasImage) => {
     if (!currentUser) {
       toast.error('请先登录后再收藏');
       return;
     }
+    const userId = currentUser.id || currentUser.name;
+    const currentModel = localStorage.getItem('wujie-current-image-model') || '';
+    const currentProvider = localStorage.getItem('wujie-current-api-provider') || '';
+    const favData = {
+      userId,
+      username: currentUser.name || '',
+      imageUrl: image.url,
+      prompt: image.prompt || '',
+      negativePrompt: image.negativePrompt || '',
+      model: currentModel,
+      modelName: currentModel,
+      aspectRatio: image.width && image.height ? `${image.width}:${image.height}` : '',
+      imageWidth: image.width,
+      imageHeight: image.height,
+      originalWidth: image.originalWidth,
+      originalHeight: image.originalHeight,
+      apiProvider: currentProvider,
+      sourceType: 'generated',
+    };
     try {
-      const currentModel = localStorage.getItem('wujie-current-image-model') || '';
-      const currentProvider = localStorage.getItem('wujie-current-api-provider') || '';
       const res = await fetch('/api/favorites', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: currentUser.id || currentUser.name,
-          username: currentUser.name || '',
-          imageUrl: image.url,
-          prompt: image.prompt || '',
-          negativePrompt: image.negativePrompt || '',
-          model: currentModel,
-          modelName: currentModel,
-          aspectRatio: image.width && image.height ? `${image.width}:${image.height}` : '',
-          imageWidth: image.width,
-          imageHeight: image.height,
-          originalWidth: image.originalWidth,
-          originalHeight: image.originalHeight,
-          apiProvider: currentProvider,
-          sourceType: 'generated',
-        }),
+        body: JSON.stringify(favData),
       });
       const data = await res.json();
       if (data.success) {
         toast.success(data.message || '已添加到收藏夹');
+        // 同步到本地缓存
+        const local = getLocalFavorites();
+        if (!local.find(f => f.image_url === image.url)) {
+          local.unshift({
+            id: data.id || Date.now(),
+            user_id: userId,
+            username: favData.username,
+            image_url: image.url,
+            prompt: favData.prompt,
+            negative_prompt: favData.negativePrompt,
+            model: favData.model,
+            model_name: favData.modelName,
+            aspect_ratio: favData.aspectRatio,
+            quality: '',
+            image_width: favData.imageWidth || 0,
+            image_height: favData.imageHeight || 0,
+            original_width: favData.originalWidth || 0,
+            original_height: favData.originalHeight || 0,
+            api_provider: favData.apiProvider,
+            api_base_url: '',
+            source_type: 'generated',
+            created_at: Date.now(),
+          });
+          saveLocalFavorites(local);
+        }
       } else {
-        toast.error(data.error || '收藏失败');
+        // API返回错误 → localStorage兜底
+        const local = getLocalFavorites();
+        if (!local.find(f => f.image_url === image.url)) {
+          local.unshift({
+            id: Date.now(),
+            user_id: userId,
+            username: favData.username,
+            image_url: image.url,
+            prompt: favData.prompt,
+            negative_prompt: favData.negativePrompt,
+            model: favData.model,
+            model_name: favData.modelName,
+            aspect_ratio: favData.aspectRatio,
+            quality: '',
+            image_width: favData.imageWidth || 0,
+            image_height: favData.imageHeight || 0,
+            original_width: favData.originalWidth || 0,
+            original_height: favData.originalHeight || 0,
+            api_provider: favData.apiProvider,
+            api_base_url: '',
+            source_type: 'generated',
+            created_at: Date.now(),
+          });
+          saveLocalFavorites(local);
+        }
+        toast.success('已添加到收藏夹（本地）');
       }
     } catch (err) {
-      console.error('[Favorites] add error:', err);
-      toast.error('收藏失败');
+      // 网络错误 → localStorage兜底
+      console.error('[Favorites] add error, falling back to localStorage:', err);
+      const local = getLocalFavorites();
+      if (!local.find(f => f.image_url === image.url)) {
+        local.unshift({
+          id: Date.now(),
+          user_id: userId,
+          username: favData.username,
+          image_url: image.url,
+          prompt: favData.prompt,
+          negative_prompt: favData.negativePrompt,
+          model: favData.model,
+          model_name: favData.modelName,
+          aspect_ratio: favData.aspectRatio,
+          quality: '',
+          image_width: favData.imageWidth || 0,
+          image_height: favData.imageHeight || 0,
+          original_width: favData.originalWidth || 0,
+          original_height: favData.originalHeight || 0,
+          api_provider: favData.apiProvider,
+          api_base_url: '',
+          source_type: 'generated',
+          created_at: Date.now(),
+        });
+        saveLocalFavorites(local);
+      }
+      toast.success('已添加到收藏夹（本地）');
     }
-  }, [currentUser]);
+  }, [currentUser, getLocalFavorites, saveLocalFavorites]);
 
   return (
     <div className={`h-screen w-screen relative overflow-hidden ${themeStyle === 'monochrome' ? 'bg-white' : 'bg-[#0a0a0a]'}`}>
