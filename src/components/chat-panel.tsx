@@ -416,7 +416,7 @@ function createMarkdownComponents(isGold: boolean, onAddImage?: (url: string) =>
       // Inline code
       return (
         <code className={`px-1 py-0.5 rounded text-xs ${
-          isGold ? 'bg-black/30 text-yellow-300' : 'bg-gray-100 text-gray-700'
+          isGold ? 'bg-black/30 text-yellow-300' : 'bg-blue-50 text-blue-700'
         }`} {...props}>{children}</code>
       );
     },
@@ -2200,7 +2200,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                     message.role === 'user'
                       ? isGold
                         ? 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-black shadow-sm'
-                        : 'bg-gray-900 text-white shadow-sm'
+                        : 'bg-blue-500 text-white shadow-sm'
                       : isGold
                         ? 'bg-[#1a1a1a]/85 text-[#e0e0e0] border border-white/[0.06]'
                         : 'bg-white text-gray-800 border border-gray-100 shadow-sm'
@@ -2282,7 +2282,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                       className={`w-full h-9 text-sm font-medium rounded-lg ${
                         isGold
                           ? 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-black hover:opacity-90'
-                          : 'bg-gray-900 text-white hover:bg-gray-800'
+                          : 'bg-blue-500 text-white hover:bg-blue-600'
                       }`}
                     >
                       {isAnalyzingImage ? (
@@ -2358,7 +2358,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                     : 'bg-gray-100 border border-gray-200 text-gray-300 cursor-not-allowed'
                   : isGold
                     ? 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-black hover:opacity-90 shadow-lg shadow-[#d4af37]/20'
-                    : 'bg-gray-900 text-white hover:bg-gray-800 shadow-md'
+                    : 'bg-blue-500 text-white hover:bg-blue-600 shadow-md'
               }`}
             >
               {isLoading ? (
@@ -2409,7 +2409,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                       optimizerMode === m.value
                         ? isGold
                           ? 'bg-[#d4af37]/15 text-[#d4af37] border border-[#d4af37]/40'
-                          : 'bg-gray-900 text-white border border-gray-700'
+                          : 'bg-blue-500 text-white border border-blue-600'
                         : isGold
                           ? 'bg-[#1a1a1a]/80 text-[#666] border border-white/[0.08] hover:text-[#999] hover:border-white/[0.14]'
                           : 'bg-gray-50 text-gray-500 border border-gray-200 hover:text-gray-700'
@@ -2479,7 +2479,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                       selectedOutputLang === 'en'
                         ? isGold
                           ? 'bg-[#d4af37] text-black'
-                          : 'bg-gray-900 text-white'
+                          : 'bg-blue-500 text-white'
                         : isGold
                           ? 'bg-[#1a1a1a]/80 text-[#666] border border-white/[0.08] hover:text-[#999]'
                           : 'bg-white text-gray-500 border border-gray-200'
@@ -2493,7 +2493,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                       selectedOutputLang === 'cn'
                         ? isGold
                           ? 'bg-[#d4af37] text-black'
-                          : 'bg-gray-900 text-white'
+                          : 'bg-blue-500 text-white'
                         : isGold
                           ? 'bg-[#1a1a1a]/80 text-[#666] border border-white/[0.08] hover:text-[#999]'
                           : 'bg-white text-gray-500 border border-gray-200'
@@ -2538,7 +2538,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                     className={`flex-1 h-9 font-medium text-sm rounded-lg ${
                       isGold
                         ? 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-black hover:opacity-90'
-                        : 'bg-gray-900 text-white hover:bg-gray-800'
+                        : 'bg-blue-500 text-white hover:bg-blue-600'
                     } transition-all flex items-center justify-center gap-1`}
                   >
                     <Send className="h-4 w-4" />

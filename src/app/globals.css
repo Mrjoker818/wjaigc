@@ -141,6 +141,69 @@ main {
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* Monochrome 主题：白色为主 + 彩色强调 */
+.theme-monochrome {
+  --background: #ffffff;
+  --foreground: #1e293b;
+  --card: #f8fafc;
+  --card-foreground: #1e293b;
+  --popover: #ffffff;
+  --popover-foreground: #1e293b;
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #334155;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --accent: #3b82f6;
+  --accent-foreground: #ffffff;
+  --destructive: #ef4444;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: #3b82f6;
+  --chart-1: #3b82f6;
+  --chart-2: #10b981;
+  --chart-3: #f59e0b;
+  --chart-4: #8b5cf6;
+  --chart-5: #ec4899;
+  --sidebar: #f8fafc;
+  --sidebar-foreground: #1e293b;
+  --sidebar-primary: #3b82f6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eff6ff;
+  --sidebar-accent-foreground: #1e40af;
+  --sidebar-border: #e2e8f0;
+  --sidebar-ring: #3b82f6;
+  /* 彩色图标专用变量 */
+  --icon-blue: #3b82f6;
+  --icon-green: #10b981;
+  --icon-amber: #f59e0b;
+  --icon-purple: #8b5cf6;
+  --icon-pink: #ec4899;
+  --icon-red: #ef4444;
+  --icon-cyan: #06b6d4;
+  --icon-orange: #f97316;
+  --icon-emerald: #059669;
+  --btn-primary: #3b82f6;
+  --btn-primary-hover: #2563eb;
+  --btn-primary-text: #ffffff;
+  --btn-secondary: #f1f5f9;
+  --btn-secondary-hover: #e2e8f0;
+  --btn-secondary-text: #334155;
+  --btn-accent: #8b5cf6;
+  --btn-accent-hover: #7c3aed;
+  --btn-accent-text: #ffffff;
+  --btn-success: #10b981;
+  --btn-success-hover: #059669;
+  --btn-success-text: #ffffff;
+  --surface-elevated: #ffffff;
+  --surface-sunken: #f1f5f9;
+  --border-strong: #cbd5e1;
+  --text-heading: #0f172a;
+  --text-body: #334155;
+  --text-caption: #94a3b8;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

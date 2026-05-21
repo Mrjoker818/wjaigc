@@ -890,20 +890,20 @@ export function GenerationPanel(
     const mc = isMonochrome; // shorthand
     // Section title style
     const stl = mc 
-        ? "text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5 mb-1"
+        ? "text-xs font-semibold text-blue-500 uppercase tracking-wider flex items-center gap-1.5 mb-1"
         : "text-xs font-semibold text-[#888] uppercase tracking-wider flex items-center gap-1.5 mb-1";
-    const dot = <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${mc ? 'bg-gray-700' : 'bg-[#d4af37]'}`} />;
+    const dot = <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${mc ? 'bg-blue-500' : 'bg-[#d4af37]'}`} />;
     // Input/Select style - comfortable padding
     const inputStl = mc
-        ? "w-full px-3 py-2 rounded-lg text-sm bg-gray-50 text-gray-900 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-300 focus:shadow-sm transition-all hover:border-gray-300"
+        ? "w-full px-3 py-2 rounded-lg text-sm bg-white text-gray-900 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:shadow-sm transition-all hover:border-blue-300"
         : "w-full px-3 py-2 rounded-lg text-sm bg-[#1a1a1a]/85 text-[#e0e0e0] border border-white/[0.08] focus:outline-none focus:ring-2 focus:ring-[#d4af37]/30 focus:shadow-[0_0_12px_rgba(212,175,55,0.08)] transition-all hover:border-white/[0.14]";
     // Grid button unselected/selected
     const gridBtnBase = "py-1.5 px-2 text-xs rounded-md transition-all duration-200 border";
     const gridBtnOff = mc
-        ? "bg-white text-gray-600 border-gray-200 hover:border-gray-400 hover:text-gray-800"
+        ? "bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600"
         : "bg-[#1a1a1a]/80 text-[#888] border-white/[0.08] hover:border-white/[0.14] hover:text-[#bbb]";
     const gridBtnOn = mc
-        ? "bg-gray-900 text-white border-gray-900 shadow-sm"
+        ? "bg-blue-500 text-white border-blue-500 shadow-sm shadow-blue-200"
         : "bg-[#d4af37]/15 text-[#d4af37] border-[#d4af37]/40 shadow-[0_0_10px_rgba(212,175,55,0.08)]";
 
     return (
@@ -1103,10 +1103,10 @@ export function GenerationPanel(
                                 className={`px-2 py-1 rounded-md text-xs transition-all duration-200 border ${
                                     selectedTags.includes(tag) 
                                         ? mc
-                                            ? 'bg-gray-900 text-white border-gray-900'
+                                            ? 'bg-blue-500 text-white border-blue-500'
                                             : 'bg-[#d4af37]/15 text-[#d4af37] border-[#d4af37]/30'
                                         : mc
-                                            ? 'bg-white text-gray-500 border-gray-200 hover:border-gray-300 hover:text-gray-700'
+                                            ? 'bg-white text-gray-500 border-gray-200 hover:border-blue-300 hover:text-blue-600'
                                             : 'bg-[#1a1a1a]/80 text-[#666] border-white/[0.08] hover:border-white/[0.14] hover:text-[#999]'
                                 }`}
                             >
@@ -1222,8 +1222,8 @@ export function GenerationPanel(
                                                             onClick={() => toggleRefCategory(i, cat.key)}
                                                             className={`text-xs px-1.5 py-0.5 rounded transition-all ${
                                                                 selectedCats.has(cat.key)
-                                                                    ? 'bg-[#d4af37] text-black font-semibold'
-                                                                    : mc ? 'bg-gray-100 text-gray-400 hover:text-gray-600' : 'bg-[#1a1a1a]/80 text-[#666] hover:text-[#999]'
+                                                                    ? 'bg-blue-500 text-white font-semibold'
+                                                                    : mc ? 'bg-gray-100 text-gray-400 hover:text-blue-500' : 'bg-[#1a1a1a]/80 text-[#666] hover:text-[#999]'
                                                             }`}
                                                         >
                                                             {cat.label}
@@ -1243,7 +1243,7 @@ export function GenerationPanel(
                                                             newStr[i] = parseInt(e.target.value);
                                                             setReferenceStrengths(newStr);
                                                         }}
-                                                        className="flex-1 h-1 accent-[#d4af37] [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5"
+                                                        className="flex-1 h-1 accent-blue-500 [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5"
                                                     />
                                                     <span className={`text-xs w-7 text-right ${mc ? 'text-gray-500' : 'text-[#888]'}`}>{strength}%</span>
                                                 </div>
@@ -1345,7 +1345,7 @@ export function GenerationPanel(
                             {/* 融合生成按钮 */}
                             <button
                                 onClick={() => onFusionGenerate?.(ctrlRefSelections, fusionPrompt)}
-                                className="w-full mt-2.5 py-2 rounded-md text-sm font-bold transition-all flex items-center justify-center gap-2 bg-[#d4af37] text-black hover:bg-[#e5c349] active:scale-[0.98]"
+                                className="w-full mt-2.5 py-2 rounded-md text-sm font-bold transition-all flex items-center justify-center gap-2 bg-blue-500 text-white hover:bg-blue-600 active:scale-[0.98]"
                             >
                                 <GitMerge className="h-4 w-4" />
                                 融合生成

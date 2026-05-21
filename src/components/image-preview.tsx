@@ -346,9 +346,9 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
   const textMutedColor = isMonochrome ? 'text-gray-500' : 'text-white/80';
   const borderColor = isMonochrome ? 'border-gray-200' : 'border-gray-700';
   const bgColor = isMonochrome ? 'bg-white' : 'bg-[#0a0a0a]';
-  const accentColor = isMonochrome ? 'text-yellow-600' : 'text-[#d4af37]';
-  const accentBg = isMonochrome ? 'bg-yellow-50' : 'bg-[#d4af37]/10';
-  const accentBorder = isMonochrome ? 'border-yellow-300' : 'border-[#d4af37]/30';
+  const accentColor = isMonochrome ? 'text-blue-600' : 'text-[#d4af37]';
+  const accentBg = isMonochrome ? 'bg-blue-50' : 'bg-[#d4af37]/10';
+  const accentBorder = isMonochrome ? 'border-blue-300' : 'border-[#d4af37]/30';
   const btnBg = isMonochrome ? 'bg-gray-50 hover:bg-gray-100' : 'bg-[#141414] hover:bg-[#1a1a1a]';
   const btnText = isMonochrome ? 'text-gray-700' : 'text-white/80';
   const overlayBg = isMonochrome ? 'from-white/90 to-white/60' : 'from-black/80 to-transparent';
@@ -460,7 +460,7 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
             {onEditImage && image && (
               <button
                 onClick={() => onEditImage(image)}
-                className={`flex items-center gap-1 px-2.5 py-1 text-xs ${isMonochrome ? 'text-yellow-700 hover:bg-yellow-50' : 'text-[#d4af37] hover:bg-[#d4af37]/10'} rounded-lg transition-all`}
+                className={`flex items-center gap-1 px-2.5 py-1 text-xs ${isMonochrome ? 'text-blue-700 hover:bg-blue-50' : 'text-[#d4af37] hover:bg-[#d4af37]/10'} rounded-lg transition-all`}
               >
                 <Pencil className="h-3 w-3" />
                 语言修图
@@ -479,7 +479,7 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
                 {exporting === 'svg' ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileCode className="h-3 w-3" />}
                 SVG
               </button>
-              <button onClick={() => handleDownload('psd')} disabled={exporting !== null} className={`flex items-center gap-1 px-2 py-1 text-xs ${isMonochrome ? 'bg-yellow-50 border-yellow-200 hover:bg-yellow-100' : 'bg-[#d4af37]/10 border-[#d4af37]/30 hover:bg-[#d4af37]/20'} ${isMonochrome ? 'text-yellow-700' : 'text-[#d4af37]'} border rounded-md transition-all disabled:opacity-50`}>
+              <button onClick={() => handleDownload('psd')} disabled={exporting !== null} className={`flex items-center gap-1 px-2 py-1 text-xs ${isMonochrome ? 'bg-blue-50 border-blue-200 hover:bg-blue-100' : 'bg-[#d4af37]/10 border-[#d4af37]/30 hover:bg-[#d4af37]/20'} ${isMonochrome ? 'text-blue-700' : 'text-[#d4af37]'} border rounded-md transition-all disabled:opacity-50`}>
                 {exporting === 'psd' ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileJson className="h-3 w-3" />}
                 PSD
               </button>
@@ -501,7 +501,7 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
           <>
             {isLoading && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
-                <div className={`animate-spin w-8 h-8 border-2 ${accentBorder} ${isMonochrome ? 'border-yellow-600' : 'border-[#d4af37]'} border-t-transparent rounded-full`} />
+                <div className={`animate-spin w-8 h-8 border-2 ${accentBorder} ${isMonochrome ? 'border-blue-600' : 'border-[#d4af37]'} border-t-transparent rounded-full`} />
               </div>
             )}
             <div className="overflow-auto pt-14 pb-16" style={{ maxHeight: '95vh' }}>

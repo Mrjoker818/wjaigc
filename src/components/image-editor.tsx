@@ -95,17 +95,17 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   // 标题文字
   const thTitle = isMonochrome ? 'text-gray-900' : 'text-white';
 
-  // 强调色（金/黑）
-  const thAccent = isMonochrome ? 'text-gray-900' : 'text-[#d4af37]';
-  const thAccentIcon = isMonochrome ? 'text-gray-700' : 'text-[#d4af37]';
+  // 强调色（蓝/金）
+  const thAccent = isMonochrome ? 'text-blue-600' : 'text-[#d4af37]';
+  const thAccentIcon = isMonochrome ? 'text-blue-500' : 'text-[#d4af37]';
 
   // 强调色背景类（用于按钮高亮、选中状态）
-  const thAccentBg = isMonochrome ? 'bg-gray-900' : 'bg-[#d4af37]';
+  const thAccentBg = isMonochrome ? 'bg-blue-500' : 'bg-[#d4af37]';
   const thAccentBgText = isMonochrome ? 'text-white' : 'text-black';
-  const thAccentBgHover = isMonochrome ? 'hover:bg-gray-800' : 'hover:bg-[#daa520]';
-  const thAccentLight = isMonochrome ? 'bg-gray-100' : 'bg-[#d4af37]/15';
-  const thAccentLightText = isMonochrome ? 'text-gray-900' : 'text-[#d4af37]';
-  const thAccentBorder = isMonochrome ? 'border-gray-400' : 'border-[#d4af37]';
+  const thAccentBgHover = isMonochrome ? 'hover:bg-blue-600' : 'hover:bg-[#daa520]';
+  const thAccentLight = isMonochrome ? 'bg-blue-50' : 'bg-[#d4af37]/15';
+  const thAccentLightText = isMonochrome ? 'text-blue-600' : 'text-[#d4af37]';
+  const thAccentBorder = isMonochrome ? 'border-blue-300' : 'border-[#d4af37]';
 
   // 次要/背景色
   const thBg = isMonochrome ? 'bg-gray-50' : 'bg-[#1a1a1a]/85';
@@ -123,22 +123,22 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
   // 输入框
   const thInput = isMonochrome
-    ? 'bg-white border-gray-200 text-gray-800 focus:border-gray-400'
+    ? 'bg-white border-gray-200 text-gray-800 focus:border-blue-400'
     : 'bg-[#1a1a1a]/85 border-white/[0.14] text-white focus:border-[#d4af37]';
 
   // 按钮
   const thBtnSecondary = isMonochrome
-    ? 'bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200'
+    ? 'bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200'
     : 'bg-[#1a1a1a]/85 text-[#888] hover:text-white border border-white/[0.14]';
 
   // 渐变主按钮
   const thBtnPrimary = isMonochrome
-    ? 'bg-gray-900 hover:bg-gray-800 text-white'
+    ? 'bg-blue-500 hover:bg-blue-600 text-white'
     : 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] hover:from-[#daa520] hover:to-[#cd9b1d] text-black';
 
   // 关闭按钮
   const thCloseBtn = isMonochrome
-    ? 'hover:bg-gray-100 text-gray-400'
+    ? 'hover:bg-blue-50 text-blue-400'
     : 'hover:bg-[#2a2a2a] text-[#888]';
 
   // 下拉菜单

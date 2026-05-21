@@ -1943,7 +1943,7 @@ function CanvasApp() {
   }, [currentUser, getLocalFavorites, saveLocalFavorites]);
 
   return (
-    <div className={`h-screen w-screen relative overflow-hidden ${themeStyle === 'monochrome' ? 'bg-white' : 'bg-[#0a0a0a]'}`}>
+    <div className={`h-screen w-screen relative overflow-hidden ${themeStyle === 'monochrome' ? 'bg-gradient-to-br from-blue-50 via-white to-purple-50/30' : 'bg-[#0a0a0a]'}`}>
       {/* Canvas - 全屏 */}
       <div className="absolute inset-0">
         <InfiniteCanvas
@@ -2072,12 +2072,12 @@ function CanvasApp() {
       {!panelCollapsed && (
         <div className={`absolute top-3 right-3 bottom-3 w-[340px] z-30 flex flex-col transition-all duration-300 overflow-hidden panel-slide-in ${
           themeStyle === 'monochrome' 
-            ? 'bg-white/95 backdrop-blur-xl border border-gray-200/80 shadow-xl rounded-xl' 
+            ? 'bg-white/95 backdrop-blur-xl border border-blue-100/60 shadow-xl shadow-blue-500/5 rounded-xl' 
             : 'bg-[#141414]/80 backdrop-blur-2xl border border-[#d4af37]/15 rounded-xl shadow-2xl'
         }`}>
           {/* 软件标题 - 版本号在下方，项目名在右侧 */}
           <div className={`px-4 py-2.5 flex-shrink-0 flex items-center justify-between ${
-            themeStyle === 'monochrome' ? 'bg-gray-50/50' : ''
+            themeStyle === 'monochrome' ? 'bg-gradient-to-r from-blue-50/50 to-purple-50/30' : ''
           }`}>
             <div className="flex items-center gap-3">
               <div className="flex flex-col">
@@ -2090,9 +2090,12 @@ function CanvasApp() {
                   {themeStyle !== 'monochrome' && (
                     <div className="w-1.5 h-1.5 rounded-full bg-[#d4af37] shadow-[0_0_6px_rgba(212,175,55,0.5)]" />
                   )}
+                  {themeStyle === 'monochrome' && (
+                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                  )}
                 </div>
                 <span className={`text-[10px] leading-tight font-mono ${
-                  themeStyle === 'monochrome' ? 'text-gray-400' : 'text-[#555]'
+                  themeStyle === 'monochrome' ? 'text-blue-400' : 'text-[#555]'
                 }`}>
                   {APP_FULL_VERSION_LABEL}
                 </span>
@@ -2100,7 +2103,7 @@ function CanvasApp() {
               {currentProject && (
                 <span className={`text-xs px-2.5 py-0.5 rounded-lg font-medium transition-colors ${
                   themeStyle === 'monochrome' 
-                    ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' 
+                    ? 'bg-blue-50 text-blue-600 border border-blue-200' 
                     : 'bg-[#d4af37]/10 text-[#d4af37] border border-[#d4af37]/20 hover:bg-[#d4af37]/15'
                 }`}>
                   {currentProject.name}
@@ -2112,24 +2115,24 @@ function CanvasApp() {
 
           {/* Panel Tabs - 紧凑化 */}
           <div className={`flex flex-shrink-0 ${
-            themeStyle === 'monochrome' ? 'bg-gray-50/30' : ''
+            themeStyle === 'monochrome' ? 'bg-blue-50/20' : ''
           }`}>
             <button
               onClick={() => setActivePanel('generate')}
               className={`flex-1 py-2 px-3 flex items-center justify-center gap-1.5 transition-all text-sm relative ${
                 activePanel === 'generate'
                   ? themeStyle === 'monochrome'
-                    ? 'text-gray-900 font-semibold'
+                    ? 'text-blue-600 font-semibold'
                     : 'text-[#d4af37] font-semibold'
                   : themeStyle === 'monochrome'
-                    ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-50/50'
+                    ? 'text-gray-500 hover:text-blue-600 hover:bg-blue-50/50'
                     : 'text-[#888] hover:text-white hover:bg-[#1a1a1a]/70'
               }`}
             >
-              <ImageIcon size={15} />
+              <ImageIcon size={15} className={themeStyle === 'monochrome' && activePanel === 'generate' ? 'text-blue-500' : ''} />
               <span className="text-sm">图像生成</span>
               {activePanel === 'generate' && (
-                <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-yellow-400' : 'bg-[#d4af37] shadow-[0_0_6px_rgba(212,175,55,0.5)]'}`} />
+                <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-gradient-to-r from-blue-500 to-cyan-400' : 'bg-[#d4af37] shadow-[0_0_6px_rgba(212,175,55,0.5)]'}`} />
               )}
             </button>
             <button
@@ -2137,17 +2140,17 @@ function CanvasApp() {
               className={`flex-1 py-2 px-3 flex items-center justify-center gap-1.5 transition-all text-sm relative ${
                 activePanel === 'chat'
                   ? themeStyle === 'monochrome'
-                    ? 'text-gray-900 font-semibold'
+                    ? 'text-blue-600 font-semibold'
                     : 'text-[#d4af37] font-semibold'
                   : themeStyle === 'monochrome'
-                    ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-50/50'
+                    ? 'text-gray-500 hover:text-blue-600 hover:bg-blue-50/50'
                     : 'text-[#888] hover:text-white hover:bg-[#1a1a1a]/70'
               }`}
             >
-              <MessageSquare size={15} />
+              <MessageSquare size={15} className={themeStyle === 'monochrome' && activePanel === 'chat' ? 'text-blue-500' : ''} />
               <span className="text-sm">智能对话</span>
               {activePanel === 'chat' && (
-                <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-yellow-400' : 'bg-[#d4af37] shadow-[0_0_6px_rgba(212,175,55,0.5)]'}`} />
+                <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-gradient-to-r from-blue-500 to-cyan-400' : 'bg-[#d4af37] shadow-[0_0_6px_rgba(212,175,55,0.5)]'}`} />
               )}
             </button>
           </div>
@@ -2201,7 +2204,7 @@ function CanvasApp() {
                   onClick={() => document.dispatchEvent(new CustomEvent('trigger-generate'))}
                   className={`btn-press w-full py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
                     themeStyle === 'monochrome'
-                      ? 'bg-gradient-to-r from-yellow-400 to-yellow-500 text-white hover:from-yellow-500 hover:to-yellow-600 shadow-md hover:shadow-lg active:shadow-sm'
+                      ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-md hover:shadow-lg active:shadow-sm'
                       : 'bg-gradient-to-r from-[#d4af37] to-[#daa520] text-black hover:from-[#daa520] hover:to-[#d4af37] shadow-md hover:shadow-lg active:shadow-sm'
                   }`}
                 >
