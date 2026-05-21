@@ -847,18 +847,16 @@ export function GenerationPanel(
         : [...referenceImages.keys()]; // max reached, no add slot
 
     // 确保类型和强度数组与图片数组对齐
-    const getRefCategories = (i: number): Set<string> => referenceSelectedCategories[i] || new Set(['style']);
-    const getRefStrength = (i: number): number => referenceStrengths[i] ?? 50;
+    const getRefCategories = (i: number): Set<string> => referenceSelectedCategories[i] || new Set();
+    const getRefStrength = (i: number): number => referenceStrengths[i] ?? 0;
 
     // Toggle a category for a reference image
     const toggleRefCategory = (i: number, cat: string) => {
         setReferenceSelectedCategories(prev => {
-            const current = prev[i] || new Set(['style']);
+            const current = prev[i] || new Set();
             const next = new Set(current);
             if (next.has(cat)) {
                 next.delete(cat);
-                // Ensure at least 1 category selected
-                if (next.size === 0) next.add('style');
             } else {
                 if (next.size >= MAX_REF_CATEGORIES) return prev; // max 2
                 next.add(cat);
@@ -871,7 +869,7 @@ export function GenerationPanel(
     const addRefSlot = () => {
         if (referenceImages.length >= MAX_REF_IMAGES) return;
         setReferenceImages(prev => [...prev, '']);
-        setReferenceStrengths(prev => [...prev, 50]);
+        setReferenceStrengths(prev => [...prev, 0]);
     };
 
     // 根据主题模式设定样式 - 国际化标准尺寸，舒适可读
@@ -1222,12 +1220,12 @@ export function GenerationPanel(
                                                     <span className={`text-xs ${mc ? 'text-gray-400' : 'text-[#666]'}`}>强度</span>
                                                     <input
                                                         type="range"
-                                                        min={10}
+                                                        min={0}
                                                         max={100}
                                                         value={strength}
                                                         onChange={e => {
                                                             const newStr = [...referenceStrengths];
-                                                            while (newStr.length <= i) newStr.push(50);
+                                                            while (newStr.length <= i) newStr.push(0);
                                                             newStr[i] = parseInt(e.target.value);
                                                             setReferenceStrengths(newStr);
                                                         }}

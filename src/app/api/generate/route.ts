@@ -330,8 +330,9 @@ export async function POST(request: NextRequest) {
 
       for (const [imgIdx, cats] of Object.entries(referenceCategories as Record<string, string[]>)) {
         if (Array.isArray(cats)) {
-          const imgStrength = strengths?.[Number(imgIdx)] ?? 50;
+          const imgStrength = strengths?.[Number(imgIdx)] ?? 0;
           for (const cat of cats) {
+            if (imgStrength <= 0) continue; // 0% strength = not active, skip
             const normKey = normalizeCategory(cat);
             activeCatStrengths[normKey] = Math.max(activeCatStrengths[normKey] || 0, imgStrength);
           }

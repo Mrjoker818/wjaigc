@@ -280,7 +280,7 @@ export function createGroupRefImage(
   defaultCategories: ReferenceCategory[] = ['style', 'composition']
 ): GroupRefImage {
   const strengths: Record<string, number> = {
-    'style': 70, 'composition': 60, 'scene': 50, 'color': 50, 'subject': 50, 'detail': 50
+    'style': 0, 'composition': 0, 'scene': 0, 'color': 0, 'subject': 0, 'detail': 0
   };
   return {
     imageId,

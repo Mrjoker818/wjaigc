@@ -2579,7 +2579,7 @@ export function InfiniteCanvas({
         const cats = group.sourceCategories[r.imageId] || [];
         const strengths = group.sourceStrengths[r.imageId] || {};
         for (const c of cats) {
-          const s = strengths[c] || 50;
+          const s = strengths[c] || 0;
           if (s > 0) {
             catStrengthMap[c] = Math.max(catStrengthMap[c] || 0, s);
           }
@@ -6595,7 +6595,7 @@ export function InfiniteCanvas({
                       >
                         {REFERENCE_CATEGORIES.map((cat, idx) => {
                           const isSelected = imgCats.includes(cat);
-                          const strength = group.sourceStrengths[img.id]?.[cat] ?? 50;
+                          const strength = group.sourceStrengths[img.id]?.[cat] ?? 0;
                           return (
                             <div
                               key={cat}
@@ -6627,7 +6627,7 @@ export function InfiniteCanvas({
                                       if (ci >= 0) cats.splice(ci, 1);
                                     } else {
                                       if (!cats.includes(cat)) cats.push(cat);
-                                      if (!str[cat]) str[cat] = 50;
+                                      if (!str[cat]) str[cat] = 0;
                                     }
                                     newCats[img.id] = cats;
                                     newStr[img.id] = str;
