@@ -553,7 +553,6 @@ export function InfiniteCanvas({
   const [brushSize, setBrushSize] = useState(20);
   const [editPrompt, setEditPrompt] = useState('');
   const [expandRatio, setExpandRatio] = useState('原始比例');
-  const [expandScale, setExpandScale] = useState(1);
   const [showExpandScaleMenu, setShowExpandScaleMenu] = useState(false);
   // 即梦风格方向性扩展：上下左右独立 padding（像素值，基于原始图片尺寸）
   const [expandPadding, setExpandPadding] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
@@ -1287,7 +1286,8 @@ export function InfiniteCanvas({
             const scale = Math.min(maxEdge / natW, maxEdge / natH, 1);
             const dispW = Math.round(natW * scale);
             const dispH = Math.round(natH * scale);
-            const updated = images.map(i =>
+            // Use imagesRef.current to avoid stale closure over images
+            const updated = imagesRef.current.map(i =>
               i.id === img.id ? { ...i, width: dispW, height: dispH, originalWidth: natW, originalHeight: natH } : i
             );
             onImagesChange(updated);
@@ -4717,7 +4717,6 @@ export function InfiniteCanvas({
     setEditMode('expand');
     setEditImageId(img.id);
     setExpandRatio('1:1');
-    setExpandScale(1);
     // 重置方向性扩展 padding
     setExpandPadding({ top: 0, right: 0, bottom: 0, left: 0 });
     expandPaddingRef.current = { top: 0, right: 0, bottom: 0, left: 0 };
@@ -7967,7 +7966,7 @@ export function InfiniteCanvas({
                       />
                     </div>
                     {/* Zoom controls overlay */}
-                    <div className={`absolute bottom-3 left-3 flex items-center gap-1 px-2 py-1 rounded-lg text-xs ${isMonochrome ? 'bg-white/80 text-gray-600' : 'bg-[#1a1a1a]/80/80 text-[#999]'}`} style={{ cursor: 'default' }}>
+                    <div className={`absolute bottom-3 left-3 flex items-center gap-1 px-2 py-1 rounded-lg text-xs ${isMonochrome ? 'bg-white/80 text-gray-600' : 'bg-[#1a1a1a]/80 text-[#999]'}`} style={{ cursor: 'default' }}>
                       <button onClick={(e) => { e.stopPropagation(); setEditCanvasZoom(z => Math.max(0.25, z / 1.2)); }} className="p-0.5 hover:text-[#d4af37]"><Minus size={12} /></button>
                       <span className="w-10 text-center tabular-nums">{Math.round(editCanvasZoom * 100)}%</span>
                       <button onClick={(e) => { e.stopPropagation(); setEditCanvasZoom(z => Math.min(5, z * 1.2)); }} className="p-0.5 hover:text-[#d4af37]"><Plus size={12} /></button>

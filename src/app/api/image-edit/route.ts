@@ -456,7 +456,9 @@ async function fetchImageBuffer(url: string): Promise<Buffer> {
   // local path (e.g., /api/serve-upload/xxx, /uploads/xxx)
   if (url.startsWith('/')) {
     // Sanitize path to prevent directory traversal attacks
-    const sanitizedUrl = url.replace(/\.\./g, '').replace(/\/\//g, '/');
+    // ★ 先 decodeURIComponent 再过滤，防止 %2e%2e%2f 绕过
+    const decoded = decodeURIComponent(url);
+    const sanitizedUrl = decoded.replace(/\.\./g, '').replace(/\/\//g, '/');
     // 1. Try local public directory (dev)
     const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
     const localPath = path.normalize(path.join(workspacePath, 'public', sanitizedUrl));
@@ -2313,7 +2315,7 @@ export async function POST(request: NextRequest) {
         .toBuffer();
 
       // 7. 构建提示词
-      const inpaintPrompt = prompt!.trim();
+      const inpaintPrompt = (prompt || '').trim();
 
       // 8. 确保 imageUrl 是 API 可访问的完整 URL（使用裁剪后的图片）
       const croppedImageDataUrl = `data:image/png;base64,${croppedImageBuffer.toString('base64')}`;

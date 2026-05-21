@@ -4,7 +4,7 @@ import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/l
 import { getSessionUser } from '@/lib/server-auth';
 import { resolveCompatProfile, buildPollUrl, type ApiCompatProfile } from '@/lib/api-compatibility';
 import { getEditTask, deleteEditTask } from '@/lib/edit-task-store';
-import { isTaskCancelled, updateTaskProgress, getTaskInfo } from '@/lib/task-registry';
+import { isTaskCancelled, updateTaskProgress, getTaskInfo, releaseQueueSlot } from '@/lib/task-registry';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,9 +13,27 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: NextRequest) {
   try {
     const { taskId, model: rawModel, userId: requestUserId, providerId } = await request.json();
+    if (!taskId || typeof taskId !== 'string') {
+      return NextResponse.json({
+        success: false,
+        status: 'error',
+        error: '缺少 taskId 参数',
+        retryable: false,
+      }, { status: 400 });
+    }
     const model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');
     const sessionUser = await getSessionUser(request);
     const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
+
+    // ★ 第一优先：检查任务是否已被取消，避免已取消任务继续远程轮询浪费资源
+    if (taskId && isTaskCancelled(taskId)) {
+      return NextResponse.json({
+        success: false,
+        status: 'cancelled',
+        error: '任务已被取消',
+        retryable: false,
+      }, { status: 200 });
+    }
 
     // 检查是否为本地语言修图任务
     if (taskId.startsWith('edit_')) {
@@ -62,6 +80,8 @@ export async function POST(request: NextRequest) {
     const registryTask = getTaskInfo(taskId);
     if (registryTask) {
       if (registryTask.status === 'completed') {
+        // ★ 释放队列槽位
+        releaseQueueSlot(taskId);
         return NextResponse.json({
           success: true,
           status: 'completed',
@@ -70,6 +90,8 @@ export async function POST(request: NextRequest) {
         }, { status: 200 });
       }
       if (registryTask.status === 'failed') {
+        // ★ 释放队列槽位
+        releaseQueueSlot(taskId);
         return NextResponse.json({
           success: false,
           status: 'failed',
@@ -100,16 +122,6 @@ export async function POST(request: NextRequest) {
         success: false, 
         error: 'Missing taskId' 
       }, { status: 400 });
-    }
-
-    // ★ 检查任务是否已被取消
-    if (isTaskCancelled(taskId)) {
-      return NextResponse.json({
-        success: false,
-        status: 'cancelled',
-        error: '任务已被取消',
-        retryable: false,
-      }, { status: 200 });
     }
 
     const provider = providerId ? await findProviderById(providerId)

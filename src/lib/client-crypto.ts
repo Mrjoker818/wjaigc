@@ -23,6 +23,11 @@ const SALT_KEY = 'unbounded_ai_enc_salt';
  * but not easily replicable by automated scripts.
  */
 async function getKeyMaterial(): Promise<CryptoKey> {
+  // ★ SSR 防护：crypto.subtle 和 localStorage 在服务端不可用
+  if (typeof window === 'undefined' || typeof crypto?.subtle === 'undefined') {
+    throw new Error('Web Crypto API not available');
+  }
+
   // Generate or retrieve a random salt (persists across sessions)
   let salt = localStorage.getItem(SALT_KEY);
   if (!salt) {
@@ -126,13 +131,17 @@ export async function decryptValue(ciphertext: string): Promise<string> {
 
 /**
  * Check if a value appears to be encrypted (base64 encoded with IV prefix)
+ * ★ 改进判断逻辑：排除明显的非加密值（__enc__/__plain__前缀、API Key格式等）
  */
 export function isEncrypted(value: string): boolean {
-  if (!value || value.startsWith('__plain__')) return false;
+  if (!value || value.startsWith('__plain__') || value.startsWith('__enc__')) return false;
+  // ★ 排除常见 API Key 格式（sk-xxx 等），这些不应被误判为加密
+  if (/^sk[_-]/i.test(value)) return false;
   try {
     const decoded = atob(value);
     // Encrypted values should be at least IV_LENGTH + some ciphertext
-    return decoded.length > IV_LENGTH;
+    // ★ 且解码后长度应远大于 IV_LENGTH（至少 32 字节密文才有意义）
+    return decoded.length > IV_LENGTH + 16;
   } catch {
     return false;
   }

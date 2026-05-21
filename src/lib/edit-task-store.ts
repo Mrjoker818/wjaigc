@@ -22,11 +22,15 @@ const MAX_EDIT_TASKS = 100;
 const editTaskStore = new Map<string, EditTask>();
 
 // 定期清理过期任务（>30分钟）
+// ★ 只清理终态任务（completed/failed），避免误删 processing 任务
 if (typeof setInterval !== 'undefined') {
   setInterval(() => {
     const now = Date.now();
     for (const [id, task] of editTaskStore) {
-      if (now - task.createdAt > 30 * 60 * 1000) {
+      const isOld = now - task.createdAt > 30 * 60 * 1000;
+      const isTerminal = task.status === 'completed' || task.status === 'failed';
+      const isZombie = now - task.createdAt > 2 * 60 * 60 * 1000; // 2小时僵尸
+      if ((isOld && isTerminal) || isZombie) {
         editTaskStore.delete(id);
       }
     }

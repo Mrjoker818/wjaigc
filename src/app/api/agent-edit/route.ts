@@ -310,7 +310,9 @@ async function performImageEdit(
   // 非 OpenAI: 使用 Gemini 或其他格式
   // 回退到现有的 edit route 逻辑
   try {
-    const editResp = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/edit`, {
+    const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
+    const base = domain.startsWith('http') ? domain : (domain ? `https://${domain}` : `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`);
+    const editResp = await fetch(`${base}/api/edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

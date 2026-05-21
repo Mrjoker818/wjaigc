@@ -299,7 +299,7 @@ export async function POST(request: NextRequest) {
       if (response.status === 503) {
         errorMessage = 'Vision API 暂时不可用 (503)，该模型可能不支持图片理解功能，请尝试切换到支持视觉的模型（如 GPT-4o、Gemini、Claude 等）';
       } else if (response.status === 401) {
-        errorMessage = '?????? 无效，请检查配置';
+        errorMessage = 'API Key 无效，请检查配置';
       } else if (response.status === 400) {
         try {
           const errJson = JSON.parse(errorText);
@@ -348,14 +348,6 @@ export async function POST(request: NextRequest) {
       }
     } else {
       // Standard JSON response
-      if (!response.ok) {
-        const errText = await response.text().catch(() => '');
-        console.error('[vision-prompt] API error:', response.status, errText.slice(0, 200));
-        return NextResponse.json(
-          { error: `API 错误: ${response.status}`, detail: errText.slice(0, 200) },
-          { status: response.status }
-        );
-      }
       try {
         const raw = await response.json() as Record<string, unknown>;
         data = (raw.Response ? raw.Response : raw) as Record<string, unknown>;

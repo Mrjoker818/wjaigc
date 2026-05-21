@@ -100,6 +100,13 @@ export function cancelTask(taskId: string): boolean {
   if (cancelledTasks.has(taskId)) return true;
   cancelledTasks.add(taskId);
   updateTaskProgress(taskId, { status: 'cancelled' });
+
+  // ★ 释放排队槽位：取消的任务不应再占用并发位置
+  const task = taskRegistry.get(taskId);
+  if (task) {
+    releaseQueueSlot(taskId);
+  }
+
   return true;
 }
 
@@ -147,11 +154,16 @@ const defaultQueueConfig: QueueConfig = { maxConcurrent: 3, perUser: true };
 const userQueues = new Map<string, string[]>();  // userId → [taskId, ...]
 // 当前每用户活跃任务数
 const userActiveCount = new Map<string, number>();
+// ★ 任务→用户映射，用于取消/完成时释放槽位
+const taskUserMap = new Map<string, string>();
 
 /** 将任务加入排队 */
 export function enqueueTask(taskId: string, userId: string, config?: Partial<QueueConfig>): number {
   const cfg = { ...defaultQueueConfig, ...config };
   const active = userActiveCount.get(userId) || 0;
+
+  // ★ 记录任务→用户映射
+  taskUserMap.set(taskId, userId);
 
   if (active < cfg.maxConcurrent) {
     // 可以立即执行
@@ -178,6 +190,7 @@ export function dequeueNextTask(userId: string): string | null {
 
   const nextTaskId = queue.shift()!;
   if (queue.length === 0) userQueues.delete(userId);
+  else userQueues.set(userId, queue);
 
   // 更新排队中所有任务的位置
   queue.forEach((id, idx) => {
@@ -185,6 +198,29 @@ export function dequeueNextTask(userId: string): string | null {
   });
 
   return nextTaskId;
+}
+
+/**
+ * ★ 释放队列槽位 — 在任务完成/失败/取消时调用
+ * 确保并发计数正确递减，避免队列槽位泄露
+ */
+export function releaseQueueSlot(taskId: string): void {
+  const userId = taskUserMap.get(taskId);
+  if (!userId) return;
+
+  const currentCount = userActiveCount.get(userId) || 0;
+  if (currentCount > 0) {
+    userActiveCount.set(userId, currentCount - 1);
+    // 尝试激活下一个排队任务
+    const nextId = dequeueNextTask(userId);
+    if (nextId) {
+      // 将排队任务提升为活跃
+      userActiveCount.set(userId, (userActiveCount.get(userId) || 0) + 1);
+      updateTaskProgress(nextId, { status: 'pending', queuePosition: 0 });
+    }
+  }
+
+  taskUserMap.delete(taskId);
 }
 
 /** 获取用户当前排队位置 */
@@ -200,14 +236,25 @@ export function getActiveTaskCount(userId: string): number {
 // ─── 清理 ──────────────────────────────────────────────────────────────
 
 // 定期清理过期任务（>30分钟）
+// ★ 只清理终态任务（completed/failed/cancelled），避免误删仍在处理的任务
 if (typeof setInterval !== 'undefined') {
   setInterval(() => {
     const now = Date.now();
     const THIRTY_MIN = 30 * 60 * 1000;
+    const ACTIVE_STATUSES: TaskStatus[] = ['pending', 'processing', 'queued'];
     for (const [id, task] of taskRegistry) {
-      if (now - task.updatedAt > THIRTY_MIN) {
+      // 仅清理超时的终态任务，或超时极久(>2h)的活跃任务（防僵尸）
+      const isOld = now - task.updatedAt > THIRTY_MIN;
+      const isTerminal = !ACTIVE_STATUSES.includes(task.status);
+      const isZombie = now - task.updatedAt > 2 * 60 * 60 * 1000; // 2小时
+      if ((isOld && isTerminal) || isZombie) {
         taskRegistry.delete(id);
         cancelledTasks.delete(id);
+        // 从排队队列中也移除
+        for (const [, queue] of userQueues) {
+          const idx = queue.indexOf(id);
+          if (idx !== -1) queue.splice(idx, 1);
+        }
       }
     }
   }, 5 * 60 * 1000);

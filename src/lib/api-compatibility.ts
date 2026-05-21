@@ -205,7 +205,9 @@ export function buildPollUrl(
     return null;
   }
   const path = profile.pollPathTemplate.replace('{taskId}', taskId);
-  return `${apiBaseUrl}${path}`;
+  // ★ 防止 base URL 末尾斜杠与 path 开头斜杠拼成双斜杠
+  const cleanBase = apiBaseUrl.replace(/\/+$/, '');
+  return `${cleanBase}${path}`;
 }
 
 /**
@@ -369,7 +371,8 @@ export function adjustRequestForProfile(
   } = {},
 ): { body: Record<string, unknown>; endpoint: ImageEndpoint } {
   const { hasImage = false, isEditEndpoint = false } = options;
-  let body = { ...requestBody };
+  // ★ 防御空 body 导致后续解构崩溃
+  let body = requestBody ? { ...requestBody } : {};
 
   // --- Size format conversion ---
   if (profile.sizeFormat === 'pixel' && body.size && typeof body.size === 'string') {
@@ -516,7 +519,11 @@ export function parseResponseForProfile(
   }
 
   // Determine actual response mode based on what we found
-  const mode: ResponseMode = directImageUrls.length > 0 ? 'direct' : 'polling';
+  // ★ 如果同时有 directImageUrls 和 taskIds，优先认为 direct 模式
+  // （有直接图片说明已完成，taskIds 可能是额外信息）
+  const mode: ResponseMode = directImageUrls.length > 0 ? 'direct'
+    : taskIds.length > 0 ? 'polling'
+    : 'direct';
 
   return { mode, directImageUrls, taskIds, raw: apiResponse };
 }

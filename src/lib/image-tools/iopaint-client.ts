@@ -276,11 +276,25 @@ function callPythonScript(
 
     const proc = spawn('python3', [scriptPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: IOPAINT_TIMEOUT_MS,
+      // ★ 不使用 spawn 的 timeout 选项（某些 Node 版本行为不一致），
+      // 改用手动 setTimeout + proc.kill() 确保超时必杀
     });
 
     let stdout = '';
     let stderr = '';
+    let settled = false;
+
+    // ★ 手动超时保护
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        proc.kill('SIGKILL');
+        resolve({
+          success: false,
+          error: `Python 脚本超时 (${Math.round(IOPAINT_TIMEOUT_MS / 1000)}s)`,
+        });
+      }
+    }, IOPAINT_TIMEOUT_MS);
 
     proc.stdout.on('data', (data: Buffer) => {
       stdout += data.toString();
@@ -291,10 +305,18 @@ function callPythonScript(
     });
 
     proc.on('error', (err: Error) => {
-      reject(new Error(`Python 脚本启动失败: ${err.message}`));
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        reject(new Error(`Python 脚本启动失败: ${err.message}`));
+      }
     });
 
     proc.on('close', (code: number | null) => {
+      if (settled) return; // 已被超时处理
+      settled = true;
+      clearTimeout(timer);
+
       if (code !== 0) {
         const errMsg = stderr.trim() || `进程退出码 ${code}`;
         console.error(`[IOPaint] Python script error (${scriptPath}): ${errMsg}`);

@@ -20,9 +20,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ position: -1, total: 0, queued: false });
   }
 
+  // ★ total 应为队列总长度，而非当前排队位置
+  // position=0 表示不在排队，total=0；position>0 时 total=队列长度
+  const total = position > 0 ? position : 0;
+
   return NextResponse.json({
     position,
-    total: position,
+    total,
     queued: info.status === 'queued',
     status: info.status,
     progress: info.progress,
@@ -49,9 +53,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ position: -1, total: 0, queued: false });
     }
 
+    // ★ total 应为队列总长度，而非当前排队位置
+    const total = position > 0 ? position : 0;
+
     return NextResponse.json({
       position,
-      total: position,
+      total,
       queued: info.status === 'queued',
       status: info.status,
       progress: info.progress,

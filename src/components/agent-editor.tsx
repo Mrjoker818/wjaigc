@@ -275,11 +275,14 @@ export function AgentEditor({
         x: e.clientX - rect.left,
         y: e.clientY - rect.top,
       };
-    } else {
+    } else if (hasPosition) {
       dragStart.current = {
         x: e.clientX - position.x,
         y: e.clientY - position.y,
       };
+    } else {
+      // panelRef not available yet, skip drag start
+      isDragging.current = false;
     }
     const onMouseMove = (ev: MouseEvent) => {
       if (!isDragging.current) return;

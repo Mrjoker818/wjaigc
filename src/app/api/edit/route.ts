@@ -57,7 +57,7 @@ async function resolveImageToBuffer(imageSrc: string): Promise<{ buffer: Buffer;
     const mimeMatch = header.match(/data:([^;]+)/);
     return { buffer: Buffer.from(base64Data, 'base64'), mimeType: mimeMatch?.[1] || 'image/png' };
   } else if (imageSrc.startsWith('http://') || imageSrc.startsWith('https://')) {
-    const response = await fetch(imageSrc);
+    const response = await fetch(imageSrc, { signal: AbortSignal.timeout(30000) });
     if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
     const arrayBuffer = await response.arrayBuffer();
     const contentType = response.headers.get('content-type');
@@ -67,7 +67,7 @@ async function resolveImageToBuffer(imageSrc: string): Promise<{ buffer: Buffer;
     const domainBase = domain.replace(/\/+$/, '');
     const base = domainBase.startsWith('http') ? domainBase : (domainBase ? `https://${domainBase}` : '');
     const fullUrl = base ? `${base}${imageSrc}` : `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageSrc}`;
-    const response = await fetch(fullUrl);
+    const response = await fetch(fullUrl, { signal: AbortSignal.timeout(30000) });
     if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
     const arrayBuffer = await response.arrayBuffer();
     const contentType = response.headers.get('content-type');

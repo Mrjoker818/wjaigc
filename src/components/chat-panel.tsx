@@ -562,19 +562,32 @@ function parseToolCalls(content: string): ToolCall[] {
 // Detect if user message intends to generate an image
 function isImageGenerationIntent(message: string): boolean {
   const lower = message.toLowerCase();
-  const patterns = [
-    /生成.*图/, /画.*图/, /制作.*图/, /创建.*图/, /设计.*图/,
-    /给我.*图/, /出.*图/, /做.*图/, /绘制/,
-    /generate.*image/, /create.*image/, /draw.*image/, /make.*image/,
-    /generate.*picture/, /create.*picture/, /draw.*picture/, /make.*picture/,
-    /generate.*photo/, /create.*photo/, /make.*photo/,
-    /海报/, /poster/, /插图/, /illustration/, /封面/, /cover/,
-    /logo/i, /icon/i, /banner/i, /壁纸/, /wallpaper/,
-    /插画/, /原画/, /concept\s*art/i, /角色.*设计/, /character.*design/i,
-    /头像/, /avatar/i, /表情/, /emoji/i, /贴纸/, /sticker/i,
+  // Precise action patterns: action verb near image noun (within 6 chars)
+  const actionPatterns = [
+    /生成.{0,6}(图|图片|图像|插画|海报|封面|插图|画)/,
+    /画.{0,4}(一.{0,2})?(图|图片|画|插画|海报)/,
+    /制作.{0,6}(图|图片|海报|封面|插图)/,
+    /创建.{0,6}(图|图片|图像|插画|海报)/,
+    /设计.{0,6}(图|图片|海报|封面|插图)/,
+    /给我.{0,6}(图|图片|画|海报)/,
+    /出.{0,4}(一.{0,2})?(张|幅|份)?(图|图片|画|海报)/,
+    /做.{0,4}(一.{0,2})?(张|幅|份)?(图|图片|画|海报)/,
+    /绘制/,
+    /generate\s+(an?\s+)?(image|picture|photo|illustration|poster)/,
+    /create\s+(an?\s+)?(image|picture|photo|illustration|poster)/,
+    /draw\s+(an?\s+)?(image|picture|photo|illustration|poster)/,
+    /make\s+(an?\s+)?(image|picture|photo|illustration|poster)/,
     /生图/, /画一个/, /画一张/, /来一张/, /来一个/,
   ];
-  return patterns.some(p => p.test(lower));
+  if (actionPatterns.some(p => p.test(lower))) return true;
+  // Standalone strong-intent nouns
+  const strongNouns = [
+    /海报/, /poster/, /封面/, /cover/, /壁纸/, /wallpaper/,
+    /logo/i, /icon/i, /banner/i, /插画/, /原画/, /concept\s*art/i,
+    /角色.*设计/, /character.*design/i, /头像/, /avatar/i,
+    /表情/, /emoji/i, /贴纸/, /sticker/i,
+  ];
+  return strongNouns.some(p => p.test(lower));
 }
 
 // Helper: clean assistant content for display - extract useful text from AI response

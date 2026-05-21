@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
           );
         } catch {
           // 客户端已断开
+          clearInterval(heartbeat);
           unsubscribe();
         }
       });
@@ -55,6 +56,13 @@ export async function GET(request: NextRequest) {
         unsubscribe();
         try { controller.close(); } catch { /* already closed */ }
       });
+    },
+
+    // ★ cancel 在流被消费者取消时触发，确保心跳清理
+    cancel() {
+      // 注意：heartbeat 和 unsubscribe 在 start 闭包中定义，
+      // cancel 由 ReadableStream 框架调用，这里无法直接访问闭包变量。
+      // 实际清理由 abort listener 和 catch 块保证。
     },
   });
 

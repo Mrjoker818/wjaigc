@@ -188,8 +188,20 @@ export async function executeAgentLoop(
 
     context.onProgress?.({ round: currentRound, step: 'thinking', detail: `第 ${currentRound} 轮思考中...` });
 
-    // 调用 LLM
-    const llmResponse = await llmCall(messages, tools);
+    // 调用 LLM — ★ 添加 try-catch 防止 LLM 调用异常导致 Agent 循环崩溃
+    let llmResponse: Awaited<ReturnType<typeof llmCall>>;
+    try {
+      llmResponse = await llmCall(messages, tools);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'LLM 调用异常';
+      return {
+        success: false,
+        output: context.imageUrl,
+        steps,
+        finalResponse: `LLM 调用失败: ${errMsg}`,
+        error: errMsg,
+      };
+    }
 
     // LLM 没有调用工具，返回最终结果
     if (!llmResponse.toolCalls || llmResponse.toolCalls.length === 0) {

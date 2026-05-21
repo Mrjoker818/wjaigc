@@ -57,22 +57,37 @@ export class UniversalApiManager {
   }
 
   private decryptedKeys: Map<string, string> = new Map(); // id -> decrypted apiKey
+  private decryptionPromises: Map<string, Promise<void>> = new Map(); // id → 解密进行中
 
   /** Decrypt API keys for all providers (handles migration from unencrypted storage) */
   private decryptProviderKeys(): void {
     for (const provider of this.providers) {
       if (provider.apiKey && provider.apiKey.startsWith('__enc__')) {
         const encryptedPart = provider.apiKey.slice(7);
-        decryptValue(encryptedPart).then(decrypted => {
-          this.decryptedKeys.set(provider.id, decrypted);
-        }).catch(() => {
-          // If decryption fails, keep the raw value (might be legacy unencrypted)
-        });
+        // ★ 追踪解密 Promise，防止竞态
+        if (!this.decryptionPromises.has(provider.id)) {
+          const promise = decryptValue(encryptedPart).then(decrypted => {
+            this.decryptedKeys.set(provider.id, decrypted);
+            this.decryptionPromises.delete(provider.id);
+          }).catch(() => {
+            // If decryption fails, keep the raw value (might be legacy unencrypted)
+            this.decryptionPromises.delete(provider.id);
+          });
+          this.decryptionPromises.set(provider.id, promise);
+        }
       } else if (provider.apiKey) {
         // Unencrypted (legacy or __plain__ prefix)
         this.decryptedKeys.set(provider.id, provider.apiKey.replace(/^__plain__/, ''));
       }
     }
+  }
+
+  /** ★ 确保指定 provider 的 API Key 已解密完成（解决异步竞态） */
+  async ensureDecrypted(providerId: string): Promise<string> {
+    // 等待正在进行的解密
+    const pending = this.decryptionPromises.get(providerId);
+    if (pending) await pending;
+    return this.getDecryptedKey(providerId);
   }
 
   /** Get decrypted API key for a provider */

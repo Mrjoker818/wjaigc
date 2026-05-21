@@ -270,6 +270,9 @@ function CanvasApp() {
   const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 项目切换中标记：防止自动保存回调用旧闭包数据覆盖刚保存的新数据
   const switchingProjectRef = useRef(false);
+  // Keep a ref to latest images to avoid stale closure in setTimeout
+  const latestImagesRef = useRef(images);
+  latestImagesRef.current = images;
   useEffect(() => {
     if (!currentProject || images.length === 0) return;
     // 项目切换进行中时，跳过自动保存，避免旧闭包数据覆盖
@@ -284,7 +287,7 @@ function CanvasApp() {
         // 先将 data:/blob: URL 持久化到服务器
         const urlMapping: Record<string, string> = {};
         const sourceUrlMapping: Record<string, string> = {};
-        const nonPersistentUrls = images.filter(img =>
+        const nonPersistentUrls = latestImagesRef.current.filter(img =>
           img.url.startsWith('data:') || img.url.startsWith('blob:')
         );
         if (nonPersistentUrls.length > 0) {
@@ -330,7 +333,7 @@ function CanvasApp() {
         }
 
         // 合并 URL 映射后的图片列表（使用 urlMapping 覆盖，避免 stale closure）
-        const resolvedImages = images.map(img => ({
+        const resolvedImages = latestImagesRef.current.map(img => ({
           ...img,
           url: urlMapping[img.url] || img.url,
         }));

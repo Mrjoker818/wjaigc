@@ -76,8 +76,15 @@ export async function fetchWithV1Retry(
     console.log(`[api-helpers] ${url} needs retry (${reason}), retrying with ${retryUrl}`);
     try {
       // Create fresh options for retry with a fresh timeout signal
+      // ★ 使用 AbortSignal.any 合并原始 signal 和超时 signal，
+      // 避免覆盖调用方传入的 abort controller
       const retryOptions: RequestInit = { ...options };
-      retryOptions.signal = AbortSignal.timeout(defaultTimeoutMs);
+      const timeoutSignal = AbortSignal.timeout(defaultTimeoutMs);
+      if (options.signal) {
+        retryOptions.signal = AbortSignal.any([options.signal, timeoutSignal]);
+      } else {
+        retryOptions.signal = timeoutSignal;
+      }
       const retryResponse = await fetch(retryUrl, retryOptions);
       // Accept retry response if it's JSON (even if status is 4xx like 401 - means API is reachable)
       // or if it's a successful response

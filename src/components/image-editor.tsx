@@ -906,6 +906,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     setSelectedResultIndexes(new Set());
     setLoadingProgress(0);
 
+    let progressIntervalId: ReturnType<typeof setInterval> | null = null;
     try {
       // ★ 将图片URL转为base64，确保服务端可处理
       let imageAsDataUrl: string;
@@ -922,6 +923,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       const progressInterval = setInterval(() => {
         setLoadingProgress(prev => Math.min(prev + 10, 90));
       }, 500);
+      progressIntervalId = progressInterval;
 
       // 解析图像模型信息
       const parts = selectedModelKey.split('::');
@@ -1090,7 +1092,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
         // ★ 更新多轮上下文历史（保留最近5轮）
         setEditContextHistory(prev => [
-          ...prev.slice(-(5 - 1)),
+          ...prev.slice(-4),
           { userPrompt: prompt, llmInstruction: collectedLlmInstruction || prompt },
         ]);
 
@@ -1152,6 +1154,8 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       setError(errMsg);
     } finally {
       setIsLoading(false);
+      // Ensure progressInterval is always cleaned up
+      if (progressIntervalId) clearInterval(progressIntervalId);
     }
   }, [prompt, selectedModelKey, selectedLlmKey, currentImageUrl, aspectRatio, quality, outputCount, currentModelSupportsMask, exportMask, clearMask, currentHistoryIndex, referenceImages, imageToDataUrl, compressImageDataUrl]);
 
@@ -1506,7 +1510,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             {/* 画笔涂抹提示 - 固定在容器底部 */}
             {currentModelSupportsMask && !isSpaceHeld && (
             <div className="absolute bottom-1 left-1 right-1 z-20 flex items-center justify-center pointer-events-none">
-              <div className={`flex items-center gap-1 px-2 py-0.5 ${isMonochrome ? 'bg-white/80 border border-gray-200' : 'bg-[#1a1a1a]/85/80 border border-white/[0.14]'} rounded`}>
+              <div className={`flex items-center gap-1 px-2 py-0.5 ${isMonochrome ? 'bg-white/80 border border-gray-200' : 'bg-[#1a1a1a]/85 border border-white/[0.14]'} rounded`}>
                 <Pencil className={`h-3 w-3 ${thAccentIcon}`} />
                 <span className={`text-[9px] ${thAccent}`}>涂抹区域 + 文字描述 = 精准修图</span>
               </div>
