@@ -8,7 +8,7 @@ import {
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
-  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot
+  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart
 } from 'lucide-react';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
 import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
@@ -286,6 +286,10 @@ export interface CanvasImage {
   threeDModelUrl?: string;
   svgDataUrl?: string; // 保存SVG数据用于下载（画布显示PNG预览时）
   threeDModelUrls?: Record<string, string>;
+  negativePrompt?: string;
+  modelName?: string;
+  apiProvider?: string;
+  apiBaseUrl?: string;
 }
 
 interface InfiniteCanvasProps {
@@ -332,6 +336,14 @@ interface InfiniteCanvasProps {
   onForceSave?: () => void;
   /** Called when user wants to open the language-based image editor (null = open empty) */
   onEditImage?: (image: CanvasImage | null) => void;
+  /** Called when view state (offset/zoom) changes for persistence */
+  onViewStateChange?: (state: { offsetX: number; offsetY: number; zoom: number }) => void;
+  /** Initial view state to restore from persistence */
+  initialViewState?: { offsetX: number; offsetY: number; zoom: number };
+  /** Callback when user adds image to favorites */
+  onAddToFavorites?: (image: CanvasImage) => void;
+  /** Callback to open favorites panel */
+  onToggleFavorites?: () => void;
 }
 
 type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'upscale' | 'svg-trace';
@@ -380,6 +392,10 @@ export function InfiniteCanvas({
   altRefMarkerIds = [],
   onForceSave,
   onEditImage,
+  onViewStateChange,
+  initialViewState,
+  onAddToFavorites,
+  onToggleFavorites,
 }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
@@ -389,11 +405,58 @@ export function InfiniteCanvas({
   const [agentSelectingImage, setAgentSelectingImage] = useState(false);
 
   // View state
-  const [viewOffset, setViewOffset] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
+  const [viewOffset, setViewOffset] = useState({ x: initialViewState?.offsetX ?? 0, y: initialViewState?.offsetY ?? 0 });
+  const [zoom, setZoom] = useState(initialViewState?.zoom ?? 1);
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [isSpacePressed, setIsSpacePressed] = useState(false);
+
+  // Persist view state changes (debounced)
+  const viewStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!onViewStateChange) return;
+    if (viewStateTimerRef.current) clearTimeout(viewStateTimerRef.current);
+    viewStateTimerRef.current = setTimeout(() => {
+      onViewStateChange({ offsetX: viewOffset.x, offsetY: viewOffset.y, zoom });
+    }, 500);
+    return () => { if (viewStateTimerRef.current) clearTimeout(viewStateTimerRef.current); };
+  }, [viewOffset, zoom, onViewStateChange]);
+
+  // Virtualization: viewport culling — only render images in the visible area
+  const canvasContainerRef = useRef<HTMLDivElement | null>(null);
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const el = canvasContainerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setCanvasSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const visibleImages = useMemo(() => {
+    if (canvasSize.width === 0 || canvasSize.height === 0) return images;
+    // Visible area in canvas coordinates
+    const vx1 = -viewOffset.x / zoom;
+    const vy1 = -viewOffset.y / zoom;
+    const vx2 = vx1 + canvasSize.width / zoom;
+    const vy2 = vy1 + canvasSize.height / zoom;
+    // Add margin to avoid pop-in (1 screen worth of margin on each side)
+    const marginW = (vx2 - vx1) * 0.5;
+    const marginH = (vy2 - vy1) * 0.5;
+    return images.filter(img => {
+      if (img.isProcessingPlaceholder) return true; // Always render processing frames
+      const ix1 = img.x;
+      const iy1 = img.y;
+      const ix2 = img.x + img.width;
+      const iy2 = img.y + img.height;
+      return ix2 >= vx1 - marginW && ix1 <= vx2 + marginW && iy2 >= vy1 - marginH && iy1 <= vy2 + marginH;
+    });
+  }, [images, viewOffset, zoom, canvasSize]);
+  // Track total vs visible for debugging
+  const virtualizationStats = useMemo(() => ({ total: images.length, visible: visibleImages.length }), [images.length, visibleImages.length]);
 
   // Navigate to image when navigateToImageId changes
   useEffect(() => {
@@ -5552,6 +5615,7 @@ export function InfiniteCanvas({
     { label: '提取关键词', action: () => { const img = selectedImageData; if (img) onExtractKeywords(img); } },
     { label: '语言修图', action: () => { const img = selectedImageData; if (img) onEditImage?.(img); else onEditImage?.(null); } },
     { label: 'Agent编排', action: () => { const img = selectedImageData; if (img) { setAgentEditImage(img); setShowAgentEditor(true); } } },
+    { label: '加入收藏夹', action: () => { const img = selectedImageData; if (img && onAddToFavorites) onAddToFavorites(img); } },
   ];
 
   const ratioOptions = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9'];
@@ -5582,7 +5646,7 @@ export function InfiniteCanvas({
     <div className="w-full h-full relative">
       {/* Canvas Area */}
       <div
-        ref={canvasRef}
+        ref={(el) => { canvasRef.current = el; canvasContainerRef.current = el; }}
         data-canvas-viewport
         className={`absolute inset-0 overflow-hidden select-none ${
           altKeyHeld && editMode === 'none'
@@ -5763,6 +5827,18 @@ export function InfiniteCanvas({
               </button>
             )}
             {/* Help / Usage Guide */}
+            <button
+              onClick={onToggleFavorites}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                isMonochrome
+                  ? 'bg-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                  : 'bg-transparent text-[#d4af37]/70 hover:text-[#d4af37] hover:bg-[#d4af37]/10'
+              }`}
+              title="收藏夹"
+            >
+              <Heart className="h-3 w-3" />
+              <span>收藏夹</span>
+            </button>
             <button
               onClick={onToggleHelp}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
@@ -5983,7 +6059,7 @@ export function InfiniteCanvas({
               </div>
             );
           })}
-          {images.map(image => {
+          {visibleImages.map(image => {
             const isSelected = selectedIds.has(image.id);
             const isDragging = dragTarget && selectedIds.has(image.id);
             // Hide images belonging to collapsed groups

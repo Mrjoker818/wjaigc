@@ -15,6 +15,7 @@ import { UserManager } from '@/components/user-manager';
 import { ProjectDataPanel } from '@/components/project-data-panel';
 import { AdminSystem } from '@/components/admin-system';
 import { HelpGuide } from '@/components/help-guide';
+import { FavoritesPanel } from '@/components/favorites-panel';
 import { User, Project } from '@/lib/user-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { toStableImageUrl } from '@/lib/stable-image-url';
@@ -119,7 +120,10 @@ function CanvasApp() {
   const [showProjectData, setShowProjectData] = useState(false);
   const [navigateToImageId, setNavigateToImageId] = useState<string | null>(null);
   const [showHelpGuide, setShowHelpGuide] = useState(false);
+  const [showFavorites, setShowFavorites] = useState(false);
   const [initialGroups, setInitialGroups] = useState<ImageGroup[]>([]);
+  const [viewState, setViewState] = useState<{ offsetX: number; offsetY: number; zoom: number } | null>(null);
+  const viewStateRef = useRef<{ offsetX: number; offsetY: number; zoom: number } | null>(null);
   const [ctrlRefSelections, setCtrlRefSelections] = useState<CtrlRefSelection[]>([]);
   // Alt+Click inline reference markers (displayed as numbered tags in the prompt textarea)
   const [altRefMarkers, setAltRefMarkers] = useState<Array<{id: string; url: string; number: number}>>([]);
@@ -201,6 +205,12 @@ function CanvasApp() {
                   } catch {}
                 }
                 setInitialGroups(restoredGroups);
+                // 恢复视图状态（画布位置和缩放）
+                const metaViewState = projects[0].metadata?.viewState;
+                if (metaViewState && typeof metaViewState === 'object' && 'offsetX' in metaViewState) {
+                  setViewState(metaViewState as { offsetX: number; offsetY: number; zoom: number });
+                  viewStateRef.current = metaViewState as { offsetX: number; offsetY: number; zoom: number };
+                }
               }
             } else {
               const defaultProject = userMgr.createProject('默认项目', '我的第一个创作项目');
@@ -268,8 +278,9 @@ function CanvasApp() {
   const latestImagesRef = useRef(images);
   latestImagesRef.current = images;
   useEffect(() => {
-    if (!currentProject || images.length === 0) return;
+    if (!currentProject) return;
     // 项目切换进行中时，跳过自动保存，避免旧闭包数据覆盖
+    if (switchingProjectRef.current) return;
     if (switchingProjectRef.current) return;
     // 防抖：1秒后保存
     if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
@@ -361,6 +372,7 @@ function CanvasApp() {
         const updatedMeta = {
           ...(currentProject.metadata || {}),
           groups: groupsRef.current,
+          viewState: viewStateRef.current,
         };
         mgr.updateProject(currentProject.id, {
           canvasImages: persistableCanvasImages,
@@ -393,10 +405,10 @@ function CanvasApp() {
     };
   }, [images, currentProject, currentUser?.id]);
 
-  // 页面关闭/刷新前同步保存
+  // 页面关闭/刷新前同步保存（localStorage + sendBeacon到服务器）
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (!currentProject || images.length === 0) return;
+      if (!currentProject) return;
       try {
         const mgr = UserManagerCore.getInstance();
         const persistableCanvasImages = images
@@ -425,18 +437,38 @@ function CanvasApp() {
             threeDModelUrls: img.threeDModelUrls || undefined,
           }))
           .filter(img => img.url);
+        // 1. localStorage 即时写入
         mgr.updateProject(currentProject.id, {
           canvasImages: persistableCanvasImages,
           metadata: {
             ...(currentProject.metadata || {}),
             groups: groupsRef.current,
+            viewState: viewStateRef.current,
           },
         });
+        // 2. sendBeacon 异步发送到服务器，确保云部署不丢数据
+        if (currentUser?.id) {
+          const payload = {
+            key: 'projects',
+            value: mgr.getProjects().map(p => ({
+              id: p.id,
+              name: p.name,
+              description: p.description,
+              canvasImages: p.id === currentProject.id ? persistableCanvasImages : p.canvasImages,
+              metadata: p.id === currentProject.id ? { ...(currentProject.metadata || {}), groups: groupsRef.current } : p.metadata,
+              settings: p.settings,
+              createdAt: p.createdAt,
+              updatedAt: p.id === currentProject.id ? Date.now() : p.updatedAt,
+            })),
+          };
+          const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+          navigator.sendBeacon('/api/user-data/sync', blob);
+        }
       } catch { /* best effort */ }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [images, currentProject]);
+  }, [images, currentProject, currentUser?.id]);
 
   const handleGenerate = useCallback(async (params: GenerationParams) => {
     // 增加活跃任务计数
@@ -1752,6 +1784,47 @@ function CanvasApp() {
     setEditingImage(null);
   }, []);
 
+  // Add image to favorites
+  const handleAddToFavorites = useCallback(async (image: CanvasImage) => {
+    if (!currentUser) {
+      toast.error('请先登录后再收藏');
+      return;
+    }
+    try {
+      const currentModel = localStorage.getItem('wujie-current-image-model') || '';
+      const currentProvider = localStorage.getItem('wujie-current-api-provider') || '';
+      const res = await fetch('/api/favorites', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUser.id || currentUser.name,
+          username: currentUser.name || '',
+          imageUrl: image.url,
+          prompt: image.prompt || '',
+          negativePrompt: image.negativePrompt || '',
+          model: currentModel,
+          modelName: currentModel,
+          aspectRatio: image.width && image.height ? `${image.width}:${image.height}` : '',
+          imageWidth: image.width,
+          imageHeight: image.height,
+          originalWidth: image.originalWidth,
+          originalHeight: image.originalHeight,
+          apiProvider: currentProvider,
+          sourceType: 'generated',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(data.message || '已添加到收藏夹');
+      } else {
+        toast.error(data.error || '收藏失败');
+      }
+    } catch (err) {
+      console.error('[Favorites] add error:', err);
+      toast.error('收藏失败');
+    }
+  }, [currentUser]);
+
   return (
     <div className={`h-screen w-screen relative overflow-hidden ${themeStyle === 'monochrome' ? 'bg-white' : 'bg-[#0a0a0a]'}`}>
       {/* Canvas - 全屏 */}
@@ -1791,6 +1864,9 @@ function CanvasApp() {
           isAdmin={currentUser?.role === 'admin'}
           onToggleProjectData={() => setShowProjectData(prev => !prev)}
           onToggleHelp={() => setShowHelpGuide(true)}
+          onAddToFavorites={handleAddToFavorites}
+          onToggleFavorites={() => setShowFavorites(true)}
+          initialViewState={viewStateRef.current || undefined}
           isPanelCollapsed={panelCollapsed}
           navigateToImageId={navigateToImageId}
           onNavigateToImageComplete={() => setNavigateToImageId(null)}
@@ -1804,6 +1880,10 @@ function CanvasApp() {
             } catch {}
           }}
           initialGroups={initialGroups}
+          onViewStateChange={(vs) => {
+            viewStateRef.current = vs;
+            setViewState(vs);
+          }}
           onForceSave={() => {
             try {
               if (currentProject?.id && images.length > 0) {
@@ -2112,6 +2192,12 @@ function CanvasApp() {
                       } catch {}
                     }
                     setInitialGroups(restoredGroups);
+                    // 恢复视图状态
+                    const loginViewState = project.metadata?.viewState;
+                    if (loginViewState && typeof loginViewState === 'object' && 'offsetX' in loginViewState) {
+                      setViewState(loginViewState as { offsetX: number; offsetY: number; zoom: number });
+                      viewStateRef.current = loginViewState as { offsetX: number; offsetY: number; zoom: number };
+                    }
                   } else {
                     setImages([]);
                     setInitialGroups([]);
@@ -2379,6 +2465,15 @@ function CanvasApp() {
         onClose={() => setShowHelpGuide(false)}
         themeStyle={themeStyle}
       />
+
+      {/* Favorites Panel */}
+      {showFavorites && currentUser && (
+        <FavoritesPanel
+          userId={currentUser.id || currentUser.name}
+          onClose={() => setShowFavorites(false)}
+          isMonochrome={themeStyle === 'monochrome'}
+        />
+      )}
 
       {/* Project Data Panel */}
       <ProjectDataPanel
