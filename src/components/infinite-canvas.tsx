@@ -2825,113 +2825,129 @@ export function InfiniteCanvas({
           return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: data.error } };
         }));
       } else if (data.taskIds) {
-        // 轮询模式
+        // 轮询模式 — 与生成面板一致的动态轮询策略
         const taskId = data.taskIds[0];
-        let attempts = 0;
-        const maxAttempts = 300;
-        const interval = setInterval(async () => {
-          attempts++;
-          if (attempts > maxAttempts) {
-            clearInterval(interval);
-            setGenGroups(prev => prev.map(g => {
-              if (g.id !== group.id) return g;
-              return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: '生成超时，请重试' } };
-            }));
-            return;
-          }
-          try {
-            const pollRes = await fetch('/api/poll-task', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId, model, providerId }),
-            });
-            const pollData = await pollRes.json();
-            // 更新组内进度
-            if (pollData.progress !== undefined) {
-              setGenGroups(prev => prev.map(g => {
-                if (g.id !== group.id) return g;
-                return { ...g, resultPlaceholder: { ...g.resultPlaceholder, progress: Math.max(pollData.progress, 5) } };
-              }));
-            }
-            if (['completed', 'succeeded', 'success', 'done'].includes(pollData.status)) {
-              clearInterval(interval);
-              // poll-task 返回 imageUrl (单图) 或 results (多图)
-              const resultUrls: string[] = [];
-              if (pollData.results && Array.isArray(pollData.results) && pollData.results.length > 0) {
-                resultUrls.push(...pollData.results);
-              } else if (pollData.imageUrl) {
-                resultUrls.push(pollData.imageUrl);
-              }
-              if (resultUrls.length > 0) {
-                // Save images to get persistent URLs
-                const savedUrls: string[] = [];
-                for (const url of resultUrls) {
-                  try {
-                    const saveRes = await fetch('/api/save-image', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ imageUrl: url }),
-                    });
-                    const saveData = await saveRes.json();
-                    savedUrls.push(saveData.url || url);
-                  } catch {
-                    savedUrls.push(url);
-                  }
-                }
-                // Add result images as REGULAR canvas images (visible, downloadable, editable)
-                // Position: right side of the result placeholder frame
-                const srcImgs = group.sourceImageIds.map(id => imagesRef.current.find(i => i.id === id)).filter(Boolean) as CanvasImage[];
-                const srcRightEdge = srcImgs.length > 0 ? Math.max(...srcImgs.map(img => img.x + img.width)) : 0;
-                const srcCenterY = srcImgs.length > 0 ? srcImgs.reduce((s, img) => s + img.y + img.height / 2, 0) / srcImgs.length : 0;
-                const resultFrameRight = srcRightEdge + 80 + Math.max(phWidth, 420);
-                // Parse actual pixel dimensions from toolbar size string (e.g. "1536×1024")
-                const actualSize = toolbar.size ? toolbar.size.replace(/×/g, 'x').split('x').map(Number) : [phWidth, phHeight];
-                const actualW = actualSize[0] || phWidth;
-                const actualH = actualSize[1] || phHeight;
-                const resultImages = savedUrls.map((url: string, i: number) => ({
-                  id: `grp-result-${Date.now()}-${i}`,
-                  url,
-                  x: resultFrameRight + 20 + i * (phWidth + 20),
-                  y: srcCenterY - phHeight / 2,
-                  width: phWidth, height: phHeight,
-                  originalWidth: actualW,
-                  originalHeight: actualH,
-                  prompt: toolbar.prompt,
-                  aspectRatio: toolbar.aspectRatio,
-                }));
-                onImagesChange([...imagesRef.current, ...resultImages]);
-                // Reset group: keep toolbar visible, clear result for next generation
+        const estimatedTime = data.estimatedTime || 30;
+        const maxPollTime = Math.min(600, Math.max(60, estimatedTime * 3 + 30)) * 1000;
+        const startTime = Date.now();
+        let pollCount = 0;
+
+        const pollWithBackoff = async () => {
+          while (Date.now() - startTime < maxPollTime) {
+            pollCount++;
+            // 动态间隔：前5次1.5s，6-15次2s，16-30次3s，之后4s
+            const delay = pollCount <= 5 ? 1500 : pollCount <= 15 ? 2000 : pollCount <= 30 ? 3000 : 4000;
+            await new Promise(r => setTimeout(r, delay));
+
+            try {
+              const pollRes = await fetch('/api/poll-task', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ taskId, model, providerId, quickPoll: true }),
+              });
+              if (!pollRes.ok) continue;
+              const pollData = await pollRes.json();
+
+              // 更新组内进度
+              if (pollData.progress !== undefined) {
                 setGenGroups(prev => prev.map(g => {
                   if (g.id !== group.id) return g;
-                  return {
-                    ...g,
-                    status: 'idle' as const,
-                    resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, resultUrl: undefined, resultImageIds: [], errorMsg: undefined },
-                    resultImageIds: [],
-                  };
+                  return { ...g, resultPlaceholder: { ...g.resultPlaceholder, progress: Math.max(pollData.progress, 5) } };
                 }));
-              } else {
-                // 完成 but 没有图片URL
-                const errMsg = pollData.error || '生成完成但未返回图片，请重试';
+              }
+
+              if (['completed', 'succeeded', 'success', 'done'].includes(pollData.status)) {
+                // 生成完成
+                const resultUrls: string[] = [];
+                if (pollData.results && Array.isArray(pollData.results) && pollData.results.length > 0) {
+                  resultUrls.push(...pollData.results);
+                } else if (pollData.imageUrl) {
+                  resultUrls.push(pollData.imageUrl);
+                }
+                if (resultUrls.length > 0) {
+                  const savedUrls: string[] = [];
+                  for (const url of resultUrls) {
+                    try {
+                      const saveRes = await fetch('/api/save-image', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ imageUrl: url }),
+                      });
+                      const saveData = await saveRes.json();
+                      savedUrls.push(saveData.url || url);
+                    } catch {
+                      savedUrls.push(url);
+                    }
+                  }
+                  const srcImgs = group.sourceImageIds.map(id => imagesRef.current.find(i => i.id === id)).filter(Boolean) as CanvasImage[];
+                  const srcRightEdge = srcImgs.length > 0 ? Math.max(...srcImgs.map(img => img.x + img.width)) : 0;
+                  const srcCenterY = srcImgs.length > 0 ? srcImgs.reduce((s, img) => s + img.y + img.height / 2, 0) / srcImgs.length : 0;
+                  const resultFrameRight = srcRightEdge + 80 + Math.max(phWidth, 420);
+                  const actualSize = toolbar.size ? toolbar.size.replace(/×/g, 'x').split('x').map(Number) : [phWidth, phHeight];
+                  const actualW = actualSize[0] || phWidth;
+                  const actualH = actualSize[1] || phHeight;
+                  const resultImages = savedUrls.map((url: string, i: number) => ({
+                    id: `grp-result-${Date.now()}-${i}`,
+                    url,
+                    x: resultFrameRight + 20 + i * (phWidth + 20),
+                    y: srcCenterY - phHeight / 2,
+                    width: phWidth, height: phHeight,
+                    originalWidth: actualW,
+                    originalHeight: actualH,
+                    prompt: toolbar.prompt,
+                    aspectRatio: toolbar.aspectRatio,
+                  }));
+                  onImagesChange([...imagesRef.current, ...resultImages]);
+                  setGenGroups(prev => prev.map(g => {
+                    if (g.id !== group.id) return g;
+                    return {
+                      ...g,
+                      status: 'idle' as const,
+                      resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, resultUrl: undefined, resultImageIds: [], errorMsg: undefined },
+                      resultImageIds: [],
+                    };
+                  }));
+                } else {
+                  const errMsg = pollData.error || '生成完成但未返回图片，请重试';
+                  setGenGroups(prev => prev.map(g => {
+                    if (g.id !== group.id) return g;
+                    return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: errMsg } };
+                  }));
+                }
+                return; // 完成，退出轮询
+              }
+
+              // 不可重试错误：立即失败
+              if (pollData.status === 'failed' || (pollData.status === 'error' && !pollData.retryable)) {
+                const errMsg = pollData.error || '生成失败，请检查模型和API配置';
                 setGenGroups(prev => prev.map(g => {
                   if (g.id !== group.id) return g;
                   return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: errMsg } };
                 }));
+                return;
               }
-            } else if (pollData.status === 'failed') {
-              clearInterval(interval);
-              const errMsg = pollData.error || '生成失败，请检查模型和API配置';
-              setGenGroups(prev => prev.map(g => {
-                if (g.id !== group.id) return g;
-                return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: errMsg } };
-              }));
+
+              // 可重试错误（error/timeout + retryable）继续轮询
+              if (pollData.status === 'error' || pollData.status === 'timeout') {
+                setGenGroups(prev => prev.map(g => {
+                  if (g.id !== group.id) return g;
+                  return { ...g, resultPlaceholder: { ...g.resultPlaceholder, progress: Math.min(90, 5 + pollCount * 2) } };
+                }));
+                // continue polling
+              }
+            } catch {
+              // 轮询网络错误，继续
             }
-          } catch {
-            // 轮询错误，继续
           }
-        }, 2000);
+          // 超时
+          setGenGroups(prev => prev.map(g => {
+            if (g.id !== group.id) return g;
+            return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: '生成超时，请重试' } };
+          }));
+        };
+        pollWithBackoff();
       }
-    } catch (error) {
+      } catch (error) {
       // 网络错误，重置组状态
       console.error('[handleGroupGenerate] error:', error);
       setGenGroups(prev => prev.map(g => {
@@ -5300,6 +5316,7 @@ export function InfiniteCanvas({
                 taskId,
                 model: actualModel,
                 providerId: img2imgProviderId || undefined,
+                quickPoll: true,
               }),
             });
             if (!pollRes.ok) continue;
@@ -5323,11 +5340,19 @@ export function InfiniteCanvas({
               taskCompleted = true;
               return;
             }
-            if (pollData.status === 'failed' || pollData.status === 'error') {
+            // ★ 与生成面板一致：可重试的错误继续轮询，不可重试的才立即失败
+            if (pollData.status === 'failed' || (pollData.status === 'error' && !pollData.retryable)) {
+              // 不可重试错误，立即失败
               alert(pollData.error || pollData.message || '图生图失败');
               removeProcessingFrame(placeholderId);
               taskCompleted = true;
               return;
+            }
+            // 可重试错误（远端API临时超时/429/poll-task查询失败等），继续轮询直到maxPollTime
+            if (pollData.status === 'error' || pollData.status === 'timeout') {
+              const progress = Math.min(90, 24 + pollCount * 1.5);
+              updateProcessingFrame(placeholderId, { progress, status: '正在重试...' });
+              // continue polling
             }
             // Still processing - 更新进度
             const progress = Math.min(90, 24 + pollCount * 1.5);
