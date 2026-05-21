@@ -112,8 +112,8 @@ export function AgentEditor({
 
     pollInterval.current = setInterval(async () => {
       pollAttempts.current++;
-      if (pollAttempts.current > 120) {
-        // 2分钟超时
+      if (pollAttempts.current > 180) {
+        // 180 * 2s = 360s = 6 分钟超时（留余量给后端 5 分钟全局超时）
         if (pollInterval.current) clearInterval(pollInterval.current);
         setIsProcessing(false);
         setError('任务超时，请重试');
@@ -121,22 +121,17 @@ export function AgentEditor({
       }
 
       try {
-        const resp = await fetch(`/api/poll-task`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ taskId: tid }),
-        });
+        // 使用 agent-edit 自己的 GET 端点查询任务状态
+        // （避免 Next.js dev 模式下不同路由内存不共享的问题）
+        const resp = await fetch(`/api/agent-edit?taskId=${encodeURIComponent(tid)}`);
         if (!resp.ok) return;
 
         const data = await resp.json() as Record<string, unknown>;
-        const taskData = data.task as Record<string, unknown> | undefined;
-        if (!taskData) return;
-
-        const status = String(taskData.status || '');
-        const prog = Number(taskData.progress || 0);
-        const label = String(taskData.label || '');
-        const result = taskData.result as Record<string, unknown> | undefined;
-        const taskError = String(taskData.error || '');
+        const status = String(data.status || '');
+        const prog = Number(data.progress || 0);
+        const label = String(data.label || '');
+        const result = data.result as Record<string, unknown> | undefined;
+        const taskError = String(data.error || '');
 
         // 更新进度
         setProgress(prog);
@@ -159,10 +154,16 @@ export function AgentEditor({
           if (result?.prompt) {
             setResultPrompt(String(result.prompt));
           }
+          // 检查 finalResponse 是否包含错误信息（后端标记为 completed 但 Agent 内部失败的情况）
+          if (result?.finalResponse && String(result.finalResponse).includes('失败')) {
+            setError(String(result.finalResponse));
+          }
         } else if (status === 'failed') {
           if (pollInterval.current) clearInterval(pollInterval.current);
           setIsProcessing(false);
-          setError(taskError || '任务执行失败');
+          // 优先使用 result.finalResponse，它包含更详细的错误描述
+          const errorMsg = taskError || (result?.finalResponse ? String(result.finalResponse) : '') || '任务执行失败';
+          setError(errorMsg);
         } else if (status === 'cancelled') {
           if (pollInterval.current) clearInterval(pollInterval.current);
           setIsProcessing(false);
@@ -241,11 +242,7 @@ export function AgentEditor({
   const handleCancel = async () => {
     if (taskId) {
       try {
-        await fetch('/api/cancel-task', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ taskId }),
-        });
+        await fetch(`/api/agent-edit?taskId=${encodeURIComponent(taskId)}&action=cancel`);
       } catch { /* ignore */ }
     }
     if (pollInterval.current) clearInterval(pollInterval.current);
@@ -500,9 +497,17 @@ export function AgentEditor({
         {/* 错误提示 */}
         {error && (
           <div className="px-3 pb-1">
-            <p className="text-[10px] px-2 py-1 rounded" style={{ color: '#ef5350', backgroundColor: isMonochrome ? '#fff0f0' : 'rgba(239,83,80,0.1)' }}>
-              {error}
-            </p>
+            <div className="text-[10px] px-2 py-1.5 rounded flex items-start gap-1.5" style={{ color: '#ef5350', backgroundColor: isMonochrome ? '#fff0f0' : 'rgba(239,83,80,0.1)' }}>
+              <XCircle size={10} className="shrink-0 mt-0.5" />
+              <span className="flex-1 break-all">{error}</span>
+              <button
+                onClick={(e) => { e.stopPropagation(); setError(''); }}
+                className="shrink-0 p-0.5 hover:opacity-70"
+                title="关闭"
+              >
+                <X size={10} />
+              </button>
+            </div>
           </div>
         )}
       </div>

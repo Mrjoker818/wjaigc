@@ -1,12 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature, findProviderById } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
-import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 import { executeAgentLoop, getToolsForLLM, type AgentContext, type AgentResult } from '@/lib/agent-engine';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
-
 export const runtime = 'nodejs';
 export const maxDuration = 600;
+
+// ─── 本地任务存储 ──────────────────────────────────────────────────
+// 由于 Next.js dev 模式下不同路由的内存不共享，
+// 在本文件内维护独立的任务状态存储，供 GET 查询使用
+interface LocalTaskInfo {
+  status: 'processing' | 'completed' | 'failed' | 'cancelled';
+  progress: number;
+  label: string;
+  result?: Record<string, unknown>;
+  error?: string;
+  createdAt: number;
+}
+
+const localTaskStore = new Map<string, LocalTaskInfo>();
+
+// 30 分钟自动清理过期任务
+if (typeof setInterval !== 'undefined') {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of localTaskStore) {
+      if (now - v.createdAt > 30 * 60 * 1000) localTaskStore.delete(k);
+    }
+  }, 60_000).unref?.();
+}
 
 /**
  * POST /api/agent-edit
@@ -42,24 +64,39 @@ export async function POST(request: NextRequest) {
     // 生成任务 ID
     const taskId = `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-    // 注册任务
-    registerTask(taskId, 'edit', `Agent: ${prompt.slice(0, 50)}`);
-    updateTaskProgress(taskId, { status: 'processing', progress: 5, label: 'Agent 分析中' });
+    // 注册任务到本地存储
+    localTaskStore.set(taskId, {
+      status: 'processing',
+      progress: 5,
+      label: 'Agent 分析中',
+      createdAt: Date.now(),
+    });
 
     // 异步执行（后台处理）
     (async () => {
       const EDIT_GLOBAL_TIMEOUT_MS = 5 * 60 * 1000;
       const timeout = setTimeout(() => {
-        if (!isTaskCancelled(taskId)) {
-          updateTaskProgress(taskId, { status: 'failed', error: '任务超时', progress: 100 });
+        const task = localTaskStore.get(taskId);
+        if (task && task.status === 'processing') {
+          localTaskStore.set(taskId, { ...task, status: 'failed', error: '任务超时', progress: 100 });
         }
       }, EDIT_GLOBAL_TIMEOUT_MS);
+
+      // 辅助函数：检查任务是否已被取消
+      const isCancelled = () => {
+        const task = localTaskStore.get(taskId);
+        return !task || task.status === 'cancelled';
+      };
 
       try {
         // 查找 LLM 提供商
         const chatProvider = await findProviderForFeature('chat');
-        if (!chatProvider) {
-          updateTaskProgress(taskId, { status: 'failed', error: '未配置聊天模型，请在管理员面板添加 LLM 模型', progress: 100 });
+        if (!chatProvider || isCancelled()) {
+          if (!chatProvider) {
+            localTaskStore.set(taskId, {
+              status: 'failed', error: '未配置聊天模型，请在管理员面板添加 LLM 模型', progress: 100, label: '失败', createdAt: Date.now(),
+            });
+          }
           return;
         }
 
@@ -76,10 +113,12 @@ export async function POST(request: NextRequest) {
           currentRound: 0,
           contextHistory: [],
           onProgress: (info) => {
-            if (isTaskCancelled(taskId)) return;
+            if (isCancelled()) return;
+            const task = localTaskStore.get(taskId);
+            if (!task || task.status !== 'processing') return;
             const progress = Math.min(95, 10 + (info.round / (context.maxRounds || 5)) * 80);
-            updateTaskProgress(taskId, {
-              status: 'processing',
+            localTaskStore.set(taskId, {
+              ...task,
               progress,
               label: `第${info.round}轮: ${info.step}${info.detail ? ' - ' + info.detail : ''}`,
             });
@@ -111,6 +150,7 @@ export async function POST(request: NextRequest) {
             messages,
             tools,
             tool_choice: 'auto',
+            stream: false,
             max_tokens: 2048,
           };
 
@@ -126,7 +166,28 @@ export async function POST(request: NextRequest) {
             throw new Error(`LLM API 返回 ${resp.status}: ${errText.slice(0, 200)}`);
           }
 
-          const data = await resp.json() as Record<string, unknown>;
+          // 检测响应类型：SSE 流式 vs JSON
+          const contentType = resp.headers.get('content-type') || '';
+          let data: Record<string, unknown>;
+
+          if (contentType.includes('text/event-stream') || contentType.includes('text/stream')) {
+            // API 返回了 SSE 流，需要解析流事件提取完整消息
+            data = await parseSSEToJSON(resp);
+          } else {
+            // 标准 JSON 响应
+            const text = await resp.text();
+            // 兜底：文本以 "data: " 开头也按 SSE 处理
+            if (text.startsWith('data: ')) {
+              data = parseSSETextToJSON(text);
+            } else {
+              try {
+                data = JSON.parse(text) as Record<string, unknown>;
+              } catch {
+                throw new Error(`LLM 响应解析失败: ${text.slice(0, 200)}`);
+              }
+            }
+          }
+
           const choices = data.choices as Array<Record<string, unknown>> | undefined;
           const choice = choices?.[0];
           if (!choice) throw new Error('LLM 返回空响应');
@@ -159,12 +220,15 @@ export async function POST(request: NextRequest) {
 
         // 实际执行图像编辑（如果 Agent 选择了 image_edit 工具）
         // 这里需要调用实际的 edit API 来完成操作
+        if (isCancelled()) return;
+
         let finalImageUrl = image;
         const imageEditStep = result.steps.find(s => s.toolName === 'image_edit' && s.success);
 
         if (imageEditStep) {
           // 调用实际的 edit route 进行图片编辑
-          updateTaskProgress(taskId, { progress: 90, label: '执行图像编辑...' });
+          const task = localTaskStore.get(taskId);
+          if (task) localTaskStore.set(taskId, { ...task, progress: 90, label: '执行图像编辑...' });
 
           try {
             const editResult = await performImageEdit(
@@ -180,21 +244,43 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // 任务完成
-        updateTaskProgress(taskId, {
-          status: 'completed',
-          progress: 100,
-          result: {
-            imageUrl: finalImageUrl,
-            steps: result.steps,
-            finalResponse: result.finalResponse,
-          },
-        });
+        // 任务完成 - 如果已被取消则不覆盖状态
+        if (isCancelled()) return;
+
+        // 根据 Agent 结果决定任务状态
+        if (result.success) {
+          localTaskStore.set(taskId, {
+            status: 'completed',
+            progress: 100,
+            label: '完成',
+            result: {
+              imageUrl: finalImageUrl,
+              steps: result.steps,
+              finalResponse: result.finalResponse,
+            },
+            createdAt: localTaskStore.get(taskId)?.createdAt || Date.now(),
+          });
+        } else {
+          // Agent 执行失败（LLM 调用失败、工具执行失败等）
+          localTaskStore.set(taskId, {
+            status: 'failed',
+            progress: 100,
+            label: '失败',
+            error: result.error || result.finalResponse || 'Agent 执行失败',
+            result: {
+              imageUrl: finalImageUrl,
+              steps: result.steps,
+              finalResponse: result.finalResponse,
+            },
+            createdAt: localTaskStore.get(taskId)?.createdAt || Date.now(),
+          });
+        }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : '未知错误';
         console.error('[agent-edit] Error:', errMsg);
-        if (!isTaskCancelled(taskId)) {
-          updateTaskProgress(taskId, { status: 'failed', error: errMsg, progress: 100 });
+        const task = localTaskStore.get(taskId);
+        if (task && task.status === 'processing') {
+          localTaskStore.set(taskId, { ...task, status: 'failed', error: errMsg, progress: 100 });
         }
       } finally {
         clearTimeout(timeout);
@@ -218,9 +304,48 @@ export async function POST(request: NextRequest) {
 
 /**
  * GET /api/agent-edit
- * 获取支持的 Agent 工具列表
+ * 获取支持的 Agent 工具列表 或 查询任务状态
+ * 
+ * 查询任务状态: /api/agent-edit?taskId=xxx
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const taskId = searchParams.get('taskId');
+  const action = searchParams.get('action');
+
+  if (taskId && action === 'cancel') {
+    // 取消任务
+    const task = localTaskStore.get(taskId);
+    if (task && task.status === 'processing') {
+      localTaskStore.set(taskId, { ...task, status: 'cancelled', error: '任务已取消' });
+      return NextResponse.json({ success: true, status: 'cancelled' });
+    }
+    return NextResponse.json({ success: false, error: '任务不存在或无法取消' });
+  }
+
+  if (taskId) {
+    // 查询任务状态
+    const task = localTaskStore.get(taskId);
+    if (!task) {
+      return NextResponse.json({
+        success: false,
+        status: 'not_found',
+        error: '任务不存在或已过期',
+        retryable: false,
+      });
+    }
+
+    return NextResponse.json({
+      success: task.status === 'completed',
+      status: task.status,
+      progress: task.progress,
+      label: task.label,
+      result: task.result,
+      error: task.error,
+    });
+  }
+
+  // 默认：获取工具列表
   const { getToolsForLLM: getTools } = await import('@/lib/agent-engine');
   return NextResponse.json({
     tools: getTools(),
@@ -345,4 +470,105 @@ function dataUrlToBlob(dataUrl: string): Blob {
     bytes[i] = binary.charCodeAt(i);
   }
   return new Blob([bytes], { type: mime });
+}
+
+// ─── SSE 解析工具 ──────────────────────────────────────────────────
+
+/**
+ * 从 SSE 流式响应中解析出完整的 JSON 对象
+ * 将多个 data: {...} 事件中的 delta 合并为完整 message
+ */
+async function parseSSEToJSON(resp: Response): Promise<Record<string, unknown>> {
+  const text = await resp.text();
+  return parseSSETextToJSON(text);
+}
+
+/**
+ * 从 SSE 文本中解析出完整的 JSON 对象
+ * 处理两种情况：
+ * 1. 单个完整 JSON 响应（某些代理以 SSE 格式返回完整响应）
+ * 2. 标准 SSE delta 流（需要合并 deltas）
+ */
+function parseSSETextToJSON(text: string): Record<string, unknown> {
+  const lines = text.split('\n');
+  let fullContent = '';
+  let toolCalls: Array<{ id?: string; type?: string; function: { name: string; arguments: string } }> = [];
+  let lastFinishReason = '';
+  let model = '';
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || !trimmed.startsWith('data: ')) continue;
+
+    const dataStr = trimmed.slice(6); // 去掉 "data: "
+
+    if (dataStr === '[DONE]') break;
+
+    try {
+      const event = JSON.parse(dataStr) as Record<string, unknown>;
+      model = String(event.model || model);
+
+      const choices = event.choices as Array<Record<string, unknown>> | undefined;
+      if (!choices || choices.length === 0) continue;
+
+      const choice = choices[0];
+      const delta = choice.delta as Record<string, unknown> | undefined;
+
+      if (delta) {
+        // 合并 content
+        if (typeof delta.content === 'string') {
+          fullContent += delta.content;
+        }
+
+        // 合并 tool_calls
+        const deltaToolCalls = delta.tool_calls as Array<Record<string, unknown>> | undefined;
+        if (deltaToolCalls) {
+          for (const dtc of deltaToolCalls) {
+            const idx = Number(dtc.index ?? toolCalls.length);
+            while (toolCalls.length <= idx) {
+              toolCalls.push({ function: { name: '', arguments: '' } });
+            }
+            const fn = dtc.function as Record<string, unknown> | undefined;
+            if (fn) {
+              if (fn.name) toolCalls[idx].function.name += String(fn.name);
+              if (fn.arguments) toolCalls[idx].function.arguments += String(fn.arguments);
+            }
+            if (dtc.id) toolCalls[idx].id = String(dtc.id);
+            if (dtc.type) toolCalls[idx].type = String(dtc.type);
+          }
+        }
+      }
+
+      // 记录 finish_reason
+      if (choice.finish_reason) {
+        lastFinishReason = String(choice.finish_reason);
+      }
+    } catch {
+      // 跳过无法解析的行
+      continue;
+    }
+  }
+
+  // 构造与标准 JSON 响应相同格式的对象
+  const message: Record<string, unknown> = {
+    role: 'assistant',
+    content: fullContent || null,
+  };
+
+  // 只有有 tool_calls 时才添加
+  const validToolCalls = toolCalls.filter(tc => tc.function.name || tc.function.arguments);
+  if (validToolCalls.length > 0) {
+    message.tool_calls = validToolCalls;
+  }
+
+  return {
+    id: `sse-${Date.now()}`,
+    object: 'chat.completion',
+    model,
+    choices: [{
+      index: 0,
+      message,
+      finish_reason: lastFinishReason || (validToolCalls.length > 0 ? 'tool_calls' : 'stop'),
+    }],
+  };
 }
