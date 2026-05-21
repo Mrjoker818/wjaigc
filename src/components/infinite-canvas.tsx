@@ -5169,6 +5169,11 @@ export function InfiniteCanvas({
       // 关键：显式告诉模型使用参考图作为基础
       fullPrompt = `[img2img] Use the provided reference image as the base. ${fullPrompt}`;
 
+      // 附加原图描述信息，帮助AI更好理解参考图内容，提升一致性
+      if (editImg.prompt && editImg.prompt.trim()) {
+        fullPrompt += ` [Original image description: ${editImg.prompt.trim()}]`;
+      }
+
       // Append negative prompt if present
       if (img2imgNegativePrompt.trim()) {
         fullPrompt += ` Avoid: ${img2imgNegativePrompt.trim()}`;
@@ -5200,7 +5205,28 @@ export function InfiniteCanvas({
       );
       exitEditMode();
       try {
-        updateProcessingFrame(placeholderId, { progress: 16, status: '正在提交图生图请求...' });
+        // 预上传参考图：将 data URL / blob URL 转为服务器 HTTP URL，大幅减少请求体积
+        let refImageUrl = editImg.url;
+        if (refImageUrl.startsWith('data:') || refImageUrl.startsWith('blob:')) {
+          try {
+            updateProcessingFrame(placeholderId, { progress: 10, status: '正在上传参考图...' });
+            const imgResp = await fetch(refImageUrl);
+            const imgBlob = await imgResp.blob();
+            const formData = new FormData();
+            formData.append('image', imgBlob, 'reference.png');
+            const uploadResp = await fetch('/api/save-image', { method: 'POST', body: formData });
+            if (uploadResp.ok) {
+              const uploadData = await uploadResp.json();
+              if (uploadData.url) {
+                refImageUrl = uploadData.url;
+              }
+            }
+          } catch (uploadErr) {
+            console.warn('参考图上传失败，使用原始URL:', uploadErr);
+          }
+        }
+
+        updateProcessingFrame(placeholderId, { progress: 20, status: '正在提交图生图请求...' });
         const res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -5217,8 +5243,8 @@ export function InfiniteCanvas({
             })(),
             quality: 'standard',
             count: 1,
-            // 直接传递参考图 URL（data: URL 由后端处理，无需前端预上传，加速提交）
-            referenceImages: [editImg.url],
+            // 使用预上传后的 HTTP URL，避免 data URL 巨大请求体
+            referenceImages: [refImageUrl],
             strength: img2imgStrength,
           }),
         });

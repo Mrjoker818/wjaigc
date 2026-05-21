@@ -407,14 +407,9 @@ export function adjustRequestForProfile(
   // When the edit endpoint is /images/generations AND there is NO image
   // field in the body, strip fields that are only valid on /images/edits.
   // However, when hasImage=true (reference image / img2img / inpaint),
-  // we KEEP image/mask/strength fields because:
-  //   1. Many API proxies (including APImart) accept these fields on
-  //      /images/generations for img2img workflows
-  //   2. Stripping them would make AI unable to see the source image,
-  //      causing "blank image" or "unrecognized subject" issues
-  //   3. If a specific API truly rejects these fields, the caller's
-  //      fallback logic (isEditsEndpointRejected → stripEditsOnlyFields)
-  //      will handle it gracefully
+  // Only strip image-edit-specific fields when there are NO reference images
+  // at all (neither base64 image nor image_urls).  When reference images exist
+  // we KEEP strength so the API can control img2img fidelity.
   if (endpoint === '/images/generations' && !hasImage) {
     delete body.image;
     delete body.mask;
@@ -443,7 +438,8 @@ export function stripEditsOnlyFields(body: Record<string, unknown>): Record<stri
   const cleaned = { ...body };
   delete cleaned.image;
   delete cleaned.mask;
-  delete cleaned.strength;
+  // 保留 strength: 即使回退到 /images/generations，APImart 等提供商
+  // 仍需要 strength 来控制图生图的一致性程度
   return cleaned;
 }
 

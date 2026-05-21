@@ -430,8 +430,34 @@ export async function POST(request: NextRequest) {
         const firstRefImage = accessibleReferenceImages[0];
         if (firstRefImage) {
           if (firstRefImage.startsWith('data:')) {
-            // 已经是 base64 data URL，直接使用
+            // 已经是 base64 data URL，直接使用（但压缩过大的图）
             requestBody.image = firstRefImage;
+          } else if (firstRefImage.startsWith('/api/serve-upload/') || firstRefImage.startsWith('/uploads/')) {
+            // 内部路径：直接从本地文件系统读取，避免 HTTP 下载开销
+            try {
+              const fs = await import('fs/promises');
+              const path = await import('path');
+              const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
+              const publicDir = path.join(workspacePath, 'public');
+              let filePath = '';
+              if (firstRefImage.startsWith('/api/serve-upload/')) {
+                const fileName = firstRefImage.replace('/api/serve-upload/', '');
+                filePath = path.join(publicDir, 'uploads', fileName);
+              } else {
+                filePath = path.join(publicDir, firstRefImage.replace(/^\//, ''));
+              }
+              // 安全检查
+              const resolved = path.resolve(filePath);
+              if (resolved.startsWith(publicDir)) {
+                const imgBuf = await fs.readFile(resolved);
+                const ext = path.extname(resolved).toLowerCase();
+                const mimeMap: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
+                const mime = mimeMap[ext] || 'image/png';
+                requestBody.image = `data:${mime};base64,${imgBuf.toString('base64')}`;
+              }
+            } catch (localErr) {
+              console.warn('Failed to read local reference image:', localErr);
+            }
           } else if (firstRefImage.startsWith('http')) {
             // 外部 URL，需要下载为 base64
             try {
@@ -446,14 +472,35 @@ export async function POST(request: NextRequest) {
             }
           }
         }
+        // 压缩参考图：大于1MB的base64图片用sharp压缩到最大1536px + JPEG q90
+        // 这显著减少传输体积（PNG→JPEG通常减少60-80%），加快API请求速度
+        const requestImageStr = requestBody.image as string | undefined;
+        if (requestImageStr && requestImageStr.startsWith('data:') && requestImageStr.length > 1_000_000) {
+          try {
+            const sharp = (await import('sharp')).default;
+            const base64Data = requestImageStr.split(',')[1];
+            const imgBuf = Buffer.from(base64Data, 'base64');
+            const compressed = await sharp(imgBuf)
+              .resize(1536, 1536, { fit: 'inside', withoutEnlargement: true })
+              .jpeg({ quality: 90 })
+              .toBuffer();
+            requestBody.image = `data:image/jpeg;base64,${compressed.toString('base64')}`;
+          } catch (compressErr) {
+            // 压缩失败不影响流程，使用原图
+            console.warn('Reference image compression failed:', compressErr);
+          }
+        }
       }
 
       // 使用兼容性层自动调整请求（size格式、端点选择等）
-      // hasImage 基于 requestBody.image 是否实际存在（而非仅有 image_urls）
-      // 当有 image 字段时：使用 editEndpoint，AI 必须处理源图
-      // 当仅有 image_urls 时：使用默认端点，image_urls 作为可选参考
+      // hasImage 应基于是否有参考图（image_urls 或 image），而非仅看 image 字段
+      // 因为 image_urls 也是参考图的传递方式（APImart 等代理通过此字段识别图生图）
+      // 当有参考图时：使用 editEndpoint，确保 API 知道这是图生图请求
+      // 当有 image 字段时：editEndpoint + image(base64)，AI 必须处理源图
+      // 当仅有 image_urls 时：editEndpoint + image_urls，AI 作为参考处理
+      const hasImageFlag = !!(requestBody.image || requestBody.image_urls || accessibleReferenceImages.length > 0);
       const { body: adjustedBody, endpoint } = adjustRequestForProfile(requestBody, profile, {
-        hasImage: !!requestBody.image,
+        hasImage: hasImageFlag,
       });
 
       console.log('Submitting image task:', {
@@ -695,11 +742,14 @@ export async function POST(request: NextRequest) {
         // /images/generations 或无 image 字段：标准 JSON 编码
         // 当 /images/generations 携带 image_urls 时，增强 prompt 以确保 AI 使用参考图
         if (endpoint === '/images/generations' && hasRefImages && adjustedBody.image_urls) {
-          const hasImg2ImgHint = String(adjustedBody.prompt || '').includes('[img2img]');
+          const p = String(adjustedBody.prompt || '');
+          const hasImg2ImgHint = p.includes('[img2img]');
           if (hasImg2ImgHint) {
-            adjustedBody.prompt = `[IMAGE-TO-IMAGE MODE] You MUST use the provided reference image as the mandatory source/base for generation. Do NOT generate from scratch. ${String(adjustedBody.prompt || '').replace('[img2img]', '')}`;
-          } else if (!String(adjustedBody.prompt || '').includes('[IMAGE-TO-IMAGE MODE]') && !String(adjustedBody.prompt || '').includes('[REFERENCE IMAGE]')) {
-            adjustedBody.prompt = `[REFERENCE IMAGE] Use the provided reference image as visual reference for generation. ${String(adjustedBody.prompt || '')}`;
+            // 前端已有图生图指令，只移除标记前缀，保留原始指令
+            adjustedBody.prompt = p.replace('[img2img]', '').trim();
+          } else if (!p.includes('[IMAGE-TO-IMAGE MODE]') && !p.includes('[REFERENCE IMAGE]')) {
+            // 无任何参考图指令时追加简洁一致性指令
+            adjustedBody.prompt = `[img2img] Preserve the structure, style and key elements of the reference image. ${p}`;
           }
         }
         submitResponse = await fetchWithV1Retry(
