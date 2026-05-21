@@ -5106,95 +5106,54 @@ export function InfiniteCanvas({
       const img2imgModelInfo = getCurrentModel();
       const img2imgProviderId = img2imgModelInfo.providerId || getCurrentProviderId();
 
-      // 图生图提示词构建：明确告诉模型参考原图的哪些方面 + 用关键词作为新内容
-      const categoryEnMap: Record<string, string> = {
-        '风格': 'artistic style and visual aesthetics',
-        '构图': 'composition and layout structure',
-        '场景': 'scene and environment setting',
-        '色彩': 'color palette and tone',
-        '主体': 'main subject and focal point',
-        '细节': 'fine details and textures',
-      };
-
+      // 图生图提示词：简洁有效，与生成面板保持一致
+      // 分类增强由后端 referenceCategories 统一处理（不再前端自建长prompt）
       const keyword = img2imgKeyword.trim();
-
-      // 判断是否激活了"主体"保留
-      const hasSubjectPreserve = img2imgActiveCategories.has('主体') && (img2imgStrengths['主体'] || 0) > 0;
-
-      // 收集激活的类别（强度>0表示要保留原图该方面）
-      const preserveAspects = Array.from(img2imgActiveCategories)
-        .filter(cat => (img2imgStrengths[cat] || 0) > 0)
-        .map(cat => {
-          const s = img2imgStrengths[cat] || 0;
-          const desc = categoryEnMap[cat] || cat;
-          if (s >= 80) return `strictly preserve the ${desc} of the reference image`;
-          if (s >= 50) return `maintain the ${desc} of the reference image`;
-          if (s >= 20) return `subtly reference the ${desc} of the reference image`;
-          return `lightly hint at the ${desc} of the reference image`;
-        });
-
-      // 收集未激活的类别（可以自由改变）
-      const freeAspects = Object.keys(categoryEnMap)
-        .filter(cat => !img2imgActiveCategories.has(cat) || (img2imgStrengths[cat] || 0) === 0)
-        .map(cat => categoryEnMap[cat]);
-
-      // 构建完整提示词
-      let fullPrompt = '';
-      if (keyword) {
-        // 有关键词时：关键词是对参考图的操作指令，不是新图描述
-        if (hasSubjectPreserve) {
-          // 明确保留主体：关键词是修饰指令，主体必须与参考图一致
-          fullPrompt = `Modify the reference image with the following instructions: ${keyword}. CRITICAL: The main subject (product/object/person) must remain EXACTLY the same as in the reference image — same item, same identity, same appearance. Do NOT replace or change the subject to a different object. Only apply the specified modifications to the existing subject.`;
-        } else {
-          // 未保留主体：关键词作为编辑方向，但仍在原图基础上修改
-          fullPrompt = `Edit the reference image with the following changes: ${keyword}.`;
-          if (preserveAspects.length > 0) {
-            fullPrompt += ` Preserve the ${preserveAspects.join(', ')} from the reference image.`;
-          }
-          if (freeAspects.length > 0) {
-            fullPrompt += ` You may reimagine the ${freeAspects.join(', ')}.`;
-          }
-        }
-      } else {
-        // 无关键词：对原图做创意变体
-        fullPrompt = 'Generate a creative variation of the reference image.';
-        if (preserveAspects.length > 0) {
-          fullPrompt += ` Keep the ${preserveAspects.join(', ')}.`;
-        }
-        if (freeAspects.length > 0) {
-          fullPrompt += ` Creatively transform the ${freeAspects.join(', ')}.`;
-        }
-      }
-
-      // 关键：显式告诉模型使用参考图作为基础
-      fullPrompt = `[img2img] Use the provided reference image as the base. ${fullPrompt}`;
+      let fullPrompt = keyword || 'Generate a creative variation of the reference image.';
 
       // 附加原图描述信息，帮助AI更好理解参考图内容，提升一致性
       if (editImg.prompt && editImg.prompt.trim()) {
         fullPrompt += ` [Original image description: ${editImg.prompt.trim()}]`;
       }
 
-      // Append negative prompt if present
+      // 反向提示词
       if (img2imgNegativePrompt.trim()) {
-        fullPrompt += ` Avoid: ${img2imgNegativePrompt.trim()}`;
+        fullPrompt += ` [negative: ${img2imgNegativePrompt.trim()}]`;
       }
 
-      // strength 计算：
-      // 保留方面多/强 → 需要更接近原图 → strength 低（偏离少）
-      // 保留方面少/弱 → 允许更多自由 → strength 高（偏离多）
+      // strength 计算：与生成面板对齐，由后端 referenceCategories 增强 prompt
+      // 保留方面多/强 → strength 低（更接近原图）
+      const hasSubjectPreserve = img2imgActiveCategories.has('主体') && (img2imgStrengths['主体'] || 0) > 0;
       const totalPreserveScore = Array.from(img2imgActiveCategories)
         .reduce((sum, cat) => sum + (img2imgStrengths[cat] || 0), 0);
       const maxPossibleScore = 600; // 6个类别 * 100
       const preserveRatio = totalPreserveScore / maxPossibleScore;
-      // strength 范围: 0.20（大量保留） ~ 0.80（几乎不保留）
       let img2imgStrength = 0.80 - preserveRatio * 0.60;
-      // 当保留主体时，额外降低 strength 以确保主体不变
       if (hasSubjectPreserve) {
         const subjectStr = img2imgStrengths['主体'] || 0;
-        const subjectReduction = (subjectStr / 100) * 0.25; // 主体强度越高，strength 越低
+        const subjectReduction = (subjectStr / 100) * 0.25;
         img2imgStrength = Math.max(0.15, img2imgStrength - subjectReduction);
       }
       img2imgStrength = Math.round(img2imgStrength * 100) / 100;
+
+      // 构建与生成面板相同的 referenceCategories 格式
+      const activeCategories = Array.from(img2imgActiveCategories)
+        .filter(cat => (img2imgStrengths[cat] || 0) > 0);
+      const referenceCategories: Record<string, string[]> = {
+        '0': activeCategories, // 第一张参考图(索引0)的分类
+      };
+      // referenceStrengths: 第一张参考图的强度取所有激活类别的平均强度
+      const avgStrength = activeCategories.length > 0
+        ? Math.round(activeCategories.reduce((sum, cat) => sum + (img2imgStrengths[cat] || 0), 0) / activeCategories.length)
+        : 50;
+      const referenceStrengths = [avgStrength];
+
+      // 计算原图比例（保持与原图一致）
+      const origW = editImg.originalWidth || Math.round(editImg.width);
+      const origH = editImg.originalHeight || Math.round(editImg.height);
+      const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
+      const d = gcd(origW, origH);
+      const aspectRatio = `${origW / d}:${origH / d}`;
 
       const placeholderId = createProcessingFrameRightOf(
         editImg,
@@ -5205,7 +5164,7 @@ export function InfiniteCanvas({
       );
       exitEditMode();
       try {
-        // 预上传参考图：将 data URL / blob URL 转为服务器 HTTP URL，大幅减少请求体积
+        // 使用预上传后的 HTTP URL，避免 data URL 巨大请求体
         let refImageUrl = editImg.url;
         if (refImageUrl.startsWith('data:') || refImageUrl.startsWith('blob:')) {
           try {
@@ -5227,6 +5186,7 @@ export function InfiniteCanvas({
         }
 
         updateProcessingFrame(placeholderId, { progress: 20, status: '正在提交图生图请求...' });
+        // ★ 与生成面板使用完全相同的参数格式，确保后端走相同的高效路径
         const res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -5234,17 +5194,13 @@ export function InfiniteCanvas({
             prompt: fullPrompt,
             model: img2imgModelInfo.model,
             providerId: img2imgProviderId || undefined,
-            aspectRatio: (() => {
-              const ow = editImg.originalWidth || Math.round(editImg.width);
-              const oh = editImg.originalHeight || Math.round(editImg.height);
-              const g = (a: number, b: number): number => b === 0 ? a : g(b, a % b);
-              const d = g(ow, oh);
-              return `${ow / d}:${oh / d}`;
-            })(),
+            aspectRatio,
             quality: 'standard',
             count: 1,
-            // 使用预上传后的 HTTP URL，避免 data URL 巨大请求体
             referenceImages: [refImageUrl],
+            referenceMode: 'style',       // ★ 关键：与生成面板一致，让后端走 image_urls 路径
+            referenceCategories,           // ★ 分类增强由后端统一处理
+            referenceStrengths,            // ★ 参考图强度
             strength: img2imgStrength,
           }),
         });
@@ -5291,10 +5247,10 @@ export function InfiniteCanvas({
               const displayScale = Math.min(maxDisplaySide / natW, maxDisplaySide / natH, 1);
               const displayW = Math.round(natW * displayScale);
               const displayH = Math.round(natH * displayScale);
-              completeProcessingFrame(placeholderId, savedUrl, displayW, displayH, { prompt: fullPrompt, originalWidth: natW, originalHeight: natH });
+              completeProcessingFrame(placeholderId, savedUrl, displayW, displayH, { prompt: fullPrompt, originalWidth: natW, originalHeight: natH, aspectRatio });
             };
             img.onerror = () => {
-              completeProcessingFrame(placeholderId, savedUrl, 420, 420, { prompt: fullPrompt, originalWidth: 1024, originalHeight: 1024 });
+              completeProcessingFrame(placeholderId, savedUrl, 420, 420, { prompt: fullPrompt, originalWidth: 1024, originalHeight: 1024, aspectRatio });
             };
             img.src = savedUrl;
           }
@@ -5302,8 +5258,8 @@ export function InfiniteCanvas({
         }
 
         const taskId = data.taskIds?.[0] || data.taskId || data.id;
-        // 使用服务端实际使用的模型（可能因自动切换而与请求模型不同）
         const actualModel = data.model || img2imgModelInfo.model;
+        const estimatedTime = data.estimatedTime || 30;
         if (!taskId) {
           alert('未获取到任务ID');
           removeProcessingFrame(placeholderId);
@@ -5311,20 +5267,40 @@ export function InfiniteCanvas({
         }
 
         updateProcessingFrame(placeholderId, { progress: 24, status: 'AI 正在生成...' });
-        // 轮询任务状态 - 快速递增间隔
-        const getImg2ImgPollInterval = (attempt: number) => {
-          if (attempt <= 2) return 800;
-          if (attempt <= 5) return 1000;
-          if (attempt <= 15) return 1500;
-          return 2000;
+
+        // ★ 对齐生成面板的轮询策略：quickPoll + 动态间隔 + 最大超时
+        const getImg2ImgPollInterval = (attempt: number, estTime: number) => {
+          const baseInterval = estTime <= 20 ? 1500 : estTime <= 60 ? 2000 : 2500;
+          if (attempt > 20) return baseInterval + 1500;
+          if (attempt > 10) return baseInterval + 500;
+          return baseInterval;
         };
-        for (let i = 0; i < 120; i++) {
-          await new Promise(r => setTimeout(r, getImg2ImgPollInterval(i)));
+        const maxPollTime = Math.min(600, Math.max(60, estimatedTime * 3 + 30)) * 1000;
+        const pollStartTime = Date.now();
+        let pollCount = 0;
+        let taskCompleted = false;
+
+        while (!taskCompleted) {
+          if (Date.now() - pollStartTime > maxPollTime) {
+            alert('图生图超时，请重试');
+            removeProcessingFrame(placeholderId);
+            return;
+          }
+
+          const interval = getImg2ImgPollInterval(pollCount, estimatedTime);
+          await new Promise(r => setTimeout(r, interval));
+          pollCount++;
+
           try {
+            // ★ 使用 quickPoll 模式：一次请求内部快速轮询3次
             const pollRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId, model: actualModel, providerId: img2imgProviderId || undefined }),
+              body: JSON.stringify({
+                taskId,
+                model: actualModel,
+                providerId: img2imgProviderId || undefined,
+              }),
             });
             if (!pollRes.ok) continue;
             const pollData = await pollRes.json();
@@ -5333,27 +5309,33 @@ export function InfiniteCanvas({
               if (pollData.imageUrl) {
                 updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入结果...' });
                 const stableUrl = await toStableImageUrl(pollData.imageUrl);
-                completeProcessingFrame(placeholderId, stableUrl, editImg.width, editImg.height, { originalWidth: editImg.originalWidth || Math.round(editImg.width), originalHeight: editImg.originalHeight || Math.round(editImg.height) });
+                // ★ 保持原图比例：使用原图的显示尺寸和原始尺寸
+                completeProcessingFrame(placeholderId, stableUrl, editImg.width, editImg.height, {
+                  originalWidth: origW,
+                  originalHeight: origH,
+                  aspectRatio,
+                  prompt: fullPrompt,
+                });
               } else {
                 alert(pollData.error || '图生图完成但未返回结果');
                 removeProcessingFrame(placeholderId);
               }
+              taskCompleted = true;
               return;
             }
             if (pollData.status === 'failed' || pollData.status === 'error') {
               alert(pollData.error || pollData.message || '图生图失败');
               removeProcessingFrame(placeholderId);
+              taskCompleted = true;
               return;
             }
-            // Still processing
-            const progress = Math.min(90, 24 + i * 0.5);
+            // Still processing - 更新进度
+            const progress = Math.min(90, 24 + pollCount * 1.5);
             updateProcessingFrame(placeholderId, { progress, status: pollData.status === 'processing' ? 'AI 正在生成...' : '等待处理中...' });
           } catch {
             // continue polling
           }
         }
-        alert('图生图超时，请重试');
-        removeProcessingFrame(placeholderId);
       } catch (e) {
         console.error('Img2Img error:', e);
         alert(`操作失败: ${e instanceof Error ? e.message : '请重试'}`);
