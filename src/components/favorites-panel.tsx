@@ -1,332 +1,417 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { X, Heart, Trash2, ChevronLeft, ChevronRight, Copy, ExternalLink } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { X, Heart, Grid3X3, List, Search, Sparkles, Trash2, Clock, User, Copy, ChevronDown, ChevronUp, Image as ImageIcon } from 'lucide-react';
 
-interface FavoriteItem {
-  id: number;
-  user_id: string;
-  username: string;
-  image_url: string;
-  prompt: string;
-  negative_prompt: string;
-  model: string;
-  model_name: string;
-  aspect_ratio: string;
-  quality: string;
-  image_width: number;
-  image_height: number;
-  original_width: number;
-  original_height: number;
-  api_provider: string;
-  api_base_url: string;
-  source_type: string;
-  created_at: number;
+export interface FavoriteItem {
+    id: number | string;
+    userId?: string;
+    imageUrl: string;
+    prompt?: string;
+    negativePrompt?: string;
+    model?: string;
+    modelName?: string;
+    aspectRatio?: string;
+    quality?: string;
+    imageWidth?: number;
+    imageHeight?: number;
+    originalWidth?: number;
+    originalHeight?: number;
+    apiProvider?: string;
+    apiBaseUrl?: string;
+    sourceType?: string;
+    createdAt?: string;
+    username?: string;
 }
 
 interface FavoritesPanelProps {
-  userId: string;
-  onClose: () => void;
-  isMonochrome: boolean;
+    userId: string;
+    onClose: () => void;
+    isMonochrome?: boolean;
+    onApplyParams?: (item: FavoriteItem) => void;
 }
 
-export function FavoritesPanel({ userId, onClose, isMonochrome }: FavoritesPanelProps) {
-  const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [selectedItem, setSelectedItem] = useState<FavoriteItem | null>(null);
-  const [copiedPrompt, setCopiedPrompt] = useState(false);
+const LOCAL_KEY = 'wujie-favorites-local';
 
-  // localStorage 兜底读写
-  const getLocalFavorites = (): FavoriteItem[] => {
-    try { const raw = localStorage.getItem('wujie-favorites-local'); return raw ? JSON.parse(raw) : []; } catch { return []; }
-  };
-  const saveLocalFavorites = (items: FavoriteItem[]) => {
-    try { localStorage.setItem('wujie-favorites-local', JSON.stringify(items)); } catch { /* ignore */ }
-  };
-
-  const fetchFavorites = useCallback(async (p: number) => {
-    setLoading(true);
+function getLocalFavorites(userId: string): FavoriteItem[] {
     try {
-      const res = await fetch(`/api/favorites?userId=${encodeURIComponent(userId)}&page=${p}&limit=20`);
-      const data = await res.json();
-      if (data.success) {
-        setFavorites(data.favorites);
-        setTotalPages(data.pagination.totalPages);
-        setTotal(data.pagination.total);
-        // 同步到本地缓存
-        if (p === 1 && data.favorites.length > 0) {
-          saveLocalFavorites(data.favorites);
-        }
-      } else {
-        // API失败 → localStorage兜底
-        const local = getLocalFavorites().filter(f => f.user_id === userId);
-        const start = (p - 1) * 20;
-        const pageItems = local.slice(start, start + 20);
-        setFavorites(pageItems);
-        setTotalPages(Math.max(1, Math.ceil(local.length / 20)));
-        setTotal(local.length);
-      }
-    } catch (err) {
-      // 网络错误 → localStorage兜底
-      console.error('[Favorites] fetch error, falling back to localStorage:', err);
-      const local = getLocalFavorites().filter(f => f.user_id === userId);
-      const start = (p - 1) * 20;
-      const pageItems = local.slice(start, start + 20);
-      setFavorites(pageItems);
-      setTotalPages(Math.max(1, Math.ceil(local.length / 20)));
-      setTotal(local.length);
-    } finally {
-      setLoading(false);
-    }
-  }, [userId]);
+        const raw = localStorage.getItem(LOCAL_KEY);
+        if (!raw) return [];
+        const all = JSON.parse(raw);
+        return Array.isArray(all) ? all.filter((f: FavoriteItem) => f.userId === userId) : [];
+    } catch { return []; }
+}
 
-  useEffect(() => { fetchFavorites(page); }, [page, fetchFavorites]);
-
-  const handleRemove = async (id: number) => {
+function saveLocalFavorites(items: FavoriteItem[]) {
     try {
-      const res = await fetch(`/api/favorites?id=${id}&userId=${encodeURIComponent(userId)}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.success) {
-        setFavorites(prev => prev.filter(f => f.id !== id));
-        setTotal(prev => prev - 1);
-        if (selectedItem?.id === id) setSelectedItem(null);
-        // 同步本地缓存
-        const local = getLocalFavorites();
-        saveLocalFavorites(local.filter(f => f.id !== id));
-      } else {
-        // API失败 → 本地删除
-        setFavorites(prev => prev.filter(f => f.id !== id));
-        setTotal(prev => prev - 1);
-        if (selectedItem?.id === id) setSelectedItem(null);
-        const local = getLocalFavorites();
-        saveLocalFavorites(local.filter(f => f.id !== id));
-      }
-    } catch (err) {
-      // 网络错误 → 本地删除
-      console.error('[Favorites] remove error, falling back to localStorage:', err);
-      setFavorites(prev => prev.filter(f => f.id !== id));
-      setTotal(prev => prev - 1);
-      if (selectedItem?.id === id) setSelectedItem(null);
-      const local = getLocalFavorites();
-      saveLocalFavorites(local.filter(f => f.id !== id));
-    }
-  };
-
-  const copyPrompt = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedPrompt(true);
-      setTimeout(() => setCopiedPrompt(false), 2000);
+        const raw = localStorage.getItem(LOCAL_KEY);
+        const existing: FavoriteItem[] = raw ? JSON.parse(raw) : [];
+        const ids = new Set(items.map(f => String(f.id)));
+        const merged = [...existing.filter(f => !ids.has(String(f.id))), ...items];
+        localStorage.setItem(LOCAL_KEY, JSON.stringify(merged));
     } catch { /* ignore */ }
-  };
-
-  const formatDate = (ts: number) => {
-    const d = new Date(ts);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  };
-
-  // Theme colors
-  const bg = isMonochrome ? 'bg-white' : 'bg-[#1a1a1a]';
-  const bgCard = isMonochrome ? 'bg-gray-50 border-gray-200' : 'bg-[#222] border-[#333]';
-  const bgCardHover = isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-[#2a2a2a]';
-  const textPrimary = isMonochrome ? 'text-gray-900' : 'text-white';
-  const textSecondary = isMonochrome ? 'text-gray-500' : 'text-[#999]';
-  const textMuted = isMonochrome ? 'text-gray-400' : 'text-[#666]';
-  const border = isMonochrome ? 'border-gray-200' : 'border-[#333]';
-  const accent = isMonochrome ? 'text-rose-500' : 'text-[#d4af37]';
-  const btnPrimary = isMonochrome ? 'bg-gray-900 text-white hover:bg-gray-800' : 'bg-[#d4af37] text-black hover:bg-[#c9a030]';
-
-  return (
-    <div className={`fixed inset-0 z-[200] flex ${bg} ${textPrimary}`}>
-      {/* Sidebar - Favorites Grid */}
-      <div className={`w-full ${selectedItem ? 'lg:w-1/2' : ''} flex flex-col border-r ${border}`}>
-        {/* Header */}
-        <div className={`flex items-center justify-between px-5 py-4 border-b ${border} shrink-0`}>
-          <div className="flex items-center gap-2">
-            <Heart className={`w-5 h-5 ${accent}`} fill="currentColor" />
-            <h2 className="text-lg font-semibold">收藏夹</h2>
-            <span className={`text-xs ${textMuted} ml-1`}>{total} 项</span>
-          </div>
-          <button onClick={onClose} className={`p-1.5 rounded-lg ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-[#333]'} transition-colors`}>
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Grid */}
-        <div className="flex-1 overflow-y-auto p-4">
-          {loading && favorites.length === 0 ? (
-            <div className={`flex items-center justify-center h-40 ${textMuted}`}>
-              <div className="animate-spin w-6 h-6 border-2 border-current border-t-transparent rounded-full mr-2" />
-              加载中...
-            </div>
-          ) : favorites.length === 0 ? (
-            <div className={`flex flex-col items-center justify-center h-40 ${textMuted}`}>
-              <Heart className="w-10 h-10 mb-3 opacity-30" />
-              <p className="text-sm">暂无收藏</p>
-              <p className="text-xs mt-1">右键点击画布中的图片可添加到收藏夹</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-              {favorites.map(item => (
-                <div
-                  key={item.id}
-                  className={`relative group cursor-pointer rounded-lg overflow-hidden border ${bgCard} ${bgCardHover} transition-all ${
-                    selectedItem?.id === item.id ? (isMonochrome ? 'ring-2 ring-gray-900' : 'ring-2 ring-[#d4af37]') : ''
-                  }`}
-                  onClick={() => setSelectedItem(item)}
-                >
-                  <div className="aspect-square overflow-hidden">
-                    <img
-                      src={item.image_url}
-                      alt={item.prompt || '收藏图片'}
-                      className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                      loading="lazy"
-                    />
-                  </div>
-                  {/* Hover overlay */}
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-end">
-                    <div className="w-full p-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <p className="text-white text-xs truncate">{item.prompt || '无提示词'}</p>
-                    </div>
-                  </div>
-                  {/* Remove button */}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleRemove(item.id); }}
-                    className="absolute top-1.5 right-1.5 p-1 rounded-full bg-black/50 text-white opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-all"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className={`flex items-center justify-center gap-3 px-4 py-3 border-t ${border} shrink-0`}>
-            <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={page <= 1}
-              className={`p-1.5 rounded-lg ${isMonochrome ? 'hover:bg-gray-100 disabled:opacity-30' : 'hover:bg-[#333] disabled:opacity-30'} transition-colors`}
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <span className={`text-xs ${textSecondary}`}>
-              {page} / {totalPages}
-            </span>
-            <button
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-              disabled={page >= totalPages}
-              className={`p-1.5 rounded-lg ${isMonochrome ? 'hover:bg-gray-100 disabled:opacity-30' : 'hover:bg-[#333] disabled:opacity-30'} transition-colors`}
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Detail Panel */}
-      {selectedItem && (
-        <div className={`hidden lg:flex w-1/2 flex-col ${bg}`}>
-          <div className={`flex items-center justify-between px-5 py-4 border-b ${border} shrink-0`}>
-            <h3 className="font-medium">详细信息</h3>
-            <button onClick={() => setSelectedItem(null)} className={`p-1.5 rounded-lg ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-[#333]'} transition-colors`}>
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-5">
-            {/* Preview image */}
-            <div className="rounded-lg overflow-hidden mb-5">
-              <img
-                src={selectedItem.image_url}
-                alt={selectedItem.prompt || '收藏图片'}
-                className="w-full object-contain max-h-[50vh]"
-              />
-            </div>
-
-            {/* Prompt */}
-            {selectedItem.prompt && (
-              <div className={`mb-4 p-3 rounded-lg ${bgCard} border`}>
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className={`text-xs font-medium ${textSecondary}`}>提示词</span>
-                  <button onClick={() => copyPrompt(selectedItem.prompt)} className={`text-xs ${accent} hover:underline flex items-center gap-1`}>
-                    <Copy className="w-3 h-3" /> {copiedPrompt ? '已复制' : '复制'}
-                  </button>
-                </div>
-                <p className="text-sm leading-relaxed">{selectedItem.prompt}</p>
-              </div>
-            )}
-
-            {/* Negative Prompt */}
-            {selectedItem.negative_prompt && (
-              <div className={`mb-4 p-3 rounded-lg ${bgCard} border`}>
-                <span className={`text-xs font-medium ${textSecondary}`}>反向提示词</span>
-                <p className="text-sm mt-1">{selectedItem.negative_prompt}</p>
-              </div>
-            )}
-
-            {/* Parameters Grid */}
-            <div className={`grid grid-cols-2 gap-3 mb-4`}>
-              {selectedItem.model_name && (
-                <InfoCard label="模型" value={selectedItem.model_name} isMonochrome={isMonochrome} />
-              )}
-              {selectedItem.aspect_ratio && (
-                <InfoCard label="画面比例" value={selectedItem.aspect_ratio} isMonochrome={isMonochrome} />
-              )}
-              {selectedItem.quality && (
-                <InfoCard label="质量" value={selectedItem.quality} isMonochrome={isMonochrome} />
-              )}
-              {selectedItem.image_width && selectedItem.image_height && (
-                <InfoCard label="尺寸" value={`${selectedItem.image_width}×${selectedItem.image_height}`} isMonochrome={isMonochrome} />
-              )}
-              {selectedItem.original_width && selectedItem.original_height && (
-                <InfoCard label="原始尺寸" value={`${selectedItem.original_width}×${selectedItem.original_height}`} isMonochrome={isMonochrome} />
-              )}
-              {selectedItem.api_provider && (
-                <InfoCard label="API 提供商" value={selectedItem.api_provider} isMonochrome={isMonochrome} />
-              )}
-              {selectedItem.source_type && (
-                <InfoCard label="来源" value={selectedItem.source_type === 'generated' ? 'AI生成' : selectedItem.source_type} isMonochrome={isMonochrome} />
-              )}
-            </div>
-
-            {/* User & Time */}
-            <div className={`p-3 rounded-lg ${bgCard} border flex items-center justify-between`}>
-              <div>
-                <span className={`text-xs ${textMuted}`}>收藏自</span>
-                <p className={`text-sm ${textSecondary}`}>{selectedItem.username || selectedItem.user_id}</p>
-              </div>
-              <div className="text-right">
-                <span className={`text-xs ${textMuted}`}>收藏时间</span>
-                <p className={`text-sm ${textSecondary}`}>{formatDate(selectedItem.created_at)}</p>
-              </div>
-            </div>
-
-            {/* Open in new tab */}
-            <a
-              href={selectedItem.image_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`mt-4 flex items-center justify-center gap-2 w-full py-2.5 rounded-lg ${btnPrimary} text-sm font-medium transition-colors`}
-            >
-              <ExternalLink className="w-4 h-4" /> 在新标签页打开原图
-            </a>
-          </div>
-        </div>
-      )}
-    </div>
-  );
 }
 
-function InfoCard({ label, value, isMonochrome }: { label: string; value: string; isMonochrome: boolean }) {
-  return (
-    <div className={`p-2.5 rounded-lg ${isMonochrome ? 'bg-gray-50 border border-gray-100' : 'bg-[#1f1f1f] border border-[#2a2a2a]'}`}>
-      <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#555]'}`}>{label}</span>
-      <p className={`text-sm mt-0.5 truncate ${isMonochrome ? 'text-gray-700' : 'text-[#ccc]'}`}>{value}</p>
-    </div>
-  );
+export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }: FavoritesPanelProps) {
+    const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [page, setPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const [expandedId, setExpandedId] = useState<string | number | null>(null);
+    const [appliedId, setAppliedId] = useState<string | number | null>(null);
+    const panelRef = useRef<HTMLDivElement>(null);
+    const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+
+    const accent = isMonochrome ? '#a0a0a0' : '#d4af37';
+    const accentBg = isMonochrome ? 'rgba(160,160,160,0.1)' : 'rgba(212,175,55,0.08)';
+    const accentBgHover = isMonochrome ? 'rgba(160,160,160,0.18)' : 'rgba(212,175,55,0.15)';
+
+    const fetchFavorites = useCallback(async (p: number) => {
+        setLoading(true);
+        try {
+            const res = await fetch(`/api/favorites?userId=${encodeURIComponent(userId)}&page=${p}&limit=20`);
+            const data = await res.json();
+            if (data.success && data.favorites) {
+                const items = data.favorites.map((f: Record<string, unknown>) => ({
+                    id: f.id as number,
+                    userId: f.user_id as string,
+                    imageUrl: f.image_url as string,
+                    prompt: (f.prompt as string) || '',
+                    negativePrompt: (f.negative_prompt as string) || '',
+                    model: (f.model as string) || '',
+                    modelName: (f.model_name as string) || '',
+                    aspectRatio: (f.aspect_ratio as string) || '',
+                    quality: (f.quality as string) || '',
+                    imageWidth: (f.image_width as number) || 0,
+                    imageHeight: (f.image_height as number) || 0,
+                    originalWidth: (f.original_width as number) || 0,
+                    originalHeight: (f.original_height as number) || 0,
+                    apiProvider: (f.api_provider as string) || '',
+                    apiBaseUrl: (f.api_base_url as string) || '',
+                    sourceType: (f.source_type as string) || '',
+                    createdAt: String(f.created_at || ''),
+                    username: (f.username as string) || '',
+                }));
+                setFavorites(items);
+                saveLocalFavorites(items);
+                setTotalPages(data.pagination?.totalPages || 1);
+            } else {
+                const local = getLocalFavorites(userId);
+                setFavorites(local);
+                setTotalPages(1);
+            }
+        } catch {
+            const local = getLocalFavorites(userId);
+            setFavorites(local);
+            setTotalPages(1);
+        } finally {
+            setLoading(false);
+        }
+    }, [userId]);
+
+    useEffect(() => { fetchFavorites(page); }, [fetchFavorites, page]);
+
+    const handleDelete = async (id: number | string) => {
+        try {
+            await fetch(`/api/favorites?id=${id}&userId=${encodeURIComponent(userId)}`, { method: 'DELETE' });
+        } catch { /* fallback: just remove from local */ }
+        setFavorites(prev => prev.filter(f => f.id !== id));
+        const raw = localStorage.getItem(LOCAL_KEY);
+        if (raw) {
+            try {
+                const all = JSON.parse(raw);
+                localStorage.setItem(LOCAL_KEY, JSON.stringify(all.filter((f: FavoriteItem) => String(f.id) !== String(id))));
+            } catch { /* ignore */ }
+        }
+    };
+
+    const handleApply = (item: FavoriteItem) => {
+        if (onApplyParams) {
+            onApplyParams(item);
+            setAppliedId(item.id);
+            setTimeout(() => setAppliedId(null), 1500);
+        }
+    };
+
+    const filtered = searchQuery
+        ? favorites.filter(f =>
+            (f.prompt || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (f.modelName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (f.username || '').toLowerCase().includes(searchQuery.toLowerCase())
+        )
+        : favorites;
+
+    // Drag to move window
+    const handleDragStart = (e: React.MouseEvent) => {
+        if (!panelRef.current) return;
+        const rect = panelRef.current.getBoundingClientRect();
+        dragRef.current = { startX: e.clientX, startY: e.clientY, origX: rect.left, origY: rect.top };
+        const onMove = (ev: MouseEvent) => {
+            if (!dragRef.current || !panelRef.current) return;
+            const dx = ev.clientX - dragRef.current.startX;
+            const dy = ev.clientY - dragRef.current.startY;
+            panelRef.current.style.left = `${dragRef.current.origX + dx}px`;
+            panelRef.current.style.top = `${dragRef.current.origY + dy}px`;
+            panelRef.current.style.transform = 'none';
+        };
+        const onUp = () => { dragRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+    };
+
+    const formatTime = (ts: string) => {
+        if (!ts) return '';
+        const d = new Date(Number(ts));
+        return isNaN(d.getTime()) ? '' : d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    };
+
+    return (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.3)' }} onClick={onClose}>
+            <div
+                ref={panelRef}
+                onClick={e => e.stopPropagation()}
+                className="fixed shadow-2xl flex flex-col overflow-hidden"
+                style={{
+                    width: 680, maxHeight: '80vh',
+                    top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+                    borderRadius: 16,
+                    background: isMonochrome ? '#1e1e1e' : '#141414',
+                    border: `1px solid ${isMonochrome ? 'rgba(160,160,160,0.2)' : 'rgba(212,175,55,0.2)'}`,
+                }}
+            >
+                {/* Title bar - draggable */}
+                <div
+                    onMouseDown={handleDragStart}
+                    className="flex items-center justify-between px-5 py-3 cursor-move select-none"
+                    style={{ borderBottom: `1px solid ${isMonochrome ? 'rgba(160,160,160,0.12)' : 'rgba(212,175,55,0.12)'}` }}
+                >
+                    <div className="flex items-center gap-2.5">
+                        <Heart size={18} fill={accent} stroke={accent} />
+                        <span className="text-[15px] font-semibold text-foreground tracking-wide">收藏夹</span>
+                        <span className="text-xs text-muted-foreground/60 ml-1">{filtered.length} 项</span>
+                    </div>
+                    <button onClick={onClose} className="p-1 rounded-md hover:bg-muted/30 transition-colors">
+                        <X size={16} className="text-muted-foreground" />
+                    </button>
+                </div>
+
+                {/* Search + View toggle */}
+                <div className="flex items-center gap-3 px-5 py-2.5" style={{ borderBottom: `1px solid ${isMonochrome ? 'rgba(160,160,160,0.08)' : 'rgba(212,175,55,0.08)'}` }}>
+                    <div className="flex-1 flex items-center gap-2 rounded-lg px-3 py-1.5" style={{ background: isMonochrome ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.04)', border: `1px solid ${isMonochrome ? 'rgba(160,160,160,0.12)' : 'rgba(212,175,55,0.1)'}` }}>
+                        <Search size={14} className="text-muted-foreground/50" />
+                        <input
+                            value={searchQuery}
+                            onChange={e => setSearchQuery(e.target.value)}
+                            placeholder="搜索关键词、模型、用户..."
+                            className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/40 outline-none"
+                        />
+                    </div>
+                    <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${isMonochrome ? 'rgba(160,160,160,0.12)' : 'rgba(212,175,55,0.1)'}` }}>
+                        <button onClick={() => setViewMode('grid')} className="p-1.5 transition-colors" style={{ background: viewMode === 'grid' ? accentBg : 'transparent' }}>
+                            <Grid3X3 size={14} style={{ color: viewMode === 'grid' ? accent : 'var(--muted-foreground)' }} />
+                        </button>
+                        <button onClick={() => setViewMode('list')} className="p-1.5 transition-colors" style={{ background: viewMode === 'list' ? accentBg : 'transparent' }}>
+                            <List size={14} style={{ color: viewMode === 'list' ? accent : 'var(--muted-foreground)' }} />
+                        </button>
+                    </div>
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin' }}>
+                    {loading ? (
+                        <div className="flex items-center justify-center py-16 gap-2 text-muted-foreground/60">
+                            <div className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: `${accent}33`, borderTopColor: accent }} />
+                            <span className="text-sm">加载中...</span>
+                        </div>
+                    ) : filtered.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground/50">
+                            <Heart size={40} strokeWidth={1} className="mb-3" />
+                            <p className="text-sm">暂无收藏</p>
+                            <p className="text-xs mt-1">右键画布图片可添加到收藏夹</p>
+                        </div>
+                    ) : viewMode === 'grid' ? (
+                        <div className="grid grid-cols-3 gap-3">
+                            {filtered.map(item => (
+                                <div
+                                    key={item.id}
+                                    className="group relative rounded-xl overflow-hidden cursor-pointer transition-all duration-200"
+                                    style={{
+                                        background: isMonochrome ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.02)',
+                                        border: expandedId === item.id ? `1.5px solid ${accent}` : `1px solid ${isMonochrome ? 'rgba(160,160,160,0.1)' : 'rgba(212,175,55,0.08)'}`,
+                                    }}
+                                    onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                                >
+                                    {/* Image */}
+                                    <div className="relative aspect-square bg-muted/20">
+                                        <img src={item.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+                                        {/* Hover overlay */}
+                                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100">
+                                            <button
+                                                onClick={e => { e.stopPropagation(); handleApply(item); }}
+                                                className="px-3 py-1.5 rounded-lg text-xs font-medium text-white flex items-center gap-1.5 transition-transform hover:scale-105"
+                                                style={{ background: accent }}
+                                            >
+                                                <Sparkles size={12} />
+                                                调用参数
+                                            </button>
+                                        </div>
+                                        {/* Applied indicator */}
+                                        {appliedId === item.id && (
+                                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                                                <span className="text-xs font-medium px-3 py-1 rounded-full" style={{ background: accent, color: isMonochrome ? '#1e1e1e' : '#141414' }}>已调用</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                    {/* Info */}
+                                    <div className="p-2.5">
+                                        <p className="text-xs text-foreground/80 truncate leading-snug">{item.prompt || '无描述'}</p>
+                                        <div className="flex items-center gap-1.5 mt-1.5">
+                                            {item.modelName && (
+                                                <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: accentBg, color: accent }}>{item.modelName}</span>
+                                            )}
+                                            {item.aspectRatio && (
+                                                <span className="text-[10px] text-muted-foreground/50">{item.aspectRatio}</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        /* List view */
+                        <div className="flex flex-col gap-2">
+                            {filtered.map(item => (
+                                <div
+                                    key={item.id}
+                                    className="flex items-start gap-3 rounded-xl p-3 transition-all duration-200 cursor-pointer"
+                                    style={{
+                                        background: expandedId === item.id ? accentBgHover : isMonochrome ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.015)',
+                                        border: expandedId === item.id ? `1px solid ${accent}40` : `1px solid ${isMonochrome ? 'rgba(160,160,160,0.08)' : 'rgba(212,175,55,0.06)'}`,
+                                    }}
+                                    onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                                >
+                                    {/* Thumbnail */}
+                                    <div className="w-16 h-16 rounded-lg overflow-hidden bg-muted/20 flex-shrink-0">
+                                        <img src={item.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+                                    </div>
+                                    {/* Info */}
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm text-foreground/85 truncate">{item.prompt || '无描述'}</p>
+                                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                            {item.modelName && (
+                                                <span className="text-[11px] px-1.5 py-0.5 rounded" style={{ background: accentBg, color: accent }}>{item.modelName}</span>
+                                            )}
+                                            {item.aspectRatio && (
+                                                <span className="text-[11px] text-muted-foreground/50">{item.aspectRatio}</span>
+                                            )}
+                                            {item.quality && (
+                                                <span className="text-[11px] text-muted-foreground/50">{item.quality}</span>
+                                            )}
+                                        </div>
+                                        <div className="flex items-center gap-3 mt-1.5 text-[11px] text-muted-foreground/40">
+                                            {item.username && (
+                                                <span className="flex items-center gap-1"><User size={10} />{item.username}</span>
+                                            )}
+                                            {item.createdAt && (
+                                                <span className="flex items-center gap-1"><Clock size={10} />{formatTime(item.createdAt)}</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                    {/* Actions */}
+                                    <div className="flex flex-col gap-1 flex-shrink-0">
+                                        <button
+                                            onClick={e => { e.stopPropagation(); handleApply(item); }}
+                                            className="p-1.5 rounded-lg transition-colors"
+                                            style={{ background: appliedId === item.id ? accent : accentBg, color: appliedId === item.id ? (isMonochrome ? '#1e1e1e' : '#141414') : accent }}
+                                            title="调用参数"
+                                        >
+                                            <Sparkles size={14} />
+                                        </button>
+                                        <button
+                                            onClick={e => { e.stopPropagation(); handleDelete(item.id); }}
+                                            className="p-1.5 rounded-lg text-muted-foreground/40 hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                                            title="取消收藏"
+                                        >
+                                            <Trash2 size={14} />
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Expanded detail panel */}
+                {expandedId !== null && (() => {
+                    const item = filtered.find(f => f.id === expandedId);
+                    if (!item) return null;
+                    return (
+                        <div className="px-5 py-3" style={{ borderTop: `1px solid ${isMonochrome ? 'rgba(160,160,160,0.12)' : 'rgba(212,175,55,0.12)'}`, background: isMonochrome ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.01)' }}>
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-medium text-muted-foreground/70">参数详情</span>
+                                <button onClick={() => setExpandedId(null)} className="text-muted-foreground/40 hover:text-foreground transition-colors">
+                                    <ChevronDown size={14} />
+                                </button>
+                            </div>
+                            <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
+                                {item.prompt && (
+                                    <div className="col-span-2">
+                                        <span className="text-muted-foreground/50">提示词</span>
+                                        <p className="text-foreground/80 mt-0.5 leading-relaxed break-all">{item.prompt}</p>
+                                    </div>
+                                )}
+                                {item.negativePrompt && (
+                                    <div className="col-span-2">
+                                        <span className="text-muted-foreground/50">反向提示词</span>
+                                        <p className="text-foreground/60 mt-0.5 leading-relaxed break-all">{item.negativePrompt}</p>
+                                    </div>
+                                )}
+                                {item.modelName && <div><span className="text-muted-foreground/50">模型</span><p className="text-foreground/80 mt-0.5">{item.modelName}</p></div>}
+                                {item.aspectRatio && <div><span className="text-muted-foreground/50">比例</span><p className="text-foreground/80 mt-0.5">{item.aspectRatio}</p></div>}
+                                {item.quality && <div><span className="text-muted-foreground/50">质量</span><p className="text-foreground/80 mt-0.5">{item.quality}</p></div>}
+                                {item.apiProvider && <div><span className="text-muted-foreground/50">API提供商</span><p className="text-foreground/80 mt-0.5">{item.apiProvider}</p></div>}
+                                {(item.originalWidth && item.originalHeight) ? <div><span className="text-muted-foreground/50">原始尺寸</span><p className="text-foreground/80 mt-0.5">{item.originalWidth} x {item.originalHeight}</p></div> : null}
+                                {item.username && <div><span className="text-muted-foreground/50">收藏自</span><p className="text-foreground/80 mt-0.5">{item.username}</p></div>}
+                                {item.createdAt && <div><span className="text-muted-foreground/50">收藏时间</span><p className="text-foreground/80 mt-0.5">{formatTime(item.createdAt)}</p></div>}
+                            </div>
+                            {/* Apply button */}
+                            <button
+                                onClick={() => handleApply(item)}
+                                className="w-full mt-3 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-all hover:brightness-110"
+                                style={{ background: appliedId === item.id ? accent : accentBg, color: appliedId === item.id ? (isMonochrome ? '#1e1e1e' : '#141414') : accent, border: `1px solid ${accent}40` }}
+                            >
+                                <Sparkles size={14} />
+                                {appliedId === item.id ? '已调用' : '调用参数到生成面板'}
+                            </button>
+                        </div>
+                    );
+                })()}
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                    <div className="flex items-center justify-center gap-2 px-5 py-2.5" style={{ borderTop: `1px solid ${isMonochrome ? 'rgba(160,160,160,0.08)' : 'rgba(212,175,55,0.08)'}` }}>
+                        <button
+                            onClick={() => setPage(p => Math.max(1, p - 1))}
+                            disabled={page <= 1}
+                            className="px-3 py-1 rounded text-xs transition-colors disabled:opacity-30"
+                            style={{ background: accentBg, color: accent }}
+                        >
+                            上一页
+                        </button>
+                        <span className="text-xs text-muted-foreground/50">{page} / {totalPages}</span>
+                        <button
+                            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                            disabled={page >= totalPages}
+                            className="px-3 py-1 rounded text-xs transition-colors disabled:opacity-30"
+                            style={{ background: accentBg, color: accent }}
+                        >
+                            下一页
+                        </button>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
 }

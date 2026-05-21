@@ -142,6 +142,13 @@ function CanvasApp() {
   const [navigateToImageId, setNavigateToImageId] = useState<string | null>(null);
   const [showHelpGuide, setShowHelpGuide] = useState(false);
   const [showFavorites, setShowFavorites] = useState(false);
+  const [favoriteParams, setFavoriteParams] = useState<{
+    prompt: string;
+    negativePrompt?: string;
+    model?: string;
+    aspectRatio?: string;
+    quality?: string;
+  } | null>(null);
   const [initialGroups, setInitialGroups] = useState<ImageGroup[]>([]);
   const [viewState, setViewState] = useState<{ offsetX: number; offsetY: number; zoom: number } | null>(null);
   const viewStateRef = useRef<{ offsetX: number; offsetY: number; zoom: number } | null>(null);
@@ -2169,6 +2176,8 @@ function CanvasApp() {
                     externalReferenceImage={externalReferenceImage}
                     onExternalReferenceImageConsumed={() => setExternalReferenceImage(null)}
                     onOpenPromptEquation={() => setShowPromptEquation(true)}
+                    applyFavoriteParams={favoriteParams}
+                    onFavoriteParamsApplied={() => setFavoriteParams(null)}
                     onError={(error: string) => {
                       toast.error('生成失败', {
                         description: error,
@@ -2582,6 +2591,16 @@ function CanvasApp() {
           userId={currentUser.id || currentUser.name}
           onClose={() => setShowFavorites(false)}
           isMonochrome={themeStyle === 'monochrome'}
+          onApplyParams={(item) => {
+            setFavoriteParams({
+              prompt: item.prompt || '',
+              negativePrompt: item.negativePrompt || '',
+              model: item.model || '',
+              aspectRatio: item.aspectRatio || '',
+              quality: item.quality || '',
+            });
+            setShowFavorites(false);
+          }}
         />
       )}
 

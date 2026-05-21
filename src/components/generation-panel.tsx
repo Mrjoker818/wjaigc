@@ -65,6 +65,8 @@ interface GenerationPanelProps {
     externalReferenceImage?: string | null;
     onExternalReferenceImageConsumed?: () => void;
     onOpenPromptEquation?: () => void;
+    applyFavoriteParams?: { prompt?: string; model?: string; aspectRatio?: string; quality?: string } | null;
+    onFavoriteParamsApplied?: () => void;
 }
 
 // 产品品类
@@ -259,7 +261,9 @@ export function GenerationPanel(
         onModelChange,
         externalReferenceImage,
         onExternalReferenceImageConsumed,
-        onOpenPromptEquation
+        onOpenPromptEquation,
+        applyFavoriteParams,
+        onFavoriteParamsApplied
     }: GenerationPanelProps
 ) {
     const [prompt, setPrompt] = useState("");
@@ -279,6 +283,20 @@ export function GenerationPanel(
             setExternalPromptApplied(false);
         }
     }, [externalPrompt, externalPromptApplied, onExternalPromptConsumed]);
+
+    // Apply favorite params (prompt, model, aspectRatio, quality)
+    useEffect(() => {
+        if (applyFavoriteParams) {
+            if (applyFavoriteParams.prompt) setPrompt(applyFavoriteParams.prompt);
+            if (applyFavoriteParams.model) {
+                setModel(applyFavoriteParams.model);
+                onModelChange?.(applyFavoriteParams.model);
+            }
+            if (applyFavoriteParams.aspectRatio) setAspectRatio(applyFavoriteParams.aspectRatio);
+            if (applyFavoriteParams.quality) setQuality(applyFavoriteParams.quality);
+            onFavoriteParamsApplied?.();
+        }
+    }, [applyFavoriteParams, onFavoriteParamsApplied, onModelChange]);
 
     // Sync external reference image from canvas right-click "发送参考图"
     useEffect(() => {
