@@ -108,9 +108,8 @@ function CanvasApp() {
     // Directly set state — no re-recording into history
     setImagesRaw(previousState);
   }, []);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [activeGenerationCount, setActiveGenerationCount] = useState(0);
   const [previewImage, setPreviewImage] = useState<CanvasImage | null>(null);
-  const [generationProgress, setGenerationProgress] = useState<{ current: number; total: number } | undefined>(undefined);
   const [themeStyle, setThemeStyle] = useState<ThemeStyle>('gold');
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [activePanel, setActivePanel] = useState<ActivePanel>('generate');
@@ -231,11 +230,6 @@ function CanvasApp() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [ohMyPromptOpen, setOhMyPromptOpen] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
-  // 用于跟踪当前生成任务的ID，确保旧任务的进度不会显示
-  const generationTaskRef = useRef<number>(0);
-  // 生成计时器
-  const [generationElapsed, setGenerationElapsed] = useState<number>(0);
-  const generationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const groupsRef = useRef<Array<{id: string; name: string; note: string; imageIds: string[]; x: number; y: number; collapsed: boolean}>>([]);
 
   const stabilizeCanvasImages = useCallback((items: Array<{ id: string; url: string }>) => {
@@ -445,14 +439,8 @@ function CanvasApp() {
   }, [images, currentProject]);
 
   const handleGenerate = useCallback(async (params: GenerationParams) => {
-    // 为新任务生成唯一ID
-    const taskId = ++generationTaskRef.current;
-    setIsGenerating(true);
-    setGenerationElapsed(0);
-    if (generationTimerRef.current) clearInterval(generationTimerRef.current);
-    generationTimerRef.current = setInterval(() => {
-      setGenerationElapsed(prev => prev + 1);
-    }, 1000);
+    // 增加活跃任务计数
+    setActiveGenerationCount(prev => prev + 1);
     // 获取生图数量，默认为1
     const outputCount = params.outputCount || 1;
 
@@ -507,7 +495,6 @@ function CanvasApp() {
     
     try {
       // 开始处理 - 提交任务
-      setGenerationProgress({ current: 0, total: outputCount });
       
       // 检查是否使用第三方模型
       const isThirdParty = !!(params as GenerationParams & { universalBaseUrl?: string }).universalBaseUrl;
@@ -519,14 +506,11 @@ function CanvasApp() {
         body: JSON.stringify({ ...params, userId: currentUser?.id }),
       });
 
-      if (taskId !== generationTaskRef.current) return;
-      
       const data = await response.json();
 
       // === 直接返回模式：API 直接返回图片URL ===
       if (data.success && data.mode === 'direct') {
         const { imageUrls, model, prompt: enhancedPrompt, originalPrompt, category, style } = data;
-        setGenerationProgress({ current: outputCount, total: outputCount });
         
         for (let i = 0; i < imageUrls.length; i++) {
           const imageUrl = imageUrls[i];
@@ -576,7 +560,6 @@ function CanvasApp() {
         // 移除多余的占位框（outputCount > imageUrls.length 时）
         const usedPlaceholderIds = new Set(placeholderIds.slice(0, imageUrls.length));
         setImages(prev => prev.filter(img => !img.isProcessingPlaceholder || !placeholderIds.includes(img.id) || usedPlaceholderIds.has(img.id)));
-        setGenerationProgress({ current: outputCount, total: outputCount });
         
         toast.success('生成完成', {
           description: `${data.modelName || model} 已生成 ${imageUrls.length} 张图片`,
@@ -590,8 +573,6 @@ function CanvasApp() {
       if (data.success && data.mode === 'polling') {
         const { taskIds, estimatedTime, prompt: enhancedPrompt, originalPrompt, category, style } = data;
         
-        setGenerationProgress({ current: Math.ceil(outputCount * 0.1), total: outputCount });
-
         // 自适应轮询间隔策略
         // 根据模型预估时间调整：快速模型1.5s起步，慢速模型2.5s起步
         const getPollInterval = (pollCount: number, estTime: number) => {
@@ -623,9 +604,6 @@ function CanvasApp() {
               });
               break;
             }
-
-            // 检查是否被新任务取代
-            if (taskId !== generationTaskRef.current) return;
 
             const interval = getPollInterval(pollCount, estimatedTime);
             await new Promise(resolve => setTimeout(resolve, interval));
@@ -678,12 +656,8 @@ function CanvasApp() {
                 consecutiveErrors = 0;
 
                 // 更新进度
-                const progressVal = Math.ceil((taskIdx + 1) / taskIds.length * outputCount * 0.9);
-                setGenerationProgress({ 
-                  current: progressVal, 
-                  total: outputCount 
-                });
                 // 更新对应占位框的进度
+                const progressVal = Math.ceil((taskIdx + 1) / taskIds.length * outputCount * 0.9);
                 const phId = placeholderIds[taskIdx];
                 if (phId) {
                   setImages(prev => prev.map((img): CanvasImage =>
@@ -819,7 +793,6 @@ function CanvasApp() {
             stabilizeCanvasImages(updated.map(img => ({ id: img.id, url: img.url })));
             return updated;
           });
-          setGenerationProgress({ current: outputCount, total: outputCount });
 
           toast.success(`生成成功`, {
             description: `已生成 ${completedImages.length} 张图片`,
@@ -902,8 +875,6 @@ function CanvasApp() {
           stabilizeCanvasImages(updated.map(img => ({ id: img.id, url: img.url })));
           return updated;
         });
-        setGenerationProgress({ current: outputCount, total: outputCount });
-
         toast.success(`生成成功`, {
           description: `已生成 ${data.images.length} 张图片`,
           className: 'bg-[#141414] border-[#2a2a2a] text-white',
@@ -945,11 +916,7 @@ function CanvasApp() {
         className: 'bg-[#141414] border border-red-900 text-white',
       });
     } finally {
-      if (taskId === generationTaskRef.current) {
-        setIsGenerating(false);
-        setGenerationProgress(undefined);
-        if (generationTimerRef.current) { clearInterval(generationTimerRef.current); generationTimerRef.current = null; }
-      }
+      setActiveGenerationCount(prev => Math.max(0, prev - 1));
     }
   }, []);
 
@@ -1211,17 +1178,10 @@ function CanvasApp() {
       params.referenceMode = 'style';
     }
 
-    const taskId = ++generationTaskRef.current;
-    setIsGenerating(true);
-    setGenerationElapsed(0);
-    if (generationTimerRef.current) clearInterval(generationTimerRef.current);
-    generationTimerRef.current = setInterval(() => {
-      setGenerationElapsed(prev => prev + 1);
-    }, 1000);
+    setActiveGenerationCount(prev => prev + 1);
     const outputCount = params.outputCount || 1;
     
     try {
-      setGenerationProgress({ current: 0, total: outputCount });
       
       const response = await fetch('/api/generate', {
         method: 'POST',
@@ -1229,15 +1189,12 @@ function CanvasApp() {
         body: JSON.stringify({ ...params, userId: currentUser?.id }),
       });
 
-      if (taskId !== generationTaskRef.current) return;
       const data = await response.json();
 
       // === 新模式：前端轮询 ===
       if (data.success && data.mode === 'polling') {
         const { taskIds, estimatedTime, prompt: enhancedPrompt } = data;
         
-        setGenerationProgress({ current: Math.ceil(outputCount * 0.1), total: outputCount });
-
         const getPollInterval = (pollCount: number, estTime: number) => {
           const baseInterval = estTime <= 20 ? 1500 : estTime <= 60 ? 2000 : 2500;
           if (pollCount > 20) return baseInterval + 1500;
@@ -1263,8 +1220,6 @@ function CanvasApp() {
               });
               break;
             }
-
-            if (taskId !== generationTaskRef.current) return;
 
             const interval = getPollInterval(pollCount, estimatedTime);
             await new Promise(resolve => setTimeout(resolve, interval));
@@ -1304,10 +1259,6 @@ function CanvasApp() {
                 });
                 taskCompleted = true;
                 consecutiveErrors = 0;
-                setGenerationProgress({ 
-                  current: Math.ceil((taskIdx + 1) / taskIds.length * outputCount * 0.9), 
-                  total: outputCount 
-                });
               } else if (pollData.status === 'failed' || pollData.status === 'cancelled') {
                 toast.error('生成失败', {
                   description: pollData.error || '任务失败',
@@ -1356,7 +1307,6 @@ function CanvasApp() {
             stabilizeCanvasImages(laidOut.map(img => ({ id: img.id, url: img.url })));
             return [...prev, ...laidOut];
           });
-          setGenerationProgress({ current: outputCount, total: outputCount });
 
           toast.success(`变体生成成功`, {
             description: `已生成 ${completedImages.length} 张变体图片`,
@@ -1370,7 +1320,6 @@ function CanvasApp() {
         const newImageUrls: string[] = data.images.map((img: { id: string; url: string; prompt: string }) => img.url);
 
         await handleAddImages(newImageUrls);
-        setGenerationProgress({ current: outputCount, total: outputCount });
 
         toast.success(`变体生成成功`, {
           description: `已生成 ${data.images.length} 张变体图片`,
@@ -1390,14 +1339,7 @@ function CanvasApp() {
         className: 'bg-[#141414] border border-red-900 text-white',
       });
     } finally {
-      if (taskId === generationTaskRef.current) {
-        setIsGenerating(false);
-        setGenerationProgress(undefined);
-        if (generationTimerRef.current) {
-          clearInterval(generationTimerRef.current);
-          generationTimerRef.current = null;
-        }
-      }
+      setActiveGenerationCount(prev => Math.max(0, prev - 1));
     }
   }, []);
 
@@ -1434,15 +1376,10 @@ function CanvasApp() {
     count: number;
     referenceImages: string[];
   }) => {
-    // 为新任务生成唯一ID
-    const taskId = ++generationTaskRef.current;
-    setIsGenerating(true);
+    setActiveGenerationCount(prev => prev + 1);
     const outputCount = params.count || 1;
     
     try {
-      // 开始处理 - 10%
-      setGenerationProgress({ current: 0, total: outputCount });
-      
       const ratioToSize: Record<string, string> = {
         '1:1': '1024x1024',
         '4:3': '1366x1024',
@@ -1485,27 +1422,12 @@ function CanvasApp() {
       });
 
       // API调用中 - 30%
-      if (taskId !== generationTaskRef.current) return;
-      setGenerationProgress({ current: Math.ceil(outputCount * 0.3), total: outputCount });
-      
       const data = await response.json();
 
       if (data.success && data.images) {
-        // 数据返回 - 60%
-        if (taskId !== generationTaskRef.current) return;
-        setGenerationProgress({ current: Math.ceil(outputCount * 0.6), total: outputCount });
-        
         const newImageUrls: string[] = data.images.map((img: { id: string; url: string; prompt: string }) => img.url);
 
-        // 添加图片到画布 - 80%（使用自动布局）
-        if (taskId !== generationTaskRef.current) return;
-        setGenerationProgress({ current: Math.ceil(outputCount * 0.8), total: outputCount });
-        
         await handleAddImages(newImageUrls);
-        
-        // 完成 - 100%
-        if (taskId !== generationTaskRef.current) return;
-        setGenerationProgress({ current: outputCount, total: outputCount });
         
         toast.success('融合成功', {
           description: `已生成 ${data.images.length} 张融合图片`,
@@ -1524,12 +1446,7 @@ function CanvasApp() {
         className: 'bg-[#141414] border border-red-900 text-white',
       });
     } finally {
-      // 只有当前任务ID匹配时才清除状态
-      if (taskId === generationTaskRef.current) {
-        setIsGenerating(false);
-        setGenerationProgress(undefined);
-        if (generationTimerRef.current) { clearInterval(generationTimerRef.current); generationTimerRef.current = null; }
-      }
+      setActiveGenerationCount(prev => Math.max(0, prev - 1));
     }
   }, []);
 
@@ -1855,8 +1772,6 @@ function CanvasApp() {
           referenceIds={ctrlRefSelections.map(r => r.id)}
           altRefMarkerIds={altRefMarkers.map(r => r.id)}
           onAltMarkReference={handleAltMarkReference}
-          isGenerating={isGenerating}
-          generationProgress={generationProgress}
           themeStyle={themeStyle}
           onVisionPrompt={handleVisionPrompt}
           visionPromptEnabled={visionPromptEnabled}
@@ -2049,7 +1964,6 @@ function CanvasApp() {
             }}>
               <GenerationPanel
                     onGenerate={handleGenerate}
-                    isGenerating={isGenerating}
                     onAnalyzeImage={handleAnalyzeImage}
                     onAddToCanvas={handleAddToCanvas}
                     onExtractPrompt={handleExtractPrompt}
@@ -2072,9 +1986,7 @@ function CanvasApp() {
                           ? 'bg-white border border-gray-200 text-gray-900' 
                           : 'bg-[#141414] border-[#2a2a2a] text-white',
                       });
-                      setIsGenerating(false);
-                      setGenerationProgress(undefined);
-                      if (generationTimerRef.current) { clearInterval(generationTimerRef.current); generationTimerRef.current = null; }
+                      setActiveGenerationCount(prev => Math.max(0, prev - 1));
                     }}
                   />
               </div>
@@ -2086,69 +1998,16 @@ function CanvasApp() {
             {activePanel === 'generate' && (
               <div className={`px-4 py-3 flex-shrink-0`}>
                 <div className="panel-divider mb-3" />
-                {/* 进度条和耗时 */}
-                {isGenerating && (
-                  <div className="mb-2">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className={`text-xs font-medium ${
-                        themeStyle === 'monochrome' ? 'text-gray-600' : 'text-[#999]'
-                      }`}>
-                        {(() => {
-                          const pct = generationProgress ? Math.round((generationProgress.current / generationProgress.total) * 100) : 0;
-                          return pct > 0 ? `生成进度 ${pct}%` : '任务提交中...';
-                        })()}
-                      </span>
-                      {generationElapsed > 0 && (
-                        <span className={`text-xs tabular-nums ${
-                          themeStyle === 'monochrome' ? 'text-gray-500' : 'text-[#777]'
-                        }`}>
-                          {generationElapsed >= 60 
-                            ? `${Math.floor(generationElapsed / 60)}分${generationElapsed % 60}秒`
-                            : `${generationElapsed}秒`}
-                        </span>
-                      )}
-                    </div>
-                    <div className={`w-full h-1.5 rounded-full overflow-hidden ${
-                      themeStyle === 'monochrome' ? 'bg-gray-200' : 'bg-[#2a2a2a]'
-                    }`}>
-                      <div 
-                        className={`h-full rounded-full progress-bar ${
-                          themeStyle === 'monochrome' 
-                            ? 'bg-gradient-to-r from-yellow-400 to-yellow-500' 
-                            : 'bg-gradient-to-r from-[#d4af37] to-[#daa520]'
-                        }`}
-                        style={{ width: `${Math.max(generationProgress ? Math.round((generationProgress.current / generationProgress.total) * 100) : 0, isGenerating ? 3 : 0)}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
                 <button
                   onClick={() => document.dispatchEvent(new CustomEvent('trigger-generate'))}
-                  disabled={isGenerating}
                   className={`btn-press w-full py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                    isGenerating
-                      ? themeStyle === 'monochrome'
-                        ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                        : 'bg-[#2a2a2a] text-[#666] cursor-not-allowed'
-                      : themeStyle === 'monochrome'
-                        ? 'bg-gradient-to-r from-yellow-400 to-yellow-500 text-white hover:from-yellow-500 hover:to-yellow-600 shadow-md hover:shadow-lg active:shadow-sm'
-                        : 'bg-gradient-to-r from-[#d4af37] to-[#daa520] text-black hover:from-[#daa520] hover:to-[#d4af37] shadow-md hover:shadow-lg active:shadow-sm'
+                    themeStyle === 'monochrome'
+                      ? 'bg-gradient-to-r from-yellow-400 to-yellow-500 text-white hover:from-yellow-500 hover:to-yellow-600 shadow-md hover:shadow-lg active:shadow-sm'
+                      : 'bg-gradient-to-r from-[#d4af37] to-[#daa520] text-black hover:from-[#daa520] hover:to-[#d4af37] shadow-md hover:shadow-lg active:shadow-sm'
                   }`}
                 >
-                  {isGenerating ? (
-                    <>
-                      <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                      </svg>
-                      <span>生成中...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="h-4 w-4" />
-                      <span>开始生成</span>
-                    </>
-                  )}
+                  <Sparkles className="h-4 w-4" />
+                  <span>开始生成</span>
                 </button>
               </div>
             )}

@@ -47,7 +47,6 @@ export interface AltRefMarker {
 
 interface GenerationPanelProps {
     onGenerate: (params: GenerationParams) => void;
-    isGenerating: boolean;
     onAnalyzeImage?: (imageData: string) => Promise<string>;
     onAddToCanvas?: (imageUrl: string) => void;
     onExtractPrompt?: (imageUrl: string) => Promise<string>;
@@ -246,7 +245,6 @@ const findModelConfig = sharedFindModelConfig;
 export function GenerationPanel(
     {
         onGenerate,
-        isGenerating,
         onAddToCanvas,
         onError,
         themeStyle = 'gold',
@@ -468,13 +466,11 @@ export function GenerationPanel(
     // 监听自定义生成事件
     useEffect(() => {
         const handleTriggerGenerate = () => {
-            if (!isGenerating) {
-                handleGenerate();
-            }
+            handleGenerate();
         };
         document.addEventListener('trigger-generate', handleTriggerGenerate);
         return () => document.removeEventListener('trigger-generate', handleTriggerGenerate);
-    }, [isGenerating, prompt, selectedTags, aspectRatio, quality, model, productCategory, outputCount]);
+    }, [prompt, selectedTags, aspectRatio, quality, model, productCategory, outputCount]);
 
     // 初始化万能API管理器
     useEffect(() => {
@@ -1331,15 +1327,10 @@ export function GenerationPanel(
                             {/* 融合生成按钮 */}
                             <button
                                 onClick={() => onFusionGenerate?.(ctrlRefSelections, fusionPrompt)}
-                                disabled={isGenerating}
-                                className={`w-full mt-2.5 py-2 rounded-md text-sm font-bold transition-all flex items-center justify-center gap-2 ${
-                                    isGenerating
-                                        ? 'bg-[#d4af37]/30 text-[#d4af37]/50 cursor-not-allowed'
-                                        : 'bg-[#d4af37] text-black hover:bg-[#e5c349] active:scale-[0.98]'
-                                }`}
+                                className="w-full mt-2.5 py-2 rounded-md text-sm font-bold transition-all flex items-center justify-center gap-2 bg-[#d4af37] text-black hover:bg-[#e5c349] active:scale-[0.98]"
                             >
                                 <GitMerge className="h-4 w-4" />
-                                {isGenerating ? '融合生成中...' : '融合生成'}
+                                融合生成
                             </button>
                         </div>
                     </div>
