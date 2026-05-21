@@ -9068,6 +9068,7 @@ export function InfiniteCanvas({
           <Suspense fallback={null}>
             <AgentEditor
               imageUrl={agentEditImage?.url}
+              imagePrompt={agentEditImage?.prompt}
               isMonochrome={isMonochrome}
               onApply={(resultUrl: string) => {
                 if (agentEditImage) {

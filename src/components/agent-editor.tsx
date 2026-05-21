@@ -208,6 +208,7 @@ export function AgentEditor({
         body: JSON.stringify({
           image: imageUrl || '',
           prompt: prompt.trim(),
+          imagePrompt: imagePrompt || '',
           maskDataUrl: '',
           maxRounds,
           size: '1024',

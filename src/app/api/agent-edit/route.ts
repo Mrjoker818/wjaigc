@@ -46,7 +46,7 @@ if (typeof setInterval !== 'undefined') {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { image, prompt, maskDataUrl, model, providerId, maxRounds } = body;
+    const { image, prompt, maskDataUrl, model, providerId, maxRounds, imagePrompt } = body;
 
     if (!image || !prompt) {
       return NextResponse.json({ success: false, error: '缺少图片或描述' }, { status: 400 });
@@ -107,6 +107,7 @@ export async function POST(request: NextRequest) {
           taskId,
           userPrompt: prompt,
           imageUrl: image,
+          imagePrompt: imagePrompt || '',
           maskDataUrl,
           model: chatModel,
           maxRounds: maxRounds || 5,

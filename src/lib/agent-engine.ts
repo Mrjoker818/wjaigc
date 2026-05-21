@@ -57,6 +57,8 @@ export interface AgentContext {
   userPrompt: string;
   /** 原始图片 URL（可选） */
   imageUrl?: string;
+  /** 原始图片描述/提示词（可选，帮助 LLM 理解图片内容） */
+  imagePrompt?: string;
   /** 蒙版图片（可选） */
   maskDataUrl?: string;
   /** 用户 ID（用于 API Key 查找） */
@@ -313,7 +315,8 @@ ${toolDescriptions}
 6. 如果无法完成，也直接说明原因
 
 当前任务: ${context.userPrompt}
-${context.imageUrl ? `图片已提供` : '没有图片'}`;
+${context.imageUrl ? `图片已提供` : '没有图片'}
+${context.imagePrompt ? `图片原始描述: ${context.imagePrompt}` : ''}`;
 }
 
 // ─── 注册内置工具 ──────────────────────────────────────────────────
