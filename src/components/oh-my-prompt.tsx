@@ -1,13 +1,15 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Sparkles, FolderPlus, Trash2, Edit3, Check, X,
   ChevronRight, ChevronDown, Plus, Search, Lightbulb,
-  GripVertical, Copy, ExternalLink
+  GripVertical, Copy, ExternalLink, Eye, Languages,
+  Tag, Image, FileText, Loader2, ChevronLeft, RefreshCw,
+  Bookmark, BookmarkCheck, ArrowRight, Zap
 } from 'lucide-react';
 
-// ===== Types =====
+// ===== Types (aligned with oh-my-prompt repository) =====
 export interface PromptItem {
   id: string;
   text: string;
@@ -26,92 +28,108 @@ export interface PromptCategory {
   prompts: PromptItem[];
 }
 
+// Resource library types (from oh-my-prompt repo)
+export interface ResourcePrompt {
+  id: string;
+  name: string;
+  nameEn?: string;
+  content: string;
+  contentEn?: string;
+  categoryId: string;
+  order: number;
+  sourceCategory?: string;
+  previewImage?: string;
+  author?: string;
+  authorUrl?: string;
+}
+
+export interface ResourceCategory {
+  id: string;
+  name: string;
+  nameEn?: string;
+  order: number;
+  count: number;
+}
+
+// Vision API result types (from oh-my-prompt repo)
+export interface JsonPromptSchema {
+  subject: string;
+  action_pose: string;
+  details_appearance: string;
+  environment_background: string;
+  lighting_atmosphere: string;
+  style_camera: string;
+  colors: string[];
+  materials: string[];
+  aspect_ratio: string;
+  [key: string]: unknown;
+}
+
+export interface ZhJsonPromptSchema {
+  主体: string;
+  动作姿态: string;
+  细节外观: string;
+  环境背景: string;
+  光影氛围: string;
+  风格镜头: string;
+  色彩: string[];
+  材质: string[];
+  宽高比: string;
+  [key: string]: unknown;
+}
+
+export interface VisionApiResultData {
+  zh: {
+    title: string;
+    prompt: string;
+    analysis: string;
+  };
+  en: {
+    title: string;
+    prompt: string;
+    analysis: string;
+  };
+  zh_style_tags: string[];
+  en_style_tags: string[];
+  zh_json?: ZhJsonPromptSchema;
+  en_json?: JsonPromptSchema;
+  json_prompt: JsonPromptSchema;
+  confidence: number;
+}
+
 export interface OmpSettings {
   enabled: boolean;
   categories: PromptCategory[];
   recentUsed: PromptItem[];
+  visionDefaultFormat: 'natural' | 'json';
+  savedVisionResults: VisionApiResultData[];
 }
 
-const STORAGE_KEY = 'oh-my-prompt-data';
+const STORAGE_KEY = 'oh-my-prompt-data-v2';
 
-// ===== Built-in Resource Library =====
-const BUILT_IN_CATEGORIES: PromptCategory[] = [
-  {
-    id: 'builtin-style',
-    name: '风格预设',
-    icon: '🎨',
-    color: '#d4af37',
-    expanded: false,
-    prompts: [
-      { id: 'b1', text: '赛博朋克风格，霓虹灯光，未来科技感，黑暗城市背景', textEn: 'Cyberpunk style, neon lights, futuristic tech, dark city background', tag: '赛博朋克', createdAt: Date.now() },
-      { id: 'b2', text: '水彩插画风格，柔和渐变，纸张纹理，艺术感', textEn: 'Watercolor illustration, soft gradients, paper texture, artistic', tag: '水彩', createdAt: Date.now() },
-      { id: 'b3', text: '极简主义风格，大量留白，简洁线条，现代设计', textEn: 'Minimalist style, lots of whitespace, clean lines, modern design', tag: '极简', createdAt: Date.now() },
-      { id: 'b4', text: '复古怀旧风格，胶片质感，褪色色调，老照片效果', textEn: 'Vintage retro, film grain, faded tones, old photo effect', tag: '复古', createdAt: Date.now() },
-      { id: 'b5', text: '超写实摄影，8K分辨率，专业灯光，微距细节', textEn: 'Hyper-realistic photography, 8K resolution, professional lighting, macro details', tag: '写实', createdAt: Date.now() },
-      { id: 'b6', text: '扁平化设计，鲜艳色彩，几何形状，矢量插画', textEn: 'Flat design, vivid colors, geometric shapes, vector illustration', tag: '扁平', createdAt: Date.now() },
-      { id: 'b7', text: '蒸汽朋克风格，黄铜机械，维多利亚时代，齿轮装置', textEn: 'Steampunk style, brass machinery, Victorian era, gear mechanisms', tag: '蒸汽朋克', createdAt: Date.now() },
-      { id: 'b8', text: '日式动漫风格，柔和色调，大眼睛，精致线条', textEn: 'Japanese anime style, soft colors, big eyes, delicate linework', tag: '动漫', createdAt: Date.now() },
-    ]
-  },
-  {
-    id: 'builtin-lighting',
-    name: '灯光系统',
-    icon: '💡',
-    color: '#fbbf24',
-    expanded: false,
-    prompts: [
-      { id: 'bl1', text: '电影级灯光，戏剧化阴影，侧逆光勾勒轮廓', textEn: 'Cinematic lighting, dramatic shadows, rim lighting on contours', tag: '电影灯光', createdAt: Date.now() },
-      { id: 'bl2', text: '柔和自然光，黄金时刻，温暖色调', textEn: 'Soft natural light, golden hour, warm tones', tag: '自然光', createdAt: Date.now() },
-      { id: 'bl3', text: '体积光，丁达尔效应，光束穿透', textEn: 'Volumetric light, Tyndall effect, light shafts piercing through', tag: '体积光', createdAt: Date.now() },
-      { id: 'bl4', text: '霓虹灯光，彩色反射，雨夜氛围', textEn: 'Neon lighting, colorful reflections, rainy night atmosphere', tag: '霓虹', createdAt: Date.now() },
-      { id: 'bl5', text: '影棚布光，三点布光，白色背景', textEn: 'Studio lighting, three-point setup, white background', tag: '影棚', createdAt: Date.now() },
-      { id: 'bl6', text: '月光照明，冷蓝色调，神秘氛围', textEn: 'Moonlight, cool blue tones, mysterious atmosphere', tag: '月光', createdAt: Date.now() },
-    ]
-  },
-  {
-    id: 'builtin-quality',
-    name: '画质增强',
-    icon: '✨',
-    color: '#34d399',
-    expanded: false,
-    prompts: [
-      { id: 'bq1', text: '8K超高清，极致细节，专业摄影级别', textEn: '8K ultra HD, extreme detail, professional photography grade', tag: '8K', createdAt: Date.now() },
-      { id: 'bq2', text: '4K高清，锐利细节，清晰纹理', textEn: '4K HD, sharp details, clear textures', tag: '4K', createdAt: Date.now() },
-      { id: 'bq3', text: '景深效果，虚化背景，焦点清晰', textEn: 'Depth of field, blurred background, sharp focus', tag: '景深', createdAt: Date.now() },
-      { id: 'bq4', text: 'HDR效果，高动态范围，明暗细节丰富', textEn: 'HDR effect, high dynamic range, rich highlight and shadow details', tag: 'HDR', createdAt: Date.now() },
-      { id: 'bq5', text: '微距摄影，超近距，极致细节纹理', textEn: 'Macro photography, ultra close-up, extreme texture detail', tag: '微距', createdAt: Date.now() },
-    ]
-  },
-  {
-    id: 'builtin-scene',
-    name: '场景模板',
-    icon: '🏗️',
-    color: '#60a5fa',
-    expanded: false,
-    prompts: [
-      { id: 'bs1', text: '展览展位设计，专业建筑摄影，模块化结构', textEn: 'Exhibition booth design, professional architectural photography, modular structures', tag: '展览', createdAt: Date.now() },
-      { id: 'bs2', text: '室内设计，现代极简空间，自然光线', textEn: 'Interior design, modern minimalist space, natural light', tag: '室内', createdAt: Date.now() },
-      { id: 'bs3', text: '产品摄影，纯色背景，商业广告级', textEn: 'Product photography, solid color background, commercial ad grade', tag: '产品', createdAt: Date.now() },
-      { id: 'bs4', text: '城市景观，高楼大厦，日落时分', textEn: 'Cityscape, skyscrapers, sunset', tag: '城市', createdAt: Date.now() },
-      { id: 'bs5', text: '自然风景，山脉湖泊，晨雾弥漫', textEn: 'Natural landscape, mountains and lakes, morning mist', tag: '风景', createdAt: Date.now() },
-      { id: 'bs6', text: '人物肖像，柔和焦外，专业棚拍', textEn: 'Portrait photography, soft bokeh, professional studio shot', tag: '人像', createdAt: Date.now() },
-    ]
-  },
-  {
-    id: 'builtin-material',
-    name: '材质质感',
-    icon: '💎',
-    color: '#a78bfa',
-    expanded: false,
-    prompts: [
-      { id: 'bm1', text: '金属拉丝质感，反射光泽，冷色调', textEn: 'Brushed metal texture, reflective gloss, cool tones', tag: '金属', createdAt: Date.now() },
-      { id: 'bm2', text: '大理石纹理，天然纹路，奢华质感', textEn: 'Marble texture, natural veins, luxurious feel', tag: '大理石', createdAt: Date.now() },
-      { id: 'bm3', text: '原木质感，温暖色调，自然纹理', textEn: 'Natural wood texture, warm tones, organic grain', tag: '木材', createdAt: Date.now() },
-      { id: 'bm4', text: '玻璃材质，透明折射，光影变幻', textEn: 'Glass material, transparent refraction, light and shadow play', tag: '玻璃', createdAt: Date.now() },
-      { id: 'bm5', text: '丝绸质感，柔滑光泽，飘逸流动', textEn: 'Silk texture, smooth luster, flowing and draping', tag: '丝绸', createdAt: Date.now() },
-    ]
-  }
-];
+// ===== Category Icon/Color Mapping =====
+const CATEGORY_ICONS: Record<string, { icon: string; color: string }> = {
+  'gpt-image': { icon: '🤖', color: '#10a37f' },
+  'nano-banana': { icon: '🍌', color: '#fbbf24' },
+  'prompts-chat-image': { icon: '💬', color: '#6366f1' },
+  '3d-miniatures-dioramas': { icon: '🏠', color: '#f97316' },
+  'product-photography': { icon: '📦', color: '#14b8a6' },
+  'character-design': { icon: '🎭', color: '#a855f7' },
+  'food-culinary': { icon: '🍜', color: '#ef4444' },
+  'fantasy-scifi': { icon: '🔮', color: '#8b5cf6' },
+  'sports-action': { icon: '⚽', color: '#22c55e' },
+  'urban-cityscapes': { icon: '🌆', color: '#3b82f6' },
+  'architecture-interiors': { icon: '🏛️', color: '#78716c' },
+  'nature-landscapes': { icon: '🏔️', color: '#059669' },
+  'logo-branding': { icon: '✏️', color: '#ec4899' },
+  'vintage-retro': { icon: '📻', color: '#b45309' },
+  'cinematic-posters': { icon: '🎬', color: '#dc2626' },
+  'anime-manga': { icon: '🌸', color: '#f472b6' },
+  'minimalist-icons': { icon: '⬜', color: '#6b7280' },
+  'fashion-photography': { icon: '👗', color: '#e11d48' },
+  'portrait-photography': { icon: '📷', color: '#0ea5e9' },
+  'misc': { icon: '📎', color: '#9ca3af' },
+};
 
 // ===== Helper =====
 function genId(): string {
@@ -119,17 +137,92 @@ function genId(): string {
 }
 
 function loadSettings(): OmpSettings {
-  if (typeof window === 'undefined') return { enabled: false, categories: [], recentUsed: [] };
+  if (typeof window === 'undefined') return { enabled: false, categories: [], recentUsed: [], visionDefaultFormat: 'natural', savedVisionResults: [] };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        enabled: false,
+        categories: [],
+        recentUsed: [],
+        visionDefaultFormat: 'natural',
+        savedVisionResults: [],
+        ...parsed,
+      };
+    }
+    // Try to migrate from v1 storage
+    const v1Raw = localStorage.getItem('oh-my-prompt-data');
+    if (v1Raw) {
+      const v1 = JSON.parse(v1Raw);
+      const migrated: OmpSettings = {
+        enabled: v1.enabled || false,
+        categories: v1.categories || [],
+        recentUsed: v1.recentUsed || [],
+        visionDefaultFormat: 'natural',
+        savedVisionResults: [],
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+      return migrated;
+    }
   } catch {}
-  return { enabled: false, categories: [], recentUsed: [] };
+  return { enabled: false, categories: [], recentUsed: [], visionDefaultFormat: 'natural', savedVisionResults: [] };
 }
 
 function saveSettings(s: OmpSettings): void {
   if (typeof window === 'undefined') return;
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch {}
+}
+
+// ===== Resource Library Data Loader =====
+let resourceDataCache: { categories: ResourceCategory[]; prompts: Map<string, ResourcePrompt[]> } | null = null;
+
+async function loadResourceData(): Promise<{ categories: ResourceCategory[]; prompts: Map<string, ResourcePrompt[]> }> {
+  if (resourceDataCache) return resourceDataCache;
+
+  try {
+    const indexRes = await fetch('/data/omp-resources/index.json');
+    if (!indexRes.ok) throw new Error('Failed to load resource index');
+    const index = await indexRes.json();
+
+    const categories: ResourceCategory[] = (index.categories || []).map((cat: ResourceCategory) => ({
+      id: cat.id,
+      name: cat.name,
+      nameEn: cat.nameEn,
+      order: cat.order,
+      count: cat.count,
+    }));
+
+    // Load all category files
+    const promptsMap = new Map<string, ResourcePrompt[]>();
+    const categoryFiles: string[] = index.categoryFiles || [];
+
+    // Load categories in parallel batches
+    const batchSize = 5;
+    for (let i = 0; i < categoryFiles.length; i += batchSize) {
+      const batch = categoryFiles.slice(i, i + batchSize);
+      const results = await Promise.allSettled(
+        batch.map(async (catId) => {
+          const res = await fetch(`/data/omp-resources/categories/${catId}.json`);
+          if (!res.ok) return null;
+          const data = await res.json();
+          return { catId, prompts: data.prompts || [] };
+        })
+      );
+
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value) {
+          promptsMap.set(result.value.catId, result.value.prompts);
+        }
+      }
+    }
+
+    resourceDataCache = { categories, prompts: promptsMap };
+    return resourceDataCache;
+  } catch (err) {
+    console.error('[Oh My Prompt] Failed to load resource data:', err);
+    return { categories: [], prompts: new Map() };
+  }
 }
 
 // ===== Main Component =====
@@ -141,11 +234,12 @@ interface OhMyPromptProps {
   onClose?: () => void;
   themeStyle?: string;
   embedded?: boolean;
+  visionResult?: VisionApiResultData | null;
 }
 
-export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAnalyzing, isOpen, onClose, themeStyle, embedded = false }: OhMyPromptProps) {
+export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAnalyzing, isOpen, onClose, themeStyle, embedded = false, visionResult }: OhMyPromptProps) {
   const [settings, setSettings] = useState<OmpSettings>(loadSettings);
-  const [activeTab, setActiveTab] = useState<'insert' | 'manage' | 'resource' | 'vision'>('insert');
+  const [activeTab, setActiveTab] = useState<'insert' | 'manage' | 'resource' | 'vision'>('resource');
   const [searchQuery, setSearchQuery] = useState('');
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const [editingCatName, setEditingCatName] = useState('');
@@ -154,9 +248,30 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
   const [addingToCatId, setAddingToCatId] = useState<string | null>(null);
   const [dragItem, setDragItem] = useState<{ catId: string; promptId: string } | null>(null);
   const [builtinExpandedIds, setBuiltinExpandedIds] = useState<Set<string>>(new Set());
+  const [resourceCategories, setResourceCategories] = useState<ResourceCategory[]>([]);
+  const [resourcePrompts, setResourcePrompts] = useState<Map<string, ResourcePrompt[]>>(new Map());
+  const [resourceLoading, setResourceLoading] = useState(true);
+  const [expandedResourceCats, setExpandedResourceCats] = useState<Set<string>>(new Set());
+  const [visionFormat, setVisionFormat] = useState<'natural' | 'json'>('natural');
+  const [selectedResourceCat, setSelectedResourceCat] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { saveSettings(settings); }, [settings]);
+
+  // Load resource data on mount
+  useEffect(() => {
+    let mounted = true;
+    loadResourceData().then(({ categories, prompts }) => {
+      if (mounted) {
+        setResourceCategories(categories);
+        setResourcePrompts(prompts);
+        setResourceLoading(false);
+      }
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  const isMonochrome = themeStyle === 'monochrome';
 
   // ===== Category Management =====
   const addCategory = useCallback(() => {
@@ -164,14 +279,14 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
       id: genId(),
       name: '新分类',
       icon: '📁',
-      color: '#d4af37',
+      color: isMonochrome ? '#3b82f6' : '#d4af37',
       expanded: true,
       prompts: [],
     };
     setSettings(prev => ({ ...prev, categories: [...prev.categories, cat] }));
     setEditingCatId(cat.id);
     setEditingCatName(cat.name);
-  }, []);
+  }, [isMonochrome]);
 
   const deleteCategory = useCallback((catId: string) => {
     setSettings(prev => ({
@@ -189,7 +304,6 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
   }, []);
 
   const toggleCategory = useCallback((catId: string) => {
-    // Check if it's a builtin category
     const isBuiltin = catId.startsWith('builtin-');
     if (isBuiltin) {
       setBuiltinExpandedIds(prev => {
@@ -227,15 +341,25 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
 
   const insertPrompt = useCallback((prompt: PromptItem) => {
     onInsertPrompt(prompt.text);
-    // Add to recent
     setSettings(prev => ({
       ...prev,
       recentUsed: [prompt, ...prev.recentUsed.filter(p => p.id !== prompt.id)].slice(0, 20),
     }));
   }, [onInsertPrompt]);
 
-  const copyPrompt = useCallback((prompt: PromptItem) => {
-    navigator.clipboard.writeText(prompt.text).catch(() => {});
+  const insertResourcePrompt = useCallback((rp: ResourcePrompt) => {
+    const text = rp.content || rp.name;
+    onInsertPrompt(text);
+    // Also add to recent
+    const prompt: PromptItem = { id: rp.id, text, textEn: rp.contentEn || rp.nameEn, tag: rp.sourceCategory, createdAt: Date.now() };
+    setSettings(prev => ({
+      ...prev,
+      recentUsed: [prompt, ...prev.recentUsed.filter(p => p.id !== prompt.id)].slice(0, 20),
+    }));
+  }, [onInsertPrompt]);
+
+  const copyPrompt = useCallback((text: string) => {
+    navigator.clipboard.writeText(text).catch(() => {});
   }, []);
 
   // ===== Drag & Drop =====
@@ -243,7 +367,7 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
     setDragItem({ catId, promptId });
   }, []);
 
-  const handleDragOver = useCallback((e: React.DragEvent, targetCatId: string, targetPromptId?: string) => {
+  const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
   }, []);
@@ -282,52 +406,293 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
       })).filter(c => c.prompts.length > 0)
     : settings.categories;
 
-  const filteredBuiltIn = searchQuery
-    ? BUILT_IN_CATEGORIES.map(c => ({
-        ...c,
-        expanded: true,
-        prompts: c.prompts.filter(p =>
-          p.text.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          (p.textEn && p.textEn.toLowerCase().includes(searchQuery.toLowerCase())) ||
-          (p.tag && p.tag.toLowerCase().includes(searchQuery.toLowerCase()))
-        ),
-      })).filter(c => c.prompts.length > 0)
-    : BUILT_IN_CATEGORIES.map(c => ({
-        ...c,
-        expanded: builtinExpandedIds.has(c.id),
-      }));
+  // Search across resource library
+  const filteredResourcePrompts = useMemo(() => {
+    if (!searchQuery || activeTab !== 'resource') return null;
+    const results: ResourcePrompt[] = [];
+    const query = searchQuery.toLowerCase();
+    for (const [, prompts] of resourcePrompts) {
+      for (const p of prompts) {
+        if (
+          (p.name && p.name.toLowerCase().includes(query)) ||
+          (p.nameEn && p.nameEn.toLowerCase().includes(query)) ||
+          (p.content && p.content.toLowerCase().includes(query)) ||
+          (p.sourceCategory && p.sourceCategory.toLowerCase().includes(query))
+        ) {
+          results.push(p);
+        }
+      }
+    }
+    return results;
+  }, [searchQuery, resourcePrompts, activeTab]);
 
-  // ===== Render =====
+  // ===== Vision result rendering =====
+  const renderVisionResult = () => {
+    if (!visionResult) {
+      return (
+        <div className="p-4 flex flex-col items-center justify-center gap-3 min-h-[200px]">
+          <div className={`w-16 h-16 rounded-full flex items-center justify-center ${isMonochrome ? 'bg-blue-500/10' : 'bg-[#d4af37]/10'}`}>
+            <Eye className={`w-8 h-8 ${isMonochrome ? 'text-blue-500' : 'text-[#d4af37]'}`} />
+          </div>
+          <div className="text-center">
+            <p className={`text-sm font-medium mb-1 ${isMonochrome ? 'text-gray-800' : 'text-[#ccc]'}`}>图片识词</p>
+            <p className={`text-xs leading-relaxed ${isMonochrome ? 'text-gray-500' : 'text-[#666]'}`}>
+              悬停画布上的图片，点击 ✨ 按钮<br />
+              自动生成双语结构化提示词<br />
+              支持自然语言 / JSON 两种格式
+            </p>
+          </div>
+          {onVisionPrompt && (
+            <button
+              onClick={() => {
+                // Could trigger canvas-level image selection
+              }}
+              className={`mt-2 px-4 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                isMonochrome
+                  ? 'bg-blue-500/20 border border-blue-500/40 text-blue-600 hover:bg-blue-500/30'
+                  : 'bg-[#d4af37]/20 border border-[#d4af37]/40 text-[#d4af37] hover:bg-[#d4af37]/30'
+              }`}
+            >
+              选择画布图片识别
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div className="p-3 space-y-3">
+        {/* Title and confidence */}
+        <div className="flex items-center justify-between">
+          <h4 className={`text-sm font-semibold ${isMonochrome ? 'text-gray-800' : 'text-[#d4af37]'}`}>
+            {visionResult.zh.title || visionResult.en.title}
+          </h4>
+          <span className={`text-xs px-2 py-0.5 rounded-full ${
+            visionResult.confidence >= 0.8
+              ? isMonochrome ? 'bg-green-100 text-green-700' : 'bg-green-900/30 text-green-400'
+              : visionResult.confidence >= 0.5
+                ? isMonochrome ? 'bg-yellow-100 text-yellow-700' : 'bg-yellow-900/30 text-yellow-400'
+                : isMonochrome ? 'bg-red-100 text-red-700' : 'bg-red-900/30 text-red-400'
+          }`}>
+            置信度 {Math.round(visionResult.confidence * 100)}%
+          </span>
+        </div>
+
+        {/* Style Tags */}
+        {(visionResult.zh_style_tags?.length > 0 || visionResult.en_style_tags?.length > 0) && (
+          <div className="flex flex-wrap gap-1">
+            {visionResult.zh_style_tags?.map((tag, i) => (
+              <span key={`zh-${i}`} className={`text-xs px-1.5 py-0.5 rounded-full ${
+                isMonochrome ? 'bg-blue-100 text-blue-700' : 'bg-[#d4af37]/15 text-[#d4af37]'
+              }`}>{tag}</span>
+            ))}
+            {visionResult.en_style_tags?.map((tag, i) => (
+              <span key={`en-${i}`} className={`text-xs px-1.5 py-0.5 rounded-full ${
+                isMonochrome ? 'bg-gray-100 text-gray-600' : 'bg-[#333] text-[#999]'
+              }`}>{tag}</span>
+            ))}
+          </div>
+        )}
+
+        {/* Format Toggle */}
+        <div className={`flex rounded-md overflow-hidden ${isMonochrome ? 'border border-gray-200' : 'border border-[#333]'}`}>
+          <button
+            className={`flex-1 px-3 py-1 text-xs font-medium transition-colors ${
+              visionFormat === 'natural'
+                ? isMonochrome ? 'bg-blue-500 text-white' : 'bg-[#d4af37] text-black'
+                : isMonochrome ? 'bg-gray-50 text-gray-600' : 'bg-[#1a1a1a] text-[#888]'
+            }`}
+            onClick={() => setVisionFormat('natural')}
+          >
+            <FileText className="w-3 h-3 inline mr-1" />自然语言
+          </button>
+          <button
+            className={`flex-1 px-3 py-1 text-xs font-medium transition-colors ${
+              visionFormat === 'json'
+                ? isMonochrome ? 'bg-blue-500 text-white' : 'bg-[#d4af37] text-black'
+                : isMonochrome ? 'bg-gray-50 text-gray-600' : 'bg-[#1a1a1a] text-[#888]'
+            }`}
+            onClick={() => setVisionFormat('json')}
+          >
+            <Zap className="w-3 h-3 inline mr-1" />结构化
+          </button>
+        </div>
+
+        {/* Content */}
+        {visionFormat === 'natural' ? (
+          <div className="space-y-2">
+            {/* Chinese prompt */}
+            {visionResult.zh.prompt && (
+              <div>
+                <div className="flex items-center gap-1 mb-1">
+                  <Languages className={`w-3 h-3 ${isMonochrome ? 'text-blue-500' : 'text-[#d4af37]'}`} />
+                  <span className={`text-xs font-medium ${isMonochrome ? 'text-gray-700' : 'text-[#ccc]'}`}>中文提示词</span>
+                  <button className={`ml-auto p-0.5 rounded hover:${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`} onClick={() => copyPrompt(visionResult.zh.prompt)}>
+                    <Copy className="w-3 h-3" />
+                  </button>
+                </div>
+                <div className={`text-xs leading-relaxed p-2 rounded-md ${
+                  isMonochrome ? 'bg-gray-50 text-gray-700 border border-gray-100' : 'bg-[#1a1a1a] text-[#ccc] border border-[#222]'
+                }`}>
+                  {visionResult.zh.prompt}
+                </div>
+              </div>
+            )}
+            {/* English prompt */}
+            {visionResult.en.prompt && (
+              <div>
+                <div className="flex items-center gap-1 mb-1">
+                  <Languages className={`w-3 h-3 ${isMonochrome ? 'text-blue-500' : 'text-[#d4af37]'}`} />
+                  <span className={`text-xs font-medium ${isMonochrome ? 'text-gray-700' : 'text-[#ccc]'}`}>英文提示词</span>
+                  <button className={`ml-auto p-0.5 rounded hover:${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`} onClick={() => copyPrompt(visionResult.en.prompt)}>
+                    <Copy className="w-3 h-3" />
+                  </button>
+                </div>
+                <div className={`text-xs leading-relaxed p-2 rounded-md ${
+                  isMonochrome ? 'bg-gray-50 text-gray-700 border border-gray-100' : 'bg-[#1a1a1a] text-[#ccc] border border-[#222]'
+                }`}>
+                  {visionResult.en.prompt}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {/* JSON structured view */}
+            {visionResult.zh_json && (
+              <div>
+                <div className="flex items-center gap-1 mb-1">
+                  <span className={`text-xs font-medium ${isMonochrome ? 'text-gray-700' : 'text-[#ccc]'}`}>中文结构化</span>
+                  <button className={`ml-auto p-0.5 rounded hover:${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`} onClick={() => copyPrompt(JSON.stringify(visionResult.zh_json, null, 2))}>
+                    <Copy className="w-3 h-3" />
+                  </button>
+                </div>
+                {renderJsonFields(visionResult.zh_json, true)}
+              </div>
+            )}
+            {visionResult.en_json && (
+              <div>
+                <div className="flex items-center gap-1 mb-1">
+                  <span className={`text-xs font-medium ${isMonochrome ? 'text-gray-700' : 'text-[#ccc]'}`}>英文结构化</span>
+                  <button className={`ml-auto p-0.5 rounded hover:${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`} onClick={() => copyPrompt(JSON.stringify(visionResult.en_json, null, 2))}>
+                    <Copy className="w-3 h-3" />
+                  </button>
+                </div>
+                {renderJsonFields(visionResult.en_json, false)}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Insert buttons */}
+        <div className="flex gap-2">
+          {visionResult.zh.prompt && (
+            <button
+              className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                isMonochrome
+                  ? 'bg-blue-500 text-white hover:bg-blue-600'
+                  : 'bg-[#d4af37] text-black hover:bg-[#e5c147]'
+              }`}
+              onClick={() => onInsertPrompt(visionResult.zh.prompt!)}
+            >
+              插入中文
+            </button>
+          )}
+          {visionResult.en.prompt && (
+            <button
+              className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                isMonochrome
+                  ? 'bg-gray-200 text-gray-800 hover:bg-gray-300'
+                  : 'bg-[#333] text-[#ccc] hover:bg-[#444]'
+              }`}
+              onClick={() => onInsertPrompt(visionResult.en.prompt!)}
+            >
+              插入英文
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Render JSON fields in a key-value grid
+  const renderJsonFields = (data: Record<string, unknown>, isChinese: boolean) => {
+    return (
+      <div className={`space-y-1 p-2 rounded-md text-xs ${
+        isMonochrome ? 'bg-gray-50 border border-gray-100' : 'bg-[#1a1a1a] border border-[#222]'
+      }`}>
+        {Object.entries(data).map(([key, value]) => {
+          if (Array.isArray(value)) {
+            return (
+              <div key={key} className="flex items-start gap-2">
+                <span className={`font-medium min-w-[60px] ${isMonochrome ? 'text-blue-600' : 'text-[#d4af37]'}`}>{key}</span>
+                <div className="flex flex-wrap gap-1">
+                  {value.map((item: string, i: number) => (
+                    <span key={i} className={`px-1.5 py-0.5 rounded ${
+                      isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-[#333] text-[#ccc]'
+                    }`}>{item}</span>
+                  ))}
+                </div>
+              </div>
+            );
+          }
+          if (typeof value === 'object' && value !== null) {
+            return (
+              <div key={key} className="flex items-start gap-2">
+                <span className={`font-medium min-w-[60px] ${isMonochrome ? 'text-blue-600' : 'text-[#d4af37]'}`}>{key}</span>
+                <span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{JSON.stringify(value)}</span>
+              </div>
+            );
+          }
+          return (
+            <div key={key} className="flex items-start gap-2">
+              <span className={`font-medium min-w-[60px] ${isMonochrome ? 'text-blue-600' : 'text-[#d4af37]'}`}>{key}</span>
+              <span className={isMonochrome ? 'text-gray-700' : 'text-[#ccc]'}>{String(value)}</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // ===== Render Prompt Item =====
   const renderPromptItem = (prompt: PromptItem, catId: string, idx: number, isBuiltIn: boolean) => (
     <div
       key={prompt.id}
       draggable={!isBuiltIn}
       onDragStart={() => handleDragStart(catId, prompt.id)}
-      onDragOver={(e) => handleDragOver(e, catId)}
+      onDragOver={handleDragOver}
       onDrop={(e) => handleDrop(e, catId, idx)}
-      className="group flex items-center gap-1.5 px-2 py-1.5 rounded-md hover:bg-[#1a1a1a] transition-colors cursor-pointer"
+      className={`group flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-colors cursor-pointer ${
+        isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-[#1a1a1a]'
+      }`}
       onClick={() => insertPrompt(prompt)}
     >
       {!isBuiltIn && (
-        <GripVertical className="w-3 h-3 text-[#555] opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+        <GripVertical className={`w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ${isMonochrome ? 'text-gray-400' : 'text-[#555]'}`} />
       )}
       <div className="flex-1 min-w-0">
-        <div className="text-xs text-[#ccc] truncate">{prompt.text}</div>
+        <div className={`text-xs truncate ${isMonochrome ? 'text-gray-700' : 'text-[#ccc]'}`}>{prompt.text}</div>
+        {prompt.textEn && (
+          <div className={`text-xs truncate ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{prompt.textEn}</div>
+        )}
       </div>
       {prompt.tag && (
-        <span className="text-xs px-1.5 py-0.5 rounded-full bg-[#d4af37]/15 text-[#d4af37] flex-shrink-0">{prompt.tag}</span>
+        <span className={`text-xs px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+          isMonochrome ? 'bg-blue-100 text-blue-700' : 'bg-[#d4af37]/15 text-[#d4af37]'
+        }`}>{prompt.tag}</span>
       )}
       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
         <button
-          className="p-0.5 rounded hover:bg-[#333] text-[#888] hover:text-[#d4af37]"
-          onClick={(e) => { e.stopPropagation(); copyPrompt(prompt); }}
+          className={`p-0.5 rounded ${isMonochrome ? 'hover:bg-gray-200 text-gray-400 hover:text-blue-500' : 'hover:bg-[#333] text-[#888] hover:text-[#d4af37]'}`}
+          onClick={(e) => { e.stopPropagation(); copyPrompt(prompt.text); }}
           title="复制"
         >
           <Copy className="w-3 h-3" />
         </button>
         {!isBuiltIn && (
           <button
-            className="p-0.5 rounded hover:bg-[#333] text-[#888] hover:text-red-400"
+            className={`p-0.5 rounded ${isMonochrome ? 'hover:bg-gray-200 text-gray-400 hover:text-red-500' : 'hover:bg-[#333] text-[#888] hover:text-red-400'}`}
             onClick={(e) => { e.stopPropagation(); deletePrompt(catId, prompt.id); }}
             title="删除"
           >
@@ -338,17 +703,73 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
     </div>
   );
 
+  // ===== Render Resource Prompt Item =====
+  const renderResourcePromptItem = (rp: ResourcePrompt) => (
+    <div
+      key={rp.id}
+      className={`group flex items-start gap-2 px-2 py-2 rounded-md transition-colors cursor-pointer ${
+        isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-[#1a1a1a]'
+      }`}
+      onClick={() => insertResourcePrompt(rp)}
+    >
+      {rp.previewImage && (
+        <div className={`w-10 h-10 rounded flex-shrink-0 overflow-hidden ${isMonochrome ? 'bg-gray-100' : 'bg-[#222]'}`}>
+          <img
+            src={rp.previewImage}
+            alt={rp.name}
+            className="w-full h-full object-cover"
+            loading="lazy"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
+        </div>
+      )}
+      <div className="flex-1 min-w-0">
+        <div className={`text-xs font-medium truncate ${isMonochrome ? 'text-gray-800' : 'text-[#ccc]'}`}>
+          {rp.name}
+          {rp.nameEn && <span className={`ml-1 ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>/ {rp.nameEn}</span>}
+        </div>
+        <div className={`text-xs truncate mt-0.5 ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>
+          {rp.content?.substring(0, 60)}...
+        </div>
+        <div className="flex items-center gap-2 mt-0.5">
+          {rp.sourceCategory && (
+            <span className={`text-xs px-1 py-0 rounded ${
+              isMonochrome ? 'bg-blue-50 text-blue-600' : 'bg-[#d4af37]/10 text-[#d4af37]'
+            }`}>{rp.sourceCategory}</span>
+          )}
+          {rp.author && (
+            <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#555]'}`}>by {rp.author}</span>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mt-1">
+        <button
+          className={`p-0.5 rounded ${isMonochrome ? 'hover:bg-gray-200 text-gray-400 hover:text-blue-500' : 'hover:bg-[#333] text-[#888] hover:text-[#d4af37]'}`}
+          onClick={(e) => { e.stopPropagation(); copyPrompt(rp.content); }}
+          title="复制"
+        >
+          <Copy className="w-3 h-3" />
+        </button>
+      </div>
+    </div>
+  );
+
+  // ===== Render Category =====
   const renderCategory = (cat: PromptCategory, isBuiltIn: boolean) => (
     <div key={cat.id} className="mb-1">
       <div
-        className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-[#1a1a1a] cursor-pointer group"
+        className={`flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer group ${
+          isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-[#1a1a1a]'
+        }`}
         onClick={() => toggleCategory(cat.id)}
       >
         <span className="text-sm">{cat.icon}</span>
         {editingCatId === cat.id ? (
           <div className="flex items-center gap-1 flex-1">
             <input
-              className="flex-1 bg-[#1a1a1a] text-xs text-[#ccc] px-1.5 py-0.5 rounded border border-[#d4af37]/50 outline-none"
+              className={`flex-1 text-xs px-1.5 py-0.5 rounded outline-none ${
+                isMonochrome ? 'bg-gray-100 text-gray-800 border border-blue-300' : 'bg-[#1a1a1a] text-[#ccc] border border-[#d4af37]/50'
+              }`}
               value={editingCatName}
               onChange={(e) => setEditingCatName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') renameCategory(cat.id, editingCatName); if (e.key === 'Escape') setEditingCatId(null); }}
@@ -364,30 +785,32 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
           </div>
         ) : (
           <>
-            <span className="text-xs font-medium text-[#ccc] flex-1">{cat.name}</span>
-            <span className="text-xs text-[#666]">{cat.prompts.length}</span>
+            <span className={`text-xs font-medium flex-1 ${isMonochrome ? 'text-gray-800' : 'text-[#ccc]'}`}>{cat.name}</span>
+            <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{cat.prompts.length}</span>
             {!isBuiltIn && (
               <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5">
-                <button className="p-0.5 text-[#888] hover:text-[#d4af37]" onClick={(e) => { e.stopPropagation(); setEditingCatId(cat.id); setEditingCatName(cat.name); }} title="重命名">
+                <button className={`p-0.5 ${isMonochrome ? 'text-gray-400 hover:text-blue-500' : 'text-[#888] hover:text-[#d4af37]'}`} onClick={(e) => { e.stopPropagation(); setEditingCatId(cat.id); setEditingCatName(cat.name); }} title="重命名">
                   <Edit3 className="w-3 h-3" />
                 </button>
-                <button className="p-0.5 text-[#888] hover:text-red-400" onClick={(e) => { e.stopPropagation(); deleteCategory(cat.id); }} title="删除">
+                <button className={`p-0.5 ${isMonochrome ? 'text-gray-400 hover:text-red-500' : 'text-[#888] hover:text-red-400'}`} onClick={(e) => { e.stopPropagation(); deleteCategory(cat.id); }} title="删除">
                   <Trash2 className="w-3 h-3" />
                 </button>
               </div>
             )}
           </>
         )}
-        {cat.expanded ? <ChevronDown className="w-3 h-3 text-[#666]" /> : <ChevronRight className="w-3 h-3 text-[#666]" />}
+        {cat.expanded ? <ChevronDown className={`w-3 h-3 ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`} /> : <ChevronRight className={`w-3 h-3 ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`} />}
       </div>
       {cat.expanded && (
-        <div className="ml-4 border-l border-[#222]">
+        <div className={`ml-4 ${isMonochrome ? 'border-l border-gray-200' : 'border-l border-[#222]'}`}>
           {cat.prompts.map((p, idx) => renderPromptItem(p, cat.id, idx, isBuiltIn))}
           {!isBuiltIn && (
             addingToCatId === cat.id ? (
               <div className="px-2 py-1.5 space-y-1">
                 <input
-                  className="w-full bg-[#1a1a1a] text-xs text-[#ccc] px-2 py-1 rounded border border-[#333] outline-none focus:border-[#d4af37]/50"
+                  className={`w-full text-xs px-2 py-1 rounded outline-none ${
+                    isMonochrome ? 'bg-gray-50 text-gray-800 border border-gray-200 focus:border-blue-300' : 'bg-[#1a1a1a] text-[#ccc] border border-[#333] focus:border-[#d4af37]/50'
+                  }`}
                   placeholder="中文提示词..."
                   value={newPromptText}
                   onChange={(e) => setNewPromptText(e.target.value)}
@@ -395,20 +818,28 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
                   autoFocus
                 />
                 <input
-                  className="w-full bg-[#1a1a1a] text-xs text-[#888] px-2 py-1 rounded border border-[#333] outline-none focus:border-[#d4af37]/50"
+                  className={`w-full text-xs px-2 py-1 rounded outline-none ${
+                    isMonochrome ? 'bg-gray-50 text-gray-500 border border-gray-200 focus:border-blue-300' : 'bg-[#1a1a1a] text-[#888] border border-[#333] focus:border-[#d4af37]/50'
+                  }`}
                   placeholder="英文补充（可选）..."
                   value={newPromptTextEn}
                   onChange={(e) => setNewPromptTextEn(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && newPromptText.trim()) addPrompt(cat.id, newPromptText.trim(), newPromptTextEn.trim() || undefined); }}
                 />
                 <div className="flex gap-1">
-                  <button className="px-2 py-0.5 text-xs bg-[#d4af37] text-black rounded" onClick={() => { if (newPromptText.trim()) addPrompt(cat.id, newPromptText.trim(), newPromptTextEn.trim() || undefined); }}>保存</button>
-                  <button className="px-2 py-0.5 text-xs bg-[#333] text-[#ccc] rounded" onClick={() => { setAddingToCatId(null); setNewPromptText(''); setNewPromptTextEn(''); }}>取消</button>
+                  <button className={`px-2 py-0.5 text-xs rounded ${
+                    isMonochrome ? 'bg-blue-500 text-white' : 'bg-[#d4af37] text-black'
+                  }`} onClick={() => { if (newPromptText.trim()) addPrompt(cat.id, newPromptText.trim(), newPromptTextEn.trim() || undefined); }}>保存</button>
+                  <button className={`px-2 py-0.5 text-xs rounded ${
+                    isMonochrome ? 'bg-gray-200 text-gray-600' : 'bg-[#333] text-[#ccc]'
+                  }`} onClick={() => { setAddingToCatId(null); setNewPromptText(''); setNewPromptTextEn(''); }}>取消</button>
                 </div>
               </div>
             ) : (
               <button
-                className="flex items-center gap-1 px-2 py-1 text-xs text-[#888] hover:text-[#d4af37] transition-colors"
+                className={`flex items-center gap-1 px-2 py-1 text-xs transition-colors ${
+                  isMonochrome ? 'text-gray-400 hover:text-blue-500' : 'text-[#888] hover:text-[#d4af37]'
+                }`}
                 onClick={() => setAddingToCatId(cat.id)}
               >
                 <Plus className="w-3 h-3" /> 添加提示词
@@ -420,29 +851,105 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
     </div>
   );
 
+  // ===== Render Resource Category =====
+  const renderResourceCategory = (cat: ResourceCategory) => {
+    const isExpanded = expandedResourceCats.has(cat.id);
+    const iconInfo = CATEGORY_ICONS[cat.id] || { icon: '📁', color: '#9ca3af' };
+    const prompts = resourcePrompts.get(cat.id) || [];
+
+    return (
+      <div key={cat.id} className="mb-1">
+        <div
+          className={`flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer group ${
+            isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-[#1a1a1a]'
+          }`}
+          onClick={() => {
+            setExpandedResourceCats(prev => {
+              const next = new Set(prev);
+              if (next.has(cat.id)) next.delete(cat.id); else next.add(cat.id);
+              return next;
+            });
+          }}
+        >
+          <span className="text-sm">{iconInfo.icon}</span>
+          <span className={`text-xs font-medium flex-1 ${isMonochrome ? 'text-gray-800' : 'text-[#ccc]'}`}>{cat.name}</span>
+          <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{cat.count || prompts.length}</span>
+          {isExpanded ? <ChevronDown className={`w-3 h-3 ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`} /> : <ChevronRight className={`w-3 h-3 ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`} />}
+        </div>
+        {isExpanded && (
+          <div className={`ml-4 ${isMonochrome ? 'border-l border-gray-200' : 'border-l border-[#222]'}`}>
+            {prompts.slice(0, 10).map(rp => renderResourcePromptItem(rp))}
+            {prompts.length > 10 && (
+              <button
+                className={`flex items-center gap-1 px-2 py-1 text-xs w-full text-left transition-colors ${
+                  isMonochrome ? 'text-blue-500 hover:text-blue-600' : 'text-[#d4af37] hover:text-[#e5c147]'
+                }`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedResourceCat(cat.id);
+                }}
+              >
+                查看全部 {prompts.length} 条 <ArrowRight className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ===== Render Expanded Resource Category =====
+  const renderExpandedResourceCat = () => {
+    if (!selectedResourceCat) return null;
+    const cat = resourceCategories.find(c => c.id === selectedResourceCat);
+    const prompts = resourcePrompts.get(selectedResourceCat) || [];
+    const iconInfo = CATEGORY_ICONS[selectedResourceCat] || { icon: '📁', color: '#9ca3af' };
+
+    return (
+      <div className="flex flex-col h-full">
+        <div className={`flex items-center gap-2 px-3 py-2 border-b ${isMonochrome ? 'border-gray-200' : 'border-[#222]'}`}>
+          <button
+            className={`p-1 rounded ${isMonochrome ? 'hover:bg-gray-200 text-gray-600' : 'hover:bg-[#333] text-[#888]'}`}
+            onClick={() => setSelectedResourceCat(null)}
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <span className="text-sm">{iconInfo.icon}</span>
+          <span className={`text-sm font-medium ${isMonochrome ? 'text-gray-800' : 'text-[#ccc]'}`}>{cat?.name}</span>
+          <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>({prompts.length})</span>
+        </div>
+        <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+          {prompts.map(rp => renderResourcePromptItem(rp))}
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div ref={panelRef} className={embedded ? 'flex flex-col overflow-hidden' : 'w-72 h-full bg-[#0d0d0d] border-l border-[#222] flex flex-col overflow-hidden'}>
+    <div ref={panelRef} className={embedded ? 'flex flex-col overflow-hidden' : `w-80 h-full flex flex-col overflow-hidden ${isMonochrome ? 'bg-white border-l border-gray-200' : 'bg-[#0d0d0d] border-l border-[#222]'}`}>
       {/* Header - hidden in embedded mode since parent provides one */}
       {!embedded && (
-        <div className="flex items-center gap-2 px-3 py-2.5 border-b border-[#222]">
-          <Sparkles className="w-4 h-4 text-[#d4af37]" />
-          <span className="text-sm font-semibold text-[#d4af37]">灵感提示词库</span>
-          <span className="text-xs text-[#666]">v1.3</span>
+        <div className={`flex items-center gap-2 px-3 py-2.5 border-b ${isMonochrome ? 'border-gray-200' : 'border-[#222]'}`}>
+          <Sparkles className={`w-4 h-4 ${isMonochrome ? 'text-blue-500' : 'text-[#d4af37]'}`} />
+          <span className={`text-sm font-semibold ${isMonochrome ? 'text-blue-600' : 'text-[#d4af37]'}`}>灵感提示词库</span>
+          <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>v2.0</span>
         </div>
       )}
 
       {/* Tabs */}
-      <div className="flex border-b border-[#222]">
+      <div className={`flex border-b ${isMonochrome ? 'border-gray-200' : 'border-[#222]'}`}>
         {[
-          { id: 'insert' as const, label: '一键插入', icon: <ExternalLink className="w-3 h-3" /> },
-          { id: 'manage' as const, label: '分类管理', icon: <FolderPlus className="w-3 h-3" /> },
           { id: 'resource' as const, label: '资源库', icon: <Lightbulb className="w-3 h-3" /> },
-          { id: 'vision' as const, label: '图片识词', icon: <Sparkles className="w-3 h-3" /> },
+          { id: 'insert' as const, label: '我的', icon: <Bookmark className="w-3 h-3" /> },
+          { id: 'manage' as const, label: '管理', icon: <FolderPlus className="w-3 h-3" /> },
+          { id: 'vision' as const, label: '图片识词', icon: <Eye className="w-3 h-3" /> },
         ].map(tab => (
           <button
             key={tab.id}
             className={`flex-1 flex items-center justify-center gap-1 py-2 text-xs transition-colors ${
-              activeTab === tab.id ? 'text-[#d4af37] border-b-2 border-[#d4af37] bg-[#d4af37]/5' : 'text-[#888] hover:text-[#ccc]'
+              activeTab === tab.id
+                ? isMonochrome ? 'text-blue-600 border-b-2 border-blue-500 bg-blue-50/50' : 'text-[#d4af37] border-b-2 border-[#d4af37] bg-[#d4af37]/5'
+                : isMonochrome ? 'text-gray-500 hover:text-gray-700' : 'text-[#888] hover:text-[#ccc]'
             }`}
             onClick={() => setActiveTab(tab.id)}
           >
@@ -453,31 +960,69 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
 
       {/* Search */}
       {activeTab !== 'vision' && (
-        <div className="px-3 py-2 border-b border-[#222]">
-          <div className="flex items-center gap-1.5 bg-[#1a1a1a] rounded-md px-2 py-1">
-            <Search className="w-3 h-3 text-[#666]" />
+        <div className={`px-3 py-2 border-b ${isMonochrome ? 'border-gray-200' : 'border-[#222]'}`}>
+          <div className={`flex items-center gap-1.5 rounded-md px-2 py-1 ${isMonochrome ? 'bg-gray-50' : 'bg-[#1a1a1a]'}`}>
+            <Search className={`w-3 h-3 ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`} />
             <input
-              className="flex-1 bg-transparent text-xs text-[#ccc] outline-none placeholder:text-[#555]"
+              className={`flex-1 bg-transparent text-xs outline-none ${isMonochrome ? 'text-gray-800 placeholder:text-gray-400' : 'text-[#ccc] placeholder:text-[#555]'}`}
               placeholder="搜索提示词..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')}>
+                <X className={`w-3 h-3 ${isMonochrome ? 'text-gray-400' : 'text-[#555]'}`} />
+              </button>
+            )}
           </div>
         </div>
       )}
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto custom-scrollbar">
-        {/* Insert Tab */}
+        {/* Resource Library Tab */}
+        {activeTab === 'resource' && (
+          <div className="flex flex-col h-full">
+            {selectedResourceCat ? (
+              renderExpandedResourceCat()
+            ) : resourceLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className={`w-5 h-5 animate-spin ${isMonochrome ? 'text-blue-500' : 'text-[#d4af37]'}`} />
+                <span className={`ml-2 text-xs ${isMonochrome ? 'text-gray-500' : 'text-[#666]'}`}>加载资源库...</span>
+              </div>
+            ) : filteredResourcePrompts ? (
+              <div className="p-2">
+                <div className={`mb-2 px-2 py-1 text-xs ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>
+                  搜索结果: {filteredResourcePrompts.length} 条
+                </div>
+                {filteredResourcePrompts.slice(0, 50).map(rp => renderResourcePromptItem(rp))}
+                {filteredResourcePrompts.length > 50 && (
+                  <div className={`text-xs text-center py-2 ${isMonochrome ? 'text-gray-400' : 'text-[#555]'}`}>
+                    仅显示前50条，请缩小搜索范围
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="p-2">
+                <div className={`mb-2 px-2 py-1 text-xs ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>
+                  精选提示词资源库，点击即可插入
+                </div>
+                {resourceCategories.map(cat => renderResourceCategory(cat))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Insert / My Prompts Tab */}
         {activeTab === 'insert' && (
           <div className="p-2">
             {/* Recent */}
             {settings.recentUsed.length > 0 && !searchQuery && (
               <div className="mb-3">
-                <div className="flex items-center gap-1.5 px-2 py-1 text-xs text-[#888] uppercase tracking-wider">
+                <div className={`flex items-center gap-1.5 px-2 py-1 text-xs uppercase tracking-wider ${isMonochrome ? 'text-gray-400' : 'text-[#888]'}`}>
                   <span>🕐</span> 最近使用
                 </div>
-                {settings.recentUsed.slice(0, 5).map(p => renderPromptItem(p, '__recent__', 0, true))}
+                {settings.recentUsed.slice(0, 8).map(p => renderPromptItem(p, '__recent__', 0, true))}
               </div>
             )}
 
@@ -487,9 +1032,9 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
             ) : (
               !searchQuery && (
                 <div className="text-center py-6">
-                  <Lightbulb className="w-8 h-8 text-[#333] mx-auto mb-2" />
-                  <p className="text-xs text-[#666]">还没有提示词</p>
-                  <p className="text-xs text-[#555]">切换到「分类管理」添加</p>
+                  <Bookmark className={`w-8 h-8 mx-auto mb-2 ${isMonochrome ? 'text-gray-300' : 'text-[#333]'}`} />
+                  <p className={`text-xs ${isMonochrome ? 'text-gray-500' : 'text-[#666]'}`}>还没有提示词</p>
+                  <p className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#555]'}`}>切换到「管理」添加</p>
                 </div>
               )
             )}
@@ -500,7 +1045,11 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
         {activeTab === 'manage' && (
           <div className="p-2">
             <button
-              className="w-full flex items-center justify-center gap-1.5 py-2 mb-3 text-xs text-[#d4af37] bg-[#d4af37]/10 rounded-md hover:bg-[#d4af37]/20 transition-colors"
+              className={`w-full flex items-center justify-center gap-1.5 py-2 mb-3 text-xs rounded-md transition-colors ${
+                isMonochrome
+                  ? 'text-blue-600 bg-blue-50 hover:bg-blue-100'
+                  : 'text-[#d4af37] bg-[#d4af37]/10 hover:bg-[#d4af37]/20'
+              }`}
               onClick={addCategory}
             >
               <FolderPlus className="w-3.5 h-3.5" /> 新建分类
@@ -508,53 +1057,33 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
             {filteredCategories.map(c => renderCategory(c, false))}
             {filteredCategories.length === 0 && (
               <div className="text-center py-6">
-                <p className="text-xs text-[#666]">点击上方按钮创建分类</p>
+                <p className={`text-xs ${isMonochrome ? 'text-gray-500' : 'text-[#666]'}`}>点击上方按钮创建分类</p>
               </div>
             )}
           </div>
         )}
 
-        {/* Resource Library */}
-        {activeTab === 'resource' && (
-          <div className="p-2">
-            <div className="mb-2 px-2 py-1 text-xs text-[#888]">
-              内置精选提示词，点击即可插入到创意描述
-            </div>
-            {filteredBuiltIn.map(c => renderCategory(c, true))}
-          </div>
-        )}
-
-        {/* Vision / Image-to-Prompt */}
+        {/* Vision / Image-to-Prompt Tab */}
         {activeTab === 'vision' && (
-          <div className="p-4 flex flex-col items-center justify-center gap-3 min-h-[200px]">
-            <div className="w-16 h-16 rounded-full bg-[#d4af37]/10 flex items-center justify-center">
-              <Sparkles className="w-8 h-8 text-[#d4af37]" />
-            </div>
-            <div className="text-center">
-              <p className="text-sm text-[#ccc] font-medium mb-1">图片识词</p>
-              <p className="text-xs text-[#666] leading-relaxed">
-                开启 OMP 后，悬停画布上的图片<br />
-                点击 ✨ 按钮即可自动生成双语提示词<br />
-                并插入到创意描述中
-              </p>
-            </div>
-            {onVisionPrompt && (
-              <button
-                onClick={() => {
-                  // Prompt user to select an image on the canvas
-                }}
-                className="mt-2 px-4 py-1.5 rounded-lg bg-[#d4af37]/20 border border-[#d4af37]/40 text-[#d4af37] text-xs font-medium hover:bg-[#d4af37]/30 transition-colors"
-              >
-                选择画布图片识别
-              </button>
+          <div>
+            {isVisionAnalyzing ? (
+              <div className="flex flex-col items-center justify-center py-12 gap-3">
+                <Loader2 className={`w-8 h-8 animate-spin ${isMonochrome ? 'text-blue-500' : 'text-[#d4af37]'}`} />
+                <div className="text-center">
+                  <p className={`text-sm font-medium ${isMonochrome ? 'text-gray-800' : 'text-[#ccc]'}`}>正在分析图片...</p>
+                  <p className={`text-xs mt-1 ${isMonochrome ? 'text-gray-500' : 'text-[#666]'}`}>生成双语结构化提示词</p>
+                </div>
+              </div>
+            ) : (
+              renderVisionResult()
             )}
           </div>
         )}
       </div>
 
       {/* Footer hint */}
-      <div className="px-3 py-1.5 border-t border-[#222] text-xs text-[#555] text-center">
-        点击提示词 → 插入到创意描述 | 悬停画布图片 ✨ → 图片识词
+      <div className={`px-3 py-1.5 border-t text-xs text-center ${isMonochrome ? 'border-gray-200 text-gray-400' : 'border-[#222] text-[#555]'}`}>
+        点击提示词 → 插入 | 悬停图片 ✨ → 识词 | 资源库 {resourceCategories.length} 类
       </div>
     </div>
   );

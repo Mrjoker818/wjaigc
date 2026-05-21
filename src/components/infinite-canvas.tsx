@@ -315,6 +315,7 @@ interface InfiniteCanvasProps {
   onInsertPrompt?: (prompt: string) => void;
   ohMyPromptThemeStyle?: string;
   isVisionAnalyzing?: boolean;
+  visionResult?: import('@/components/oh-my-prompt').VisionApiResultData | null;
   onToggleSettings?: () => void;
   onToggleTheme?: () => void;
   onToggleUserManager?: () => void;
@@ -375,6 +376,7 @@ export function InfiniteCanvas({
   onInsertPrompt,
   ohMyPromptThemeStyle = 'gold',
   isVisionAnalyzing = false,
+  visionResult = null,
   onToggleSettings,
   onToggleTheme,
   onToggleUserManager,
@@ -5893,6 +5895,7 @@ export function InfiniteCanvas({
                 onInsertPrompt={(prompt: string) => onInsertPrompt?.(prompt)}
                 onVisionPrompt={(url: string) => onVisionPrompt?.(url)}
                 isVisionAnalyzing={isVisionAnalyzing}
+                visionResult={visionResult}
                 themeStyle={ohMyPromptThemeStyle}
                 embedded={true}
               />

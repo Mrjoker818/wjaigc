@@ -169,6 +169,7 @@ function CanvasApp() {
   // Oh My Prompt - Vision Prompt state
   const [visionPromptEnabled, setVisionPromptEnabled] = useState(false);
   const [isVisionAnalyzing, setIsVisionAnalyzing] = useState(false);
+  const [visionResult, setVisionResult] = useState<import('@/components/oh-my-prompt').VisionApiResultData | null>(null);
 
   // Initialize current user and admin UI state
   useEffect(() => {
@@ -1729,6 +1730,9 @@ function CanvasApp() {
 
       if (result.success && result.data) {
         const data = result.data;
+        // Store structured vision result for OhMyPrompt component
+        setVisionResult(data);
+
         // Build bilingual prompt string
         let promptText = '';
         if (data.zh?.prompt) {
@@ -1974,6 +1978,7 @@ function CanvasApp() {
           onInsertPrompt={(prompt: string) => setExternalPrompt(prompt)}
           ohMyPromptThemeStyle={themeStyle}
           isVisionAnalyzing={isVisionAnalyzing}
+          visionResult={visionResult}
           onToggleSettings={() => setPanelCollapsed(prev => !prev)}
           onToggleTheme={() => setThemeStyle(prev => prev === 'gold' ? 'monochrome' : 'gold')}
           onToggleUserManager={() => setShowUserManager(prev => !prev)}
