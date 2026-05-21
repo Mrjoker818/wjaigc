@@ -332,10 +332,9 @@ interface InfiniteCanvasProps {
   onForceSave?: () => void;
   /** Called when user wants to open the language-based image editor (null = open empty) */
   onEditImage?: (image: CanvasImage | null) => void;
-  /** Called when img2img generate is triggered - delegates to page.tsx handleGenerate for reliable polling */
-  }
+}
 
-type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'img2img' | 'upscale' | 'svg-trace';
+type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'upscale' | 'svg-trace';
 type ActiveTool = 'none' | 'upscale' | 'download' | 'multiAngle' | 'to3d';
 type MultiAngleMode = 'image' | 'camera';
 type ThreeDBackend = 'api' | 'local';
@@ -571,7 +570,7 @@ export function InfiniteCanvas({
     if (typeof window !== 'undefined') {
       try { const saved = localStorage.getItem('wujie_toolbar_order'); if (saved) return JSON.parse(saved); } catch {}
     }
-    return ['放大','移除背景','SVG智能描摹','擦除','蒙版','编辑元素','多角度','转3D','扩展','裁切','图生图','语言修图','Agent编排','下载'];
+    return ['放大','移除背景','SVG智能描摹','擦除','蒙版','编辑元素','多角度','转3D','扩展','裁切','语言修图','Agent编排','下载'];
   });
   const [toolbarHiddenItems, setToolbarHiddenItems] = useState<Set<string>>(() => {
     if (typeof window !== 'undefined') {
@@ -591,23 +590,6 @@ export function InfiniteCanvas({
       localStorage.setItem('wujie_toolbar_hidden', JSON.stringify([...toolbarHiddenItems]));
     }
   }, [toolbarHiddenItems]);
-
-  // 图生图 state
-  const IMG2IMG_CATEGORIES = [
-    { key: '风格', prefix: 'in the style of', placeholder: '如：水彩画风格' },
-    { key: '构图', prefix: 'with the composition of', placeholder: '如：居中对称构图' },
-    { key: '场景', prefix: 'in the scene of', placeholder: '如：夕阳下的海滩' },
-    { key: '色彩', prefix: 'with the color palette of', placeholder: '如：暖橙色调' },
-    { key: '主体', prefix: 'featuring the subject of', placeholder: '如：蒙娜丽莎' },
-    { key: '细节', prefix: 'with the details of', placeholder: '如：细腻纹理' },
-  ];
-
-  const [img2imgStrengths, setImg2imgStrengths] = useState<Record<string, number>>({ '风格': 0, '构图': 0, '场景': 0, '色彩': 0, '主体': 0, '细节': 0 });
-  const [img2imgKeyword, setImg2imgKeyword] = useState('');
-  const [img2imgNegativePrompt, setImg2imgNegativePrompt] = useState('');
-  const [img2imgGenerating, setImg2imgGenerating] = useState(false);
-  const [img2imgShowNegative, setImg2imgShowNegative] = useState(false);
-  const [img2imgActiveCategories, setImg2imgActiveCategories] = useState<Set<string>>(new Set());
 
   // Active tool panel
   const [activeTool, setActiveTool] = useState<ActiveTool>('none');
@@ -2581,7 +2563,7 @@ export function InfiniteCanvas({
     let calculatedStrength: number | undefined;
 
     if (group.type === 'reference' && group.refImages.length > 0) {
-      // 参考图组：与图生图一致的6类别参考逻辑
+      // 参考图组：6类别参考逻辑
       const categoryEnMap: Record<string, string> = {
         'style': 'artistic style and visual aesthetics',
         'composition': 'composition and layout structure',
@@ -5119,187 +5101,7 @@ export function InfiniteCanvas({
       return;
     }
 
-    if (editMode === 'img2img') {
-      // ★ 图生图：通过 onImg2Img 回调委托给 page.tsx 的 handleGenerate，
-      // 完全复用生成面板的提交+轮询逻辑，避免重复实现导致的不一致问题
-      const keyword = img2imgKeyword.trim();
-      let fullPrompt = keyword || 'Generate a creative variation of the reference image.';
-      if (editImg.prompt && editImg.prompt.trim()) {
-        fullPrompt += ` [Original image description: ${editImg.prompt.trim()}]`;
-      }
-      if (img2imgNegativePrompt.trim()) {
-        fullPrompt += ` [negative: ${img2imgNegativePrompt.trim()}]`;
-      }
 
-      // strength 计算
-      const hasSubjectPreserve = img2imgActiveCategories.has('主体') && (img2imgStrengths['主体'] || 0) > 0;
-      const totalPreserveScore = Array.from(img2imgActiveCategories)
-        .reduce((sum, cat) => sum + (img2imgStrengths[cat] || 0), 0);
-      const preserveRatio = totalPreserveScore / 600;
-      let img2imgStrength = 0.80 - preserveRatio * 0.60;
-      if (hasSubjectPreserve) {
-        const subjectStr = img2imgStrengths['主体'] || 0;
-        img2imgStrength = Math.max(0.15, img2imgStrength - (subjectStr / 100) * 0.25);
-      }
-      img2imgStrength = Math.round(img2imgStrength * 100) / 100;
-
-      // 构建分类参数
-      const activeCategories = Array.from(img2imgActiveCategories)
-        .filter(cat => (img2imgStrengths[cat] || 0) > 0);
-      const referenceCategories: Record<string, string[]> = { '0': activeCategories };
-      const avgStrength = activeCategories.length > 0
-        ? Math.round(activeCategories.reduce((sum, cat) => sum + (img2imgStrengths[cat] || 0), 0) / activeCategories.length)
-        : 50;
-
-      // 计算原图比例
-      const origW = editImg.originalWidth || Math.round(editImg.width);
-      const origH = editImg.originalHeight || Math.round(editImg.height);
-      const gcdVal = (a: number, b: number): number => b === 0 ? a : gcdVal(b, a % b);
-      const d = gcdVal(origW, origH);
-      const aspectRatio = `${origW / d}:${origH / d}`;
-
-      exitEditMode();
-
-      // ★ 图生图：使用与生成面板(handleGenerate)完全一致的提交+轮询逻辑
-      // 在原图右侧创建processing frame
-      const processingId = `processing-${Date.now()}`;
-      const newW = Math.round(editImg.width);
-      const newH = Math.round(editImg.height);
-      const processingFrame: CanvasImage = {
-        id: processingId,
-        url: '',
-        x: editImg.x + editImg.width + 20,
-        y: editImg.y,
-        width: newW,
-        height: newH,
-        isProcessingPlaceholder: true,
-        processing: { progress: 0, label: '图生图生成中...', status: 'processing', sourceUrl: editImg.url },
-      };
-      const nextImages = [...imagesRef.current, processingFrame];
-      imagesRef.current = nextImages;
-      onImagesChange(nextImages);
-
-      try {
-        // 提交生成请求（与 page.tsx handleGenerate 一致）
-        const img2imgModelInfo = getCurrentModel();
-        const img2imgProviderId = getCurrentProviderId();
-        const response = await fetch('/api/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt: fullPrompt,
-            model: img2imgModelInfo.model,
-            providerId: img2imgProviderId || undefined,
-            aspectRatio,
-            quality: 'standard',
-            count: 1,
-            referenceImages: [editImg.url],
-            referenceMode: 'style',
-            referenceCategories,
-            referenceStrengths: [avgStrength],
-            strength: img2imgStrength,
-          }),
-        });
-
-        const data = await response.json();
-        console.log('[img2img] generate response:', data.success, data.mode, data.taskIds?.[0]);
-
-        if (!data.success) {
-          throw new Error(data.error || '生成请求失败');
-        }
-
-        if (data.imageUrls && data.imageUrls.length > 0) {
-          // 直接返回模式
-          const newUrl = data.imageUrls[0];
-          completeProcessingFrame(processingId, newUrl, newW, newH, {
-            prompt: fullPrompt,
-            aspectRatio,
-            originalWidth: origW,
-            originalHeight: origH,
-          });
-        } else if (data.taskIds && data.taskIds.length > 0) {
-          // 轮询模式（与 page.tsx handleGenerate 完全一致的轮询逻辑）
-          const taskId = data.taskIds[0];
-          const estimatedTime = data.estimatedTime || 30;
-          const maxPollTime = Math.min(600, Math.max(60, estimatedTime * 3 + 30)) * 1000;
-          const startTime = Date.now();
-          let pollCount = 0;
-
-          const pollInterval = () => {
-            if (Date.now() - startTime > estimatedTime * 1000) return 2000;
-            return 1500;
-          };
-
-          while (Date.now() - startTime < maxPollTime) {
-            await new Promise(r => setTimeout(r, pollInterval()));
-            pollCount++;
-
-            try {
-              const pollRes = await fetch('/api/poll-task', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  taskId,
-                  model: img2imgModelInfo.model,
-                  providerId: img2imgProviderId || undefined,
-                }),
-              });
-              const pollData = await pollRes.json();
-
-              // ★ 完全复用 page.tsx handleGenerate 的轮询判断逻辑
-              if (pollData.status === 'completed' && pollData.imageUrl) {
-                completeProcessingFrame(processingId, pollData.imageUrl, newW, newH, {
-                  prompt: fullPrompt,
-                  aspectRatio,
-                  originalWidth: origW,
-                  originalHeight: origH,
-                });
-                return;
-              }
-
-              if (!pollData.success && !pollData.retryable) {
-                throw new Error(pollData.error || '生成失败');
-              }
-
-              if (!pollData.success && pollData.retryable && pollCount > 15) {
-                throw new Error('重试次数过多，请稍后再试');
-              }
-
-              // 更新进度
-              if (pollData.progress) {
-                const updatedImages = imagesRef.current.map((img: CanvasImage) =>
-                  img.id === processingId
-                    ? { ...img, processing: { progress: pollData.progress, label: `生成中 ${Math.round(pollData.progress)}%`, status: 'processing', sourceUrl: editImg.url } }
-                    : img
-                );
-                imagesRef.current = updatedImages;
-                onImagesChange(updatedImages);
-              }
-            } catch (pollErr: unknown) {
-              if (pollErr instanceof Error && pollErr.message.includes('重试次数过多')) {
-                throw pollErr;
-              }
-              // 轮询单次失败，继续重试
-              console.warn('[img2img] poll error, retrying:', pollErr);
-            }
-          }
-
-          throw new Error('图生图超时，请重试');
-        } else {
-          throw new Error('未收到任务ID');
-        }
-      } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : '图生图失败';
-        console.error('[img2img] error:', errMsg);
-        // 移除processing frame
-        const cleanedImages = imagesRef.current.filter((img: CanvasImage) => img.id !== processingId);
-        imagesRef.current = cleanedImages;
-        onImagesChange(cleanedImages);
-        alert(errMsg);
-      }
-
-      return;
-    }
 
     if (editMode === 'expand') {
       // 方向性扩展：使用 expandPadding (top/right/bottom/left)
@@ -5407,7 +5209,7 @@ export function InfiniteCanvas({
     }
 
     exitEditMode();
-  }, [editMode, editImageId, images, editStrokes, editPrompt, maskKeyword, expandPadding, img2imgKeyword, img2imgStrengths, img2imgActiveCategories, img2imgNegativePrompt, brushSize, zoom, cropRect, onImagesChange, getApiKey, getCurrentModel, renderMaskFromStrokes, pollForResult, exitEditMode, viewOffset, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
+  }, [editMode, editImageId, images, editStrokes, editPrompt, maskKeyword, expandPadding, brushSize, zoom, cropRect, onImagesChange, getCurrentModel, renderMaskFromStrokes, exitEditMode, viewOffset, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
 
   // Mask keyword confirm
   // Download handlers
@@ -5602,7 +5404,6 @@ export function InfiniteCanvas({
     { icon: <Box size={14} />, label: '转3D', desc: '生成3D模型预览', action: handleOpen3D },
     { icon: <Expand size={14} />, label: '扩展', desc: '向四周延伸画面，自动补齐背景', action: handleOpenExpand },
     { icon: <Scissors size={14} />, label: '裁切', desc: '自由/预设比例裁切', action: handleOpenCrop },
-    { icon: <ImagePlus size={14} />, label: '图生图', desc: '基于当前图生成新图', action: () => { if (selectedImage) setEditImageId(selectedImage.id); setEditMode('img2img'); } },
     { icon: <Pencil size={14} />, label: '语言修图', desc: '用自然语言描述修改图片', action: () => { if (selectedImage) onEditImage?.(selectedImage); else onEditImage?.(null); } },
     { icon: <Bot size={14} />, label: 'Agent编排', desc: '智能编排多工具编辑图片', action: () => { const img = selectedImageData || selectedImage; if (img) { setAgentEditImage(img); } else { setAgentEditImage(null); } setShowAgentEditor(true); } },
     { icon: <Download size={14} />, label: '下载', desc: 'PNG/SVG/PSD下载', action: handleOpenDownload },
@@ -8664,168 +8465,6 @@ export function InfiniteCanvas({
         })()}
 
         {/* ====== IMAGE-TO-IMAGE FLOATING PANEL ====== */}
-        {editMode === 'img2img' && selectedImageData && (() => {
-          const pos = getToolbarPosition();
-          const categories = IMG2IMG_CATEGORIES.map(c => c.key);
-          const placeholderHints: Record<string, string> = Object.fromEntries(
-            IMG2IMG_CATEGORIES.map(c => [c.key, c.placeholder])
-          );
-          const activeCategories = img2imgActiveCategories;
-          return (
-            <div
-              className="absolute z-50 pointer-events-auto"
-              data-toolbar="img2img"
-              style={{ left: pos.x, top: pos.y, transform: 'translate(-50%, -100%)' }}
-              onMouseDown={(e) => e.stopPropagation()}
-              onWheel={(e) => e.stopPropagation()}
-            >
-              <div
-                className="flex flex-col items-stretch gap-2 p-3 min-w-[300px] rounded-xl border shadow-2xl"
-                style={{ background: 'rgba(20,20,20,0.85)', borderColor: '#d4af3740', borderWidth: '1px' }}
-                onMouseDown={(e) => e.stopPropagation()}
-              >
-                {/* Header */}
-                <div className="flex items-center gap-2">
-                  <ImagePlus size={14} style={{ color: '#d4af37' }} />
-                  <span className="text-xs font-semibold text-[#d4af37]">图生图</span>
-                  <span className="text-xs ml-auto text-gray-500">Esc 退出</span>
-                </div>
-
-                {/* Category Rows with toggle + strength */}
-                <div className="flex flex-col gap-1">
-                  {categories.map(cat => {
-                    const strength = img2imgStrengths[cat] ?? 50;
-                    const isActive = activeCategories.has(cat);
-                    return (
-                      <div key={cat} className="flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all" style={{ background: isActive ? 'rgba(212,175,55,0.20)' : 'transparent' }}>
-                        {/* Toggle Button */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setImg2imgActiveCategories(prev => {
-                              const next = new Set(prev);
-                              if (next.has(cat)) {
-                                next.delete(cat);
-                              } else {
-                                next.add(cat);
-                                // 激活时设置默认强度为50%
-                                if ((img2imgStrengths[cat] ?? 0) === 0) {
-                                  setImg2imgStrengths(prev2 => ({ ...prev2, [cat]: 50 }));
-                                }
-                              }
-                              return next;
-                            });
-                          }}
-                          className="px-2 py-0.5 text-xs rounded-md transition-all font-medium shrink-0 border"
-                          style={{
-                            background: isActive ? '#d4af37' : 'transparent',
-                            color: isActive ? '#000' : '#888',
-                            borderColor: isActive ? '#d4af37' : '#555',
-                          }}
-                        >
-                          {cat}
-                        </button>
-                        {/* Strength Slider */}
-                        <input
-                          type="range"
-                          min={0}
-                          max={100}
-                          value={strength}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                            setImg2imgStrengths(prev => ({ ...prev, [cat]: Number(e.target.value) }));
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                          disabled={!isActive}
-                          className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer"
-                          style={{
-                            accentColor: '#d4af37',
-                            opacity: isActive ? 1 : 0.3,
-                            background: `linear-gradient(to right, #d4af37 ${strength}%, #444 ${strength}%)`,
-                          }}
-                        />
-                        <span className="text-xs font-mono w-8 text-right shrink-0" style={{ color: isActive ? '#d4af37' : '#555' }}>{strength}%</span>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Keyword Input with resize handle */}
-                <div className="relative">
-                  <textarea
-                    value={img2imgKeyword}
-                    onChange={(e) => setImg2imgKeyword(e.target.value)}
-                    placeholder="输入关键词描述你想要的效果，如：蒙娜丽莎"
-                    rows={2}
-                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border-none outline-none focus:ring-1 focus:ring-[#d4af37]/50 resize-y min-h-[36px] max-h-[120px]"
-                    style={{ background: 'rgba(34,34,34,0.80)', color: '#e0e0e0' }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.nativeEvent.isComposing && !e.shiftKey) {
-                        e.preventDefault();
-                        handleEditConfirm();
-                      }
-                    }}
-                  />
-                </div>
-
-                {/* Quick action buttons */}
-                <div className="flex gap-1.5">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (selectedImageData?.prompt) setImg2imgKeyword(selectedImageData.prompt);
-                    }}
-                    className="flex-1 py-1 text-xs rounded-lg transition-all text-left px-2 truncate"
-                    style={{ background: 'rgba(34,34,34,0.80)', color: '#999', borderLeft: '2px solid #d4af37' }}
-                    onMouseEnter={(e) => { (e.target as HTMLButtonElement).style.color = '#d4af37'; }}
-                    onMouseLeave={(e) => { (e.target as HTMLButtonElement).style.color = '#999'; }}
-                  >
-                    当前图片描述
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setImg2imgShowNegative(prev => !prev);
-                      if (!img2imgShowNegative && !img2imgNegativePrompt) {
-                        setImg2imgNegativePrompt('低质量, 模糊, 变形, 畸形, 水印, 文字, 签名, 截图, 压缩伪影');
-                      }
-                    }}
-                    className="flex-1 py-1 text-xs rounded-lg transition-all text-left px-2 truncate"
-                    style={{ background: 'rgba(34,34,34,0.80)', color: img2imgShowNegative ? '#d4af37' : '#999', borderLeft: img2imgShowNegative ? '2px solid #d4af37' : '2px solid rgba(255,255,255,0.20)' }}
-                    onMouseEnter={(e) => { (e.target as HTMLButtonElement).style.color = '#d4af37'; }}
-                    onMouseLeave={(e) => { (e.target as HTMLButtonElement).style.color = img2imgShowNegative ? '#d4af37' : '#999'; }}
-                  >
-                    反向提示词
-                  </button>
-                </div>
-
-                {/* Negative prompt input (collapsible) */}
-                {img2imgShowNegative && (
-                  <div className="relative">
-                    <textarea
-                      value={img2imgNegativePrompt}
-                      onChange={(e) => setImg2imgNegativePrompt(e.target.value)}
-                      placeholder="输入不想出现的元素，如: 模糊, 变形, 水印..."
-                      rows={2}
-                      className="w-full px-2.5 py-1.5 text-xs rounded-lg border-none outline-none focus:ring-1 focus:ring-red-500/50 resize-y min-h-[36px] max-h-[120px]"
-                      style={{ background: 'rgba(34,34,34,0.80)', color: '#e0e0e0', borderLeft: '2px solid #ef4444' }}
-                    />
-                  </div>
-                )}
-
-                {/* Generate Button */}
-                <button
-                  onClick={handleEditConfirm}
-                  className="btn-press w-full py-1.5 text-xs rounded-lg font-medium bg-[#d4af37] text-black hover:bg-[#c4a030] active:bg-[#b8960f] shadow-md shadow-[#d4af37]/20 hover:shadow-lg transition-all"
-                >
-                  生成
-                </button>
-              </div>
-            </div>
-          );
-        })()}
-
-
         {/* ====== MULTI-ANGLE FLOATING PANEL ====== */}
         {activeTool === 'multiAngle' && selectedImageData && editMode === 'none' && (() => {
           const pos = getToolbarPosition();
@@ -10138,7 +9777,7 @@ export function InfiniteCanvas({
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>图片操作工具栏</div>
                       <div className="space-y-2">
-                        {[['放大', '智能补细节，变大变高清'], ['移除背景', '一键去背景，生成透明底图'], ['SVG智能描摹', '彩色/黑白矢量化，图片压缩，缩略图'], ['擦除', '画笔涂抹消除，AI自动补全'], ['蒙版', '精准遮罩控制，AI重新生成'], ['编辑元素', '按元素智能分层，独立编辑'], ['多角度', '多视角生成图片'], ['转3D', '生成3D模型预览'], ['扩展', '向四周延伸画面，自动补齐'], ['裁切', '自由/预设比例裁切'], ['图生图', '6大类别参考，基于当前图生成新图'], ['Agent编排', '智能编排多工具，自动选择最佳方案'], ['下载', 'PNG/SVG/PSD多格式下载']].map(([k, v]) => (
+                        {[['放大', '智能补细节，变大变高清'], ['移除背景', '一键去背景，生成透明底图'], ['SVG智能描摹', '彩色/黑白矢量化，图片压缩，缩略图'], ['擦除', '画笔涂抹消除，AI自动补全'], ['蒙版', '精准遮罩控制，AI重新生成'], ['编辑元素', '按元素智能分层，独立编辑'], ['多角度', '多视角生成图片'], ['转3D', '生成3D模型预览'], ['扩展', '向四周延伸画面，自动补齐'], ['裁切', '自由/预设比例裁切'], ['Agent编排', '智能编排多工具，自动选择最佳方案'], ['下载', 'PNG/SVG/PSD多格式下载']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
                         ))}
                       </div>
@@ -10176,7 +9815,7 @@ export function InfiniteCanvas({
                     <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>{APP_VERSION_LABEL}</div>
                     <div className="space-y-2.5">
                       {[
-                        '12大图片工具：放大/移除背景/SVG智能描摹/擦除/蒙版/编辑元素/多角度/转3D/扩展/裁切/图生图/下载',
+                        '11大图片工具：放大/移除背景/SVG智能描摹/擦除/蒙版/编辑元素/多角度/转3D/扩展/裁切/下载',
                         '放大：智能补细节把图片变大变高清，不改画面内容',
                         '移除背景：一键删除背景，生成透明底主体图',
                         'SVG智能描摹：彩色/黑白矢量化，多级质量预设，自定义参数，兼容Adobe Illustrator',
@@ -10187,7 +9826,6 @@ export function InfiniteCanvas({
                         '多角度：多视角生成图片',
                         '转3D：生成3D模型并可在线预览旋转',
                         '扩展：比例预设 + AI向四周延伸画面',
-                        '图生图：6大类别参考（风格/构图/场景/色彩/主体/细节），每类独立强度控制',
                         'Alt+Click标记参考图：标记画布图片为参考图，自动添加到创意描述',
                         'Ctrl+Click参考融合：选择画布图片直接融合生成',
                         '组功能：多图右键创建组，支持折叠/展开，长按标题栏拖动',
