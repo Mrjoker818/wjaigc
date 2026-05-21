@@ -154,9 +154,15 @@ export function AgentEditor({
           if (result?.prompt) {
             setResultPrompt(String(result.prompt));
           }
-          // 检查 finalResponse 是否包含错误信息（后端标记为 completed 但 Agent 内部失败的情况）
-          if (result?.finalResponse && String(result.finalResponse).includes('失败')) {
-            setError(String(result.finalResponse));
+          // 检查是否有步骤失败（后端标记为 completed 但 Agent 内部某些步骤可能失败）
+          const steps = (result?.steps || []) as AgentStep[];
+          const failedSteps = steps.filter((s: AgentStep) => !s.success);
+          if (failedSteps.length > 0) {
+            // 展示失败的步骤错误信息
+            const errorDetails = failedSteps.map((s: AgentStep, i: number) => 
+              `步骤${i + 1}(${s.toolName}): ${s.result || '未知错误'}`
+            ).join('\n');
+            setError(errorDetails);
           }
         } else if (status === 'failed') {
           if (pollInterval.current) clearInterval(pollInterval.current);
@@ -468,9 +474,13 @@ export function AgentEditor({
                     ) : (
                       <XCircle size={10} className="shrink-0 mt-0.5" style={{ color: '#ef5350' }} />
                     )}
-                    <span>
+                    <span className="flex-1 min-w-0">
                       R{step.round}: {step.toolName}
-                      {step.detail ? ` - ${step.detail}` : ''}
+                      {step.params?.prompt ? (
+                        <span className="truncate" style={{ color: accentDim }}> — {String(step.params.prompt).slice(0, 50)}</span>
+                      ) : step.detail ? (
+                        <span> - {step.detail}</span>
+                      ) : null}
                     </span>
                   </div>
                 ))}

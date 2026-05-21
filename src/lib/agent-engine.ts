@@ -334,8 +334,7 @@ registerTool({
     return {
       success: true,
       data: ctx.imageUrl, // placeholder - 实际由 route 处理
-      description: `图片编辑完成: ${params.prompt}`,
-      shouldContinue: false,
+      description: `图片编辑指令已记录: ${params.prompt}`,
     };
   },
 });
@@ -350,8 +349,7 @@ registerTool({
   execute: async (params) => {
     return {
       success: true,
-      description: `图片生成完成: ${params.prompt}`,
-      shouldContinue: false,
+      description: `图片生成指令已记录: ${params.prompt}`,
     };
   },
 });
@@ -366,8 +364,7 @@ registerTool({
     return {
       success: true,
       data: ctx.imageUrl,
-      description: '背景移除完成',
-      shouldContinue: false,
+      description: '背景移除指令已记录',
     };
   },
 });
@@ -382,8 +379,7 @@ registerTool({
     return {
       success: true,
       data: ctx.imageUrl,
-      description: `图片已放大 ${params.scale || '2'}x`,
-      shouldContinue: false,
+      description: `图片放大指令已记录: ${params.scale || '2'}x`,
     };
   },
 });
@@ -399,8 +395,7 @@ registerTool({
     return {
       success: true,
       data: ctx.imageUrl,
-      description: `SVG描摹完成 (${params.mode || 'color'} 模式)`,
-      shouldContinue: false,
+      description: `SVG描摹指令已记录 (${params.mode || 'color'} 模式)`,
     };
   },
 });

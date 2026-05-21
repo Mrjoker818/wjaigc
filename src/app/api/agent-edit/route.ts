@@ -218,29 +218,95 @@ export async function POST(request: NextRequest) {
         // 执行 Agent 循环
         const result: AgentResult = await executeAgentLoop(context, llmCall);
 
-        // 实际执行图像编辑（如果 Agent 选择了 image_edit 工具）
-        // 这里需要调用实际的 edit API 来完成操作
+        // 实际执行所有图像编辑步骤（按轮次顺序）
         if (isCancelled()) return;
 
         let finalImageUrl = image;
-        const imageEditStep = result.steps.find(s => s.toolName === 'image_edit' && s.success);
+        const allEditSteps = result.steps.filter(s => s.toolName === 'image_edit' && s.success);
 
-        if (imageEditStep) {
-          // 调用实际的 edit route 进行图片编辑
-          const task = localTaskStore.get(taskId);
-          if (task) localTaskStore.set(taskId, { ...task, progress: 90, label: '执行图像编辑...' });
+        if (allEditSteps.length > 0) {
+          // 逐步执行所有 image_edit 操作，每步使用上一步的结果
+          for (let i = 0; i < allEditSteps.length; i++) {
+            if (isCancelled()) break;
+            const step = allEditSteps[i];
+            const progressBase = Math.round(70 + (20 * i / allEditSteps.length));
+            const task = localTaskStore.get(taskId);
+            if (task) localTaskStore.set(taskId, { ...task, progress: progressBase, label: `执行图像编辑 (${i + 1}/${allEditSteps.length})...` });
 
+            try {
+              const editResult = await performImageEdit(
+                finalImageUrl, // 使用上一步的结果（第一步用原图）
+                String(step.params.prompt || prompt),
+                i === 0 ? maskDataUrl : undefined, // 仅第一步使用用户蒙版
+              );
+              if (editResult.success && editResult.imageUrl) {
+                finalImageUrl = editResult.imageUrl;
+                // 更新步骤结果为实际编辑结果
+                step.result = `编辑成功: ${String(step.params.prompt || prompt)}`;
+              } else {
+                step.result = `编辑失败: ${editResult.error || '未知错误'}`;
+                step.success = false;
+              }
+            } catch (err) {
+              console.error(`[agent-edit] Image edit step ${i + 1} failed:`, err);
+              step.result = `编辑异常: ${err instanceof Error ? err.message : '未知错误'}`;
+              step.success = false;
+            }
+          }
+        }
+
+        // 执行其他非 image_edit 工具的实际操作
+        const otherSteps = result.steps.filter(s => s.toolName !== 'image_edit' && s.success);
+        for (const step of otherSteps) {
+          if (isCancelled()) break;
           try {
-            const editResult = await performImageEdit(
-              image,
-              String(imageEditStep.params.prompt || prompt),
-              maskDataUrl
-            );
-            if (editResult.success && editResult.imageUrl) {
-              finalImageUrl = editResult.imageUrl;
+            if (step.toolName === 'upscale') {
+              // 调用放大 API
+              const task = localTaskStore.get(taskId);
+              if (task) localTaskStore.set(taskId, { ...task, label: '执行无损放大...' });
+              const upscaleResp = await fetch(new URL('/api/image/upscale', request.url).href, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ imageUrl: finalImageUrl, scale: step.params.scale || '2', outputFormat: 'png' }),
+              });
+              const upscaleData = await upscaleResp.json();
+              if (upscaleData.success && upscaleData.imageUrl) {
+                finalImageUrl = upscaleData.imageUrl;
+                step.result = '放大成功';
+              }
+            } else if (step.toolName === 'remove_background') {
+              // 调用去背景 API
+              const task = localTaskStore.get(taskId);
+              if (task) localTaskStore.set(taskId, { ...task, label: '执行移除背景...' });
+              const rbResp = await fetch(new URL('/api/image-edit', request.url).href, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ imageUrl: finalImageUrl, action: 'removebg' }),
+              });
+              const rbData = await rbResp.json();
+              if (rbData.success && rbData.imageUrl) {
+                finalImageUrl = rbData.imageUrl;
+                step.result = '移除背景成功';
+              }
+            } else if (step.toolName === 'svg_trace') {
+              // 调用 SVG 描摹 API
+              const task = localTaskStore.get(taskId);
+              if (task) localTaskStore.set(taskId, { ...task, label: '执行SVG描摹...' });
+              const svgResp = await fetch(new URL('/api/svg-trace', request.url).href, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ imageUrl: finalImageUrl, mode: step.params.mode || 'color', quality: step.params.quality || 'balanced' }),
+              });
+              const svgData = await svgResp.json();
+              if (svgData.success && svgData.svgDataUrl) {
+                finalImageUrl = svgData.previewUrl || finalImageUrl;
+                step.result = 'SVG描摹成功';
+              }
             }
           } catch (err) {
-            console.error('[agent-edit] Image edit failed:', err);
+            console.error(`[agent-edit] Tool ${step.toolName} execution failed:`, err);
+            step.result = `执行失败: ${err instanceof Error ? err.message : '未知错误'}`;
+            step.success = false;
           }
         }
 
@@ -432,29 +498,118 @@ async function performImageEdit(
     return { success: false, error: 'OpenAI 未返回图片' };
   }
 
-  // 非 OpenAI: 使用 Gemini 或其他格式
-  // 回退到现有的 edit route 逻辑
+  // 非 OpenAI: 使用 chat/completions + 图片输入 (Gemini / 兼容 API)
+  // 直接调用提供商 API，不经过 /api/edit 路由（避免 Next.js dev 模式内存隔离问题）
   try {
-    const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
-    const base = domain.startsWith('http') ? domain : (domain ? `https://${domain}` : `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`);
-    const editResp = await fetch(`${base}/api/edit`, {
+    // 解析图片为 base64
+    let imageBase64 = '';
+    let imageMimeType = 'image/png';
+    if (imageUrl.startsWith('data:')) {
+      const commaIdx = imageUrl.indexOf(',');
+      const header = imageUrl.substring(0, commaIdx);
+      const mimeMatch = header.match(/data:([^;]+)/);
+      imageMimeType = mimeMatch?.[1] || 'image/png';
+      imageBase64 = imageUrl.substring(commaIdx + 1);
+    } else {
+      // 下载图片
+      const imgResp = await fetch(imageUrl.startsWith('/') ? `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}` : imageUrl, {
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!imgResp.ok) return { success: false, error: `无法下载图片: ${imgResp.status}` };
+      const imgBuffer = Buffer.from(await imgResp.arrayBuffer());
+      imageBase64 = imgBuffer.toString('base64');
+      imageMimeType = imgResp.headers.get('content-type') || 'image/png';
+    }
+
+    // 构建 chat/completions 请求
+    const chatMessages: Array<Record<string, unknown>> = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: editPrompt },
+          { type: 'image_url', image_url: { url: `data:${imageMimeType};base64,${imageBase64}` } },
+        ],
+      },
+    ];
+
+    // 如果有蒙版，也添加进去
+    if (maskDataUrl?.startsWith('data:')) {
+      const maskCommaIdx = maskDataUrl.indexOf(',');
+      const maskHeader = maskDataUrl.substring(0, maskCommaIdx);
+      const maskMimeMatch = maskHeader.match(/data:([^;]+)/);
+      const maskMime = maskMimeMatch?.[1] || 'image/png';
+      const maskBase64 = maskDataUrl.substring(maskCommaIdx + 1);
+      const maskContent = (chatMessages[0].content as Array<Record<string, unknown>>);
+      maskContent.push({ type: 'image_url', image_url: { url: `data:${maskMime};base64,${maskBase64}` } });
+      maskContent[0] = { type: 'text', text: `${editPrompt}\n\n第二张图片是需要修改的蒙版区域（白色=修改区域）。请仅修改蒙版标记的区域。` };
+    }
+
+    const chatBody = {
+      model: imageModel,
+      messages: chatMessages,
+      max_tokens: 4096,
+      stream: false,
+    };
+
+    const chatHeaders: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    };
+
+    const chatResp = await fetchWithV1Retry(baseUrl, '/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        image: imageUrl,
-        prompt: editPrompt,
-        mask: maskDataUrl,
-        model: imageModel,
-        size: '1024',
-        quality: 'high',
-      }),
+      headers: chatHeaders,
+      body: JSON.stringify(chatBody),
+      signal: AbortSignal.timeout(120000),
     });
 
-    const editData = await editResp.json() as Record<string, unknown>;
-    if (editData.success) {
-      return { success: true, imageUrl: String(editData.taskId ? '' : (editData.imageUrl || '')) };
+    if (!chatResp.ok) {
+      const errText = await chatResp.text().catch(() => '');
+      return { success: false, error: `编辑请求失败 (${chatResp.status}): ${errText.slice(0, 200)}` };
     }
-    return { success: false, error: String(editData.error || '编辑失败') };
+
+    // 解析响应（兼容 SSE 流式响应）
+    const chatData = await parseAPIResponse(chatResp);
+
+    // 提取图片 URL
+    const choices = chatData.choices as Array<Record<string, unknown>> | undefined;
+    if (choices && choices.length > 0) {
+      const message = choices[0].message as Record<string, unknown> | undefined;
+      if (message) {
+        // 检查 message.content 是否包含图片
+        const content = message.content;
+        if (typeof content === 'string' && content.includes('data:image')) {
+          // 从文本中提取 base64 图片
+          const imgMatch = content.match(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/);
+          if (imgMatch) return { success: true, imageUrl: imgMatch[0] };
+        }
+        // 检查 Gemini 格式的 inline_data
+        if (Array.isArray(content)) {
+          for (const part of content) {
+            const p = part as Record<string, unknown>;
+            if (p.type === 'image_url' && p.image_url) {
+              const iu = p.image_url as Record<string, unknown>;
+              if (iu.url) return { success: true, imageUrl: String(iu.url) };
+            }
+            if (p.inline_data) {
+              const id = p.inline_data as Record<string, unknown>;
+              if (id.data) return { success: true, imageUrl: `data:${id.mime_type || 'image/png'};base64,${id.data}` };
+            }
+          }
+        }
+      }
+    }
+
+    // 尝试 images/generations 格式的响应
+    const dataArr = chatData.data as Array<Record<string, unknown>> | undefined;
+    if (dataArr && dataArr.length > 0) {
+      const resultUrl = String(dataArr[0].url || dataArr[0].b64_json || '');
+      if (resultUrl) {
+        return { success: true, imageUrl: resultUrl.startsWith('data:') ? resultUrl : resultUrl };
+      }
+    }
+
+    return { success: false, error: '模型未返回编辑后的图片' };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : '编辑请求失败' };
   }
@@ -478,6 +633,29 @@ function dataUrlToBlob(dataUrl: string): Blob {
  * 从 SSE 流式响应中解析出完整的 JSON 对象
  * 将多个 data: {...} 事件中的 delta 合并为完整 message
  */
+/**
+ * 自动检测响应格式并解析为 JSON（兼容 SSE 流和普通 JSON）
+ */
+async function parseAPIResponse(resp: Response): Promise<Record<string, unknown>> {
+  const contentType = resp.headers.get('content-type') || '';
+  const text = await resp.text();
+
+  // 尝试直接解析 JSON
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    // 不是纯 JSON，尝试 SSE 解析
+  }
+
+  // SSE 格式解析
+  if (contentType.includes('text/event-stream') || text.trim().startsWith('data: ')) {
+    return parseSSETextToJSON(text);
+  }
+
+  // 无法解析
+  throw new Error(`无法解析 API 响应: ${text.slice(0, 200)}`);
+}
+
 async function parseSSEToJSON(resp: Response): Promise<Record<string, unknown>> {
   const text = await resp.text();
   return parseSSETextToJSON(text);
