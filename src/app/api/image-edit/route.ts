@@ -1246,8 +1246,8 @@ async function pollTaskUntilComplete(
   apiKey: string,
   apiBaseUrl: string,
   profile: ApiCompatProfile,
-  maxAttempts: number = 80,
-  intervalMs: number = 3000,
+  maxAttempts: number = 120,
+  intervalMs: number = 1500,
 ): Promise<string> {
   // 使用兼容性档案确定轮询 URL
   const pollUrl = buildPollUrl(apiBaseUrl, taskId, profile);
@@ -1256,7 +1256,9 @@ async function pollTaskUntilComplete(
   }
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    await new Promise(r => setTimeout(r, intervalMs));
+    // 动态轮询间隔: 前3次500ms快速检测，之后逐步增长
+    const dynamicInterval = attempt < 3 ? 500 : attempt < 10 ? 1000 : attempt < 20 ? 1500 : 2000;
+    await new Promise(r => setTimeout(r, dynamicInterval));
 
     try {
       const pollRes = await fetch(pollUrl, {
@@ -1779,14 +1781,11 @@ export async function POST(request: NextRequest) {
         return findClosestAspectRatio(ar);
       })();
 
-      // Step 1: 获取视觉描述
+      // Step 1: 获取参考图（直接传原图给模型，跳过冗余的 vision 描述调用以节省 3-10 秒）
+      // input_fidelity: 'high' + image 参数已经把原图发给模型，模型会自行理解内容
       const imageBase64ForVision = await resolveImageToBase64(imageUrl);
-      const visionDescription = await describeImageWithVision(
-        imageBase64ForVision,
-        'Describe this image with extreme visual precision for an AI upscaler. Include: exact subject identity and pose, precise color palette, lighting, textures, background details, composition. Output dense keyword-rich description. No intro text.'
-      );
-      const descSnippet = visionDescription && visionDescription.length > 20
-        ? visionDescription.substring(0, 500) : (prompt || '');
+      // 仅在用户提供了描述性 prompt 时使用，否则用通用放大指令
+      const descSnippet = prompt || '';
 
       // Step 2: 构建整图放大 prompt
       const upscalePrompt = [
@@ -1947,9 +1946,12 @@ export async function POST(request: NextRequest) {
             const pollUrl = buildPollUrl(apiBaseUrl, result.taskId, profile);
             
             if (pollUrl && apiKey && apiBaseUrl) {
-              const pollIntervalMs = 2000;
+              let removebgPollCount = 0;
               while (Date.now() - aiStart < AI_REMOVEBG_TIMEOUT_MS) {
-                await new Promise(r => setTimeout(r, pollIntervalMs));
+                // 动态轮询: 前3次500ms快速检测，之后1秒
+                const pollWait = removebgPollCount < 3 ? 500 : 1000;
+                removebgPollCount++;
+                await new Promise(r => setTimeout(r, pollWait));
                 try {
                   const pollRes = await fetch(pollUrl, {
                     headers: { 'Authorization': `Bearer ${apiKey}` },
@@ -2117,16 +2119,14 @@ export async function POST(request: NextRequest) {
           binaryMaskPixels[i + 3] = 255;
         }
         const eraseBinaryMaskBuffer = await sharp(binaryMaskPixels, { raw: { width: origW, height: origH, channels: 4 } })
-          .png()
-          .toBuffer();
-        // 擦除场景扩大 2-4px 蒙版并轻微柔化，减少物体残影、白边和硬边。
-        const eraseMaskForAI = await sharp(eraseBinaryMaskBuffer)
           .grayscale()
           .threshold(127)
           .blur(2.2)
           .threshold(10)
           .png()
           .toBuffer();
+        // eraseBinaryMaskBuffer 同时用于 IOPaint 和 AI 模型（已含柔化处理）
+        const eraseMaskForAI = eraseBinaryMaskBuffer;
 
         // ─── 优先路径：IOPaint LaMa 本地擦除 ───
         // LaMa 是专业修复模型，效果优于 AI 生成式擦除和 BFS 边界扩散
@@ -2176,7 +2176,7 @@ export async function POST(request: NextRequest) {
           aiInputH = aiInputH % 2 === 0 ? aiInputH : aiInputH - 1;
           aiInputImageBuffer = await sharp(imageBuffer)
             .resize(aiInputW, aiInputH, { fit: 'fill' })
-            .png()
+            .jpeg({ quality: 85 })
             .toBuffer();
           aiInputMaskBuffer = await sharp(eraseMaskForAI)
             .resize(aiInputW, aiInputH, { fit: 'fill', kernel: 'nearest' })
@@ -2256,8 +2256,10 @@ export async function POST(request: NextRequest) {
                 imageBuffer, resultOrigSize, eraseMaskForAI, origW, origH, fullCropInfo
               );
 
-              const resultDataUrl = `data:image/png;base64,${compositeResult.toString('base64')}`;
-              console.log(`[inpaint] AI erase result: base64 data URL (${(compositeResult.length / 1024).toFixed(0)}KB)`);
+              // 输出用 JPEG 压缩减少传输体积（比 PNG 小 60-80%）
+              const compositeJpeg = await sharp(compositeResult).jpeg({ quality: 92 }).toBuffer();
+              const resultDataUrl = `data:image/jpeg;base64,${compositeJpeg.toString('base64')}`;
+              console.log(`[inpaint] AI erase result: JPEG base64 (${(compositeJpeg.length / 1024).toFixed(0)}KB, was PNG ${(compositeResult.length / 1024).toFixed(0)}KB)`);
               eraseUsedAI = true;
               return NextResponse.json({ success: true, imageUrl: resultDataUrl, action, engine: 'ai-erase' });
             } else if (eraseResult.taskId) {
@@ -2278,8 +2280,9 @@ export async function POST(request: NextRequest) {
         try {
           const resultBuffer = await createLocalEraseInpaint(imageBuffer, maskGrayData, origW, origH, cropInfo);
 
-          const resultDataUrl = `data:image/png;base64,${resultBuffer.toString('base64')}`;
-          console.log(`[inpaint] Local erase result: base64 data URL (${(resultBuffer.length / 1024).toFixed(0)}KB)`);
+          const resultJpeg = await sharp(resultBuffer).jpeg({ quality: 92 }).toBuffer();
+          const resultDataUrl = `data:image/jpeg;base64,${resultJpeg.toString('base64')}`;
+          console.log(`[inpaint] Local erase result: JPEG base64 (${(resultJpeg.length / 1024).toFixed(0)}KB)`);
           return NextResponse.json({ success: true, imageUrl: resultDataUrl, action, engine: 'local-erase' });
         } catch (localErr) {
           console.error('[inpaint] Local erase failed:', localErr);
@@ -2419,8 +2422,10 @@ export async function POST(request: NextRequest) {
           const resultFileName = `inpaint_${Date.now()}.png`;
 
           // 直接返回 base64 data URL，彻底避免文件路径可达性问题
-          const compositeDataUrl = `data:image/png;base64,${compositeResult.toString('base64')}`;
-          console.log(`[inpaint] AI composite result: base64 data URL (${(compositeResult.length / 1024).toFixed(0)}KB)`);
+          // 输出用 JPEG 压缩减少传输体积
+          const compositeJpeg = await sharp(compositeResult).jpeg({ quality: 92 }).toBuffer();
+          const compositeDataUrl = `data:image/jpeg;base64,${compositeJpeg.toString('base64')}`;
+          console.log(`[inpaint] AI composite result: JPEG base64 (${(compositeJpeg.length / 1024).toFixed(0)}KB, was PNG ${(compositeResult.length / 1024).toFixed(0)}KB)`);
 
           return NextResponse.json({ success: true, imageUrl: compositeDataUrl, action, engine: 'ai-crop-composite', cropInfo });
         } catch (compositeErr) {
@@ -2746,8 +2751,9 @@ export async function POST(request: NextRequest) {
           if (isS3Available()) {
             compositeResultUrl = (await uploadImageToS3(finalBuffer, resultFileName, 'image/png')) || '';
           } else {
-          // 直接返回 base64 data URL，彻底避免文件路径可达性问题
-          compositeResultUrl = `data:image/png;base64,${finalBuffer.toString('base64')}`;
+          // 输出用 JPEG 压缩减少传输体积
+          const finalJpeg = await sharp(finalBuffer).jpeg({ quality: 92 }).toBuffer();
+          compositeResultUrl = `data:image/jpeg;base64,${finalJpeg.toString('base64')}`;
           }
           console.log(`[outpaint] Sync result saved: ${resultFileName}`);
 

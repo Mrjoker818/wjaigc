@@ -3731,9 +3731,9 @@ export function InfiniteCanvas({
     const currentModelInfo = getCurrentModel();
     const maxAttempts = 150; // 150次 × 动态间隔 ≈ 600秒，兼容token link等慢速API
     const getEditPollInterval = (attempt: number) => {
-      if (attempt <= 2) return 800;
-      if (attempt <= 5) return 1000;
-      if (attempt <= 15) return 1500;
+      if (attempt <= 2) return 500;
+      if (attempt <= 5) return 800;
+      if (attempt <= 15) return 1200;
       return 2000;
     };
     lastPollErrorRef.current = '';
@@ -3946,9 +3946,17 @@ export function InfiniteCanvas({
 
       // Poll for results
       const pollForResult = async (taskId: string): Promise<string | null> => {
-        const maxAttempts = 300; // 300次 × 2秒 = 600秒，兼容token link等慢速API
+        const maxAttempts = 300; // 兼容慢速API
+        const getPollInterval = (attempt: number) => {
+          if (attempt <= 2) return 500;   // 首次快速检查
+          if (attempt <= 5) return 700;
+          if (attempt <= 10) return 1000;
+          if (attempt <= 20) return 1500;
+          return 2000;
+        };
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
-          await new Promise(r => setTimeout(r, 2000));
+          // 动态间隔：首次快速检查，后续逐渐加长
+          await new Promise(r => setTimeout(r, getPollInterval(attempt)));
           try {
             const pollRes = await fetch('/api/poll-task', {
               method: 'POST',
