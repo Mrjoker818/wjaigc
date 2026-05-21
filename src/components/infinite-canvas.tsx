@@ -8591,7 +8591,7 @@ export function InfiniteCanvas({
                         }}
                       >
                         {/* Front face - main image */}
-                        <div className="absolute inset-0 rounded-lg overflow-hidden border-2 border-[#d4af37]/60 shadow-[0_0_20px_rgba(212,175,55,0.3)]" style={{ transform: 'translateZ(55px)', backfaceVisibility: 'hidden' }}>
+                        <div className="absolute inset-0 rounded-lg overflow-hidden border-2 border-blue-400/60 shadow-[0_0_20px_rgba(59,130,246,0.3)]" style={{ transform: 'translateZ(55px)', backfaceVisibility: 'hidden' }}>
                           <img src={selectedImageData.url} alt="front" className="w-full h-full object-cover" />
                         </div>
                         {/* Back face */}
@@ -9135,8 +9135,8 @@ export function InfiniteCanvas({
                 className="rounded-2xl"
                 style={{
                   background: isMonochrome ? 'rgba(255,255,255,0.97)' : 'rgba(20,20,20,0.96)',
-                  border: `2px solid ${isThisGroupDragging ? '#d4af37' : isMonochrome ? '#e5e7eb' : '#333'}`,
-                  boxShadow: isThisGroupDragging ? '0 0 24px rgba(212,175,55,0.3)' : '0 8px 32px rgba(0,0,0,0.4)',
+                  border: `2px solid ${isThisGroupDragging ? (isMonochrome ? '#3b82f6' : '#d4af37') : isMonochrome ? '#e5e7eb' : '#333'}`,
+                  boxShadow: isThisGroupDragging ? (isMonochrome ? '0 0 24px rgba(59,130,246,0.3)' : '0 0 24px rgba(212,175,55,0.3)') : '0 8px 32px rgba(0,0,0,0.4)',
                   minWidth: netW + previewSize + 80,
                 }}
                 onMouseDown={(e) => e.stopPropagation()}
@@ -9161,12 +9161,12 @@ export function InfiniteCanvas({
                   }}
                 >
                   <div className="flex items-center gap-2">
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="#d4af37" strokeWidth="2">
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke={isMonochrome ? "#3b82f6" : "#d4af37"} strokeWidth="2">
                       <path d="M12 2L2 7l10 5 10-5-10-5z" />
                       <path d="M2 17l10 5 10-5" />
                       <path d="M2 12l10 5 10-5" />
                     </svg>
-                    <span className="text-sm font-semibold" style={{ color: '#d4af37' }}>六面体</span>
+                    <span className="text-sm font-semibold" style={{ color: isMonochrome ? '#3b82f6' : '#d4af37' }}>六面体</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <button
@@ -9177,7 +9177,7 @@ export function InfiniteCanvas({
                       }}
                       title={hcg.isCollapsed ? '展开' : '折叠'}
                     >
-                      <svg className="w-4 h-4 transition-transform" style={{ color: '#d4af37', transform: hcg.isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <svg className="w-4 h-4 transition-transform" style={{ color: isMonochrome ? '#3b82f6' : '#d4af37', transform: hcg.isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="6 9 12 15 18 9" />
                       </svg>
                     </button>
@@ -9213,7 +9213,7 @@ export function InfiniteCanvas({
                           return (
                             <div
                               key={face}
-                              className="relative rounded-lg overflow-hidden flex items-center justify-center cursor-pointer transition-all hover:ring-2 hover:ring-[#d4af37]/50"
+                              className="relative rounded-lg overflow-hidden flex items-center justify-center cursor-pointer transition-all hover:ring-2 hover:ring-blue-400/50"
                               style={{
                                 background: isMonochrome ? '#f9fafb' : '#252525',
                                 border: `1px dashed ${isMonochrome ? '#d1d5db' : '#444'}`,
@@ -9247,13 +9247,13 @@ export function InfiniteCanvas({
                                 <img src={faceData.imageUrl} alt={label} className="w-full h-full object-cover" />
                               ) : (
                                 <div className="flex flex-col items-center gap-1">
-                                  <svg className="w-5 h-5" style={{ color: isMonochrome ? '#9ca3af' : '#555' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                  <svg className="w-5 h-5" style={{ color: isMonochrome ? '#93c5fd' : '#555' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                                     <path d="M12 5v14M5 12h14" />
                                   </svg>
-                                  <span className="text-xs font-medium" style={{ color: isMonochrome ? '#9ca3af' : '#555' }}>{label}</span>
+                                  <span className="text-xs font-medium" style={{ color: isMonochrome ? '#6b7280' : '#555' }}>{label}</span>
                                 </div>
                               )}
-                              <div className="absolute top-1 left-1 px-1 py-0.5 rounded text-[10px] font-bold" style={{ background: 'rgba(212,175,55,0.9)', color: '#000' }}>{label}</div>
+                              <div className="absolute top-1 left-1 px-1 py-0.5 rounded text-[10px] font-bold" style={{ background: isMonochrome ? 'rgba(59,130,246,0.9)' : 'rgba(212,175,55,0.9)', color: '#fff' }}>{label}</div>
                             </div>
                           );
                         })}
@@ -9301,7 +9301,7 @@ export function InfiniteCanvas({
                           {(() => {
                             const frontFace = hcg.faces.find(f => f.face === 'front');
                             return (
-                              <div className="absolute inset-0 rounded-lg overflow-hidden border-2 border-[#d4af37]/60 shadow-[0_0_20px_rgba(212,175,55,0.3)]" style={{ transform: 'translateZ(55px)', backfaceVisibility: 'hidden' }}>
+                              <div className="absolute inset-0 rounded-lg overflow-hidden border-2 border-blue-400/60 shadow-[0_0_20px_rgba(59,130,246,0.3)]" style={{ transform: 'translateZ(55px)', backfaceVisibility: 'hidden' }}>
                                 {frontFace?.imageUrl ? (
                                   <img src={frontFace.imageUrl} alt="front" className="w-full h-full object-cover" />
                                 ) : (
@@ -9387,7 +9387,7 @@ export function InfiniteCanvas({
                       {/* 旋转/倾斜滑块 */}
                       <div className="flex items-center gap-3 mt-2">
                         <div className="flex items-center gap-1 flex-1">
-                          <span className="text-[10px]" style={{ color: isMonochrome ? '#6b7280' : '#666' }}>旋转</span>
+                          <span className="text-[10px]" style={{ color: isMonochrome ? '#3b82f6' : '#666' }}>旋转</span>
                           <input
                             type="range" min={0} max={360} step={5}
                             value={hcg.toolbar.rotationY}
@@ -9399,7 +9399,7 @@ export function InfiniteCanvas({
                           <span className="text-[10px] w-7 text-right" style={{ color: isMonochrome ? '#6b7280' : '#666' }}>{hcg.toolbar.rotationY}°</span>
                         </div>
                         <div className="flex items-center gap-1 flex-1">
-                          <span className="text-[10px]" style={{ color: isMonochrome ? '#6b7280' : '#666' }}>倾斜</span>
+                          <span className="text-[10px]" style={{ color: isMonochrome ? '#3b82f6' : '#666' }}>倾斜</span>
                           <input
                             type="range" min={-60} max={60} step={5}
                             value={hcg.toolbar.tiltX}
@@ -9473,7 +9473,7 @@ export function InfiniteCanvas({
                               >
                                 <span>{getModelDisplayName(m.id)} · 来自 {m.providerName}</span>
                                 {hcg.toolbar.model === m.id && hcg.toolbar.providerId === m.providerId && (
-                                  <svg className="w-3 h-3 flex-shrink-0" viewBox="0 0 24 24" fill="#d4af37" stroke="none"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>
+                                  <svg className="w-3 h-3 flex-shrink-0" viewBox="0 0 24 24" fill={isMonochrome ? "#3b82f6" : "#d4af37"} stroke="none"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>
                                 )}
                               </div>
                             ))}
@@ -9539,7 +9539,7 @@ export function InfiniteCanvas({
                     <div className="flex items-center gap-2 mt-2">
                       <button
                         className="px-3 py-2 rounded-lg text-xs font-medium transition-all"
-                        style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#6b7280' : '#888', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
+                        style={{ background: isMonochrome ? '#eff6ff' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#3b82f6' : '#888', border: `1px solid ${isMonochrome ? '#bfdbfe' : 'rgba(255,255,255,0.10)'}` }}
                         onClick={async () => {
                           if (!hcg.toolbar.prompt.trim()) return;
                           setOptimizingGroupId(`hex-${hcg.id}`);
@@ -9568,7 +9568,7 @@ export function InfiniteCanvas({
                       </button>
                       <button
                         className="flex-1 py-2.5 rounded-lg text-sm font-bold text-black transition-all hover:brightness-110 active:scale-[0.98]"
-                        style={{ background: 'linear-gradient(135deg, #d4af37, #f0d060)' }}
+                        style={{ background: isMonochrome ? 'linear-gradient(135deg, #3b82f6, #60a5fa)' : 'linear-gradient(135deg, #d4af37, #f0d060)' }}
                         onClick={async () => {
                           if (!hcg.toolbar.model || !hcg.toolbar.prompt.trim()) return;
                           const faceDescriptions = hcg.faces
