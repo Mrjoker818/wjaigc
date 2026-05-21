@@ -130,6 +130,15 @@ function genId(): string {
   return 'p' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
 }
 
+/** Get image URL - direct external URL with referrer bypass */
+function getImgUrl(url: string | undefined | null): string | undefined {
+  if (!url) return undefined;
+  // Already a relative path or data URL - return as-is
+  if (url.startsWith('/') || url.startsWith('data:')) return url;
+  // Return direct URL - browser will load with referrerpolicy
+  return url;
+}
+
 function loadSettings(): OmpSettings {
   if (typeof window === 'undefined') return { enabled: false, categories: [], recentUsed: [], visionDefaultFormat: 'natural', savedVisionResults: [], favorites: [] };
   try {
@@ -570,7 +579,7 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
       {/* Thumbnail */}
       <div className={`w-14 h-14 rounded-md flex-shrink-0 overflow-hidden ${isMonochrome ? 'bg-gray-100 border border-gray-200' : 'bg-[#222] border border-[#333]'}`}>
         {rp.previewImage ? (
-          <img src={rp.previewImage} alt={rp.name} className="w-full h-full object-cover" loading="lazy"
+          <img src={getImgUrl(rp.previewImage)} referrerPolicy="no-referrer" crossOrigin="anonymous" alt={rp.name} className="w-full h-full object-cover" loading="lazy"
             onError={(e) => { const el = e.target as HTMLImageElement; el.style.display = 'none'; if (el.parentElement) el.parentElement.innerHTML = `<div class="w-full h-full flex items-center justify-center text-lg">${CATEGORY_ICONS[rp.categoryId]?.icon || '📝'}</div>`; }}
           />
         ) : (
@@ -665,7 +674,7 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
                 {prompts.slice(0, 10).map(rp => (
                   <div key={rp.id} className={`rounded-md overflow-hidden cursor-pointer ${isMonochrome ? 'bg-gray-50 border border-gray-200 hover:border-blue-300' : 'bg-[#1a1a1a] border border-[#333] hover:border-[#d4af37]/50'}`} onClick={() => insertResourcePrompt(rp)}>
                     <div className={`w-full h-16 overflow-hidden ${isMonochrome ? 'bg-gray-100' : 'bg-[#222]'}`}>
-                      {rp.previewImage ? <img src={rp.previewImage} alt="" className="w-full h-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} /> : <div className="w-full h-full flex items-center justify-center text-xl">{iconInfo.icon}</div>}
+                      {rp.previewImage ? <img src={getImgUrl(rp.previewImage)} referrerPolicy="no-referrer" crossOrigin="anonymous" alt="" className="w-full h-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} /> : <div className="w-full h-full flex items-center justify-center text-xl">{iconInfo.icon}</div>}
                     </div>
                     <div className="px-1.5 py-1"><div className={`text-xs truncate ${tc.text}`}>{rp.name}</div></div>
                   </div>
@@ -707,7 +716,7 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
               {prompts.map(rp => (
                 <div key={rp.id} className={`rounded-md overflow-hidden cursor-pointer ${isMonochrome ? 'bg-gray-50 border border-gray-200 hover:border-blue-300' : 'bg-[#1a1a1a] border border-[#333] hover:border-[#d4af37]/50'}`} onClick={() => insertResourcePrompt(rp)}>
                   <div className={`w-full h-16 overflow-hidden ${isMonochrome ? 'bg-gray-100' : 'bg-[#222]'}`}>
-                    {rp.previewImage ? <img src={rp.previewImage} alt="" className="w-full h-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} /> : <div className="w-full h-full flex items-center justify-center text-xl">{iconInfo.icon}</div>}
+                    {rp.previewImage ? <img src={getImgUrl(rp.previewImage)} referrerPolicy="no-referrer" crossOrigin="anonymous" alt="" className="w-full h-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} /> : <div className="w-full h-full flex items-center justify-center text-xl">{iconInfo.icon}</div>}
                   </div>
                   <div className="px-1.5 py-1"><div className={`text-xs truncate ${tc.text}`}>{rp.name}</div></div>
                 </div>
@@ -736,7 +745,7 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
           <div className="p-4 space-y-3">
             {isResource && rp.previewImage && (
               <div className={`w-full h-48 rounded-lg overflow-hidden ${isMonochrome ? 'bg-gray-100' : 'bg-[#222]'}`}>
-                <img src={rp.previewImage} alt={rp.name} className="w-full h-full object-cover" />
+                <img src={getImgUrl(rp.previewImage)} referrerPolicy="no-referrer" crossOrigin="anonymous" alt={rp.name} className="w-full h-full object-cover" />
               </div>
             )}
             <div>
