@@ -11,16 +11,17 @@ interface EquationField {
     placeholder: string;
     icon: string;
     color: string;   // accent color (gold theme)
+    monoColor: string; // accent color (monochrome theme - vibrant)
 }
 
 const EQUATION_FIELDS: EquationField[] = [
-    { key: 'subject',    label: '主体',       sublabel: '要画什么，核心元素',  placeholder: '例：一只金色的凤凰、未来城市天际线…',        icon: '🎯', color: '#d4af37' },
-    { key: 'scene',      label: '场景/背景',   sublabel: '环境氛围',           placeholder: '例：雪山之巅、赛博朋克街道、星空下…',        icon: '🌄', color: '#7eb8a0' },
-    { key: 'composition',label: '构图/视角',   sublabel: '画面布局',           placeholder: '例：仰视广角、居中对称、黄金分割…',          icon: '📐', color: '#8eaadb' },
-    { key: 'lighting',   label: '光线/氛围',   sublabel: '光影与氛围',         placeholder: '例：黄昏逆光、丁达尔光效、霓虹灯…',          icon: '💡', color: '#f0c56d' },
-    { key: 'style',      label: '风格/媒介',   sublabel: '艺术风格',           placeholder: '例：水彩画、油画、3D渲染、赛博朋克…',        icon: '🎨', color: '#c07eb0' },
-    { key: 'details',    label: '细节/修饰',   sublabel: '增加画面细节',       placeholder: '例：精致羽毛纹理、镜面反射、微距细节…',      icon: '🔍', color: '#7dc8e8' },
-    { key: 'params',     label: '参数/格式',   sublabel: '输出要求',           placeholder: '例：4K高清、16:9、电影级画质、超写实…',       icon: '⚙️', color: '#999' },
+    { key: 'subject',    label: '主体',       sublabel: '要画什么，核心元素',  placeholder: '例：一只金色的凤凰、未来城市天际线…',        icon: '🎯', color: '#d4af37', monoColor: '#3b82f6' },
+    { key: 'scene',      label: '场景/背景',   sublabel: '环境氛围',           placeholder: '例：雪山之巅、赛博朋克街道、星空下…',        icon: '🌄', color: '#7eb8a0', monoColor: '#10b981' },
+    { key: 'composition',label: '构图/视角',   sublabel: '画面布局',           placeholder: '例：仰视广角、居中对称、黄金分割…',          icon: '📐', color: '#8eaadb', monoColor: '#8b5cf6' },
+    { key: 'lighting',   label: '光线/氛围',   sublabel: '光影与氛围',         placeholder: '例：黄昏逆光、丁达尔光效、霓虹灯…',          icon: '💡', color: '#f0c56d', monoColor: '#f59e0b' },
+    { key: 'style',      label: '风格/媒介',   sublabel: '艺术风格',           placeholder: '例：水彩画、油画、3D渲染、赛博朋克…',        icon: '🎨', color: '#c07eb0', monoColor: '#ec4899' },
+    { key: 'details',    label: '细节/修饰',   sublabel: '增加画面细节',       placeholder: '例：精致羽毛纹理、镜面反射、微距细节…',      icon: '🔍', color: '#7dc8e8', monoColor: '#06b6d4' },
+    { key: 'params',     label: '参数/格式',   sublabel: '输出要求',           placeholder: '例：4K高清、16:9、电影级画质、超写实…',       icon: '⚙️', color: '#999', monoColor: '#6b7280' },
 ];
 
 type FieldValues = Record<string, string>;
@@ -209,7 +210,7 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                                 className="rounded-xl overflow-hidden transition-all duration-200"
                                 style={{
                                     background: sectionBg,
-                                    border: `1px solid ${hasValue ? f.color + '40' : inputBorder}`,
+                                    border: `1px solid ${hasValue ? (mc ? (f.monoColor || f.color) + '40' : f.color + '40') : inputBorder}`,
                                 }}
                             >
                                 {/* 字段标题行 */}
@@ -218,10 +219,10 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                                     onClick={() => toggleCollapse(f.key)}
                                 >
                                     <span className="text-sm">{f.icon}</span>
-                                    <span className="text-sm font-semibold" style={{ color: f.color }}>{f.label}</span>
+                                    <span className="text-sm font-semibold" style={{ color: mc ? f.monoColor || f.color : f.color }}>{f.label}</span>
                                     <span className="text-xs" style={{ color: textSecondary }}>{f.sublabel}</span>
                                     {hasValue && (
-                                        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: f.color }} />
+                                        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: mc ? f.monoColor || f.color : f.color }} />
                                     )}
                                     <span className="flex-shrink-0" style={{ color: textSecondary }}>
                                         {isCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
@@ -241,7 +242,7 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                                                 color: textPrimary,
                                                 border: `1px solid ${inputBorder}`,
                                             }}
-                                            onFocus={(e) => { e.currentTarget.style.borderColor = f.color; e.currentTarget.style.boxShadow = `0 0 0 2px ${f.color}25`; }}
+                                            onFocus={(e) => { const c = mc ? f.monoColor || f.color : f.color; e.currentTarget.style.borderColor = c; e.currentTarget.style.boxShadow = `0 0 0 2px ${c}25`; }}
                                             onBlur={(e) => { e.currentTarget.style.borderColor = inputBorder; e.currentTarget.style.boxShadow = 'none'; }}
                                         />
                                     </div>
@@ -277,8 +278,8 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                                             onClick={() => setUseOptimized(false)}
                                             className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-all"
                                             style={{
-                                                background: !useOptimized ? (mc ? '#1a1a1a' : 'rgba(212,175,55,0.15)') : 'transparent',
-                                                color: !useOptimized ? (mc ? '#fff' : '#d4af37') : textSecondary,
+                                                background: !useOptimized ? (mc ? '#eff6ff' : 'rgba(212,175,55,0.15)') : 'transparent',
+                                                color: !useOptimized ? (mc ? '#3b82f6' : '#d4af37') : textSecondary,
                                                 border: `1px solid ${!useOptimized ? (mc ? '#3b82f6' : '#d4af37') : 'transparent'}`,
                                             }}
                                         >
@@ -288,8 +289,8 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                                             onClick={() => setUseOptimized(true)}
                                             className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-all"
                                             style={{
-                                                background: useOptimized ? (mc ? '#1a1a1a' : 'rgba(212,175,55,0.15)') : 'transparent',
-                                                color: useOptimized ? (mc ? '#fff' : '#d4af37') : textSecondary,
+                                                background: useOptimized ? (mc ? '#eff6ff' : 'rgba(212,175,55,0.15)') : 'transparent',
+                                                color: useOptimized ? (mc ? '#3b82f6' : '#d4af37') : textSecondary,
                                                 border: `1px solid ${useOptimized ? (mc ? '#3b82f6' : '#d4af37') : 'transparent'}`,
                                             }}
                                         >

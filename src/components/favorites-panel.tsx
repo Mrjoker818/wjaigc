@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { X, Heart, Grid3X3, List, Search, Sparkles, Trash2, Clock, User, Copy, ChevronDown, ChevronUp, Image as ImageIcon } from 'lucide-react';
+import { X, Heart, Grid3X3, List, Search, Sparkles, Trash2, Clock, User, Copy, ChevronDown, ChevronUp, Image as ImageIcon, Download, Upload, Shuffle, Eye, ArrowRight, Tag, Filter, SortAsc, FolderOpen, CheckSquare, Square, GripHorizontal } from 'lucide-react';
 
 export interface FavoriteItem {
     id: number | string;
@@ -22,6 +22,8 @@ export interface FavoriteItem {
     sourceType?: string;
     createdAt?: string;
     username?: string;
+    tags?: string[];
+    useCount?: number;
 }
 
 interface FavoritesPanelProps {
@@ -61,12 +63,31 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
     const [totalPages, setTotalPages] = useState(1);
     const [expandedId, setExpandedId] = useState<string | number | null>(null);
     const [appliedId, setAppliedId] = useState<string | number | null>(null);
+    const [previewItem, setPreviewItem] = useState<FavoriteItem | null>(null);
+    const [selectedIds, setSelectedIds] = useState<Set<string | number>>(new Set());
+    const [batchMode, setBatchMode] = useState(false);
+    const [sortBy, setSortBy] = useState<'time' | 'model' | 'usage'>('time');
+    const [filterModel, setFilterModel] = useState<string>('all');
+    const [windowSize, setWindowSize] = useState({ w: 1020, h: 720 });
     const panelRef = useRef<HTMLDivElement>(null);
+    const resizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number } | null>(null);
     const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const accent = isMonochrome ? '#a0a0a0' : '#d4af37';
-    const accentBg = isMonochrome ? 'rgba(160,160,160,0.1)' : 'rgba(212,175,55,0.08)';
-    const accentBgHover = isMonochrome ? 'rgba(160,160,160,0.18)' : 'rgba(212,175,55,0.15)';
+    // Theme colors for Monochrome - white bg, blue accent
+    const mc = !!isMonochrome;
+    const bg = mc ? '#ffffff' : '#141414';
+    const bgCard = mc ? '#f8fafc' : 'rgba(255,255,255,0.02)';
+    const bgCardHover = mc ? '#f1f5f9' : 'rgba(255,255,255,0.04)';
+    const border = mc ? 'rgba(203,213,225,0.6)' : 'rgba(212,175,55,0.15)';
+    const borderLight = mc ? 'rgba(203,213,225,0.3)' : 'rgba(212,175,55,0.08)';
+    const accent = mc ? '#3b82f6' : '#d4af37';
+    const accentBg = mc ? 'rgba(59,130,246,0.08)' : 'rgba(212,175,55,0.08)';
+    const accentBgHover = mc ? 'rgba(59,130,246,0.15)' : 'rgba(212,175,55,0.15)';
+    const textPrimary = mc ? '#0f172a' : '#e2e8f0';
+    const textSecondary = mc ? '#475569' : '#94a3b8';
+    const textMuted = mc ? '#94a3b8' : '#64748b';
+    const inputBg = mc ? '#f1f5f9' : 'rgba(255,255,255,0.04)';
 
     const fetchFavorites = useCallback(async (p: number) => {
         setLoading(true);
@@ -93,6 +114,8 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                     sourceType: (f.source_type as string) || '',
                     createdAt: String(f.created_at || ''),
                     username: (f.username as string) || '',
+                    tags: (f.tags as string[]) || [],
+                    useCount: (f.use_count as number) || 0,
                 }));
                 setFavorites(items);
                 saveLocalFavorites(items);
@@ -127,6 +150,14 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
         }
     };
 
+    const handleBatchDelete = async () => {
+        for (const id of selectedIds) {
+            await handleDelete(id);
+        }
+        setSelectedIds(new Set());
+        setBatchMode(false);
+    };
+
     const handleApply = (item: FavoriteItem) => {
         if (onApplyParams) {
             onApplyParams(item);
@@ -135,13 +166,85 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
         }
     };
 
-    const filtered = searchQuery
-        ? favorites.filter(f =>
-            (f.prompt || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (f.modelName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (f.username || '').toLowerCase().includes(searchQuery.toLowerCase())
-        )
-        : favorites;
+    const handleCopyPrompt = (prompt: string) => {
+        navigator.clipboard.writeText(prompt).catch(() => {});
+    };
+
+    // Export favorites as JSON
+    const handleExport = () => {
+        const blob = new Blob([JSON.stringify(favorites, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `wujie-favorites-${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    // Import favorites from JSON
+    const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            try {
+                const imported = JSON.parse(ev.target?.result as string);
+                if (Array.isArray(imported)) {
+                    const valid = imported.filter((f: FavoriteItem) => f.imageUrl);
+                    setFavorites(prev => {
+                        const existingIds = new Set(prev.map(f => String(f.id)));
+                        const newItems = valid.filter((f: FavoriteItem) => !existingIds.has(String(f.id)));
+                        return [...prev, ...newItems];
+                    });
+                    saveLocalFavorites([...favorites, ...valid]);
+                }
+            } catch { /* ignore invalid JSON */ }
+        };
+        reader.readAsText(file);
+        e.target.value = '';
+    };
+
+    // Random pick
+    const handleRandomPick = () => {
+        if (filtered.length === 0) return;
+        const idx = Math.floor(Math.random() * filtered.length);
+        setPreviewItem(filtered[idx]);
+    };
+
+    // Filtering and sorting
+    const modelNames = [...new Set(favorites.map(f => f.modelName).filter(Boolean))];
+    const filtered = (() => {
+        let result = searchQuery
+            ? favorites.filter(f =>
+                (f.prompt || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                (f.modelName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                (f.username || '').toLowerCase().includes(searchQuery.toLowerCase())
+            )
+            : favorites;
+        if (filterModel !== 'all') {
+            result = result.filter(f => f.modelName === filterModel);
+        }
+        if (sortBy === 'model') {
+            result = [...result].sort((a, b) => (a.modelName || '').localeCompare(b.modelName || ''));
+        } else if (sortBy === 'usage') {
+            result = [...result].sort((a, b) => (b.useCount || 0) - (a.useCount || 0));
+        }
+        return result;
+    })();
+
+    // Search highlight
+    const highlightText = (text: string, query: string) => {
+        if (!query) return text;
+        const idx = text.toLowerCase().indexOf(query.toLowerCase());
+        if (idx === -1) return text;
+        return (
+            <>
+                {text.slice(0, idx)}
+                <mark style={{ background: mc ? 'rgba(59,130,246,0.2)' : 'rgba(212,175,55,0.3)', color: 'inherit', borderRadius: 2, padding: '0 1px' }}>{text.slice(idx, idx + query.length)}</mark>
+                {text.slice(idx + query.length)}
+            </>
+        );
+    };
 
     // Drag to move window
     const handleDragStart = (e: React.MouseEvent) => {
@@ -161,118 +264,251 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
         window.addEventListener('mouseup', onUp);
     };
 
+    // Resize handle
+    const handleResizeStart = (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        resizeRef.current = { startX: e.clientX, startY: e.clientY, origW: windowSize.w, origH: windowSize.h };
+        const onMove = (ev: MouseEvent) => {
+            if (!resizeRef.current) return;
+            const newW = Math.max(600, resizeRef.current.origW + (ev.clientX - resizeRef.current.startX));
+            const newH = Math.max(400, resizeRef.current.origH + (ev.clientY - resizeRef.current.startY));
+            setWindowSize({ w: newW, h: newH });
+        };
+        const onUp = () => { resizeRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+    };
+
     const formatTime = (ts: string) => {
         if (!ts) return '';
         const d = new Date(Number(ts));
         return isNaN(d.getTime()) ? '' : d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     };
 
+    const toggleSelect = (id: string | number) => {
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    };
+
+    // Wheel event stop propagation to prevent canvas zoom
+    const handleWheel = (e: React.WheelEvent) => {
+        e.stopPropagation();
+    };
+
     return (
-        <div className="fixed inset-0 z-[150] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.3)' }} onClick={onClose}>
+        <div className="fixed inset-0 z-[150]" style={{ background: 'rgba(0,0,0,0.25)' }} onClick={onClose}>
             <div
                 ref={panelRef}
                 onClick={e => e.stopPropagation()}
+                onWheel={handleWheel}
                 className="fixed shadow-2xl flex flex-col overflow-hidden"
                 style={{
-                    width: 680, maxHeight: '80vh',
+                    width: windowSize.w,
+                    height: windowSize.h,
+                    maxHeight: '90vh',
                     top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
                     borderRadius: 16,
-                    background: isMonochrome ? '#1e1e1e' : '#141414',
-                    border: `1px solid ${isMonochrome ? 'rgba(160,160,160,0.2)' : 'rgba(212,175,55,0.2)'}`,
+                    background: bg,
+                    border: `1px solid ${border}`,
+                    boxShadow: mc ? '0 25px 60px rgba(0,0,0,0.12)' : '0 25px 60px rgba(0,0,0,0.5)',
                 }}
             >
                 {/* Title bar - draggable */}
                 <div
                     onMouseDown={handleDragStart}
-                    className="flex items-center justify-between px-5 py-3 cursor-move select-none"
-                    style={{ borderBottom: `1px solid ${isMonochrome ? 'rgba(160,160,160,0.12)' : 'rgba(212,175,55,0.12)'}` }}
+                    className="flex items-center justify-between px-5 py-3 cursor-move select-none flex-shrink-0"
+                    style={{ borderBottom: `1px solid ${borderLight}`, background: mc ? '#f8fafc' : 'rgba(255,255,255,0.02)' }}
                 >
                     <div className="flex items-center gap-2.5">
                         <Heart size={18} fill={accent} stroke={accent} />
-                        <span className="text-[15px] font-semibold text-foreground tracking-wide">收藏夹</span>
-                        <span className="text-xs text-muted-foreground/60 ml-1">{filtered.length} 项</span>
+                        <span className="text-[15px] font-semibold tracking-wide" style={{ color: textPrimary }}>收藏夹</span>
+                        <span className="text-xs ml-1" style={{ color: textMuted }}>{filtered.length} 项</span>
+                        {batchMode && selectedIds.size > 0 && (
+                            <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: accentBg, color: accent }}>已选 {selectedIds.size}</span>
+                        )}
                     </div>
-                    <button onClick={onClose} className="p-1 rounded-md hover:bg-muted/30 transition-colors">
-                        <X size={16} className="text-muted-foreground" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                        {/* Batch mode toggle */}
+                        <button
+                            onClick={() => { setBatchMode(!batchMode); setSelectedIds(new Set()); }}
+                            className="p-1.5 rounded-md transition-colors"
+                            style={{ background: batchMode ? accentBg : 'transparent', color: batchMode ? accent : textMuted }}
+                            title="批量管理"
+                        >
+                            <CheckSquare size={15} />
+                        </button>
+                        <button onClick={onClose} className="p-1.5 rounded-md transition-colors hover:opacity-70" style={{ color: textMuted }}>
+                            <X size={16} />
+                        </button>
+                    </div>
                 </div>
 
-                {/* Search + View toggle */}
-                <div className="flex items-center gap-3 px-5 py-2.5" style={{ borderBottom: `1px solid ${isMonochrome ? 'rgba(160,160,160,0.08)' : 'rgba(212,175,55,0.08)'}` }}>
-                    <div className="flex-1 flex items-center gap-2 rounded-lg px-3 py-1.5" style={{ background: isMonochrome ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.04)', border: `1px solid ${isMonochrome ? 'rgba(160,160,160,0.12)' : 'rgba(212,175,55,0.1)'}` }}>
-                        <Search size={14} className="text-muted-foreground/50" />
+                {/* Toolbar: Search + Actions */}
+                <div className="flex items-center gap-2 px-5 py-2.5 flex-shrink-0" style={{ borderBottom: `1px solid ${borderLight}` }}>
+                    {/* Search */}
+                    <div className="flex-1 flex items-center gap-2 rounded-lg px-3 py-1.5" style={{ background: inputBg, border: `1px solid ${borderLight}` }}>
+                        <Search size={14} style={{ color: textMuted }} />
                         <input
                             value={searchQuery}
                             onChange={e => setSearchQuery(e.target.value)}
                             placeholder="搜索关键词、模型、用户..."
-                            className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/40 outline-none"
+                            className="flex-1 bg-transparent text-sm outline-none"
+                            style={{ color: textPrimary }}
                         />
                     </div>
-                    <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${isMonochrome ? 'rgba(160,160,160,0.12)' : 'rgba(212,175,55,0.1)'}` }}>
+                    {/* Sort */}
+                    <select
+                        value={sortBy}
+                        onChange={e => setSortBy(e.target.value as 'time' | 'model' | 'usage')}
+                        className="rounded-lg px-2 py-1.5 text-xs outline-none cursor-pointer"
+                        style={{ background: inputBg, border: `1px solid ${borderLight}`, color: textSecondary }}
+                    >
+                        <option value="time">按时间</option>
+                        <option value="model">按模型</option>
+                        <option value="usage">按使用</option>
+                    </select>
+                    {/* Filter by model */}
+                    {modelNames.length > 1 && (
+                        <select
+                            value={filterModel}
+                            onChange={e => setFilterModel(e.target.value)}
+                            className="rounded-lg px-2 py-1.5 text-xs outline-none cursor-pointer"
+                            style={{ background: inputBg, border: `1px solid ${borderLight}`, color: textSecondary }}
+                        >
+                            <option value="all">全部模型</option>
+                            {modelNames.map(m => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                    )}
+                    {/* View toggle */}
+                    <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${borderLight}` }}>
                         <button onClick={() => setViewMode('grid')} className="p-1.5 transition-colors" style={{ background: viewMode === 'grid' ? accentBg : 'transparent' }}>
-                            <Grid3X3 size={14} style={{ color: viewMode === 'grid' ? accent : 'var(--muted-foreground)' }} />
+                            <Grid3X3 size={14} style={{ color: viewMode === 'grid' ? accent : textMuted }} />
                         </button>
                         <button onClick={() => setViewMode('list')} className="p-1.5 transition-colors" style={{ background: viewMode === 'list' ? accentBg : 'transparent' }}>
-                            <List size={14} style={{ color: viewMode === 'list' ? accent : 'var(--muted-foreground)' }} />
+                            <List size={14} style={{ color: viewMode === 'list' ? accent : textMuted }} />
                         </button>
                     </div>
+                    {/* Action buttons */}
+                    <button onClick={handleRandomPick} className="p-1.5 rounded-lg transition-colors" style={{ color: textMuted }} title="随机推荐">
+                        <Shuffle size={15} />
+                    </button>
+                    <button onClick={handleExport} className="p-1.5 rounded-lg transition-colors" style={{ color: textMuted }} title="导出收藏">
+                        <Download size={15} />
+                    </button>
+                    <button onClick={() => fileInputRef.current?.click()} className="p-1.5 rounded-lg transition-colors" style={{ color: textMuted }} title="导入收藏">
+                        <Upload size={15} />
+                    </button>
+                    <input ref={fileInputRef} type="file" accept=".json" onChange={handleImport} className="hidden" />
                 </div>
+
+                {/* Batch action bar */}
+                {batchMode && (
+                    <div className="flex items-center gap-3 px-5 py-2 flex-shrink-0" style={{ background: mc ? '#eff6ff' : 'rgba(59,130,246,0.06)', borderBottom: `1px solid ${borderLight}` }}>
+                        <button
+                            onClick={() => setSelectedIds(new Set(filtered.map(f => f.id)))}
+                            className="text-xs px-2.5 py-1 rounded-md transition-colors"
+                            style={{ background: accentBg, color: accent }}
+                        >全选</button>
+                        <button
+                            onClick={() => setSelectedIds(new Set())}
+                            className="text-xs px-2.5 py-1 rounded-md transition-colors"
+                            style={{ background: inputBg, color: textSecondary }}
+                        >取消全选</button>
+                        {selectedIds.size > 0 && (
+                            <button
+                                onClick={handleBatchDelete}
+                                className="text-xs px-2.5 py-1 rounded-md transition-colors"
+                                style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444' }}
+                            >删除选中 ({selectedIds.size})</button>
+                        )}
+                    </div>
+                )}
 
                 {/* Content */}
                 <div className="flex-1 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin' }}>
                     {loading ? (
-                        <div className="flex items-center justify-center py-16 gap-2 text-muted-foreground/60">
+                        <div className="flex items-center justify-center py-16 gap-2" style={{ color: textMuted }}>
                             <div className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: `${accent}33`, borderTopColor: accent }} />
                             <span className="text-sm">加载中...</span>
                         </div>
                     ) : filtered.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground/50">
+                        <div className="flex flex-col items-center justify-center py-16" style={{ color: textMuted }}>
                             <Heart size={40} strokeWidth={1} className="mb-3" />
                             <p className="text-sm">暂无收藏</p>
-                            <p className="text-xs mt-1">右键画布图片可添加到收藏夹</p>
+                            <p className="text-xs mt-1" style={{ color: textMuted }}>右键画布图片可添加到收藏夹</p>
                         </div>
                     ) : viewMode === 'grid' ? (
-                        <div className="grid grid-cols-3 gap-3">
+                        <div className="grid grid-cols-4 gap-3" style={{ minWidth: 500 }}>
                             {filtered.map(item => (
                                 <div
                                     key={item.id}
                                     className="group relative rounded-xl overflow-hidden cursor-pointer transition-all duration-200"
                                     style={{
-                                        background: isMonochrome ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.02)',
-                                        border: expandedId === item.id ? `1.5px solid ${accent}` : `1px solid ${isMonochrome ? 'rgba(160,160,160,0.1)' : 'rgba(212,175,55,0.08)'}`,
+                                        background: bgCard,
+                                        border: expandedId === item.id ? `1.5px solid ${accent}` : `1px solid ${borderLight}`,
                                     }}
-                                    onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                                    onClick={() => {
+                                        if (batchMode) { toggleSelect(item.id); return; }
+                                        setExpandedId(expandedId === item.id ? null : item.id);
+                                    }}
                                 >
+                                    {/* Selection checkbox */}
+                                    {batchMode && (
+                                        <div className="absolute top-2 left-2 z-10">
+                                            {selectedIds.has(item.id) ? (
+                                                <CheckSquare size={16} style={{ color: accent }} />
+                                            ) : (
+                                                <Square size={16} style={{ color: textMuted }} />
+                                            )}
+                                        </div>
+                                    )}
                                     {/* Image */}
-                                    <div className="relative aspect-square bg-muted/20">
+                                    <div className="relative aspect-square" style={{ background: mc ? '#e2e8f0' : 'rgba(255,255,255,0.05)' }}>
                                         <img src={item.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
                                         {/* Hover overlay */}
-                                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100">
+                                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all duration-200 flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
                                             <button
                                                 onClick={e => { e.stopPropagation(); handleApply(item); }}
                                                 className="px-3 py-1.5 rounded-lg text-xs font-medium text-white flex items-center gap-1.5 transition-transform hover:scale-105"
                                                 style={{ background: accent }}
                                             >
                                                 <Sparkles size={12} />
-                                                调用参数
+                                                调用
+                                            </button>
+                                            <button
+                                                onClick={e => { e.stopPropagation(); setPreviewItem(item); }}
+                                                className="px-3 py-1.5 rounded-lg text-xs font-medium text-white flex items-center gap-1.5 transition-transform hover:scale-105"
+                                                style={{ background: 'rgba(0,0,0,0.5)' }}
+                                            >
+                                                <Eye size={12} />
+                                                预览
                                             </button>
                                         </div>
                                         {/* Applied indicator */}
                                         {appliedId === item.id && (
                                             <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                                                <span className="text-xs font-medium px-3 py-1 rounded-full" style={{ background: accent, color: isMonochrome ? '#1e1e1e' : '#141414' }}>已调用</span>
+                                                <span className="text-xs font-medium px-3 py-1 rounded-full" style={{ background: accent, color: mc ? '#fff' : '#141414' }}>已调用</span>
                                             </div>
                                         )}
                                     </div>
                                     {/* Info */}
                                     <div className="p-2.5">
-                                        <p className="text-xs text-foreground/80 truncate leading-snug">{item.prompt || '无描述'}</p>
+                                        <p className="text-xs truncate leading-snug" style={{ color: textPrimary }}>
+                                            {highlightText(item.prompt || '无描述', searchQuery)}
+                                        </p>
                                         <div className="flex items-center gap-1.5 mt-1.5">
                                             {item.modelName && (
                                                 <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: accentBg, color: accent }}>{item.modelName}</span>
                                             )}
                                             {item.aspectRatio && (
-                                                <span className="text-[10px] text-muted-foreground/50">{item.aspectRatio}</span>
+                                                <span className="text-[10px]" style={{ color: textMuted }}>{item.aspectRatio}</span>
+                                            )}
+                                            {(item.useCount || 0) > 0 && (
+                                                <span className="text-[10px]" style={{ color: textMuted }}>×{item.useCount}</span>
                                             )}
                                         </div>
                                     </div>
@@ -287,30 +523,50 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                                     key={item.id}
                                     className="flex items-start gap-3 rounded-xl p-3 transition-all duration-200 cursor-pointer"
                                     style={{
-                                        background: expandedId === item.id ? accentBgHover : isMonochrome ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.015)',
-                                        border: expandedId === item.id ? `1px solid ${accent}40` : `1px solid ${isMonochrome ? 'rgba(160,160,160,0.08)' : 'rgba(212,175,55,0.06)'}`,
+                                        background: expandedId === item.id ? accentBgHover : bgCard,
+                                        border: expandedId === item.id ? `1px solid ${accent}40` : `1px solid ${borderLight}`,
                                     }}
-                                    onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                                    onClick={() => {
+                                        if (batchMode) { toggleSelect(item.id); return; }
+                                        setExpandedId(expandedId === item.id ? null : item.id);
+                                    }}
                                 >
+                                    {/* Selection checkbox */}
+                                    {batchMode && (
+                                        <div className="flex-shrink-0 mt-1">
+                                            {selectedIds.has(item.id) ? (
+                                                <CheckSquare size={16} style={{ color: accent }} />
+                                            ) : (
+                                                <Square size={16} style={{ color: textMuted }} />
+                                            )}
+                                        </div>
+                                    )}
                                     {/* Thumbnail */}
-                                    <div className="w-16 h-16 rounded-lg overflow-hidden bg-muted/20 flex-shrink-0">
-                                        <img src={item.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+                                    <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 cursor-pointer" style={{ background: mc ? '#e2e8f0' : 'rgba(255,255,255,0.05)' }}>
+                                        <img src={item.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" onClick={e => { e.stopPropagation(); setPreviewItem(item); }} />
                                     </div>
                                     {/* Info */}
                                     <div className="flex-1 min-w-0">
-                                        <p className="text-sm text-foreground/85 truncate">{item.prompt || '无描述'}</p>
+                                        <p className="text-sm truncate" style={{ color: textPrimary }}>
+                                            {highlightText(item.prompt || '无描述', searchQuery)}
+                                        </p>
                                         <div className="flex items-center gap-2 mt-1 flex-wrap">
                                             {item.modelName && (
                                                 <span className="text-[11px] px-1.5 py-0.5 rounded" style={{ background: accentBg, color: accent }}>{item.modelName}</span>
                                             )}
                                             {item.aspectRatio && (
-                                                <span className="text-[11px] text-muted-foreground/50">{item.aspectRatio}</span>
+                                                <span className="text-[11px]" style={{ color: textMuted }}>{item.aspectRatio}</span>
                                             )}
                                             {item.quality && (
-                                                <span className="text-[11px] text-muted-foreground/50">{item.quality}</span>
+                                                <span className="text-[11px]" style={{ color: textMuted }}>{item.quality}</span>
+                                            )}
+                                            {(item.useCount || 0) > 0 && (
+                                                <span className="text-[11px] flex items-center gap-0.5" style={{ color: accent }}>
+                                                    <Sparkles size={9} />×{item.useCount}
+                                                </span>
                                             )}
                                         </div>
-                                        <div className="flex items-center gap-3 mt-1.5 text-[11px] text-muted-foreground/40">
+                                        <div className="flex items-center gap-3 mt-1.5 text-[11px]" style={{ color: textMuted }}>
                                             {item.username && (
                                                 <span className="flex items-center gap-1"><User size={10} />{item.username}</span>
                                             )}
@@ -324,14 +580,31 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                                         <button
                                             onClick={e => { e.stopPropagation(); handleApply(item); }}
                                             className="p-1.5 rounded-lg transition-colors"
-                                            style={{ background: appliedId === item.id ? accent : accentBg, color: appliedId === item.id ? (isMonochrome ? '#1e1e1e' : '#141414') : accent }}
+                                            style={{ background: appliedId === item.id ? accent : accentBg, color: appliedId === item.id ? '#fff' : accent }}
                                             title="调用参数"
                                         >
                                             <Sparkles size={14} />
                                         </button>
                                         <button
+                                            onClick={e => { e.stopPropagation(); setPreviewItem(item); }}
+                                            className="p-1.5 rounded-lg transition-colors"
+                                            style={{ color: textMuted }}
+                                            title="预览"
+                                        >
+                                            <Eye size={14} />
+                                        </button>
+                                        <button
+                                            onClick={e => { e.stopPropagation(); handleCopyPrompt(item.prompt || ''); }}
+                                            className="p-1.5 rounded-lg transition-colors"
+                                            style={{ color: textMuted }}
+                                            title="复制提示词"
+                                        >
+                                            <Copy size={14} />
+                                        </button>
+                                        <button
                                             onClick={e => { e.stopPropagation(); handleDelete(item.id); }}
-                                            className="p-1.5 rounded-lg text-muted-foreground/40 hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                                            className="p-1.5 rounded-lg transition-colors hover:opacity-70"
+                                            style={{ color: '#ef4444' }}
                                             title="取消收藏"
                                         >
                                             <Trash2 size={14} />
@@ -348,67 +621,145 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                     const item = filtered.find(f => f.id === expandedId);
                     if (!item) return null;
                     return (
-                        <div className="px-5 py-3" style={{ borderTop: `1px solid ${isMonochrome ? 'rgba(160,160,160,0.12)' : 'rgba(212,175,55,0.12)'}`, background: isMonochrome ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.01)' }}>
+                        <div className="px-5 py-3 flex-shrink-0" style={{ borderTop: `1px solid ${borderLight}`, background: mc ? '#f8fafc' : 'rgba(255,255,255,0.01)' }}>
                             <div className="flex items-center justify-between mb-2">
-                                <span className="text-xs font-medium text-muted-foreground/70">参数详情</span>
-                                <button onClick={() => setExpandedId(null)} className="text-muted-foreground/40 hover:text-foreground transition-colors">
+                                <span className="text-xs font-medium" style={{ color: textSecondary }}>参数详情</span>
+                                <button onClick={() => setExpandedId(null)} style={{ color: textMuted }}>
                                     <ChevronDown size={14} />
                                 </button>
                             </div>
                             <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
                                 {item.prompt && (
                                     <div className="col-span-2">
-                                        <span className="text-muted-foreground/50">提示词</span>
-                                        <p className="text-foreground/80 mt-0.5 leading-relaxed break-all">{item.prompt}</p>
+                                        <span style={{ color: textMuted }}>提示词</span>
+                                        <p className="mt-0.5 leading-relaxed break-all" style={{ color: textPrimary }}>{item.prompt}</p>
                                     </div>
                                 )}
                                 {item.negativePrompt && (
                                     <div className="col-span-2">
-                                        <span className="text-muted-foreground/50">反向提示词</span>
-                                        <p className="text-foreground/60 mt-0.5 leading-relaxed break-all">{item.negativePrompt}</p>
+                                        <span style={{ color: textMuted }}>反向提示词</span>
+                                        <p className="mt-0.5 leading-relaxed break-all" style={{ color: textSecondary }}>{item.negativePrompt}</p>
                                     </div>
                                 )}
-                                {item.modelName && <div><span className="text-muted-foreground/50">模型</span><p className="text-foreground/80 mt-0.5">{item.modelName}</p></div>}
-                                {item.aspectRatio && <div><span className="text-muted-foreground/50">比例</span><p className="text-foreground/80 mt-0.5">{item.aspectRatio}</p></div>}
-                                {item.quality && <div><span className="text-muted-foreground/50">质量</span><p className="text-foreground/80 mt-0.5">{item.quality}</p></div>}
-                                {item.apiProvider && <div><span className="text-muted-foreground/50">API提供商</span><p className="text-foreground/80 mt-0.5">{item.apiProvider}</p></div>}
-                                {(item.originalWidth && item.originalHeight) ? <div><span className="text-muted-foreground/50">原始尺寸</span><p className="text-foreground/80 mt-0.5">{item.originalWidth} x {item.originalHeight}</p></div> : null}
-                                {item.username && <div><span className="text-muted-foreground/50">收藏自</span><p className="text-foreground/80 mt-0.5">{item.username}</p></div>}
-                                {item.createdAt && <div><span className="text-muted-foreground/50">收藏时间</span><p className="text-foreground/80 mt-0.5">{formatTime(item.createdAt)}</p></div>}
+                                {item.modelName && <div><span style={{ color: textMuted }}>模型</span><p className="mt-0.5" style={{ color: textPrimary }}>{item.modelName}</p></div>}
+                                {item.aspectRatio && <div><span style={{ color: textMuted }}>比例</span><p className="mt-0.5" style={{ color: textPrimary }}>{item.aspectRatio}</p></div>}
+                                {item.quality && <div><span style={{ color: textMuted }}>质量</span><p className="mt-0.5" style={{ color: textPrimary }}>{item.quality}</p></div>}
+                                {item.apiProvider && <div><span style={{ color: textMuted }}>API提供商</span><p className="mt-0.5" style={{ color: textPrimary }}>{item.apiProvider}</p></div>}
+                                {(item.originalWidth && item.originalHeight) ? <div><span style={{ color: textMuted }}>原始尺寸</span><p className="mt-0.5" style={{ color: textPrimary }}>{item.originalWidth} x {item.originalHeight}</p></div> : null}
+                                {item.username && <div><span style={{ color: textMuted }}>收藏自</span><p className="mt-0.5" style={{ color: textPrimary }}>{item.username}</p></div>}
+                                {item.createdAt && <div><span style={{ color: textMuted }}>收藏时间</span><p className="mt-0.5" style={{ color: textPrimary }}>{formatTime(item.createdAt)}</p></div>}
                             </div>
-                            {/* Apply button */}
-                            <button
-                                onClick={() => handleApply(item)}
-                                className="w-full mt-3 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-all hover:brightness-110"
-                                style={{ background: appliedId === item.id ? accent : accentBg, color: appliedId === item.id ? (isMonochrome ? '#1e1e1e' : '#141414') : accent, border: `1px solid ${accent}40` }}
-                            >
-                                <Sparkles size={14} />
-                                {appliedId === item.id ? '已调用' : '调用参数到生成面板'}
-                            </button>
+                            <div className="flex gap-2 mt-3">
+                                <button
+                                    onClick={() => handleApply(item)}
+                                    className="flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-all hover:opacity-90"
+                                    style={{ background: appliedId === item.id ? accent : accentBg, color: appliedId === item.id ? '#fff' : accent, border: `1px solid ${accent}40` }}
+                                >
+                                    <Sparkles size={14} />
+                                    {appliedId === item.id ? '已调用' : '调用参数'}
+                                </button>
+                                <button
+                                    onClick={() => handleCopyPrompt(item.prompt || '')}
+                                    className="px-4 py-2 rounded-lg text-sm flex items-center justify-center gap-2 transition-all hover:opacity-80"
+                                    style={{ background: inputBg, color: textSecondary, border: `1px solid ${borderLight}` }}
+                                >
+                                    <Copy size={14} />
+                                    复制
+                                </button>
+                            </div>
                         </div>
                     );
                 })()}
 
                 {/* Pagination */}
                 {totalPages > 1 && (
-                    <div className="flex items-center justify-center gap-2 px-5 py-2.5" style={{ borderTop: `1px solid ${isMonochrome ? 'rgba(160,160,160,0.08)' : 'rgba(212,175,55,0.08)'}` }}>
+                    <div className="flex items-center justify-center gap-2 px-5 py-2.5 flex-shrink-0" style={{ borderTop: `1px solid ${borderLight}` }}>
                         <button
                             onClick={() => setPage(p => Math.max(1, p - 1))}
                             disabled={page <= 1}
                             className="px-3 py-1 rounded text-xs transition-colors disabled:opacity-30"
                             style={{ background: accentBg, color: accent }}
-                        >
-                            上一页
-                        </button>
-                        <span className="text-xs text-muted-foreground/50">{page} / {totalPages}</span>
+                        >上一页</button>
+                        <span className="text-xs" style={{ color: textMuted }}>{page} / {totalPages}</span>
                         <button
                             onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                             disabled={page >= totalPages}
                             className="px-3 py-1 rounded text-xs transition-colors disabled:opacity-30"
                             style={{ background: accentBg, color: accent }}
+                        >下一页</button>
+                    </div>
+                )}
+
+                {/* Resize handle - bottom right */}
+                <div
+                    onMouseDown={handleResizeStart}
+                    className="absolute bottom-0 right-0 w-5 h-5 cursor-se-resize flex items-center justify-center"
+                    style={{ color: textMuted }}
+                >
+                    <GripHorizontal size={12} className="rotate-[-45deg]" />
+                </div>
+
+                {/* Preview modal */}
+                {previewItem && (
+                    <div
+                        className="absolute inset-0 z-50 flex items-center justify-center"
+                        style={{ background: 'rgba(0,0,0,0.6)', borderRadius: 16 }}
+                        onClick={() => setPreviewItem(null)}
+                    >
+                        <div
+                            className="relative max-w-[80%] max-h-[80%] flex gap-4"
+                            onClick={e => e.stopPropagation()}
+                            style={{ background: bg, borderRadius: 12, padding: 16, border: `1px solid ${border}` }}
                         >
-                            下一页
-                        </button>
+                            <img
+                                src={previewItem.imageUrl}
+                                alt=""
+                                className="max-h-[60vh] max-w-[50%] object-contain rounded-lg"
+                            />
+                            <div className="flex-1 min-w-[200px] max-w-[300px] flex flex-col">
+                                <div className="flex items-center justify-between mb-3">
+                                    <span className="text-sm font-semibold" style={{ color: textPrimary }}>图片详情</span>
+                                    <button onClick={() => setPreviewItem(null)} style={{ color: textMuted }}>
+                                        <X size={16} />
+                                    </button>
+                                </div>
+                                {previewItem.prompt && (
+                                    <div className="mb-3">
+                                        <span className="text-xs" style={{ color: textMuted }}>提示词</span>
+                                        <p className="text-sm mt-1 leading-relaxed break-all" style={{ color: textPrimary }}>{previewItem.prompt}</p>
+                                    </div>
+                                )}
+                                {previewItem.negativePrompt && (
+                                    <div className="mb-3">
+                                        <span className="text-xs" style={{ color: textMuted }}>反向提示词</span>
+                                        <p className="text-sm mt-1 leading-relaxed break-all" style={{ color: textSecondary }}>{previewItem.negativePrompt}</p>
+                                    </div>
+                                )}
+                                <div className="grid grid-cols-2 gap-2 text-xs mb-4">
+                                    {previewItem.modelName && <div><span style={{ color: textMuted }}>模型</span><p style={{ color: textPrimary }}>{previewItem.modelName}</p></div>}
+                                    {previewItem.aspectRatio && <div><span style={{ color: textMuted }}>比例</span><p style={{ color: textPrimary }}>{previewItem.aspectRatio}</p></div>}
+                                    {previewItem.quality && <div><span style={{ color: textMuted }}>质量</span><p style={{ color: textPrimary }}>{previewItem.quality}</p></div>}
+                                    {(previewItem.originalWidth && previewItem.originalHeight) && <div><span style={{ color: textMuted }}>尺寸</span><p style={{ color: textPrimary }}>{previewItem.originalWidth}×{previewItem.originalHeight}</p></div>}
+                                </div>
+                                <div className="flex gap-2 mt-auto">
+                                    <button
+                                        onClick={() => { handleApply(previewItem); setPreviewItem(null); }}
+                                        className="flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5"
+                                        style={{ background: accent, color: '#fff' }}
+                                    >
+                                        <Sparkles size={13} />
+                                        调用参数
+                                    </button>
+                                    <button
+                                        onClick={() => handleCopyPrompt(previewItem.prompt || '')}
+                                        className="px-3 py-2 rounded-lg text-sm"
+                                        style={{ background: inputBg, color: textSecondary, border: `1px solid ${borderLight}` }}
+                                    >
+                                        <Copy size={13} />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 )}
             </div>
