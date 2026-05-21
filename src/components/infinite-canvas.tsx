@@ -5867,44 +5867,18 @@ export function InfiniteCanvas({
           </div>
         </div>
 
-        {/* Oh My Prompt Panel - floating popup from toolbar */}
+        {/* Oh My Prompt Panel - floating window from toolbar */}
         {ohMyPromptOpen && (
-          <div className="absolute top-3 left-[52px] z-50 w-[380px] max-h-[calc(100vh-80px)] overflow-hidden rounded-xl border shadow-2xl"
-            style={{
-              borderColor: isMonochrome ? '#e5e5e5' : '#2a2a2a',
-              background: isMonochrome ? '#fff' : '#111',
-            }}
-          >
-            <div className="flex items-center justify-between px-4 py-2.5 border-b"
-              style={{ borderColor: isMonochrome ? '#e5e5e5' : '#2a2a2a' }}
-            >
-              <div className="flex items-center gap-2">
-                <Sparkles className={`h-4 w-4 ${isMonochrome ? 'text-blue-500' : 'text-[#d4af37]'}`} />
-                <span className="font-semibold text-sm" style={{ color: isMonochrome ? '#333' : '#eee' }}>
-                  Oh My Prompt
-                </span>
-              </div>
-              <button
-                onClick={onCloseOhMyPrompt}
-                className="p-1 rounded-md hover:bg-[#2a2a2a]/60 transition-colors"
-                style={{ color: isMonochrome ? '#666' : '#999' }}
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <div className="overflow-y-auto max-h-[calc(100vh-130px)]">
-              <OhMyPrompt
-                isOpen={true}
-                onClose={() => onCloseOhMyPrompt?.()}
-                onInsertPrompt={(prompt: string) => onInsertPrompt?.(prompt)}
-                onVisionPrompt={(url: string) => onVisionPrompt?.(url)}
-                isVisionAnalyzing={isVisionAnalyzing}
-                visionResult={visionResult}
-                themeStyle={ohMyPromptThemeStyle}
-                embedded={true}
-              />
-            </div>
-          </div>
+          <OhMyPrompt
+            isOpen={true}
+            onClose={() => onCloseOhMyPrompt?.()}
+            onInsertPrompt={(prompt: string) => onInsertPrompt?.(prompt)}
+            onVisionPrompt={(url: string) => onVisionPrompt?.(url)}
+            isVisionAnalyzing={isVisionAnalyzing}
+            visionResult={visionResult}
+            themeStyle={ohMyPromptThemeStyle}
+            floating={true}
+          />
         )}
 
         {/* Alt+Click reference mark hint (top center) */}
