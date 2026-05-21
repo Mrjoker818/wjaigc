@@ -505,7 +505,7 @@ export function parseResponseForProfile(
   const taskIds: string[] = [];
 
   // Check for direct image responses: data[].url or data[].b64_json
-  const data = apiResponse.data as Array<Record<string, unknown>> | undefined;
+  const data = apiResponse.data as Array<Record<string, unknown>> | Record<string, unknown> | undefined;
   if (data && Array.isArray(data)) {
     for (const item of data) {
       if (item.url && typeof item.url === 'string') {
@@ -516,6 +516,41 @@ export function parseResponseForProfile(
         taskIds.push(item.task_id);
       }
     }
+  }
+
+  // ── 额外提取 task_id / id（兼容多种 API 响应格式） ──
+  // 1) data 是对象（如 APImart: { data: { task_id: "xxx" } }）
+  if (!Array.isArray(data) && data && typeof data === 'object') {
+    const dataObj = data as Record<string, unknown>;
+    if (dataObj.task_id && typeof dataObj.task_id === 'string') {
+      taskIds.push(dataObj.task_id);
+    }
+    if (dataObj.id && typeof dataObj.id === 'string' && !dataObj.task_id) {
+      taskIds.push(dataObj.id);
+    }
+    // data 对象中可能包含直接图片 URL（非标准但部分 API 使用）
+    if (dataObj.url && typeof dataObj.url === 'string') {
+      directImageUrls.push(dataObj.url);
+    }
+    if (dataObj.b64_json && typeof dataObj.b64_json === 'string') {
+      directImageUrls.push(`data:image/png;base64,${dataObj.b64_json}`);
+    }
+    // 嵌套 images 数组（部分 API: { data: { images: [{ url: "..." }] } }）
+    const images = dataObj.images as Array<Record<string, unknown>> | undefined;
+    if (images && Array.isArray(images)) {
+      for (const img of images) {
+        if (img.url && typeof img.url === 'string') directImageUrls.push(img.url);
+        if (img.b64_json && typeof img.b64_json === 'string') directImageUrls.push(`data:image/png;base64,${img.b64_json}`);
+      }
+    }
+  }
+
+  // 2) task_id / id 在顶层（如某些 OpenAI 兼容: { task_id: "xxx" } 或 { id: "xxx" }）
+  if (apiResponse.task_id && typeof apiResponse.task_id === 'string') {
+    taskIds.push(apiResponse.task_id as string);
+  } else if (apiResponse.id && typeof apiResponse.id === 'string' && !apiResponse.task_id && !apiResponse.data) {
+    // 仅当没有 data 和 task_id 时，才将 id 作为 taskId（避免误解析 data 数组中的 id）
+    taskIds.push(apiResponse.id as string);
   }
 
   // Determine actual response mode based on what we found

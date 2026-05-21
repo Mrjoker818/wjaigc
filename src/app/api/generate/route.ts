@@ -470,9 +470,10 @@ export async function POST(request: NextRequest) {
       });
 
       // 根据兼容性档案确定超时时间
+      // ★ 异步模式（polling）提交请求也需要足够时间（图生图含大量 base64 数据）
       const isDirectMode = profile.responseMode === 'direct';
       const controller = new AbortController();
-      const timeoutMs = isDirectMode ? 600000 : 30000;
+      const timeoutMs = isDirectMode ? 600000 : 60000;
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
       let timeoutCleared = false;
       const clearTimeoutSafely = () => {

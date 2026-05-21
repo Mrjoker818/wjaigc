@@ -249,8 +249,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, status: 'error', error: '无法获取任务状态', retryable: true }, { status: 200 });
     }
 
-    const taskData = statusResult.data as Record<string, unknown> | undefined;
-    const taskStatus = taskData?.status as string | undefined;
+    // ★ 多格式兼容：data 内层 vs 顶层
+    const taskData = (statusResult.data as Record<string, unknown> | undefined) || statusResult;
+    let taskStatus = taskData?.status as string | undefined;
+
+    // 额外检查：data.result.status（部分 API 嵌套更深）
+    if (!taskStatus) {
+      const taskResult = taskData?.result as Record<string, unknown> | undefined;
+      if (taskResult?.status) taskStatus = taskResult.status as string;
+    }
 
     const completedStatuses = ['completed', 'succeeded', 'success', 'done'];
     const normalizedStatus = completedStatuses.includes(taskStatus || '') ? 'completed' : taskStatus;
@@ -267,18 +274,49 @@ export async function POST(request: NextRequest) {
     if (completedStatuses.includes(taskStatus || '')) {
       // ★ 更新任务注册中心状态
       updateTaskProgress(taskId, { status: 'completed', progress: 100 });
-      // 提取图片URL - 通用格式兼容
+      // 提取图片URL - 通用格式兼容（多种 API 响应格式）
       let sourceImageUrl: string | null = null;
+
+      // 路径1: data.result.images[].url（APImart 格式）
       const images = (taskData?.result as Record<string, unknown>)?.images as Array<Record<string, unknown>> | undefined;
       if (images && images.length > 0) {
         const firstImage = images[0];
         const rawUrl = firstImage.url || firstImage.image_url || firstImage.src;
         sourceImageUrl = Array.isArray(rawUrl) ? rawUrl[0] : (typeof rawUrl === 'string' ? rawUrl : null);
       }
-      // 兜底：b64_json格式
+
+      // 路径2: data.result.b64_json
       const taskResult = taskData?.result as Record<string, unknown> | undefined;
       if (!sourceImageUrl && taskResult?.b64_json) {
         sourceImageUrl = `data:image/png;base64,${taskResult.b64_json}`;
+      }
+
+      // 路径3: data.output[].url（OpenAI images/generations 兼容格式）
+      if (!sourceImageUrl) {
+        const output = taskData?.output as Array<Record<string, unknown>> | undefined;
+        if (output && Array.isArray(output) && output.length > 0) {
+          const rawUrl = output[0].url || output[0].image_url;
+          sourceImageUrl = Array.isArray(rawUrl) ? rawUrl[0] : (typeof rawUrl === 'string' ? rawUrl : null);
+        }
+      }
+
+      // 路径4: data.data[].url（嵌套 data 数组格式）
+      if (!sourceImageUrl) {
+        const nestedData = taskData?.data as Array<Record<string, unknown>> | undefined;
+        if (nestedData && Array.isArray(nestedData) && nestedData.length > 0) {
+          const rawUrl = nestedData[0].url || nestedData[0].b64_json;
+          if (typeof rawUrl === 'string') {
+            sourceImageUrl = rawUrl.startsWith('data:') ? rawUrl : rawUrl;
+          }
+        }
+      }
+
+      // 路径5: data.image_url / data.url（单图格式）
+      if (!sourceImageUrl) {
+        const singleUrl = (taskData?.image_url as string) || (taskData?.url as string);
+        if (singleUrl && typeof singleUrl === 'string') {
+          sourceImageUrl = Array.isArray(singleUrl) ? singleUrl[0] : singleUrl;
+        }
       }
 
       // ★ 持久化图片：下载远程/b64图片 → 保存本地 + 上传S3 → 返回持久化URL
