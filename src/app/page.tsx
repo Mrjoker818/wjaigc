@@ -272,12 +272,29 @@ function CanvasApp() {
   const groupsRef = useRef<Array<{id: string; name: string; note: string; imageIds: string[]; x: number; y: number; collapsed: boolean}>>([]);
 
   const stabilizeCanvasImages = useCallback((items: Array<{ id: string; url: string }>) => {
-    items.forEach(({ id, url }) => {
-      if (!url || url.startsWith('data:')) return;
-      void toStableImageUrl(url).then(stableUrl => {
-        if (!stableUrl || stableUrl === url) return;
-        setImages(prev => prev.map(img => img.id === id ? { ...img, url: stableUrl } : img));
-      });
+    const toStabilize = items.filter(({ url }) => url && !url.startsWith('data:'));
+    if (toStabilize.length === 0) return;
+
+    // 批量并发稳定化所有 URL，然后一次性更新状态，避免 N 次 React 重渲染
+    void Promise.all(
+      toStabilize.map(async ({ id, url }) => {
+        try {
+          const stableUrl = await toStableImageUrl(url);
+          return { id, stableUrl: stableUrl !== url ? stableUrl : null };
+        } catch {
+          return { id, stableUrl: null };
+        }
+      })
+    ).then(results => {
+      const updates = new Map<string, string>();
+      for (const { id, stableUrl } of results) {
+        if (stableUrl) updates.set(id, stableUrl);
+      }
+      if (updates.size === 0) return;
+      setImages(prev => prev.map(img => {
+        const newUrl = updates.get(img.id);
+        return newUrl ? { ...img, url: newUrl } : img;
+      }));
     });
   }, []);
 

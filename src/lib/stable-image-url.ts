@@ -7,6 +7,9 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+// 缓存已验证的本地路径，避免重复 HEAD 请求
+const verifiedLocalPaths = new Map<string, boolean>();
+
 export async function toStableImageUrl(imageUrl: string): Promise<string> {
   if (!imageUrl || imageUrl.startsWith('data:')) return imageUrl;
 
@@ -16,15 +19,29 @@ export async function toStableImageUrl(imageUrl: string): Promise<string> {
       return await blobToDataUrl(await response.blob());
     }
 
-    // 本地相对路径：尝试直接 fetch 验证可达性，不可达则 fallback 到 /api/serve-upload/ 前缀
+    // 本地相对路径：检查缓存，避免每次都发 HEAD 请求
     if (!/^https?:\/\//i.test(imageUrl)) {
+      const cached = verifiedLocalPaths.get(imageUrl);
+      if (cached === true) return imageUrl;
+
+      // 已知 /uploads/ 和 /api/serve-upload/ 路径直接可用，跳过验证
+      if (imageUrl.startsWith('/uploads/') || imageUrl.startsWith('/api/serve-upload/')) {
+        verifiedLocalPaths.set(imageUrl, true);
+        return imageUrl;
+      }
+
       const isValid = await verifyLocalImageAccessible(imageUrl);
+      verifiedLocalPaths.set(imageUrl, isValid);
       if (isValid) return imageUrl;
 
       // 尝试 fallback：为非 /api/serve-upload/ 路径补上前缀
       if (!imageUrl.startsWith('/api/serve-upload/')) {
         const fallbackUrl = `/api/serve-upload/${imageUrl.replace(/^\//, '')}`;
+        const fallbackCached = verifiedLocalPaths.get(fallbackUrl);
+        if (fallbackCached === true) return fallbackUrl;
+
         const fallbackValid = await verifyLocalImageAccessible(fallbackUrl);
+        verifiedLocalPaths.set(fallbackUrl, fallbackValid);
         if (fallbackValid) return fallbackUrl;
       }
 
