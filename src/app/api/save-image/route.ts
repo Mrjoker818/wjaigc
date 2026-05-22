@@ -61,25 +61,35 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Image too large (max 20MB)' }, { status: 400 });
       }
 
-      // ★ 后端压缩：大图自动缩放 + JPEG 质量 85
+      // ★ 后端压缩：大图自动缩放 + 智能格式选择（保留透明通道）
       let finalBuffer: Buffer = buffer;
       let finalMimeType = mimeType;
       if (shouldCompress && mimeType !== 'svg') {
         try {
           const metadata = await sharp(buffer).metadata();
+          const hasAlpha = metadata.channels === 4 || metadata.hasAlpha === true;
           const maxEdge = 2048;
           if ((metadata.width || 0) > maxEdge || (metadata.height || 0) > maxEdge) {
-            finalBuffer = await sharp(buffer)
-              .resize(maxEdge, maxEdge, { fit: 'inside', withoutEnlargement: true })
-              .jpeg({ quality: 85 })
-              .toBuffer();
-            finalMimeType = 'jpeg';
+            const resizePipeline = sharp(buffer)
+              .resize(maxEdge, maxEdge, { fit: 'inside', withoutEnlargement: true });
+            if (hasAlpha) {
+              // 有透明通道的图片保持 PNG 格式，不丢失透明度
+              finalBuffer = await resizePipeline.png({ quality: 90, compressionLevel: 6 }).toBuffer();
+              finalMimeType = 'png';
+            } else {
+              finalBuffer = await resizePipeline.jpeg({ quality: 85 }).toBuffer();
+              finalMimeType = 'jpeg';
+            }
           } else if (buffer.length > 1024 * 1024) {
             // 不超尺寸但超1MB，也压缩
-            finalBuffer = await sharp(buffer)
-              .jpeg({ quality: 85 })
-              .toBuffer();
-            finalMimeType = 'jpeg';
+            const pipeline = sharp(buffer);
+            if (hasAlpha) {
+              finalBuffer = await pipeline.png({ quality: 90, compressionLevel: 6 }).toBuffer();
+              finalMimeType = 'png';
+            } else {
+              finalBuffer = await pipeline.jpeg({ quality: 85 }).toBuffer();
+              finalMimeType = 'jpeg';
+            }
           }
         } catch (compressErr) {
           console.warn('[save-image] Sharp compress failed, using original:', compressErr);

@@ -261,8 +261,16 @@ export async function removeBgWithIOPaint(
 
     const resultBuffer = Buffer.from(result.image, 'base64');
     const outputMeta = await sharp(resultBuffer).metadata();
+
+    // 确保 RemoveBG 结果是 RGBA 格式（有透明通道）
+    let finalBuffer = resultBuffer;
+    if (outputMeta.channels && outputMeta.channels < 4) {
+      console.log(`[iopaint-removebg] Output has ${outputMeta.channels} channels, converting to RGBA`);
+      finalBuffer = Buffer.from(await sharp(resultBuffer).ensureAlpha().png().toBuffer());
+    }
+
     const imageUrl = saveOutputBuffer(
-      resultBuffer,
+      finalBuffer,
       'removebg',
       'png',
       INPAINT_OUTPUT_DIR,
