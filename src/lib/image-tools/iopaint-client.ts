@@ -15,6 +15,8 @@ import {
   INPAINT_OUTPUT_DIR,
   IMAGE_MAX_EDGE,
   LOCAL_AI_ENABLED,
+  IOPAINT_MODELS_DIR,
+  REMOVEBG_MODELS_DIR,
 } from './config';
 import {
   ensureOutputDirs,
@@ -43,11 +45,8 @@ export type EraseModelId = (typeof ERASE_MODELS)[number]['id'];
 export const DEFAULT_ERASE_MODEL: EraseModelId = 'lama';
 export const VALID_ERASE_MODELS: readonly string[] = ERASE_MODELS.map((m) => m.id);
 
-/** LaMa 模型文件路径 */
-const LAMA_MODEL_PATH = path.join(
-  process.env.HOME || '/root',
-  '.cache/torch/hub/checkpoints/big-lama.pt',
-);
+/** LaMa 模型文件路径 (项目持久化目录，不受沙箱重启影响) */
+const LAMA_MODEL_PATH = path.join(IOPAINT_MODELS_DIR, 'big-lama.pt');
 
 /**
  * IOPaint RemoveBG 支持的模型 (精简为 3 个，覆盖通用/轻量/人像场景)
@@ -318,6 +317,13 @@ function callPythonScript(
 
     const proc = spawn('python3', [scriptPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        IOPAINT_MODELS_DIR: IOPAINT_MODELS_DIR,
+        REMOVEBG_MODELS_DIR: REMOVEBG_MODELS_DIR,
+        U2NET_HOME: REMOVEBG_MODELS_DIR,  // rembg 模型缓存目录
+        TORCH_HOME: IOPAINT_MODELS_DIR,  // torch hub cache: TORCH_HOME/checkpoints/
+      },
       // ★ 不使用 spawn 的 timeout 选项（某些 Node 版本行为不一致），
       // 改用手动 setTimeout + proc.kill() 确保超时必杀
     });

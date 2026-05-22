@@ -5,23 +5,32 @@
 import { NextResponse } from 'next/server';
 import { isUpscaylAvailable } from '@/lib/image-tools/upscayl';
 import { checkIOPaintHealth, REMOVEBG_MODELS, ERASE_MODELS } from '@/lib/image-tools/iopaint-client';
-import { LOCAL_AI_ENABLED } from '@/lib/image-tools/config';
+import { LOCAL_AI_ENABLED, IOPAINT_MODELS_DIR } from '@/lib/image-tools/config';
 import fs from 'fs';
 import path from 'path';
 
 /** 检查擦除模型文件是否存在且有效 */
 function checkEraseModels(): Record<string, { available: boolean; path: string; size?: number; error?: string }> {
-  const cacheDir = path.join(process.env.HOME || '/root', '.cache/torch/hub/checkpoints');
+  // 使用持久化模型目录（支持 root 目录和 hub/checkpoints/ 子目录两种布局）
+  const modelsDir = IOPAINT_MODELS_DIR;
+  const hubCkptDir = path.join(modelsDir, 'hub', 'checkpoints');
   const models: Record<string, { available: boolean; path: string; size?: number; error?: string }> = {};
   for (const m of ERASE_MODELS) {
     const primaryFile = m.files[0]; // 第一个文件为主文件
-    const modelPath = path.join(cacheDir, primaryFile);
+    // 查找模型文件: 先查 root 目录，再查 hub/checkpoints/ 子目录
+    let modelPath = path.join(modelsDir, primaryFile);
+    if (!fs.existsSync(modelPath)) {
+      modelPath = path.join(hubCkptDir, primaryFile);
+    }
     try {
       // 检查所有文件是否都存在
       let allExist = true;
       let totalSize = 0;
       for (const f of m.files) {
-        const fp = path.join(cacheDir, f);
+        let fp = path.join(modelsDir, f);
+        if (!fs.existsSync(fp)) {
+          fp = path.join(hubCkptDir, f);
+        }
         if (!fs.existsSync(fp)) { allExist = false; break; }
         totalSize += fs.statSync(fp).size;
       }

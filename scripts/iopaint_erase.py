@@ -31,6 +31,43 @@ import io
 import os
 import traceback
 
+# ============================================================
+# 持久化模型路径: 优先从环境变量读取，让模型从项目目录加载
+# ============================================================
+_IOPAINT_MODELS_DIR = os.environ.get("IOPAINT_MODELS_DIR", "")
+
+# 设置 LAMA_MODEL_URL / ANIME_LAMA_MODEL_URL 环境变量
+# iopaint.model.lama 会读取这些变量，如果指向本地文件且存在，直接加载
+if _IOPAINT_MODELS_DIR:
+    _lama_path = os.path.join(_IOPAINT_MODELS_DIR, "big-lama.pt")
+    if os.path.exists(_lama_path):
+        os.environ.setdefault("LAMA_MODEL_URL", _lama_path)
+    _anime_lama_path = os.path.join(_IOPAINT_MODELS_DIR, "anime-manga-big-lama.pt")
+    if os.path.exists(_anime_lama_path):
+        os.environ.setdefault("ANIME_LAMA_MODEL_URL", _anime_lama_path)
+
+# 设置 TORCH_HOME，让 get_cache_path_by_url 在持久化目录查找模型
+# get_cache_path_by_url 构建路径为: TORCH_HOME/checkpoints/<filename>
+# TORCH_HOME = IOPAINT_MODELS_DIR，所以路径为 IOPAINT_MODELS_DIR/checkpoints/<filename>
+# 我们需要创建 checkpoints 子目录的符号链接，将模型文件链接过去
+if _IOPAINT_MODELS_DIR:
+    _ckpt_dir = os.path.join(_IOPAINT_MODELS_DIR, "hub", "checkpoints")
+    if not os.path.exists(_ckpt_dir):
+        os.makedirs(_ckpt_dir, exist_ok=True)
+    # 为每个模型文件创建符号链接（如果 hub/checkpoints 下不存在）
+    # iopaint 的 get_cache_path_by_url 会查找 TORCH_HOME/hub/checkpoints/<filename>
+    for _fname in ["big-lama.pt", "anime-manga-big-lama.pt",
+                    "zits-inpaint-0717.pt", "zits-edge-line-0717.pt",
+                    "zits-structure-upsample-0717.pt", "zits-wireframe-0717.pt"]:
+        _src = os.path.join(_IOPAINT_MODELS_DIR, _fname)
+        _dst = os.path.join(_ckpt_dir, _fname)
+        if os.path.exists(_src) and not os.path.exists(_dst):
+            try:
+                os.symlink(_src, _dst)
+            except Exception:
+                pass  # 符号链接失败不影响主流程
+    os.environ.setdefault("TORCH_HOME", _IOPAINT_MODELS_DIR)
+
 import cv2
 import numpy as np
 
@@ -60,29 +97,88 @@ def encode_np_to_base64(img_bgr: np.ndarray) -> str:
 
 
 def check_model_available(model_name: str) -> str:
-    """检查模型文件是否可用，返回路径或空字符串"""
-    from iopaint.helper import get_cache_path_by_url
+    """检查模型文件是否可用，返回路径或空字符串
+
+    优先从环境变量 IOPAINT_MODELS_DIR 指定的持久化目录查找模型，
+    若未找到则回退到 iopaint 默认缓存路径（torch hub cache）。
+    """
+    # 持久化模型目录（由 Node.js 传入环境变量）
+    models_dir = os.environ.get("IOPAINT_MODELS_DIR", "")
+    # 同时检查 TORCH_HOME（torch hub 的根目录）
+    torch_home = os.environ.get("TORCH_HOME", "")
+
+    def _check_persistent_dir(filename: str) -> str:
+        """在持久化目录中查找模型文件（支持根目录、checkpoints/ 和 hub/checkpoints/ 三种布局）"""
+        if models_dir:
+            # 新版布局: 模型直接在 models/iopaint/ 下
+            p = os.path.join(models_dir, filename)
+            if os.path.exists(p) and os.path.getsize(p) > 1_000_000:
+                return p
+            # torch hub 布局: 模型在 models/iopaint/hub/checkpoints/ 下（符号链接）
+            p2 = os.path.join(models_dir, "hub", "checkpoints", filename)
+            if os.path.exists(p2) and os.path.getsize(p2) > 1_000_000:
+                return p2
+            # 旧版布局: 模型在 models/iopaint/checkpoints/ 下
+            p3 = os.path.join(models_dir, "checkpoints", filename)
+            if os.path.exists(p3) and os.path.getsize(p3) > 1_000_000:
+                return p3
+        return ""
 
     if model_name == "lama":
-        url = "https://github.com/Sanster/models/releases/download/add_big_lama/big-lama.pt"
-        path = get_cache_path_by_url(url)
-        if os.path.exists(path) and os.path.getsize(path) > 1_000_000:
-            return path
+        # 1. 优先查持久化目录
+        p = _check_persistent_dir("big-lama.pt")
+        if p:
+            return p
+        # 2. 回退到 iopaint 默认缓存路径
+        try:
+            from iopaint.helper import get_cache_path_by_url
+            url = "https://github.com/Sanster/models/releases/download/add_big_lama/big-lama.pt"
+            path = get_cache_path_by_url(url)
+            if os.path.exists(path) and os.path.getsize(path) > 1_000_000:
+                return path
+        except Exception:
+            pass
+
     elif model_name == "anime-lama":
-        url = "https://github.com/Sanster/models/releases/download/AnimeMangaInpainting/anime-manga-big-lama.pt"
-        path = get_cache_path_by_url(url)
-        if os.path.exists(path) and os.path.getsize(path) > 1_000_000:
-            return path
+        p = _check_persistent_dir("anime-manga-big-lama.pt")
+        if p:
+            return p
+        try:
+            from iopaint.helper import get_cache_path_by_url
+            url = "https://github.com/Sanster/models/releases/download/AnimeMangaInpainting/anime-manga-big-lama.pt"
+            path = get_cache_path_by_url(url)
+            if os.path.exists(path) and os.path.getsize(path) > 1_000_000:
+                return path
+        except Exception:
+            pass
+
     elif model_name == "zits":
-        urls = [
-            "https://github.com/Sanster/models/releases/download/add_zits/zits-inpaint-0717.pt",
-            "https://github.com/Sanster/models/releases/download/add_zits/zits-edge-line-0717.pt",
-            "https://github.com/Sanster/models/releases/download/add_zits/zits-structure-upsample-0717.pt",
-            "https://github.com/Sanster/models/releases/download/add_zits/zits-wireframe-0717.pt",
+        filenames = [
+            "zits-inpaint-0717.pt",
+            "zits-edge-line-0717.pt",
+            "zits-structure-upsample-0717.pt",
+            "zits-wireframe-0717.pt",
         ]
-        paths = [get_cache_path_by_url(u) for u in urls]
-        if all(os.path.exists(p) and os.path.getsize(p) > 100_000 for p in paths):
-            return ",".join(paths)
+        # 1. 持久化目录
+        if models_dir:
+            paths = [os.path.join(models_dir, f) for f in filenames]
+            if all(os.path.exists(p) and os.path.getsize(p) > 100_000 for p in paths):
+                return ",".join(paths)
+        # 2. 回退到 iopaint 默认缓存路径
+        try:
+            from iopaint.helper import get_cache_path_by_url
+            urls = [
+                "https://github.com/Sanster/models/releases/download/add_zits/zits-inpaint-0717.pt",
+                "https://github.com/Sanster/models/releases/download/add_zits/zits-edge-line-0717.pt",
+                "https://github.com/Sanster/models/releases/download/add_zits/zits-structure-upsample-0717.pt",
+                "https://github.com/Sanster/models/releases/download/add_zits/zits-wireframe-0717.pt",
+            ]
+            paths = [get_cache_path_by_url(u) for u in urls]
+            if all(os.path.exists(p) and os.path.getsize(p) > 100_000 for p in paths):
+                return ",".join(paths)
+        except Exception:
+            pass
+
     return ""
 
 
@@ -202,9 +298,10 @@ def main():
         # 检查模型是否可用
         model_path = check_model_available(model_name)
         if not model_path:
+            models_dir_hint = _IOPAINT_MODELS_DIR or "未设置"
             print(json.dumps({
                 "success": False,
-                "error": f"模型 {model_name} 文件不存在，请先下载模型。运行: bash scripts/download-iopaint-models.sh",
+                "error": f"模型 {model_name} 文件不存在。IOPAINT_MODELS_DIR={models_dir_hint}，请运行: bash scripts/download-iopaint-models.sh",
                 "modelUnavailable": True,
                 "model": model_name,
             }))

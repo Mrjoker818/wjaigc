@@ -5,9 +5,9 @@ IOPaint RemoveBG 去背景脚本 - 被 Node.js 通过 child_process 调用
 输出: stdout JSON { success: bool, image?: base64_string, error?: string, model?: string }
 
 支持的模型 (精简为 3 个):
-  - birefnet-general-lite  (推荐默认, BiRefNet轻量通用, 高精度, 224MB)
-  - u2netp                 (极轻量快速备选, 4.5MB)
+  - u2netp                 (极轻量快速, 推荐, 4.5MB)
   - silueta                (轻量人像去背景, 45MB)
+  - birefnet-general-lite  (高精度, 需大内存≥16GB, 224MB)
 
 需要 rembg >= 2.0.59 以支持 birefnet 模型
 """
@@ -21,11 +21,27 @@ import traceback
 
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 
+# ============================================================
+# 持久化模型路径: 优先从环境变量读取，让模型从项目目录加载
+# ============================================================
+_REMOVEBG_MODELS_DIR = os.environ.get("REMOVEBG_MODELS_DIR", "")
+
+# rembg 使用 U2NET_HOME 环境变量作为模型缓存目录
+# 默认值是 ~/.u2net，沙箱重启会被清空
+# 设置为项目持久化目录，确保模型不丢失
+if _REMOVEBG_MODELS_DIR:
+    os.environ.setdefault("U2NET_HOME", _REMOVEBG_MODELS_DIR)
+else:
+    # 兜底: 如果没有设置 REMOVEBG_MODELS_DIR，使用项目目录
+    _fallback_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "removebg")
+    if os.path.isdir(_fallback_dir):
+        os.environ.setdefault("U2NET_HOME", _fallback_dir)
+
 # 支持的模型列表 (精简为 3 个)
 SUPPORTED_MODELS = [
-    "birefnet-general-lite",
     "u2netp",
     "silueta",
+    "birefnet-general-lite",
 ]
 
 def main():
@@ -33,7 +49,7 @@ def main():
         # 读取输入
         input_data = json.loads(sys.stdin.read())
         image_b64 = input_data.get("image", "")
-        model_name = input_data.get("model", "birefnet-general-lite")
+        model_name = input_data.get("model", "u2netp")
         gen_mask = input_data.get("gen_mask", False)
 
         if not image_b64:

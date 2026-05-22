@@ -16,10 +16,20 @@ export const INPAINT_OUTPUT_DIR = path.join(PUBLIC_DIR, 'outputs', 'inpaint');
 /** 临时文件目录 */
 export const TEMP_DIR = path.join(PUBLIC_DIR, 'outputs', 'temp');
 
-/** upscayl 模型目录 */
+/** 放大模型目录 (项目持久化目录，不受沙箱重启影响) */
 export const UPSCAYL_MODELS_DIR =
   process.env.UPSCAYL_MODELS_DIR ||
-  path.join(process.cwd(), 'upscayl-models');
+  path.join(process.cwd(), 'models', 'upscayl');
+
+/** IOPaint / LaMa / RemoveBG 模型根目录 (项目持久化目录) */
+export const IOPAINT_MODELS_DIR =
+  process.env.IOPAINT_MODELS_DIR ||
+  path.join(process.cwd(), 'models', 'iopaint');
+
+/** RemoveBG 模型目录 (项目持久化目录) */
+export const REMOVEBG_MODELS_DIR =
+  process.env.REMOVEBG_MODELS_DIR ||
+  path.join(process.cwd(), 'models', 'removebg');
 
 /** IOPaint 基础 URL */
 export const IOPAINT_BASE_URL =
