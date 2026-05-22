@@ -79,6 +79,25 @@ ehthumbs.db
 Thumbs.db
 Desktop.ini
 
+# AI Models (large binary files)
+models/
+upscayl-models/
+
+# Python virtual environment
+.venv/
+
+# Uploads (generated images, user content)
+public/uploads/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Download temp files
+*.part*.rar
+*.rar
+
 # Temporary files
 *.tmp
 *.temp
