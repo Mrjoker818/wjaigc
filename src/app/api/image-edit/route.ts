@@ -2008,46 +2008,10 @@ export async function POST(request: NextRequest) {
       const bgSize = aspectRatio ? findClosestAspectRatio(aspectRatio) : '1:1';
       const imageBase64ForBg = await resolveImageToBase64(imageUrl).catch(() => null);
       
-      // ─── 优先路径：IOPaint RemoveBG 本地去背景 ───
-      // RemoveBG 是专业去背景模型，效果优于 AI 生成式去背景和本地透明化
-      // 仅在 LOCAL_AI_ENABLED 时尝试
-      if (LOCAL_AI_ENABLED) {
-        try {
-          console.log(`[remove_background] Attempting IOPaint RemoveBG...`);
-          const sourceBuffer = await fetchImageBuffer(imageUrl);
-          const sourceMeta = await sharp(sourceBuffer).metadata();
-          const srcW = sourceMeta.width || 512;
-          const srcH = sourceMeta.height || 512;
-          
-          const validRemoveBgModels: readonly string[] = REMOVEBG_MODELS.map(m => m.id);
-          const rmbgModelName: string = validRemoveBgModels.includes(body.removeBgModel || '') ? body.removeBgModel! : DEFAULT_REMOVEBG_MODEL;
-          console.log(`[remove_background] Using RemoveBG model: ${rmbgModelName}`);
-          
-          // 限时 30 秒：RemoveBG 首次使用时可能需要下载模型（100MB+），避免长时间阻塞请求
-          const IOPAINT_REMOVEBG_TIMEOUT = 30000;
-          const rmbgResult = await Promise.race([
-            removeBgWithIOPaint(sourceBuffer, srcW, srcH, rmbgModelName),
-            new Promise<null>((resolve) => setTimeout(() => {
-              console.log(`[remove_background] IOPaint RemoveBG timed out after ${IOPAINT_REMOVEBG_TIMEOUT}ms`);
-              resolve(null);
-            }, IOPAINT_REMOVEBG_TIMEOUT)),
-          ]);
-          if (rmbgResult && rmbgResult.success && rmbgResult.imageUrl) {
-            console.log(`[remove_background] IOPaint RemoveBG succeeded: ${rmbgResult.imageUrl}`);
-            return NextResponse.json({
-              success: true,
-              imageUrl: rmbgResult.imageUrl,
-              action,
-              engine: rmbgResult.engine || 'iopaint-removebg',
-            });
-          }
-          console.log(`[remove_background] IOPaint RemoveBG ${rmbgResult ? 'failed: ' + rmbgResult.error : 'timed out'}, falling back to AI API`);
-        } catch (rmbgErr) {
-          console.warn(`[remove_background] IOPaint RemoveBG error:`, rmbgErr instanceof Error ? rmbgErr.message : rmbgErr);
-        }
-      }
-
-      // ─── 降级路径：AI 模型去背景 ───
+      // ─── 优先路径1：AI 模型去背景（精度最高） ───
+      // AI 生成模型（GPT-4o/Gemini）的主体识别远超本地 rembg 模型
+      // 版本 1ac67a9 的 RemoveBG 精度好，正是因为本地模型失败后降级到 AI API
+      // 本地 rembg 模型（ISNet/u2net/silueta/u2netp）主体识别精度不足，仅作降级兜底
       // 移除背景：AI 优先但限时，超时快速降级到本地透明化
       // 避免前端长时间轮询导致"生成超时"
       const AI_REMOVEBG_TIMEOUT_MS = 45000; // AI 路径总限时 45 秒
@@ -2188,7 +2152,45 @@ export async function POST(request: NextRequest) {
         console.warn('[remove_background] AI remove failed, using local background-alpha fallback:', bgErr instanceof Error ? bgErr.message : bgErr);
       }
 
-      // AI 失败或超时 → 本地透明化兜底（秒级完成）
+      // ─── 优先路径2：本地 rembg 去背景（AI 不可用时降级） ───
+      // 本地模型（ISNet/u2net/silueta/u2netp）精度不如 AI，但无需 API 密钥
+      if (LOCAL_AI_ENABLED) {
+        try {
+          console.log(`[remove_background] AI unavailable, trying IOPaint RemoveBG...`);
+          const sourceBuffer = await fetchImageBuffer(imageUrl);
+          const sourceMeta = await sharp(sourceBuffer).metadata();
+          const srcW = sourceMeta.width || 512;
+          const srcH = sourceMeta.height || 512;
+          
+          const validRemoveBgModels: readonly string[] = REMOVEBG_MODELS.map(m => m.id);
+          const rmbgModelName: string = validRemoveBgModels.includes(body.removeBgModel || '') ? body.removeBgModel! : DEFAULT_REMOVEBG_MODEL;
+          console.log(`[remove_background] Using RemoveBG model: ${rmbgModelName}`);
+          
+          // 限时 30 秒：RemoveBG 首次使用时可能需要下载模型（100MB+），避免长时间阻塞请求
+          const IOPAINT_REMOVEBG_TIMEOUT = 30000;
+          const rmbgResult = await Promise.race([
+            removeBgWithIOPaint(sourceBuffer, srcW, srcH, rmbgModelName),
+            new Promise<null>((resolve) => setTimeout(() => {
+              console.log(`[remove_background] IOPaint RemoveBG timed out after ${IOPAINT_REMOVEBG_TIMEOUT}ms`);
+              resolve(null);
+            }, IOPAINT_REMOVEBG_TIMEOUT)),
+          ]);
+          if (rmbgResult && rmbgResult.success && rmbgResult.imageUrl) {
+            console.log(`[remove_background] IOPaint RemoveBG succeeded: ${rmbgResult.imageUrl}`);
+            return NextResponse.json({
+              success: true,
+              imageUrl: rmbgResult.imageUrl,
+              action,
+              engine: rmbgResult.engine || 'iopaint-removebg',
+            });
+          }
+          console.log(`[remove_background] IOPaint RemoveBG ${rmbgResult ? 'failed: ' + rmbgResult.error : 'timed out'}, falling back to local transparent`);
+        } catch (rmbgErr) {
+          console.warn(`[remove_background] IOPaint RemoveBG error:`, rmbgErr instanceof Error ? rmbgErr.message : rmbgErr);
+        }
+      }
+
+      // AI + 本地 rembg 均失败 → 本地透明化兜底（秒级完成）
       try {
         const sourceBuffer = await fetchImageBuffer(imageUrl);
         const localBuffer = await createLocalBackgroundAlpha(sourceBuffer);
