@@ -4,20 +4,20 @@
  * AI 模型（GPT/Gemini）去背景时通常返回 JPEG（无 alpha 通道），
  * 背景区域可能是：
  * 1. 棋盘格图案（灰色+白色 或 黑色+白色 交替方块）
- * 2. 纯白/浅灰/浅色背景
+ * 2. 纯色背景（白/灰/浅色）
  * 3. 棋盘格+纯色混合
  * 
- * 本模块检测这些背景模式并替换为真正的透明像素，输出 PNG。
+ * 核心原则：**只从边缘向内扩展，遇到任何与背景色不同的像素就停止**
+ * 这样主体内部的灰色/白色区域绝对不会被误删
  */
 import sharp from 'sharp';
 import fs from 'fs/promises';
 import path from 'path';
 
 /**
- * 检测像素是否为"灰色"（低饱和度）
- * 灰色像素的 R≈G≈B，饱和度极低
+ * 判断像素是否为"灰色"（低饱和度）
  */
-function isGrayish(r: number, g: number, b: number, maxSaturation: number = 0.12): boolean {
+function isGrayish(r: number, g: number, b: number, maxSaturation: number = 0.10): boolean {
   const maxC = Math.max(r, g, b);
   const minC = Math.min(r, g, b);
   if (maxC === 0) return true;
@@ -26,267 +26,177 @@ function isGrayish(r: number, g: number, b: number, maxSaturation: number = 0.12
 }
 
 /**
- * 策略1: 检测棋盘格图案并替换为透明
- * 支持多种棋盘格尺寸和颜色
+ * 计算两个像素的颜色距离
  */
-function detectCheckerboard(
+function colorDistance(r1: number, g1: number, b1: number, r2: number, g2: number, b2: number): number {
+  return Math.sqrt((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2);
+}
+
+/**
+ * 采样图片四边的颜色，找出最常见的背景色
+ * 返回背景色簇（可能有多个：如棋盘格的两种颜色）
+ */
+function sampleEdgeColors(
   raw: Buffer, width: number, height: number
-): { alphaChannel: Uint8Array; checkerPixels: number } {
-  const totalPixels = width * height;
-  const alphaChannel = new Uint8Array(totalPixels).fill(255);
-  let checkerPixels = 0;
-
-  // 尝试多种棋盘格尺寸
-  const CHECKER_SIZES = [4, 8, 10, 12, 16, 20];
-
-  let bestSize = 0;
-  let bestCount = 0;
-
-  // 先用采样法找到最佳棋盘格尺寸
-  for (const size of CHECKER_SIZES) {
-    let count = 0;
-    const sampleStep = Math.max(1, Math.floor(size / 2));
-    // 采样：每隔 sampleStep 检查一个像素
-    for (let y = size; y < height - size; y += sampleStep) {
-      for (let x = size; x < width - size; x += sampleStep) {
-        const idx = (y * width + x) * 4;
-        const r = raw[idx], g = raw[idx + 1], b = raw[idx + 2];
-        
-        if (!isGrayish(r, g, b, 0.15)) continue;
-
-        // 检查水平方向相邻块的颜色差异
-        const nextIdx = (y * width + Math.min(x + size, width - 1)) * 4;
-        const nR = raw[nextIdx], nG = raw[nextIdx + 1], nB = raw[nextIdx + 2];
-        
-        if (!isGrayish(nR, nG, nB, 0.15)) continue;
-
-        const currBrightness = (r + g + b) / 3;
-        const nextBrightness = (nR + nG + nB) / 3;
-        const diff = Math.abs(currBrightness - nextBrightness);
-
-        // 棋盘格特征：相邻块亮度有明显差异但不极端
-        if (diff > 10 && diff < 180) {
-          count++;
-        }
-      }
-    }
-    if (count > bestCount) {
-      bestCount = count;
-      bestSize = size;
-    }
-  }
-
-  if (bestSize === 0) {
-    return { alphaChannel, checkerPixels: 0 };
-  }
-
-  console.log(`[removeCheckerboard] Best checker size: ${bestSize} (sampled ${bestCount} matches)`);
-
-  // 用最佳尺寸逐像素检测
+): { clusters: { r: number; g: number; b: number; count: number }[]; grayRatio: number } {
+  const BORDER = 3; // 采样边缘3像素
+  const samples: { r: number; g: number; b: number }[] = [];
+  
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
+      if (x >= BORDER && x < width - BORDER && y >= BORDER && y < height - BORDER) continue;
       const idx = (y * width + x) * 4;
-      const r = raw[idx], g = raw[idx + 1], b = raw[idx + 2];
-
-      // 检查是否为灰色像素（棋盘格总是灰色的）
-      if (!isGrayish(r, g, b, 0.18)) continue;
-
-      const brightness = (r + g + b) / 3;
-      // 棋盘格亮度范围：从深灰到近白（0-240），排除极端亮白（可能是主体高光）
-      if (brightness > 245) continue;
-
-      // 检查当前像素所在块的相邻块是否有亮度差异（棋盘格的标志）
-      const blockX = Math.floor(x / bestSize);
-      const blockY = Math.floor(y / bestSize);
-
-      // 取当前块和相邻块的中心像素亮度
-      const centers: number[] = [];
-      for (const [dx, dy] of [[1, 0], [0, 1]] as const) {
-        const nbx = blockX + dx;
-        const nby = blockY + dy;
-        const cx = Math.min((nbx * bestSize) + Math.floor(bestSize / 2), width - 1);
-        const cy = Math.min((nby * bestSize) + Math.floor(bestSize / 2), height - 1);
-        const ci = (cy * width + cx) * 4;
-        if (isGrayish(raw[ci], raw[ci + 1], raw[ci + 2], 0.18)) {
-          centers.push((raw[ci] + raw[ci + 1] + raw[ci + 2]) / 3);
-        }
-      }
-
-      // 当前块中心亮度
-      const currCX = Math.min((blockX * bestSize) + Math.floor(bestSize / 2), width - 1);
-      const currCY = Math.min((blockY * bestSize) + Math.floor(bestSize / 2), height - 1);
-      const currCI = (currCY * width + currCX) * 4;
-      if (!isGrayish(raw[currCI], raw[currCI + 1], raw[currCI + 2], 0.18)) continue;
-      const currCenterBrightness = (raw[currCI] + raw[currCI + 1] + raw[currCI + 2]) / 3;
-
-      // 至少有一个相邻块与当前块有明显亮度差异
-      let isCheckerArea = false;
-      for (const nb of centers) {
-        if (Math.abs(currCenterBrightness - nb) > 10 && Math.abs(currCenterBrightness - nb) < 180) {
-          isCheckerArea = true;
-          break;
-        }
-      }
-
-      if (isCheckerArea) {
-        alphaChannel[y * width + x] = 0;
-        checkerPixels++;
-      }
+      samples.push({ r: raw[idx], g: raw[idx + 1], b: raw[idx + 2] });
     }
   }
-
-  return { alphaChannel, checkerPixels };
+  
+  if (samples.length === 0) return { clusters: [], grayRatio: 0 };
+  
+  // 统计灰色像素比例
+  const grayCount = samples.filter(s => isGrayish(s.r, s.g, s.b, 0.12)).length;
+  const grayRatio = grayCount / samples.length;
+  
+  // 简单聚类：将颜色距离 < 30 的归为同一簇
+  const clusters: { r: number; g: number; b: number; count: number }[] = [];
+  const visited = new Set<number>();
+  
+  for (let i = 0; i < samples.length; i++) {
+    if (visited.has(i)) continue;
+    const s = samples[i];
+    let sumR = s.r, sumG = s.g, sumB = s.b, count = 1;
+    visited.add(i);
+    
+    for (let j = i + 1; j < samples.length; j++) {
+      if (visited.has(j)) continue;
+      const t = samples[j];
+      if (colorDistance(s.r, s.g, s.b, t.r, t.g, t.b) < 30) {
+        sumR += t.r; sumG += t.g; sumB += t.b; count++;
+        visited.add(j);
+      }
+    }
+    
+    clusters.push({
+      r: Math.round(sumR / count),
+      g: Math.round(sumG / count),
+      b: Math.round(sumB / count),
+      count
+    });
+  }
+  
+  // 按出现频率排序
+  clusters.sort((a, b) => b.count - a.count);
+  
+  return { clusters, grayRatio };
 }
 
 /**
- * 策略2: 检测纯色/渐变背景并替换为透明
- * 从图片边缘采样，找出背景色，将相似的像素替换为透明
+ * 从边缘 BFS flood-fill，将与背景色相似的连通像素标记为透明
+ * 
+ * 关键：只从边缘进入，遇到任何与背景色差异超过阈值的像素就停止扩展
+ * 这样主体内部的灰色区域不会被误删
  */
-function detectSolidBackground(
+function bfsBackgroundFromEdge(
   raw: Buffer, width: number, height: number,
-  existingAlpha: Uint8Array
-): { alphaChannel: Uint8Array; bgPixels: number } {
-  const alphaChannel = new Uint8Array(existingAlpha);
-  let bgPixels = 0;
-
-  // 从四条边采样背景颜色
-  const edgeSamples: { r: number; g: number; b: number }[] = [];
-  const sampleEvery = Math.max(1, Math.floor(Math.min(width, height) / 50));
-
-  // 上边
-  for (let x = 0; x < width; x += sampleEvery) {
-    const idx = x * 4;
-    edgeSamples.push({ r: raw[idx], g: raw[idx + 1], b: raw[idx + 2] });
-  }
-  // 下边
-  for (let x = 0; x < width; x += sampleEvery) {
-    const idx = ((height - 1) * width + x) * 4;
-    edgeSamples.push({ r: raw[idx], g: raw[idx + 1], b: raw[idx + 2] });
-  }
-  // 左边
-  for (let y = 0; y < height; y += sampleEvery) {
-    const idx = (y * width) * 4;
-    edgeSamples.push({ r: raw[idx], g: raw[idx + 1], b: raw[idx + 2] });
-  }
-  // 右边
-  for (let y = 0; y < height; y += sampleEvery) {
-    const idx = (y * width + width - 1) * 4;
-    edgeSamples.push({ r: raw[idx], g: raw[idx + 1], b: raw[idx + 2] });
-  }
-
-  if (edgeSamples.length === 0) return { alphaChannel, bgPixels: 0 };
-
-  // 找出最常见的边缘颜色簇
-  // 简单方法：统计灰色像素的平均值作为背景色
-  const graySamples = edgeSamples.filter(s => isGrayish(s.r, s.g, s.b, 0.10));
+  bgClusters: { r: number; g: number; b: number; count: number }[]
+): Uint8Array {
+  const totalPixels = width * height;
+  const alphaChannel = new Uint8Array(totalPixels).fill(255);
+  const visited = new Uint8Array(totalPixels);
   
-  if (graySamples.length < edgeSamples.length * 0.3) {
-    // 不到 30% 的边缘像素是灰色，可能不是纯色背景
-    return { alphaChannel, bgPixels: 0 };
+  // 计算主背景簇和次背景簇（棋盘格可能有两种颜色）
+  const mainBg = bgClusters[0];
+  const altBg = bgClusters.length > 1 ? bgClusters[1] : null;
+  
+  // 严格的颜色距离阈值 - 非常关键！
+  // 必须足够小以避免吃进主体，但足够大以覆盖背景的微小色彩变化
+  const STRICT_THRESHOLD = 25;  // 严格模式：与背景色距离 < 25 才视为背景
+  const MEDIUM_THRESHOLD = 35;  // 中等模式：适用于灰色像素
+  
+  console.log(`[bfsBackground] Main bg: rgb(${mainBg.r},${mainBg.g},${mainBg.b}) count=${mainBg.count}`);
+  if (altBg) {
+    console.log(`[bfsBackground] Alt bg: rgb(${altBg.r},${altBg.g},${altBg.b}) count=${altBg.count}`);
   }
-
-  // 计算背景色的平均值
-  let avgR = 0, avgG = 0, avgB = 0;
-  for (const s of graySamples) {
-    avgR += s.r; avgG += s.g; avgB += s.b;
-  }
-  avgR = Math.round(avgR / graySamples.length);
-  avgG = Math.round(avgG / graySamples.length);
-  avgB = Math.round(avgB / graySamples.length);
-
-  const bgBrightness = (avgR + avgG + avgB) / 3;
-  console.log(`[removeSolidBg] Detected background color: rgb(${avgR},${avgG},${avgB}), brightness: ${bgBrightness.toFixed(0)}`);
-
-  // 计算背景色的颜色范围（容差）
-  // 对于灰色背景，使用亮度差异而非颜色差异
-  const TOLERANCE = 40; // 亮度容差
-
-  // 从边缘开始 flood-fill，将与背景色相似的连通区域标记为透明
-  // 这样可以避免将主体内部的灰色区域误判为背景
-  const visited = new Uint8Array(width * height);
-  const queue: [number, number][] = [];
-
-  // 将所有边缘像素中与背景色相似的加入队列
+  
+  // BFS 队列
+  const queue: number[] = []; // 存储像素索引 (y * width + x)
+  
+  // 从四边开始，将与背景色匹配的像素加入队列
+  const enqueueIfBackground = (pixelIdx: number) => {
+    if (visited[pixelIdx]) return;
+    const dataIdx = pixelIdx * 4;
+    const r = raw[dataIdx], g = raw[dataIdx + 1], b = raw[dataIdx + 2];
+    
+    // 检查是否与主背景色匹配
+    const distToMain = colorDistance(r, g, b, mainBg.r, mainBg.g, mainBg.b);
+    const distToAlt = altBg ? colorDistance(r, g, b, altBg.r, altBg.g, altBg.b) : Infinity;
+    const minDist = Math.min(distToMain, distToAlt);
+    
+    // 判断条件：颜色距离足够近 AND (灰色像素用较宽松阈值，彩色像素用严格阈值)
+    const grayish = isGrayish(r, g, b, 0.12);
+    const threshold = grayish ? MEDIUM_THRESHOLD : STRICT_THRESHOLD;
+    
+    if (minDist < threshold) {
+      queue.push(pixelIdx);
+    }
+  };
+  
+  // 初始化：遍历四边像素
   for (let x = 0; x < width; x++) {
-    // 上边
-    const idx1 = x * 4;
-    if (isSimilarToBackground(raw[idx1], raw[idx1 + 1], raw[idx1 + 2], avgR, avgG, avgB, TOLERANCE)) {
-      queue.push([x, 0]);
-    }
-    // 下边
-    const idx2 = ((height - 1) * width + x) * 4;
-    if (isSimilarToBackground(raw[idx2], raw[idx2 + 1], raw[idx2 + 2], avgR, avgG, avgB, TOLERANCE)) {
-      queue.push([x, height - 1]);
-    }
+    enqueueIfBackground(x); // 上边 y=0
+    enqueueIfBackground((height - 1) * width + x); // 下边
   }
-  for (let y = 0; y < height; y++) {
-    // 左边
-    const idx1 = (y * width) * 4;
-    if (isSimilarToBackground(raw[idx1], raw[idx1 + 1], raw[idx1 + 2], avgR, avgG, avgB, TOLERANCE)) {
-      queue.push([0, y]);
-    }
-    // 右边
-    const idx2 = (y * width + width - 1) * 4;
-    if (isSimilarToBackground(raw[idx2], raw[idx2 + 1], raw[idx2 + 2], avgR, avgG, avgB, TOLERANCE)) {
-      queue.push([width - 1, y]);
-    }
+  for (let y = 1; y < height - 1; y++) {
+    enqueueIfBackground(y * width); // 左边 x=0
+    enqueueIfBackground(y * width + width - 1); // 右边
   }
-
-  // BFS flood-fill
+  
+  // BFS 扩展
+  let bgPixels = 0;
   while (queue.length > 0) {
-    const [x, y] = queue.shift()!;
-    const pixelIdx = y * width + x;
+    const pixelIdx = queue.shift()!;
     if (visited[pixelIdx]) continue;
     visited[pixelIdx] = 1;
-
+    
     const dataIdx = pixelIdx * 4;
-    if (!isSimilarToBackground(raw[dataIdx], raw[dataIdx + 1], raw[dataIdx + 2], avgR, avgG, avgB, TOLERANCE)) {
+    const r = raw[dataIdx], g = raw[dataIdx + 1], b = raw[dataIdx + 2];
+    
+    // 再次检查当前像素是否与背景匹配
+    const distToMain = colorDistance(r, g, b, mainBg.r, mainBg.g, mainBg.b);
+    const distToAlt = altBg ? colorDistance(r, g, b, altBg.r, altBg.g, altBg.b) : Infinity;
+    const minDist = Math.min(distToMain, distToAlt);
+    
+    const grayish = isGrayish(r, g, b, 0.12);
+    const threshold = grayish ? MEDIUM_THRESHOLD : STRICT_THRESHOLD;
+    
+    if (minDist >= threshold) {
+      // 不匹配背景色，停止扩展（主体边界）
       continue;
     }
-
-    // 标记为透明（但不覆盖已经被棋盘格策略标记为透明的像素）
-    if (alphaChannel[pixelIdx] !== 0) {
-      alphaChannel[pixelIdx] = 0;
-      bgPixels++;
-    }
-
-    // 扩展到相邻像素
-    if (x > 0) queue.push([x - 1, y]);
-    if (x < width - 1) queue.push([x + 1, y]);
-    if (y > 0) queue.push([x, y - 1]);
-    if (y < height - 1) queue.push([x, y + 1]);
+    
+    // 标记为透明
+    alphaChannel[pixelIdx] = 0;
+    bgPixels++;
+    
+    // 扩展到4邻域
+    const x = pixelIdx % width;
+    const y = Math.floor(pixelIdx / width);
+    if (x > 0) enqueueIfBackground(pixelIdx - 1);
+    if (x < width - 1) enqueueIfBackground(pixelIdx + 1);
+    if (y > 0) enqueueIfBackground(pixelIdx - width);
+    if (y < height - 1) enqueueIfBackground(pixelIdx + width);
   }
-
-  return { alphaChannel, bgPixels };
-}
-
-/**
- * 判断像素颜色是否与背景色相似
- */
-function isSimilarToBackground(
-  r: number, g: number, b: number,
-  bgR: number, bgG: number, bgB: number,
-  tolerance: number
-): boolean {
-  // 使用亮度差异（更适合灰色背景检测）
-  const pixelBrightness = (r + g + b) / 3;
-  const bgBrightness = (bgR + bgG + bgB) / 3;
-  if (Math.abs(pixelBrightness - bgBrightness) > tolerance) return false;
-
-  // 同时检查饱和度（灰色背景的像素也应为灰色）
-  if (!isGrayish(r, g, b, 0.15)) return false;
-
-  // 检查颜色通道差异（防止将相似亮度的彩色像素误判）
-  const colorDist = Math.abs(r - bgR) + Math.abs(g - bgG) + Math.abs(b - bgB);
-  return colorDist < tolerance * 3;
+  
+  console.log(`[bfsBackground] BFS found ${bgPixels} background pixels (${(bgPixels / totalPixels * 100).toFixed(1)}%)`);
+  return alphaChannel;
 }
 
 /**
  * 对 alpha 通道做边缘羽化（抗锯齿）
+ * 只对紧邻透明区域的不透明像素做微调
  */
 function featherAlphaEdge(
   raw: Buffer, width: number, height: number,
-  alphaChannel: Uint8Array, radius: number = 3
+  alphaChannel: Uint8Array, radius: number = 2
 ): void {
   const origAlpha = Buffer.from(alphaChannel);
   
@@ -296,29 +206,26 @@ function featherAlphaEdge(
       if (origAlpha[idx] !== 255) continue; // 只处理不透明像素
 
       // 检查周围是否有透明像素
-      let nearbyTransparent = false;
       let minDist = radius + 1;
+      let hasTransparentNeighbor = false;
 
-      for (let dy = -radius; dy <= radius && !nearbyTransparent; dy++) {
+      for (let dy = -radius; dy <= radius; dy++) {
         for (let dx = -radius; dx <= radius; dx++) {
           if (dy === 0 && dx === 0) continue;
           const ni = (y + dy) * width + (x + dx);
           if (origAlpha[ni] === 0) {
-            nearbyTransparent = true;
+            hasTransparentNeighbor = true;
             const dist = Math.sqrt(dx * dx + dy * dy);
             minDist = Math.min(minDist, dist);
           }
         }
       }
 
-      if (nearbyTransparent && minDist <= radius) {
-        // 根据到透明区域距离设置 alpha 值
-        // 距离越近越透明，距离越远越不透明
+      if (hasTransparentNeighbor && minDist <= radius) {
         const featherAlpha = Math.round(255 * Math.min(1, minDist / radius));
         alphaChannel[idx] = featherAlpha;
 
-        // 同时对颜色做预乘：将边缘像素颜色与背景色混合，避免透明边缘出现灰边
-        // 简单做法：将颜色向白色方向调整一点
+        // 预乘颜色混合，避免灰边
         const dataIdx = idx * 4;
         if (featherAlpha < 200) {
           const factor = featherAlpha / 255;
@@ -334,13 +241,13 @@ function featherAlphaEdge(
 /**
  * 主函数：检测 AI RemoveBG 结果的背景并替换为透明
  * 
- * 多策略检测：
- * 1. 棋盘格检测（支持多种尺寸和颜色）
- * 2. 纯色/渐变背景检测（从边缘 BFS 扩展）
- * 3. 如果都不满足，返回原图
+ * 策略：
+ * 1. 采样图片边缘颜色，找出背景色簇
+ * 2. 从边缘 BFS flood-fill，只移除与背景色匹配的连通区域
+ * 3. 羽化边缘，输出透明 PNG
  * 
- * @param imageUrl 图片 URL（支持 data: URL、相对路径 /uploads/xxx、完整 URL）
- * @returns 处理后的图片 URL（相对路径 /uploads/xxx）或原图 URL
+ * @param imageUrl 图片 URL
+ * @returns 处理后的图片 URL 或原图 URL
  */
 export async function removeCheckerboardAndMakeTransparent(imageUrl: string): Promise<string> {
   // 1. 获取图片数据
@@ -362,7 +269,7 @@ export async function removeCheckerboardAndMakeTransparent(imageUrl: string): Pr
   const raw = await sharp(imageBuffer).ensureAlpha().raw().toBuffer();
   const totalPixels = width * height;
 
-  // 2.5 先检查图片是否已有真正的透明像素（alpha < 255 的非全透明像素）
+  // 2.5 先检查图片是否已有真正的透明像素
   let hasRealAlpha = false;
   let transparentPixelCount = 0;
   for (let i = 0; i < totalPixels; i++) {
@@ -370,72 +277,63 @@ export async function removeCheckerboardAndMakeTransparent(imageUrl: string): Pr
     if (a < 255) {
       transparentPixelCount++;
       if (a > 0 && a < 255) {
-        // 有半透明像素 = 真正的 alpha 通道
         hasRealAlpha = true;
         break;
       }
     }
   }
   if (!hasRealAlpha && transparentPixelCount > totalPixels * 0.05) {
-    // 有大量全透明像素但无半透明像素 → 可能已有透明通道
     hasRealAlpha = true;
   }
 
   if (hasRealAlpha) {
     console.log(`[removeBgPostProcess] Image already has alpha channel transparency, returning as-is`);
-    // 图片已有透明通道，直接保存为 PNG
     const outputBuffer = await sharp(imageBuffer).png({ compressionLevel: 6 }).toBuffer();
     return await saveTransparentPng(outputBuffer, width, height);
   }
 
-  // 3. 策略1：棋盘格检测
-  const { alphaChannel: checkerAlpha, checkerPixels } = detectCheckerboard(raw, width, height);
-  const checkerRatio = checkerPixels / totalPixels;
-  console.log(`[removeBgPostProcess] Checkerboard: ${checkerPixels} pixels (${(checkerRatio * 100).toFixed(1)}%)`);
-
-  // 合并策略结果
-  let finalAlpha = checkerAlpha;
-  let totalBgPixels = checkerPixels;
-
-  // 4. 策略2：纯色背景检测（补充棋盘格遗漏的区域）
-  if (checkerRatio > 0.02) {
-    // 已检测到部分棋盘格，再用 BFS 补充连通的纯色区域
-    const { alphaChannel: solidAlpha, bgPixels } = detectSolidBackground(raw, width, height, finalAlpha);
-    // 合并：任一策略标记为透明的像素都变透明
-    for (let i = 0; i < totalPixels; i++) {
-      if (solidAlpha[i] === 0 && finalAlpha[i] !== 0) {
-        finalAlpha[i] = 0;
-        totalBgPixels++;
-      }
-    }
-    console.log(`[removeBgPostProcess] Solid background BFS: +${bgPixels} pixels, total: ${totalBgPixels} (${(totalBgPixels / totalPixels * 100).toFixed(1)}%)`);
-  } else if (checkerRatio < 0.02) {
-    // 棋盘格检测几乎无结果，尝试纯色背景检测
-    const { alphaChannel: solidAlpha, bgPixels } = detectSolidBackground(raw, width, height, finalAlpha);
-    finalAlpha = solidAlpha;
-    totalBgPixels = bgPixels;
-    console.log(`[removeBgPostProcess] No checkerboard, trying solid background: ${bgPixels} pixels (${(bgPixels / totalPixels * 100).toFixed(1)}%)`);
+  // 3. 采样边缘颜色，找出背景色簇
+  const { clusters, grayRatio } = sampleEdgeColors(raw, width, height);
+  console.log(`[removeBgPostProcess] Edge sampling: ${clusters.length} clusters, grayRatio=${(grayRatio * 100).toFixed(0)}%`);
+  
+  // 如果边缘灰色像素不足 30%，可能不是典型的去背景结果
+  if (clusters.length === 0) {
+    console.log(`[removeBgPostProcess] No edge color clusters found, returning original`);
+    return imageUrl;
   }
-
-  // 5. 判断是否有足够的背景区域需要移除
-  const bgRatio = totalBgPixels / totalPixels;
+  
+  // 4. 取前2个最大的簇作为背景色（棋盘格通常有两种颜色）
+  const bgClusters = clusters.slice(0, 2);
+  
+  // 5. 从边缘 BFS，将与背景色匹配的连通区域标记为透明
+  const alphaChannel = bfsBackgroundFromEdge(raw, width, height, bgClusters);
+  
+  // 统计背景移除量
+  let bgPixels = 0;
+  for (let i = 0; i < totalPixels; i++) {
+    if (alphaChannel[i] === 0) bgPixels++;
+  }
+  const bgRatio = bgPixels / totalPixels;
+  
   if (bgRatio < 0.03) {
     console.log(`[removeBgPostProcess] Background ratio too low (${(bgRatio * 100).toFixed(1)}%), returning original`);
     return imageUrl;
   }
-
-  // 6. 对 alpha 边缘做羽化
-  featherAlphaEdge(raw, width, height, finalAlpha, 3);
-
+  
+  console.log(`[removeBgPostProcess] Total background removed: ${bgPixels} pixels (${(bgRatio * 100).toFixed(1)}%)`);
+  
+  // 6. 羽化边缘
+  featherAlphaEdge(raw, width, height, alphaChannel, 2);
+  
   // 7. 重建图片，将背景区域设为透明
-  const outputRaw = Buffer.alloc(width * height * 4);
+  const outputRaw = Buffer.alloc(totalPixels * 4);
   for (let i = 0; i < totalPixels; i++) {
     const srcIdx = i * 4;
     const dstIdx = i * 4;
     outputRaw[dstIdx] = raw[srcIdx];         // R
     outputRaw[dstIdx + 1] = raw[srcIdx + 1]; // G
     outputRaw[dstIdx + 2] = raw[srcIdx + 2]; // B
-    outputRaw[dstIdx + 3] = finalAlpha[i];   // A (背景=0, 主体=255, 边缘=渐变)
+    outputRaw[dstIdx + 3] = alphaChannel[i]; // A
   }
 
   // 8. 输出为 PNG
@@ -470,7 +368,7 @@ async function saveTransparentPng(
 
 /**
  * 创建本地背景透明化结果（兜底方案）
- * 使用简单的边缘检测+阈值方法将白色/浅色背景替换为透明
+ * 使用简单的阈值方法将白色/浅色背景替换为透明
  */
 export async function createLocalBackgroundAlpha(imageUrl: string): Promise<string> {
   let imageBuffer: Buffer;
@@ -489,41 +387,38 @@ export async function createLocalBackgroundAlpha(imageUrl: string): Promise<stri
   const height = meta.height || 1;
   const raw = await sharp(imageBuffer).ensureAlpha().raw().toBuffer();
 
-  // 将白色/近白色像素替换为透明（简单阈值法）
-  const totalPixels = width * height;
-  const outputRaw = Buffer.alloc(totalPixels * 4);
-  let transparentCount = 0;
-
-  for (let i = 0; i < totalPixels; i++) {
-    const idx = i * 4;
-    const r = raw[idx], g = raw[idx + 1], b = raw[idx + 2];
-    const brightness = (r + g + b) / 3;
-
-    // 亮度 > 240 且饱和度极低 → 认为是白色背景
-    const maxC = Math.max(r, g, b);
-    const minC = Math.min(r, g, b);
-    const saturation = maxC === 0 ? 0 : (maxC - minC) / maxC;
-
-    if (brightness > 240 && saturation < 0.05) {
-      outputRaw[idx] = 0;
-      outputRaw[idx + 1] = 0;
-      outputRaw[idx + 2] = 0;
-      outputRaw[idx + 3] = 0;
-      transparentCount++;
-    } else {
-      outputRaw[idx] = r;
-      outputRaw[idx + 1] = g;
-      outputRaw[idx + 2] = b;
-      outputRaw[idx + 3] = 255;
-    }
-  }
-
-  if (transparentCount < totalPixels * 0.02) {
-    console.log(`[localBgAlpha] Too few white pixels (${transparentCount}), returning original`);
+  // 使用与主函数相同的 BFS 策略，而不是简单阈值法
+  const { clusters } = sampleEdgeColors(raw, width, height);
+  if (clusters.length === 0) {
+    console.log(`[localBgAlpha] No edge color clusters, returning original`);
     return imageUrl;
   }
 
-  console.log(`[localBgAlpha] Made ${transparentCount} white pixels transparent`);
+  const bgClusters = clusters.slice(0, 2);
+  const alphaChannel = bfsBackgroundFromEdge(raw, width, height, bgClusters);
+  
+  let transparentCount = 0;
+  for (let i = 0; i < width * height; i++) {
+    if (alphaChannel[i] === 0) transparentCount++;
+  }
+  
+  if (transparentCount < width * height * 0.02) {
+    console.log(`[localBgAlpha] Too few background pixels (${transparentCount}), returning original`);
+    return imageUrl;
+  }
+
+  featherAlphaEdge(raw, width, height, alphaChannel, 2);
+
+  const totalPixels = width * height;
+  const outputRaw = Buffer.alloc(totalPixels * 4);
+  for (let i = 0; i < totalPixels; i++) {
+    const srcIdx = i * 4;
+    const dstIdx = i * 4;
+    outputRaw[dstIdx] = raw[srcIdx];
+    outputRaw[dstIdx + 1] = raw[srcIdx + 1];
+    outputRaw[dstIdx + 2] = raw[srcIdx + 2];
+    outputRaw[dstIdx + 3] = alphaChannel[i];
+  }
 
   const outputBuffer = await sharp(outputRaw, { raw: { width, height, channels: 4 } })
     .png({ compressionLevel: 6 })
