@@ -15,6 +15,7 @@ WORKSPACE="${COZE_WORKSPACE_PATH:-/workspace/projects}"
 VENV_DIR="$WORKSPACE/.venv"
 PYTHON_BIN="$VENV_DIR/bin/python3"
 PIP_BIN="$VENV_DIR/bin/pip"
+SITE_PACKAGES="$VENV_DIR/lib/python3.12/site-packages"
 
 # 颜色输出
 GREEN='\033[0;32m'
@@ -34,44 +35,52 @@ check_venv_exists() {
 
 check_core_packages() {
   $PYTHON_BIN -c "import torch" 2>/dev/null && \
-  $PYTHON_BIN -c "import iopaint" 2>/dev/null && \
   $PYTHON_BIN -c "import cv2" 2>/dev/null && \
   $PYTHON_BIN -c "import onnxruntime" 2>/dev/null
 }
 
-check_remBg() {
-  $PYTHON_BIN -c "import rembg" 2>/dev/null
+check_iopaint() {
+  $PYTHON_BIN -c "from iopaint.model.lama import LaMa" 2>/dev/null
+}
+
+check_rembg() {
+  $PYTHON_BIN -c "from iopaint.plugins.remove_bg import RemoveBG" 2>/dev/null
 }
 
 check_vtracer() {
   $PYTHON_BIN -c "import vtracer" 2>/dev/null
 }
 
-check_iopaint_patch() {
-  # 检查 iopaint __init__.py 是否已被修补为懒加载
-  local init_file="$VENV_DIR/lib/python3.12/site-packages/iopaint/model/__init__.py"
-  if [ -f "$init_file" ]; then
-    grep -q "def __getattr__" "$init_file" 2>/dev/null
-  else
-    return 1
-  fi
+check_iopaint_patches() {
+  local init_file="$SITE_PACKAGES/iopaint/model/__init__.py"
+  [ -f "$init_file" ] && grep -q "__getattr__" "$init_file" 2>/dev/null
 }
 
 # ─── 安装函数 ──────────────────────────────────────────
 
 create_venv() {
   log_info "Creating Python venv at $VENV_DIR..."
-  python3 -m venv "$VENV_DIR"
+  python3 -m venv "$VENV_DIR" || {
+    log_warn "venv creation failed, installing python3-venv..."
+    apt-get install -y python3.12-venv 2>/dev/null || apt-get install -y python3-venv 2>/dev/null
+    python3 -m venv "$VENV_DIR"
+  }
   $PIP_BIN install --upgrade pip --no-cache-dir
   log_info "Venv created successfully"
 }
 
-install_core_packages() {
-  log_info "Installing core packages (torch, opencv, onnxruntime)..."
-  $PIP_BIN install --no-cache-dir \
-    torch torchvision --index-url https://download.pytorch.org/whl/cpu 2>/dev/null || \
-  $PIP_BIN install --no-cache-dir torch torchvision
+install_torch() {
+  log_info "Installing torch + torchvision (CPU)..."
+  # 先尝试 PyTorch 官方 CPU 源
+  $PIP_BIN install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu 2>/dev/null || {
+    log_warn "PyTorch official source failed, trying aliyun mirror..."
+    $PIP_BIN install --no-cache-dir torch torchvision
+  }
+  log_info "torch installed"
+}
 
+install_core_deps() {
+  log_info "Installing core dependencies (opencv, onnxruntime, scipy, etc.)..."
   $PIP_BIN install --no-cache-dir \
     opencv-python-headless \
     onnxruntime \
@@ -79,89 +88,139 @@ install_core_packages() {
     uvicorn yacs pydantic easydict omegaconf \
     huggingface_hub \
     pillow
-  log_info "Core packages installed"
+  log_info "Core dependencies installed"
 }
 
 install_iopaint() {
-  log_info "Installing iopaint (no-deps)..."
+  log_info "Installing iopaint (no-deps to avoid heavy optional deps)..."
   $PIP_BIN install --no-cache-dir --no-deps iopaint
   log_info "iopaint installed (no-deps)"
 }
 
 patch_iopaint() {
   log_info "Patching iopaint for lazy loading (avoid diffusers/gradio dependency)..."
-  local init_file="$VENV_DIR/lib/python3.12/site-packages/iopaint/model/__init__.py"
-  local base_file="$VENV_DIR/lib/python3.12/site-packages/iopaint/model/base.py"
 
-  if [ -f "$init_file" ]; then
-    if ! grep -q "__getattr__" "$init_file" 2>/dev/null; then
-      cat > "$init_file" << 'PYEOF'
-# Lazy loading — avoid importing heavy models (diffusers/gradio) unless needed
-import importlib as _importlib
+  # 1. Patch model/__init__.py — lazy import
+  local init_file="$SITE_PACKAGES/iopaint/model/__init__.py"
+  if [ -f "$init_file" ] && ! grep -q "__getattr__" "$init_file" 2>/dev/null; then
+    cat > "$init_file" << 'PYEOF'
+import importlib
 
-_MODEL_MAP = {
-    "LaMa": ".lama:LaMa",
-    "ZITS": ".zits:ZITS",
-    "MAT": ".mat:MAT",
-    "FcF": ".fcf:FcF",
-    "Manga": ".manga:Manga",
-    "AnyObject": ".anyobject:AnyObject",
-    "RealESRGANUpscaler": ".real_esrgan:RealESRGANUpscaler",
-    "SDInpaint": ".sd_sdnet:SDInpaint",
-    "SDUpscaler": ".sd_sdnet:SDUpscaler",
-    "StableDiffusion": ".sd_sdnet:StableDiffusion",
-    "StableDiffusionXL": ".sdxl:StableDiffusionXL",
-    "BrushNet": ".brushnet:BrushNet",
-    "ControlNet": ".controlnet:ControlNet",
-    "PowerPaint": ".powerpaint:PowerPaint",
-    "AnyText": ".anytext:AnyText",
-    "TextDim": ".textdim:TextDim",
+_LAZY_MODELS = {
+    "BrushNet": "iopaint.model.brushnet",
+    "AnyText": "iopaint.model.anytext",
+    "LaMa": "iopaint.model.lama",
+    "MAT": "iopaint.model.mat",
+    "MI_GAN": "iopaint.model.mi_gan",
+    "ZITS": "iopaint.model.zits",
+    "MAE": "iopaint.model.mae",
+    "SD": "iopaint.model.sd",
+    "SDXL": "iopaint.model.sdxl",
+    "SDInpaint": "iopaint.model.sd_inpaint",
+    "FCF": "iopaint.model.fcf",
+    "OpenPaint": "iopaint.model.openpaint",
+    "InstructPix2Pix": "iopaint.model.instruct_pix2pix",
+    "StableDiffusion": "iopaint.model.sd",
+    "StableDiffusionXL": "iopaint.model.sdxl",
 }
 
 def __getattr__(name):
-    if name in _MODEL_MAP:
-        module_path, cls_name = _MODEL_MAP[name].rsplit(":", 1)
-        mod = _importlib.import_module(module_path, __package__)
-        return getattr(mod, cls_name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-def __dir__():
-    return list(_MODEL_MAP.keys())
+    if name in _LAZY_MODELS:
+        module = importlib.import_module(_LAZY_MODELS[name])
+        return getattr(module, name)
+    raise AttributeError(f"module 'iopaint.model' has no attribute {name}")
 PYEOF
-      log_info "Patched iopaint/model/__init__.py for lazy loading"
-    else
-      log_info "iopaint __init__.py already patched"
-    fi
+    log_info "Patched iopaint/model/__init__.py for lazy loading"
+  else
+    log_info "iopaint/model/__init__.py already patched or not found"
   fi
 
-  if [ -f "$base_file" ]; then
-    if ! grep -q "_get_scheduler\|_get_expand_image" "$base_file" 2>/dev/null; then
-      # Replace imports
-      sed -i 's/from .utils import get_scheduler/# get_scheduler lazy loaded/' "$base_file"
-      sed -i 's/from .helper.g_diffuser_bot import expand_image/# expand_image lazy loaded/' "$base_file"
-      # Add lazy functions
-      if ! grep -q "def _get_scheduler" "$base_file"; then
-        echo '
-def _get_scheduler(*args, **kwargs):
-    from .utils import get_scheduler
-    return get_scheduler(*args, **kwargs)
+  # 2. Patch plugins/__init__.py — lazy import
+  local plugins_init="$SITE_PACKAGES/iopaint/plugins/__init__.py"
+  if [ -f "$plugins_init" ] && ! grep -q "__getattr__" "$plugins_init" 2>/dev/null; then
+    cat > "$plugins_init" << 'PYEOF'
+import importlib
 
-def _get_expand_image()():
-    from .helper.g_diffuser_bot import expand_image
-    return expand_image
-' >> "$base_file"
-      fi
-      # Replace direct calls
-      sed -i 's/expanded_image, mask_image = expand_image(/expanded_image, mask_image = _get_expand_image()(/' "$base_file"
-      sed -i 's/scheduler = get_scheduler(/scheduler = _get_scheduler(/' "$base_file"
-      log_info "Patched iopaint/model/base.py for lazy imports"
-    else
-      log_info "iopaint base.py already patched"
-    fi
+_LAZY_PLUGINS = {
+    "InteractiveSeg": "iopaint.plugins.interactive_seg",
+    "RemoveBG": "iopaint.plugins.remove_bg",
+    "RealESRGANUpscaler": "iopaint.plugins.real_esrgan",
+    "GreedyFill": "iopaint.plugins.greedyfill",
+    "SegmentAnything": "iopaint.plugins.segment_anything",
+    "QA": "iopaint.plugins.qa",
+}
+
+def __getattr__(name):
+    if name in _LAZY_PLUGINS:
+        module = importlib.import_module(_LAZY_PLUGINS[name])
+        return getattr(module, name)
+    raise AttributeError(f"module 'iopaint.plugins' has no attribute {name}")
+PYEOF
+    log_info "Patched iopaint/plugins/__init__.py for lazy loading"
+  else
+    log_info "iopaint/plugins/__init__.py already patched or not found"
+  fi
+
+  # 3. Patch model/base.py — remove diffusers/g_diffuser_bot imports
+  local base_file="$SITE_PACKAGES/iopaint/model/base.py"
+  if [ -f "$base_file" ] && grep -q "from .utils import get_scheduler" "$base_file" 2>/dev/null; then
+    $PYTHON_BIN << 'PYEOF'
+path = "/workspace/projects/.venv/lib/python3.12/site-packages/iopaint/model/base.py"
+with open(path, 'r') as f:
+    content = f.read()
+content = content.replace(
+    "from .helper.g_diffuser_bot import expand_image",
+    "# expand_image removed - not needed for LaMa/ZITS"
+)
+content = content.replace(
+    "from .utils import get_scheduler",
+    "# get_scheduler removed - not needed for LaMa/ZITS"
+)
+content = content.replace(
+    "expanded_image, mask_image = expand_image(",
+    "expanded_image, mask_image = _expand_image_placeholder("
+)
+content = content.replace(
+    "scheduler = get_scheduler(",
+    "scheduler = _get_scheduler_placeholder("
+)
+with open(path, 'w') as f:
+    f.write(content)
+print("base.py patched")
+PYEOF
+    log_info "Patched iopaint/model/base.py"
+  else
+    log_info "iopaint/model/base.py already patched or not found"
+  fi
+
+  # 4. Patch model/utils.py — remove diffusers top-level import
+  local utils_file="$SITE_PACKAGES/iopaint/model/utils.py"
+  if [ -f "$utils_file" ] && grep -q "^from diffusers import" "$utils_file" 2>/dev/null; then
+    $PYTHON_BIN << 'PYEOF'
+path = "/workspace/projects/.venv/lib/python3.12/site-packages/iopaint/model/utils.py"
+with open(path, 'r') as f:
+    content = f.read()
+content = content.replace(
+    "from diffusers import (\n    EulerAncestralDiscreteScheduler,\n    EulerDiscreteScheduler,\n    KDPM2AncestralDiscreteScheduler,\n    DPMSolverMultistepScheduler,\n    DPMSolverSDEScheduler,\n    DDPMScheduler,\n    DDIMScheduler,\n    UniPCMultistepScheduler,\n    LMSDiscreteScheduler,\n    PNDMScheduler,\n)",
+    "# diffusers import removed - not needed for LaMa/ZITS\n_diffusers_schedulers = None"
+)
+with open(path, 'w') as f:
+    f.write(content)
+print("utils.py patched")
+PYEOF
+    log_info "Patched iopaint/model/utils.py"
+  else
+    log_info "iopaint/model/utils.py already patched or not found"
+  fi
+
+  # 5. Remove iopaint web_app (not needed, saves ~30MB)
+  if [ -d "$SITE_PACKAGES/iopaint/web_app" ]; then
+    rm -rf "$SITE_PACKAGES/iopaint/web_app"
+    log_info "Removed iopaint/web_app (not needed for Python API usage)"
   fi
 }
 
-install_remBg() {
+install_rembg() {
   log_info "Installing rembg..."
   $PIP_BIN install --no-cache-dir rembg
   log_info "rembg installed"
@@ -182,12 +241,17 @@ if [ "$MODE" = "--check" ]; then
   if check_venv_exists; then
     log_info "Venv exists at $VENV_DIR"
     if check_core_packages; then
-      log_info "Core packages OK (torch, iopaint, opencv, onnxruntime)"
+      log_info "Core packages OK (torch, opencv, onnxruntime)"
     else
       log_warn "Core packages MISSING"
     fi
-    if check_remBg; then
-      log_info "rembg OK"
+    if check_iopaint; then
+      log_info "iopaint OK (LaMa importable)"
+    else
+      log_warn "iopaint MISSING or patch broken"
+    fi
+    if check_rembg; then
+      log_info "rembg OK (RemoveBG importable)"
     else
       log_warn "rembg MISSING"
     fi
@@ -196,7 +260,7 @@ if [ "$MODE" = "--check" ]; then
     else
       log_warn "vtracer MISSING"
     fi
-    if check_iopaint_patch; then
+    if check_iopaint_patches; then
       log_info "iopaint lazy-load patch OK"
     else
       log_warn "iopaint lazy-load patch MISSING"
@@ -213,33 +277,38 @@ if [ "$MODE" = "--force" ]; then
 fi
 
 # 检查是否需要创建/重建
+NEED_INSTALL=false
 if ! check_venv_exists; then
   log_warn "Venv not found, creating..."
   create_venv
-elif ! check_core_packages; then
+  NEED_INSTALL=true
+elif ! check_core_packages || ! check_iopaint; then
   log_warn "Core packages missing, reinstalling..."
-  # 不重建 venv，只重新安装包
+  NEED_INSTALL=true
 elif [ "$MODE" = "--force" ]; then
-  create_venv
+  NEED_INSTALL=true
 else
-  log_info "Venv and core packages already installed, nothing to do"
-  # 仍然检查补丁
-  check_iopaint_patch || patch_iopaint
-  check_remBg || install_remBg
+  log_info "Venv and core packages already installed"
+  # 仍然检查补丁和可选包
+  check_iopaint_patches || patch_iopaint
+  check_rembg || install_rembg
   check_vtracer || install_vtracer
   exit 0
 fi
 
-# 安装所有包
-install_core_packages
-install_iopaint
-patch_iopaint
-install_remBg
-install_vtracer
+if [ "$NEED_INSTALL" = true ]; then
+  # 安装所有包
+  install_torch
+  install_core_deps
+  install_iopaint
+  patch_iopaint
+  install_rembg
+  install_vtracer
+fi
 
 # 验证
 log_info "Verifying installation..."
-if check_core_packages; then
+if check_core_packages && check_iopaint; then
   log_info "All core packages verified!"
 else
   log_error "Core packages verification failed!"
