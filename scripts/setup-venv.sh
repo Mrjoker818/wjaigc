@@ -220,6 +220,38 @@ PYEOF
   fi
 }
 
+slim_torch() {
+  log_info "Slimming torch installation..."
+  # Remove torch test files (~84M)
+  if [ -d "$SITE_PACKAGES/torch/test" ]; then
+    rm -rf "$SITE_PACKAGES/torch/test"
+    log_info "Removed torch/test/ (~84M saved)"
+  fi
+  # Remove torch test binaries, keep only torch_shm_manager
+  if [ -d "$SITE_PACKAGES/torch/bin" ]; then
+    # Create dummy torch_shm_manager first (required by torch __init__)
+    local bin_dir="$SITE_PACKAGES/torch/bin"
+    cat > "$bin_dir/torch_shm_manager" << 'SHMEOF'
+#!/bin/bash
+# dummy torch_shm_manager - not needed for CPU-only inference
+exit 0
+SHMEOF
+    chmod +x "$bin_dir/torch_shm_manager"
+    # Remove all other binaries
+    find "$bin_dir" -type f ! -name "torch_shm_manager" -delete
+    log_info "Slimmed torch/bin/ (~48M saved)"
+  fi
+  # Remove __pycache__ from torch
+  find "$SITE_PACKAGES/torch" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
+  log_info "Cleaned torch __pycache__"
+}
+
+clean_pycache() {
+  log_info "Cleaning all __pycache__ in venv..."
+  find "$VENV_DIR" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
+  log_info "Cleaned __pycache__ (~147M saved)"
+}
+
 install_rembg() {
   log_info "Installing rembg..."
   $PIP_BIN install --no-cache-dir rembg
@@ -304,6 +336,9 @@ if [ "$NEED_INSTALL" = true ]; then
   patch_iopaint
   install_rembg
   install_vtracer
+  # 精简安装
+  slim_torch
+  clean_pycache
 fi
 
 # 验证
