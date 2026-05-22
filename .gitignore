@@ -119,3 +119,8 @@ __pycache__/
 
 .coze-logs
 .cozeproj/reduction
+public/outpaint/
+public/upscaled/
+public/outputs/
+public/data/
+assets/
