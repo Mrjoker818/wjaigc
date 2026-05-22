@@ -6,6 +6,7 @@ import { existsSync } from 'fs';
 import path from 'path';
 import { getServerDataRoot, saveImageFile } from '@/lib/server-data-root';
 import { uploadImageToS3, isS3Available } from '@/lib/s3-storage';
+import { PYTHON_BIN } from '@/lib/image-tools/config';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -300,7 +301,7 @@ async function runVTracer(
     const timeout = params.colorPrecision >= 8 ? 300000 : 120000;
 
     await new Promise<void>((resolve, reject) => {
-      execFile('python3', args, { timeout }, (error, _stdout, stderr) => {
+      execFile(PYTHON_BIN, args, { timeout }, (error, _stdout, stderr) => {
         if (error) {
           console.error('[svg-trace] VTracer error:', stderr || error.message);
           reject(new Error(`VTracer failed: ${stderr || error.message}`));
@@ -1168,7 +1169,7 @@ export async function POST(req: NextRequest) {
     // Pre-check tool availability for trace modes
     if (mode === 'color') {
       const vtracerCheck = await new Promise<boolean>((resolve) => {
-        execFile('python3', ['-c', 'import vtracer'], { timeout: 5000 }, (error) => {
+        execFile(PYTHON_BIN, ['-c', 'import vtracer'], { timeout: 5000 }, (error) => {
           resolve(!error);
         });
       });

@@ -79,3 +79,8 @@ export const UPSCALE_TIMEOUT_MS = parseInt(
   process.env.UPSCALE_TIMEOUT_MS || '300000',
   10,
 );
+
+/** Python 解释器路径（优先使用 .venv 持久化虚拟环境） */
+export const PYTHON_BIN =
+  process.env.PYTHON_BIN ||
+  path.join(process.cwd(), '.venv', 'bin', 'python3');

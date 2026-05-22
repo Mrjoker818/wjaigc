@@ -18,7 +18,7 @@ export async function register() {
       console.warn('[instrumentation] DB migration failed (non-fatal):', e);
     }
 
-    // 异步检查本地 AI 模型文件状态（不阻塞启动）
+    // 异步检查本地 AI 模型文件状态和 Python 环境（不阻塞启动）
     // 使用动态 import 确保此模块不会被 Edge Runtime 静态分析
     import('@/lib/check-local-models').then(({ checkLocalModels }) => {
       checkLocalModels().catch(() => {});

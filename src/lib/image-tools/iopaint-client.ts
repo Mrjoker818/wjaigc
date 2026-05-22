@@ -17,6 +17,7 @@ import {
   LOCAL_AI_ENABLED,
   IOPAINT_MODELS_DIR,
   REMOVEBG_MODELS_DIR,
+  PYTHON_BIN,
 } from './config';
 import {
   ensureOutputDirs,
@@ -73,14 +74,15 @@ async function checkPythonEnv(): Promise<boolean> {
 
   try {
     const { execSync } = await import('child_process');
-    // 检查 python3 是否存在
-    execSync('which python3', { stdio: 'ignore', timeout: 3000 });
+    // 检查 Python 解释器是否可用（优先 .venv 持久化环境）
+    const pythonBin = PYTHON_BIN;
+    execSync(`which ${pythonBin}`, { stdio: 'ignore', timeout: 3000 });
     // 检查 torch 是否安装
-    execSync('python3 -c "import torch"', { stdio: 'ignore', timeout: 10000 });
+    execSync(`${pythonBin} -c "import torch"`, { stdio: 'ignore', timeout: 10000 });
     // 检查 iopaint 是否安装
-    execSync('python3 -c "import iopaint"', { stdio: 'ignore', timeout: 10000 });
+    execSync(`${pythonBin} -c "import iopaint"`, { stdio: 'ignore', timeout: 10000 });
     _pythonEnvAvailable = true;
-    console.log('[IOPaint] Python environment check passed (python3 + torch + iopaint available)');
+    console.log(`[IOPaint] Python environment check passed (${pythonBin} + torch + iopaint available)`);
   } catch {
     _pythonEnvAvailable = false;
     console.log('[IOPaint] Python environment check failed (python3/torch/iopaint not available), skipping local IOPaint');
@@ -315,7 +317,7 @@ function callPythonScript(
   return new Promise((resolve, reject) => {
     const inputData = JSON.stringify(input);
 
-    const proc = spawn('python3', [scriptPath], {
+    const proc = spawn(PYTHON_BIN, [scriptPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
