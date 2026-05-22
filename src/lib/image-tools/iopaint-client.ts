@@ -50,19 +50,21 @@ export const VALID_ERASE_MODELS: readonly string[] = ERASE_MODELS.map((m) => m.i
 const LAMA_MODEL_PATH = path.join(IOPAINT_MODELS_DIR, 'big-lama.pt');
 
 /**
- * IOPaint RemoveBG 支持的模型 (3 个，覆盖通用/人像/轻量场景)
- * - u2net: 精度高，通用去背景推荐 (176MB ONNX)
+ * IOPaint RemoveBG 支持的模型 (4 个，覆盖高精度/通用/人像/轻量场景)
+ * - isnet-general-use: ISNet 高精度通用，F-measure 0.912，推荐 (170MB ONNX)
+ * - u2net: U2Net 通用，F-measure 0.874 (176MB ONNX)
  * - silueta: 轻量人像备选 (45MB ONNX)
  * - u2netp: 极轻量快速备选 (4.5MB ONNX)
  */
 export const REMOVEBG_MODELS = [
-  { id: 'u2net', label: 'U2Net 通用', group: 'recommended', recommended: true, description: '精度高，通用去背景推荐', size: '176MB' },
+  { id: 'isnet-general-use', label: 'ISNet 高精度', group: 'recommended', recommended: true, description: '精度最高，通用去背景推荐', size: '170MB' },
+  { id: 'u2net', label: 'U2Net 通用', group: 'general', description: '精度高，通用去背景', size: '176MB' },
   { id: 'silueta', label: 'Silueta 人像', group: 'portrait', description: '轻量人像去背景', size: '45MB' },
   { id: 'u2netp', label: 'U2Net 轻量', group: 'lightweight', description: '极轻量快速备选', size: '4.5MB' },
 ] as const;
 
 /** 默认 RemoveBG 模型 */
-export const DEFAULT_REMOVEBG_MODEL = 'u2net';
+export const DEFAULT_REMOVEBG_MODEL = 'isnet-general-use';
 
 /** 检查 Python + 依赖是否可用（比仅检查模型文件更准确） */
 let _pythonEnvChecked = false;

@@ -148,21 +148,21 @@ download_with_fallback \
 echo ""
 echo "--- RemoveBG 去背景模型 ---"
 
-# u2netp (~4.5MB) - 轻量快速，精度较低
+# isnet-general-use (~170MB) - ISNet 高精度通用，F-measure 0.912，推荐
 download_with_fallback \
-    "U2NetP 轻量去背景 (u2netp.onnx)" \
-    "$REMOVEBG_DIR/u2netp.onnx" \
-    1000000 \
-    "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx" \
-    "${GH_PROXY}https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx"
+    "ISNet 高精度去背景 (isnet-general-use.onnx)" \
+    "$REMOVEBG_DIR/isnet-general-use.onnx" \
+    100000000 \
+    "https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx" \
+    "${GH_PROXY}https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx"
 
-	# u2net (~176MB) - 推荐，精度最高
-	download_with_fallback \
-	    "U2Net 去背景 (u2net.onnx)" \
-	    "$REMOVEBG_DIR/u2net.onnx" \
-	    100000000 \
-	    "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx" \
-	    "${GH_PROXY}https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx"
+# u2net (~176MB) - U2Net 通用，F-measure 0.874
+download_with_fallback \
+    "U2Net 去背景 (u2net.onnx)" \
+    "$REMOVEBG_DIR/u2net.onnx" \
+    100000000 \
+    "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx" \
+    "${GH_PROXY}https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx"
 
 # silueta (~45MB) - 轻量人像
 download_with_fallback \
@@ -171,6 +171,14 @@ download_with_fallback \
     10000000 \
     "https://github.com/danielgatis/rembg/releases/download/v0.0.0/silueta.onnx" \
     "${GH_PROXY}https://github.com/danielgatis/rembg/releases/download/v0.0.0/silueta.onnx"
+
+# u2netp (~4.5MB) - 轻量快速，精度较低
+download_with_fallback \
+    "U2NetP 轻量去背景 (u2netp.onnx)" \
+    "$REMOVEBG_DIR/u2netp.onnx" \
+    1000000 \
+    "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx" \
+    "${GH_PROXY}https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx"
 
 
 # ============================================================

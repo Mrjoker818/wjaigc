@@ -43,8 +43,9 @@ export async function checkLocalModels() {
     // ─── 检查核心模型文件 ────────────────────────────────
     const coreModels = [
       { name: 'LaMa 擦除', path: path.join(iopaintDir, 'big-lama.pt'), minSize: 1_000_000 },
+      { name: 'ISNet 去背景(推荐)', path: path.join(removebgDir, 'isnet-general-use.onnx'), minSize: 100_000_000 },
+      { name: 'U2Net 去背景', path: path.join(removebgDir, 'u2net.onnx'), minSize: 100_000_000 },
       { name: 'U2NetP 去背景', path: path.join(removebgDir, 'u2netp.onnx'), minSize: 1_000_000 },
-      { name: 'U2Net 去背景(推荐)', path: path.join(removebgDir, 'u2net.onnx'), minSize: 100_000_000 },
     ];
 
     const missing: string[] = [];
