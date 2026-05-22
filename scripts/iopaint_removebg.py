@@ -12,8 +12,8 @@ RemoveBG 去背景脚本 - 被 Node.js 通过 child_process 调用
 
 关键优化:
   - 直接使用 rembg.remove() 而非 IOPaint 包装器
-  - 开启 alpha_matting 精细边缘抠图
-  - 开启 post_process_mask 蒙版后处理
+  - alpha_matting=False: 不使用 PyMatting 精细边缘（会导致主体被侵蚀）
+  - post_process_mask=True: 仅清理蒙版噪点，不侵蚀主体
   - ISNet 精度显著高于 U2Net (0.912 vs 0.874)
 """
 
@@ -100,7 +100,13 @@ def main():
 
         # ===== 直接使用 rembg.remove() =====
         # 不走 IOPaint 包装器，直接使用 rembg 原生管线
-        # 开启 alpha_matting 精细边缘抠图 + post_process_mask 蒙版后处理
+        #
+        # 关键: 不启用 alpha_matting!
+        # alpha_matting 使用 PyMatting 做精细边缘，但它的 foreground_threshold
+        # 会把蒙版值 <240 的区域归为"不确定"，再用 binary_erosion 腐蚀，
+        # 导致主体细节（手指、头发、细小物体）被误删。
+        # 版本 1ac67a9 使用 naive_cutout（直接信任模型蒙版）效果更好。
+        # 保留 post_process_mask=True 仅清理蒙版噪点，不侵蚀主体。
         from rembg import remove, new_session
 
         session = new_session(model_name=model_name)
@@ -108,10 +114,7 @@ def main():
         result = remove(
             image_pil,
             session=session,
-            alpha_matting=True,
-            alpha_matting_foreground_threshold=240,
-            alpha_matting_background_threshold=10,
-            alpha_matting_erode_size=10,
+            alpha_matting=False,
             post_process_mask=True,
             only_mask=gen_mask,
         )
