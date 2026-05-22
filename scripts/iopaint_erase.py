@@ -54,7 +54,7 @@ if _IOPAINT_MODELS_DIR:
     _ckpt_dir = os.path.join(_IOPAINT_MODELS_DIR, "hub", "checkpoints")
     if not os.path.exists(_ckpt_dir):
         os.makedirs(_ckpt_dir, exist_ok=True)
-    # 为每个模型文件创建符号链接（如果 hub/checkpoints 下不存在）
+    # 为每个模型文件创建符号链接到 hub/checkpoints/（如果不存在）
     # iopaint 的 get_cache_path_by_url 会查找 TORCH_HOME/hub/checkpoints/<filename>
     for _fname in ["big-lama.pt", "anime-manga-big-lama.pt",
                     "zits-inpaint-0717.pt", "zits-edge-line-0717.pt",
@@ -66,6 +66,20 @@ if _IOPAINT_MODELS_DIR:
                 os.symlink(_src, _dst)
             except Exception:
                 pass  # 符号链接失败不影响主流程
+    # 也为 RemoveBG 模型创建符号链接到 hub/checkpoints/ 目录
+    # iopaint RemoveBG 插件会在 __init__ 中设置:
+    #   U2NET_HOME = os.path.join(torch.hub.get_dir(), "checkpoints")
+    #   = TORCH_HOME/hub/checkpoints/ （与我们擦除模型同一个目录）
+    _removebg_dir = os.environ.get("REMOVEBG_MODELS_DIR", os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "removebg"))
+    for _fname in ["u2netp.onnx", "silueta.onnx", "birefnet_general_lite.onnx"]:
+        _src = os.path.join(_removebg_dir, _fname)
+        _dst = os.path.join(_ckpt_dir, _fname)
+        if os.path.exists(_src) and not os.path.exists(_dst):
+            try:
+                os.symlink(_src, _dst)
+            except Exception:
+                pass
     os.environ.setdefault("TORCH_HOME", _IOPAINT_MODELS_DIR)
 
 import cv2

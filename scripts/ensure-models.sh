@@ -225,6 +225,17 @@ for f in big-lama.pt anime-manga-big-lama.pt zits-wireframe-0717.pt zits-edge-li
     fi
 done
 
+# RemoveBG 模型也需要链接到 hub/checkpoints/
+# 因为 iopaint RemoveBG 插件设置 U2NET_HOME = TORCH_HOME/hub/checkpoints/
+for f in u2netp.onnx silueta.onnx birefnet_general_lite.onnx; do
+    src="$REMOVEBG_DIR/$f"
+    dst="$HUB_CKPT_DIR/$f"
+    if [ -f "$src" ] && [ ! -e "$dst" ]; then
+        ln -sf "$src" "$dst"
+        echo "[链接] $f -> hub/checkpoints/ (RemoveBG)"
+    fi
+done
+
 # ============================================================
 # 汇总
 # ============================================================

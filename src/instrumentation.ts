@@ -26,22 +26,29 @@ export async function register() {
 /**
  * 检查本地 AI 模型文件状态，日志提示缺失的模型
  * 仅检查核心模型（LaMa + U2NetP），不自动下载（下载耗时较长，需用户手动执行）
+ * 
+ * 注意: 不从 config.ts 导入，因为 config.ts 顶层 import path 会在 Edge Runtime 报错
  */
 async function checkLocalModels() {
   try {
     const fs = await import('fs');
     const path = await import('path');
-    const { IOPAINT_MODELS_DIR, REMOVEBG_MODELS_DIR, LOCAL_AI_ENABLED } = await import('@/lib/image-tools/config');
 
-    if (!LOCAL_AI_ENABLED) {
+    // 直接读取环境变量，不依赖 config.ts
+    const localAiEnabled = process.env.LOCAL_AI_ENABLED;
+    if (localAiEnabled === 'false') {
       console.log('[instrumentation] LOCAL_AI_ENABLED is false, skipping model check');
       return;
     }
 
+    const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
+    const iopaintDir = process.env.IOPAINT_MODELS_DIR || path.join(workspacePath, 'models', 'iopaint');
+    const removebgDir = process.env.REMOVEBG_MODELS_DIR || path.join(workspacePath, 'models', 'removebg');
+
     // 检查核心模型文件
     const coreModels = [
-      { name: 'LaMa 擦除', path: path.join(IOPAINT_MODELS_DIR, 'big-lama.pt'), minSize: 1_000_000 },
-      { name: 'U2NetP 去背景', path: path.join(REMOVEBG_MODELS_DIR, 'u2netp.onnx'), minSize: 1_000_000 },
+      { name: 'LaMa 擦除', path: path.join(iopaintDir, 'big-lama.pt'), minSize: 1_000_000 },
+      { name: 'U2NetP 去背景', path: path.join(removebgDir, 'u2netp.onnx'), minSize: 1_000_000 },
     ];
 
     const missing: string[] = [];
@@ -60,7 +67,7 @@ async function checkLocalModels() {
       console.warn(
         `[instrumentation] 本地 AI 模型缺失:\n${missing.map(m => `  - ${m}`).join('\n')}\n` +
         `  请运行: bash scripts/ensure-models.sh --download\n` +
-        `  模型目录: IOPaint=${IOPAINT_MODELS_DIR}, RemoveBG=${REMOVEBG_MODELS_DIR}\n` +
+        `  模型目录: IOPaint=${iopaintDir}, RemoveBG=${removebgDir}\n` +
         `  缺失模型将自动降级到 AI API 兜底`
       );
     } else {

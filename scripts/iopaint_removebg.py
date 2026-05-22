@@ -29,13 +29,38 @@ _REMOVEBG_MODELS_DIR = os.environ.get("REMOVEBG_MODELS_DIR", "")
 # rembg 使用 U2NET_HOME 环境变量作为模型缓存目录
 # 默认值是 ~/.u2net，沙箱重启会被清空
 # 设置为项目持久化目录，确保模型不丢失
+#
+# 重要: iopaint RemoveBG 插件会在 __init__ 中覆盖 U2NET_HOME 为
+# TORCH_HOME/checkpoints/，所以需要同时在两个位置放置模型:
+# 1. REMOVEBG_MODELS_DIR (直接存储目录)
+# 2. TORCH_HOME/checkpoints/ (iopaint RemoveBG 插件覆盖后的目录)
 if _REMOVEBG_MODELS_DIR:
-    os.environ.setdefault("U2NET_HOME", _REMOVEBG_MODELS_DIR)
+    os.environ["U2NET_HOME"] = _REMOVEBG_MODELS_DIR
 else:
     # 兜底: 如果没有设置 REMOVEBG_MODELS_DIR，使用项目目录
     _fallback_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "removebg")
     if os.path.isdir(_fallback_dir):
-        os.environ.setdefault("U2NET_HOME", _fallback_dir)
+        os.environ["U2NET_HOME"] = _fallback_dir
+    _REMOVEBG_MODELS_DIR = os.environ.get("U2NET_HOME", "")
+
+# 确保 RemoveBG 模型也链接到 iopaint/hub/checkpoints/ 目录
+# 因为 iopaint.plugins.remove_bg.RemoveBG.__init__ 会设置:
+#   U2NET_HOME = os.path.join(torch.hub.get_dir(), "checkpoints")
+#   = TORCH_HOME/hub/checkpoints/ （与擦除模型同一个目录）
+_IOPAINT_MODELS_DIR = os.environ.get("IOPAINT_MODELS_DIR", os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "iopaint"))
+if os.path.isdir(_IOPAINT_MODELS_DIR):
+    _rmbg_ckpt_dir = os.path.join(_IOPAINT_MODELS_DIR, "hub", "checkpoints")
+    if not os.path.exists(_rmbg_ckpt_dir):
+        os.makedirs(_rmbg_ckpt_dir, exist_ok=True)
+    for _fname in ["u2netp.onnx", "silueta.onnx", "birefnet_general_lite.onnx"]:
+        _src = os.path.join(_REMOVEBG_MODELS_DIR, _fname)
+        _dst = os.path.join(_rmbg_ckpt_dir, _fname)
+        if os.path.exists(_src) and not os.path.exists(_dst):
+            try:
+                os.symlink(_src, _dst)
+            except Exception:
+                pass
 
 # 支持的模型列表 (精简为 3 个)
 SUPPORTED_MODELS = [
