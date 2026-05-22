@@ -101,12 +101,13 @@ def main():
         # ===== 直接使用 rembg.remove() =====
         # 不走 IOPaint 包装器，直接使用 rembg 原生管线
         #
-        # 关键: 不启用 alpha_matting!
+        # 关键: 不启用 alpha_matting 和 post_process_mask!
         # alpha_matting 使用 PyMatting 做精细边缘，但它的 foreground_threshold
         # 会把蒙版值 <240 的区域归为"不确定"，再用 binary_erosion 腐蚀，
         # 导致主体细节（手指、头发、细小物体）被误删。
-        # 版本 1ac67a9 使用 naive_cutout（直接信任模型蒙版）效果更好。
-        # 保留 post_process_mask=True 仅清理蒙版噪点，不侵蚀主体。
+        # post_process_mask 会做形态学 opening(腐蚀+膨胀) + 高斯模糊 + 阈值二值化，
+        # 进一步侵蚀细小结构和边缘区域，实测前景面积减少近 50%。
+        # 版本 1ac67a9 使用 naive_cutout（直接信任模型蒙版）效果最好。
         from rembg import remove, new_session
 
         session = new_session(model_name=model_name)
@@ -115,7 +116,7 @@ def main():
             image_pil,
             session=session,
             alpha_matting=False,
-            post_process_mask=True,
+            post_process_mask=False,
             only_mask=gen_mask,
         )
 
