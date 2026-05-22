@@ -57,14 +57,14 @@ const LAMA_MODEL_PATH = path.join(IOPAINT_MODELS_DIR, 'big-lama.pt');
  * - u2netp: 极轻量快速备选 (4.5MB ONNX)
  */
 export const REMOVEBG_MODELS = [
-  { id: 'isnet-general-use', label: 'ISNet 高精度', group: 'recommended', recommended: true, description: '精度最高，通用去背景推荐', size: '170MB' },
-  { id: 'u2net', label: 'U2Net 通用', group: 'general', description: '精度高，通用去背景', size: '176MB' },
+  { id: 'u2net', label: 'U2Net 通用', group: 'recommended', recommended: true, description: '主体保留最完整，通用推荐', size: '176MB' },
+  { id: 'isnet-general-use', label: 'ISNet 高精度', group: 'general', description: '精度高但蒙版偏紧', size: '170MB' },
   { id: 'silueta', label: 'Silueta 人像', group: 'portrait', description: '轻量人像去背景', size: '45MB' },
   { id: 'u2netp', label: 'U2Net 轻量', group: 'lightweight', description: '极轻量快速备选', size: '4.5MB' },
 ] as const;
 
-/** 默认 RemoveBG 模型 */
-export const DEFAULT_REMOVEBG_MODEL = 'isnet-general-use';
+/** 默认 RemoveBG 模型 — U2Net 主体保留最完整 */
+export const DEFAULT_REMOVEBG_MODEL = 'u2net';
 
 /** 检查 Python + 依赖是否可用（比仅检查模型文件更准确） */
 let _pythonEnvChecked = false;

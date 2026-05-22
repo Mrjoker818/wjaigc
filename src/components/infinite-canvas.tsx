@@ -816,7 +816,7 @@ export function InfiniteCanvas({
   // Erase model selection (LaMa / ZITS / Anime-Lama)
   const [eraseModelId, setEraseModelId] = useState<string>('lama');
   // RemoveBG model selection
-  const [removeBgModelId, setRemoveBgModelId] = useState<string>('isnet-general-use');
+  const [removeBgModelId, setRemoveBgModelId] = useState<string>('u2net');
   // RemoveBG model picker dialog
   const [showRemoveBgPicker, setShowRemoveBgPicker] = useState(false);
   // Floating window canvas zoom/pan
@@ -7990,8 +7990,8 @@ export function InfiniteCanvas({
         {/* ====== REMOVE BACKGROUND MODEL PICKER ====== */}
         {showRemoveBgPicker && (() => {
           const removeBgModels: Array<{ id: string; label: string; description: string; size: string; recommended?: boolean }> = [
-            { id: 'isnet-general-use', label: 'ISNet 高精度', description: '精度最高，通用去背景推荐', size: '170MB', recommended: true },
-            { id: 'u2net', label: 'U2Net 通用', description: '精度高，通用去背景', size: '176MB' },
+            { id: 'u2net', label: 'U2Net 通用', description: '主体保留最完整，通用推荐', size: '176MB', recommended: true },
+            { id: 'isnet-general-use', label: 'ISNet 高精度', description: '精度高但蒙版偏紧', size: '170MB' },
             { id: 'silueta', label: 'Silueta 人像', description: '轻量人像去背景', size: '45MB' },
             { id: 'u2netp', label: 'U2Net 轻量', description: '极轻量快速备选', size: '4.5MB' },
           ];

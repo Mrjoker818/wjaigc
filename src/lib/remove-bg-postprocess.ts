@@ -109,8 +109,8 @@ function bfsBackgroundFromEdge(
   
   // 严格的颜色距离阈值 - 非常关键！
   // 必须足够小以避免吃进主体，但足够大以覆盖背景的微小色彩变化
-  const STRICT_THRESHOLD = 25;  // 严格模式：与背景色距离 < 25 才视为背景
-  const MEDIUM_THRESHOLD = 35;  // 中等模式：适用于灰色像素
+  const STRICT_THRESHOLD = 22;  // 严格模式：彩色像素与背景色距离 < 22 才视为背景
+  const MEDIUM_THRESHOLD = 28;  // 中等模式：灰色像素用稍宽松阈值
   
   console.log(`[bfsBackground] Main bg: rgb(${mainBg.r},${mainBg.g},${mainBg.b}) count=${mainBg.count}`);
   if (altBg) {
