@@ -3,6 +3,7 @@ import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { resolveCompatProfile, buildPollUrl, type ApiCompatProfile } from '@/lib/api-compatibility';
+import { removeCheckerboardAndMakeTransparent } from '@/lib/remove-bg-postprocess';
 import { getEditTask, deleteEditTask } from '@/lib/edit-task-store';
 import { isTaskCancelled, updateTaskProgress, getTaskInfo, releaseQueueSlot } from '@/lib/task-registry';
 
@@ -389,10 +390,30 @@ export async function POST(request: NextRequest) {
           console.warn('[poll-task] persistRemoteImage failed, using raw URL:', persistErr);
           pollResult.imageUrl = sourceImageUrl;
         }
+
+        // ★ AI RemoveBG 后处理：检测棋盘格背景 → 替换为真正的透明像素
+        // 当 image-edit 的 remove_background 动作返回 AI 异步 taskId 时，
+        // AI 结果可能包含棋盘格背景（而非真正的透明 PNG），需要后处理
+        const registryInfo = getTaskInfo(taskId);
+        const taskEngine = (registryInfo?.result as Record<string, unknown>)?.engine as string | undefined;
+        if (taskEngine === 'ai-background-remove' && pollResult.imageUrl) {
+          try {
+            console.log(`[poll-task] Applying checkerboard removal for AI RemoveBG task ${taskId}`);
+            const processedUrl = await removeCheckerboardAndMakeTransparent(pollResult.imageUrl as string);
+            pollResult.imageUrl = processedUrl;
+            console.log(`[poll-task] AI RemoveBG post-processing complete: ${processedUrl}`);
+          } catch (postErr) {
+            console.warn('[poll-task] AI RemoveBG checkerboard removal failed, using original:', postErr instanceof Error ? postErr.message : postErr);
+          }
+        }
+
         await appendUserJsonl(userId, 'images', { type: 'completed', providerId: provider?.id || 'env', model, taskId, imageUrl: pollResult.imageUrl });
       }
       // ★ 更新任务注册中心状态（包含 result，后续 poll 可直接从 registry 返回）
-      updateTaskProgress(taskId, { status: 'completed', progress: 100, result: { imageUrl: pollResult.imageUrl } });
+      // 保留原有 result 中的 engine 等元数据
+      const regInfo = getTaskInfo(taskId);
+      const existingResult = (regInfo?.result as Record<string, unknown>) || {};
+      updateTaskProgress(taskId, { status: 'completed', progress: 100, result: { ...existingResult, imageUrl: pollResult.imageUrl } });
       // ★ 同时更新本地完成缓存（Next.js dev模式下 registry 实例可能不一致）
       const cachedImageUrl = pollResult.imageUrl as string | undefined;
       if (cachedImageUrl) {
