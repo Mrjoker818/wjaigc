@@ -3788,7 +3788,8 @@ export function InfiniteCanvas({
   const pollForResult = useCallback(async (
     taskId: string,
     apiKeyOrModel: string,
-    onProgress?: (progress: number, status: string) => void
+    onProgress?: (progress: number, status: string) => void,
+    engine?: string
   ): Promise<string | null> => {
     // apiKeyOrModel was previously apiKey, now we pass the model name for server-side key lookup
     const currentModelInfo = getCurrentModel();
@@ -3821,7 +3822,7 @@ export function InfiniteCanvas({
         const res = await fetch('/api/poll-task', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ taskId, model: currentModelInfo.model, providerId: getCurrentProviderId() }),
+          body: JSON.stringify({ taskId, model: currentModelInfo.model, providerId: getCurrentProviderId(), engine }),
           signal: abortController.signal,
         });
         if (!res.ok) throw new Error(`Poll HTTP ${res.status}`);
@@ -4363,7 +4364,7 @@ export function InfiniteCanvas({
               const res = await fetch('/api/poll-task', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ taskId, model: modelInfo.model, providerId: getCurrentProviderId() }),
+                body: JSON.stringify({ taskId, model: modelInfo.model, providerId: getCurrentProviderId(), engine: data.engine }),
               });
               if (!res.ok) throw new Error(`HTTP ${res.status}`);
               const pollData = await res.json();

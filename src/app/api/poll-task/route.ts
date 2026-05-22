@@ -33,7 +33,7 @@ if (typeof setInterval !== 'undefined') {
 // 通用化设计：支持不同提供商的任务状态查询格式
 export async function POST(request: NextRequest) {
   try {
-    const { taskId, model: rawModel, userId: requestUserId, providerId } = await request.json();
+    const { taskId, model: rawModel, userId: requestUserId, providerId, engine: requestEngine } = await request.json();
     if (!taskId || typeof taskId !== 'string') {
       return NextResponse.json({
         success: false,
@@ -43,6 +43,9 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
     const model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');
+    // ★ engine 参数：前端传递的任务引擎类型（用于 AI RemoveBG 后处理等场景）
+    // 优先使用请求参数，因为 Next.js dev 模式下 task-registry 可能不共享
+    const requestEngineStr = typeof requestEngine === 'string' ? requestEngine : '';
     const sessionUser = await getSessionUser(request);
     const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
 
@@ -391,11 +394,13 @@ export async function POST(request: NextRequest) {
           pollResult.imageUrl = sourceImageUrl;
         }
 
-        // ★ AI RemoveBG 后处理：检测棋盘格背景 → 替换为真正的透明像素
+        // ★ AI RemoveBG 后处理：检测棋盘格/纯色背景 → 替换为真正的透明像素
         // 当 image-edit 的 remove_background 动作返回 AI 异步 taskId 时，
         // AI 结果可能包含棋盘格背景（而非真正的透明 PNG），需要后处理
+        // 优先使用请求参数中的 engine（前端传递），其次检查 task-registry
         const registryInfo = getTaskInfo(taskId);
-        const taskEngine = (registryInfo?.result as Record<string, unknown>)?.engine as string | undefined;
+        const registryEngine = (registryInfo?.result as Record<string, unknown>)?.engine as string | undefined;
+        const taskEngine = requestEngineStr || registryEngine;
         if (taskEngine === 'ai-background-remove' && pollResult.imageUrl) {
           try {
             console.log(`[poll-task] Applying checkerboard removal for AI RemoveBG task ${taskId}`);
