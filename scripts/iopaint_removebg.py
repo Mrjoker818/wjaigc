@@ -5,11 +5,9 @@ IOPaint RemoveBG 去背景脚本 - 被 Node.js 通过 child_process 调用
 输出: stdout JSON { success: bool, image?: base64_string, error?: string, model?: string }
 
 支持的模型 (精简为 3 个):
-  - u2netp                 (极轻量快速, 推荐, 4.5MB)
-  - silueta                (轻量人像去背景, 45MB)
-  - birefnet-general-lite  (高精度, 需大内存≥16GB, 224MB)
-
-需要 rembg >= 2.0.59 以支持 birefnet 模型
+  - u2net     (通用高精度, 推荐, 176MB)
+  - u2netp    (极轻量快速, 4.5MB)
+  - silueta   (轻量人像去背景, 45MB)
 """
 
 import sys
@@ -53,7 +51,7 @@ if os.path.isdir(_IOPAINT_MODELS_DIR):
     _rmbg_ckpt_dir = os.path.join(_IOPAINT_MODELS_DIR, "hub", "checkpoints")
     if not os.path.exists(_rmbg_ckpt_dir):
         os.makedirs(_rmbg_ckpt_dir, exist_ok=True)
-    for _fname in ["u2netp.onnx", "silueta.onnx", "birefnet_general_lite.onnx"]:
+    for _fname in ["u2net.onnx", "u2netp.onnx", "silueta.onnx"]:
         _src = os.path.join(_REMOVEBG_MODELS_DIR, _fname)
         _dst = os.path.join(_rmbg_ckpt_dir, _fname)
         if os.path.exists(_src) and not os.path.exists(_dst):
@@ -64,9 +62,9 @@ if os.path.isdir(_IOPAINT_MODELS_DIR):
 
 # 支持的模型列表 (精简为 3 个)
 SUPPORTED_MODELS = [
+    "u2net",
     "u2netp",
     "silueta",
-    "birefnet-general-lite",
 ]
 
 def main():

@@ -613,7 +613,7 @@ interface EditRequest {
   model?: string;
   providerId?: string;
   eraseModel?: string; // IOPaint erase model: lama/zits/anime-lama
-  removeBgModel?: string; // IOPaint RemoveBG model: birefnet-general-lite / u2netp / silueta
+  removeBgModel?: string; // IOPaint RemoveBG model: u2net / u2netp / silueta
 }
 
 // Helper: fetch image as Buffer (supports external URLs, data URLs, and local paths)

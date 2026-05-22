@@ -7988,9 +7988,9 @@ export function InfiniteCanvas({
         {/* ====== REMOVE BACKGROUND MODEL PICKER ====== */}
         {showRemoveBgPicker && (() => {
           const removeBgModels: Array<{ id: string; label: string; description: string; size: string; recommended?: boolean }> = [
-            { id: 'birefnet-general-lite', label: 'BiRefNet 通用', description: '精度最高，需要大内存(≥16GB)', size: '224MB' },
-            { id: 'u2netp', label: 'U2Net 轻量', description: '极轻量快速备选，速度最快', size: '4.5MB', recommended: true },
+            { id: 'u2net', label: 'U2Net 通用', description: '精度高，通用去背景推荐', size: '176MB', recommended: true },
             { id: 'silueta', label: 'Silueta 人像', description: '轻量人像去背景', size: '45MB' },
+            { id: 'u2netp', label: 'U2Net 轻量', description: '极轻量快速备选', size: '4.5MB' },
           ];
           return (
             <div className="fixed inset-0 z-[200] flex items-center justify-center" onMouseDown={(e) => e.stopPropagation()}>

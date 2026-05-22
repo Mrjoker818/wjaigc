@@ -21,7 +21,7 @@ REMOVEBG_DIR="${REMOVEBG_MODELS_DIR:-$PROJECT_ROOT/models/removebg}"
 ACTION="${1:---check}"
 
 # GitHub 下载加速镜像 (ghproxy.cc SSL 过期，使用 ghfast.top)
-GH_PROXY="${GH_PROXY:-https://ghfast.top/}"
+GH_PROXY="${GH_PROXY:-https://gh-proxy.com/}"
 
 echo "============================================"
 echo " IOPaint + RemoveBG 模型检查工具"
@@ -148,13 +148,21 @@ download_with_fallback \
 echo ""
 echo "--- RemoveBG 去背景模型 ---"
 
-# u2netp (~4.5MB) - 推荐，内存友好
+# u2netp (~4.5MB) - 轻量快速，精度较低
 download_with_fallback \
     "U2NetP 轻量去背景 (u2netp.onnx)" \
     "$REMOVEBG_DIR/u2netp.onnx" \
     1000000 \
     "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx" \
     "${GH_PROXY}https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx"
+
+	# u2net (~176MB) - 推荐，精度最高
+	download_with_fallback \
+	    "U2Net 去背景 (u2net.onnx)" \
+	    "$REMOVEBG_DIR/u2net.onnx" \
+	    100000000 \
+	    "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx" \
+	    "${GH_PROXY}https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx"
 
 # silueta (~45MB) - 轻量人像
 download_with_fallback \
@@ -164,14 +172,6 @@ download_with_fallback \
     "https://github.com/danielgatis/rembg/releases/download/v0.0.0/silueta.onnx" \
     "${GH_PROXY}https://github.com/danielgatis/rembg/releases/download/v0.0.0/silueta.onnx"
 
-# BiRefNet (~224MB) - 高精度但需大内存(≥16GB)，不推荐在沙箱环境使用
-# 如需使用，取消下面注释
-# download_with_fallback \
-#     "BiRefNet 通用去背景 (birefnet_general_lite.onnx)" \
-#     "$REMOVEBG_DIR/birefnet_general_lite.onnx" \
-#     100000000 \
-#     "https://github.com/danielgatis/rembg/releases/download/v0.0.0/birefnet_general_lite.onnx" \
-#     "${GH_PROXY}https://github.com/danielgatis/rembg/releases/download/v0.0.0/birefnet_general_lite.onnx"
 
 # ============================================================
 # 迁移旧路径模型文件（如果存在）
@@ -196,7 +196,7 @@ fi
 
 # 迁移 RemoveBG 模型
 if [ -d "$OLD_U2NET_HOME" ]; then
-    for f in u2netp.onnx silueta.onnx birefnet_general_lite.onnx; do
+    for f in u2netp.onnx u2net.onnx silueta.onnx; do
         src="$OLD_U2NET_HOME/$f"
         dest="$REMOVEBG_DIR/$f"
         if [ -f "$src" ] && [ "$(stat -c%s "$src" 2>/dev/null || echo 0)" -gt 100000 ] && [ ! -f "$dest" ]; then
@@ -227,7 +227,7 @@ done
 
 # RemoveBG 模型也需要链接到 hub/checkpoints/
 # 因为 iopaint RemoveBG 插件设置 U2NET_HOME = TORCH_HOME/hub/checkpoints/
-for f in u2netp.onnx silueta.onnx birefnet_general_lite.onnx; do
+for f in u2netp.onnx u2net.onnx silueta.onnx; do
     src="$REMOVEBG_DIR/$f"
     dst="$HUB_CKPT_DIR/$f"
     if [ -f "$src" ] && [ ! -e "$dst" ]; then
@@ -260,6 +260,7 @@ check_status "LaMa 擦除" "$IOPAINT_DIR/big-lama.pt" 1000000
 check_status "Anime-Lama 动漫擦除" "$IOPAINT_DIR/anime-manga-big-lama.pt" 1000000
 check_status "ZITS 结构修复" "$IOPAINT_DIR/zits-inpaint-0717.pt" 100000
 check_status "U2NetP 去背景" "$REMOVEBG_DIR/u2netp.onnx" 1000000
+check_status "U2Net 去背景" "$REMOVEBG_DIR/u2net.onnx" 100000000
 check_status "Silueta 去背景" "$REMOVEBG_DIR/silueta.onnx" 10000000
 
 echo ""
