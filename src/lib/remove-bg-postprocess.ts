@@ -239,24 +239,32 @@ export async function postProcessLocalRemoveBG(
 
     console.log(`[remove-bg-postprocess-local] Mask: ${maskWidth}x${maskHeight}, channels=${maskChannels}`);
 
-    // 将蒙版转为单通道灰度（无论输入是 RGB/RGBA/灰度）
-    const maskRaw = await sharp(maskBuffer)
-      .ensureAlpha()
+    // 将蒙版转为单通道灰度 raw 数据（最可靠的方式）
+    // grayscale() 确保输出为灰度色彩空间
+    // resolveWithObject 返回实际通道数信息，避免 assumeAlpha() 对灰度图产生 2 通道
+    const { data: maskRawObj, info: maskInfo } = await sharp(maskBuffer)
+      .grayscale()
       .raw()
-      .toBuffer();
+      .toBuffer({ resolveWithObject: true });
     
-    // 提取灰度值（R 通道）作为蒙版
+    // 提取灰度值作为蒙版
     // rembg 生成的蒙版：白色=主体，黑色=背景
-    const maskPixelCount = maskWidth * maskHeight;
+    const maskPixelCount = maskInfo.width * maskInfo.height;
+    const actualChannels = maskInfo.channels;
     const maskData = new Uint8ClampedArray(maskPixelCount);
-    for (let i = 0; i < maskPixelCount; i++) {
-      // 如果是 RGBA，取 R 通道；如果蒙版有 alpha，需要检查
-      const idx = i * 4; // always 4 channels after ensureAlpha
-      const r = maskRaw[idx];
-      const a = maskRaw[idx + 3];
-      // 如果 alpha 为 0，说明此像素是透明的（背景），蒙版值应为 0
-      // 如果 alpha > 0，取 R 通道值作为蒙版灰度
-      maskData[i] = a > 0 ? r : 0;
+    
+    console.log(`[remove-bg-postprocess-local] Mask raw: ${maskInfo.width}x${maskInfo.height}, channels=${actualChannels}, size=${maskRawObj.length}`);
+    
+    if (actualChannels === 1) {
+      // 单通道灰度：直接拷贝
+      for (let i = 0; i < maskPixelCount; i++) {
+        maskData[i] = maskRawObj[i];
+      }
+    } else {
+      // 多通道(RGB/RGBA)：取 R 通道作为灰度值
+      for (let i = 0; i < maskPixelCount; i++) {
+        maskData[i] = maskRawObj[i * actualChannels];
+      }
     }
 
     // 调试：统计原始蒙版白/黑比例
@@ -456,32 +464,34 @@ async function generateRembgMask(
       return null;
     }
 
-    // 解码蒙版 PNG
+    // 解码蒙版 PNG — 使用 grayscale()+resolveWithObject 确保正确读取
     const maskBuffer = Buffer.from(result.mask, 'base64');
-    const maskMeta = await sharp(maskBuffer).metadata();
-    const maskRaw = await sharp(maskBuffer).raw().toBuffer();
+    const { data: maskRawObj, info: maskOutInfo } = await sharp(maskBuffer)
+      .grayscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
 
-    // 处理蒙版通道数
-    const maskPixelCount = (maskMeta.width || width) * (maskMeta.height || height);
-    const maskChannels = maskMeta.channels || 1;
-    const rawMaskData = new Uint8ClampedArray(maskRaw.buffer, maskRaw.byteOffset, maskRaw.byteLength);
+    const maskPixelCount = maskOutInfo.width * maskOutInfo.height;
+    const actualChannels = maskOutInfo.channels;
+    const rawMaskData = new Uint8ClampedArray(maskRawObj.buffer, maskRawObj.byteOffset, maskRawObj.byteLength);
 
-    // 如果蒙版是多通道(RGB/RGBA)，转为单通道灰度
+    // 如果蒙版是多通道（grayscale 后一般不会，但防御性编程），转为单通道灰度
     let maskData: Uint8ClampedArray;
-    if (maskChannels === 1) {
+    if (actualChannels === 1) {
       maskData = rawMaskData;
     } else {
       maskData = new Uint8ClampedArray(maskPixelCount);
       for (let i = 0; i < maskPixelCount; i++) {
-        // 取 R 通道作为灰度值
-        maskData[i] = rawMaskData[i * maskChannels];
+        maskData[i] = rawMaskData[i * actualChannels];
       }
     }
 
+    console.log(`[generateRembgMask] Mask decoded: ${maskOutInfo.width}x${maskOutInfo.height}, channels=${actualChannels}, pixels=${maskPixelCount}`);
+
     return {
       maskData,
-      width: maskMeta.width || width,
-      height: maskMeta.height || height,
+      width: maskOutInfo.width || width,
+      height: maskOutInfo.height || height,
     };
   } catch (err) {
     console.error('[remove-bg-postprocess] rembg mask generation error:', err);

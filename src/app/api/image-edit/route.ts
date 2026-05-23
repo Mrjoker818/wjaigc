@@ -1834,96 +1834,13 @@ export async function POST(request: NextRequest) {
       const bgSize = aspectRatio ? findClosestAspectRatio(aspectRatio) : '1:1';
       const imageBase64ForBg = await resolveImageToBase64(imageUrl).catch(() => null);
       
-      // ─── 优先路径1：AI 模型去背景（精度最高） ───
-      // AI 生成模型（GPT-4o/Gemini）的主体识别远超本地 rembg 模型
-      // 版本 1ac67a9 的 RemoveBG 精度好，正是因为本地模型失败后降级到 AI API
-      // 本地 rembg 模型（ISNet/u2net/silueta/u2netp）主体识别精度不足，仅作降级兜底
-      // 关键修复：AI 返回异步 taskId 时，直接返回给前端轮询，不在后端限时轮询
-      // 后端限时轮询导致 APImart 等慢速 API 超时，降级到本地低精度 rembg
-
-      // 结构化提示词：参考 OpenAI 官方指南，明确"保留什么/改变什么/不要添加什么"
-      // 1. 主体锁定：逐字描述"所有前景内容保持不变"
-      // 2. 背景目标：明确输出透明 PNG alpha 通道
-      // 3. 护栏约束：禁止 AI 重绘、添加新元素、替换主体
-      const removeBgPrompt = [
-        'Remove the background from this image.',
-        'Preserve: All foreground subjects exactly as-is — every pixel of the main subject(s), including edges, colors, textures, details, proportions, and pose.',
-        'Change only: The background becomes fully transparent (alpha = 0).',
-        'Do not: Redraw, repaint, stylize, or modify the subject in any way. Do not add white fill, gray fill, checkerboard pattern, shadow, reflection, border, frame, text, watermark, vignette, or any new background.',
-        'Output a PNG image with a real transparent alpha channel.',
-      ].join(' ');
-
-      const removeBgNegativePrompt = [
-        'white background', 'gray background', 'solid color background', 'checkerboard',
-        'new background', 'shadow', 'reflection', 'border', 'frame', 'watermark', 'text',
-        'changed subject', 'distorted edges', 'halo', 'white fringe', 'repainted subject',
-        'stylized subject', 'redrawn subject', 'low quality', 'blurry', 'artifact',
-      ].join(', ');
-
-      // 关键参数：
-      //   background: 'transparent' — GPT Image API 原生支持透明背景输出
-      //   output_format: 'png' — 透明通道需要 PNG 格式
-      //   input_fidelity: 'high' — 尽可能忠实于原图主体
-      try {
-        const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
-          model: m,
-          prompt: removeBgPrompt,
-          negative_prompt: removeBgNegativePrompt,
-          size: bgSize,
-          n: 1,
-          image: imageBase64ForBg || undefined,
-          image_urls: [imageBase64ForBg || imageUrl],
-          response_format: 'url',
-          background: 'transparent',     // OpenAI gpt-image-1/2 原生支持
-          output_format: 'png',          // 透明背景需要 PNG
-          input_fidelity: 'high',        // 保持主体忠实度
-        }), '移除背景');
-        
-        if (result.directUrl) {
-          // 同步模式：直接返回结果（后处理检测棋盘格→透明）
-          try {
-            const processedUrl = await postProcessAIRemoveBG(result.directUrl, imageUrl);
-            const finalUrl = processedUrl || result.directUrl;
-            return NextResponse.json({ success: true, imageUrl: finalUrl, action, usedModel: result.usedModel, engine: 'ai-background-remove' });
-          } catch (postErr) {
-            console.warn('[remove_background] Checkerboard post-processing failed (sync), returning original:', postErr instanceof Error ? postErr.message : postErr);
-            return NextResponse.json({ success: true, imageUrl: result.directUrl, action, usedModel: result.usedModel, engine: 'ai-background-remove' });
-          }
-        }
-        
-        if (result.taskId) {
-          // 异步模式：直接返回 taskId 给前端轮询
-          // ★ 关键修复：不再在后端限时轮询，前端通过 /api/poll-task 轮询
-          // APImart 等慢速 API 处理时间可能超过 60 秒，后端限时轮询必然超时
-          // 注册任务到 task-registry，标记 engine 供 poll-task 后处理
-          console.log(`[remove_background] AI returned taskId=${result.taskId}, returning to frontend for polling`);
-          registerTask(result.taskId, 'generate', 'AI 移除背景');
-          // 存储元数据供 poll-task 后处理使用（棋盘格检测+透明化）
-          updateTaskProgress(result.taskId, {
-            status: 'processing',
-            progress: 10,
-            label: 'AI 正在识别主体并移除背景...',
-            result: { engine: 'ai-background-remove', usedModel: result.usedModel, originalImageUrl: imageUrl },
-          });
-          return NextResponse.json({
-            success: true,
-            taskId: result.taskId,
-            action,
-            engine: 'ai-background-remove',
-            usedModel: result.usedModel,
-            prompt: removeBgPrompt,
-          });
-        }
-      } catch (bgErr) {
-        // AI 提交失败（所有模型都不支持/认证失败等），降级到本地 rembg
-        console.warn('[remove_background] AI remove failed, using local background-alpha fallback:', bgErr instanceof Error ? bgErr.message : bgErr);
-      }
-
-      // ─── 优先路径2：本地 rembg 去背景（AI 不可用时降级） ───
-      // 本地模型（ISNet/u2net/silueta/u2netp）精度不如 AI，但无需 API 密钥
+      // ─── 优先路径1：本地 rembg 去背景（推荐） ───
+      // 本地模型（ISNet/u2net/silueta/u2netp）生成黑白蒙版 → 应用到原图 → 真正透明PNG
+      // AI 路径虽然主体识别好，但 AI 输出的"透明背景"实际上是棋盘格像素（不是真alpha=0），
+      // 后处理也难以完美提取蒙版，所以本地模型蒙版法是更可靠的透明PNG方案
       if (LOCAL_AI_ENABLED) {
         try {
-          console.log(`[remove_background] AI unavailable, trying IOPaint RemoveBG...`);
+          console.log(`[remove_background] Trying local IOPaint RemoveBG first...`);
           const sourceBuffer = await fetchImageBuffer(imageUrl);
           const sourceMeta = await sharp(sourceBuffer).metadata();
           const srcW = sourceMeta.width || 512;
@@ -1957,15 +1874,87 @@ export async function POST(request: NextRequest) {
                 engine: 'local-removebg',
               });
             }
-            console.log(`[remove_background] postProcessLocalRemoveBG failed, falling back`);
+            console.log(`[remove_background] postProcessLocalRemoveBG failed, falling back to AI path`);
+          } else {
+            console.log(`[remove_background] Mask generation ${maskResult ? 'succeeded but no maskBase64' : 'failed/timed out'}, falling back to AI path`);
           }
-          console.log(`[remove_background] Mask generation ${maskResult ? 'succeeded but apply failed' : 'failed/timed out'}, falling back to AI path`);
         } catch (rmbgErr) {
           console.warn(`[remove_background] IOPaint RemoveBG error:`, rmbgErr instanceof Error ? rmbgErr.message : rmbgErr);
         }
       }
 
-      // AI + 本地 rembg 均失败 → 本地透明化兜底（秒级完成）
+      // ─── 优先路径2：AI 模型去背景（本地不可用时降级） ───
+      // AI 生成模型（GPT-4o/Gemini）返回的结果通常含棋盘格/白底（非真透明alpha），
+      // 需要后处理提取蒙版再应用到原图
+      const removeBgPrompt = [
+        'Remove the background from this image.',
+        'Preserve: All foreground subjects exactly as-is — every pixel of the main subject(s), including edges, colors, textures, details, proportions, and pose.',
+        'Change only: The background becomes fully transparent (alpha = 0).',
+        'Do not: Redraw, repaint, stylize, or modify the subject in any way. Do not add white fill, gray fill, checkerboard pattern, shadow, reflection, border, frame, text, watermark, vignette, or any new background.',
+        'Output a PNG image with a real transparent alpha channel.',
+      ].join(' ');
+
+      const removeBgNegativePrompt = [
+        'white background', 'gray background', 'solid color background', 'checkerboard',
+        'new background', 'shadow', 'reflection', 'border', 'frame', 'watermark', 'text',
+        'changed subject', 'distorted edges', 'halo', 'white fringe', 'repainted subject',
+        'stylized subject', 'redrawn subject', 'low quality', 'blurry', 'artifact',
+      ].join(', ');
+
+      try {
+        const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
+          model: m,
+          prompt: removeBgPrompt,
+          negative_prompt: removeBgNegativePrompt,
+          size: bgSize,
+          n: 1,
+          image: imageBase64ForBg || undefined,
+          image_urls: [imageBase64ForBg || imageUrl],
+          response_format: 'url',
+          background: 'transparent',
+          output_format: 'png',
+          input_fidelity: 'high',
+        }), '移除背景');
+        
+        if (result.directUrl) {
+          // 同步模式：后处理提取蒙版→应用到原图→真正透明PNG
+          try {
+            const processedUrl = await postProcessAIRemoveBG(result.directUrl, imageUrl);
+            if (processedUrl) {
+              return NextResponse.json({ success: true, imageUrl: processedUrl, action, usedModel: result.usedModel, engine: 'ai-background-remove' });
+            }
+            // postProcessAIRemoveBG 返回 null，不用原始 AI 结果（含棋盘格）
+            console.warn('[remove_background] AI post-processing returned null, not using raw AI result with checkerboard');
+          } catch (postErr) {
+            console.warn('[remove_background] AI post-processing failed (sync):', postErr instanceof Error ? postErr.message : postErr);
+          }
+          // AI 后处理失败，继续往下走降级路径
+        }
+        
+        if (result.taskId) {
+          // 异步模式：返回 taskId 给前端轮询，poll-task 会做后处理
+          console.log(`[remove_background] AI returned taskId=${result.taskId}, returning to frontend for polling`);
+          registerTask(result.taskId, 'generate', 'AI 移除背景');
+          updateTaskProgress(result.taskId, {
+            status: 'processing',
+            progress: 10,
+            label: 'AI 正在识别主体并移除背景...',
+            result: { engine: 'ai-background-remove', usedModel: result.usedModel, originalImageUrl: imageUrl },
+          });
+          return NextResponse.json({
+            success: true,
+            taskId: result.taskId,
+            action,
+            engine: 'ai-background-remove',
+            usedModel: result.usedModel,
+            prompt: removeBgPrompt,
+          });
+        }
+      } catch (bgErr) {
+        console.warn('[remove_background] AI remove failed, using local background-alpha fallback:', bgErr instanceof Error ? bgErr.message : bgErr);
+      }
+
+      // ─── 所有路径均失败 → 本地透明化兜底（秒级完成） ───
       try {
         const sourceBuffer = await fetchImageBuffer(imageUrl);
         const localBuffer = await createLocalBackgroundAlpha(sourceBuffer);
