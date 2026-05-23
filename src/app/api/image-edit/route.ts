@@ -1842,9 +1842,6 @@ export async function POST(request: NextRequest) {
         try {
           console.log(`[remove_background] Trying local IOPaint RemoveBG first...`);
           const sourceBuffer = await fetchImageBuffer(imageUrl);
-          const sourceMeta = await sharp(sourceBuffer).metadata();
-          const srcW = sourceMeta.width || 512;
-          const srcH = sourceMeta.height || 512;
           
           const validRemoveBgModels: readonly string[] = REMOVEBG_MODELS.map(m => m.id);
           const rmbgModelName: string = validRemoveBgModels.includes(body.removeBgModel || '') ? body.removeBgModel! : DEFAULT_REMOVEBG_MODEL;
@@ -1853,7 +1850,7 @@ export async function POST(request: NextRequest) {
           // 限时 60 秒：RemoveBG 首次使用时可能需要下载模型（100MB+）
           const IOPAINT_REMOVEBG_TIMEOUT = 60000;
           
-          // 流程：本地模型生成蒙版 → 优化边缘 → 蒙版应用到原图 → 透明PNG
+          // 流程：本地模型生成蒙版+应用 → Python端完成所有处理 → RGBA PNG
           const maskResult = await Promise.race([
             generateRemoveBgMask(sourceBuffer, rmbgModelName),
             new Promise<null>((resolve) => setTimeout(() => {
@@ -1862,9 +1859,9 @@ export async function POST(request: NextRequest) {
             }, IOPAINT_REMOVEBG_TIMEOUT)),
           ]);
           
-          if (maskResult && maskResult.success && maskResult.maskBase64) {
-            console.log(`[remove_background] Mask generated (model: ${maskResult.model}), applying to original image...`);
-            const finalUrl = await postProcessLocalRemoveBG(sourceBuffer, maskResult.maskBase64);
+          if (maskResult && maskResult.success && maskResult.rgbaBase64) {
+            console.log(`[remove_background] RGBA result generated (model: ${maskResult.model}), saving...`);
+            const finalUrl = await postProcessLocalRemoveBG(maskResult.rgbaBase64);
             if (finalUrl) {
               console.log(`[remove_background] Local RemoveBG succeeded: ${finalUrl}`);
               return NextResponse.json({
@@ -1876,7 +1873,7 @@ export async function POST(request: NextRequest) {
             }
             console.log(`[remove_background] postProcessLocalRemoveBG failed, falling back to AI path`);
           } else {
-            console.log(`[remove_background] Mask generation ${maskResult ? 'succeeded but no maskBase64' : 'failed/timed out'}, falling back to AI path`);
+            console.log(`[remove_background] Mask generation ${maskResult ? 'succeeded but no rgbaBase64' : 'failed/timed out'}, falling back to AI path`);
           }
         } catch (rmbgErr) {
           console.warn(`[remove_background] IOPaint RemoveBG error:`, rmbgErr instanceof Error ? rmbgErr.message : rmbgErr);

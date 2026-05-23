@@ -248,21 +248,23 @@ export async function removeBgWithIOPaint(
   ensureOutputDirs();
 
   try {
-    const imageBase64 = `data:image/png;base64,${imageBuffer.toString('base64')}`;
+    // ★ 发送纯 base64（不含 data: 前缀），Python 脚本通过 base64.b64decode 解码
+    const imageBase64 = imageBuffer.toString('base64');
 
     const result = await callPythonScript(REMOVEBG_SCRIPT, {
       image: imageBase64,
       model,
     });
 
-    if (!result.success || !result.image) {
+    // ★ Python 脚本返回 imageBase64 字段（不是 image）
+    if (!result.success || !result.imageBase64) {
       return {
         success: false,
         error: result.error || 'RemoveBG 去背景失败',
       };
     }
 
-    const resultBuffer = Buffer.from(result.image, 'base64');
+    const resultBuffer = Buffer.from(result.imageBase64, 'base64');
     const outputMeta = await sharp(resultBuffer).metadata();
 
     // 确保 RemoveBG 结果是 RGBA 格式（有透明通道）
@@ -341,7 +343,7 @@ export async function generateRemoveBgMask(
       'scripts/iopaint_removebg.py',
       { image: imageBase64, model, return_mask: 'true' },
     );
-    if (!result.success || !result.mask) {
+    if (!result.success || !result.maskBase64) {
       return {
         success: false,
         error: result.error || '蒙版生成失败',
@@ -349,8 +351,8 @@ export async function generateRemoveBgMask(
     }
     return {
       success: true,
-      maskBase64: result.mask,
-      rgbaBase64: result.image,
+      maskBase64: result.maskBase64,
+      rgbaBase64: result.rgbaBase64,
       model: result.model,
     };
   } catch (error) {
@@ -370,7 +372,12 @@ interface PythonScriptResult {
   success: boolean;
   image?: string;
   mask?: string;
+  maskBase64?: string;
+  rgbaBase64?: string;
+  imageBase64?: string;
   model?: string;
+  maskSize?: number[];
+  originalSize?: number[];
   error?: string;
 }
 
@@ -446,6 +453,10 @@ function callPythonScript(
 
       try {
         const result = JSON.parse(stdout.trim()) as PythonScriptResult;
+        // ★ Python 脚本不一定返回 success 字段，进程退出码 0 即为成功
+        if (result.success === undefined) {
+          result.success = true;
+        }
         resolve(result);
       } catch {
         console.error(`[IOPaint] Failed to parse Python output: ${stdout.substring(0, 200)}`);
