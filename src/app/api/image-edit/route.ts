@@ -14,7 +14,7 @@ import { isS3Available, uploadImageToS3 } from '@/lib/s3-storage';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 import { eraseWithLama, removeBgWithIOPaint, DEFAULT_REMOVEBG_MODEL, VALID_ERASE_MODELS, REMOVEBG_MODELS } from '@/lib/image-tools/iopaint-client';
 import { LOCAL_AI_ENABLED } from '@/lib/image-tools/config';
-import { removeCheckerboardAndMakeTransparent } from '@/lib/remove-bg-postprocess';
+import { postProcessAIRemoveBG } from '@/lib/remove-bg-postprocess';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -1882,7 +1882,7 @@ export async function POST(request: NextRequest) {
         if (result.directUrl) {
           // 同步模式：直接返回结果（后处理检测棋盘格→透明）
           try {
-            const processedUrl = await removeCheckerboardAndMakeTransparent(result.directUrl);
+            const processedUrl = await postProcessAIRemoveBG(result.directUrl);
             return NextResponse.json({ success: true, imageUrl: processedUrl, action, usedModel: result.usedModel, engine: 'ai-background-remove' });
           } catch (postErr) {
             console.warn('[remove_background] Checkerboard post-processing failed (sync), returning original:', postErr instanceof Error ? postErr.message : postErr);

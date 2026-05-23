@@ -3,7 +3,7 @@ import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { resolveCompatProfile, buildPollUrl, type ApiCompatProfile } from '@/lib/api-compatibility';
-import { removeCheckerboardAndMakeTransparent } from '@/lib/remove-bg-postprocess';
+import { postProcessAIRemoveBG } from '@/lib/remove-bg-postprocess';
 import { getEditTask, deleteEditTask } from '@/lib/edit-task-store';
 import { isTaskCancelled, updateTaskProgress, getTaskInfo, releaseQueueSlot } from '@/lib/task-registry';
 
@@ -404,7 +404,7 @@ export async function POST(request: NextRequest) {
         if (taskEngine === 'ai-background-remove' && pollResult.imageUrl) {
           try {
             console.log(`[poll-task] Applying checkerboard removal for AI RemoveBG task ${taskId}`);
-            const processedUrl = await removeCheckerboardAndMakeTransparent(pollResult.imageUrl as string);
+            const processedUrl = await postProcessAIRemoveBG(pollResult.imageUrl as string);
             pollResult.imageUrl = processedUrl;
             console.log(`[poll-task] AI RemoveBG post-processing complete: ${processedUrl}`);
           } catch (postErr) {

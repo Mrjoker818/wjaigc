@@ -172,7 +172,7 @@ def main():
             if 0.01 < fg_ratio < 0.98:
                 # 有效蒙版 — 膨胀保护主体
                 binary_mask = np.where(mask_array > 127, 255, 0).astype(np.uint8)
-                dilated_mask = dilate_mask(binary_mask, iterations=2)
+                dilated_mask = dilate_mask(binary_mask, iterations=4)
                 
                 # 用膨胀后的蒙版重新合成：主体区域用原图，背景区域透明
                 alpha_result = Image.fromarray(dilated_mask, mode="L")
@@ -185,7 +185,7 @@ def main():
             mask_arr = np.where(mask_arr > 127, 255, 0).astype(np.uint8)
             
             # 对蒙版也做膨胀
-            mask_arr = dilate_mask(mask_arr, iterations=2)
+            mask_arr = dilate_mask(mask_arr, iterations=4)
             
             result = Image.fromarray(mask_arr, mode="L")
 
