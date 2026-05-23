@@ -313,9 +313,30 @@ export async function generateRemoveBgMask(
   error?: string;
 }> {
   try {
+    // 将 imageUrl 转为 base64（Python 脚本期望 image 字段为 base64）
+    let imageBase64: string;
+    if (imageUrl.startsWith('data:')) {
+      // data URL: 提取 base64 部分
+      imageBase64 = imageUrl.split(',', 2)[1] || '';
+    } else {
+      // HTTP URL 或相对路径：下载并转为 base64
+      const baseUrl = `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+      const fullUrl = imageUrl.startsWith('http') ? imageUrl : `${baseUrl}${imageUrl}`;
+      const resp = await fetch(fullUrl);
+      if (!resp.ok) {
+        return { success: false, error: `无法下载图片: ${resp.status}` };
+      }
+      const buffer = Buffer.from(await resp.arrayBuffer());
+      imageBase64 = buffer.toString('base64');
+    }
+
+    if (!imageBase64) {
+      return { success: false, error: '图片 base64 为空' };
+    }
+
     const result = await callPythonScript(
       'scripts/iopaint_removebg.py',
-      { input: imageUrl, model, output_mode: 'mask_and_rgba' },
+      { image: imageBase64, model, return_mask: 'true' },
     );
     if (!result.success || !result.mask) {
       return {

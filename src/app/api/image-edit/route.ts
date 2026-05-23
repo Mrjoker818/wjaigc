@@ -1945,8 +1945,8 @@ export async function POST(request: NextRequest) {
             }, IOPAINT_REMOVEBG_TIMEOUT)),
           ]);
           
-          if (maskResult) {
-            console.log(`[remove_background] Mask generated, applying to original image...`);
+          if (maskResult && maskResult.success && maskResult.maskBase64) {
+            console.log(`[remove_background] Mask generated (model: ${maskResult.model}), applying to original image...`);
             const finalUrl = await postProcessLocalRemoveBG(imageUrl, maskResult.maskBase64);
             if (finalUrl) {
               console.log(`[remove_background] Local RemoveBG succeeded: ${finalUrl}`);
