@@ -412,7 +412,55 @@ export async function POST(request: NextRequest) {
               pollResult.imageUrl = processedUrl;
               console.log(`[poll-task] AI RemoveBG post-processing complete: ${processedUrl}`);
             } else {
-              console.warn('[poll-task] AI RemoveBG post-processing returned null, keeping original URL');
+              // postProcessAIRemoveBG 返回 null → 用简单透明化兜底
+              console.warn('[poll-task] AI RemoveBG post-processing returned null, trying local fallback');
+              if (originalImageUrl) {
+                try {
+                  const baseUrl = `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+                  const fetchUrl = originalImageUrl.startsWith('http') ? originalImageUrl : `${baseUrl}${originalImageUrl}`;
+                  const imgResp = await fetch(fetchUrl);
+                  if (imgResp.ok) {
+                    const imgBuf = Buffer.from(await imgResp.arrayBuffer());
+                    // 使用 sharp 做简单透明化兜底
+                    const sharp = (await import('sharp')).default;
+                    const meta = await sharp(imgBuf).metadata();
+                    if (meta.width && meta.height) {
+                      const rgba = await sharp(imgBuf).ensureAlpha().raw().toBuffer();
+                      // 采样四个角落的平均亮度作为背景色
+                      const w = meta.width;
+                      const h = meta.height;
+                      const cornerSize = Math.max(5, Math.min(20, Math.floor(Math.min(w, h) * 0.05)));
+                      let rSum = 0, gSum = 0, bSum = 0, sampleCount = 0;
+                      for (const [sy, sx] of [[0, 0], [0, w - cornerSize], [h - cornerSize, 0], [h - cornerSize, w - cornerSize]]) {
+                        for (let dy = 0; dy < cornerSize; dy++) {
+                          for (let dx = 0; dx < cornerSize; dx++) {
+                            const idx = ((sy + dy) * w + (sx + dx)) * 4;
+                            rSum += rgba[idx]; gSum += rgba[idx + 1]; bSum += rgba[idx + 2];
+                            sampleCount++;
+                          }
+                        }
+                      }
+                      const bgR = rSum / sampleCount, bgG = gSum / sampleCount, bgB = bSum / sampleCount;
+                      // 将与背景色距离小于阈值的像素设为透明
+                      const threshold = 60;
+                      for (let i = 0; i < w * h; i++) {
+                        const idx = i * 4;
+                        const dr = rgba[idx] - bgR, dg = rgba[idx + 1] - bgG, db = rgba[idx + 2] - bgB;
+                        const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+                        if (dist < threshold) rgba[idx + 3] = 0;
+                      }
+                      const resultPng = await sharp(rgba, { raw: { width: w, height: h, channels: 4 } }).png().toBuffer();
+                      const { saveImageFile } = await import('../../../lib/server-data-root');
+                      const filename = `removebg-fallback-${Date.now()}.png`;
+                      const fallbackUrl = saveImageFile(resultPng, filename, 'removebg');
+                      pollResult.imageUrl = fallbackUrl;
+                      console.log(`[poll-task] Local fallback RemoveBG succeeded: ${fallbackUrl}`);
+                    }
+                  }
+                } catch (fallbackErr) {
+                  console.warn('[poll-task] Local fallback also failed:', fallbackErr instanceof Error ? fallbackErr.message : fallbackErr);
+                }
+              }
             }
           } catch (postErr) {
             console.warn('[poll-task] AI RemoveBG mask-based removal failed, using original:', postErr instanceof Error ? postErr.message : postErr);

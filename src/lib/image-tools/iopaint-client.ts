@@ -303,7 +303,7 @@ export async function removeBgWithIOPaint(
  * 用于后续 Node.js 端优化蒙版边缘 + 应用到原图
  */
 export async function generateRemoveBgMask(
-  imageUrl: string,
+  imageUrlOrBuffer: string | Buffer,
   model: string = DEFAULT_REMOVEBG_MODEL,
 ): Promise<{
   success: boolean;
@@ -313,15 +313,18 @@ export async function generateRemoveBgMask(
   error?: string;
 }> {
   try {
-    // 将 imageUrl 转为 base64（Python 脚本期望 image 字段为 base64）
+    // 将 imageUrl 或 Buffer 转为 base64（Python 脚本期望 image 字段为 base64）
     let imageBase64: string;
-    if (imageUrl.startsWith('data:')) {
+    if (Buffer.isBuffer(imageUrlOrBuffer)) {
+      // 直接传入 Buffer：无需下载
+      imageBase64 = imageUrlOrBuffer.toString('base64');
+    } else if (imageUrlOrBuffer.startsWith('data:')) {
       // data URL: 提取 base64 部分
-      imageBase64 = imageUrl.split(',', 2)[1] || '';
+      imageBase64 = imageUrlOrBuffer.split(',', 2)[1] || '';
     } else {
       // HTTP URL 或相对路径：下载并转为 base64
       const baseUrl = `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-      const fullUrl = imageUrl.startsWith('http') ? imageUrl : `${baseUrl}${imageUrl}`;
+      const fullUrl = imageUrlOrBuffer.startsWith('http') ? imageUrlOrBuffer : `${baseUrl}${imageUrlOrBuffer}`;
       const resp = await fetch(fullUrl);
       if (!resp.ok) {
         return { success: false, error: `无法下载图片: ${resp.status}` };

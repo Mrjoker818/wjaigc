@@ -166,7 +166,7 @@ async function applyMaskToOriginal(
 
   // 获取原图像素数据 — 必须先解码为 raw RGBA
   let origRgba: Uint8ClampedArray;
-  const origRawRgba = await sharp(originalBuffer).ensureAlpha(255).raw().toBuffer();
+  const origRawRgba = await sharp(originalBuffer).ensureAlpha().raw().toBuffer();
   origRgba = bufferToUint8Clamped(origRawRgba);
 
   // 应用蒙版到原图：蒙版值直接作为 alpha
@@ -196,22 +196,26 @@ async function applyMaskToOriginal(
  * @returns 持久化后的透明 PNG URL
  */
 export async function postProcessLocalRemoveBG(
-  originalImageUrl: string,
+  originalImage: string | Buffer,
   maskBase64: string
 ): Promise<string | null> {
   try {
-    const baseUrl = `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-    const origUrl = originalImageUrl.startsWith('http') ? originalImageUrl : `${baseUrl}${originalImageUrl}`;
-
-    // 1. 获取原图
-    console.log('[remove-bg-postprocess-local] Step 1: Fetch original image');
-    const origResp = await fetch(origUrl);
-    if (!origResp.ok) {
-      console.error('[remove-bg-postprocess-local] Failed to fetch original:', origResp.status);
-      return null;
+    // 1. 获取原图像素数据
+    console.log('[remove-bg-postprocess-local] Step 1: Prepare original image');
+    let origBuffer: Buffer;
+    if (Buffer.isBuffer(originalImage)) {
+      // 直接传入 Buffer：无需下载
+      origBuffer = originalImage;
+    } else {
+      const baseUrl = `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+      const origUrl = originalImage.startsWith('http') ? originalImage : `${baseUrl}${originalImage}`;
+      const origResp = await fetch(origUrl);
+      if (!origResp.ok) {
+        console.error('[remove-bg-postprocess-local] Failed to fetch original:', origResp.status);
+        return null;
+      }
+      origBuffer = Buffer.from(await origResp.arrayBuffer());
     }
-    const origArrayBuffer = await origResp.arrayBuffer();
-    const origBuffer = Buffer.from(origArrayBuffer);
     const origMeta = await sharp(origBuffer).metadata();
     const origWidth = origMeta.width || 0;
     const origHeight = origMeta.height || 0;
@@ -518,7 +522,7 @@ export async function createLocalTransparentBg(
     if (!width || !height) return null;
 
     // 转为 RGBA
-    const rgba = await sharp(imageBuffer).ensureAlpha(255).raw().toBuffer();
+    const rgba = await sharp(imageBuffer).ensureAlpha().raw().toBuffer();
     const pixels = bufferToUint8Clamped(rgba);
     const pixelCount = width * height;
 

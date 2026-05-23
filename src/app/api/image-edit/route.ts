@@ -1855,7 +1855,7 @@ export async function POST(request: NextRequest) {
           
           // 流程：本地模型生成蒙版 → 优化边缘 → 蒙版应用到原图 → 透明PNG
           const maskResult = await Promise.race([
-            generateRemoveBgMask(imageUrl, rmbgModelName),
+            generateRemoveBgMask(sourceBuffer, rmbgModelName),
             new Promise<null>((resolve) => setTimeout(() => {
               console.log(`[remove_background] Mask generation timed out after ${IOPAINT_REMOVEBG_TIMEOUT}ms`);
               resolve(null);
@@ -1864,7 +1864,7 @@ export async function POST(request: NextRequest) {
           
           if (maskResult && maskResult.success && maskResult.maskBase64) {
             console.log(`[remove_background] Mask generated (model: ${maskResult.model}), applying to original image...`);
-            const finalUrl = await postProcessLocalRemoveBG(imageUrl, maskResult.maskBase64);
+            const finalUrl = await postProcessLocalRemoveBG(sourceBuffer, maskResult.maskBase64);
             if (finalUrl) {
               console.log(`[remove_background] Local RemoveBG succeeded: ${finalUrl}`);
               return NextResponse.json({
