@@ -142,9 +142,14 @@ def main():
             mask_array = np.array(a)
 
         # 保存原始蒙版为 PNG（用于 return_mask 模式）
+        # 轻微膨胀 (1 次 3x3 max filter)，确保主体边缘完整
         mask_b64 = None
         if return_mask:
-            mask_pil = Image.fromarray(mask_array, mode="L")
+            from scipy.ndimage import maximum_filter
+            dilated_mask = maximum_filter(mask_array, size=5)
+            # 再做一次膨胀确保更完整
+            dilated_mask = maximum_filter(dilated_mask, size=3)
+            mask_pil = Image.fromarray(dilated_mask, mode="L")
             mask_buf = io.BytesIO()
             mask_pil.save(mask_buf, format="PNG")
             mask_b64 = base64.b64encode(mask_buf.getvalue()).decode("utf-8")
