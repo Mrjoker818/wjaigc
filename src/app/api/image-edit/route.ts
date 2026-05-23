@@ -1882,7 +1882,7 @@ export async function POST(request: NextRequest) {
         if (result.directUrl) {
           // 同步模式：直接返回结果（后处理检测棋盘格→透明）
           try {
-            const processedUrl = await postProcessAIRemoveBG(result.directUrl);
+            const processedUrl = await postProcessAIRemoveBG(result.directUrl, imageUrl);
             const finalUrl = processedUrl || result.directUrl;
             return NextResponse.json({ success: true, imageUrl: finalUrl, action, usedModel: result.usedModel, engine: 'ai-background-remove' });
           } catch (postErr) {
@@ -1903,7 +1903,7 @@ export async function POST(request: NextRequest) {
             status: 'processing',
             progress: 10,
             label: 'AI 正在识别主体并移除背景...',
-            result: { engine: 'ai-background-remove', usedModel: result.usedModel },
+            result: { engine: 'ai-background-remove', usedModel: result.usedModel, originalImageUrl: imageUrl },
           });
           return NextResponse.json({
             success: true,

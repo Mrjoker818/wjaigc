@@ -394,17 +394,20 @@ export async function POST(request: NextRequest) {
           pollResult.imageUrl = sourceImageUrl;
         }
 
-        // ★ AI RemoveBG 后处理：检测棋盘格/纯色背景 → 替换为真正的透明像素
+        // ★ AI RemoveBG 后处理：用蒙版应用到原图，精确去背景
         // 当 image-edit 的 remove_background 动作返回 AI 异步 taskId 时，
-        // AI 结果可能包含棋盘格背景（而非真正的透明 PNG），需要后处理
+        // 从 AI 结果生成蒙版 → 优化边缘 → 用蒙版应用到原图
         // 优先使用请求参数中的 engine（前端传递），其次检查 task-registry
         const registryInfo = getTaskInfo(taskId);
-        const registryEngine = (registryInfo?.result as Record<string, unknown>)?.engine as string | undefined;
+        const registryResult = (registryInfo?.result as Record<string, unknown>) || {};
+        const registryEngine = registryResult.engine as string | undefined;
         const taskEngine = requestEngineStr || registryEngine;
         if (taskEngine === 'ai-background-remove' && pollResult.imageUrl) {
           try {
-            console.log(`[poll-task] Applying checkerboard removal for AI RemoveBG task ${taskId}`);
-            const processedUrl = await postProcessAIRemoveBG(pollResult.imageUrl as string);
+            // 获取原图 URL（从 task-registry 中存储的元数据）
+            const originalImageUrl = registryResult.originalImageUrl as string | undefined;
+            console.log(`[poll-task] Applying mask-based background removal for AI RemoveBG task ${taskId}, originalUrl: ${originalImageUrl || 'N/A'}`);
+            const processedUrl = await postProcessAIRemoveBG(pollResult.imageUrl as string, originalImageUrl);
             if (processedUrl) {
               pollResult.imageUrl = processedUrl;
               console.log(`[poll-task] AI RemoveBG post-processing complete: ${processedUrl}`);
@@ -412,7 +415,7 @@ export async function POST(request: NextRequest) {
               console.warn('[poll-task] AI RemoveBG post-processing returned null, keeping original URL');
             }
           } catch (postErr) {
-            console.warn('[poll-task] AI RemoveBG checkerboard removal failed, using original:', postErr instanceof Error ? postErr.message : postErr);
+            console.warn('[poll-task] AI RemoveBG mask-based removal failed, using original:', postErr instanceof Error ? postErr.message : postErr);
           }
         }
 
