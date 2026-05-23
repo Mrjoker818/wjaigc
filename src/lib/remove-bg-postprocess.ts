@@ -1,18 +1,23 @@
 import sharp from 'sharp';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { saveImageFile } from './server-data-root';
 
+const execFileAsync = promisify(execFile);
+
 /**
- * AI RemoveBG 后处理 — 颜色距离 Alpha 提取法
+ * AI RemoveBG 后处理 — 蒙版 + Alpha 提取结合法
  *
- * 核心思路：AI 已经完美识别主体，输出的是"主体+统一背景"的图。
- * 我们不做任何"重新识别主体"的操作（不用 rembg），
- * 而是直接从 AI 结果中提取：与背景色越接近 → alpha 越低（越透明），
- * 与背景色越不同 → alpha 越高（越不透明）。
- *
- * 这样蒙版完全遵循 AI 自己的渲染边界，包括抗锯齿过渡像素，
- * 自然就能还原 AI 原始的顺滑边缘。
- *
- * 降级链：已有透明 → 颜色距离Alpha提取 → 棋盘格检测 → 原图兜底
+ * 核心思路：AI 已经完美识别主体，输出的图是"主体 + 统一背景"。
+ * 
+ * 算法：
+ * 1. 用 rembg 对 AI 结果生成黑白蒙版 → 确定主体范围（不膨胀！）
+ * 2. 用颜色距离计算每个像素的精细 alpha → 边缘自然顺滑
+ * 3. 结合：蒙版内的像素 alpha=255（主体全保留），
+ *         蒙版外且颜色接近背景的像素 alpha=0（背景全透明），
+ *         蒙版边界的像素用颜色距离算过渡 alpha（边缘圆润）
+ * 
+ * 降级链：已有透明 → 蒙版+Alpha结合 → 颜色距离Alpha → 棋盘格检测 → 原图兜底
  */
 
 export async function postProcessAIRemoveBG(imageUrl: string): Promise<string | null> {
@@ -40,15 +45,36 @@ export async function postProcessAIRemoveBG(imageUrl: string): Promise<string | 
 
         const rgbaData = rgbToRgba(data, w, h, channels);
 
-        // ★ 策略 1: 颜色距离 Alpha 提取 — 核心算法
-        // 对 AI 结果图，检测背景色，用颜色距离直接映射 alpha
-        const success = applyColorDistanceAlpha(rgbaData, w, h);
-        if (success) {
-            console.log('[AI-RemoveBG] Color distance alpha extraction succeeded');
+        // ★ 策略 1: 蒙版 + Alpha 提取结合法（最优）
+        const maskResult = await generateRembgMask(imageBuffer, 'u2net');
+        if (maskResult) {
+            const maskData = maskResult.mask;
+            const success = applyMaskPlusAlpha(rgbaData, w, h, maskData);
+            if (success) {
+                console.log('[AI-RemoveBG] Mask + Alpha extraction succeeded');
+                return saveAsPngAndGetUrl(rgbaData, w, h);
+            }
+        }
+
+        // 降级：尝试 u2netp
+        if (!maskResult) {
+            const maskResult2 = await generateRembgMask(imageBuffer, 'u2netp');
+            if (maskResult2) {
+                const success = applyMaskPlusAlpha(rgbaData, w, h, maskResult2.mask);
+                if (success) {
+                    console.log('[AI-RemoveBG] Mask + Alpha extraction succeeded (u2netp)');
+                    return saveAsPngAndGetUrl(rgbaData, w, h);
+                }
+            }
+        }
+
+        // ★ 策略 2: 颜色距离 Alpha 提取（无蒙版降级）
+        if (applyColorDistanceAlpha(rgbaData, w, h)) {
+            console.log('[AI-RemoveBG] Color distance alpha extraction succeeded (fallback)');
             return saveAsPngAndGetUrl(rgbaData, w, h);
         }
 
-        // ★ 策略 2: 棋盘格检测兜底
+        // ★ 策略 3: 棋盘格检测兜底
         if (detectAndRemoveCheckerboard(rgbaData, w, h)) {
             console.log('[AI-RemoveBG] Checkerboard removal succeeded');
             return saveAsPngAndGetUrl(rgbaData, w, h);
@@ -64,26 +90,299 @@ export async function postProcessAIRemoveBG(imageUrl: string): Promise<string | 
 }
 
 // ============================================================
-// 核心：颜色距离 Alpha 提取
+// 核心：蒙版 + Alpha 提取结合法
 // ============================================================
 
 /**
- * 从 AI 结果图中提取背景 → 透明
- *
- * 原理：AI 结果的背景是统一颜色（白/灰/黑/棋盘格），
- * 主体区域的颜色与背景色不同。对每个像素计算与背景色的距离，
- * 距离越大 → 越可能是主体 → alpha 越高。
- * 距离越小 → 越可能是背景 → alpha 越低。
- *
- * 抗锯齿边缘像素是主体色和背景色的混合，
- * 其颜色距离自然处于中间值，alpha 也是中间值，
- * 所以边缘自然顺滑，不需要膨胀/羽化。
- *
- * 额外保护：只允许与图片边缘连通的区域变透明，
- * 防止主体内部与背景色相近的区域被误删。
+ * 结合 rembg 蒙版和颜色距离 Alpha 的终极算法
+ * 
+ * 蒙版告诉我们"谁是主体"（二值化），不膨胀。
+ * 颜色距离告诉我们"每个像素离背景有多远"（连续值）。
+ * 
+ * 三类像素处理：
+ * 1. 蒙版=主体(白) 且 远离蒙版边界 → alpha=255（主体核心，全保留）
+ * 2. 蒙版=主体(白) 且 在蒙版边界附近 → 用颜色距离算 alpha（边缘圆润）
+ * 3. 蒙版=背景(黑) → 用颜色距离算 alpha（背景透明，带过渡）
  */
-function applyColorDistanceAlpha(data: Uint8ClampedArray, w: number, h: number): boolean {
+function applyMaskPlusAlpha(
+    data: Uint8ClampedArray,
+    w: number,
+    h: number,
+    maskData: Uint8ClampedArray
+): boolean {
     // Step 1: 从边缘采样背景色
+    const bgColors = sampleEdgeColors(data, w, h);
+    if (!bgColors || bgColors.length === 0) {
+        console.log('[AI-RemoveBG] No dominant edge color found for mask+alpha');
+        return false;
+    }
+
+    const primaryBg = bgColors[0];
+    const bgR = primaryBg.r, bgG = primaryBg.g, bgB = primaryBg.b;
+    const bgBrightness = (bgR + bgG + bgB) / 3;
+    const secondaryBg = bgColors.length > 1 ? bgColors[1] : null;
+
+    console.log(`[AI-RemoveBG] Mask+Alpha: bg=rgb(${bgR},${bgG},${bgB}), brightness=${bgBrightness.toFixed(0)}`);
+
+    // Step 2: 动态阈值
+    let tightThreshold: number;
+    let wideThreshold: number;
+
+    if (bgBrightness < 30) {
+        tightThreshold = 4; wideThreshold = 15;
+    } else if (bgBrightness < 80) {
+        tightThreshold = 5; wideThreshold = 18;
+    } else if (bgBrightness < 180) {
+        tightThreshold = 6; wideThreshold = 22;
+    } else {
+        tightThreshold = 8; wideThreshold = 28;
+    }
+
+    // Step 3: 构建蒙版边界距离图
+    // 对蒙版做距离变换：每个像素离最近的蒙版边界的距离
+    // 蒙版边界 = 主体像素(白) 与 背景像素(黑) 的交界处
+    const isSubject = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+        isSubject[i] = maskData[i * 4] > 128 ? 1 : 0; // R通道，白=主体
+    }
+
+    // 计算每个主体像素离蒙版边界的距离（简单的 BFS 距离变换）
+    const borderDist = new Int16Array(w * h).fill(-1); // -1=背景像素
+    const distQueue: number[] = [];
+
+    // 初始化：蒙版边界上的主体像素（4邻域中有背景像素的主体像素）
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            const idx = y * w + x;
+            if (!isSubject[idx]) continue;
+
+            // 检查是否在边界
+            let onBorder = false;
+            const neighbors = [[x-1,y],[x+1,y],[x,y-1],[x,y+1]];
+            for (const [nx, ny] of neighbors) {
+                if (nx < 0 || nx >= w || ny < 0 || ny >= h) {
+                    onBorder = true; break;
+                }
+                if (!isSubject[ny * w + nx]) {
+                    onBorder = true; break;
+                }
+            }
+            if (onBorder) {
+                borderDist[idx] = 0;
+                distQueue.push(idx);
+            }
+        }
+    }
+
+    // BFS 扩展距离
+    let qi = 0;
+    while (qi < distQueue.length) {
+        const idx = distQueue[qi++];
+        const x = idx % w, y = Math.floor(idx / w);
+        const d = borderDist[idx];
+        const neighbors = [[x-1,y],[x+1,y],[x,y-1],[x,y+1]];
+        for (const [nx, ny] of neighbors) {
+            if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+            const nIdx = ny * w + nx;
+            if (borderDist[nIdx] !== -1) continue; // 已访问
+            if (!isSubject[nIdx]) continue; // 只扩展主体像素
+            borderDist[nIdx] = d + 1;
+            distQueue.push(nIdx);
+        }
+    }
+
+    // Step 4: 结合蒙版和颜色距离，计算最终 alpha
+    const blendZone = 3; // 蒙版边界过渡区宽度（像素）
+
+    let transparentCount = 0;
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            const idx = y * w + x;
+            const px = idx * 4;
+            const r = data[px], g = data[px + 1], b = data[px + 2];
+
+            // 计算与背景色的颜色距离
+            const dr = r - bgR, dg = g - bgG, db = b - bgB;
+            let dist = Math.sqrt(dr * dr + dg * dg + db * db);
+            if (secondaryBg) {
+                const dr2 = r - secondaryBg.r, dg2 = g - secondaryBg.g, db2 = b - secondaryBg.b;
+                dist = Math.min(dist, Math.sqrt(dr2 * dr2 + dg2 * dg2 + db2 * db2));
+            }
+
+            // 颜色距离 → alpha（0=背景透明, 255=主体不透明）
+            let colorAlpha: number;
+            if (dist <= tightThreshold) {
+                colorAlpha = 0;
+            } else if (dist >= wideThreshold) {
+                colorAlpha = 255;
+            } else {
+                colorAlpha = Math.round(((dist - tightThreshold) / (wideThreshold - tightThreshold)) * 255);
+            }
+
+            if (isSubject[idx]) {
+                // 主体像素
+                const bd = borderDist[idx];
+                if (bd >= blendZone) {
+                    // 主体核心区域：alpha=255，绝不透明
+                    data[px + 3] = 255;
+                } else {
+                    // 主体边界区域：在蒙版和颜色距离之间插值
+                    // blendFactor: 0=边界上, 1=blendZone像素远
+                    const blendFactor = bd / blendZone;
+                    // 边界上：用颜色距离 alpha（更顺滑）
+                    // blendZone外：用蒙版 alpha=255（保护主体）
+                    const finalAlpha = Math.round(colorAlpha * (1 - blendFactor) + 255 * blendFactor);
+                    data[px + 3] = Math.max(finalAlpha, 50); // 主体边界最低 50，防止误删
+                }
+            } else {
+                // 背景像素：直接用颜色距离 alpha
+                // 边缘连通性保护：只允许与图片边缘连通的背景变透明
+                data[px + 3] = colorAlpha;
+            }
+
+            if (data[px + 3] < 250) transparentCount++;
+        }
+    }
+
+    // Step 5: 背景区域的边缘连通性保护
+    // 只保留与图片边缘连通的透明区域，防止主体内部出现"空洞"
+    applyEdgeConnectivity(data, w, h);
+
+    const pct = (transparentCount / (w * h)) * 100;
+    console.log(`[AI-RemoveBG] Mask+Alpha: ${pct.toFixed(1)}% pixels transparent`);
+
+    if (pct < 3) {
+        for (let i = 0; i < w * h; i++) { data[i * 4 + 3] = 255; }
+        console.log('[AI-RemoveBG] Too few transparent pixels, treating as failure');
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * 边缘连通性保护：只保留与图片边缘连通的透明区域
+ * 主体内部的透明"空洞"会被恢复为不透明
+ */
+function applyEdgeConnectivity(data: Uint8ClampedArray, w: number, h: number): void {
+    const isTransparent = new Uint8Array(w * h);
+    const visited = new Uint8Array(w * h);
+
+    // 标记所有半透明/透明像素
+    for (let i = 0; i < w * h; i++) {
+        isTransparent[i] = data[i * 4 + 3] < 250 ? 1 : 0;
+    }
+
+    // 从四条边的透明像素开始 BFS
+    const queue: number[] = [];
+    const edgeConnected = new Uint8Array(w * h);
+
+    for (let x = 0; x < w; x++) {
+        if (isTransparent[x]) { edgeConnected[x] = 1; queue.push(x); }
+        const bIdx = (h - 1) * w + x;
+        if (isTransparent[bIdx]) { edgeConnected[bIdx] = 1; queue.push(bIdx); }
+    }
+    for (let y = 1; y < h - 1; y++) {
+        const lIdx = y * w;
+        if (isTransparent[lIdx]) { edgeConnected[lIdx] = 1; queue.push(lIdx); }
+        const rIdx = y * w + (w - 1);
+        if (isTransparent[rIdx]) { edgeConnected[rIdx] = 1; queue.push(rIdx); }
+    }
+
+    // BFS 扩展
+    let qi = 0;
+    while (qi < queue.length) {
+        const idx = queue[qi++];
+        const x = idx % w, y = Math.floor(idx / w);
+        const neighbors = [[x-1,y],[x+1,y],[x,y-1],[x,y+1]];
+        for (const [nx, ny] of neighbors) {
+            if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+            const nIdx = ny * w + nx;
+            if (edgeConnected[nIdx]) continue;
+            if (isTransparent[nIdx]) {
+                edgeConnected[nIdx] = 1;
+                queue.push(nIdx);
+            }
+        }
+    }
+
+    // 不与边缘连通的透明区域 → 恢复为不透明（保护主体内部）
+    let restored = 0;
+    for (let i = 0; i < w * h; i++) {
+        if (isTransparent[i] && !edgeConnected[i]) {
+            data[i * 4 + 3] = 255;
+            restored++;
+        }
+    }
+    if (restored > 0) {
+        console.log(`[AI-RemoveBG] Restored ${restored} interior transparent pixels (subject protection)`);
+    }
+}
+
+// ============================================================
+// rembg 蒙版生成
+// ============================================================
+
+interface MaskResult {
+    mask: Uint8ClampedArray; // RGBA, 白=主体, 黑=背景
+    width: number;
+    height: number;
+}
+
+/**
+ * 用 rembg 生成黑白蒙版（仅蒙版，不含膨胀/羽化）
+ * AI 结果的背景是统一颜色，rembg 极易精确分割
+ */
+async function generateRembgMask(imageBuffer: Buffer, model: string): Promise<MaskResult | null> {
+    try {
+        const venvPython = '/workspace/projects/.venv/bin/python3';
+        const script = '/workspace/projects/scripts/iopaint_removebg.py';
+        const inputB64 = imageBuffer.toString('base64');
+
+        const { stdout, stderr } = await execFileAsync(venvPython, [
+            script, '--gen_mask', '--model', model,
+        ], {
+            input: Buffer.from(inputB64, 'utf-8'),
+            maxBuffer: 50 * 1024 * 1024,
+            timeout: 60000,
+            encoding: 'buffer',
+        } as any);
+
+        if (stderr.length > 0) {
+            const errMsg = stderr.toString().slice(0, 200);
+            if (errMsg.includes('Error') || errMsg.includes('error')) {
+                console.log(`[AI-RemoveBG] rembg mask stderr: ${errMsg}`);
+            }
+        }
+
+        if (!stdout || stdout.length < 100) {
+            console.log(`[AI-RemoveBG] rembg mask output too small: ${stdout?.length || 0} bytes`);
+            return null;
+        }
+
+        // 解码蒙版 PNG
+        const { data, info } = await sharp(stdout)
+            .ensureAlpha()
+            .raw()
+            .toBuffer({ resolveWithObject: true });
+
+        return {
+            mask: new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength),
+            width: info.width,
+            height: info.height,
+        };
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.log(`[AI-RemoveBG] rembg mask generation failed (${model}): ${msg.slice(0, 200)}`);
+        return null;
+    }
+}
+
+// ============================================================
+// 颜色距离 Alpha 提取（无蒙版降级方案）
+// ============================================================
+
+function applyColorDistanceAlpha(data: Uint8ClampedArray, w: number, h: number): boolean {
     const bgColors = sampleEdgeColors(data, w, h);
     if (!bgColors || bgColors.length === 0) {
         console.log('[AI-RemoveBG] No dominant edge color found');
@@ -93,38 +392,22 @@ function applyColorDistanceAlpha(data: Uint8ClampedArray, w: number, h: number):
     const primaryBg = bgColors[0];
     const bgR = primaryBg.r, bgG = primaryBg.g, bgB = primaryBg.b;
     const bgBrightness = (bgR + bgG + bgB) / 3;
+    const secondaryBg = bgColors.length > 1 ? bgColors[1] : null;
 
-    console.log(`[AI-RemoveBG] Detected background color: rgb(${bgR},${bgG},${bgB}), brightness=${bgBrightness.toFixed(0)}`);
-
-    // Step 2: 动态阈值 — 深色背景更保守，浅色背景稍宽松
-    // tightThreshold: 低于此距离 = 确定是背景 (alpha=0)
-    // wideThreshold: 高于此距离 = 确定是主体 (alpha=255)
-    // 之间 = 抗锯齿过渡区，线性插值
     let tightThreshold: number;
     let wideThreshold: number;
 
     if (bgBrightness < 30) {
-        // 纯黑/深色背景：极其保守
-        tightThreshold = 4;
-        wideThreshold = 15;
+        tightThreshold = 4; wideThreshold = 15;
     } else if (bgBrightness < 80) {
-        tightThreshold = 5;
-        wideThreshold = 18;
+        tightThreshold = 5; wideThreshold = 18;
     } else if (bgBrightness < 180) {
-        tightThreshold = 6;
-        wideThreshold = 20;
+        tightThreshold = 6; wideThreshold = 20;
     } else {
-        // 浅色/白色背景：稍宽松
-        tightThreshold = 8;
-        wideThreshold = 25;
+        tightThreshold = 8; wideThreshold = 25;
     }
 
-    // 如果有第二主色（棋盘格的第二色），也一并处理
-    const secondaryBg = bgColors.length > 1 ? bgColors[1] : null;
-
-    // Step 3: 计算每个像素的 alpha
-    // 先算粗略 alpha（纯颜色距离），然后用边缘连通性修正
-    const alphaMap = new Float32Array(w * h); // 0~1, 0=背景, 1=主体
+    const alphaMap = new Float32Array(w * h);
 
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
@@ -132,46 +415,35 @@ function applyColorDistanceAlpha(data: Uint8ClampedArray, w: number, h: number):
             const px = idx * 4;
             const r = data[px], g = data[px + 1], b = data[px + 2];
 
-            // 计算与主背景色的距离
             const dr = r - bgR, dg = g - bgG, db = b - bgB;
             let dist = Math.sqrt(dr * dr + dg * dg + db * db);
-
-            // 如果有第二背景色，取最小距离
             if (secondaryBg) {
                 const dr2 = r - secondaryBg.r, dg2 = g - secondaryBg.g, db2 = b - secondaryBg.b;
-                const dist2 = Math.sqrt(dr2 * dr2 + dg2 * dg2 + db2 * db2);
-                dist = Math.min(dist, dist2);
+                dist = Math.min(dist, Math.sqrt(dr2 * dr2 + dg2 * dg2 + db2 * db2));
             }
 
-            // 映射到 alpha
             if (dist <= tightThreshold) {
-                alphaMap[idx] = 0; // 确定背景
+                alphaMap[idx] = 0;
             } else if (dist >= wideThreshold) {
-                alphaMap[idx] = 1; // 确定主体
+                alphaMap[idx] = 1;
             } else {
-                // 过渡区：线性插值
                 alphaMap[idx] = (dist - tightThreshold) / (wideThreshold - tightThreshold);
             }
         }
     }
 
-    // Step 4: 边缘连通性保护
-    // 只有从图片边缘可达的"低alpha"区域才能变透明
-    // 主体内部与背景色相近的区域被主体像素包围，不会从边缘到达
-    const canBeTransparent = new Uint8Array(w * h); // 1 = 可以变透明
+    // 边缘连通性 BFS
+    const canBeTransparent = new Uint8Array(w * h);
     const queue: number[] = [];
 
-    // 从四条边开始，如果 alpha < 0.5 就加入队列
     for (let x = 0; x < w; x++) {
-        enqueueIfBackground(x, 0);
-        enqueueIfBackground(x, h - 1);
+        enqueueBg(x, 0); enqueueBg(x, h - 1);
     }
     for (let y = 1; y < h - 1; y++) {
-        enqueueIfBackground(0, y);
-        enqueueIfBackground(w - 1, y);
+        enqueueBg(0, y); enqueueBg(w - 1, y);
     }
 
-    function enqueueIfBackground(x: number, y: number) {
+    function enqueueBg(x: number, y: number) {
         const idx = y * w + x;
         if (canBeTransparent[idx]) return;
         if (alphaMap[idx] < 0.5) {
@@ -180,21 +452,15 @@ function applyColorDistanceAlpha(data: Uint8ClampedArray, w: number, h: number):
         }
     }
 
-    // BFS 扩展：从已确认的透明区域扩展到相邻的低 alpha 像素
-    // 使用较宽松的阈值（0.6），允许过渡区像素也被标记
-    while (queue.length > 0) {
-        const idx = queue.shift()!;
+    let qi = 0;
+    while (qi < queue.length) {
+        const idx = queue[qi++];
         const x = idx % w, y = Math.floor(idx / w);
-
-        const neighbors = [
-            [x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]
-        ];
-
+        const neighbors = [[x-1,y],[x+1,y],[x,y-1],[x,y+1]];
         for (const [nx, ny] of neighbors) {
             if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
             const nIdx = ny * w + nx;
             if (canBeTransparent[nIdx]) continue;
-            // 扩展条件：alpha < 0.6（过渡区的背景侧也能被标记）
             if (alphaMap[nIdx] < 0.6) {
                 canBeTransparent[nIdx] = 1;
                 queue.push(nIdx);
@@ -202,32 +468,19 @@ function applyColorDistanceAlpha(data: Uint8ClampedArray, w: number, h: number):
         }
     }
 
-    // Step 5: 应用最终 alpha
     let transparentCount = 0;
     for (let i = 0; i < w * h; i++) {
         if (canBeTransparent[i]) {
-            // 该像素与边缘连通，可以变透明
-            // alpha 值来自颜色距离计算（包含过渡区的平滑渐变）
-            const alpha = Math.round(alphaMap[i] * 255);
-            data[i * 4 + 3] = alpha;
-            if (alpha < 250) transparentCount++;
+            data[i * 4 + 3] = Math.round(alphaMap[i] * 255);
+            if (data[i * 4 + 3] < 250) transparentCount++;
         }
-        // 如果 canBeTransparent[i] === 0，说明是主体内部，保持 alpha=255
     }
 
     const pct = (transparentCount / (w * h)) * 100;
-    console.log(`[AI-RemoveBG] Color distance alpha: ${(pct).toFixed(1)}% pixels transparent`);
-
-    // 如果透明像素太少（<3%），可能检测到了错误的背景色
     if (pct < 3) {
-        // 恢复所有 alpha
-        for (let i = 0; i < w * h; i++) {
-            data[i * 4 + 3] = 255;
-        }
-        console.log('[AI-RemoveBG] Too few transparent pixels, treating as failure');
+        for (let i = 0; i < w * h; i++) { data[i * 4 + 3] = 255; }
         return false;
     }
-
     return true;
 }
 
@@ -235,33 +488,17 @@ function applyColorDistanceAlpha(data: Uint8ClampedArray, w: number, h: number):
 // 边缘背景色采样
 // ============================================================
 
-/**
- * 从图片四条边采样，返回 1~2 个主色
- * 返回数组按频率降序排列，第一个是最主要背景色
- */
 function sampleEdgeColors(data: Uint8ClampedArray, w: number, h: number): Array<{ r: number; g: number; b: number }> | null {
-    const band = 3; // 采样边框宽度
+    const band = 3;
     const colorCounts = new Map<number, { r: number; g: number; b: number; count: number }>();
 
     for (let x = 0; x < w; x++) {
-        // 顶部 band 行
-        for (let dy = 0; dy < band && dy < h; dy++) {
-            addSample(x, dy);
-        }
-        // 底部 band 行
-        for (let dy = 0; dy < band && (h - 1 - dy) >= 0; dy++) {
-            addSample(x, h - 1 - dy);
-        }
+        for (let dy = 0; dy < band && dy < h; dy++) { addSample(x, dy); }
+        for (let dy = 0; dy < band && (h - 1 - dy) >= 0; dy++) { addSample(x, h - 1 - dy); }
     }
     for (let y = band; y < h - band; y++) {
-        // 左侧 band 列
-        for (let dx = 0; dx < band; dx++) {
-            addSample(dx, y);
-        }
-        // 右侧 band 列
-        for (let dx = 0; dx < band; dx++) {
-            addSample(w - 1 - dx, y);
-        }
+        for (let dx = 0; dx < band; dx++) { addSample(dx, y); }
+        for (let dx = 0; dx < band; dx++) { addSample(w - 1 - dx, y); }
     }
 
     function addSample(x: number, y: number) {
@@ -270,11 +507,7 @@ function sampleEdgeColors(data: Uint8ClampedArray, w: number, h: number): Array<
         const key = quantizeColor(r, g, b);
         const existing = colorCounts.get(key);
         if (existing) {
-            // 累加实际颜色值，最后取平均
-            existing.r += r;
-            existing.g += g;
-            existing.b += b;
-            existing.count++;
+            existing.r += r; existing.g += g; existing.b += b; existing.count++;
         } else {
             colorCounts.set(key, { r, g, b, count: 1 });
         }
@@ -282,29 +515,22 @@ function sampleEdgeColors(data: Uint8ClampedArray, w: number, h: number): Array<
 
     if (colorCounts.size === 0) return null;
 
-    // 排序取前 2 个
     const sorted = Array.from(colorCounts.values())
         .map(c => ({
-            r: Math.round(c.r / c.count),
-            g: Math.round(c.g / c.count),
-            b: Math.round(c.b / c.count),
-            count: c.count,
+            r: Math.round(c.r / c.count), g: Math.round(c.g / c.count),
+            b: Math.round(c.b / c.count), count: c.count,
         }))
         .sort((a, b) => b.count - a.count);
 
     const totalEdgePixels = sorted.reduce((s, c) => s + c.count, 0);
     const results: Array<{ r: number; g: number; b: number }> = [];
 
-    // 第一主色必须占边缘 >25%
     if (sorted[0].count / totalEdgePixels < 0.25) return null;
     results.push({ r: sorted[0].r, g: sorted[0].g, b: sorted[0].b });
 
-    // 第二主色：如果占边缘 >15% 且与第一色差异 >20（可能是棋盘格的第二色）
     if (sorted.length > 1) {
         const second = sorted[1];
-        const dr = second.r - sorted[0].r;
-        const dg = second.g - sorted[0].g;
-        const db = second.b - sorted[0].b;
+        const dr = second.r - sorted[0].r, dg = second.g - sorted[0].g, db = second.b - sorted[0].b;
         const dist = Math.sqrt(dr * dr + dg * dg + db * db);
         if (second.count / totalEdgePixels > 0.15 && dist > 20) {
             results.push({ r: second.r, g: second.g, b: second.b });
@@ -314,12 +540,8 @@ function sampleEdgeColors(data: Uint8ClampedArray, w: number, h: number): Array<
     return results;
 }
 
-/** 颜色量化到 16 级（每级 16） */
 function quantizeColor(r: number, g: number, b: number): number {
-    const qr = Math.floor(r / 16) * 16;
-    const qg = Math.floor(g / 16) * 16;
-    const qb = Math.floor(b / 16) * 16;
-    return (qr << 16) | (qg << 8) | qb;
+    return (Math.floor(r / 16) * 16 << 16) | (Math.floor(g / 16) * 16 << 8) | Math.floor(b / 16) * 16;
 }
 
 // ============================================================
@@ -336,15 +558,11 @@ function detectAndRemoveCheckerboard(data: Uint8ClampedArray, w: number, h: numb
                 for (let x = 0; x < w; x++) {
                     const idx = (y * w + x) * 4;
                     const r = data[idx], g = data[idx + 1], b = data[idx + 2];
-
                     const distA = Math.sqrt((r - colorA.r) ** 2 + (g - colorA.g) ** 2 + (b - colorA.b) ** 2);
                     const distB = Math.sqrt((r - colorB.r) ** 2 + (g - colorB.g) ** 2 + (b - colorB.b) ** 2);
                     const expectedA = ((Math.floor(x / size) + Math.floor(y / size)) % 2 === 0);
-
-                    // 像素与所在格的预期颜色接近
                     if ((expectedA && distA < 10) || (!expectedA && distB < 10)) {
-                        data[idx + 3] = 0;
-                        removed++;
+                        data[idx + 3] = 0; removed++;
                     }
                 }
             }
@@ -360,14 +578,11 @@ function detectCheckerboardPattern(data: Uint8ClampedArray, w: number, h: number
     const sampleX = Math.min(topLeft, w - 1);
     const idx1 = (sampleY * w + sampleX) * 4;
     const colorA = { r: data[idx1], g: data[idx1 + 1], b: data[idx1 + 2] };
-
     const sample2X = Math.min(sampleX + size, w - 1);
     const idx2 = (sampleY * w + sample2X) * 4;
     const colorB = { r: data[idx2], g: data[idx2 + 1], b: data[idx2 + 2] };
 
-    const distAB = Math.sqrt(
-        (colorA.r - colorB.r) ** 2 + (colorA.g - colorB.g) ** 2 + (colorA.b - colorB.b) ** 2
-    );
+    const distAB = Math.sqrt((colorA.r - colorB.r) ** 2 + (colorA.g - colorB.g) ** 2 + (colorA.b - colorB.b) ** 2);
     if (distAB < 20) return { colorA, colorB, confidence: 0 };
 
     let matches = 0, total = 0;
@@ -378,31 +593,24 @@ function detectCheckerboardPattern(data: Uint8ClampedArray, w: number, h: number
             const r = data[i], g = data[i + 1], b = data[i + 2];
             const distA = Math.sqrt((r - colorA.r) ** 2 + (g - colorA.g) ** 2 + (b - colorA.b) ** 2);
             const distB = Math.sqrt((r - colorB.r) ** 2 + (g - colorB.g) ** 2 + (b - colorB.b) ** 2);
-
             const expectedA = ((Math.floor(x / size) + Math.floor(y / size)) % 2 === 0);
-            const isA = distA < 15, isB = distB < 15;
-
-            if (isA || isB) {
-                if ((expectedA && isA) || (!expectedA && isB)) matches++;
+            if ((distA < 15) || (distB < 15)) {
+                if ((expectedA && distA < 15) || (!expectedA && distB < 15)) matches++;
                 total++;
             }
         }
     }
-
-    const confidence = total > 5 ? matches / total : 0;
-    return { colorA, colorB, confidence };
+    return { colorA, colorB, confidence: total > 5 ? matches / total : 0 };
 }
 
 // ============================================================
 // 通用工具函数
 // ============================================================
 
-/** Buffer 转 Uint8ClampedArray */
 function bufferToUint8(data: Buffer): Uint8ClampedArray {
     return new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength);
 }
 
-/** RGB/RGBA 数据统一转为 RGBA Uint8ClampedArray */
 function rgbToRgba(data: Buffer, w: number, h: number, channels: number): Uint8ClampedArray {
     const pixelCount = w * h;
     const src = new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength);
@@ -417,7 +625,6 @@ function rgbToRgba(data: Buffer, w: number, h: number, channels: number): Uint8C
     return rgbaData;
 }
 
-/** 获取图片 Buffer */
 async function fetchImageBuffer(input: string): Promise<Buffer> {
     if (Buffer.isBuffer(input)) return input;
     if (input.startsWith('http')) {
@@ -435,19 +642,16 @@ async function fetchImageBuffer(input: string): Promise<Buffer> {
     return Buffer.from(await resp.arrayBuffer());
 }
 
-/** 保存为 PNG 并返回 URL */
 async function saveAsPngAndGetUrl(data: Uint8ClampedArray, width: number, height: number): Promise<string> {
     const pngBuffer = await sharp(Buffer.from(data.buffer, data.byteOffset, data.byteLength), {
         raw: { width, height, channels: 4 }
-    })
-        .png()
-        .toBuffer();
+    }).png().toBuffer();
 
     const filename = `transparent-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.png`;
     return saveImageFile(pngBuffer, filename, 'uploads');
 }
 
-/** 本地兜底透明化（仅用于本地 rembg 路径） */
+/** 本地兜底透明化 */
 export async function createLocalTransparentBg(imageUrl: string): Promise<{ buffer: Buffer; format: 'png' } | null> {
     try {
         const imageBuffer = await fetchImageBuffer(imageUrl);
@@ -461,18 +665,14 @@ export async function createLocalTransparentBg(imageUrl: string): Promise<{ buff
         if (applyColorDistanceAlpha(rgbaData, w, h)) {
             const buffer = await sharp(Buffer.from(rgbaData.buffer, rgbaData.byteOffset, rgbaData.byteLength), {
                 raw: { width: w, height: h, channels: 4 }
-            })
-                .png()
-                .toBuffer();
+            }).png().toBuffer();
             return { buffer, format: 'png' };
         }
 
         if (detectAndRemoveCheckerboard(rgbaData, w, h)) {
             const buffer = await sharp(Buffer.from(rgbaData.buffer, rgbaData.byteOffset, rgbaData.byteLength), {
                 raw: { width: w, height: h, channels: 4 }
-            })
-                .png()
-                .toBuffer();
+            }).png().toBuffer();
             return { buffer, format: 'png' };
         }
 
