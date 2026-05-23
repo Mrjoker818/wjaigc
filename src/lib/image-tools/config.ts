@@ -80,7 +80,17 @@ export const UPSCALE_TIMEOUT_MS = parseInt(
   10,
 );
 
-/** Python 解释器路径（优先使用 .venv 持久化虚拟环境） */
+/** Python 解释器路径（优先使用 .venv 持久化虚拟环境，不存在则回退系统 python3） */
+const VENV_PYTHON = path.join(process.cwd(), '.venv', 'bin', 'python3');
+const SYSTEM_PYTHON = 'python3';
+const VENV_EXISTS = (() => {
+  try {
+    require('fs').accessSync(VENV_PYTHON);
+    return true;
+  } catch {
+    return false;
+  }
+})();
 export const PYTHON_BIN =
   process.env.PYTHON_BIN ||
-  path.join(process.cwd(), '.venv', 'bin', 'python3');
+  (VENV_EXISTS ? VENV_PYTHON : SYSTEM_PYTHON);
