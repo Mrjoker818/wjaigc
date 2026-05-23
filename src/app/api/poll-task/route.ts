@@ -405,8 +405,12 @@ export async function POST(request: NextRequest) {
           try {
             console.log(`[poll-task] Applying checkerboard removal for AI RemoveBG task ${taskId}`);
             const processedUrl = await postProcessAIRemoveBG(pollResult.imageUrl as string);
-            pollResult.imageUrl = processedUrl;
-            console.log(`[poll-task] AI RemoveBG post-processing complete: ${processedUrl}`);
+            if (processedUrl) {
+              pollResult.imageUrl = processedUrl;
+              console.log(`[poll-task] AI RemoveBG post-processing complete: ${processedUrl}`);
+            } else {
+              console.warn('[poll-task] AI RemoveBG post-processing returned null, keeping original URL');
+            }
           } catch (postErr) {
             console.warn('[poll-task] AI RemoveBG checkerboard removal failed, using original:', postErr instanceof Error ? postErr.message : postErr);
           }

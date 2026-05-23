@@ -1883,7 +1883,8 @@ export async function POST(request: NextRequest) {
           // 同步模式：直接返回结果（后处理检测棋盘格→透明）
           try {
             const processedUrl = await postProcessAIRemoveBG(result.directUrl);
-            return NextResponse.json({ success: true, imageUrl: processedUrl, action, usedModel: result.usedModel, engine: 'ai-background-remove' });
+            const finalUrl = processedUrl || result.directUrl;
+            return NextResponse.json({ success: true, imageUrl: finalUrl, action, usedModel: result.usedModel, engine: 'ai-background-remove' });
           } catch (postErr) {
             console.warn('[remove_background] Checkerboard post-processing failed (sync), returning original:', postErr instanceof Error ? postErr.message : postErr);
             return NextResponse.json({ success: true, imageUrl: result.directUrl, action, usedModel: result.usedModel, engine: 'ai-background-remove' });

@@ -1,29 +1,53 @@
-import path from 'path';
 import sharp from 'sharp';
-import { spawn } from 'child_process';
+import { saveImageFile } from '@/lib/server-data-root';
+import { isS3Available, uploadImageToS3 } from '@/lib/s3-storage';
+import crypto from 'crypto';
 
 /**
- * AI RemoveBG 后处理：用 rembg 对 AI 结果生成精确蒙版
- * 
- * 策略：AI 模型（Gemini/GPT）擅长理解"主体是什么"，但生成的图
- * 背景是均匀灰色/棋盘格而非真正透明。用 rembg 对 AI 结果再
- * 做一次蒙版提取，因为 AI 结果背景高度均匀，rembg 极易精确分割。
- * 
- * 组合优势：AI 主体理解（知道白色脸部是主体）+ rembg 精确蒙版（背景均匀易分割）
+ * 将图片 Buffer 持久化保存，优先 S3 → 本地文件 → base64 data URL 兜底
+ */
+async function persistBuffer(buffer: Buffer, filename: string, subDir: string, mimeType: string = 'image/png'): Promise<string> {
+  if (await isS3Available()) {
+    try {
+      const s3Url = await uploadImageToS3(buffer, filename, mimeType);
+      if (s3Url) return s3Url;
+    } catch (e) {
+      console.warn(`[remove-bg-postprocess] S3 upload failed for ${filename}:`, e);
+    }
+  }
+  try {
+    const localUrl = saveImageFile(buffer, filename, subDir);
+    if (localUrl) return localUrl;
+  } catch (e) {
+    console.warn(`[remove-bg-postprocess] Local save failed for ${filename}:`, e);
+  }
+  return `data:${mimeType};base64,${buffer.toString('base64')}`;
+}
+
+/**
+ * AI RemoveBG 后处理：将 AI 结果的棋盘格/纯色背景转为透明 PNG
+ *
+ * 核心原则：AI 已正确识别主体，后处理只删除明确的背景像素，
+ * 绝不删除任何可能是主体的像素。宁可保留少量背景，也不误删主体。
+ *
+ * 策略优先级：
+ * 1. 检测图片已有 alpha 透明 → 直接输出 PNG（无需处理）
+ * 2. 精准棋盘格检测 → 只删除棋盘格图案像素
+ * 3. 纯色边缘 BFS → 只删除与边缘连通、颜色精确匹配的背景像素
+ * 4. 兜底 → 转为 PNG 全不透明输出（绝不误删）
+ *
+ * 返回持久化后的 URL string
  */
 export async function postProcessAIRemoveBG(
   imageInput: Buffer | string,
-  options: {
-    maskDilatePx?: number; // 蒙版膨胀像素，保护主体边缘（默认 8）
-    featherPx?: number;     // 边缘羽化像素（默认 3）
+  _options: {
+    maskDilatePx?: number;
+    featherPx?: number;
   } = {}
-): Promise<{ buffer: Buffer; format: 'png' } | null> {
-  const { maskDilatePx = 10, featherPx = 3 } = options;
-
+): Promise<string | null> {
   // 支持 URL 或 Buffer 输入
   let imageBuffer: Buffer;
   if (typeof imageInput === 'string') {
-    // 将相对路径转为绝对 URL
     let fetchUrl = imageInput;
     if (imageInput.startsWith('/')) {
       const port = process.env.DEPLOY_RUN_PORT || '5000';
@@ -40,258 +64,479 @@ export async function postProcessAIRemoveBG(
     imageBuffer = imageInput;
   }
 
-  console.log(`[ai-rmbg-post] Starting AI RemoveBG post-process (dilate=${maskDilatePx}px, feather=${featherPx}px, input=${imageBuffer.length} bytes)`);
-
-  // Step 1: 用 rembg 生成蒙版
-  const maskResult = await generateRembgMask(imageBuffer, 'u2net');
-  if (maskResult) {
-    return applyMaskToImage(imageBuffer, maskResult, maskDilatePx, featherPx);
-  }
-
-  // u2net 失败，尝试 u2netp
-  const fallbackMask = await generateRembgMask(imageBuffer, 'u2netp');
-  if (fallbackMask) {
-    return applyMaskToImage(imageBuffer, fallbackMask, maskDilatePx, featherPx);
-  }
-
-  // rembg 不可用（无 venv），降级到颜色 BFS 检测
-  console.warn('[ai-rmbg-post] rembg unavailable, falling back to color-based BFS detection');
-  return colorBasedBackgroundRemoval(imageBuffer, maskDilatePx, featherPx);
-}
-
-/**
- * 调用 Python rembg 脚本生成蒙版
- */
-async function generateRembgMask(
-  imageBuffer: Buffer,
-  model: string
-): Promise<Buffer | null> {
-  const pythonScript = path.join(process.cwd(), 'scripts', 'iopaint_removebg.py');
-  const modelsDir = path.join(process.cwd(), 'models', 'removebg');
-  const venvPython = path.join(process.cwd(), '.venv', 'bin', 'python3');
-
-  const inputPayload = JSON.stringify({
-    image: imageBuffer.toString('base64'),
-    model: model,
-    gen_mask: true,
-  });
+  console.log(`[ai-rmbg-post] Starting conservative background removal (input=${imageBuffer.length} bytes)`);
 
   try {
-    const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-      const proc = spawn(venvPython, [pythonScript], {
-        env: {
-          ...process.env,
-          REMOVEBG_MODELS_DIR: modelsDir,
-          U2NET_HOME: modelsDir,
-          TF_CPP_MIN_LOG_LEVEL: '3',
-        },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
+    const image = sharp(imageBuffer);
+    const metadata = await image.metadata();
+    const { width = 1, height = 1, channels = 3 } = metadata;
 
-      let stdout = '';
-      let stderr = '';
-
-      proc.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
-      proc.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
-
-      proc.on('close', (code: number) => {
-        if (code !== 0) {
-          reject(new Error(`Python process exited with code ${code}: ${stderr.slice(-500)}`));
-        } else {
-          resolve({ stdout, stderr });
-        }
-      });
-
-      proc.on('error', (err: Error) => { reject(err); });
-
-      // 写入 stdin
-      proc.stdin.write(inputPayload);
-      proc.stdin.end();
-
-      // 60 秒超时
-      setTimeout(() => {
-        proc.kill('SIGKILL');
-        reject(new Error('Python process timed out after 60s'));
-      }, 60000);
-    });
-
-    const parsed = JSON.parse(result.stdout.trim());
-    if (!parsed.success || !parsed.image) {
-      console.error(`[rembgMask] Python script error: ${parsed.error || 'no image'}`);
-      return null;
+    // 策略 1: 如果图片已有 alpha 通道且有透明像素，直接持久化输出 PNG
+    if (channels === 4) {
+      const { data: rawData, info: alphaInfo } = await image.raw().toBuffer({ resolveWithObject: true });
+      const data = rawData as unknown as Uint8Array;
+      let hasTransparent = false;
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] < 200) { hasTransparent = true; break; }
+      }
+      if (hasTransparent) {
+        console.log('[ai-rmbg-post] Image already has transparency, outputting directly as PNG');
+        const pngBuffer = await sharp(imageBuffer).png().toBuffer();
+        const uid = crypto.randomBytes(8).toString('hex');
+        return await persistBuffer(pngBuffer, `rmbg-${uid}.png`, 'removebg');
+      }
     }
 
-    return Buffer.from(parsed.image, 'base64');
+    // 读取 RGBA 数据
+    const { data: rawData, info } = await sharp(imageBuffer)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const data = rawData as unknown as Uint8Array;
+    const w = info.width;
+    const h = info.height;
+    const uid = crypto.randomBytes(8).toString('hex');
+
+    // 策略 2: 精准棋盘格检测
+    const checkerboardResult = detectAndRemoveCheckerboard(data, w, h);
+    if (checkerboardResult !== null) {
+      const resultBuffer = await sharp(data, { raw: { width: w, height: h, channels: 4 } })
+        .png()
+        .toBuffer();
+      console.log(`[ai-rmbg-post] Checkerboard detected and removed: ${checkerboardResult.pct.toFixed(1)}% background removed (grid=${checkerboardResult.gridSize})`);
+      return await persistBuffer(resultBuffer, `rmbg-${uid}.png`, 'removebg');
+    }
+
+    // 策略 3: 纯色边缘 BFS（极其保守）
+    const bfsResult = conservativeEdgeBFS(data, w, h);
+    if (bfsResult !== null && bfsResult.pct > 0) {
+      const resultBuffer = await sharp(data, { raw: { width: w, height: h, channels: 4 } })
+        .png()
+        .toBuffer();
+      console.log(`[ai-rmbg-post] Solid background removed: ${bfsResult.pct.toFixed(1)}% background removed (color=${bfsResult.bgColor})`);
+      return await persistBuffer(resultBuffer, `rmbg-${uid}.png`, 'removebg');
+    }
+
+    // 策略 4: 兜底 — 转为 PNG 全不透明（绝不误删主体）
+    console.log('[ai-rmbg-post] No clear background pattern detected, outputting as opaque PNG (safe fallback)');
+    const fallbackBuffer = await sharp(imageBuffer).ensureAlpha().png().toBuffer();
+    return await persistBuffer(fallbackBuffer, `rmbg-${uid}.png`, 'removebg');
+
   } catch (err) {
-    console.error(`[rembgMask] Failed:`, (err as Error).message);
+    console.error('[ai-rmbg-post] Error:', (err as Error).message);
     return null;
   }
 }
 
 /**
- * 应用蒙版到原图：膨胀保护主体 + 羽化边缘
+ * 精准棋盘格检测与移除
+ *
+ * 棋盘格特征：两种颜色在规则网格上交替排列。
+ * 检测步骤：
+ * 1. 扫描多种常见网格尺寸（4~24px）
+ * 2. 对每个候选尺寸，采样计算两种候选色
+ * 3. 逐像素验证：位置在网格奇偶性 + 颜色匹配两个条件都满足才标记为棋盘格
+ * 4. 需要显著比例的像素匹配才算检测成功（>15%）
+ *
+ * 返回 null 表示未检测到棋盘格
  */
-async function applyMaskToImage(
-  imageBuffer: Buffer,
-  maskPng: Buffer,
-  maskDilatePx: number,
-  featherPx: number
-): Promise<{ buffer: Buffer; format: 'png' }> {
-  const image = sharp(imageBuffer);
-  const metadata = await image.metadata();
-  const { width = 1, height = 1 } = metadata;
+function detectAndRemoveCheckerboard(
+  data: Uint8Array,
+  w: number,
+  h: number
+): { pct: number; gridSize: number } | null {
+  const CANDIDATE_SIZES = [4, 6, 8, 10, 12, 14, 16, 20, 24];
+  const MIN_MATCH_RATIO = 0.15; // 至少 15% 像素匹配才算棋盘格
 
-  // 读取蒙版灰度图
-  const maskData = await sharp(maskPng)
-    .resize(width, height, { fit: 'fill' })
-    .grayscale()
-    .raw()
-    .toBuffer();
+  let bestGrid = 0;
+  let bestPct = 0;
 
-  // 膨胀蒙版：保护主体边缘
-  const dilatedMask = dilateMask(maskData, width, height, maskDilatePx);
+  for (const gs of CANDIDATE_SIZES) {
+    if (gs > w / 4 || gs > h / 4) continue; // 网格不能太大
 
-  // 羽化边缘
-  const featheredMask = featherMask(dilatedMask, width, height, featherPx);
+    // 采样提取两种候选颜色
+    // 取 (0,0) 和 (gs,0) 两个位置的局部区域均值
+    const sampleA = sampleRegion(data, w, h, Math.floor(gs / 2), Math.floor(gs / 2), gs);
+    const sampleB = sampleRegion(data, w, h, gs + Math.floor(gs / 2), Math.floor(gs / 2), gs);
 
-  // 应用蒙版：创建带 alpha 通道的 PNG
-  const { data: rgbaData, info } = await image
-    .ensureAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
+    if (!sampleA || !sampleB) continue;
 
-  for (let i = 0; i < width * height; i++) {
-    rgbaData[i * 4 + 3] = featheredMask[i]; // 设置 alpha
-  }
+    // 两种候选色必须有足够差异（>20）
+    const colorDiff = Math.sqrt(
+      (sampleA[0] - sampleB[0]) ** 2 +
+      (sampleA[1] - sampleB[1]) ** 2 +
+      (sampleA[2] - sampleB[2]) ** 2
+    );
+    if (colorDiff < 20) continue;
 
-  const resultBuffer = await sharp(rgbaData, {
-    raw: { width, height, channels: 4 },
-  })
-    .png()
-    .toBuffer();
+    // 逐像素验证棋盘格模式
+    let matchCount = 0;
+    const totalPixels = w * h;
+    const TOLERANCE = 25; // 颜色容差
 
-  const transparentCount = featheredMask.filter(v => v < 128).length;
-  const totalCount = width * height;
-  console.log(`[ai-rmbg-post] Mask applied: ${(transparentCount / totalCount * 100).toFixed(1)}% background removed (dilate=${maskDilatePx}px, feather=${featherPx}px)`);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = (y * w + x) * 4;
+        const r = data[idx], g = data[idx + 1], b = data[idx + 2];
 
-  return { buffer: resultBuffer, format: 'png' };
-}
+        // 确定此像素在棋盘格上的"颜色组"
+        const gridX = Math.floor(x / gs);
+        const gridY = Math.floor(y / gs);
+        const isEvenCell = (gridX + gridY) % 2 === 0;
 
-/**
- * 膨胀蒙版：向外扩展前景区域，保护主体边缘
- * 使用方形结构元素，迭代扩展
- */
-function dilateMask(mask: Buffer, width: number, height: number, dilatePx: number): Buffer {
-  let current = Buffer.from(mask);
+        // 检查颜色是否匹配对应组的候选色
+        const ref = isEvenCell ? sampleA : sampleB;
+        const dist = Math.sqrt((r - ref[0]) ** 2 + (g - ref[1]) ** 2 + (b - ref[2]) ** 2);
 
-  // 迭代膨胀，每次扩展 1 像素
-  for (let iter = 0; iter < dilatePx; iter++) {
-    const next = Buffer.alloc(current.length);
-
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const idx = y * width + x;
-        if (current[idx] > 127) {
-          // 前景像素：保持 + 扩展到 4 邻域
-          next[idx] = 255;
-          if (x > 0) next[idx - 1] = 255;
-          if (x < width - 1) next[idx + 1] = 255;
-          if (y > 0) next[idx - width] = 255;
-          if (y < height - 1) next[idx + width] = 255;
+        if (dist < TOLERANCE) {
+          matchCount++;
         }
       }
     }
 
-    current = next;
-  }
-
-  return current;
-}
-
-/**
- * 羽化蒙版边缘：在前景/背景边界做 alpha 渐变
- * 避免硬边切割效果
- */
-function featherMask(mask: Buffer, width: number, height: number, featherPx: number): Buffer {
-  if (featherPx <= 0) return mask;
-
-  const result = Buffer.from(mask);
-
-  // 计算每个像素到最近背景像素的距离
-  // 使用简化版：在前景边缘做渐变
-  const dist = new Float32Array(width * height).fill(Infinity);
-
-  // 从背景像素开始 BFS
-  const queue: number[] = [];
-  for (let i = 0; i < width * height; i++) {
-    if (mask[i] < 128) {
-      dist[i] = 0;
-      queue.push(i);
+    const matchPct = matchCount / totalPixels;
+    if (matchPct > bestPct && matchPct >= MIN_MATCH_RATIO) {
+      bestPct = matchPct;
+      bestGrid = gs;
     }
   }
 
-  // BFS 计算距离
+  if (bestGrid === 0) return null;
+
+  // 用最佳网格尺寸执行删除
+  const sampleA = sampleRegion(data, w, h, Math.floor(bestGrid / 2), Math.floor(bestGrid / 2), bestGrid)!;
+  const sampleB = sampleRegion(data, w, h, bestGrid + Math.floor(bestGrid / 2), Math.floor(bestGrid / 2), bestGrid)!;
+
+  // 先标记所有匹配棋盘格模式的像素
+  const cbMatch = new Uint8Array(w * h); // 1=匹配棋盘格
+  const TOLERANCE = 25;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      const r = data[idx], g = data[idx + 1], b = data[idx + 2];
+
+      const gridX = Math.floor(x / bestGrid);
+      const gridY = Math.floor(y / bestGrid);
+      const isEvenCell = (gridX + gridY) % 2 === 0;
+
+      const ref = isEvenCell ? sampleA : sampleB;
+      const dist = Math.sqrt((r - ref[0]) ** 2 + (g - ref[1]) ** 2 + (b - ref[2]) ** 2);
+
+      if (dist < TOLERANCE) {
+        cbMatch[y * w + x] = 1;
+      }
+    }
+  }
+
+  // 关键保护：只删除与图片边缘连通的棋盘格像素
+  // 主体内部的像素即使颜色恰好匹配棋盘格，也不删除
+  const visited = new Uint8Array(w * h);
+  const edgeConnected = new Uint8Array(w * h); // 与边缘连通的棋盘格
+  const queue: number[] = [];
+
+  // 从四边开始 BFS
+  for (let x = 0; x < w; x++) {
+    const topIdx = x;
+    const bottomIdx = (h - 1) * w + x;
+    if (cbMatch[topIdx] && !visited[topIdx]) { visited[topIdx] = 1; edgeConnected[topIdx] = 1; queue.push(topIdx); }
+    if (cbMatch[bottomIdx] && !visited[bottomIdx]) { visited[bottomIdx] = 1; edgeConnected[bottomIdx] = 1; queue.push(bottomIdx); }
+  }
+  for (let y = 0; y < h; y++) {
+    const leftIdx = y * w;
+    const rightIdx = y * w + (w - 1);
+    if (cbMatch[leftIdx] && !visited[leftIdx]) { visited[leftIdx] = 1; edgeConnected[leftIdx] = 1; queue.push(leftIdx); }
+    if (cbMatch[rightIdx] && !visited[rightIdx]) { visited[rightIdx] = 1; edgeConnected[rightIdx] = 1; queue.push(rightIdx); }
+  }
+
+  // BFS 扩展连通区域
+  let head = 0;
+  const dx = [-1, 1, 0, 0];
+  const dy = [0, 0, -1, 1];
+  while (head < queue.length) {
+    const idx = queue[head++];
+    const x = idx % w;
+    const y = Math.floor(idx / w);
+    for (let dir = 0; dir < 4; dir++) {
+      const nx = x + dx[dir];
+      const ny = y + dy[dir];
+      if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+      const nIdx = ny * w + nx;
+      if (visited[nIdx]) continue;
+      visited[nIdx] = 1;
+      if (cbMatch[nIdx]) {
+        edgeConnected[nIdx] = 1;
+        queue.push(nIdx);
+      }
+    }
+  }
+
+  // 只删除与边缘连通的棋盘格像素
+  let removedCount = 0;
+  for (let i = 0; i < w * h; i++) {
+    if (edgeConnected[i]) {
+      data[i * 4 + 3] = 0; // 设为透明
+      removedCount++;
+    }
+  }
+
+  // 对透明边缘做轻微羽化（2px），避免硬边
+  applyEdgeFeather(data, w, h, 2);
+
+  const pct = (removedCount / (w * h) * 100);
+  return { pct, gridSize: bestGrid };
+}
+
+/**
+ * 采样图片中一个矩形区域的平均颜色
+ */
+function sampleRegion(
+  data: Uint8Array,
+  w: number,
+  h: number,
+  cx: number,
+  cy: number,
+  size: number
+): [number, number, number] | null {
+  const half = Math.floor(size / 2);
+  const x0 = Math.max(0, cx - half);
+  const y0 = Math.max(0, cy - half);
+  const x1 = Math.min(w, cx + half);
+  const y1 = Math.min(h, cy + half);
+
+  let rSum = 0, gSum = 0, bSum = 0, count = 0;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const idx = (y * w + x) * 4;
+      rSum += data[idx];
+      gSum += data[idx + 1];
+      bSum += data[idx + 2];
+      count++;
+    }
+  }
+
+  if (count === 0) return null;
+  return [Math.round(rSum / count), Math.round(gSum / count), Math.round(bSum / count)];
+}
+
+/**
+ * 保守的纯色边缘 BFS
+ *
+ * 只删除同时满足以下所有条件的像素：
+ * 1. 与图片四角的背景色精确匹配（容差极小：灰色≤12，彩色≤8）
+ * 2. 与图片边缘连通（BFS 从边缘出发，不跳跃）
+ * 3. 像素在局部 3x3 区域内颜色均匀（无纹理/细节）
+ *
+ * 不会删除：
+ * - 与背景色相近但不完全匹配的像素
+ * - 不与边缘连通的像素
+ * - 有纹理/细节的像素（即使颜色匹配）
+ */
+function conservativeEdgeBFS(
+  data: Uint8Array,
+  w: number,
+  h: number
+): { pct: number; bgColor: string } | null {
+  // 采样四角区域，计算背景色
+  const CORNER_SIZE = Math.max(3, Math.min(10, Math.floor(Math.min(w, h) / 50)));
+
+  const corners: number[][] = [];
+  for (const [cx, cy] of [
+    [0, 0], [w - CORNER_SIZE, 0],
+    [0, h - CORNER_SIZE], [w - CORNER_SIZE, h - CORNER_SIZE]
+  ]) {
+    const sample = sampleRegion(data, w, h, cx + Math.floor(CORNER_SIZE / 2), cy + Math.floor(CORNER_SIZE / 2), CORNER_SIZE);
+    if (sample) corners.push(sample);
+  }
+
+  if (corners.length === 0) return null;
+
+  // 找到四角颜色的聚类中心（取中位数更鲁棒）
+  const bgR = median(corners.map(c => c[0]));
+  const bgG = median(corners.map(c => c[1]));
+  const bgB = median(corners.map(c => c[2]));
+
+  const bgColorStr = `rgb(${bgR},${bgG},${bgB})`;
+  console.log(`[conservative-bfs] Background color from corners: ${bgColorStr}`);
+
+  // 判断背景是灰色还是彩色
+  const maxC = Math.max(bgR, bgG, bgB);
+  const minC = Math.min(bgR, bgG, bgB);
+  const isGray = (maxC - minC) < 30;
+  // 极其保守的容差：灰色 12，彩色 8
+  const COLOR_THRESHOLD = isGray ? 12 : 8;
+
+  // BFS 从四条边出发
+  const visited = new Uint8Array(w * h);
+  const bgMask = new Uint8Array(w * h); // 1=背景
+  const queue: number[] = [];
+
+  // 判断像素是否可能是背景（颜色匹配 + 局部均匀）
+  const isCandidateBg = (idx: number): boolean => {
+    const px = idx * 4;
+    const r = data[px], g = data[px + 1], b = data[px + 2];
+    const dist = Math.sqrt((r - bgR) ** 2 + (g - bgG) ** 2 + (b - bgB) ** 2);
+    if (dist > COLOR_THRESHOLD) return false;
+
+    // 局部均匀性检查：3x3 邻域颜色方差不能太大
+    // 这可以防止将主体中与背景色相同的纹理区域误判为背景
+    const x = idx % w;
+    const y = Math.floor(idx / w);
+    let rVar = 0, gVar = 0, bVar = 0, count = 0;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+        const ni = (ny * w + nx) * 4;
+        rVar += Math.abs(data[ni] - r);
+        gVar += Math.abs(data[ni + 1] - g);
+        bVar += Math.abs(data[ni + 2] - b);
+        count++;
+      }
+    }
+    const avgVar = (rVar + gVar + bVar) / (count * 3);
+    // 局部方差阈值：背景区域应该非常均匀（方差 < 5）
+    // 主体区域即使颜色相近，也会有纹理细节
+    return avgVar < 5;
+  };
+
+  // 从四边初始化
+  for (let x = 0; x < w; x++) {
+    const topIdx = x;
+    const bottomIdx = (h - 1) * w + x;
+    if (isCandidateBg(topIdx)) { visited[topIdx] = 1; bgMask[topIdx] = 1; queue.push(topIdx); }
+    if (isCandidateBg(bottomIdx)) { visited[bottomIdx] = 1; bgMask[bottomIdx] = 1; queue.push(bottomIdx); }
+  }
+  for (let y = 0; y < h; y++) {
+    const leftIdx = y * w;
+    const rightIdx = y * w + (w - 1);
+    if (isCandidateBg(leftIdx)) { visited[leftIdx] = 1; bgMask[leftIdx] = 1; queue.push(leftIdx); }
+    if (isCandidateBg(rightIdx)) { visited[rightIdx] = 1; bgMask[rightIdx] = 1; queue.push(rightIdx); }
+  }
+
+  if (queue.length === 0) {
+    console.log('[conservative-bfs] No background pixels found at edges');
+    return null;
+  }
+
+  // BFS 扩展
   let head = 0;
   const dx = [-1, 1, 0, 0];
   const dy = [0, 0, -1, 1];
 
   while (head < queue.length) {
     const idx = queue[head++];
-    const x = idx % width;
-    const y = Math.floor(idx / width);
-    const d = dist[idx];
-
-    if (d >= featherPx) continue;
-
+    const x = idx % w;
+    const y = Math.floor(idx / w);
     for (let dir = 0; dir < 4; dir++) {
       const nx = x + dx[dir];
       const ny = y + dy[dir];
-      if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
-      const nIdx = ny * width + nx;
-      if (dist[nIdx] > d + 1) {
-        dist[nIdx] = d + 1;
+      if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+      const nIdx = ny * w + nx;
+      if (visited[nIdx]) continue;
+      visited[nIdx] = 1;
+      if (isCandidateBg(nIdx)) {
+        bgMask[nIdx] = 1;
         queue.push(nIdx);
       }
     }
   }
 
-  // 应用羽化
-  for (let i = 0; i < width * height; i++) {
-    if (mask[i] >= 128) {
-      // 前景像素：根据距离做渐变
-      const d = dist[i];
-      if (d <= featherPx) {
-        // 在羽化范围内：alpha 从 0 渐变到 255
-        result[i] = Math.round((1 - d / featherPx) * 200 + 55);
-        // 确保最内层也是 255
-        if (d === 0) result[i] = 0; // 距离为 0 的是背景
-      }
-      // 距离 > featherPx 的保持 255
-    } else {
-      // 背景像素保持 0（透明）
-      result[i] = 0;
+  // 统计并应用
+  let removedCount = 0;
+  for (let i = 0; i < w * h; i++) {
+    if (bgMask[i]) {
+      data[i * 4 + 3] = 0; // 透明
+      removedCount++;
     }
   }
 
-  // 纠正：距离为 0 的是背景，应该是透明
-  for (let i = 0; i < width * height; i++) {
-    if (mask[i] < 128) {
-      result[i] = 0;
-    } else if (dist[i] >= featherPx || !isFinite(dist[i])) {
-      result[i] = 255;
-    } else {
-      // 在羽化范围的前景像素
-      const ratio = dist[i] / featherPx;
-      result[i] = Math.round(ratio * 255);
-      if (result[i] < 55) result[i] = 55; // 最低 alpha，避免主体太薄
+  // 羽化边缘
+  applyEdgeFeather(data, w, h, 2);
+
+  const pct = (removedCount / (w * h) * 100);
+  if (pct < 0.5) {
+    // 删除的太少，可能不是纯色背景
+    console.log(`[conservative-bfs] Only ${pct.toFixed(1)}% removed, not a solid background`);
+    // 恢复 alpha
+    for (let i = 0; i < w * h; i++) {
+      data[i * 4 + 3] = 255;
     }
+    return null;
   }
 
-  return result;
+  return { pct, bgColor: bgColorStr };
 }
 
 /**
- * 本地 RemoveBG 的透明化兜底（替代旧的 createLocalBackgroundAlpha）
+ * 对透明/不透明边界做羽化
+ * 在 alpha=0 和 alpha=255 的边界做 2px 渐变，避免硬边锯齿
+ */
+function applyEdgeFeather(data: Uint8Array, w: number, h: number, featherPx: number): void {
+  if (featherPx <= 0) return;
+
+  // 识别边缘：透明像素旁边的非透明像素
+  const isTransparent = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    isTransparent[i] = data[i * 4 + 3] < 128 ? 1 : 0;
+  }
+
+  // BFS 从透明区域计算距离
+  const dist = new Int16Array(w * h).fill(-1);
+  const queue: number[] = [];
+
+  for (let i = 0; i < w * h; i++) {
+    if (isTransparent[i]) {
+      dist[i] = 0;
+      queue.push(i);
+    }
+  }
+
+  let head = 0;
+  const dx = [-1, 1, 0, 0];
+  const dy = [0, 0, -1, 1];
+
+  while (head < queue.length) {
+    const idx = queue[head++];
+    const x = idx % w;
+    const y = Math.floor(idx / w);
+    const d = dist[idx];
+    if (d >= featherPx) continue;
+
+    for (let dir = 0; dir < 4; dir++) {
+      const nx = x + dx[dir];
+      const ny = y + dy[dir];
+      if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+      const nIdx = ny * w + nx;
+      if (dist[nIdx] >= 0) continue;
+      dist[nIdx] = d + 1;
+      queue.push(nIdx);
+    }
+  }
+
+  // 对边缘附近的不透明像素做 alpha 渐变
+  for (let i = 0; i < w * h; i++) {
+    if (isTransparent[i]) continue; // 已经透明
+    const d = dist[i];
+    if (d > 0 && d <= featherPx) {
+      // 距离越近越透明
+      const ratio = d / featherPx; // 0→1 (越远越不透明)
+      data[i * 4 + 3] = Math.round(ratio * 255);
+    }
+  }
+}
+
+/**
+ * 计算中位数
+ */
+function median(arr: number[]): number {
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
+
+/**
+ * 本地 RemoveBG 的透明化兜底（保守纯色检测）
  */
 export async function createLocalTransparentBg(
   imageBuffer: Buffer
@@ -304,224 +549,35 @@ export async function createLocalTransparentBg(
       .toBuffer({ resolveWithObject: true });
 
     const data = rawData as unknown as Uint8Array;
-
     const { width, height } = info;
 
-    // 简单策略：检测纯白/近白像素（>240）作为背景
-    // 从边缘 BFS 扩展，只删除连通的背景
-    const bgMask = new Uint8Array(width * height); // 0=keep, 1=remove
-    const visited = new Uint8Array(width * height);
-
-    const isBackground = (idx: number): boolean => {
-      const r = data[idx * 4];
-      const g = data[idx * 4 + 1];
-      const b = data[idx * 4 + 2];
-      // 近白色/近灰色
-      const max = Math.max(r, g, b);
-      const min = Math.min(r, g, b);
-      return max > 230 && (max - min) < 20;
-    };
-
-    // 从四条边开始 BFS
-    const queue: number[] = [];
-    for (let x = 0; x < width; x++) {
-      const topIdx = x;
-      const bottomIdx = (height - 1) * width + x;
-      if (isBackground(topIdx) && !visited[topIdx]) { visited[topIdx] = 1; bgMask[topIdx] = 1; queue.push(topIdx); }
-      if (isBackground(bottomIdx) && !visited[bottomIdx]) { visited[bottomIdx] = 1; bgMask[bottomIdx] = 1; queue.push(bottomIdx); }
-    }
-    for (let y = 0; y < height; y++) {
-      const leftIdx = y * width;
-      const rightIdx = y * width + (width - 1);
-      if (isBackground(leftIdx) && !visited[leftIdx]) { visited[leftIdx] = 1; bgMask[leftIdx] = 1; queue.push(leftIdx); }
-      if (isBackground(rightIdx) && !visited[rightIdx]) { visited[rightIdx] = 1; bgMask[rightIdx] = 1; queue.push(rightIdx); }
+    // 使用保守边缘 BFS
+    const result = conservativeEdgeBFS(data, width, height);
+    if (result && result.pct > 0) {
+      const resultBuffer = await sharp(data, { raw: { width, height, channels: 4 } })
+        .png()
+        .toBuffer();
+      console.log(`[local-transparent] Removed ${result.pct}% background (color=${result.bgColor})`);
+      return { buffer: resultBuffer, format: 'png' };
     }
 
-    // BFS 扩展
-    let head = 0;
-    const dx = [-1, 1, 0, 0];
-    const dy = [0, 0, -1, 1];
-    while (head < queue.length) {
-      const idx = queue[head++];
-      const x = idx % width;
-      const y = Math.floor(idx / width);
-      for (let dir = 0; dir < 4; dir++) {
-        const nx = x + dx[dir];
-        const ny = y + dy[dir];
-        if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
-        const nIdx = ny * width + nx;
-        if (visited[nIdx]) continue;
-        visited[nIdx] = 1;
-        if (isBackground(nIdx)) {
-          bgMask[nIdx] = 1;
-          queue.push(nIdx);
-        }
-      }
+    // 无法检测纯色背景，尝试棋盘格
+    const cbResult = detectAndRemoveCheckerboard(data, width, height);
+    if (cbResult) {
+      const resultBuffer = await sharp(data, { raw: { width, height, channels: 4 } })
+        .png()
+        .toBuffer();
+      console.log(`[local-transparent] Checkerboard removed: ${cbResult.pct}% (grid=${cbResult.gridSize})`);
+      return { buffer: resultBuffer, format: 'png' };
     }
 
-    // 应用蒙版
-    let removedCount = 0;
-    for (let i = 0; i < width * height; i++) {
-      if (bgMask[i]) {
-        data[i * 4 + 3] = 0; // 透明
-        removedCount++;
-      }
-    }
+    // 兜底：转 PNG 全不透明
+    console.log('[local-transparent] No background pattern detected, outputting as opaque PNG');
+    const fallbackBuffer = await sharp(imageBuffer).ensureAlpha().png().toBuffer();
+    return { buffer: fallbackBuffer, format: 'png' };
 
-    const resultBuffer = await sharp(data, { raw: { width, height, channels: 4 } })
-      .png()
-      .toBuffer();
-
-    console.log(`[local-transparent] Removed ${(removedCount / (width * height) * 100).toFixed(1)}% background pixels`);
-
-    return { buffer: resultBuffer, format: 'png' };
   } catch (err) {
     console.error('[local-transparent] Error:', (err as Error).message);
-    return null;
-  }
-}
-
-/**
- * 颜色 BFS 背景移除 — rembg 不可用时的降级方案
- * 从图片四边采样背景色，BFS 扩展标记背景区域，替换为透明
- */
-async function colorBasedBackgroundRemoval(
-  imageBuffer: Buffer,
-  maskDilatePx: number = 10,
-  featherPx: number = 2
-): Promise<{ buffer: Buffer; format: 'png' } | null> {
-  try {
-    const image = sharp(imageBuffer);
-    const { data, info } = await image.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-    const { width, height } = info;
-
-    // Step 1: 从四边采样背景色
-    const edgeSamples: number[][] = [];
-    const sampleStep = Math.max(1, Math.floor(Math.min(width, height) / 100));
-
-    for (let x = 0; x < width; x += sampleStep) {
-      for (let row of [0, 1, 2, height - 1, height - 2, height - 3]) {
-        if (row < height) {
-          const idx = row * width + x;
-          edgeSamples.push([data[idx * 4], data[idx * 4 + 1], data[idx * 4 + 2]]);
-        }
-      }
-    }
-    for (let y = 0; y < height; y += sampleStep) {
-      for (let col of [0, 1, 2, width - 1, width - 2, width - 3]) {
-        if (col < width) {
-          const idx = y * width + col;
-          edgeSamples.push([data[idx * 4], data[idx * 4 + 1], data[idx * 4 + 2]]);
-        }
-      }
-    }
-
-    // Step 2: 简单聚类 — 找出前2个最大颜色簇
-    const clusters: { center: number[]; count: number }[] = [];
-    const CLUSTER_THRESHOLD = 40;
-
-    for (const sample of edgeSamples) {
-      let found = false;
-      for (const cluster of clusters) {
-        const dist = Math.sqrt(
-          (sample[0] - cluster.center[0]) ** 2 +
-          (sample[1] - cluster.center[1]) ** 2 +
-          (sample[2] - cluster.center[2]) ** 2
-        );
-        if (dist < CLUSTER_THRESHOLD) {
-          cluster.count++;
-          // 更新中心
-          cluster.center[0] = Math.round((cluster.center[0] * (cluster.count - 1) + sample[0]) / cluster.count);
-          cluster.center[1] = Math.round((cluster.center[1] * (cluster.count - 1) + sample[1]) / cluster.count);
-          cluster.center[2] = Math.round((cluster.center[2] * (cluster.count - 1) + sample[2]) / cluster.count);
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        clusters.push({ center: [...sample], count: 1 });
-      }
-    }
-
-    clusters.sort((a, b) => b.count - a.count);
-    const bgColors = clusters.slice(0, 2).map(c => c.center);
-    console.log(`[color-bfs-fallback] Background colors: ${bgColors.map(c => `rgb(${c.join(',')})`).join(' + ')}`);
-
-    // Step 3: BFS 从四边扩展，标记背景
-    const bgMask = new Uint8Array(width * height);
-    const visited = new Uint8Array(width * height);
-
-    const colorDist = (idx: number, ref: number[]): number => {
-      const r = data[idx * 4], g = data[idx * 4 + 1], b = data[idx * 4 + 2];
-      return Math.sqrt((r - ref[0]) ** 2 + (g - ref[1]) ** 2 + (b - ref[2]) ** 2);
-    };
-
-    const isNearBg = (idx: number): boolean => {
-      const r = data[idx * 4], g = data[idx * 4 + 1], b = data[idx * 4 + 2];
-      const max = Math.max(r, g, b), min = Math.min(r, g, b);
-      const isGray = (max - min) < 30;
-      const threshold = isGray ? 30 : 22;
-      return bgColors.some(ref => colorDist(idx, ref) < threshold);
-    };
-
-    // 从四边开始
-    const queue: number[] = [];
-    for (let x = 0; x < width; x++) {
-      for (const row of [0, height - 1]) {
-        const idx = row * width + x;
-        if (!visited[idx] && isNearBg(idx)) { visited[idx] = 1; bgMask[idx] = 1; queue.push(idx); }
-      }
-    }
-    for (let y = 0; y < height; y++) {
-      for (const col of [0, width - 1]) {
-        const idx = y * width + col;
-        if (!visited[idx] && isNearBg(idx)) { visited[idx] = 1; bgMask[idx] = 1; queue.push(idx); }
-      }
-    }
-
-    // BFS 扩展
-    let head = 0;
-    const dx = [-1, 1, 0, 0], dy = [0, 0, -1, 1];
-    while (head < queue.length) {
-      const idx = queue[head++];
-      const x = idx % width, y = Math.floor(idx / width);
-      for (let dir = 0; dir < 4; dir++) {
-        const nx = x + dx[dir], ny = y + dy[dir];
-        if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
-        const nIdx = ny * width + nx;
-        if (visited[nIdx]) continue;
-        visited[nIdx] = 1;
-        if (isNearBg(nIdx)) { bgMask[nIdx] = 1; queue.push(nIdx); }
-      }
-    }
-
-    // 统计
-    let bgCount = 0;
-    for (let i = 0; i < width * height; i++) if (bgMask[i]) bgCount++;
-    console.log(`[color-bfs-fallback] BFS marked ${(bgCount / (width * height) * 100).toFixed(1)}% as background`);
-
-    // Step 4: 膨胀蒙版保护主体
-    let maskBuf: Buffer = Buffer.from(bgMask.map(v => v > 0 ? 255 : 0));
-    for (let i = 0; i < maskDilatePx; i++) {
-      maskBuf = dilateMask(maskBuf, width, height, 1) as Buffer;
-    }
-    // 反转：255=背景(要删除), 0=前景(要保留)
-    const finalMask = Buffer.from(maskBuf.map(v => v > 128 ? 0 : 255));
-
-    // Step 5: 羽化
-    const featheredMask = featherMask(finalMask, width, height, featherPx);
-
-    // Step 6: 应用蒙版
-    for (let i = 0; i < width * height; i++) {
-      data[i * 4 + 3] = featheredMask[i];
-    }
-
-    const resultBuffer = await sharp(data, { raw: { width, height, channels: 4 } }).png().toBuffer();
-    console.log(`[color-bfs-fallback] Post-processed image saved as transparent PNG`);
-
-    return { buffer: resultBuffer, format: 'png' };
-  } catch (err) {
-    console.error('[color-bfs-fallback] Error:', (err as Error).message);
     return null;
   }
 }
