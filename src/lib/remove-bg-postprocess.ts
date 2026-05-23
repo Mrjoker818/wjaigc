@@ -14,6 +14,7 @@
  */
 
 import { saveImageFile } from './server-data-root';
+import { fetchImageBuffer } from './fetch-image-buffer';
 
 /** RemoveBG 后处理结果 */
 export interface RemoveBGResult {
@@ -30,7 +31,7 @@ export interface RemoveBGResult {
  * 
  * @param rgbaBase64 Python 端输出的 RGBA PNG base64（透明背景图）
  * @param maskBase64 Python 端输出的蒙版 PNG base64（黑白蒙版图）
- * @returns 持久化后的 URL（透明背景图 + 蒙版图），任一保存失败则该字段为 null
+ * @returns 持久化后的 URL（透明背景图 + 蒙版图），任一保存失败则该字段为空字符串
  */
 export async function postProcessLocalRemoveBG(
   rgbaBase64: string,
@@ -77,6 +78,9 @@ export async function postProcessLocalRemoveBG(
  * 需要用 rembg 生成蒙版后应用到原图
  * 
  * 这里也走 Python 路径：让 Python 生成蒙版并应用到原图，返回 RGBA PNG + 蒙版 PNG
+ * 
+ * @param _aiResultUrl AI 返回的图片 URL（暂未使用，蒙版基于原图生成）
+ * @param originalImageUrl 原始图片 URL 或 Buffer（支持 data URL、本地路径、外部 URL）
  */
 export async function postProcessAIRemoveBG(
   _aiResultUrl: string,
@@ -88,16 +92,13 @@ export async function postProcessAIRemoveBG(
       return null;
     }
 
-    // 获取原图数据
+    // 获取原图数据（支持 data URL、本地路径、外部 URL）
     let origBuffer: Buffer;
     if (Buffer.isBuffer(originalImageUrl)) {
       origBuffer = originalImageUrl;
     } else {
-      const baseUrl = `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-      const fullUrl = originalImageUrl.startsWith('http') ? originalImageUrl : `${baseUrl}${originalImageUrl}`;
-      const resp = await fetch(fullUrl);
-      if (!resp.ok) throw new Error(`Failed to fetch original: ${resp.status}`);
-      origBuffer = Buffer.from(await resp.arrayBuffer());
+      // 使用共享的 fetchImageBuffer，支持 data URL、本地路径、S3、外部 URL 等
+      origBuffer = await fetchImageBuffer(originalImageUrl);
     }
 
     // 用本地 rembg 生成蒙版并应用（Python 端完成所有处理）

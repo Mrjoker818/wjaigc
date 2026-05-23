@@ -15,6 +15,7 @@ import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-re
 import { eraseWithLama, removeBgWithIOPaint, generateRemoveBgMask, DEFAULT_REMOVEBG_MODEL, VALID_ERASE_MODELS, REMOVEBG_MODELS } from '@/lib/image-tools/iopaint-client';
 import { LOCAL_AI_ENABLED } from '@/lib/image-tools/config';
 import { postProcessAIRemoveBG, postProcessLocalRemoveBG } from '@/lib/remove-bg-postprocess';
+import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -200,6 +201,66 @@ async function createLocalBackgroundAlpha(imageBuffer: Buffer): Promise<Buffer> 
   for (let p = 0; p < width * height; p++) out[p * 4 + 3] = softAlpha[p];
 
   return sharp(out, { raw: { width, height, channels: 4 } }).png().toBuffer();
+}
+
+/**
+ * 本地背景蒙版生成：与 createLocalBackgroundAlpha 使用相同算法，
+ * 但输出黑白蒙版 PNG（白色=主体，黑色=背景），方便用户手动抠图。
+ */
+async function createLocalBackgroundMask(imageBuffer: Buffer): Promise<Buffer> {
+  const imgInfo = await sharp(imageBuffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width, height } = imgInfo.info;
+  const raw = imgInfo.data;
+  const samples: Array<[number, number, number]> = [];
+  const stepX = Math.max(1, Math.floor(width / 60));
+  const stepY = Math.max(1, Math.floor(height / 60));
+
+  const addSample = (x: number, y: number) => {
+    const i = (y * width + x) * 4;
+    samples.push([raw[i], raw[i + 1], raw[i + 2]]);
+  };
+
+  for (let x = 0; x < width; x += stepX) {
+    addSample(x, 0);
+    addSample(x, height - 1);
+  }
+  for (let y = 0; y < height; y += stepY) {
+    addSample(0, y);
+    addSample(width - 1, y);
+  }
+
+  const median = (idx: number) => {
+    const arr = samples.map(s => s[idx]).sort((a, b) => a - b);
+    return arr[Math.floor(arr.length / 2)] || 255;
+  };
+  const bgR = median(0), bgG = median(1), bgB = median(2);
+
+  const bgLuma = 0.2126 * bgR + 0.7152 * bgG + 0.0722 * bgB;
+  const transparentThreshold = bgLuma > 230 ? 34 : 26;
+  const opaqueThreshold = bgLuma > 230 ? 118 : 96;
+
+  // 生成单通道灰度蒙版
+  const maskData = Buffer.alloc(width * height);
+  for (let p = 0; p < width * height; p++) {
+    const i = p * 4;
+    const dr = raw[i] - bgR;
+    const dg = raw[i + 1] - bgG;
+    const db = raw[i + 2] - bgB;
+    const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+    let val: number;
+    if (dist <= transparentThreshold) val = 0;       // 背景=黑色
+    else if (dist >= opaqueThreshold) val = 255;     // 主体=白色
+    else {
+      const t = (dist - transparentThreshold) / (opaqueThreshold - transparentThreshold);
+      val = Math.round(Math.min(255, Math.max(0, t * t * (3 - 2 * t)) * 255));
+    }
+    maskData[p] = val;
+  }
+
+  // 轻微羽化边缘
+  const softMask = await sharp(maskData, { raw: { width, height, channels: 1 } }).blur(0.8).grayscale().raw().toBuffer();
+
+  return sharp(softMask, { raw: { width, height, channels: 1 } }).png().toBuffer();
 }
 
 async function createLocalEraseInpaint(
@@ -440,91 +501,6 @@ interface EditRequest {
   providerId?: string;
   eraseModel?: string; // IOPaint erase model: lama/zits/anime-lama
   removeBgModel?: string; // IOPaint RemoveBG model: isnet-general-use / u2net / u2netp / silueta
-}
-
-// Helper: fetch image as Buffer (supports external URLs, data URLs, and local paths)
-async function fetchImageBuffer(url: string): Promise<Buffer> {
-  // data URL
-  if (url.startsWith('data:')) {
-    const matches = url.match(/^data:image\/(\w+);base64,(.+)$/);
-    if (matches) return Buffer.from(matches[2], 'base64');
-    throw new Error('Invalid data URL format');
-  }
-  // blob URL - cannot be resolved server-side
-  if (url.startsWith('blob:')) {
-    throw new Error('Blob URLs cannot be processed server-side');
-  }
-  // local path (e.g., /api/serve-upload/xxx, /uploads/xxx)
-  if (url.startsWith('/')) {
-    // Sanitize path to prevent directory traversal attacks
-    // ★ 先 decodeURIComponent 再过滤，防止 %2e%2e%2f 绕过
-    const decoded = decodeURIComponent(url);
-    const sanitizedUrl = decoded.replace(/\.\./g, '').replace(/\/\//g, '/');
-    // 1. Try local public directory (dev)
-    const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
-    const localPath = path.normalize(path.join(workspacePath, 'public', sanitizedUrl));
-    const allowedPublicDir = path.normalize(path.join(workspacePath, 'public'));
-    if (localPath.startsWith(allowedPublicDir) && fsSync.existsSync(localPath)) return await fs.readFile(localPath);
-    // 2. Try persistent data directory
-    const { getServerDataRoot } = await import('@/lib/server-data-root');
-    const dataRoot = await getServerDataRoot();
-    const normalizedDataRoot = path.normalize(dataRoot);
-    // Try exact path under dataRoot
-    const persistentPath = path.normalize(path.join(dataRoot, sanitizedUrl.replace(/^\//, '')));
-    if (persistentPath.startsWith(normalizedDataRoot) && fsSync.existsSync(persistentPath)) return await fs.readFile(persistentPath);
-    // Try uploads/ prefix under dataRoot
-    const uploadPath = path.normalize(path.join(dataRoot, 'uploads', sanitizedUrl.replace(/^\//, '')));
-    if (uploadPath.startsWith(normalizedDataRoot) && fsSync.existsSync(uploadPath)) return await fs.readFile(uploadPath);
-    // 3. Try S3 object storage fallback (try both 'images/' and 'uploads/' prefixes)
-    const { isS3Available, downloadImageFromS3 } = await import('@/lib/s3-storage');
-    if (isS3Available()) {
-      for (const prefix of ['images/', 'uploads/']) {
-        const s3Key = `${prefix}${url.replace(/^\/api\/serve-upload\//, '').replace(/^\//, '')}`;
-        const s3Buffer = await downloadImageFromS3(s3Key);
-        if (s3Buffer) return s3Buffer;
-      }
-    }
-    // 4. Try source URL mapping (re-download from original external URL)
-    const filename = url.replace(/^\/api\/serve-upload\//, '').replace(/^\//, '');
-    const { getImageSourceUrl } = await import('@/lib/image-source-map');
-    const sourceUrl = await getImageSourceUrl(filename);
-    if (sourceUrl) {
-      console.log(`[image-edit] Re-downloading from source: ${sourceUrl.substring(0, 80)}...`);
-      try {
-        const srcRes = await fetch(sourceUrl, { signal: AbortSignal.timeout(30000) });
-        if (srcRes.ok) {
-          const buffer = Buffer.from(await srcRes.arrayBuffer());
-          // Re-save to local for future use
-          try {
-            const { getServerDataRoot } = await import('@/lib/server-data-root');
-            const dataRoot = await getServerDataRoot();
-            const dir = path.join(dataRoot, 'api', 'serve-upload');
-            await fs.mkdir(dir, { recursive: true });
-            await fs.writeFile(path.join(dir, filename), buffer);
-          } catch { /* ignore save failure */ }
-          return buffer;
-        }
-      } catch { /* ignore re-download failure */ }
-    }
-    // 5. Try localhost fetch (serve-upload API)
-    const port = process.env.DEPLOY_RUN_PORT || 5000;
-    const res = await fetch(`http://localhost:${port}${url}`, { signal: AbortSignal.timeout(10000) });
-    if (res.ok) return Buffer.from(await res.arrayBuffer());
-    // 6. Try current domain fetch
-    const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT;
-    if (domain) {
-      const domainBase = domain.replace(/\/+$/, '');
-      const base = domainBase.startsWith('http') ? domainBase : `https://${domainBase}`;
-      const fullUrl = `${base}${url}`;
-      const domainRes = await fetch(fullUrl, { signal: AbortSignal.timeout(10000) });
-      if (domainRes.ok) return Buffer.from(await domainRes.arrayBuffer());
-    }
-    throw new Error(`无法获取原始图片：文件已过期或不存在，请重新生成图片`);
-  }
-  // external URL
-  const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
-  if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
-  return Buffer.from(await res.arrayBuffer());
 }
 
 // Helper: submit a task to the images/generations API and return taskId or directUrl
@@ -1956,9 +1932,15 @@ export async function POST(request: NextRequest) {
       try {
         const sourceBuffer = await fetchImageBuffer(imageUrl);
         const localBuffer = await createLocalBackgroundAlpha(sourceBuffer);
-        const dataUrl = `data:image/png;base64,${localBuffer.toString('base64')}`;
-        console.log(`[remove_background] Local fallback completed`);
-        return NextResponse.json({ success: true, imageUrl: dataUrl, action, engine: 'local-background-alpha' });
+        // 同时生成黑白蒙版图
+        const localMaskBuffer = await createLocalBackgroundMask(sourceBuffer);
+        const timestamp = Date.now();
+        const rgbaFilename = `removebg-fallback-${timestamp}.png`;
+        const maskFilename = `removebg-mask-${timestamp}.png`;
+        const fallbackUrl = saveImageFile(localBuffer, rgbaFilename, 'removebg');
+        const fallbackMaskUrl = localMaskBuffer ? saveImageFile(localMaskBuffer, maskFilename, 'removebg') : '';
+        console.log(`[remove_background] Local fallback completed: ${fallbackUrl}, mask: ${fallbackMaskUrl || 'N/A'}`);
+        return NextResponse.json({ success: true, imageUrl: fallbackUrl, maskUrl: fallbackMaskUrl || '', action, engine: 'local-background-alpha' });
       } catch (localErr) {
         console.error('[remove_background] local fallback failed:', localErr);
         return NextResponse.json({ success: false, error: '移除背景失败：AI模型不可用，且本地透明化兜底失败' }, { status: 500 });
