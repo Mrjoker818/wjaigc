@@ -407,7 +407,7 @@ export async function POST(request: NextRequest) {
             // 获取原图 URL（从 task-registry 中存储的元数据）
             const originalImageUrl = registryResult.originalImageUrl as string | undefined;
             console.log(`[poll-task] Applying mask-based background removal for AI RemoveBG task ${taskId}, originalUrl: ${originalImageUrl || 'N/A'}`);
-            const processedUrl = await postProcessAIRemoveBG(pollResult.imageUrl as string, originalImageUrl);
+            const processedUrl = await postProcessAIRemoveBG(pollResult.imageUrl as string, originalImageUrl || undefined);
             if (processedUrl) {
               pollResult.imageUrl = processedUrl;
               console.log(`[poll-task] AI RemoveBG post-processing complete: ${processedUrl}`);

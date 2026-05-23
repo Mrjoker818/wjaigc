@@ -298,6 +298,46 @@ export async function removeBgWithIOPaint(
   }
 }
 
+/**
+ * 生成本地 RemoveBG 的蒙版（不膨胀，纯原始蒙版）
+ * 用于后续 Node.js 端优化蒙版边缘 + 应用到原图
+ */
+export async function generateRemoveBgMask(
+  imageUrl: string,
+  model: string = DEFAULT_REMOVEBG_MODEL,
+): Promise<{
+  success: boolean;
+  maskBase64?: string; // 原始蒙版 PNG (base64)
+  rgbaBase64?: string; // RGBA 结果 PNG (base64, 含原始alpha)
+  model?: string;
+  error?: string;
+}> {
+  try {
+    const result = await callPythonScript(
+      'scripts/iopaint_removebg.py',
+      { input: imageUrl, model, output_mode: 'mask_and_rgba' },
+    );
+    if (!result.success || !result.mask) {
+      return {
+        success: false,
+        error: result.error || '蒙版生成失败',
+      };
+    }
+    return {
+      success: true,
+      maskBase64: result.mask,
+      rgbaBase64: result.image,
+      model: result.model,
+    };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return {
+      success: false,
+      error: `蒙版生成失败: ${msg}`,
+    };
+  }
+}
+
 // ============================================================
 // Python 脚本调用通用方法
 // ============================================================
@@ -305,6 +345,7 @@ export async function removeBgWithIOPaint(
 interface PythonScriptResult {
   success: boolean;
   image?: string;
+  mask?: string;
   model?: string;
   error?: string;
 }

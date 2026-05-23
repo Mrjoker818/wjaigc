@@ -12,9 +12,9 @@ import path from 'path';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { isS3Available, uploadImageToS3 } from '@/lib/s3-storage';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
-import { eraseWithLama, removeBgWithIOPaint, DEFAULT_REMOVEBG_MODEL, VALID_ERASE_MODELS, REMOVEBG_MODELS } from '@/lib/image-tools/iopaint-client';
+import { eraseWithLama, removeBgWithIOPaint, generateRemoveBgMask, DEFAULT_REMOVEBG_MODEL, VALID_ERASE_MODELS, REMOVEBG_MODELS } from '@/lib/image-tools/iopaint-client';
 import { LOCAL_AI_ENABLED } from '@/lib/image-tools/config';
-import { postProcessAIRemoveBG } from '@/lib/remove-bg-postprocess';
+import { postProcessAIRemoveBG, postProcessLocalRemoveBG } from '@/lib/remove-bg-postprocess';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -1933,25 +1933,33 @@ export async function POST(request: NextRequest) {
           const rmbgModelName: string = validRemoveBgModels.includes(body.removeBgModel || '') ? body.removeBgModel! : DEFAULT_REMOVEBG_MODEL;
           console.log(`[remove_background] Using RemoveBG model: ${rmbgModelName}`);
           
-          // 限时 30 秒：RemoveBG 首次使用时可能需要下载模型（100MB+），避免长时间阻塞请求
-          const IOPAINT_REMOVEBG_TIMEOUT = 30000;
-          const rmbgResult = await Promise.race([
-            removeBgWithIOPaint(sourceBuffer, srcW, srcH, rmbgModelName),
+          // 限时 60 秒：RemoveBG 首次使用时可能需要下载模型（100MB+）
+          const IOPAINT_REMOVEBG_TIMEOUT = 60000;
+          
+          // 流程：本地模型生成蒙版 → 优化边缘 → 蒙版应用到原图 → 透明PNG
+          const maskResult = await Promise.race([
+            generateRemoveBgMask(imageUrl, rmbgModelName),
             new Promise<null>((resolve) => setTimeout(() => {
-              console.log(`[remove_background] IOPaint RemoveBG timed out after ${IOPAINT_REMOVEBG_TIMEOUT}ms`);
+              console.log(`[remove_background] Mask generation timed out after ${IOPAINT_REMOVEBG_TIMEOUT}ms`);
               resolve(null);
             }, IOPAINT_REMOVEBG_TIMEOUT)),
           ]);
-          if (rmbgResult && rmbgResult.success && rmbgResult.imageUrl) {
-            console.log(`[remove_background] IOPaint RemoveBG succeeded: ${rmbgResult.imageUrl}`);
-            return NextResponse.json({
-              success: true,
-              imageUrl: rmbgResult.imageUrl,
-              action,
-              engine: rmbgResult.engine || 'iopaint-removebg',
-            });
+          
+          if (maskResult) {
+            console.log(`[remove_background] Mask generated, applying to original image...`);
+            const finalUrl = await postProcessLocalRemoveBG(imageUrl, maskResult.maskBase64);
+            if (finalUrl) {
+              console.log(`[remove_background] Local RemoveBG succeeded: ${finalUrl}`);
+              return NextResponse.json({
+                success: true,
+                imageUrl: finalUrl,
+                action,
+                engine: 'local-removebg',
+              });
+            }
+            console.log(`[remove_background] postProcessLocalRemoveBG failed, falling back`);
           }
-          console.log(`[remove_background] IOPaint RemoveBG ${rmbgResult ? 'failed: ' + rmbgResult.error : 'timed out'}, falling back to local transparent`);
+          console.log(`[remove_background] Mask generation ${maskResult ? 'succeeded but apply failed' : 'failed/timed out'}, falling back to AI path`);
         } catch (rmbgErr) {
           console.warn(`[remove_background] IOPaint RemoveBG error:`, rmbgErr instanceof Error ? rmbgErr.message : rmbgErr);
         }
