@@ -397,13 +397,95 @@ export async function POST(request: NextRequest) {
           pollResult.imageUrl = sourceImageUrl;
         }
 
+        // ★ Outpaint 扩展后处理：将原图合成到 AI 结果中心
+        // 当 image-edit 的 outpaint 动作返回 AI 异步 taskId 时，
+        // AI 返回的扩展图片尺寸可能与目标不匹配，需要：1) resize 到目标尺寸 2) 将原图叠在中心
+        const registryInfo = getTaskInfo(taskId);
+        const registryResult = (registryInfo?.result as Record<string, unknown>) || {};
+        const outpaintInfo = registryResult.outpaintInfo as Record<string, number> | undefined;
+        if (outpaintInfo && pollResult.imageUrl) {
+          try {
+            const sharp = (await import('sharp')).default;
+            const originalImageUrl = registryResult.originalImageUrl as string | undefined;
+            console.log(`[poll-task] Outpaint composite for task ${taskId}, originalUrl: ${originalImageUrl || 'N/A'}`);
+
+            if (originalImageUrl) {
+              // 获取 AI 扩展结果和原图
+              const aiResultBuf = await fetchImageBuffer(pollResult.imageUrl as string);
+              const originalBuf = await fetchImageBuffer(originalImageUrl);
+
+              const scaledTargetW = outpaintInfo.scaledTargetW;
+              const scaledTargetH = outpaintInfo.scaledTargetH;
+              const scaledOffsetX = outpaintInfo.scaledOffsetX;
+              const scaledOffsetY = outpaintInfo.scaledOffsetY;
+              const scaledSrcW = outpaintInfo.scaledSrcW;
+              const scaledSrcH = outpaintInfo.scaledSrcH;
+              const targetW = outpaintInfo.targetW;
+              const targetH = outpaintInfo.targetH;
+
+              if (scaledTargetW && scaledTargetH) {
+                // Step 1: 将 AI 结果 resize 到缩放后的目标尺寸
+                let aiResized = aiResultBuf;
+                const aiMeta = await sharp(aiResultBuf).metadata();
+                if ((aiMeta.width || 0) !== scaledTargetW || (aiMeta.height || 0) !== scaledTargetH) {
+                  aiResized = await sharp(aiResultBuf)
+                    .resize(scaledTargetW, scaledTargetH, { fit: 'fill' })
+                    .png()
+                    .toBuffer();
+                }
+
+                // Step 2: 将原图 resize 到缩放后的源图尺寸
+                const scaledOriginal = await sharp(originalBuf)
+                  .resize(scaledSrcW, scaledSrcH, { fit: 'fill' })
+                  .png()
+                  .toBuffer();
+
+                // Step 3: 合成 - 原图叠在 AI 结果中心
+                const scaledComposite = await sharp(aiResized)
+                  .composite([{
+                    input: scaledOriginal,
+                    left: scaledOffsetX,
+                    top: scaledOffsetY,
+                    blend: 'over',
+                  }])
+                  .png()
+                  .toBuffer();
+
+                // Step 4: 放大到原始目标尺寸
+                const finalBuffer = await sharp(scaledComposite)
+                  .resize(targetW, targetH, { fit: 'fill' })
+                  .jpeg({ quality: 92 })
+                  .toBuffer();
+
+                // 保存合成结果
+                const { saveImageFile } = await import('../../../lib/server-data-root');
+                const timestamp = Date.now();
+                const compositeFilename = `outpaint-composite-${timestamp}.jpg`;
+                const compositeUrl = saveImageFile(finalBuffer, compositeFilename, 'outpaint');
+                if (compositeUrl) {
+                  pollResult.imageUrl = compositeUrl;
+                  console.log(`[poll-task] Outpaint composite succeeded: ${compositeUrl}`);
+                } else {
+                  pollResult.imageUrl = `data:image/jpeg;base64,${finalBuffer.toString('base64')}`;
+                  console.log(`[poll-task] Outpaint composite saved as data URL`);
+                }
+                // 传递目标尺寸给前端
+                (pollResult as Record<string, unknown>).targetWidth = targetW;
+                (pollResult as Record<string, unknown>).targetHeight = targetH;
+              }
+            }
+          } catch (outpaintErr) {
+            console.warn('[poll-task] Outpaint composite failed, using raw AI result:', outpaintErr instanceof Error ? outpaintErr.message : outpaintErr);
+          }
+        }
+
         // ★ AI RemoveBG 后处理：用蒙版应用到原图，精确去背景
         // 当 image-edit 的 remove_background 动作返回 AI 异步 taskId 时，
         // 从 AI 结果生成蒙版 → 优化边缘 → 用蒙版应用到原图
         // 优先使用请求参数中的 engine（前端传递），其次检查 task-registry
-        const registryInfo = getTaskInfo(taskId);
-        const registryResult = (registryInfo?.result as Record<string, unknown>) || {};
-        const registryEngine = registryResult.engine as string | undefined;
+        const rbRegistryInfo = getTaskInfo(taskId);
+        const rbRegistryResult = (rbRegistryInfo?.result as Record<string, unknown>) || {};
+        const registryEngine = rbRegistryResult.engine as string | undefined;
         const taskEngine = requestEngineStr || registryEngine;
         if (taskEngine === 'ai-background-remove' && pollResult.imageUrl) {
           try {

@@ -4588,6 +4588,9 @@ export function InfiniteCanvas({
           rotation: multiAngleRotation,
           tilt: multiAngleTilt,
           zoom: multiAngleZoom,
+          aspectRatio: img.aspectRatio || `${img.originalWidth || Math.round(img.width)}:${img.originalHeight || Math.round(img.height)}`,
+          originalWidth: img.originalWidth || Math.round(img.width),
+          originalHeight: img.originalHeight || Math.round(img.height),
           model: modelInfo.model,
           apiKey,
           providerId: modelInfo.providerId || getCurrentProviderId(),
@@ -5246,7 +5249,7 @@ export function InfiniteCanvas({
             action: 'outpaint',
             imageUrl: currentEditImg.url,
             expandPadding: { top: pad.top, right: pad.right, bottom: pad.bottom, left: pad.left },
-            aspectRatio: `${origW}:${origH}`,
+            aspectRatio: `${targetW}:${targetH}`,
             prompt: editPrompt || 'Naturally extend the image beyond its original borders. Fill the new areas with content that seamlessly continues the existing scene, maintaining consistent style, lighting, perspective and color palette.',
             model: modelInfo.model,
             apiKey,
@@ -7227,8 +7230,8 @@ export function InfiniteCanvas({
         {editMode === 'svg-trace' && (() => {
           const editImg = images.find(i => i.id === editImageId);
           if (!editImg) return null;
-          const imgOrigW = editImg.originalWidth || Math.round(editImg.width);
-          const imgOrigH = editImg.originalHeight || Math.round(editImg.height);
+          const imgOrigW = editImg.originalWidth || Math.round(editImg.width) || 512;
+          const imgOrigH = editImg.originalHeight || Math.round(editImg.height) || 512;
           const pos = getToolbarPosition();
 
           const svgTraceModes = [
@@ -7671,6 +7674,8 @@ export function InfiniteCanvas({
                         alt="edit"
                         className="w-full h-full object-contain select-none"
                         draggable={false}
+                        crossOrigin="anonymous"
+                        referrerPolicy="no-referrer"
                         style={{ pointerEvents: 'none' }}
                       />
                       {/* Stroke overlay SVG */}
@@ -8631,8 +8636,8 @@ export function InfiniteCanvas({
                         }}
                       >
                         {/* Front face - main image */}
-                        <div className="absolute inset-0 rounded-lg overflow-hidden border-2 border-blue-400/60 shadow-[0_0_20px_rgba(59,130,246,0.3)]" style={{ transform: 'translateZ(55px)', backfaceVisibility: 'hidden' }}>
-                          <img src={selectedImageData.url} alt="front" className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 rounded-lg overflow-hidden border-2 border-blue-400/60 shadow-[0_0_20px_rgba(59,130,246,0.3)]" style={{ transform: 'translateZ(55px)' }}>
+                          <img src={selectedImageData.url} alt="front" className="w-full h-full object-cover" crossOrigin="anonymous" referrerPolicy="no-referrer" />
                         </div>
                         {/* Back face */}
                         <div className={`absolute inset-0 rounded-lg border flex items-center justify-center ${isMonochrome ? 'bg-gray-200 border-gray-300' : 'bg-[#1a1a1a]/85 border-white/[0.12]'}`} style={{ transform: 'rotateY(180deg) translateZ(55px)' }}>
