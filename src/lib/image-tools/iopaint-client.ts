@@ -117,6 +117,8 @@ export interface InpaintResult {
 export interface RemoveBgResult {
   success: boolean;
   imageUrl?: string;
+  /** 黑白蒙版 PNG URL（白色=前景主体，黑色=背景） */
+  maskUrl?: string;
   originalSize?: { width: number; height: number };
   outputSize?: { width: number; height: number };
   engine?: string;
@@ -254,17 +256,18 @@ export async function removeBgWithIOPaint(
     const result = await callPythonScript(REMOVEBG_SCRIPT, {
       image: imageBase64,
       model,
+      return_mask: 'true', // 同时获取蒙版和 RGBA 结果
     });
 
-    // ★ Python 脚本返回 imageBase64 字段（不是 image）
-    if (!result.success || !result.imageBase64) {
+    // ★ Python 脚本返回 rgbaBase64 + maskBase64 字段（gen_mask 模式）
+    if (!result.success || !result.rgbaBase64) {
       return {
         success: false,
         error: result.error || 'RemoveBG 去背景失败',
       };
     }
 
-    const resultBuffer = Buffer.from(result.imageBase64, 'base64');
+    const resultBuffer = Buffer.from(result.rgbaBase64, 'base64');
     const outputMeta = await sharp(resultBuffer).metadata();
 
     // 确保 RemoveBG 结果是 RGBA 格式（有透明通道）
@@ -281,9 +284,17 @@ export async function removeBgWithIOPaint(
       INPAINT_OUTPUT_DIR,
     );
 
+    // 保存黑白蒙版图
+    let maskUrl: string | undefined;
+    if (result.maskBase64) {
+      const maskBuffer = Buffer.from(result.maskBase64, 'base64');
+      maskUrl = saveOutputBuffer(maskBuffer, 'removebg-mask', 'png', INPAINT_OUTPUT_DIR);
+    }
+
     return {
       success: true,
       imageUrl,
+      maskUrl,
       originalSize: { width: imageWidth, height: imageHeight },
       outputSize: {
         width: outputMeta.width || imageWidth,

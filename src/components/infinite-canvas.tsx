@@ -4341,12 +4341,13 @@ export function InfiniteCanvas({
       // 1) 同步返回 imageUrl（本地透明化 / AI 直接出图 — 后端已做棋盘格后处理）
       // 2) 异步返回 taskId（AI 模型通过 APImart 等代理异步处理，前端轮询）
       let resultUrl: string | null = data.imageUrl ? String(data.imageUrl) : null;
+      let maskResultUrl: string | null = data.maskUrl ? String(data.maskUrl) : null;
       if (!resultUrl && data.taskId) {
         // AI RemoveBG 异步轮询：APImart 代理可能需要 60-120 秒
         // 轮询次数增加到 60 次（约 120 秒），适应 AI 模型处理时间
         const isAIRemoveBg = String(data.engine || '').includes('ai-background-remove');
         const maxRemoveBgAttempts = isAIRemoveBg ? 60 : 30;
-        resultUrl = await (async () => {
+        const asyncResult = await (async () => {
           const taskId = data.taskId as string;
           const modelInfo = getCurrentModel();
           const getEditPollInterval = (attempt: number) => {
@@ -4368,12 +4369,18 @@ export function InfiniteCanvas({
               });
               if (!res.ok) throw new Error(`HTTP ${res.status}`);
               const pollData = await res.json();
-              if (pollData.status === 'completed' && pollData.imageUrl) return pollData.imageUrl;
+              if (pollData.status === 'completed' && pollData.imageUrl) {
+                return { imageUrl: pollData.imageUrl as string, maskUrl: (pollData.maskUrl || pollData.result?.maskUrl || '') as string };
+              }
               if (pollData.status === 'failed' || pollData.status === 'error' || pollData.retryable === false) return null;
             } catch { /* continue */ }
           }
           return null;
         })();
+        if (asyncResult) {
+          resultUrl = asyncResult.imageUrl;
+          if (asyncResult.maskUrl) maskResultUrl = asyncResult.maskUrl;
+        }
       }
 
       if (resultUrl) {
@@ -4381,11 +4388,36 @@ export function InfiniteCanvas({
         const h = img.originalHeight || Math.round(img.height);
         updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入透明背景结果...' });
         const stableUrl = await toStableImageUrl(resultUrl);
-        completeProcessingFrame(placeholderId, stableUrl, img.width, img.height, {
+        const completedImage = completeProcessingFrame(placeholderId, stableUrl, img.width, img.height, {
           originalWidth: w,
           originalHeight: h,
           modifyPrompt: data.engine === 'local-background-alpha' ? '背景移除（本地透明化）' : String(data.engine || '').includes('ai-background-remove') ? '背景移除（AI高精度）' : '背景移除',
         });
+
+        // 同时添加黑白蒙版图到画布（紧邻透明图右侧）
+        if (maskResultUrl && completedImage) {
+          try {
+            const stableMaskUrl = await toStableImageUrl(maskResultUrl);
+            const gap = 10;
+            const maskImage: CanvasImage = {
+              id: `mask-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+              url: stableMaskUrl,
+              x: completedImage.x + completedImage.width + gap,
+              y: completedImage.y,
+              width: completedImage.width,
+              height: completedImage.height,
+              originalWidth: w,
+              originalHeight: h,
+              prompt: '黑白蒙版（白色=主体，黑色=背景）',
+              model: 'removebg-mask',
+            };
+            const nextImages = [...imagesRef.current, maskImage];
+            imagesRef.current = nextImages;
+            onImagesChange(nextImages);
+          } catch (maskErr) {
+            console.warn('[removeBg] Failed to add mask image to canvas:', maskErr);
+          }
+        }
       } else {
         alert(lastPollErrorRef.current || data.error || '移除背景超时，请重试');
       }
@@ -4394,7 +4426,7 @@ export function InfiniteCanvas({
       alert(`操作失败: ${e instanceof Error ? e.message : '请重试'}`);
     }
     setIsEditProcessing(false);
-  }, [selectedImageData, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame]);
+  }, [selectedImageData, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, onImagesChange]);
 
   // 3. SVG智能描摹 - Sharp + VTracer (彩色) / ImageMagick + Potrace (黑白) / Sharp (压缩/缩略图)
   const handleOpenSvgTrace = useCallback(() => {

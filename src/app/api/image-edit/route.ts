@@ -1861,12 +1861,13 @@ export async function POST(request: NextRequest) {
           
           if (maskResult && maskResult.success && maskResult.rgbaBase64) {
             console.log(`[remove_background] RGBA result generated (model: ${maskResult.model}), saving...`);
-            const finalUrl = await postProcessLocalRemoveBG(maskResult.rgbaBase64);
-            if (finalUrl) {
-              console.log(`[remove_background] Local RemoveBG succeeded: ${finalUrl}`);
+            const removeBgResult = await postProcessLocalRemoveBG(maskResult.rgbaBase64, maskResult.maskBase64);
+            if (removeBgResult) {
+              console.log(`[remove_background] Local RemoveBG succeeded: ${removeBgResult.imageUrl}, mask: ${removeBgResult.maskUrl || 'N/A'}`);
               return NextResponse.json({
                 success: true,
-                imageUrl: finalUrl,
+                imageUrl: removeBgResult.imageUrl,
+                maskUrl: removeBgResult.maskUrl || '',
                 action,
                 engine: 'local-removebg',
               });
@@ -1916,9 +1917,9 @@ export async function POST(request: NextRequest) {
         if (result.directUrl) {
           // 同步模式：后处理提取蒙版→应用到原图→真正透明PNG
           try {
-            const processedUrl = await postProcessAIRemoveBG(result.directUrl, imageUrl);
-            if (processedUrl) {
-              return NextResponse.json({ success: true, imageUrl: processedUrl, action, usedModel: result.usedModel, engine: 'ai-background-remove' });
+            const aiResult = await postProcessAIRemoveBG(result.directUrl, imageUrl);
+            if (aiResult) {
+              return NextResponse.json({ success: true, imageUrl: aiResult.imageUrl, maskUrl: aiResult.maskUrl || '', action, usedModel: result.usedModel, engine: 'ai-background-remove' });
             }
             // postProcessAIRemoveBG 返回 null，不用原始 AI 结果（含棋盘格）
             console.warn('[remove_background] AI post-processing returned null, not using raw AI result with checkerboard');

@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
 // ★ 本地完成缓存：避免同一任务重复查远端API和重复持久化
 // （Next.js dev模式下不同路由可能使用不同的 task-registry 实例，
 //   所以在 poll-task 内部维护自己的缓存更可靠）
-const completedTaskCache = new Map<string, { imageUrl: string; timestamp: number }>();
+const completedTaskCache = new Map<string, { imageUrl: string; maskUrl?: string; timestamp: number }>();
 const FAILED_CACHE = Symbol('failed');
 const failedTaskCache = new Map<string, { error: string; timestamp: number }>();
 
@@ -108,6 +108,7 @@ export async function POST(request: NextRequest) {
         status: 'completed',
         progress: 100,
         imageUrl: cachedCompleted.imageUrl,
+        maskUrl: cachedCompleted.maskUrl || '',
       }, { status: 200 });
     }
     const cachedFailed = failedTaskCache.get(taskId);
@@ -132,6 +133,7 @@ export async function POST(request: NextRequest) {
           progress: registryTask.progress,
           result: registryTask.result,
           imageUrl: (registryTask.result as Record<string, unknown>)?.imageUrl as string | undefined,
+          maskUrl: (registryTask.result as Record<string, unknown>)?.maskUrl as string | undefined,
         }, { status: 200 });
       }
       if (registryTask.status === 'failed') {
@@ -407,10 +409,12 @@ export async function POST(request: NextRequest) {
             // 获取原图 URL（从 task-registry 中存储的元数据）
             const originalImageUrl = registryResult.originalImageUrl as string | undefined;
             console.log(`[poll-task] Applying mask-based background removal for AI RemoveBG task ${taskId}, originalUrl: ${originalImageUrl || 'N/A'}`);
-            const processedUrl = await postProcessAIRemoveBG(pollResult.imageUrl as string, originalImageUrl || undefined);
-            if (processedUrl) {
-              pollResult.imageUrl = processedUrl;
-              console.log(`[poll-task] AI RemoveBG post-processing complete: ${processedUrl}`);
+            const aiRemoveBgResult = await postProcessAIRemoveBG(pollResult.imageUrl as string, originalImageUrl || undefined);
+            if (aiRemoveBgResult) {
+              pollResult.imageUrl = aiRemoveBgResult.imageUrl;
+              // 传递 maskUrl 到前端
+              (pollResult as Record<string, unknown>).maskUrl = aiRemoveBgResult.maskUrl || '';
+              console.log(`[poll-task] AI RemoveBG post-processing complete: ${aiRemoveBgResult.imageUrl}, mask: ${aiRemoveBgResult.maskUrl || 'N/A'}`);
             } else {
               // postProcessAIRemoveBG 返回 null → 用简单透明化兜底
               console.warn('[poll-task] AI RemoveBG post-processing returned null, trying local fallback');
@@ -473,11 +477,13 @@ export async function POST(request: NextRequest) {
       // 保留原有 result 中的 engine 等元数据
       const regInfo = getTaskInfo(taskId);
       const existingResult = (regInfo?.result as Record<string, unknown>) || {};
-      updateTaskProgress(taskId, { status: 'completed', progress: 100, result: { ...existingResult, imageUrl: pollResult.imageUrl } });
+      const maskUrl = (pollResult as Record<string, unknown>).maskUrl as string | undefined;
+      updateTaskProgress(taskId, { status: 'completed', progress: 100, result: { ...existingResult, imageUrl: pollResult.imageUrl, maskUrl: maskUrl || '' } });
       // ★ 同时更新本地完成缓存（Next.js dev模式下 registry 实例可能不一致）
       const cachedImageUrl = pollResult.imageUrl as string | undefined;
+      const cachedMaskUrl = (pollResult as Record<string, unknown>).maskUrl as string | undefined;
       if (cachedImageUrl) {
-        completedTaskCache.set(taskId, { imageUrl: cachedImageUrl, timestamp: Date.now() });
+        completedTaskCache.set(taskId, { imageUrl: cachedImageUrl, maskUrl: cachedMaskUrl || '', timestamp: Date.now() });
       }
       if (!pollResult.imageUrl) {
         const taskError = taskData?.error as Record<string, unknown> | undefined;

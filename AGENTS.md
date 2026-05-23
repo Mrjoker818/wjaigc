@@ -68,6 +68,7 @@ src/
 │   ├── task-events-client.ts       # SSE任务事件客户端（前端连接SSE、取消任务）
 │   ├── agent-engine.ts             # Agent编排引擎（工具注册表、Agent循环、多轮决策）
 │   ├── image-compress.ts           # 图片压缩工具（前端canvas压缩+尺寸限制）
+│   ├── remove-bg-postprocess.ts   # RemoveBG后处理（保存RGBA+蒙版PNG，Python端处理）
 │   ├── api-helpers.ts              # API 辅助函数（fetchWithV1Retry 智能 /v1 重试）
 │   ├── psd-export.ts               # PSD 导出功能
 │   ├── svg-export.ts               # SVG 矢量化导出
@@ -224,6 +225,8 @@ scripts/
 - **蒙版修图**: AI 模型优先生成 + 后端精确蒙版合成（仅替换蒙版区域）
 - **无损放大**: upscayl-node (NCNN) + AI 整图放大兜底
 - **移除背景**: IOPaint RemoveBG 优先（支持 3 个模型：BiRefNet通用 + U2Net轻量快速 + Silueta轻量人像），默认 birefnet-general-lite，AI 模型兜底，本地透明化最终兜底
+  - 同时生成透明背景图和黑白蒙版图（白色=主体，黑色=背景），两图并排添加到画布
+  - Python 端完成所有蒙版处理（膨胀+模糊+应用），Node.js 端仅保存文件
 - **扩展画面**: AI 模型向四周延伸，支持缩放比例和画面比例选择
 - **异步任务**: 擦除/蒙版/放大/扩展均支持提交+轮询模式（`taskId` + `/api/poll-task`）
 - **持久化**: `persistImageBuffer` 三级 fallback（S3 → save-image API → base64 data URL）
@@ -561,6 +564,14 @@ UPSCALE_TIMEOUT_MS=300000
 ## 更新日志
 
 ### v2.9.0 (当前版本)
+
+**P0: RemoveBG 同时输出透明图+蒙版图**
+- 移除背景时同时生成透明背景 PNG 和黑白蒙版 PNG，两图并排添加到画布
+- 黑白蒙版图：白色=前景主体，黑色=背景，方便用户手动抠图
+- `remove-bg-postprocess.ts` 重构：Python 端完成所有蒙版处理（膨胀+模糊+应用），Node.js 端仅保存文件
+- 修复 `callPythonScript` 不设置 success 字段导致本地 RemoveBG 路径从未执行的 Bug
+- API 响应新增 `maskUrl` 字段，`poll-task` 和 `completedTaskCache` 同步传播
+- `RemoveBgResult` 类型新增 `maskUrl` 字段
 
 **P0: 任务基础设施升级**
 - 新增 `task-registry.ts`: 统一任务注册中心，支持状态追踪、SSE推送、取消、队列管理
