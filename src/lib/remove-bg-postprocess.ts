@@ -69,7 +69,8 @@ async function optimizeMask(
 
   // Step 2: 阈值化 — 模糊后恢复为干净的黑白蒙版
   // blur 后边缘有渐变，threshold(128) 把中间值归到 0 或 255
-  pipeline = pipeline.threshold(128);
+  // 注意：sharp threshold() 会将单通道转为 3 通道(RGB)，必须用 grayscale() 转回单通道
+  pipeline = pipeline.threshold(128).grayscale();
 
   let result = await pipeline.raw().toBuffer();
 
@@ -108,7 +109,12 @@ async function dilateMask(
   let current = input;
   
   for (let i = 0; i < iterations; i++) {
-    const blurred = await sharp(current, {
+    // 确保输入为单通道 — threshold() 会将单通道转为 3 通道(RGB)
+    const singleChannel = await sharp(current, {
+      raw: { width, height, channels: 1 },
+    }).grayscale().raw().toBuffer();
+
+    const blurred = await sharp(singleChannel, {
       raw: { width, height, channels: 1 },
     })
       .convolve({
@@ -117,6 +123,7 @@ async function dilateMask(
         kernel: [1, 1, 1, 1, 1, 1, 1, 1, 1],
       })
       .threshold(28) // 9个像素中只要有1个255，均值 > 28
+      .grayscale() // threshold 输出 3 通道，转回单通道
       .raw()
       .toBuffer();
     
@@ -164,10 +171,36 @@ async function applyMaskToOriginal(
     finalHeight = originalHeight;
   }
 
+  // 安全检查：如果蒙版长度异常（多通道），转换为单通道
+  if (finalMask.length !== finalWidth * finalHeight) {
+    const detectedChannels = finalMask.length / (finalWidth * finalHeight);
+    console.warn(`[applyMaskToOriginal] Mask has ${detectedChannels} channels instead of 1, extracting grayscale`);
+    const singleChannel = await sharp(Buffer.from(finalMask), {
+      raw: { width: finalWidth, height: finalHeight, channels: Math.round(detectedChannels) as 1 | 2 | 3 | 4 },
+    }).grayscale().raw().toBuffer();
+    finalMask = new Uint8ClampedArray(singleChannel.buffer, singleChannel.byteOffset, singleChannel.byteLength);
+  }
+
   // 获取原图像素数据 — 必须先解码为 raw RGBA
   let origRgba: Uint8ClampedArray;
   const origRawRgba = await sharp(originalBuffer).ensureAlpha().raw().toBuffer();
   origRgba = bufferToUint8Clamped(origRawRgba);
+
+  // 调试：检查 origRgba 和 finalMask 的实际内容
+  const dbgOrigLen = origRgba.length;
+  const dbgMaskLen = finalMask.length;
+  const dbgExpectedOrigLen = originalWidth * originalHeight * 4;
+  const dbgExpectedMaskLen = finalWidth * finalHeight;
+  let dbgMaskWhite = 0, dbgMaskBlack = 0, dbgMaskMid = 0;
+  for (let i = 0; i < Math.min(dbgMaskLen, finalWidth * finalHeight); i++) {
+    if (finalMask[i] > 128) dbgMaskWhite++;
+    else if (finalMask[i] === 0) dbgMaskBlack++;
+    else dbgMaskMid++;
+  }
+  console.log(`[applyMaskToOriginal] DEBUG: origRgba.length=${dbgOrigLen} expected=${dbgExpectedOrigLen}, finalMask.length=${dbgMaskLen} expected=${dbgExpectedMaskLen}`);
+  console.log(`[applyMaskToOriginal] DEBUG: mask white=${dbgMaskWhite} black=${dbgMaskBlack} mid=${dbgMaskMid}, total=${finalWidth * finalHeight}`);
+  console.log(`[applyMaskToOriginal] DEBUG: origRgba first 16 bytes:`, Array.from(origRgba.slice(0, 16)));
+  console.log(`[applyMaskToOriginal] DEBUG: finalMask first 16 bytes:`, Array.from(finalMask.slice(0, 16)));
 
   // 应用蒙版到原图：蒙版值直接作为 alpha
   // 白色(255) = 不透明（保留主体），黑色(0) = 透明（去除背景）
@@ -176,10 +209,32 @@ async function applyMaskToOriginal(
     origRgba[i * 4 + 3] = finalMask[i];
   }
 
+  // 调试：检查 alpha 设置后的结果
+  let dbgAlpha0 = 0, dbgAlpha255 = 0;
+  for (let i = 0; i < Math.min(pixelCount, 10000); i++) {
+    const a = origRgba[i * 4 + 3];
+    if (a === 0) dbgAlpha0++;
+    else if (a === 255) dbgAlpha255++;
+  }
+  console.log(`[applyMaskToOriginal] DEBUG after apply: first 10000px alpha0=${dbgAlpha0} alpha255=${dbgAlpha255}`);
+
   // 编码为 PNG（确保输出 RGBA PNG，保留 alpha 通道）
-  return sharp(Buffer.from(origRgba), {
+  const resultPng = await sharp(Buffer.from(origRgba), {
     raw: { width: originalWidth, height: originalHeight, channels: 4 },
   }).png().toBuffer();
+
+  // 最终验证：检查输出的 PNG 是否真的有 alpha
+  const verifyRgba = await sharp(resultPng).ensureAlpha().raw().toBuffer();
+  let vAlpha0 = 0, vAlpha255 = 0;
+  const vPixelCount = originalWidth * originalHeight;
+  for (let i = 0; i < vPixelCount; i++) {
+    const a = verifyRgba[i * 4 + 3];
+    if (a === 0) vAlpha0++;
+    else if (a === 255) vAlpha255++;
+  }
+  console.log(`[applyMaskToOriginal] VERIFY: alpha0=${vAlpha0} alpha255=${vAlpha255} total=${vPixelCount}`);
+
+  return resultPng;
 }
 
 // ============================================================
