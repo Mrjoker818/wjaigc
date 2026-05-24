@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import { IOPAINT_MODELS_DIR } from '@/lib/image-tools/config';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +28,7 @@ export async function POST(request: NextRequest) {
       // IOPaint is not running, try to start it
       if (process.env.LOCAL_AI_ENABLED !== 'false') {
         const port = new URL(iopaintBaseUrl).port || '8080';
-        const modelDir = process.env.IOPAINT_MODEL_DIR || './models/iopaint';
+        const modelDir = process.env.IOPAINT_MODEL_DIR || IOPAINT_MODELS_DIR;
 
         // Ensure model directory exists
         const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
