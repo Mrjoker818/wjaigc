@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { X, UserPlus, Trash2, Ban, CheckCircle2, KeyRound, Plug, RefreshCw, Activity, Wallet, Pencil, Zap, CheckCircle, XCircle, Loader2, Search, Settings, ChevronDown, Plus, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { X, UserPlus, Trash2, Ban, CheckCircle2, KeyRound, Plug, RefreshCw, Activity, Wallet, Pencil, Zap, CheckCircle, XCircle, Loader2, Search, Settings, ChevronDown, Plus, ShieldCheck, AlertTriangle, ArrowUp, ArrowDown } from 'lucide-react';
 import { User } from '@/lib/user-types';
 import { ConfirmDialog } from './custom-dialogs';
 import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
@@ -488,6 +488,23 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     });
   };
 
+  const handleReorderApi = async (providerId: string, direction: 'up' | 'down') => {
+    try {
+      const res = await fetch('/api/admin/apis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reorder', providerId, direction }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        window.dispatchEvent(new Event('wujie-admin-apis-updated'));
+        await refresh();
+      }
+    } catch (e) {
+      console.error('[admin] reorder error:', e);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 backdrop-blur-xl p-4">
       <div className={`w-full max-w-5xl max-h-[88vh] rounded-2xl border shadow-2xl flex flex-col overflow-hidden ${panelClass}`}>
@@ -781,7 +798,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                   <button aria-label="刷新余额" onClick={() => void refreshBalances()} className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 ${isGold ? 'bg-[#1a1a1a] text-[#aaa]' : 'bg-gray-100 text-gray-600'}`}><Activity className="w-3 h-3" />刷新余额</button>
                   <button aria-label="刷新模型列表" onClick={() => void refresh()} className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 ${isGold ? 'bg-[#1a1a1a] text-[#aaa]' : 'bg-gray-100 text-gray-600'}`}><RefreshCw className="w-3 h-3" />刷新模型</button>
                 </div>
-                {providers.map(provider => (
+                {providers.map((provider, providerIndex) => (
                   <div key={provider.id} className={`rounded-xl border p-4 ${softClass}`}>
                     <div className="flex items-start gap-3">
                       <Plug className={`w-5 h-5 mt-0.5 shrink-0 ${provider.isEnabled ? 'text-[#d4af37]' : 'text-gray-500'}`} />
@@ -839,6 +856,13 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                     </div>
                     {/* 底部工具栏：图标横排右下角 */}
                     <div className="flex items-center justify-end gap-1 mt-3 pt-2 border-t border-current/5">
+                      <button aria-label={`上移 ${provider.displayName || provider.name}`} onClick={() => void handleReorderApi(provider.id, 'up')} disabled={providerIndex === 0} className={`p-1.5 rounded-lg ${isGold ? 'hover:bg-[#222] text-[#999]' : 'hover:bg-gray-100 text-gray-500'} disabled:opacity-20 disabled:cursor-not-allowed`} title="上移">
+                        <ArrowUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button aria-label={`下移 ${provider.displayName || provider.name}`} onClick={() => void handleReorderApi(provider.id, 'down')} disabled={providerIndex === providers.length - 1} className={`p-1.5 rounded-lg ${isGold ? 'hover:bg-[#222] text-[#999]' : 'hover:bg-gray-100 text-gray-500'} disabled:opacity-20 disabled:cursor-not-allowed`} title="下移">
+                        <ArrowDown className="w-3.5 h-3.5" />
+                      </button>
+                      <div className={`w-px h-4 mx-1 ${isGold ? 'bg-[#333]' : 'bg-gray-200'}`} />
                       <button aria-label={`重新探测 ${provider.displayName || provider.name} 的模型`} onClick={() => void handleRefreshApi(provider)} className={`p-1.5 rounded-lg ${isGold ? 'hover:bg-[#222] text-[#999]' : 'hover:bg-gray-100 text-gray-500'}`} title="重新探测模型">
                         <RefreshCw className="w-3.5 h-3.5" />
                       </button>

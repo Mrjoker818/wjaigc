@@ -9,8 +9,9 @@ export async function register() {
     // 首次请求时会在对应 API 路由中自动完成初始化
     const dbInit = async () => {
       try {
-        const { migrateFileDataToDb } = await import('@/lib/db-storage');
+        const { migrateFileDataToDb, dbEnsureSortOrderColumn } = await import('@/lib/db-storage');
         await migrateFileDataToDb();
+        await dbEnsureSortOrderColumn();
         console.log('[instrumentation] DB migration check completed');
 
         // 确保 sourceUrl 映射表存在

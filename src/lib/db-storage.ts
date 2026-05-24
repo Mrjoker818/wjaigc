@@ -37,6 +37,7 @@ interface DbApiProvider {
   updated_at: number;
   connection_status?: string;
   discovered_models?: Record<string, unknown>[];
+  sort_order?: number;
 }
 
 // ─── Users ───────────────────────────────────────────────────────────────────
@@ -100,7 +101,7 @@ export async function dbDeleteUser(id: string): Promise<boolean> {
 
 export async function dbGetApiProviders(): Promise<DbApiProvider[]> {
   try {
-    const result = await execSql('SELECT * FROM wujie_api_providers ORDER BY created_at ASC');
+    const result = await execSql('SELECT * FROM wujie_api_providers ORDER BY COALESCE(sort_order, 999999) ASC, created_at ASC');
     return result.rows as unknown as DbApiProvider[];
   } catch (e) {
     console.error('[db-storage] dbGetApiProviders error:', e);
@@ -121,8 +122,8 @@ export async function dbGetApiProviderById(id: string): Promise<DbApiProvider | 
 export async function dbUpsertApiProvider(provider: DbApiProvider): Promise<boolean> {
   try {
     await execSql(`
-      INSERT INTO wujie_api_providers (id, name, display_name, base_url, api_key, is_enabled, type, model_type, request_style, selected_models, advanced_params, is_default, created_at, updated_at, connection_status, discovered_models)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      INSERT INTO wujie_api_providers (id, name, display_name, base_url, api_key, is_enabled, type, model_type, request_style, selected_models, advanced_params, is_default, created_at, updated_at, connection_status, discovered_models, sort_order)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         display_name = EXCLUDED.display_name,
@@ -137,7 +138,8 @@ export async function dbUpsertApiProvider(provider: DbApiProvider): Promise<bool
         is_default = EXCLUDED.is_default,
         updated_at = EXCLUDED.updated_at,
         connection_status = EXCLUDED.connection_status,
-        discovered_models = EXCLUDED.discovered_models
+        discovered_models = EXCLUDED.discovered_models,
+        sort_order = EXCLUDED.sort_order
     `, [
       provider.id, provider.name, provider.display_name, provider.base_url,
       provider.api_key, provider.is_enabled, provider.type, provider.model_type,
@@ -145,7 +147,8 @@ export async function dbUpsertApiProvider(provider: DbApiProvider): Promise<bool
       JSON.stringify(provider.advanced_params), provider.is_default,
       provider.created_at, provider.updated_at,
       provider.connection_status || null,
-      JSON.stringify(provider.discovered_models || [])
+      JSON.stringify(provider.discovered_models || []),
+      provider.sort_order ?? null,
     ]);
     return true;
   } catch (e) {
@@ -161,6 +164,26 @@ export async function dbDeleteApiProvider(id: string): Promise<boolean> {
   } catch (e) {
     console.error('[db-storage] dbDeleteApiProvider error:', e);
     return false;
+  }
+}
+
+export async function dbBatchUpdateProviderOrder(orders: Array<{ id: string; sortOrder: number }>): Promise<boolean> {
+  try {
+    for (const { id, sortOrder } of orders) {
+      await execSql('UPDATE wujie_api_providers SET sort_order = $1, updated_at = $2 WHERE id = $3', [sortOrder, Date.now(), id]);
+    }
+    return true;
+  } catch (e) {
+    console.error('[db-storage] dbBatchUpdateProviderOrder error:', e);
+    return false;
+  }
+}
+
+export async function dbEnsureSortOrderColumn(): Promise<void> {
+  try {
+    await execSql(`ALTER TABLE wujie_api_providers ADD COLUMN IF NOT EXISTS sort_order INTEGER`);
+  } catch {
+    // Column may already exist
   }
 }
 

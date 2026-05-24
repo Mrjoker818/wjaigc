@@ -5,6 +5,7 @@ import {
   discoverModelsForCredentials,
   getPublicApiProviders,
   refreshApiProvider,
+  reorderProviders,
   sanitizeProvider,
   updateApiProvider,
 } from '@/lib/server-api-config';
@@ -57,6 +58,12 @@ export async function POST(request: NextRequest) {
     if (action === 'refresh') {
       const provider = await refreshApiProvider(String(body.providerId || ''));
       return NextResponse.json({ success: Boolean(provider), provider: provider ? sanitizeProvider(provider) : null });
+    }
+
+    if (action === 'reorder') {
+      const providers = await reorderProviders(String(body.providerId || ''), body.direction as 'up' | 'down');
+      if (!providers) return NextResponse.json({ success: false, error: 'Cannot reorder' });
+      return NextResponse.json({ success: true, providers: providers.map(sanitizeProvider) });
     }
 
     const provider = await addApiProvider({

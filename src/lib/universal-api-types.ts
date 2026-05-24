@@ -30,6 +30,8 @@ export interface ApiProvider {
   discoveredModels?: ModelInfo[];
   balance?: ApiBalanceInfo;
   isDefault?: boolean;
+  // 排序顺序（数值越小越靠前，管理员可调整）
+  sortOrder?: number;
 }
 
 export interface ModelInfo {

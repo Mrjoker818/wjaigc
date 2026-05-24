@@ -174,7 +174,7 @@ async function readConfig(): Promise<StoredApiConfig> {
   try {
     const dbProviderRows = await dbGetApiProviders();
     if (dbProviderRows && dbProviderRows.length > 0) {
-      const providers: ApiProvider[] = dbProviderRows.map(p => ({
+      const providers: ApiProvider[] = dbProviderRows.map((p, i) => ({
         id: p.id,
         name: p.name,
         displayName: p.display_name || p.name,
@@ -196,6 +196,7 @@ async function readConfig(): Promise<StoredApiConfig> {
           providerId: p.id,
           type: (m.type as string) || p.model_type,
         })) as ModelInfo[] : [],
+        sortOrder: p.sort_order ?? i,
       }));
       return {
         providers,
@@ -225,7 +226,8 @@ async function readConfig(): Promise<StoredApiConfig> {
 }
 
 async function migrateProvidersToDb(providers: ApiProvider[]): Promise<void> {
-  for (const p of providers) {
+  for (let i = 0; i < providers.length; i++) {
+    const p = providers[i];
     await dbUpsertApiProvider({
       id: p.id,
       name: p.name,
@@ -243,6 +245,7 @@ async function migrateProvidersToDb(providers: ApiProvider[]): Promise<void> {
       updated_at: p.updatedAt || Date.now(),
       connection_status: p.connectionStatus,
       discovered_models: (p.discoveredModels || []) as unknown as Record<string, unknown>[],
+      sort_order: p.sortOrder ?? i,
     });
   }
 }
@@ -257,7 +260,11 @@ async function writeConfig(config: StoredApiConfig): Promise<void> {
 }
 
 export async function getApiProviders(): Promise<ApiProvider[]> {
-  return (await readConfig()).providers;
+  const providers = (await readConfig()).providers;
+  // Ensure sortOrder is assigned and sort by it
+  providers.forEach((p, i) => { if (p.sortOrder == null) p.sortOrder = i; });
+  providers.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+  return providers;
 }
 
 export async function getApiProvider(id: string): Promise<ApiProvider | null> {
@@ -441,6 +448,7 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
     createdAt: now,
     updatedAt: now,
     connectionStatus: 'untested',
+    sortOrder: 0, // will be set after unshift
   };
 
   const discovery = await discoverModelsForCredentials(provider.baseUrl, provider.apiKey, input.modelType);
@@ -480,6 +488,8 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
     : config.providers;
 
   nextProviders.unshift(provider);
+  // Reassign sortOrder: new provider at position 0, rest shifted
+  nextProviders.forEach((p, i) => { p.sortOrder = i; });
   await writeConfig({ providers: nextProviders, updatedAt: Date.now() });
   return provider;
 }
@@ -522,8 +532,36 @@ export async function deleteApiProvider(providerId: string): Promise<boolean> {
   if (next.length === config.providers.length) return false;
   // Delete from database explicitly
   dbDeleteApiProvider(providerId).catch(() => {});
+  // Reassign sortOrder after deletion
+  next.forEach((p, i) => { p.sortOrder = i; });
   await writeConfig({ providers: next, updatedAt: Date.now() });
   return true;
+}
+
+export async function reorderProviders(providerId: string, direction: 'up' | 'down'): Promise<ApiProvider[] | null> {
+  const config = await readConfig();
+  const providers = config.providers;
+
+  // Ensure sortOrder is assigned
+  providers.forEach((p, i) => {
+    if (p.sortOrder == null) p.sortOrder = i;
+  });
+  // Sort by sortOrder
+  providers.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+
+  const index = providers.findIndex(p => p.id === providerId);
+  if (index === -1) return null;
+
+  const targetIndex = direction === 'up' ? index - 1 : index + 1;
+  if (targetIndex < 0 || targetIndex >= providers.length) return null;
+
+  // Swap
+  [providers[index], providers[targetIndex]] = [providers[targetIndex], providers[index]];
+  // Reassign sortOrder
+  providers.forEach((p, i) => { p.sortOrder = i; });
+
+  await writeConfig({ providers, updatedAt: Date.now() });
+  return providers;
 }
 
 export async function refreshApiProvider(providerId: string): Promise<ApiProvider | null> {
