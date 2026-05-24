@@ -1546,90 +1546,78 @@ export async function POST(request: NextRequest) {
 
     if (action === 'multi_angle') {
       // ============================================================
-      // 多角度旋转 (Multi-Angle Rotation)
+      // 多角度 (Multi-Angle)
       //
-      // 参考 Lovart.ai 的多角度功能:
-      // - Lovart 无需提示词, 模型直接理解视角变化
-      // - 核心差异: Lovart 用"重渲染"思路, 而非"编辑/变换"思路
+      // 历史BUG总结与修复策略 (v6):
       //
-      // v5 核心策略 (参考 Lovart + 历史BUG修正):
-      // 1. 传递原图 prompt 作为场景上下文 → AI知道画面里有什么
-      // 2. 描述"结果画面"而非"变换过程" → 避免AI独立旋转每个元素
-      //    ❌ "camera moved right, left side now visible" → AI旋转每个物体
-      //    ✅ "left-side view of [scene], showing [what's visible]" → AI生成新画面
-      // 3. input_fidelity: 'high' — 让AI保持原图风格/材质/细节
-      // 4. strength: 根据角度变化量调整, 确保足够重渲染自由度
+      // v1-v2: "旋转主体" → 元素独立旋转 → 分离
+      // v3: 动态fidelity → 大角度fidelity=low → 元素发散更严重
+      // v4: "Orbit camera" → 太抽象, AI不理解
+      // v5: 描述"结果画面" → prompt过长(100+词), AI注意力分散
+      //     → 部分元素改变风格/色彩, 倾斜角度被忽略
+      //
+      // v6 核心策略 (极简 + 分离关注点):
+      // 1. prompt < 30词 — AI对短prompt执行力远强于长prompt
+      // 2. 只说两件事: "新视角是什么" + "保持原有风格"
+      // 3. 用标准摄影/绘画术语 (3/4 view, worm's-eye, bird's-eye)
+      // 4. 倾斜放在旋转前面 (pitch优先于yaw, 防止被忽略)
+      // 5. input_fidelity: 'high' — 保持原图风格
+      // 6. strength: 0.75 固定值 — 不动态调整, 避免不稳定
       // ============================================================
 
       const absRot = Math.abs(rotation);
       const absTilt = Math.abs(tilt);
 
-      // ============================================================
-      // 角度描述: 描述"从这个角度能看到什么"
-      // ============================================================
+      // ── 视角描述: 使用标准摄影/绘画术语 ──
+      // 用"3/4 view""profile""worm's-eye"等术语
+      // 而非"camera moved""turned"等变换指令
 
-      // Rotation (yaw) — 描述侧面可见性
-      const yawDesc = rotation === 0 ? '' :
-        absRot <= 20 ? `slight ${rotation > 0 ? 'left' : 'right'}-side glimpse, still mostly frontal` :
-        absRot <= 50 ? `${rotation > 0 ? 'left' : 'right'}-side angle, the ${rotation > 0 ? 'left' : 'right'} profile is prominent` :
-        `nearly side view from the ${rotation > 0 ? 'left' : 'right'}, showing the full ${rotation > 0 ? 'left' : 'right'} profile`;
+      // Tilt (俯仰) — 放在前面, 防止被AI忽略
+      const pitchTerm = tilt === 0 ? '' :
+        tilt > 0 && absTilt <= 20 ? 'slightly low-angle' :
+        tilt > 0 && absTilt <= 45 ? 'low-angle' :
+        tilt > 0 ? "worm's-eye" :
+        absTilt <= 20 ? 'slightly high-angle' :
+        absTilt <= 45 ? 'high-angle' :
+        "bird's-eye";
 
-      // Tilt (pitch) — 描述俯仰视角
-      const pitchDesc = tilt === 0 ? '' :
-        tilt > 0 && absTilt <= 15 ? `slightly looking up` :
-        tilt > 0 && absTilt <= 35 ? `looking up from below, undersides and ground stretching above` :
-        tilt > 0 ? `dramatic worm's-eye view from far below, looking steeply upward` :
-        absTilt <= 15 ? `slightly looking down` :
-        absTilt <= 35 ? `looking down from above, tops of objects visible, ground plane spread out` :
-        `bird's-eye view from directly above, looking steeply downward`;
+      // Rotation (偏航) — 使用标准视角术语
+      const yawTerm = rotation === 0 ? '' :
+        absRot <= 25 ? (rotation > 0 ? 'slight left' : 'slight right') :
+        absRot <= 55 ? (rotation > 0 ? '3/4 left' : '3/4 right') :
+        (rotation > 0 ? 'left profile' : 'right profile');
 
-      // Zoom (dolly) — 景别描述
+      // Zoom (景别)
       const zoomIdx = typeof zoom === 'number' ? zoom : 1;
-      const dollyDesc = zoomIdx === 0 ? 'close-up' : zoomIdx === 2 ? 'wide shot' : 'medium shot';
+      const shotTerm = zoomIdx === 0 ? 'close-up' : zoomIdx === 2 ? 'wide shot' : '';
+
+      // 组合视角: pitch + yaw + shot
+      const viewParts: string[] = [];
+      if (pitchTerm) viewParts.push(pitchTerm);
+      if (yawTerm) viewParts.push(yawTerm);
+      if (shotTerm) viewParts.push(shotTerm);
+      const viewDesc = viewParts.length > 0 ? viewParts.join(' ') : 'frontal';
 
       // Use original image aspect ratio
       const maOrigW = body.originalWidth || 1024;
       const maOrigH = body.originalHeight || 1024;
       const maAspectRatio = body.aspectRatio || findClosestAspectRatio(`${maOrigW}:${maOrigH}`);
 
-      // ============================================================
-      // v5 Prompt 构建策略: "描述结果画面"而非"变换指令"
-      //
-      // Lovart 不需要提示词就能工作, 因为它的模型专门理解视角变化。
-      // 我们用通用API, 所以必须把"新视角的画面"描述清楚。
-      //
-      // 关键: 把角度变化融入场景描述中, 而不是作为独立指令
-      // 这样AI生成的是一个"从新角度看到的场景", 而非"被变换过的旧图"
-      // ============================================================
-
-      // If we have the original prompt, use it as scene context
+      // ── v6 Prompt: 极简, <30词 ──
+      // 结构: [场景描述] + [视角术语] + [风格保持]
+      // 不使用: "camera moved"/"rotate"/"orbit"/"transform"等变换词
       const sceneBase = originalPrompt ? originalPrompt.trim() : '';
 
-      // Build the viewpoint description
-      const viewParts: string[] = [];
-      if (yawDesc) viewParts.push(yawDesc);
-      if (pitchDesc) viewParts.push(pitchDesc);
-      const viewDesc = viewParts.length > 0 ? viewParts.join(', ') : 'frontal view';
-
-      // The prompt describes the DESIRED OUTPUT IMAGE
-      // Structure: [scene] + [new viewpoint] + [shot type] + [consistency rule]
+      // 极简prompt: 场景 + 视角 + 风格保持(仅6个词)
       const multiAnglePrompt = prompt || (sceneBase
-        ? `${sceneBase}, now seen from a ${viewDesc} perspective, ${dollyDesc}. Everything in the scene maintains the same spatial arrangement and relationships, just viewed from this different angle.`
-        : `The same scene from a ${viewDesc} perspective, ${dollyDesc}. All elements maintain their original spatial relationships, rendered as one coherent unified picture from this new viewpoint.`);
+        ? `${sceneBase}, ${viewDesc} view. Same style, colors, details.`
+        : `${viewDesc} view of this scene. Same style, colors, details.`);
 
-      // ============================================================
-      // v5 参数策略:
+      // ── v6 参数: 固定值, 不动态调整 ──
       // input_fidelity: 'high' — 保持原图风格/材质/主体特征
-      //   (之前用 'medium' 导致AI自由度太大→元素发散分离)
-      // strength: 动态计算 — 角度越大, strength越高
-      //   - 小角度(≤15°): 0.65 — 微调, 保留更多原图
-      //   - 中角度(16-45°): 0.78 — 足够重渲染, 但不脱离原图
-      //   - 大角度(>45°): 0.88 — 需要大幅重渲染
-      // ============================================================
-      const totalAngle = Math.sqrt(absRot * absRot + absTilt * absTilt);
-      const multiAngleStrength = totalAngle <= 15 ? 0.65
-        : totalAngle <= 45 ? 0.78
-        : 0.88;
+      // strength: 0.75 — 中等偏上, 允许视角变化但不脱离原图
+      //   (之前0.88太高中风格漂移, 0.65太低AI不改变视角)
+      const multiAngleStrength = 0.75;
 
       // Resolve image to base64 for maximum content preservation
       const multiAngleBase64 = await resolveImageToBase64(imageUrl);
