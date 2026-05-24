@@ -169,9 +169,19 @@ let resourceDataCache: { categories: ResourceCategory[]; prompts: Map<string, Re
 async function loadResourceData(): Promise<{ categories: ResourceCategory[]; prompts: Map<string, ResourcePrompt[]> }> {
   if (resourceDataCache) return resourceDataCache;
   try {
-    const indexRes = await fetch('/data/omp-resources/index.json');
-    if (!indexRes.ok) throw new Error('Failed to load resource index');
-    const index = await indexRes.json();
+    // 优先使用 API 路由获取资源数据（确保部署环境也能正常工作）
+    // public/ 静态文件作为备用
+    let index: { categories?: ResourceCategory[]; categoryFiles?: string[] };
+    try {
+      const apiRes = await fetch('/api/omp-resources');
+      if (!apiRes.ok) throw new Error('API route failed');
+      index = await apiRes.json();
+    } catch {
+      // Fallback to static files
+      const staticRes = await fetch('/data/omp-resources/index.json');
+      if (!staticRes.ok) throw new Error('Failed to load resource index');
+      index = await staticRes.json();
+    }
     const categories: ResourceCategory[] = (index.categories || []).map((cat: ResourceCategory) => ({ id: cat.id, name: cat.name, nameEn: cat.nameEn, order: cat.order, count: cat.count }));
     const promptsMap = new Map<string, ResourcePrompt[]>();
     const categoryFiles: string[] = index.categoryFiles || [];
@@ -179,9 +189,17 @@ async function loadResourceData(): Promise<{ categories: ResourceCategory[]; pro
     for (let i = 0; i < categoryFiles.length; i += batchSize) {
       const batch = categoryFiles.slice(i, i + batchSize);
       const results = await Promise.allSettled(batch.map(async (catId) => {
-        const res = await fetch(`/data/omp-resources/categories/${catId}.json`);
-        if (!res.ok) return null;
-        const data = await res.json();
+        // 优先 API 路由，备用静态文件
+        let data: { prompts?: ResourcePrompt[] };
+        try {
+          const apiRes = await fetch(`/api/omp-resources?cat=${catId}`);
+          if (!apiRes.ok) throw new Error('API route failed');
+          data = await apiRes.json();
+        } catch {
+          const staticRes = await fetch(`/data/omp-resources/categories/${catId}.json`);
+          if (!staticRes.ok) return null;
+          data = await staticRes.json();
+        }
         return { catId, prompts: data.prompts || [] };
       }));
       for (const result of results) {
