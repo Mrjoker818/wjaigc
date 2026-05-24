@@ -2800,45 +2800,42 @@ export async function POST(request: NextRequest) {
         try { await fs.unlink(maskPath); } catch (_) { /* ignore */ }
       };
 
-      // 辅助函数：将 AI 生成结果与原图合成
-      // 策略：AI 在缩小尺寸上生成 → 提取扩展边缘 → 放大回原始尺寸 → 与原图合成
-      const compositeOriginalOnResult = async (resultBuffer: Buffer): Promise<Buffer> => {
+      // ★ 扩展画面：直接使用 AI 结果
+      // AI 已收到合成参考图（原图+灰色边框），生成的结果已包含原图内容+扩展内容
+      // 不再做硬覆盖合成，避免边界拼接痕迹和灰色块问题
+      const persistOutpaintResult = async (resultBuffer: Buffer): Promise<{ url: string; w: number; h: number }> => {
         const resultMeta = await sharp(resultBuffer).metadata();
         const resultW = resultMeta.width || scaledTargetW;
         const resultH = resultMeta.height || scaledTargetH;
 
-        // Step 1: 将 AI 结果 resize 到缩放后的目标尺寸（如果 API 返回尺寸不一致）
-        let aiResult = resultBuffer;
+        // 如果 AI 结果尺寸与缩放目标不同，resize 到缩放目标尺寸
+        let finalBuf = resultBuffer;
         if (resultW !== scaledTargetW || resultH !== scaledTargetH) {
-          aiResult = await sharp(resultBuffer)
+          finalBuf = await sharp(resultBuffer)
             .resize(scaledTargetW, scaledTargetH, { fit: 'fill' })
             .png()
             .toBuffer();
         }
 
-        // Step 2: 在缩放尺寸上将原图叠在 AI 结果上（像素级保留原图区域）
-        const scaledOriginal = await sharp(imageBuffer)
-          .resize(scaledSrcW, scaledSrcH, { fit: 'fill' })
-          .png()
-          .toBuffer();
+        // 如果有缩放，放大到原始目标尺寸
+        if (scaleFactor > 1) {
+          finalBuf = await sharp(finalBuf)
+            .resize(targetW, targetH, { fit: 'fill' })
+            .jpeg({ quality: 92 })
+            .toBuffer();
+        } else {
+          finalBuf = await sharp(finalBuf).jpeg({ quality: 92 }).toBuffer();
+        }
 
-        const scaledComposite = await sharp(aiResult)
-          .composite([{
-            input: scaledOriginal,
-            left: scaledOffsetX,
-            top: scaledOffsetY,
-            blend: 'over',
-          }])
-          .png()
-          .toBuffer();
-
-        // Step 3: 将合成结果放大到原始目标尺寸
-        const finalComposite = await sharp(scaledComposite)
-          .resize(targetW, targetH, { fit: 'fill' })
-          .png()
-          .toBuffer();
-
-        return finalComposite;
+        const resultFileName = `outpaint_${timestamp}.jpg`;
+        let resultUrl: string = '';
+        if (isS3Available()) {
+          resultUrl = (await uploadImageToS3(finalBuf, resultFileName, 'image/jpeg')) || '';
+        }
+        if (!resultUrl) {
+          resultUrl = `data:image/jpeg;base64,${finalBuf.toString('base64')}`;
+        }
+        return { url: resultUrl, w: targetW, h: targetH };
       };
 
       // Build request body for AI generation using scaled target size
@@ -2879,44 +2876,33 @@ export async function POST(request: NextRequest) {
       );
 
       if (result.directUrl) {
-        // 同步结果 - 合成原图到中心
+        // 同步结果 - 直接使用 AI 结果（已包含原图内容+扩展内容）
         try {
           const resultBuffer = await fetchImageBuffer(result.directUrl);
-          const finalBuffer = await compositeOriginalOnResult(resultBuffer);
+          const { url: compositeResultUrl } = await persistOutpaintResult(resultBuffer);
 
-          const resultFileName = `outpaint_${timestamp}.png`;
-          let compositeResultUrl: string;
-
-          if (isS3Available()) {
-            compositeResultUrl = (await uploadImageToS3(finalBuffer, resultFileName, 'image/png')) || '';
-          } else {
-          // 输出用 JPEG 压缩减少传输体积
-          const finalJpeg = await sharp(finalBuffer).jpeg({ quality: 92 }).toBuffer();
-          compositeResultUrl = `data:image/jpeg;base64,${finalJpeg.toString('base64')}`;
-          }
-          console.log(`[outpaint] Sync result saved: ${resultFileName}`);
+          console.log(`[outpaint] Sync result saved`);
 
           // 清理临时文件
           await cleanupFiles();
 
           return NextResponse.json({ success: true, imageUrl: compositeResultUrl, action, targetWidth: targetW, targetHeight: targetH });
         } catch (compositeErr) {
-          console.error('[outpaint] Composite failed, using raw result:', compositeErr);
+          console.error('[outpaint] Persist failed, using raw result:', compositeErr);
           await cleanupFiles();
           return NextResponse.json({ success: true, imageUrl: result.directUrl, action, targetWidth: targetW, targetHeight: targetH });
         }
       }
 
-      // 异步结果 - 返回 taskId + 合成信息，前端轮询后需后端合成
-      // ★ 注册异步 outpaint 任务到 task-registry，存储合成信息和提供商信息供 poll-task 使用
+      // 异步结果 - 返回 taskId，前端轮询后直接使用 AI 结果（不再做合成）
+      // ★ 注册异步 outpaint 任务到 task-registry，存储提供商信息供 poll-task 使用
       if (result.taskId) {
         registerTask(result.taskId, 'outpaint', '扩展画面');
         updateTaskProgress(result.taskId, {
           status: 'processing',
           progress: 10,
           result: {
-            outpaintInfo: { offsetX, offsetY, srcW, srcH, targetW, targetH, origW, origH, scaleFactor, scaledTargetW, scaledTargetH, scaledOffsetX, scaledOffsetY, scaledSrcW, scaledSrcH },
-            originalImageUrl: imageUrl,
+            outpaintInfo: { targetW, targetH, scaleFactor, scaledTargetW, scaledTargetH },
             usedModel: cm?.model,
             apiBaseUrl: cm?.apiBaseUrl,
             apiKey: cm?.apiKey,
@@ -2930,7 +2916,6 @@ export async function POST(request: NextRequest) {
         action,
         targetWidth: targetW,
         targetHeight: targetH,
-        outpaintInfo: { offsetX, offsetY, srcW, srcH, targetW, targetH, origW, origH, scaleFactor, scaledTargetW, scaledTargetH, scaledOffsetX, scaledOffsetY, scaledSrcW, scaledSrcH },
       });
     }
 

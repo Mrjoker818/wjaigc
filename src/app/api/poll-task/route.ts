@@ -437,71 +437,51 @@ export async function POST(request: NextRequest) {
 
             if (originalImageUrl) {
               // 获取 AI 扩展结果和原图
-              const aiResultBuf = await fetchImageBuffer(pollResult.imageUrl as string);
-              const originalBuf = await fetchImageBuffer(originalImageUrl);
+              // ★ 扩展画面：直接使用 AI 结果（AI 已基于参考图生成包含原图内容的完整画面）
+              // 不再做"原图覆盖到AI结果上"的合成，因为：
+              // 1. AI 接收了参考图，生成结果已包含原图内容
+              // 2. 硬覆盖原图会产生拼接痕迹和边界问题
+              // 3. 灰色块是因为原图覆盖位置/尺寸不匹配
+              try {
+                const outpaintInfo = registryResult.outpaintInfo as Record<string, number> | undefined;
+                if (outpaintInfo) {
+                  const aiResultBuf = await fetchImageBuffer(pollResult.imageUrl as string);
+                  const targetW = outpaintInfo.targetW;
+                  const targetH = outpaintInfo.targetH;
 
-              const scaledTargetW = outpaintInfo.scaledTargetW;
-              const scaledTargetH = outpaintInfo.scaledTargetH;
-              const scaledOffsetX = outpaintInfo.scaledOffsetX;
-              const scaledOffsetY = outpaintInfo.scaledOffsetY;
-              const scaledSrcW = outpaintInfo.scaledSrcW;
-              const scaledSrcH = outpaintInfo.scaledSrcH;
-              const targetW = outpaintInfo.targetW;
-              const targetH = outpaintInfo.targetH;
+                  // 将 AI 结果 resize 到精确的目标尺寸（避免比例偏差）
+                  const aiMeta = await sharp(aiResultBuf).metadata();
+                  if (targetW && targetH && ((aiMeta.width || 0) !== targetW || (aiMeta.height || 0) !== targetH)) {
+                    const resizedBuf = await sharp(aiResultBuf)
+                      .resize(targetW, targetH, { fit: 'fill' })
+                      .jpeg({ quality: 92 })
+                      .toBuffer();
 
-              if (scaledTargetW && scaledTargetH) {
-                // Step 1: 将 AI 结果 resize 到缩放后的目标尺寸
-                let aiResized = aiResultBuf;
-                const aiMeta = await sharp(aiResultBuf).metadata();
-                if ((aiMeta.width || 0) !== scaledTargetW || (aiMeta.height || 0) !== scaledTargetH) {
-                  aiResized = await sharp(aiResultBuf)
-                    .resize(scaledTargetW, scaledTargetH, { fit: 'fill' })
-                    .png()
-                    .toBuffer();
+                    const { saveImageFile } = await import('../../../lib/server-data-root');
+                    const timestamp = Date.now();
+                    const resizedFilename = `outpaint-${timestamp}.jpg`;
+                    const resizedUrl = saveImageFile(resizedBuf, resizedFilename, 'outpaint');
+                    if (resizedUrl) {
+                      pollResult.imageUrl = resizedUrl;
+                    } else {
+                      pollResult.imageUrl = `data:image/jpeg;base64,${resizedBuf.toString('base64')}`;
+                    }
+                  }
+
+                  // 传递目标尺寸给前端
+                  (pollResult as Record<string, unknown>).targetWidth = targetW;
+                  (pollResult as Record<string, unknown>).targetHeight = targetH;
+                  console.log(`[poll-task] Outpaint: using AI result directly (no composite), target: ${targetW}x${targetH}`);
                 }
-
-                // Step 2: 将原图 resize 到缩放后的源图尺寸
-                const scaledOriginal = await sharp(originalBuf)
-                  .resize(scaledSrcW, scaledSrcH, { fit: 'fill' })
-                  .png()
-                  .toBuffer();
-
-                // Step 3: 合成 - 原图叠在 AI 结果中心
-                const scaledComposite = await sharp(aiResized)
-                  .composite([{
-                    input: scaledOriginal,
-                    left: scaledOffsetX,
-                    top: scaledOffsetY,
-                    blend: 'over',
-                  }])
-                  .png()
-                  .toBuffer();
-
-                // Step 4: 放大到原始目标尺寸
-                const finalBuffer = await sharp(scaledComposite)
-                  .resize(targetW, targetH, { fit: 'fill' })
-                  .jpeg({ quality: 92 })
-                  .toBuffer();
-
-                // 保存合成结果
-                const { saveImageFile } = await import('../../../lib/server-data-root');
-                const timestamp = Date.now();
-                const compositeFilename = `outpaint-composite-${timestamp}.jpg`;
-                const compositeUrl = saveImageFile(finalBuffer, compositeFilename, 'outpaint');
-                if (compositeUrl) {
-                  pollResult.imageUrl = compositeUrl;
-                  console.log(`[poll-task] Outpaint composite succeeded: ${compositeUrl}`);
-                } else {
-                  pollResult.imageUrl = `data:image/jpeg;base64,${finalBuffer.toString('base64')}`;
-                  console.log(`[poll-task] Outpaint composite saved as data URL`);
-                }
-                // 传递目标尺寸给前端
-                (pollResult as Record<string, unknown>).targetWidth = targetW;
-                (pollResult as Record<string, unknown>).targetHeight = targetH;
+              } catch (outpaintErr) {
+                console.warn('[poll-task] Outpaint resize failed, using raw AI result:', outpaintErr instanceof Error ? outpaintErr.message : outpaintErr);
               }
+            } else {
+              // 没有原图 URL，直接使用 AI 结果
+              console.log(`[poll-task] Outpaint: no original URL, using AI result directly`);
             }
-          } catch (outpaintErr) {
-            console.warn('[poll-task] Outpaint composite failed, using raw AI result:', outpaintErr instanceof Error ? outpaintErr.message : outpaintErr);
+          } catch (outpaintCompositeErr) {
+            console.warn('[poll-task] Outpaint composite failed:', outpaintCompositeErr instanceof Error ? outpaintCompositeErr.message : outpaintCompositeErr);
           }
         }
 
