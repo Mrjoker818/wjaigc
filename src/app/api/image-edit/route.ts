@@ -1554,84 +1554,74 @@ export async function POST(request: NextRequest) {
       // 如果 /images/edits 不可用, 回退到 /images/generations + image_urls
       // ============================================================
 
-      // Build angle description text
-      // rotation: -90 to 90 (yaw), tilt: -30 to 60 (pitch), zoom: 0=特写 1=标准 2=广角
+      // Build angle description text — ultra-concise camera language only
+      // rotation: -90 to 90 (yaw), tilt: -30 to 60 (pitch)
       // ============================================================
-      // CRITICAL: 所有角度描述必须使用纯摄像机语言，绝不能使用"旋转/转向物体"语言。
-      // "turned to the right" 会让 AI 独立旋转每个元素 → 导致狗和滑板分离。
-      // "camera moved to the left" 让 AI 理解为统一视角变化 → 所有元素一起移动。
+      // 核心原则: 多角度 = 虚拟摄像机轨道移动 (orbit camera)
+      // 所有描述只用摄像机方位词, 禁止任何"旋转/转向/物体"措辞
+      // AI对短prompt的执行力远强于长prompt, 关键信息必须前置
       // ============================================================
       const absRot = Math.abs(rotation);
       const absTilt = Math.abs(tilt);
 
-      // Yaw (horizontal) — 纯摄像机水平移动描述
-      // rotation > 0 → 摄像机向右移动 → 看到场景/主体的左侧
-      // rotation < 0 → 摄像机向左移动 → 看到场景/主体的右侧
-      let cameraYawDesc: string;
-      if (rotation === 0) {
-        cameraYawDesc = 'camera is centered at the front';
-      } else if (absRot <= 15) {
-        cameraYawDesc = `camera has shifted slightly ${rotation > 0 ? 'to the right' : 'to the left'}, so we now see a bit of the ${rotation > 0 ? 'left' : 'right'} side of everything in the scene`;
-      } else if (absRot <= 45) {
-        cameraYawDesc = `camera has moved ${rotation > 0 ? 'to the right' : 'to the left'} by about ${absRot}°, revealing the ${rotation > 0 ? 'left' : 'right'} side of the scene — we can now see the ${rotation > 0 ? 'left' : 'right'} faces of all objects`;
-      } else {
-        cameraYawDesc = `camera has moved far ${rotation > 0 ? 'to the right' : 'to the left'} (${absRot}°), nearly a side profile view — almost everything is seen from its ${rotation > 0 ? 'left' : 'right'} side`;
-      }
+      // Orbit yaw — 极简摄像机方位描述
+      const yawDir = rotation > 0 ? 'right' : 'left';
+      const yawSide = rotation > 0 ? 'left' : 'right';
+      const cameraYawDesc = rotation === 0 ? 'camera facing front' :
+        absRot <= 20 ? `camera shifted slightly ${yawDir}, peeking at the ${yawSide} side` :
+        absRot <= 50 ? `camera orbited ${yawDir} ${absRot}°, now seeing the ${yawSide} side of everything` :
+        `camera orbited far ${yawDir} ${absRot}°, near side profile — everything seen from its ${yawSide}`;
 
-      // Pitch (vertical) — 纯摄像机垂直移动描述
-      // tilt > 0 → 摄像机向下移动（低于场景）→ 仰视
-      // tilt < 0 → 摄像机向上移动（高于场景）→ 俯视
-      let cameraPitchDesc: string;
-      if (tilt === 0) {
-        cameraPitchDesc = 'camera is at eye level, horizontal view';
-      } else if (tilt > 0 && tilt <= 15) {
-        cameraPitchDesc = `camera has dropped slightly below eye level, looking upward at the scene (low-angle shot, ${absTilt}°)`;
-      } else if (tilt > 15 && tilt <= 35) {
-        cameraPitchDesc = `camera is well below the scene, looking up at everything from a worm's-eye view (${absTilt}°) — undersides of objects become visible`;
-      } else if (tilt > 35) {
-        cameraPitchDesc = `camera is very low, looking steeply upward (${absTilt}°) — dramatic low-angle, emphasizing height and showing undersides of all objects`;
-      } else if (tilt < 0 && absTilt <= 15) {
-        cameraPitchDesc = `camera has risen slightly above eye level, looking down at the scene (high-angle shot, ${absTilt}°)`;
-      } else {
-        cameraPitchDesc = `camera is high above the scene, looking down at everything from a bird's-eye view (${absTilt}°) — tops of all objects become visible`;
-      }
+      // Orbit pitch — 极简摄像机高度描述
+      const cameraPitchDesc = tilt === 0 ? 'at eye level' :
+        tilt > 0 && absTilt <= 20 ? `looking up slightly from below (${absTilt}°)` :
+        tilt > 0 ? `looking up steeply from below (${absTilt}°), undersides visible` :
+        absTilt <= 20 ? `looking down slightly from above (${absTilt}°)` :
+        `looking down steeply from above (${absTilt}°), tops visible`;
 
       const zoomIdx = typeof zoom === 'number' ? zoom : 1;
-      const dollyText = zoomIdx === 0 ? 'close-up shot, tight framing, subject fills the frame' : zoomIdx === 2 ? 'wide-angle shot, pulled back camera, shows more environment and context' : 'standard medium framing';
+      const dollyText = zoomIdx === 0 ? 'close-up' : zoomIdx === 2 ? 'wide shot' : 'medium shot';
 
       // Use original image aspect ratio for multi-angle generation
       const maOrigW = body.originalWidth || 1024;
       const maOrigH = body.originalHeight || 1024;
       const maAspectRatio = body.aspectRatio || findClosestAspectRatio(`${maOrigW}:${maOrigH}`);
 
-      // Build optimized prompt for multi-angle rotation
       // ============================================================
-      // 核心原则：多角度 = 虚拟摄像机移动，所有元素保持空间关系不变。
+      // 多角度 Prompt 策略 (v3 — 精简版)
       //
-      // 之前的BUG：prompt中使用"主体转向右侧"→ AI理解为主体对象独立旋转
-      // → 狗和滑板各自旋转导致分离，建筑偏移错位
+      // 历史BUG分析:
+      // v1: "subject turned 30° right" → AI独立旋转每个元素 → 分离
+      // v2: 长prompt + 详细规则 → AI关注度分散 → 部分元素不响应
       //
-      // 修复策略：所有描述都必须是"摄像机移动到新位置"，
-      // 不能出现任何"物体旋转/转向"的措辞。
-      // 就像你绕着一个场景走一圈拍照——所有东西的位置都不变，
-      // 只是你从不同位置看到它们的不同面。
+      // v3 修复策略:
+      // 1. 极简prompt (<60词), 让AI集中注意力执行单一指令
+      // 2. 第一句就是最核心的指令: "orbit camera"
+      // 3. 唯一约束: "single unified scene" (5个词, 比100词规则更有效)
+      // 4. 根据角度动态调整 input_fidelity:
+      //    - 小角度(≤15°): high — 保留细节, 微调视角
+      //    - 中角度(16-40°): medium — 平衡细节保留与重渲染自由
+      //    - 大角度(>40°): low — 让AI自由重渲染, 确保场景统一
+      //    (high fidelity + 大角度 = AI试图保留原图 → 部分元素不变 → 分离)
+      // 5. 提高strength下限: 0.65-1.0, 确保AI不会仅复制原图
       // ============================================================
-      const sceneCoherenceRule = 'CRITICAL SPATIAL RULE: This is a single camera viewpoint change of ONE unified 3D scene. All objects MUST maintain their original spatial relationships — if a character is standing ON a skateboard, they must still be standing ON it from the new angle. If a building is BEHIND a character, it must still be BEHIND them. Do NOT rotate individual objects independently. The camera moves, the scene does NOT move. Every object stays in its exact same position; only our viewing angle changes.';
 
+      // Dynamic input_fidelity based on angle magnitude
+      const totalAngleChange = Math.sqrt(absRot * absRot + absTilt * absTilt);
+      const fidelityLevel: 'high' | 'medium' | 'low' = totalAngleChange <= 15 ? 'high' : totalAngleChange <= 40 ? 'medium' : 'low';
+
+      // Calculate strength — higher for larger angles to ensure full re-render
+      const multiAngleStrength = Math.min(1, Math.max(0.65, totalAngleChange / 80));
+
+      // Ultra-concise prompt — every word counts, front-load the key instruction
       const multiAnglePrompt = prompt || (angleMode === 'image'
-        ? `Re-render this image as if a photographer walked around to a new viewpoint. The ${cameraYawDesc}. Also the ${cameraPitchDesc}. Framing: ${dollyText}. ${sceneCoherenceRule} Infer unseen surfaces and geometry that become visible from this new camera angle while preserving identity, materials, colors, proportions, and lighting. Do NOT simply rotate the 2D image canvas.`
-        : `Re-render this image as if the camera was repositioned in the 3D scene. The ${cameraYawDesc}. Also the ${cameraPitchDesc}. Framing: ${dollyText}. ${sceneCoherenceRule} Re-render the entire scene from this new camera position, inferring any unseen geometry and surfaces that become visible. Preserve all subjects, objects, materials, colors, environment, and mood. Do NOT simply rotate the 2D image canvas.`);
+        ? `Orbit camera: ${cameraYawDesc}, ${cameraPitchDesc}, ${dollyText}. Render the ENTIRE scene as ONE unified 3D space from this new camera orbit position — all objects shift together coherently with their spatial relationships fully preserved.`
+        : `Camera repositioned: ${cameraYawDesc}, ${cameraPitchDesc}, ${dollyText}. Render the ENTIRE scene as ONE unified 3D space from this new camera position — all objects shift together coherently with their spatial relationships fully preserved.`);
 
       // Resolve image to base64 for maximum content preservation
       const multiAngleBase64 = await resolveImageToBase64(imageUrl);
 
-      // Calculate strength based on total angle change
-      // Larger angle changes need higher strength so AI doesn't just reproduce the original
-      const totalAngleChange = Math.sqrt(absRot * absRot + absTilt * absTilt);
-      const multiAngleStrength = Math.min(1, Math.max(0.55, totalAngleChange / 100));
-
-      // Strategy 1: Try /images/edits endpoint with input_fidelity: 'high'
-      // This is the correct approach for "edit this image from a different angle"
+      // Strategy 1: Try /images/edits endpoint
       let result: { taskId?: string; directUrl?: string; usedModel?: string } | null = null;
       let usedEndpoint: '/images/edits' | '/images/generations' = '/images/edits';
 
@@ -1645,17 +1635,15 @@ export async function POST(request: NextRequest) {
             n: 1,
             image: multiAngleBase64,
             strength: multiAngleStrength,
-            input_fidelity: 'high',
+            input_fidelity: fidelityLevel,
           }), '多角度(edits)', '/images/edits');
-          console.info(`[multi-angle] Successfully used /images/edits endpoint`);
+          console.info(`[multi-angle] Used /images/edits, fidelity=${fidelityLevel}, strength=${multiAngleStrength.toFixed(2)}, totalAngle=${totalAngleChange.toFixed(1)}°`);
         } else {
           // No base64 available, skip edits and go straight to generations
           throw new ModelCapabilityError('No base64 image available for edits endpoint');
         }
       } catch (editsErr: unknown) {
         // Strategy 2: Fallback to /images/generations with image_urls
-        // This treats the image as a reference rather than an edit source,
-        // but is better than failing completely
         const editsErrMsg = editsErr instanceof Error ? editsErr.message : String(editsErr);
         console.warn(`[multi-angle] /images/edits failed: ${editsErrMsg}, falling back to /images/generations`);
         usedEndpoint = '/images/generations';
@@ -1668,7 +1656,7 @@ export async function POST(request: NextRequest) {
           image_urls: [imageUrl],
           ...(multiAngleBase64 ? { image: multiAngleBase64 } : {}),
           strength: multiAngleStrength,
-          input_fidelity: 'high',
+          input_fidelity: fidelityLevel,
         }), '多角度(generations)');
       }
 
