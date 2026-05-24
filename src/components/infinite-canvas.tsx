@@ -9908,7 +9908,7 @@ export function InfiniteCanvas({
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>画布操作</div>
                       <div className="space-y-2">
-                        {[['左键单击', '选择图片'], ['左键拖拽空白区域', '框选多图'], ['Ctrl+左键', '多选图片'], ['Alt+左键', '标记图片为参考图'], ['长按左键拖动图片', '移动图片'], ['空格+拖动 / 长按中键', '平移画布'], ['滚轮 / Ctrl+滚轮', '缩放画布'], ['右键', '上下文菜单'], ['Ctrl+D', '复制选中图片'], ['Ctrl+Z', '撤回操作'], ['ESC', '退出编辑/取消选择'], ['Delete', '删除选中图片']].map(([k, v]) => (
+                        {[['左键单击', '选择图片'], ['左键拖拽空白区域', '框选多图'], ['Ctrl+左键', '多选图片/参考融合'], ['Alt+左键', '标记图片为参考图'], ['长按左键拖动图片', '移动图片'], ['空格+拖动 / 长按中键', '平移画布'], ['滚轮 / Ctrl+滚轮', '缩放画布'], ['右键', '上下文菜单'], ['Ctrl+D', '复制选中图片'], ['Ctrl+Z', '撤回操作'], ['ESC', '退出编辑/取消选择'], ['Delete', '删除选中图片']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
                         ))}
                       </div>
@@ -9917,7 +9917,7 @@ export function InfiniteCanvas({
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>图片操作工具栏</div>
                       <div className="space-y-2">
-                        {[['放大', '智能补细节，变大变高清'], ['移除背景', '一键去背景，生成透明底图'], ['SVG智能描摹', '彩色/黑白矢量化，图片压缩，缩略图'], ['擦除', '画笔涂抹消除，AI自动补全'], ['蒙版', '精准遮罩控制，AI重新生成'], ['编辑元素', '按元素智能分层，独立编辑'], ['多角度', '多视角生成图片'], ['转3D', '生成3D模型预览'], ['扩展', '向四周延伸画面，自动补齐'], ['裁切', '自由/预设比例裁切'], ['Agent编排', '智能编排多工具，自动选择最佳方案'], ['下载', 'PNG/SVG/PSD多格式下载']].map(([k, v]) => (
+                        {[['放大', '智能补细节，变大变高清'], ['移除背景', '一键去背景，生成透明底图+蒙版'], ['SVG智能描摹', '彩色/黑白矢量化，多级质量预设'], ['擦除', '画笔涂抹消除，本地LaMa优先+AI修复'], ['蒙版', '精准遮罩控制，AI重新生成指定区域'], ['编辑元素', '按元素智能分层，独立编辑'], ['图生图', '基于当前图风格/构图/角色/IP融合生成'], ['多角度', '多视角3D旋转生成图片'], ['转3D', '生成3D模型预览'], ['扩展', '向四周延伸画面，自动补齐'], ['裁切', '自由/预设比例裁切'], ['Agent编排', '智能编排多工具，自动选择最佳方案'], ['下载', 'PNG/SVG/PSD多格式下载']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
                         ))}
                       </div>
@@ -9935,7 +9935,7 @@ export function InfiniteCanvas({
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>左上角工具栏</div>
                       <div className="space-y-2">
-                        {[['Oh My Prompt', '提示词管理与图片识词'], ['参考融合', 'Ctrl+Click选择参考图融合生成'], ['设置', '应用配置'], ['主题切换', '黑白/彩色模式切换'], ['用户管理', '多用户切换与管理'], ['项目数据', '项目保存与加载'], ['管理员系统', 'API与模型配置（仅管理员）'], ['使用说明', '操作与更新内容']].map(([k, v]) => (
+                        {[['Oh My Prompt', '提示词管理与图片识词'], ['参考融合', 'Ctrl+Click选择参考图融合生成'], ['设置', '应用配置'], ['主题切换', '黑白/彩色模式切换'], ['用户管理', '多用户切换与管理'], ['项目数据', '项目保存与加载'], ['管理员系统', 'API与模型配置（仅管理员）'], ['使用说明', '操作与更新内容'], ['任务管理', '查看/取消进行中的任务']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
                         ))}
                       </div>
@@ -9944,7 +9944,7 @@ export function InfiniteCanvas({
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>底部工具栏</div>
                       <div className="space-y-2">
-                        {[['选择工具', '默认模式，点击/框选图片'], ['抓手工具', '平移画布'], ['图片上传', '上传本地图片到画布'], ['图像生成器', 'AI图像生成（金色按钮）'], ['语言修图', '自然语言描述修改图片'], ['图层', '打开Layer Graph设计工程'], ['缩放控制', '放大/缩小/百分比/重置视图']].map(([k, v]) => (
+                        {[['选择工具', '默认模式，点击/框选图片'], ['抓手工具', '平移画布'], ['图片上传', '上传本地图片到画布'], ['图像生成器', 'AI图像生成（金色按钮）'], ['语言修图', '自然语言描述修改图片'], ['Agent', '智能编排多工具编辑'], ['图层', '打开Layer Graph设计工程'], ['缩放控制', '放大/缩小/百分比/重置视图']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
                         ))}
                       </div>
@@ -9955,29 +9955,27 @@ export function InfiniteCanvas({
                     <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>{APP_VERSION_LABEL}</div>
                     <div className="space-y-2.5">
                       {[
-                        '11大图片工具：放大/移除背景/SVG智能描摹/擦除/蒙版/编辑元素/多角度/转3D/扩展/裁切/下载',
-                        '放大：智能补细节把图片变大变高清，不改画面内容',
-                        '移除背景：一键删除背景，生成透明底主体图',
-                        'SVG智能描摹：彩色/黑白矢量化，多级质量预设，自定义参数，兼容Adobe Illustrator',
-                        '擦除：画笔涂抹消除 + AI智能修复（全图发送避免变形），Alt键反向涂抹',
-                        '蒙版：精准遮罩控制 + AI重新生成指定区域 + 后端精确蒙版合成',
-                        '语言修图：自然语言描述修改意图，支持OpenAI（蒙版涂抹）+ Gemini（智能理解）',
+                        '13大图片工具：放大/移除背景/SVG智能描摹/擦除/蒙版/编辑元素/图生图/多角度/转3D/扩展/裁切/Agent编排/下载',
+                        '移除背景：一键去背景，同时生成透明底图+黑白蒙版，本地rembg优先+AI兜底',
+                        'SVG智能描摹：彩色/黑白矢量化，多级质量预设，矢量模型API→LLM fallback→本地vtracer兜底',
+                        '擦除：画笔涂抹消除，本地LaMa/ZITS/Anime-Lama优先，AI修复+边界扩散兜底',
+                        '蒙版：精准遮罩控制，AI重新生成指定区域，后端精确蒙版合成，前端直接显示结果',
+                        '图生图：基于当前图的风格/构图/角色/IP融合生成，独立强度滑块控制',
+                        '语言修图：自然语言描述修改图片，支持OpenAI+Gemini，画面比例/质量/数量参数已生效',
                         '编辑元素：根据图片元素进行智能分层，独立编辑',
-                        '多角度：多视角生成图片',
-                        '转3D：生成3D模型并可在线预览旋转',
+                        '多角度：3D旋转视角生成，全场景元素跟随角度变化',
                         '扩展：比例预设 + AI向四周延伸画面',
+                        'Agent编排：智能编排多工具（修图/生图/分析/调色），自动循环决策',
+                        '任务管理：统一任务注册中心，SSE实时推送进度，支持取消任务和队列排队',
+                        '图片压缩上传：前端canvas压缩+后端sharp压缩，自动优化大图',
+                        'API协议验证：管理员一键验证API提供商兼容性',
                         'Alt+Click标记参考图：标记画布图片为参考图，自动添加到创意描述',
                         'Ctrl+Click参考融合：选择画布图片直接融合生成',
-                        '组功能：多图右键创建组，支持折叠/展开，长按标题栏拖动',
-                        '框选：左键拖拽空白区域直接框选，显示选择矩形',
+                        '组功能：多图右键创建组，支持折叠/展开/拖动',
                         'Ctrl+Z无限撤回：纯ref同步管理，流畅操作',
-                        '右键菜单：图片右键可复制/下载/发送参考图/提取关键词/语言修图',
                         '下载：PNG/SVG/PSD三种格式，PSD支持Basic/Pro/Studio模式',
                         '服务器端API密钥管理：管理员统一配置，用户无需输入Key',
-                        '通用模型类型：API管理支持通用模型，自动识别所有可用模型',
-                        '高级参数与连接测试：添加固定API时支持高级参数和测试连接',
-                        '矢量化多策略降级：矢量模型API → LLM视觉fallback → 本地vtracer兜底',
-                        'API兼容层：通用多提供商适配，自动推断请求格式',
+                        'API兼容层：通用多提供商适配，input_fidelity自动转换为strength',
                       ].map((item, i) => (
                         <div key={i} className="flex items-start gap-2"><span className={`mt-1.5 w-1 h-1 rounded-full flex-shrink-0 ${isMonochrome ? 'bg-gray-400' : 'bg-[#d4af37]'}`} /><span>{item}</span></div>
                       ))}
