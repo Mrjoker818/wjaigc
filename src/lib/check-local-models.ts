@@ -15,11 +15,20 @@ export async function checkLocalModels() {
     }
 
     const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
-    const iopaintDir = process.env.IOPAINT_MODELS_DIR || path.join(workspacePath, 'models', 'iopaint');
-    const removebgDir = process.env.REMOVEBG_MODELS_DIR || path.join(workspacePath, 'models', 'removebg');
+    
+    // 优先使用 /space 持久存储目录（S3，沙箱重建后不丢失）
+    const iopaintDir = process.env.IOPAINT_MODELS_DIR ||
+      (fs.existsSync('/space/iopaint-models') ? '/space/iopaint-models' : path.join(workspacePath, 'models', 'iopaint'));
+    const removebgDir = process.env.REMOVEBG_MODELS_DIR ||
+      (fs.existsSync('/space/removebg-models') ? '/space/removebg-models' : path.join(workspacePath, 'models', 'removebg'));
 
     // ─── 检查 Python 虚拟环境 ─────────────────────────────
-    const venvPython = process.env.PYTHON_BIN || path.join(workspacePath, '.venv', 'bin', 'python3');
+    // 优先级: PYTHON_BIN 环境变量 > /space/python-venv (持久) > .venv (临时) > 系统 python3
+    const spaceVenvPython = '/space/python-venv/bin/python3';
+    const projectVenvPython = path.join(workspacePath, '.venv', 'bin', 'python3');
+    const venvPython = process.env.PYTHON_BIN ||
+      (fs.existsSync(spaceVenvPython) ? spaceVenvPython :
+       fs.existsSync(projectVenvPython) ? projectVenvPython : 'python3');
     let pythonOk = false;
     try {
       if (fs.existsSync(venvPython)) {

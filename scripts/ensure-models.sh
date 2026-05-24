@@ -15,8 +15,23 @@
 
 # 项目根目录
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-IOPAINT_DIR="${IOPAINT_MODELS_DIR:-$PROJECT_ROOT/models/iopaint}"
-REMOVEBG_DIR="${REMOVEBG_MODELS_DIR:-$PROJECT_ROOT/models/removebg}"
+
+# ─── 持久化目录策略 ─────────────────────────────────────
+# /space 是 S3 持久存储，沙箱重建后不丢失
+# /workspace 是 kataShared 临时存储，沙箱重建后会丢失
+# 优先使用 /space 下的模型目录
+
+if [ -d "/space/iopaint-models" ]; then
+  IOPAINT_DIR="${IOPAINT_MODELS_DIR:-/space/iopaint-models}"
+else
+  IOPAINT_DIR="${IOPAINT_MODELS_DIR:-$PROJECT_ROOT/models/iopaint}"
+fi
+
+if [ -d "/space/removebg-models" ]; then
+  REMOVEBG_DIR="${REMOVEBG_MODELS_DIR:-/space/removebg-models}"
+else
+  REMOVEBG_DIR="${REMOVEBG_MODELS_DIR:-$PROJECT_ROOT/models/removebg}"
+fi
 
 ACTION="${1:---check}"
 

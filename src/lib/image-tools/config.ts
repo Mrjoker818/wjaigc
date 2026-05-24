@@ -2,6 +2,7 @@
 // Image Tools — Configuration
 // ============================================================
 
+import fs from 'fs';
 import path from 'path';
 
 /** 项目根目录下的 public 目录 */
@@ -16,20 +17,26 @@ export const INPAINT_OUTPUT_DIR = path.join(PUBLIC_DIR, 'outputs', 'inpaint');
 /** 临时文件目录 */
 export const TEMP_DIR = path.join(PUBLIC_DIR, 'outputs', 'temp');
 
-/** 放大模型目录 (项目持久化目录，不受沙箱重启影响) */
+/** 放大模型目录 (优先使用 /space 持久存储，不受沙箱重启影响) */
 export const UPSCAYL_MODELS_DIR =
   process.env.UPSCAYL_MODELS_DIR ||
-  path.join(process.cwd(), 'models', 'upscayl');
+  (fs.existsSync('/space/upscayl-models')
+    ? '/space/upscayl-models'
+    : path.join(process.cwd(), 'models', 'upscayl'));
 
-/** IOPaint / LaMa / RemoveBG 模型根目录 (项目持久化目录) */
+/** IOPaint / LaMa / RemoveBG 模型根目录 (优先使用 /space 持久存储) */
 export const IOPAINT_MODELS_DIR =
   process.env.IOPAINT_MODELS_DIR ||
-  path.join(process.cwd(), 'models', 'iopaint');
+  (fs.existsSync('/space/iopaint-models')
+    ? '/space/iopaint-models'
+    : path.join(process.cwd(), 'models', 'iopaint'));
 
-/** RemoveBG 模型目录 (项目持久化目录) */
+/** RemoveBG 模型目录 (优先使用 /space 持久存储) */
 export const REMOVEBG_MODELS_DIR =
   process.env.REMOVEBG_MODELS_DIR ||
-  path.join(process.cwd(), 'models', 'removebg');
+  (fs.existsSync('/space/removebg-models')
+    ? '/space/removebg-models'
+    : path.join(process.cwd(), 'models', 'removebg'));
 
 /** IOPaint 基础 URL */
 export const IOPAINT_BASE_URL =
@@ -80,7 +87,8 @@ export const UPSCALE_TIMEOUT_MS = parseInt(
   10,
 );
 
-/** Python 解释器路径（优先使用 .venv 持久化虚拟环境，不存在则回退系统 python3） */
+/** Python 解释器路径（优先使用 /space 持久化虚拟环境，再检查项目 .venv，最后回退系统 python3） */
+const SPACE_VENV_PYTHON = '/space/python-venv/bin/python3';
 const VENV_PYTHON = path.join(process.cwd(), '.venv', 'bin', 'python3');
 const SYSTEM_PYTHON = 'python3';
 const VENV_EXISTS = (() => {
@@ -91,6 +99,14 @@ const VENV_EXISTS = (() => {
     return false;
   }
 })();
+const SPACE_VENV_EXISTS = (() => {
+  try {
+    require('fs').accessSync(SPACE_VENV_PYTHON);
+    return true;
+  } catch {
+    return false;
+  }
+})();
 export const PYTHON_BIN =
   process.env.PYTHON_BIN ||
-  (VENV_EXISTS ? VENV_PYTHON : SYSTEM_PYTHON);
+  (SPACE_VENV_EXISTS ? SPACE_VENV_PYTHON : VENV_EXISTS ? VENV_PYTHON : SYSTEM_PYTHON);

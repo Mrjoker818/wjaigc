@@ -12,7 +12,19 @@
 set -e
 
 WORKSPACE="${COZE_WORKSPACE_PATH:-/workspace/projects}"
-VENV_DIR="$WORKSPACE/.venv"
+
+# ─── 持久化目录策略 ─────────────────────────────────────
+# /space 是 S3 持久存储，沙箱重建后不丢失
+# /workspace 是 kataShared 临时存储，沙箱重建后会丢失
+# 优先使用 /space 下的虚拟环境和模型
+
+# Python 虚拟环境：优先 /space/python-venv (持久)，回退 .venv (临时)
+if [ -d "/space/python-venv" ] && [ -x "/space/python-venv/bin/python3" ]; then
+  VENV_DIR="/space/python-venv"
+else
+  VENV_DIR="$WORKSPACE/.venv"
+fi
+
 PYTHON_BIN="$VENV_DIR/bin/python3"
 PIP_BIN="$VENV_DIR/bin/pip"
 SITE_PACKAGES="$VENV_DIR/lib/python3.12/site-packages"
@@ -60,13 +72,27 @@ check_iopaint_patches() {
 
 create_venv() {
   log_info "Creating Python venv at $VENV_DIR..."
-  python3 -m venv "$VENV_DIR" || {
-    log_warn "venv creation failed, installing python3-venv..."
-    apt-get install -y python3.12-venv 2>/dev/null || apt-get install -y python3-venv 2>/dev/null
-    python3 -m venv "$VENV_DIR"
+  
+  # 确保目录存在
+  mkdir -p "$(dirname "$VENV_DIR")"
+  
+  # 尝试使用 --system-site-packages 复用系统已安装的包（节省大量安装时间）
+  python3 -m venv --system-site-packages "$VENV_DIR" 2>/dev/null || {
+    log_warn "venv creation with --system-site-packages failed, trying without..."
+    python3 -m venv "$VENV_DIR" || {
+      log_warn "venv creation failed, installing python3-venv..."
+      apt-get install -y python3.12-venv 2>/dev/null || apt-get install -y python3-venv 2>/dev/null
+      python3 -m venv --system-site-packages "$VENV_DIR" || python3 -m venv "$VENV_DIR"
+    }
   }
-  $PIP_BIN install --upgrade pip --no-cache-dir
-  log_info "Venv created successfully"
+  
+  # 确保 pyvenv.cfg 中 include-system-site-packages = true
+  if [ -f "$VENV_DIR/pyvenv.cfg" ]; then
+    sed -i 's/include-system-site-packages = false/include-system-site-packages = true/' "$VENV_DIR/pyvenv.cfg" 2>/dev/null || true
+  fi
+  
+  $PIP_BIN install --upgrade pip --no-cache-dir 2>/dev/null || true
+  log_info "Venv created successfully at $VENV_DIR"
 }
 
 install_torch() {
@@ -165,7 +191,7 @@ PYEOF
   local base_file="$SITE_PACKAGES/iopaint/model/base.py"
   if [ -f "$base_file" ] && grep -q "from .utils import get_scheduler" "$base_file" 2>/dev/null; then
     $PYTHON_BIN << 'PYEOF'
-path = "/workspace/projects/.venv/lib/python3.12/site-packages/iopaint/model/base.py"
+path = "${VENV_DIR}/lib/python3.12/site-packages/iopaint/model/base.py"
 with open(path, 'r') as f:
     content = f.read()
 content = content.replace(
@@ -197,7 +223,7 @@ PYEOF
   local utils_file="$SITE_PACKAGES/iopaint/model/utils.py"
   if [ -f "$utils_file" ] && grep -q "^from diffusers import" "$utils_file" 2>/dev/null; then
     $PYTHON_BIN << 'PYEOF'
-path = "/workspace/projects/.venv/lib/python3.12/site-packages/iopaint/model/utils.py"
+path = "${VENV_DIR}/lib/python3.12/site-packages/iopaint/model/utils.py"
 with open(path, 'r') as f:
     content = f.read()
 content = content.replace(

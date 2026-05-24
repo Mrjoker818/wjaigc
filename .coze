@@ -3,7 +3,7 @@ requires = ["nodejs-24"]
 template = "nextjs"
 
 [dev]
-build = ["pnpm", "install"]
+build = ["bash", "scripts/build-with-python-check.sh"]
 run = ["pnpm", "run", "dev"]
 
 [deploy]

@@ -5,7 +5,14 @@
 
 set -e
 
-MODEL_DIR="/root/.cache/torch/hub/checkpoints"
+# ─── 持久化目录策略 ─────────────────────────────────────
+# 优先使用 /space/removebg-models (S3 持久存储)
+# 回退到项目 models/removebg 目录
+if [ -d "/space/removebg-models" ]; then
+  MODEL_DIR="/space/removebg-models"
+else
+  MODEL_DIR="${REMOVEBG_MODELS_DIR:-$(cd "$(dirname "$0")/.." && pwd)/models/removebg}"
+fi
 
 # Model definitions: name | filename | url | md5 | size
 MODELS=(

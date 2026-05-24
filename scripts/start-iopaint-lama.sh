@@ -7,7 +7,12 @@
 # ============================================================
 set -e
 
-MODEL_DIR="${IOPAINT_MODEL_DIR:-./models/iopaint}"
+# ─── 持久化目录策略 ─────────────────────────────────────
+if [ -d "/space/iopaint-models" ]; then
+  MODEL_DIR="${IOPAINT_MODEL_DIR:-/space/iopaint-models}"
+else
+  MODEL_DIR="${IOPAINT_MODEL_DIR:-./models/iopaint}"
+fi
 PORT="${IOPAINT_PORT:-8080}"
 DEVICE="${IOPAINT_DEVICE:-cpu}"
 MODEL="${IOPAINT_MODEL:-lama}"

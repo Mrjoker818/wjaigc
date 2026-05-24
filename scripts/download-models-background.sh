@@ -3,7 +3,12 @@
 # 用法: bash scripts/download-models-background.sh [model...]
 # 示例: bash scripts/download-models-background.sh lama anime-lama zits
 
-MODEL_DIR="/root/.cache/torch/hub/checkpoints"
+# ─── 持久化目录策略 ─────────────────────────────────────
+if [ -d "/space/iopaint-models" ]; then
+  MODEL_DIR="/space/iopaint-models"
+else
+  MODEL_DIR="${IOPAINT_MODELS_DIR:-$(cd "$(dirname "$0")/.." && pwd)/models/iopaint}"
+fi
 mkdir -p "$MODEL_DIR"
 
 GITHUB_BASE="https://github.com/Sanster/models/releases/download"
