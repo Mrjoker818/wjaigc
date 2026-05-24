@@ -14,12 +14,17 @@ import type { ApiProvider } from '@/lib/universal-api-types';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  const admin = await requireAdminUser(request);
-  if (!admin) {
-    return NextResponse.json({ success: false, error: 'Admin session required' }, { status: 401 });
+  try {
+    const admin = await requireAdminUser(request);
+    if (!admin) {
+      return NextResponse.json({ success: false, error: 'Admin session required' }, { status: 401 });
+    }
+    const providers = await getPublicApiProviders();
+    return NextResponse.json({ success: true, providers });
+  } catch (error) {
+    console.error('[admin/apis] GET error:', error);
+    return NextResponse.json({ success: false, error: 'Failed to load API providers', providers: [] }, { status: 500 });
   }
-  const providers = await getPublicApiProviders();
-  return NextResponse.json({ success: true, providers });
 }
 
 export async function POST(request: NextRequest) {

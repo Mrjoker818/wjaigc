@@ -17,13 +17,18 @@ async function requireRootAdmin(request: NextRequest): Promise<User | null> {
 }
 
 export async function GET(request: NextRequest) {
-  const admin = await requireRootAdmin(request);
-  if (!admin) {
-    return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
-  }
+  try {
+    const admin = await requireRootAdmin(request);
+    if (!admin) {
+      return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
+    }
 
-  const users = await listManagedUsers();
-  return NextResponse.json({ success: true, users });
+    const users = await listManagedUsers();
+    return NextResponse.json({ success: true, users });
+  } catch (error) {
+    console.error('[admin/users] GET error:', error);
+    return NextResponse.json({ success: false, error: 'Failed to load users', users: [] }, { status: 500 });
+  }
 }
 
 export async function POST(request: NextRequest) {
