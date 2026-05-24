@@ -1556,35 +1556,44 @@ export async function POST(request: NextRequest) {
 
       // Build angle description text
       // rotation: -90 to 90 (yaw), tilt: -30 to 60 (pitch), zoom: 0=特写 1=标准 2=广角
+      // ============================================================
+      // CRITICAL: 所有角度描述必须使用纯摄像机语言，绝不能使用"旋转/转向物体"语言。
+      // "turned to the right" 会让 AI 独立旋转每个元素 → 导致狗和滑板分离。
+      // "camera moved to the left" 让 AI 理解为统一视角变化 → 所有元素一起移动。
+      // ============================================================
       const absRot = Math.abs(rotation);
       const absTilt = Math.abs(tilt);
 
-      // Yaw (rotation) description - more visual and concrete
-      let yawDesc: string;
+      // Yaw (horizontal) — 纯摄像机水平移动描述
+      // rotation > 0 → 摄像机向右移动 → 看到场景/主体的左侧
+      // rotation < 0 → 摄像机向左移动 → 看到场景/主体的右侧
+      let cameraYawDesc: string;
       if (rotation === 0) {
-        yawDesc = 'front view, no horizontal rotation';
+        cameraYawDesc = 'camera is centered at the front';
       } else if (absRot <= 15) {
-        yawDesc = `slightly turned ${rotation > 0 ? 'to the right' : 'to the left'} (${absRot}°)`;
+        cameraYawDesc = `camera has shifted slightly ${rotation > 0 ? 'to the right' : 'to the left'}, so we now see a bit of the ${rotation > 0 ? 'left' : 'right'} side of everything in the scene`;
       } else if (absRot <= 45) {
-        yawDesc = `turned ${rotation > 0 ? 'to the right' : 'to the left'} showing the ${rotation > 0 ? 'left' : 'right'} side (${absRot}°)`;
+        cameraYawDesc = `camera has moved ${rotation > 0 ? 'to the right' : 'to the left'} by about ${absRot}°, revealing the ${rotation > 0 ? 'left' : 'right'} side of the scene — we can now see the ${rotation > 0 ? 'left' : 'right'} faces of all objects`;
       } else {
-        yawDesc = `heavily rotated ${rotation > 0 ? 'to the right' : 'to the left'}, almost a ${rotation > 0 ? 'right' : 'left'} profile view (${absRot}°)`;
+        cameraYawDesc = `camera has moved far ${rotation > 0 ? 'to the right' : 'to the left'} (${absRot}°), nearly a side profile view — almost everything is seen from its ${rotation > 0 ? 'left' : 'right'} side`;
       }
 
-      // Pitch (tilt) description - strongly emphasize vertical angle change
-      let pitchDesc: string;
+      // Pitch (vertical) — 纯摄像机垂直移动描述
+      // tilt > 0 → 摄像机向下移动（低于场景）→ 仰视
+      // tilt < 0 → 摄像机向上移动（高于场景）→ 俯视
+      let cameraPitchDesc: string;
       if (tilt === 0) {
-        pitchDesc = 'eye-level view, no vertical tilt';
+        cameraPitchDesc = 'camera is at eye level, horizontal view';
       } else if (tilt > 0 && tilt <= 15) {
-        pitchDesc = `slightly looking up from below, low-angle shot (${absTilt}° upward tilt) — camera is below subject level`;
+        cameraPitchDesc = `camera has dropped slightly below eye level, looking upward at the scene (low-angle shot, ${absTilt}°)`;
       } else if (tilt > 15 && tilt <= 35) {
-        pitchDesc = `looking up at the subject from below, worm's-eye view (${absTilt}° upward tilt) — camera is significantly below, seeing the underside and lower surfaces`;
+        cameraPitchDesc = `camera is well below the scene, looking up at everything from a worm's-eye view (${absTilt}°) — undersides of objects become visible`;
       } else if (tilt > 35) {
-        pitchDesc = `extreme low-angle looking far upward, subject towers above (${absTilt}° upward tilt) — camera is very low, dramatically emphasizing height and looking at the underside`;
+        cameraPitchDesc = `camera is very low, looking steeply upward (${absTilt}°) — dramatic low-angle, emphasizing height and showing undersides of all objects`;
       } else if (tilt < 0 && absTilt <= 15) {
-        pitchDesc = `slightly looking down from above, high-angle shot (${absTilt}° downward tilt) — camera is above subject level`;
+        cameraPitchDesc = `camera has risen slightly above eye level, looking down at the scene (high-angle shot, ${absTilt}°)`;
       } else {
-        pitchDesc = `looking down at the subject from above, bird's-eye view (${absTilt}° downward tilt) — camera is high above, seeing the top and upper surfaces`;
+        cameraPitchDesc = `camera is high above the scene, looking down at everything from a bird's-eye view (${absTilt}°) — tops of all objects become visible`;
       }
 
       const zoomIdx = typeof zoom === 'number' ? zoom : 1;
@@ -1597,17 +1606,21 @@ export async function POST(request: NextRequest) {
 
       // Build optimized prompt for multi-angle rotation
       // ============================================================
-      // 核心原则：多角度始终应用于整个画面/场景，而非只旋转单个元素。
-      // 当视角改变时，场景中所有元素（主体、背景、前景）都应该
-      // 一起产生3D透视变化，这样结果才真实自然。
+      // 核心原则：多角度 = 虚拟摄像机移动，所有元素保持空间关系不变。
       //
-      // 两种模式的区别在于"变化焦点"而非"变化范围"：
-      // - 主体模式：焦点是主体的新侧面/新角度，整幅画面随之调整
-      // - 摄像头模式：焦点是虚拟摄像机的新位置，整幅画面随之调整
+      // 之前的BUG：prompt中使用"主体转向右侧"→ AI理解为主体对象独立旋转
+      // → 狗和滑板各自旋转导致分离，建筑偏移错位
+      //
+      // 修复策略：所有描述都必须是"摄像机移动到新位置"，
+      // 不能出现任何"物体旋转/转向"的措辞。
+      // 就像你绕着一个场景走一圈拍照——所有东西的位置都不变，
+      // 只是你从不同位置看到它们的不同面。
       // ============================================================
+      const sceneCoherenceRule = 'CRITICAL SPATIAL RULE: This is a single camera viewpoint change of ONE unified 3D scene. All objects MUST maintain their original spatial relationships — if a character is standing ON a skateboard, they must still be standing ON it from the new angle. If a building is BEHIND a character, it must still be BEHIND them. Do NOT rotate individual objects independently. The camera moves, the scene does NOT move. Every object stays in its exact same position; only our viewing angle changes.';
+
       const multiAnglePrompt = prompt || (angleMode === 'image'
-        ? `Reconstruct this entire image from a new 3D viewing angle. The main subject is now ${yawDesc}, and the vertical viewpoint has changed: ${pitchDesc}. Framing: ${dollyText}. IMPORTANT: The ENTIRE scene must be re-rendered — subject, background, foreground, and all surrounding elements should shift together in a coherent 3D perspective. Do NOT isolate and rotate only the subject while leaving the background flat and unchanged. The subject is a real 3D object in a real 3D environment, so infer its unseen sides, top, and bottom, and also infer how the environment would look from this new angle. Keep the same identity, face, clothing, product, design, materials, labels, text, colors, proportions, and lighting style. Do NOT simply rotate the 2D image canvas.`
-        : `Re-render this entire scene from a completely new camera position. The camera has moved: horizontally ${yawDesc}, and vertically ${pitchDesc}. Framing: ${dollyText}. You MUST apply BOTH the horizontal orbit AND the vertical tilt — they are equally important camera movements. The scene and subject remain fixed in place, but the ENTIRE image is re-rendered from this new viewpoint — every object, surface, shadow, and background element shifts naturally with the new perspective. Preserve all subjects, objects, materials, colors, environment, and mood. Infer unseen geometry, top surfaces, and undersides based on visible context. Do NOT simply rotate the 2D image canvas.`);
+        ? `Re-render this image as if a photographer walked around to a new viewpoint. The ${cameraYawDesc}. Also the ${cameraPitchDesc}. Framing: ${dollyText}. ${sceneCoherenceRule} Infer unseen surfaces and geometry that become visible from this new camera angle while preserving identity, materials, colors, proportions, and lighting. Do NOT simply rotate the 2D image canvas.`
+        : `Re-render this image as if the camera was repositioned in the 3D scene. The ${cameraYawDesc}. Also the ${cameraPitchDesc}. Framing: ${dollyText}. ${sceneCoherenceRule} Re-render the entire scene from this new camera position, inferring any unseen geometry and surfaces that become visible. Preserve all subjects, objects, materials, colors, environment, and mood. Do NOT simply rotate the 2D image canvas.`);
 
       // Resolve image to base64 for maximum content preservation
       const multiAngleBase64 = await resolveImageToBase64(imageUrl);
