@@ -13,6 +13,7 @@
  * 2. Node.js 解码 base64 → 保存两份 PNG → 返回两个 URL
  */
 
+import sharp from 'sharp';
 import { saveImageFile } from './server-data-root';
 import { fetchImageBuffer } from './fetch-image-buffer';
 
@@ -49,10 +50,26 @@ export async function postProcessLocalRemoveBG(
     // 解码 base64 → PNG Buffer
     const rgbaBuffer = Buffer.from(rgbaBase64, 'base64');
 
-    // 保存透明背景图
+    // 将透明背景合成到白色背景上（用户要求：主体图不要透明背景，只显示主体）
+    let subjectBuffer: Buffer;
+    try {
+      const rgbaImage = sharp(rgbaBuffer);
+      const meta = await rgbaImage.metadata();
+      const w = meta.width || 1;
+      const h = meta.height || 1;
+      subjectBuffer = await sharp({ create: { width: w, height: h, channels: 3, background: { r: 255, g: 255, b: 255 } } })
+        .composite([{ input: rgbaBuffer, blend: 'over' }])
+        .png()
+        .toBuffer();
+    } catch {
+      // 合成失败时 fallback 到原始 RGBA
+      subjectBuffer = rgbaBuffer;
+    }
+
+    // 保存主体图（白色背景，无透明）
     const timestamp = Date.now();
     const imageFilename = `removebg-${timestamp}.png`;
-    const imageUrl = saveImageFile(rgbaBuffer, imageFilename, 'removebg');
+    const imageUrl = saveImageFile(subjectBuffer, imageFilename, 'removebg');
 
     // 保存黑白蒙版图
     let maskUrl: string | null = null;
@@ -63,11 +80,11 @@ export async function postProcessLocalRemoveBG(
     }
 
     if (!imageUrl) {
-      console.error('[postProcessLocalRemoveBG] Failed to save RGBA PNG');
+      console.error('[postProcessLocalRemoveBG] Failed to save subject PNG');
       return null;
     }
 
-    console.log(`[postProcessLocalRemoveBG] Saved RGBA PNG: ${imageUrl} (${rgbaBuffer.length} bytes), mask: ${maskUrl || 'N/A'}`);
+    console.log(`[postProcessLocalRemoveBG] Saved subject PNG (white bg): ${imageUrl} (${subjectBuffer.length} bytes), mask: ${maskUrl || 'N/A'}`);
     
     return {
       imageUrl,

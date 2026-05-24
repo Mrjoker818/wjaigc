@@ -4435,7 +4435,7 @@ export function InfiniteCanvas({
           modifyPrompt: data.engine === 'local-background-alpha' ? '背景移除（本地透明化）' : String(data.engine || '').includes('ai-background-remove') ? '背景移除（AI高精度）' : '背景移除',
         });
 
-        // 同时添加黑白蒙版图到画布（紧邻透明图右侧）
+        // 同时添加黑白蒙版图到画布（紧邻主体图右侧）
         if (maskResultUrl && completedImage) {
           try {
             const stableMaskUrl = await toStableImageUrl(maskResultUrl);

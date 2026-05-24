@@ -2277,17 +2277,11 @@ export async function POST(request: NextRequest) {
                 resultOrigSize = resultBuffer;
               }
 
-              // 蒙版合成：仅将 AI 结果应用到蒙版区域，保留非蒙版区域
-              // 全图模式：cropInfo 覆盖整个图片
-              const fullCropInfo: InpaintCropInfo = { cropX: 0, cropY: 0, cropW: origW, cropH: origH, origW, origH };
-              const compositeResult = await compositeAIResultToOriginal(
-                imageBuffer, resultOrigSize, eraseMaskForAI, origW, origH, fullCropInfo
-              );
-
-              // 输出用 JPEG 压缩减少传输体积（比 PNG 小 60-80%）
-              const compositeJpeg = await sharp(compositeResult).jpeg({ quality: 92 }).toBuffer();
+              // 直接使用 AI 返回的结果，不做蒙版合成
+              // AI 模型（DALL-E/GPT Image等）返回的已经是完整修改后的图片
+              const compositeJpeg = await sharp(resultOrigSize).jpeg({ quality: 92 }).toBuffer();
               const resultDataUrl = `data:image/jpeg;base64,${compositeJpeg.toString('base64')}`;
-              console.log(`[inpaint] AI erase result: JPEG base64 (${(compositeJpeg.length / 1024).toFixed(0)}KB, was PNG ${(compositeResult.length / 1024).toFixed(0)}KB)`);
+              console.log(`[inpaint] AI erase result (no composite): JPEG base64 (${(compositeJpeg.length / 1024).toFixed(0)}KB)`);
               eraseUsedAI = true;
               return NextResponse.json({ success: true, imageUrl: resultDataUrl, action, engine: 'ai-erase' });
             } else if (eraseResult.taskId) {
@@ -2389,14 +2383,10 @@ export async function POST(request: NextRequest) {
                             resultOrigSize = resultBuffer;
                           }
 
-                          // 蒙版合成
-                          const fullCropInfo: InpaintCropInfo = { cropX: 0, cropY: 0, cropW: origW, cropH: origH, origW, origH };
-                          const compositeResult = await compositeAIResultToOriginal(
-                            imageBuffer, resultOrigSize, eraseMaskForAI, origW, origH, fullCropInfo
-                          );
-                          const compositeJpeg = await sharp(compositeResult).jpeg({ quality: 92 }).toBuffer();
+                          // 直接使用 AI 返回的结果，不做蒙版合成
+                          const compositeJpeg = await sharp(resultOrigSize).jpeg({ quality: 92 }).toBuffer();
                           const resultDataUrl = `data:image/jpeg;base64,${compositeJpeg.toString('base64')}`;
-                          console.log(`[inpaint] AI erase async result: JPEG base64 (${(compositeJpeg.length / 1024).toFixed(0)}KB)`);
+                          console.log(`[inpaint] AI erase async result (no composite): JPEG base64 (${(compositeJpeg.length / 1024).toFixed(0)}KB)`);
 
                           // 更新任务注册中心
                           updateTaskProgress(eraseResult.taskId, { status: 'completed', progress: 100, result: { imageUrl: resultDataUrl } });
@@ -2438,34 +2428,18 @@ export async function POST(request: NextRequest) {
                     apiBaseUrl: eraseCandidate?.apiBaseUrl,
                     apiKey: eraseCandidate?.apiKey,
                     advancedParams: eraseCandidate?.advancedParams,
-                    compositeInfo: {
-                      originalImageUrl: imageUrl,
-                      aiInputW,
-                      aiInputH,
-                      origW,
-                      origH,
-                      maskDataUrl: eraseMaskDataUrl,
-                    },
                   }
                 });
 
                 // ★ 不再直接降级到BFS，而是将taskId返回给前端继续轮询
-                // 前端会在轮询到结果后进行蒙版合成
+                // AI返回的结果已经是完整的擦除图，无需蒙版合成
                 return NextResponse.json({
                   success: true,
                   taskId: eraseResult.taskId,
                   action,
                   engine: 'ai-erase-async',
                   usedModel: eraseResult.usedModel,
-                  // 蒙版合成信息：poll-task 轮询到结果后用这些数据做蒙版合成
-                  compositeInfo: {
-                    originalImageUrl: imageUrl,
-                    aiInputW,
-                    aiInputH,
-                    origW,
-                    origH,
-                    maskDataUrl: eraseMaskDataUrl,
-                  },
+                  // AI返回的结果已经是完整的擦除图，无需蒙版合成
                 });
               }
             }
@@ -2598,23 +2572,12 @@ export async function POST(request: NextRequest) {
             resizedResult = resultBuffer;
           }
 
-          // 用裁剪区域的蒙版做柔边合成（增大模糊半径使过渡更自然，避免硬边错位感）
-          const croppedSoftMask = await sharp(croppedMaskBuffer)
-            .threshold(127)
-            .blur(12)
-            .grayscale()
-            .raw()
-            .toBuffer();
+          // AI 返回的已经是正确的修图结果，直接贴回原图裁剪区域即可
+          // 不再做蒙版alpha合成——AI模型已根据蒙版生成正确内容，蒙版合成会产生涂抹痕迹
 
-          const aiRaw = await sharp(resizedResult).ensureAlpha().raw().toBuffer();
-          for (let i = 0; i < cropInfo.cropW * cropInfo.cropH; i++) {
-            aiRaw[i * 4 + 3] = croppedSoftMask[i];
-          }
-          const aiWithAlpha = await sharp(aiRaw, { raw: { width: cropInfo.cropW, height: cropInfo.cropH, channels: 4 } }).png().toBuffer();
-
-          // 将裁剪区域的 AI 结果合成回原图
+          // 将裁剪区域的 AI 结果直接合成回原图（直接覆盖裁剪区域）
           const compositeResult = await sharp(imageBuffer)
-            .composite([{ input: aiWithAlpha, left: cropInfo.cropX, top: cropInfo.cropY, blend: 'over' }])
+            .composite([{ input: resizedResult, left: cropInfo.cropX, top: cropInfo.cropY }])
             .png()
             .toBuffer();
 
@@ -2653,16 +2616,8 @@ export async function POST(request: NextRequest) {
             apiKey: usedCandidate?.apiKey,
             advancedParams: usedCandidate?.advancedParams,
             cropInfo,
-            // ★ 合成所需数据：poll-task 轮询到结果后用这些数据做蒙版合成
-            compositeInfo: {
-              originalImageUrl: imageUrl,
-              maskDataUrl: croppedMaskDataUrl,
-              cropInfo,
-              origW,
-              origH,
-              aiInputW: cropInfo?.cropW || origW,
-              aiInputH: cropInfo?.cropH || origH,
-            },
+            // AI返回的结果已经是完整的修图结果，无需蒙版合成
+            // 保留裁剪信息供前端将AI结果贴回原图位置
           }
         });
       }

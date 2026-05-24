@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import sharp from 'sharp';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl, getApiProviders } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
@@ -410,6 +411,46 @@ export async function POST(request: NextRequest) {
         }
       } else {
         maskBuffer = Buffer.from(mask, 'base64');
+      }
+    }
+
+    // ========== 3.5 裁切/填充原图匹配目标比例 ==========
+    // 语言修图：如果用户设置了不同的画面比例，先对原图做中心裁切使比例匹配，
+    // 避免 AI 为满足尺寸要求而变形拉伸原图内容
+    if (size && size !== '1:1') {
+      try {
+        const sharpImg = sharp(imageBuffer);
+        const meta = await sharpImg.metadata();
+        const origW = meta.width || 1;
+        const origH = meta.height || 1;
+        const origRatio = origW / origH;
+
+        // 解析目标比例
+        const parts = size.split(':').map(Number);
+        const targetRatio = parts.length === 2 && parts[0] > 0 && parts[1] > 0
+          ? parts[0] / parts[1] : origRatio;
+
+        // 比例差异超过 5% 才做裁切
+        if (Math.abs(origRatio - targetRatio) / Math.max(origRatio, targetRatio) > 0.05) {
+          let cropW = origW;
+          let cropH = origH;
+          if (origRatio > targetRatio) {
+            // 原图更宽，裁切左右
+            cropW = Math.round(origH * targetRatio);
+          } else {
+            // 原图更高，裁切上下
+            cropH = Math.round(origW / targetRatio);
+          }
+          const left = Math.round((origW - cropW) / 2);
+          const top = Math.round((origH - cropH) / 2);
+          imageBuffer = await sharp(imageBuffer)
+            .extract({ left, top, width: cropW, height: cropH })
+            .toBuffer();
+          console.log(`[edit] Cropped image from ${origW}x${origH} to ${cropW}x${cropH} for target ratio ${size}`);
+        }
+      } catch (cropErr) {
+        // 裁切失败不影响后续流程
+        console.warn('[edit] Failed to crop image for aspect ratio, using original:', cropErr);
       }
     }
 
