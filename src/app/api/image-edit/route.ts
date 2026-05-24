@@ -501,6 +501,7 @@ interface EditRequest {
   providerId?: string;
   eraseModel?: string; // IOPaint erase model: lama/zits/anime-lama
   removeBgModel?: string; // IOPaint RemoveBG model: isnet-general-use / u2net / u2netp / silueta
+  originalPrompt?: string; // 原图的生成提示词, 用于多角度场景上下文
 }
 
 // Helper: submit a task to the images/generations API and return taskId or directUrl
@@ -1350,6 +1351,7 @@ export async function POST(request: NextRequest) {
       rotation = 0,
       tilt = 0,
       zoom = 1,
+      originalPrompt = '',
       model: rawModel = 'gemini-2.5-flash-image-preview',
       providerId,
     } = body;
@@ -1546,91 +1548,88 @@ export async function POST(request: NextRequest) {
       // ============================================================
       // 多角度旋转 (Multi-Angle Rotation)
       //
-      // 参考 Lovart.ai 的多角度功能实现方式:
-      // 核心策略: 使用 /images/edits 端点 + input_fidelity: 'high'
-      // - /images/edits 会把输入图片视为"要编辑的源图"而非"风格参考"
-      // - input_fidelity: 'high' 让 AI 最大程度保留原图内容(identity/材质/细节)
-      // - AI 推断隐藏侧面, 重新渲染指定角度的视图
-      // 如果 /images/edits 不可用, 回退到 /images/generations + image_urls
+      // 参考 Lovart.ai 的多角度功能:
+      // - Lovart 无需提示词, 模型直接理解视角变化
+      // - 核心差异: Lovart 用"重渲染"思路, 而非"编辑/变换"思路
+      //
+      // v5 核心策略 (参考 Lovart + 历史BUG修正):
+      // 1. 传递原图 prompt 作为场景上下文 → AI知道画面里有什么
+      // 2. 描述"结果画面"而非"变换过程" → 避免AI独立旋转每个元素
+      //    ❌ "camera moved right, left side now visible" → AI旋转每个物体
+      //    ✅ "left-side view of [scene], showing [what's visible]" → AI生成新画面
+      // 3. input_fidelity: 'high' — 让AI保持原图风格/材质/细节
+      // 4. strength: 根据角度变化量调整, 确保足够重渲染自由度
       // ============================================================
 
-      // Build angle description text — pure camera viewpoint language
-      // rotation: -90 to 90 (yaw), tilt: -30 to 60 (pitch)
-      // ============================================================
-      // 核心原则:
-      // 1. 所有描述只描述"摄像机看到什么", 禁止"旋转/转向/物体移动"
-      // 2. 倾斜描述前置(之前被忽略), 与旋转同等重要
-      // 3. Prompt结构: 视角变化 → 场景重绘 → 空间一致
-      // ============================================================
       const absRot = Math.abs(rotation);
       const absTilt = Math.abs(tilt);
 
-      // Camera pitch (tilt) — 倾斜描述, 使用视觉化场景语言
       // ============================================================
-      // 关键: 不要只说"looking up/down", 要描述从新视角"能看到什么"
-      // 这样AI才能理解需要渲染什么样的新画面
+      // 角度描述: 描述"从这个角度能看到什么"
       // ============================================================
-      const pitchVisualDesc = tilt === 0 ? '' :
-        tilt > 0 && absTilt <= 15 ? `The camera is now slightly below the scene, so we can see a bit of the undersides and the ground stretches away upward.` :
-        tilt > 0 && absTilt <= 35 ? `The camera has dropped below the scene looking upward — we see undersides of objects, the ground plane rises away from us, and the sky fills the upper portion.` :
-        tilt > 0 ? `The camera is far below the scene looking steeply upward — undersides of all objects are clearly visible, the ground plane soars above us, and the scene towers overhead.` :
-        absTilt <= 15 ? `The camera is now slightly above the scene, so we can see a bit of the tops of objects and the ground extends away below.` :
-        absTilt <= 35 ? `The camera has risen above the scene looking downward — we see the tops of objects, the ground plane spreads out below us, and objects appear shorter in perspective.` :
-        `The camera is far above the scene looking steeply downward — tops of all objects are clearly visible, the ground plane fills the view, and objects appear very small in perspective.`;
 
-      // Camera yaw (rotation) — 水平旋转描述
-      const yawVisualDesc = rotation === 0 ? '' :
-        absRot <= 20 ? `The camera has moved slightly to the ${rotation > 0 ? 'right' : 'left'}, so we now see a bit more of the ${rotation > 0 ? 'left' : 'right'} side of the scene.` :
-        absRot <= 50 ? `The camera has moved to the ${rotation > 0 ? 'right' : 'left'}, so we now see the ${rotation > 0 ? 'left' : 'right'} side of everything in the scene — the ${rotation > 0 ? 'left' : 'right'} faces of objects become visible while the ${rotation > 0 ? 'right' : 'left'} faces start to turn away.` :
-        `The camera has moved far to the ${rotation > 0 ? 'right' : 'left'}, now showing the scene almost from the ${rotation > 0 ? 'left' : 'right'} side — we see the ${rotation > 0 ? 'left' : 'right'} profiles of everything.`;
+      // Rotation (yaw) — 描述侧面可见性
+      const yawDesc = rotation === 0 ? '' :
+        absRot <= 20 ? `slight ${rotation > 0 ? 'left' : 'right'}-side glimpse, still mostly frontal` :
+        absRot <= 50 ? `${rotation > 0 ? 'left' : 'right'}-side angle, the ${rotation > 0 ? 'left' : 'right'} profile is prominent` :
+        `nearly side view from the ${rotation > 0 ? 'left' : 'right'}, showing the full ${rotation > 0 ? 'left' : 'right'} profile`;
 
+      // Tilt (pitch) — 描述俯仰视角
+      const pitchDesc = tilt === 0 ? '' :
+        tilt > 0 && absTilt <= 15 ? `slightly looking up` :
+        tilt > 0 && absTilt <= 35 ? `looking up from below, undersides and ground stretching above` :
+        tilt > 0 ? `dramatic worm's-eye view from far below, looking steeply upward` :
+        absTilt <= 15 ? `slightly looking down` :
+        absTilt <= 35 ? `looking down from above, tops of objects visible, ground plane spread out` :
+        `bird's-eye view from directly above, looking steeply downward`;
+
+      // Zoom (dolly) — 景别描述
       const zoomIdx = typeof zoom === 'number' ? zoom : 1;
-      const dollyText = zoomIdx === 0 ? 'close-up view' : zoomIdx === 2 ? 'wide establishing shot' : 'medium shot';
+      const dollyDesc = zoomIdx === 0 ? 'close-up' : zoomIdx === 2 ? 'wide shot' : 'medium shot';
 
-      // Use original image aspect ratio for multi-angle generation
+      // Use original image aspect ratio
       const maOrigW = body.originalWidth || 1024;
       const maOrigH = body.originalHeight || 1024;
       const maAspectRatio = body.aspectRatio || findClosestAspectRatio(`${maOrigW}:${maOrigH}`);
 
       // ============================================================
-      // 多角度 Prompt 策略 (v4 — 场景统一版)
+      // v5 Prompt 构建策略: "描述结果画面"而非"变换指令"
       //
-      // 历史BUG分析:
-      // v1: "subject turned 30° right" → AI独立旋转每个元素 → 分离
-      // v2: 长prompt + "CRITICAL SPATIAL RULE" → AI关注度分散 → 部分元素不响应
-      // v3: 极简prompt "Orbit camera" + 动态fidelity → fidelity=low时AI过度自由→更严重分离
+      // Lovart 不需要提示词就能工作, 因为它的模型专门理解视角变化。
+      // 我们用通用API, 所以必须把"新视角的画面"描述清楚。
       //
-      // v4 修复策略:
-      // 1. input_fidelity 固定为 'medium' — 既不过度保留原图(导致部分不变), 也不过度自由(导致分离)
-      // 2. Prompt结构: 先描述视觉变化(what you see), 再要求场景统一(how to render)
-      // 3. 倾斜描述前置且详细(之前被忽略的问题), 使用"你能看到什么"而非"摄像机在哪儿"
-      // 4. strength 固定 0.75 — 中等偏上, 允许AI重新渲染但不至于脱离原图
-      // 5. 场景统一规则用自然语言: "as if taking a photo from a different angle"
-      //    而非技术约束: "maintain spatial relationships" (AI不太理解这种抽象概念)
+      // 关键: 把角度变化融入场景描述中, 而不是作为独立指令
+      // 这样AI生成的是一个"从新角度看到的场景", 而非"被变换过的旧图"
       // ============================================================
 
-      // Fixed input_fidelity: 'medium' for all angles
-      // - 'high' causes AI to over-preserve original → some elements don't change → separation
-      // - 'low' causes AI to diverge too freely → elements scatter → worse separation
-      // - 'medium' is the sweet spot: AI understands the scene but has freedom to re-render
-      const multiAngleFidelity = 'medium' as const;
+      // If we have the original prompt, use it as scene context
+      const sceneBase = originalPrompt ? originalPrompt.trim() : '';
 
-      // Fixed strength: 0.75 — enough for perspective change, not so much that AI loses the scene
-      const multiAngleStrength = 0.75;
+      // Build the viewpoint description
+      const viewParts: string[] = [];
+      if (yawDesc) viewParts.push(yawDesc);
+      if (pitchDesc) viewParts.push(pitchDesc);
+      const viewDesc = viewParts.length > 0 ? viewParts.join(', ') : 'frontal view';
 
-      // Build prompt — structured for clarity and emphasis
-      // Key: Describe WHAT THE NEW VIEW LOOKS LIKE, not abstract camera movements
-      const angleChanges: string[] = [];
-      if (pitchVisualDesc) angleChanges.push(pitchVisualDesc);
-      if (yawVisualDesc) angleChanges.push(yawVisualDesc);
-      
-      const angleDesc = angleChanges.length > 0
-        ? angleChanges.join(' ')
-        : 'The camera stays at the same position.';
+      // The prompt describes the DESIRED OUTPUT IMAGE
+      // Structure: [scene] + [new viewpoint] + [shot type] + [consistency rule]
+      const multiAnglePrompt = prompt || (sceneBase
+        ? `${sceneBase}, now seen from a ${viewDesc} perspective, ${dollyDesc}. Everything in the scene maintains the same spatial arrangement and relationships, just viewed from this different angle.`
+        : `The same scene from a ${viewDesc} perspective, ${dollyDesc}. All elements maintain their original spatial relationships, rendered as one coherent unified picture from this new viewpoint.`);
 
-      const multiAnglePrompt = prompt || (angleMode === 'image'
-        ? `Re-render this entire image from a different camera viewpoint. ${angleDesc} The shot is a ${dollyText}. IMPORTANT: Re-draw the COMPLETE scene as one unified picture — every person, object, and background element must shift together naturally, as if you simply took a photo of the same scene from a different angle. Do NOT move or rotate any individual object separately.`
-        : `Re-render this entire image with the camera repositioned. ${angleDesc} The shot is a ${dollyText}. IMPORTANT: Re-draw the COMPLETE scene as one unified picture — every person, object, and background element must shift together naturally, as if you simply took a photo of the same scene from a different angle. Do NOT move or rotate any individual object separately.`);
+      // ============================================================
+      // v5 参数策略:
+      // input_fidelity: 'high' — 保持原图风格/材质/主体特征
+      //   (之前用 'medium' 导致AI自由度太大→元素发散分离)
+      // strength: 动态计算 — 角度越大, strength越高
+      //   - 小角度(≤15°): 0.65 — 微调, 保留更多原图
+      //   - 中角度(16-45°): 0.78 — 足够重渲染, 但不脱离原图
+      //   - 大角度(>45°): 0.88 — 需要大幅重渲染
+      // ============================================================
+      const totalAngle = Math.sqrt(absRot * absRot + absTilt * absTilt);
+      const multiAngleStrength = totalAngle <= 15 ? 0.65
+        : totalAngle <= 45 ? 0.78
+        : 0.88;
 
       // Resolve image to base64 for maximum content preservation
       const multiAngleBase64 = await resolveImageToBase64(imageUrl);
@@ -1649,9 +1648,9 @@ export async function POST(request: NextRequest) {
             n: 1,
             image: multiAngleBase64,
             strength: multiAngleStrength,
-            input_fidelity: multiAngleFidelity,
+            input_fidelity: 'high' as const,
           }), '多角度(edits)', '/images/edits');
-          console.info(`[multi-angle] Used /images/edits, fidelity=${multiAngleFidelity}, strength=${multiAngleStrength}, rotation=${rotation}, tilt=${tilt}`);
+          console.info(`[multi-angle] Used /images/edits, fidelity=high, strength=${multiAngleStrength}, rotation=${rotation}, tilt=${tilt}, hasOriginalPrompt=${!!originalPrompt}`);
         } else {
           // No base64 available, skip edits and go straight to generations
           throw new ModelCapabilityError('No base64 image available for edits endpoint');
@@ -1670,7 +1669,7 @@ export async function POST(request: NextRequest) {
           image_urls: [imageUrl],
           ...(multiAngleBase64 ? { image: multiAngleBase64 } : {}),
           strength: multiAngleStrength,
-          input_fidelity: multiAngleFidelity,
+          input_fidelity: 'high' as const,
         }), '多角度(generations)');
       }
 

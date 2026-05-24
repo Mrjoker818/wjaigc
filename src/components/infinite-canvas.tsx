@@ -4606,6 +4606,7 @@ export function InfiniteCanvas({
           rotation: multiAngleRotation,
           tilt: multiAngleTilt,
           zoom: multiAngleZoom,
+          originalPrompt: img.prompt || img.modifyPrompt || '',
           aspectRatio: (() => { const ar = img.aspectRatio; if (ar && STANDARD_RATIOS.includes(ar as any)) return ar; return findClosestStandardRatio(img.originalWidth || Math.round(img.width), img.originalHeight || Math.round(img.height)); })(),
           originalWidth: img.originalWidth || Math.round(img.width),
           originalHeight: img.originalHeight || Math.round(img.height),
