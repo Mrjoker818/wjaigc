@@ -624,9 +624,7 @@ export async function POST(request: NextRequest) {
         if (oi.targetW) (pollResult as Record<string, unknown>).targetWidth = oi.targetW;
         if (oi.targetH) (pollResult as Record<string, unknown>).targetHeight = oi.targetH;
       }
-      if (existingResult.compositeInfo) {
-        (pollResult as Record<string, unknown>).compositeInfo = existingResult.compositeInfo;
-      }
+
       if (existingResult.usedModel) {
         (pollResult as Record<string, unknown>).usedModel = existingResult.usedModel;
       }
