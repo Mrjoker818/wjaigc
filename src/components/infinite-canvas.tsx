@@ -983,7 +983,8 @@ export function InfiniteCanvas({
       const dx = event.clientX - drag.startX;
       const dy = event.clientY - drag.startY;
       setMultiAngleRotation(Math.round(clampMultiAngleValue(drag.startRotation + dx * 0.55, -90, 90)));
-      setMultiAngleTilt(Math.round(clampMultiAngleValue(drag.startTilt + dy * 0.55, -30, 60)));
+      // Invert dy: drag down → look down (俯视, negative tilt), drag up → look up (仰视, positive tilt)
+      setMultiAngleTilt(Math.round(clampMultiAngleValue(drag.startTilt - dy * 0.55, -30, 60)));
     };
     const handleUp = () => {
       multiAngleDragRef.current = null;
@@ -8648,7 +8649,7 @@ export function InfiniteCanvas({
                           width: '110px',
                           height: '110px',
                           transformStyle: 'preserve-3d',
-                          transform: `rotateX(${multiAngleTilt * 0.8}deg) rotateY(${multiAngleRotation * 1.2}deg)`,
+                          transform: `rotateX(${-multiAngleTilt * 0.8}deg) rotateY(${multiAngleRotation * 1.2}deg)`,
                           transition: isMultiAngleDragging ? 'none' : 'transform 0.15s ease-out',
                         }}
                       >
@@ -8679,9 +8680,12 @@ export function InfiniteCanvas({
                       </div>
                       {/* Perspective hint label */}
                       <div className={`absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full text-xs ${isMonochrome ? 'bg-white/80 text-gray-500 border border-gray-200' : 'bg-black/60 text-[#aaa] border border-white/10'}`}>
-                        {Math.abs(multiAngleRotation) < 10 && Math.abs(multiAngleTilt) < 10 ? '正面' :
-                         multiAngleRotation > 45 ? '左侧' : multiAngleRotation < -45 ? '右侧' :
-                         multiAngleTilt > 35 ? '仰视' : multiAngleTilt < -15 ? '俯视' : '斜视'}
+                        {Math.abs(multiAngleRotation) < 5 && Math.abs(multiAngleTilt) < 5 ? '正面' :
+                         multiAngleTilt > 40 ? '强仰视' : multiAngleTilt > 20 ? '仰视' : multiAngleTilt > 5 ? '微仰视' :
+                         multiAngleTilt < -20 ? '强俯视' : multiAngleTilt < -5 ? '俯视' :
+                         multiAngleRotation > 60 ? '左侧面' : multiAngleRotation > 30 ? '左侧' : multiAngleRotation > 10 ? '微左侧' :
+                         multiAngleRotation < -60 ? '右侧面' : multiAngleRotation < -30 ? '右侧' : multiAngleRotation < -10 ? '微右侧' :
+                         '正面'}
                       </div>
                     </div>
                   ) : (
@@ -8703,13 +8707,15 @@ export function InfiniteCanvas({
                 </div>
 
                 {([
-                  { label: '旋转', value: multiAngleRotation, min: -90, max: 90, step: 1, onChange: setMultiAngleRotation },
-                  { label: multiAngleMode === 'camera' ? '俯仰' : '倾斜', value: multiAngleTilt, min: -30, max: 60, step: 1, onChange: setMultiAngleTilt },
+                  { label: '旋转', value: multiAngleRotation, min: -90, max: 90, step: 1, onChange: setMultiAngleRotation,
+                    desc: multiAngleRotation === 0 ? '正面' : multiAngleRotation > 0 ? `向右${Math.abs(multiAngleRotation)}°` : `向左${Math.abs(multiAngleRotation)}°` },
+                  { label: multiAngleMode === 'camera' ? '俯仰' : '倾斜', value: multiAngleTilt, min: -30, max: 60, step: 1, onChange: setMultiAngleTilt,
+                    desc: multiAngleTilt === 0 ? '平视' : multiAngleTilt > 0 ? `仰视${Math.abs(multiAngleTilt)}°` : `俯视${Math.abs(multiAngleTilt)}°` },
                 ]).map(item => (
                   <div key={item.label} className="space-y-1">
                     <div className="flex items-center justify-between">
                       <span className={panelLabelClass}>{item.label}</span>
-                      <span className={panelSmallLabelClass}>{item.value}°</span>
+                      <span className={panelSmallLabelClass}>{item.desc}</span>
                     </div>
                     <input
                       type="range"

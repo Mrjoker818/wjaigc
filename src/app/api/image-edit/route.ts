@@ -1556,8 +1556,37 @@ export async function POST(request: NextRequest) {
 
       // Build angle description text
       // rotation: -90 to 90 (yaw), tilt: -30 to 60 (pitch), zoom: 0=特写 1=标准 2=广角
-      const yawText = rotation > 0 ? `${Math.abs(rotation)} degrees to the right` : rotation < 0 ? `${Math.abs(rotation)} degrees to the left` : 'front view';
-      const pitchText = tilt > 0 ? `${Math.abs(tilt)} degrees low angle looking up` : tilt < 0 ? `${Math.abs(tilt)} degrees high angle looking down` : 'level camera height';
+      const absRot = Math.abs(rotation);
+      const absTilt = Math.abs(tilt);
+
+      // Yaw (rotation) description - more visual and concrete
+      let yawDesc: string;
+      if (rotation === 0) {
+        yawDesc = 'front view, no horizontal rotation';
+      } else if (absRot <= 15) {
+        yawDesc = `slightly turned ${rotation > 0 ? 'to the right' : 'to the left'} (${absRot}°)`;
+      } else if (absRot <= 45) {
+        yawDesc = `turned ${rotation > 0 ? 'to the right' : 'to the left'} showing the ${rotation > 0 ? 'left' : 'right'} side (${absRot}°)`;
+      } else {
+        yawDesc = `heavily rotated ${rotation > 0 ? 'to the right' : 'to the left'}, almost a ${rotation > 0 ? 'right' : 'left'} profile view (${absRot}°)`;
+      }
+
+      // Pitch (tilt) description - strongly emphasize vertical angle change
+      let pitchDesc: string;
+      if (tilt === 0) {
+        pitchDesc = 'eye-level view, no vertical tilt';
+      } else if (tilt > 0 && tilt <= 15) {
+        pitchDesc = `slightly looking up from below, low-angle shot (${absTilt}° upward tilt) — camera is below subject level`;
+      } else if (tilt > 15 && tilt <= 35) {
+        pitchDesc = `looking up at the subject from below, worm's-eye view (${absTilt}° upward tilt) — camera is significantly below, seeing the underside and lower surfaces`;
+      } else if (tilt > 35) {
+        pitchDesc = `extreme low-angle looking far upward, subject towers above (${absTilt}° upward tilt) — camera is very low, dramatically emphasizing height and looking at the underside`;
+      } else if (tilt < 0 && absTilt <= 15) {
+        pitchDesc = `slightly looking down from above, high-angle shot (${absTilt}° downward tilt) — camera is above subject level`;
+      } else {
+        pitchDesc = `looking down at the subject from above, bird's-eye view (${absTilt}° downward tilt) — camera is high above, seeing the top and upper surfaces`;
+      }
+
       const zoomIdx = typeof zoom === 'number' ? zoom : 1;
       const dollyText = zoomIdx === 0 ? 'close-up shot, tight framing, subject fills the frame' : zoomIdx === 2 ? 'wide-angle shot, pulled back camera, shows more environment and context' : 'standard medium framing';
 
@@ -1569,12 +1598,22 @@ export async function POST(request: NextRequest) {
       // Build optimized prompt for multi-angle rotation
       // angleMode === 'image': 只旋转主体，背景不变
       // angleMode === 'camera': 虚拟摄像机运动，整个场景重新渲染
+      //
+      // CRITICAL: Prompt must STRONGLY convey BOTH yaw and pitch.
+      // Previous issue: tilt/pitch was weakly described ("viewed from...") and AI ignored it.
+      // Fix: Describe pitch as an explicit, independent vertical camera movement with
+      // visual language (worm's-eye, bird's-eye, underside, top surfaces).
       const multiAnglePrompt = prompt || (angleMode === 'image'
-        ? `Edit this image to show the main subject as if it has been physically rotated ${yawText} in 3D space, viewed from ${pitchText}, with ${dollyText}. The subject is a real 3D object — reconstruct its unseen sides based on context. Keep the same identity, face, clothing, product, design, materials, labels, text, colors, proportions, and lighting style. IMPORTANT: Only rotate the main subject itself, the background and surroundings must remain completely unchanged. Do NOT rotate the entire image canvas.`
-        : `Edit this image as if moving a virtual camera around the scene: camera orbits to yaw ${yawText}, pitch ${pitchText}, ${dollyText}. The scene and subject remain fixed in place. Re-render the entire scene from this new camera position, preserving all subjects, objects, materials, colors, environment, and mood. Infer unseen geometry and surfaces based on the visible context. Do NOT rotate the 2D image canvas.`);
+        ? `Reconstruct this image with the subject rotated in 3D. The subject is now ${yawDesc}. Additionally, the vertical viewing angle has changed: ${pitchDesc}. Framing: ${dollyText}. You MUST apply BOTH the horizontal rotation AND the vertical tilt — they are equally important. The subject is a real 3D object, so infer its unseen sides, top, and bottom based on context. Keep the same identity, face, clothing, product, design, materials, labels, text, colors, proportions, and lighting style. IMPORTANT: Only transform the main subject, the background must remain completely unchanged. Do NOT simply rotate the 2D image canvas.`
+        : `Re-render this scene from a completely new camera position. The camera has moved: horizontally ${yawDesc}, and vertically ${pitchDesc}. Framing: ${dollyText}. You MUST apply BOTH the horizontal orbit AND the vertical tilt — they are equally important camera movements. The scene and subject remain fixed in place. Re-render everything from this new viewpoint, preserving all subjects, objects, materials, colors, environment, and mood. Infer unseen geometry, top surfaces, and undersides based on visible context. Do NOT simply rotate the 2D image canvas.`);
 
       // Resolve image to base64 for maximum content preservation
       const multiAngleBase64 = await resolveImageToBase64(imageUrl);
+
+      // Calculate strength based on total angle change
+      // Larger angle changes need higher strength so AI doesn't just reproduce the original
+      const totalAngleChange = Math.sqrt(absRot * absRot + absTilt * absTilt);
+      const multiAngleStrength = Math.min(1, Math.max(0.55, totalAngleChange / 100));
 
       // Strategy 1: Try /images/edits endpoint with input_fidelity: 'high'
       // This is the correct approach for "edit this image from a different angle"
@@ -1590,7 +1629,8 @@ export async function POST(request: NextRequest) {
             size: maAspectRatio,
             n: 1,
             image: multiAngleBase64,
-            input_fidelity: angleMode === 'image' ? 'medium' : 'high',
+            strength: multiAngleStrength,
+            input_fidelity: 'high',
           }), '多角度(edits)', '/images/edits');
           console.info(`[multi-angle] Successfully used /images/edits endpoint`);
         } else {
@@ -1612,7 +1652,8 @@ export async function POST(request: NextRequest) {
           n: 1,
           image_urls: [imageUrl],
           ...(multiAngleBase64 ? { image: multiAngleBase64 } : {}),
-          input_fidelity: angleMode === 'image' ? 'medium' : 'high',
+          strength: multiAngleStrength,
+          input_fidelity: 'high',
         }), '多角度(generations)');
       }
 
