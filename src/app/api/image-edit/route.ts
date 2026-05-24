@@ -716,8 +716,8 @@ async function submitImageTask(
     }
 
     // 清理常见 API 错误信息，提供更友好的中文提示
-    if (errorMsg.includes('ratio or price') || errorMsg.includes('not configured')) {
-      throw new ModelCapabilityError(`当前模型不支持此操作，尝试回退到视觉模型...`);
+    if (errorMsg.includes('ratio or price') || errorMsg.includes('not configured') || errorMsg.includes('宽高比不在允许') || errorMsg.includes('aspect ratio is not in the allowed') || errorMsg.includes('Invalid aspect ratio') || errorMsg.includes('not a valid size')) {
+      throw new ModelCapabilityError(`当前模型不支持此画面比例，尝试切换到标准比例...`);
     }
     if (errorMsg.includes('image_urls') || errorMsg.includes('mask_image') || errorMsg.includes('image editing')) {
       throw new ModelCapabilityError(`当前模型不支持图像编辑功能，尝试回退到视觉模型...`);
@@ -917,6 +917,7 @@ async function autoTrySubmitImageTask(
   endpoint: '/images/generations' | '/images/edits' = '/images/generations',
 ): Promise<{ taskId?: string; directUrl?: string; usedModel?: string }> {
   const errors: string[] = [];
+  let ratioRetryDone = false;
   
   for (const candidate of candidateModels) {
     try {
@@ -932,8 +933,33 @@ async function autoTrySubmitImageTask(
       errors.push(`${candidate.model}: ${errMsg}`);
       console.warn(`[image-edit] ${operation}: Model ${candidate.model} failed: ${errMsg}`);
       
-      // ModelCapabilityError → 继续尝试下一个模型
+      // ModelCapabilityError → 检查是否是宽高比问题，可以重试
       if (err instanceof ModelCapabilityError) {
+        if (!ratioRetryDone && (errMsg.includes('ratio') || errMsg.includes('宽高比') || errMsg.includes('aspect'))) {
+          // 宽高比不被支持，用 1:1 重试所有模型
+          console.warn(`[image-edit] ${operation}: Aspect ratio not supported, retrying with 1:1`);
+          ratioRetryDone = true;
+          // 重新尝试所有候选模型，但使用 1:1 比例
+          for (const retryCandidate of candidateModels) {
+            try {
+              const retryBody = buildRequestBody(retryCandidate.model);
+              // 强制设置 size 为 1:1
+              if (retryBody.size) retryBody.size = '1:1';
+              const retryResult = await submitImageTask(retryCandidate.apiBaseUrl, retryCandidate.apiKey, retryBody, endpoint, {
+                baseUrl: retryCandidate.apiBaseUrl,
+                advancedParams: retryCandidate.advancedParams,
+              });
+              return { ...retryResult, usedModel: retryCandidate.model };
+            } catch (retryErr: unknown) {
+              const retryErrMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+              errors.push(`${retryCandidate.model}(1:1): ${retryErrMsg}`);
+              if (retryErr instanceof ModelCapabilityError) continue;
+              const nr = retryErrMsg.includes('Invalid API key') || retryErrMsg.includes('invalid api_key');
+              if (nr) throw retryErr;
+              continue;
+            }
+          }
+        }
         continue;
       }
       // 不可重试的致命错误（认证/配额等）→ 直接抛出

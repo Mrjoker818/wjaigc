@@ -1,5 +1,22 @@
 'use client';
 
+/** 标准画面比例列表（与后端 SUPPORTED_RATIOS 一致） */
+const STANDARD_RATIOS = ['1:1','2:3','3:2','3:4','4:3','4:5','5:4','9:16','16:9','21:9'] as const;
+
+/** 将任意宽高比化简为最接近的标准比例字符串，如 768:1024 → "3:4" */
+function findClosestStandardRatio(w: number, h: number): string {
+  if (w <= 0 || h <= 0) return '1:1';
+  const ratio = w / h;
+  let best = '1:1';
+  let bestDiff = Infinity;
+  for (const r of STANDARD_RATIOS) {
+    const [rw, rh] = r.split(':').map(Number);
+    const diff = Math.abs(ratio - rw / rh);
+    if (diff < bestDiff) { bestDiff = diff; best = r; }
+  }
+  return best;
+}
+
 import React, { useState, useRef, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import {
   Plus, Trash2, Copy, Download, Image as ImageIcon,
@@ -4170,7 +4187,7 @@ export function InfiniteCanvas({
           prompt: img.prompt || img.modifyPrompt || '', // 传图片描述给后端，让AI知道原图内容
           targetWidth: targetW,
           targetHeight: targetH,
-          aspectRatio: `${origW}:${origH}`,
+          aspectRatio: findClosestStandardRatio(origW, origH),
           model: modelInfo.model,
           apiKey,
           providerId: modelInfo.providerId || getCurrentProviderId(),
@@ -4302,7 +4319,7 @@ export function InfiniteCanvas({
         body: JSON.stringify({
           action: 'remove_background',
           imageUrl: img.url,
-          aspectRatio: `${img.originalWidth || img.width}:${img.originalHeight || img.height}`,
+          aspectRatio: findClosestStandardRatio(img.originalWidth || img.width, img.originalHeight || img.height),
           model: modelInfo.model,
           apiKey,
           providerId: modelInfo.providerId || getCurrentProviderId(),
@@ -4588,7 +4605,7 @@ export function InfiniteCanvas({
           rotation: multiAngleRotation,
           tilt: multiAngleTilt,
           zoom: multiAngleZoom,
-          aspectRatio: img.aspectRatio || `${img.originalWidth || Math.round(img.width)}:${img.originalHeight || Math.round(img.height)}`,
+          aspectRatio: (() => { const ar = img.aspectRatio; if (ar && STANDARD_RATIOS.includes(ar as any)) return ar; return findClosestStandardRatio(img.originalWidth || Math.round(img.width), img.originalHeight || Math.round(img.height)); })(),
           originalWidth: img.originalWidth || Math.round(img.width),
           originalHeight: img.originalHeight || Math.round(img.height),
           model: modelInfo.model,
@@ -5077,7 +5094,7 @@ export function InfiniteCanvas({
           maskImage: maskBase64,
           prompt,
           editMode: currentEditMode as 'erase' | 'mask',
-          aspectRatio: `${currentEditImg.originalWidth || currentEditImg.width || 1}:${currentEditImg.originalHeight || currentEditImg.height || 1}`,
+          aspectRatio: currentEditImg.aspectRatio && STANDARD_RATIOS.includes(currentEditImg.aspectRatio as any) ? currentEditImg.aspectRatio : findClosestStandardRatio(currentEditImg.originalWidth || currentEditImg.width || 1, currentEditImg.originalHeight || currentEditImg.height || 1),
           model: modelInfo.model,
           apiKey,
           providerId: modelInfo.providerId || getCurrentProviderId(),
