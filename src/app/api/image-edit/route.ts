@@ -1596,16 +1596,18 @@ export async function POST(request: NextRequest) {
       const maAspectRatio = body.aspectRatio || findClosestAspectRatio(`${maOrigW}:${maOrigH}`);
 
       // Build optimized prompt for multi-angle rotation
-      // angleMode === 'image': 只旋转主体，背景不变
-      // angleMode === 'camera': 虚拟摄像机运动，整个场景重新渲染
+      // ============================================================
+      // 核心原则：多角度始终应用于整个画面/场景，而非只旋转单个元素。
+      // 当视角改变时，场景中所有元素（主体、背景、前景）都应该
+      // 一起产生3D透视变化，这样结果才真实自然。
       //
-      // CRITICAL: Prompt must STRONGLY convey BOTH yaw and pitch.
-      // Previous issue: tilt/pitch was weakly described ("viewed from...") and AI ignored it.
-      // Fix: Describe pitch as an explicit, independent vertical camera movement with
-      // visual language (worm's-eye, bird's-eye, underside, top surfaces).
+      // 两种模式的区别在于"变化焦点"而非"变化范围"：
+      // - 主体模式：焦点是主体的新侧面/新角度，整幅画面随之调整
+      // - 摄像头模式：焦点是虚拟摄像机的新位置，整幅画面随之调整
+      // ============================================================
       const multiAnglePrompt = prompt || (angleMode === 'image'
-        ? `Reconstruct this image with the subject rotated in 3D. The subject is now ${yawDesc}. Additionally, the vertical viewing angle has changed: ${pitchDesc}. Framing: ${dollyText}. You MUST apply BOTH the horizontal rotation AND the vertical tilt — they are equally important. The subject is a real 3D object, so infer its unseen sides, top, and bottom based on context. Keep the same identity, face, clothing, product, design, materials, labels, text, colors, proportions, and lighting style. IMPORTANT: Only transform the main subject, the background must remain completely unchanged. Do NOT simply rotate the 2D image canvas.`
-        : `Re-render this scene from a completely new camera position. The camera has moved: horizontally ${yawDesc}, and vertically ${pitchDesc}. Framing: ${dollyText}. You MUST apply BOTH the horizontal orbit AND the vertical tilt — they are equally important camera movements. The scene and subject remain fixed in place. Re-render everything from this new viewpoint, preserving all subjects, objects, materials, colors, environment, and mood. Infer unseen geometry, top surfaces, and undersides based on visible context. Do NOT simply rotate the 2D image canvas.`);
+        ? `Reconstruct this entire image from a new 3D viewing angle. The main subject is now ${yawDesc}, and the vertical viewpoint has changed: ${pitchDesc}. Framing: ${dollyText}. IMPORTANT: The ENTIRE scene must be re-rendered — subject, background, foreground, and all surrounding elements should shift together in a coherent 3D perspective. Do NOT isolate and rotate only the subject while leaving the background flat and unchanged. The subject is a real 3D object in a real 3D environment, so infer its unseen sides, top, and bottom, and also infer how the environment would look from this new angle. Keep the same identity, face, clothing, product, design, materials, labels, text, colors, proportions, and lighting style. Do NOT simply rotate the 2D image canvas.`
+        : `Re-render this entire scene from a completely new camera position. The camera has moved: horizontally ${yawDesc}, and vertically ${pitchDesc}. Framing: ${dollyText}. You MUST apply BOTH the horizontal orbit AND the vertical tilt — they are equally important camera movements. The scene and subject remain fixed in place, but the ENTIRE image is re-rendered from this new viewpoint — every object, surface, shadow, and background element shifts naturally with the new perspective. Preserve all subjects, objects, materials, colors, environment, and mood. Infer unseen geometry, top surfaces, and undersides based on visible context. Do NOT simply rotate the 2D image canvas.`);
 
       // Resolve image to base64 for maximum content preservation
       const multiAngleBase64 = await resolveImageToBase64(imageUrl);

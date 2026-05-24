@@ -8702,8 +8702,8 @@ export function InfiniteCanvas({
 
                 <div className={`text-xs leading-relaxed rounded-xl px-3 py-2 ${isMonochrome ? 'bg-gray-50 text-gray-500' : 'bg-[#0a0a0a]/90 text-[#888]'}`}>
                   {multiAngleMode === 'image'
-                    ? '主体模式：拖动立方体或调整滑块设定角度，AI 会推断隐藏侧面并生成转角后的摄影棚图。'
-                    : '摄像头模式：拖动球体或调整滑块设定视角，AI 会移动虚拟相机生成新机位、俯仰和推进效果。'}
+                    ? '主体模式：调整角度查看主体的新侧面，整幅画面会随视角一起变化，产生真实的3D透视效果。'
+                    : '摄像头模式：移动虚拟摄像机拍摄位置，整幅画面随新机位重新渲染，包括俯仰和推进效果。'}
                 </div>
 
                 {([
