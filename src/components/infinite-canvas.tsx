@@ -4633,7 +4633,7 @@ export function InfiniteCanvas({
       completeProcessingFrame(placeholderId, stableUrl, img.width, img.height, {
         originalWidth: img.originalWidth || Math.round(img.width),
         originalHeight: img.originalHeight || Math.round(img.height),
-        modifyPrompt: `AI伪3D摄影棚 / ${multiAngleMode === 'image' ? '主体转角' : '摄像机位'} / yaw ${multiAngleRotation}° / pitch ${multiAngleTilt}° / ${['特写', '标准', '广角'][multiAngleZoom]}`,
+        modifyPrompt: `AI视角变换 / ${multiAngleMode === 'image' ? '环绕观察' : '摄像机位移'} / 水平 ${multiAngleRotation}° / 垂直 ${multiAngleTilt}° / ${['特写', '标准', '广角'][multiAngleZoom]}`,
       });
       setActiveTool('none');
     } catch (e) {

@@ -1554,33 +1554,38 @@ export async function POST(request: NextRequest) {
       // 如果 /images/edits 不可用, 回退到 /images/generations + image_urls
       // ============================================================
 
-      // Build angle description text — ultra-concise camera language only
+      // Build angle description text — pure camera viewpoint language
       // rotation: -90 to 90 (yaw), tilt: -30 to 60 (pitch)
       // ============================================================
-      // 核心原则: 多角度 = 虚拟摄像机轨道移动 (orbit camera)
-      // 所有描述只用摄像机方位词, 禁止任何"旋转/转向/物体"措辞
-      // AI对短prompt的执行力远强于长prompt, 关键信息必须前置
+      // 核心原则:
+      // 1. 所有描述只描述"摄像机看到什么", 禁止"旋转/转向/物体移动"
+      // 2. 倾斜描述前置(之前被忽略), 与旋转同等重要
+      // 3. Prompt结构: 视角变化 → 场景重绘 → 空间一致
       // ============================================================
       const absRot = Math.abs(rotation);
       const absTilt = Math.abs(tilt);
 
-      // Orbit yaw — 极简摄像机方位描述
-      const yawDir = rotation > 0 ? 'right' : 'left';
-      const yawSide = rotation > 0 ? 'left' : 'right';
-      const cameraYawDesc = rotation === 0 ? 'camera facing front' :
-        absRot <= 20 ? `camera shifted slightly ${yawDir}, peeking at the ${yawSide} side` :
-        absRot <= 50 ? `camera orbited ${yawDir} ${absRot}°, now seeing the ${yawSide} side of everything` :
-        `camera orbited far ${yawDir} ${absRot}°, near side profile — everything seen from its ${yawSide}`;
+      // Camera pitch (tilt) — 倾斜描述, 使用视觉化场景语言
+      // ============================================================
+      // 关键: 不要只说"looking up/down", 要描述从新视角"能看到什么"
+      // 这样AI才能理解需要渲染什么样的新画面
+      // ============================================================
+      const pitchVisualDesc = tilt === 0 ? '' :
+        tilt > 0 && absTilt <= 15 ? `The camera is now slightly below the scene, so we can see a bit of the undersides and the ground stretches away upward.` :
+        tilt > 0 && absTilt <= 35 ? `The camera has dropped below the scene looking upward — we see undersides of objects, the ground plane rises away from us, and the sky fills the upper portion.` :
+        tilt > 0 ? `The camera is far below the scene looking steeply upward — undersides of all objects are clearly visible, the ground plane soars above us, and the scene towers overhead.` :
+        absTilt <= 15 ? `The camera is now slightly above the scene, so we can see a bit of the tops of objects and the ground extends away below.` :
+        absTilt <= 35 ? `The camera has risen above the scene looking downward — we see the tops of objects, the ground plane spreads out below us, and objects appear shorter in perspective.` :
+        `The camera is far above the scene looking steeply downward — tops of all objects are clearly visible, the ground plane fills the view, and objects appear very small in perspective.`;
 
-      // Orbit pitch — 极简摄像机高度描述
-      const cameraPitchDesc = tilt === 0 ? 'at eye level' :
-        tilt > 0 && absTilt <= 20 ? `looking up slightly from below (${absTilt}°)` :
-        tilt > 0 ? `looking up steeply from below (${absTilt}°), undersides visible` :
-        absTilt <= 20 ? `looking down slightly from above (${absTilt}°)` :
-        `looking down steeply from above (${absTilt}°), tops visible`;
+      // Camera yaw (rotation) — 水平旋转描述
+      const yawVisualDesc = rotation === 0 ? '' :
+        absRot <= 20 ? `The camera has moved slightly to the ${rotation > 0 ? 'right' : 'left'}, so we now see a bit more of the ${rotation > 0 ? 'left' : 'right'} side of the scene.` :
+        absRot <= 50 ? `The camera has moved to the ${rotation > 0 ? 'right' : 'left'}, so we now see the ${rotation > 0 ? 'left' : 'right'} side of everything in the scene — the ${rotation > 0 ? 'left' : 'right'} faces of objects become visible while the ${rotation > 0 ? 'right' : 'left'} faces start to turn away.` :
+        `The camera has moved far to the ${rotation > 0 ? 'right' : 'left'}, now showing the scene almost from the ${rotation > 0 ? 'left' : 'right'} side — we see the ${rotation > 0 ? 'left' : 'right'} profiles of everything.`;
 
       const zoomIdx = typeof zoom === 'number' ? zoom : 1;
-      const dollyText = zoomIdx === 0 ? 'close-up' : zoomIdx === 2 ? 'wide shot' : 'medium shot';
+      const dollyText = zoomIdx === 0 ? 'close-up view' : zoomIdx === 2 ? 'wide establishing shot' : 'medium shot';
 
       // Use original image aspect ratio for multi-angle generation
       const maOrigW = body.originalWidth || 1024;
@@ -1588,35 +1593,44 @@ export async function POST(request: NextRequest) {
       const maAspectRatio = body.aspectRatio || findClosestAspectRatio(`${maOrigW}:${maOrigH}`);
 
       // ============================================================
-      // 多角度 Prompt 策略 (v3 — 精简版)
+      // 多角度 Prompt 策略 (v4 — 场景统一版)
       //
       // 历史BUG分析:
       // v1: "subject turned 30° right" → AI独立旋转每个元素 → 分离
-      // v2: 长prompt + 详细规则 → AI关注度分散 → 部分元素不响应
+      // v2: 长prompt + "CRITICAL SPATIAL RULE" → AI关注度分散 → 部分元素不响应
+      // v3: 极简prompt "Orbit camera" + 动态fidelity → fidelity=low时AI过度自由→更严重分离
       //
-      // v3 修复策略:
-      // 1. 极简prompt (<60词), 让AI集中注意力执行单一指令
-      // 2. 第一句就是最核心的指令: "orbit camera"
-      // 3. 唯一约束: "single unified scene" (5个词, 比100词规则更有效)
-      // 4. 根据角度动态调整 input_fidelity:
-      //    - 小角度(≤15°): high — 保留细节, 微调视角
-      //    - 中角度(16-40°): medium — 平衡细节保留与重渲染自由
-      //    - 大角度(>40°): low — 让AI自由重渲染, 确保场景统一
-      //    (high fidelity + 大角度 = AI试图保留原图 → 部分元素不变 → 分离)
-      // 5. 提高strength下限: 0.65-1.0, 确保AI不会仅复制原图
+      // v4 修复策略:
+      // 1. input_fidelity 固定为 'medium' — 既不过度保留原图(导致部分不变), 也不过度自由(导致分离)
+      // 2. Prompt结构: 先描述视觉变化(what you see), 再要求场景统一(how to render)
+      // 3. 倾斜描述前置且详细(之前被忽略的问题), 使用"你能看到什么"而非"摄像机在哪儿"
+      // 4. strength 固定 0.75 — 中等偏上, 允许AI重新渲染但不至于脱离原图
+      // 5. 场景统一规则用自然语言: "as if taking a photo from a different angle"
+      //    而非技术约束: "maintain spatial relationships" (AI不太理解这种抽象概念)
       // ============================================================
 
-      // Dynamic input_fidelity based on angle magnitude
-      const totalAngleChange = Math.sqrt(absRot * absRot + absTilt * absTilt);
-      const fidelityLevel: 'high' | 'medium' | 'low' = totalAngleChange <= 15 ? 'high' : totalAngleChange <= 40 ? 'medium' : 'low';
+      // Fixed input_fidelity: 'medium' for all angles
+      // - 'high' causes AI to over-preserve original → some elements don't change → separation
+      // - 'low' causes AI to diverge too freely → elements scatter → worse separation
+      // - 'medium' is the sweet spot: AI understands the scene but has freedom to re-render
+      const multiAngleFidelity = 'medium' as const;
 
-      // Calculate strength — higher for larger angles to ensure full re-render
-      const multiAngleStrength = Math.min(1, Math.max(0.65, totalAngleChange / 80));
+      // Fixed strength: 0.75 — enough for perspective change, not so much that AI loses the scene
+      const multiAngleStrength = 0.75;
 
-      // Ultra-concise prompt — every word counts, front-load the key instruction
+      // Build prompt — structured for clarity and emphasis
+      // Key: Describe WHAT THE NEW VIEW LOOKS LIKE, not abstract camera movements
+      const angleChanges: string[] = [];
+      if (pitchVisualDesc) angleChanges.push(pitchVisualDesc);
+      if (yawVisualDesc) angleChanges.push(yawVisualDesc);
+      
+      const angleDesc = angleChanges.length > 0
+        ? angleChanges.join(' ')
+        : 'The camera stays at the same position.';
+
       const multiAnglePrompt = prompt || (angleMode === 'image'
-        ? `Orbit camera: ${cameraYawDesc}, ${cameraPitchDesc}, ${dollyText}. Render the ENTIRE scene as ONE unified 3D space from this new camera orbit position — all objects shift together coherently with their spatial relationships fully preserved.`
-        : `Camera repositioned: ${cameraYawDesc}, ${cameraPitchDesc}, ${dollyText}. Render the ENTIRE scene as ONE unified 3D space from this new camera position — all objects shift together coherently with their spatial relationships fully preserved.`);
+        ? `Re-render this entire image from a different camera viewpoint. ${angleDesc} The shot is a ${dollyText}. IMPORTANT: Re-draw the COMPLETE scene as one unified picture — every person, object, and background element must shift together naturally, as if you simply took a photo of the same scene from a different angle. Do NOT move or rotate any individual object separately.`
+        : `Re-render this entire image with the camera repositioned. ${angleDesc} The shot is a ${dollyText}. IMPORTANT: Re-draw the COMPLETE scene as one unified picture — every person, object, and background element must shift together naturally, as if you simply took a photo of the same scene from a different angle. Do NOT move or rotate any individual object separately.`);
 
       // Resolve image to base64 for maximum content preservation
       const multiAngleBase64 = await resolveImageToBase64(imageUrl);
@@ -1635,9 +1649,9 @@ export async function POST(request: NextRequest) {
             n: 1,
             image: multiAngleBase64,
             strength: multiAngleStrength,
-            input_fidelity: fidelityLevel,
+            input_fidelity: multiAngleFidelity,
           }), '多角度(edits)', '/images/edits');
-          console.info(`[multi-angle] Used /images/edits, fidelity=${fidelityLevel}, strength=${multiAngleStrength.toFixed(2)}, totalAngle=${totalAngleChange.toFixed(1)}°`);
+          console.info(`[multi-angle] Used /images/edits, fidelity=${multiAngleFidelity}, strength=${multiAngleStrength}, rotation=${rotation}, tilt=${tilt}`);
         } else {
           // No base64 available, skip edits and go straight to generations
           throw new ModelCapabilityError('No base64 image available for edits endpoint');
@@ -1656,7 +1670,7 @@ export async function POST(request: NextRequest) {
           image_urls: [imageUrl],
           ...(multiAngleBase64 ? { image: multiAngleBase64 } : {}),
           strength: multiAngleStrength,
-          input_fidelity: fidelityLevel,
+          input_fidelity: multiAngleFidelity,
         }), '多角度(generations)');
       }
 
