@@ -1546,31 +1546,30 @@ export async function POST(request: NextRequest) {
 
     if (action === 'multi_angle') {
       // ============================================================
-      // 多角度 (Multi-Angle)
+      // 多角度 (Multi-Angle) v7
       //
-      // 历史BUG总结与修复策略 (v6):
+      // 核心教训:
+      // 1. strength参数有毒 — OpenAI /images/edits 不支持strength,
+      //    APImart等提供商将strength解释为"重写N%的图像",
+      //    导致元素剧变。绝对不能传strength。
+      // 2. originalPrompt让AI变成文生图 — 当prompt包含场景描述时,
+      //    AI会忽略原图,从文字重新生成场景→元素全部改变。
+      // 3. prompt应该是"编辑指令"而非"画面描述" — 告诉AI做什么,
+      //    而非描述结果长什么样。
+      // 4. input_fidelity: 'high' 是唯一需要的保真控制 —
+      //    它告诉API"尽量保留原图的风格/色彩/细节"
       //
-      // v1-v2: "旋转主体" → 元素独立旋转 → 分离
-      // v3: 动态fidelity → 大角度fidelity=low → 元素发散更严重
-      // v4: "Orbit camera" → 太抽象, AI不理解
-      // v5: 描述"结果画面" → prompt过长(100+词), AI注意力分散
-      //     → 部分元素改变风格/色彩, 倾斜角度被忽略
-      //
-      // v6 核心策略 (极简 + 分离关注点):
-      // 1. prompt < 30词 — AI对短prompt执行力远强于长prompt
-      // 2. 只说两件事: "新视角是什么" + "保持原有风格"
-      // 3. 用标准摄影/绘画术语 (3/4 view, worm's-eye, bird's-eye)
-      // 4. 倾斜放在旋转前面 (pitch优先于yaw, 防止被忽略)
-      // 5. input_fidelity: 'high' — 保持原图风格
-      // 6. strength: 0.75 固定值 — 不动态调整, 避免不稳定
+      // v7 策略:
+      // - prompt: 纯编辑指令, 不含场景描述, <20词
+      // - 不传strength (让API用默认值)
+      // - input_fidelity: 'high'
+      // - 倾斜放在旋转前面
       // ============================================================
 
       const absRot = Math.abs(rotation);
       const absTilt = Math.abs(tilt);
 
-      // ── 视角描述: 使用标准摄影/绘画术语 ──
-      // 用"3/4 view""profile""worm's-eye"等术语
-      // 而非"camera moved""turned"等变换指令
+      // ── 视角术语 (标准摄影/绘画术语) ──
 
       // Tilt (俯仰) — 放在前面, 防止被AI忽略
       const pitchTerm = tilt === 0 ? '' :
@@ -1581,9 +1580,9 @@ export async function POST(request: NextRequest) {
         absTilt <= 45 ? 'high-angle' :
         "bird's-eye";
 
-      // Rotation (偏航) — 使用标准视角术语
+      // Rotation (偏航)
       const yawTerm = rotation === 0 ? '' :
-        absRot <= 25 ? (rotation > 0 ? 'slight left' : 'slight right') :
+        absRot <= 25 ? (rotation > 0 ? 'slightly left' : 'slightly right') :
         absRot <= 55 ? (rotation > 0 ? '3/4 left' : '3/4 right') :
         (rotation > 0 ? 'left profile' : 'right profile');
 
@@ -1591,7 +1590,7 @@ export async function POST(request: NextRequest) {
       const zoomIdx = typeof zoom === 'number' ? zoom : 1;
       const shotTerm = zoomIdx === 0 ? 'close-up' : zoomIdx === 2 ? 'wide shot' : '';
 
-      // 组合视角: pitch + yaw + shot
+      // 组合视角术语
       const viewParts: string[] = [];
       if (pitchTerm) viewParts.push(pitchTerm);
       if (yawTerm) viewParts.push(yawTerm);
@@ -1603,21 +1602,11 @@ export async function POST(request: NextRequest) {
       const maOrigH = body.originalHeight || 1024;
       const maAspectRatio = body.aspectRatio || findClosestAspectRatio(`${maOrigW}:${maOrigH}`);
 
-      // ── v6 Prompt: 极简, <30词 ──
-      // 结构: [场景描述] + [视角术语] + [风格保持]
-      // 不使用: "camera moved"/"rotate"/"orbit"/"transform"等变换词
-      const sceneBase = originalPrompt ? originalPrompt.trim() : '';
-
-      // 极简prompt: 场景 + 视角 + 风格保持(仅6个词)
-      const multiAnglePrompt = prompt || (sceneBase
-        ? `${sceneBase}, ${viewDesc} view. Same style, colors, details.`
-        : `${viewDesc} view of this scene. Same style, colors, details.`);
-
-      // ── v6 参数: 固定值, 不动态调整 ──
-      // input_fidelity: 'high' — 保持原图风格/材质/主体特征
-      // strength: 0.75 — 中等偏上, 允许视角变化但不脱离原图
-      //   (之前0.88太高中风格漂移, 0.65太低AI不改变视角)
-      const multiAngleStrength = 0.75;
+      // ── v7 Prompt: 纯编辑指令, 不含场景描述 ──
+      // 关键: 不使用originalPrompt! 那会让AI变成文生图
+      // 不使用变换词(camera/rotate/orbit/move), 那会让AI独立变换元素
+      // 只用: "Show this image from [视角] view"
+      const multiAnglePrompt = prompt || `Show this image from a ${viewDesc} view`;
 
       // Resolve image to base64 for maximum content preservation
       const multiAngleBase64 = await resolveImageToBase64(imageUrl);
@@ -1628,23 +1617,22 @@ export async function POST(request: NextRequest) {
 
       try {
         if (multiAngleBase64) {
-          // multiAngleBase64 is already a full data URL (data:image/xxx;base64,...), use directly
           result = await autoTrySubmitImageTask(candidateModels, (m) => ({
             model: m,
             prompt: multiAnglePrompt,
             size: maAspectRatio,
             n: 1,
             image: multiAngleBase64,
-            strength: multiAngleStrength,
+            // ★ 不传strength! OpenAI /images/edits不支持,
+            //   其他提供商可能将strength解释为"重写N%的图像"
+            //   导致元素剧变。让API使用默认值。
             input_fidelity: 'high' as const,
           }), '多角度(edits)', '/images/edits');
-          console.info(`[multi-angle] Used /images/edits, fidelity=high, strength=${multiAngleStrength}, rotation=${rotation}, tilt=${tilt}, hasOriginalPrompt=${!!originalPrompt}`);
+          console.info(`[multi-angle] Used /images/edits, fidelity=high, no strength, rotation=${rotation}, tilt=${tilt}`);
         } else {
-          // No base64 available, skip edits and go straight to generations
           throw new ModelCapabilityError('No base64 image available for edits endpoint');
         }
       } catch (editsErr: unknown) {
-        // Strategy 2: Fallback to /images/generations with image_urls
         const editsErrMsg = editsErr instanceof Error ? editsErr.message : String(editsErr);
         console.warn(`[multi-angle] /images/edits failed: ${editsErrMsg}, falling back to /images/generations`);
         usedEndpoint = '/images/generations';
@@ -1656,8 +1644,7 @@ export async function POST(request: NextRequest) {
           n: 1,
           image_urls: [imageUrl],
           ...(multiAngleBase64 ? { image: multiAngleBase64 } : {}),
-          strength: multiAngleStrength,
-          input_fidelity: 'high' as const,
+          // ★ 同样不传strength
         }), '多角度(generations)');
       }
 
