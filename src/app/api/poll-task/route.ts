@@ -157,10 +157,11 @@ export async function POST(request: NextRequest) {
         }, { status: 200 });
       }
       // ★ 关键修复：queued / processing 状态不直接返回！
-      // 对于 generate 类型的任务（远端异步），必须继续查询远端API获取真实状态
-      // 否则永远返回内存中的旧状态，导致超时
-      if (registryTask.type !== 'generate') {
-        // 非 generate 类型（agent-edit/image-edit 等）由后端自行更新 registry，直接返回
+      // 对于所有远端异步任务类型，必须继续查询远端API获取真实状态
+      // 只有纯本地任务（edit/agent-edit）才由后端自行更新 registry，直接返回
+      const LOCAL_TASK_TYPES = ['edit', 'agent-edit'];
+      if (LOCAL_TASK_TYPES.includes(registryTask.type)) {
+        // 纯本地任务：由后端自行更新 registry，直接返回当前状态
         return NextResponse.json({
           success: true,
           status: registryTask.status,
@@ -168,7 +169,7 @@ export async function POST(request: NextRequest) {
           label: registryTask.label,
         }, { status: 200 });
       }
-      // generate 类型：继续往下走，查询远端 API 获取真实状态并更新 registry
+      // 远端异步任务（generate/mask/erase/outpaint/multi-angle/removebg 等）：继续往下走，查询远端 API
     }
 
     if (!taskId) {
@@ -178,21 +179,46 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const provider = providerId ? await findProviderById(providerId)
-      : await findProviderForModel(model || '', 'imageEdit')
-      || await findProviderForModel(model || '', 'image')
-      || await findProviderForModel(model || '', 'universal');
-    const apiKey = provider?.apiKey;
-    const apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || '');
-    if (!apiKey || !apiBaseUrl) {
-      console.error(`[poll-task] No API provider for taskId=${taskId}, model=${model}, providerId=${providerId}`);
-      return NextResponse.json({ success: false, error: 'No API provider configured for image polling' }, { status: 400 });
+    // ★ 查找 API 提供商：优先使用 task-registry 中存储的提供商信息
+    // （image-edit 注册异步任务时存储了 apiBaseUrl/apiKey/advancedParams）
+    const regInfoForProvider = getTaskInfo(taskId);
+    const regResultForProvider = (regInfoForProvider?.result as Record<string, unknown>) || {};
+    const regApiBaseUrl = regResultForProvider.apiBaseUrl as string | undefined;
+    const regApiKey = regResultForProvider.apiKey as string | undefined;
+    const regAdvancedParams = regResultForProvider.advancedParams as Record<string, string> | undefined;
+    const regUsedModel = regResultForProvider.usedModel as string | undefined;
+
+    let apiKey: string | undefined;
+    let apiBaseUrl: string;
+    let profile: ApiCompatProfile;
+    let providerName = 'unknown';
+
+    if (regApiBaseUrl && regApiKey) {
+      // ★ 从 task-registry 获取的提供商信息（最准确，由 image-edit 提交时保存）
+      apiKey = regApiKey;
+      apiBaseUrl = normalizeApiBaseUrl(regApiBaseUrl);
+      profile = resolveCompatProfile({ baseUrl: regApiBaseUrl, advancedParams: regAdvancedParams });
+      providerName = `registry(${regUsedModel || 'unknown'})`;
+      console.log(`[poll-task] Using registry-stored provider for taskId=${taskId}, model=${regUsedModel || 'unknown'}, baseUrl=${apiBaseUrl}`);
+    } else {
+      // 降级：从管理员配置查找提供商
+      const provider = providerId ? await findProviderById(providerId)
+        : await findProviderForModel(model || regUsedModel || '', 'imageEdit')
+        || await findProviderForModel(model || regUsedModel || '', 'image')
+        || await findProviderForModel(model || regUsedModel || '', 'universal');
+      apiKey = provider?.apiKey;
+      apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || '');
+      providerName = provider?.name || 'unknown';
+      if (!apiKey || !apiBaseUrl) {
+        console.error(`[poll-task] No API provider for taskId=${taskId}, model=${model}, providerId=${providerId}`);
+        return NextResponse.json({ success: false, error: 'No API provider configured for image polling' }, { status: 400 });
+      }
+      profile = resolveCompatProfile(provider);
     }
 
     // 解析兼容性档案 - 确定轮询 URL 格式
-    const profile: ApiCompatProfile = resolveCompatProfile(provider);
     const pollUrl = buildPollUrl(apiBaseUrl, taskId, profile);
-    console.log(`[poll-task] Polling taskId=${taskId}, provider=${provider.name}, model=${model}, pollUrl=${pollUrl?.substring(0, 100)}...`);
+    console.log(`[poll-task] Polling taskId=${taskId}, provider=${providerName}, model=${model || regUsedModel || ''}, pollUrl=${pollUrl?.substring(0, 100)}...`);
 
     if (!pollUrl) {
       // 该提供商不支持轮询（直接返回模式），不应该到这里
@@ -559,14 +585,30 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        await appendUserJsonl(userId, 'images', { type: 'completed', providerId: provider?.id || 'env', model, taskId, imageUrl: pollResult.imageUrl });
+        await appendUserJsonl(userId, 'images', { type: 'completed', providerId: providerName, model: model || regUsedModel || '', taskId, imageUrl: pollResult.imageUrl });
       }
       // ★ 更新任务注册中心状态（包含 result，后续 poll 可直接从 registry 返回）
-      // 保留原有 result 中的 engine 等元数据
+      // 保留原有 result 中的 engine/cropInfo 等元数据
       const regInfo = getTaskInfo(taskId);
       const existingResult = (regInfo?.result as Record<string, unknown>) || {};
       const maskUrl = (pollResult as Record<string, unknown>).maskUrl as string | undefined;
       updateTaskProgress(taskId, { status: 'completed', progress: 100, result: { ...existingResult, imageUrl: pollResult.imageUrl, maskUrl: maskUrl || '' } });
+
+      // ★ 将 cropInfo（蒙版修图需要）和 targetWidth/Height（扩展需要）等元数据附加到 pollResult
+      if (existingResult.cropInfo) {
+        (pollResult as Record<string, unknown>).cropInfo = existingResult.cropInfo;
+      }
+      if (existingResult.outpaintInfo) {
+        const oi = existingResult.outpaintInfo as Record<string, number>;
+        if (oi.targetW) (pollResult as Record<string, unknown>).targetWidth = oi.targetW;
+        if (oi.targetH) (pollResult as Record<string, unknown>).targetHeight = oi.targetH;
+      }
+      if (existingResult.compositeInfo) {
+        (pollResult as Record<string, unknown>).compositeInfo = existingResult.compositeInfo;
+      }
+      if (existingResult.usedModel) {
+        (pollResult as Record<string, unknown>).usedModel = existingResult.usedModel;
+      }
       // ★ 同时更新本地完成缓存（Next.js dev模式下 registry 实例可能不一致）
       const cachedImageUrl = pollResult.imageUrl as string | undefined;
       const cachedMaskUrl = (pollResult as Record<string, unknown>).maskUrl as string | undefined;

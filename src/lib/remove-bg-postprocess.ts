@@ -16,6 +16,14 @@
 import { saveImageFile } from './server-data-root';
 import { fetchImageBuffer } from './fetch-image-buffer';
 
+/** 计算数组中位数 */
+function median(arr: number[]): number {
+  if (arr.length === 0) return 0;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
+
 /** RemoveBG 后处理结果 */
 export interface RemoveBGResult {
   /** 透明背景 PNG URL */
@@ -163,7 +171,93 @@ export async function postProcessAIRemoveBG(
       }
     }
 
-    // 策略2: AI 结果没有有效透明通道，用本地 rembg 生成蒙版（使用高质量模型）
+    // 策略2: AI 结果没有有效透明通道，尝试从 AI 结果中检测并移除棋盘格/纯色背景
+    if (aiBuffer) {
+      try {
+        const sharp = (await import('sharp')).default;
+        const { data: raw, info } = await sharp(aiBuffer)
+          .ensureAlpha()
+          .raw()
+          .toBuffer({ resolveWithObject: true });
+
+        const w = info.width;
+        const h = info.height;
+
+        // 采样边缘像素（上下左右各 3px 条带），统计最常见的颜色作为背景色
+        const edgeSamples: number[][] = [];
+        const bandWidth = 3;
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            // 仅取边缘条带
+            if (x < bandWidth || x >= w - bandWidth || y < bandWidth || y >= h - bandWidth) {
+              const idx = (y * w + x) * 4;
+              edgeSamples.push([raw[idx], raw[idx + 1], raw[idx + 2]]);
+            }
+          }
+        }
+
+        // 计算边缘颜色中位数作为背景色
+        const bgR = median(edgeSamples.map(s => s[0]));
+        const bgG = median(edgeSamples.map(s => s[1]));
+        const bgB = median(edgeSamples.map(s => s[2]));
+
+        // 使用容差检测背景色像素（允许一定色彩变化，适应棋盘格和渐变背景）
+        const bgTolerance = 55;
+        const pixelCount = w * h;
+        const alphaData = Buffer.alloc(pixelCount);
+        let foregroundCount = 0;
+
+        for (let i = 0; i < pixelCount; i++) {
+          const idx = i * 4;
+          const dr = raw[idx] - bgR;
+          const dg = raw[idx + 1] - bgG;
+          const db = raw[idx + 2] - bgB;
+          const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+          // 距离背景色远的像素是前景，设为不透明
+          if (dist > bgTolerance) {
+            alphaData[i] = 255;
+            foregroundCount++;
+          } else {
+            alphaData[i] = 0;
+          }
+        }
+
+        const foregroundRatio = foregroundCount / pixelCount;
+        console.log(`[postProcessAIRemoveBG] Edge-based bg detection: bg=(${bgR},${bgG},${bgB}), tolerance=${bgTolerance}, foreground=${(foregroundRatio * 100).toFixed(1)}%`);
+
+        // 前景占比在合理范围（5%-95%）时，认为检测有效
+        if (foregroundRatio > 0.05 && foregroundRatio < 0.95) {
+          // 将原始 RGB 与新 alpha 合成
+          const newRaw = Buffer.alloc(pixelCount * 4);
+          for (let i = 0; i < pixelCount; i++) {
+            const idx = i * 4;
+            newRaw[idx] = raw[idx];
+            newRaw[idx + 1] = raw[idx + 1];
+            newRaw[idx + 2] = raw[idx + 2];
+            newRaw[idx + 3] = alphaData[i];
+          }
+
+          const resultPng = await sharp(newRaw, { raw: { width: w, height: h, channels: 4 } })
+            .png()
+            .toBuffer();
+
+          // 保存黑白蒙版
+          const maskPng = await sharp(alphaData, { raw: { width: w, height: h, channels: 1 } })
+            .png()
+            .toBuffer();
+
+          console.log('[postProcessAIRemoveBG] Edge-based bg detection succeeded, using AI result with extracted foreground');
+          return await postProcessLocalRemoveBG(
+            resultPng.toString('base64'),
+            maskPng.toString('base64')
+          );
+        }
+      } catch (bgDetectErr) {
+        console.warn('[postProcessAIRemoveBG] Edge-based background detection failed:', bgDetectErr);
+      }
+    }
+
+    // 策略3: AI 结果无法提取前景，用本地 rembg 生成蒙版（使用高质量模型）
     console.log('[postProcessAIRemoveBG] Using rembg to generate mask from original image');
     const { generateRemoveBgMask } = await import('./image-tools/iopaint-client');
     const maskResult = await generateRemoveBgMask(origBuffer, 'isnet-general-use');

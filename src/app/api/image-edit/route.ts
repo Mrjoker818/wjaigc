@@ -1593,6 +1593,21 @@ export async function POST(request: NextRequest) {
       if (result?.directUrl) {
         return NextResponse.json({ success: true, imageUrl: result.directUrl, action, usedModel: result.usedModel, endpoint: usedEndpoint });
       }
+      // ★ 注册异步多角度任务（存储提供商信息，供 poll-task 轮询远端API）
+      if (result?.taskId) {
+        const maCandidate = candidateModels.find(c => c.model === result.usedModel) || candidateModels[0];
+        registerTask(result.taskId, 'multi-angle', '多角度旋转');
+        updateTaskProgress(result.taskId, {
+          status: 'processing',
+          progress: 10,
+          result: {
+            usedModel: result.usedModel || maCandidate?.model,
+            apiBaseUrl: maCandidate?.apiBaseUrl,
+            apiKey: maCandidate?.apiKey,
+            advancedParams: maCandidate?.advancedParams,
+          }
+        });
+      }
       return NextResponse.json({ success: true, taskId: result?.taskId, action, prompt: multiAnglePrompt, usedModel: result?.usedModel, endpoint: usedEndpoint });
     }
 
@@ -1914,12 +1929,13 @@ export async function POST(request: NextRequest) {
         if (result.taskId) {
           // 异步模式：返回 taskId 给前端轮询，poll-task 会做后处理
           console.log(`[remove_background] AI returned taskId=${result.taskId}, returning to frontend for polling`);
+          const rbUsedCandidate = candidateModels.find(c => c.model === result.usedModel) || candidateModels[0];
           registerTask(result.taskId, 'generate', 'AI 移除背景');
           updateTaskProgress(result.taskId, {
             status: 'processing',
             progress: 10,
             label: 'AI 正在识别主体并移除背景...',
-            result: { engine: 'ai-background-remove', usedModel: result.usedModel, originalImageUrl: imageUrl },
+            result: { engine: 'ai-background-remove', usedModel: result.usedModel, originalImageUrl: imageUrl, apiBaseUrl: rbUsedCandidate?.apiBaseUrl, apiKey: rbUsedCandidate?.apiKey, advancedParams: rbUsedCandidate?.advancedParams },
           });
           return NextResponse.json({
             success: true,
@@ -2143,10 +2159,10 @@ export async function POST(request: NextRequest) {
               n: 1,
               image_urls: [eraseImageDataUrl],
               mask_image: eraseMaskDataUrl,
-              strength: 0.72,
+              strength: 0.85,
             };
 
-            console.log(`[inpaint] AI erase attempt: full image ${aiInputW}x${aiInputH}, size=${eraseEffectiveSize}, strength=0.72`);
+            console.log(`[inpaint] AI erase attempt: full image ${aiInputW}x${aiInputH}, size=${eraseEffectiveSize}, strength=0.85`);
 
             const eraseResult = await autoTrySubmitImageTask(
               candidateModels,
@@ -2202,13 +2218,24 @@ export async function POST(request: NextRequest) {
               eraseUsedAI = true;
               return NextResponse.json({ success: true, imageUrl: resultDataUrl, action, engine: 'ai-erase' });
             } else if (eraseResult.taskId) {
-              // 异步模式：尝试服务器端轮询（最多3分钟），超时则降级到BFS
-              const ERASE_POLL_TIMEOUT_MS = 180_000; // 3分钟服务器端轮询上限
+              // 异步模式：服务器端短时间轮询（30秒），超时则返回taskId让前端poll-task接管
+              const ERASE_POLL_TIMEOUT_MS = 30_000; // 30秒服务器端轮询上限
               const ERASE_POLL_INTERVAL_MS = 3000; // 3秒轮询间隔
               console.log(`[inpaint] AI erase async: taskId=${eraseResult.taskId}, server-side polling for up to ${ERASE_POLL_TIMEOUT_MS / 1000}s`);
 
-              // ★ 注册异步擦除任务
+              // ★ 注册异步擦除任务（存储提供商信息，供 poll-task 轮询远端API）
+              const eraseUsedCandidate = candidateModels.find(c => c.model === eraseResult.usedModel) || candidateModels[0];
               registerTask(eraseResult.taskId, 'erase', '擦除');
+              updateTaskProgress(eraseResult.taskId, {
+                status: 'processing',
+                progress: 10,
+                result: {
+                  usedModel: eraseResult.usedModel || eraseUsedCandidate?.model,
+                  apiBaseUrl: eraseUsedCandidate?.apiBaseUrl,
+                  apiKey: eraseUsedCandidate?.apiKey,
+                  advancedParams: eraseUsedCandidate?.advancedParams,
+                }
+              });
 
               // 服务器端轮询：尝试在超时内获取结果
               let asyncEraseSucceeded = false;
@@ -2326,6 +2353,27 @@ export async function POST(request: NextRequest) {
               if (!asyncEraseSucceeded) {
                 const elapsed = ((Date.now() - pollStart) / 1000).toFixed(0);
                 console.warn(`[inpaint] AI erase async server-side poll timed out after ${elapsed}s, returning taskId to client for continued polling`);
+
+                // ★ 注册异步擦除任务（存储提供商信息，供 poll-task 轮询远端API）
+                const eraseCandidate = candidateModels.find(c => c.model === eraseResult.usedModel) || candidateModels[0];
+                registerTask(eraseResult.taskId, 'erase', 'AI擦除');
+                updateTaskProgress(eraseResult.taskId, {
+                  status: 'processing',
+                  progress: 30,
+                  result: {
+                    usedModel: eraseResult.usedModel || eraseCandidate?.model,
+                    apiBaseUrl: eraseCandidate?.apiBaseUrl,
+                    apiKey: eraseCandidate?.apiKey,
+                    advancedParams: eraseCandidate?.advancedParams,
+                    compositeInfo: {
+                      aiInputW,
+                      aiInputH,
+                      origW,
+                      origH,
+                      maskDataUrl: eraseMaskDataUrl,
+                    },
+                  }
+                });
 
                 // ★ 不再直接降级到BFS，而是将taskId返回给前端继续轮询
                 // 前端会在轮询到结果后进行蒙版合成
@@ -2517,14 +2565,29 @@ export async function POST(request: NextRequest) {
       }
 
       // 异步结果 - 返回 taskId 给前端轮询，前端做蒙版合成
-      // ★ 注册异步蒙版修图任务
-      if (result.taskId) registerTask(result.taskId, 'mask', '蒙版修图');
+      // ★ 注册异步蒙版修图任务（存储提供商信息，供 poll-task 轮询远端API）
+      if (result.taskId) {
+        const usedCandidate = candidateModels.find(c => c.model === result.usedModel) || candidateModels[0];
+        registerTask(result.taskId, 'mask', '蒙版修图');
+        updateTaskProgress(result.taskId, {
+          status: 'processing',
+          progress: 10,
+          result: {
+            usedModel: result.usedModel || usedCandidate?.model,
+            apiBaseUrl: usedCandidate?.apiBaseUrl,
+            apiKey: usedCandidate?.apiKey,
+            advancedParams: usedCandidate?.advancedParams,
+            cropInfo,
+          }
+        });
+      }
       return NextResponse.json({
         success: true,
         taskId: result.taskId,
         action,
         cropInfo,
         engine: 'ai-api',
+        usedModel: result.usedModel,
       });
     }
 
@@ -2845,8 +2908,7 @@ export async function POST(request: NextRequest) {
       }
 
       // 异步结果 - 返回 taskId + 合成信息，前端轮询后需后端合成
-      // 为了简化，异步结果也返回 cropInfo 供前端合成
-      // ★ 注册异步 outpaint 任务到 task-registry，存储合成信息供 poll-task 使用
+      // ★ 注册异步 outpaint 任务到 task-registry，存储合成信息和提供商信息供 poll-task 使用
       if (result.taskId) {
         registerTask(result.taskId, 'outpaint', '扩展画面');
         updateTaskProgress(result.taskId, {
@@ -2855,6 +2917,10 @@ export async function POST(request: NextRequest) {
           result: {
             outpaintInfo: { offsetX, offsetY, srcW, srcH, targetW, targetH, origW, origH, scaleFactor, scaledTargetW, scaledTargetH, scaledOffsetX, scaledOffsetY, scaledSrcW, scaledSrcH },
             originalImageUrl: imageUrl,
+            usedModel: cm?.model,
+            apiBaseUrl: cm?.apiBaseUrl,
+            apiKey: cm?.apiKey,
+            advancedParams: cm?.advancedParams,
           }
         });
       }
