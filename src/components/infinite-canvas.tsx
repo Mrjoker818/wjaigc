@@ -5196,27 +5196,7 @@ export function InfiniteCanvas({
           return;
         }
 
-        // 异步结果前端蒙版合成
-        if (resultUrl && !syncResultUrl) {
-          try {
-            // 如果有 compositeInfo（服务器端轮询超时后返回），使用其中的蒙版数据
-            const compositeMask = compositeInfo?.maskDataUrl || maskBase64;
-            const compositeOrigW = compositeInfo?.origW || (currentEditImg.originalWidth || Math.round(currentEditImg.width));
-            const compositeOrigH = compositeInfo?.origH || (currentEditImg.originalHeight || Math.round(currentEditImg.height));
-            const compositeUrl = await compositeInpaintResult(
-              currentEditImg.url,
-              compositeMask,
-              resultUrl,
-              compositeOrigW,
-              compositeOrigH,
-              cropInfo,
-              editMode === 'erase' ? 'erase' : 'mask'
-            );
-            resultUrl = compositeUrl;
-          } catch (compositeErr) {
-            console.error('Composite inpaint failed, using raw result:', compositeErr);
-          }
-        }
+        // 异步蒙版/擦除结果：poll-task 已在后端完成蒙版合成，前端直接使用即可
 
         if (resultUrl) {
           updateProcessingFrame(placeholderId, { progress: 96, status: '正在合成编辑结果...' });

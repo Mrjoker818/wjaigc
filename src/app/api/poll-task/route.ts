@@ -565,6 +565,146 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        // ★ 蒙版修图/擦除异步结果后处理：poll-task 做蒙版合成，前端无需二次处理
+        // 当 image-edit 的 mask/erase 动作返回异步 taskId 时，
+        // poll-task 轮询到 AI 结果后，用蒙版合成回原图，确保结果与同步路径一致
+        const compositeRegistryInfo = getTaskInfo(taskId);
+        const compositeRegistryResult = (compositeRegistryInfo?.result as Record<string, unknown>) || {};
+        const compositeInfo = compositeRegistryResult.compositeInfo as Record<string, unknown> | undefined;
+        const taskType = compositeRegistryInfo?.type as string | undefined;
+        if ((taskType === 'mask' || taskType === 'erase') && compositeInfo && pollResult.imageUrl) {
+          try {
+            const originalImageUrl = compositeInfo.originalImageUrl as string | undefined;
+            const maskDataUrl = compositeInfo.maskDataUrl as string | undefined;
+            const cropInfoData = compositeInfo.cropInfo as Record<string, number> | undefined;
+            const origW = compositeInfo.origW as number | undefined;
+            const origH = compositeInfo.origH as number | undefined;
+            const aiInputW = compositeInfo.aiInputW as number | undefined;
+            const aiInputH = compositeInfo.aiInputH as number | undefined;
+
+            if (originalImageUrl && maskDataUrl && origW && origH) {
+              console.log(`[poll-task] Mask/erase composite for task ${taskId}, type=${taskType}, origW=${origW}, origH=${origH}`);
+
+              const sharp = (await import('sharp')).default;
+
+              // 获取原图和 AI 结果
+              const originalBuf = await fetchImageBuffer(originalImageUrl);
+              const aiResultBuf = await fetchImageBuffer(pollResult.imageUrl as string);
+
+              // 将 AI 结果 resize 到原图尺寸
+              const aiMeta = await sharp(aiResultBuf).metadata();
+              let resultOrigSize: Buffer;
+              const resW = aiMeta.width || aiInputW || origW;
+              const resH = aiMeta.height || aiInputH || origH;
+              if (resW !== origW || resH !== origH) {
+                let step1: Buffer;
+                if (aiInputW && aiInputH && (resW !== aiInputW || resH !== aiInputH)) {
+                  step1 = await sharp(aiResultBuf).resize(aiInputW, aiInputH, { fit: 'fill' }).png().toBuffer();
+                } else {
+                  step1 = aiResultBuf;
+                }
+                if (aiInputW !== origW || aiInputH !== origH) {
+                  resultOrigSize = await sharp(step1).resize(origW, origH, { fit: 'fill' }).png().toBuffer();
+                } else {
+                  resultOrigSize = step1;
+                }
+              } else {
+                resultOrigSize = aiResultBuf;
+              }
+
+              // 提取蒙版数据
+              const maskBase64 = maskDataUrl.replace(/^data:image\/\w+;base64,/, '');
+              const maskBuf = Buffer.from(maskBase64, 'base64');
+
+              if (cropInfoData && cropInfoData.cropW && cropInfoData.cropH) {
+                // 有 cropInfo：蒙版是裁剪区域的，需要合成到正确位置
+                const cropX = cropInfoData.cropX;
+                const cropY = cropInfoData.cropY;
+                const cropW = cropInfoData.cropW;
+                const cropH = cropInfoData.cropH;
+
+                // 将 AI 结果 resize 到裁剪区域尺寸
+                let resizedResult: Buffer;
+                if (resW !== cropW || resH !== cropH) {
+                  const innerResult = await sharp(resultOrigSize)
+                    .resize(cropW, cropH, { fit: 'inside', withoutEnlargement: true })
+                    .png()
+                    .toBuffer();
+                  const innerMeta = await sharp(innerResult).metadata();
+                  const padX = Math.floor((cropW - (innerMeta.width || cropW)) / 2);
+                  const padY = Math.floor((cropH - (innerMeta.height || cropH)) / 2);
+                  if (padX > 0 || padY > 0) {
+                    resizedResult = await sharp({
+                      create: { width: cropW, height: cropH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } }
+                    })
+                      .composite([{ input: innerResult, left: padX, top: padY, blend: 'over' }])
+                      .png()
+                      .toBuffer();
+                  } else {
+                    resizedResult = innerResult;
+                  }
+                } else {
+                  resizedResult = resultOrigSize;
+                }
+
+                // 用蒙版做柔边合成
+                const croppedSoftMask = await sharp(maskBuf)
+                  .threshold(127)
+                  .blur(12)
+                  .grayscale()
+                  .raw()
+                  .toBuffer();
+
+                const aiRaw = await sharp(resizedResult).ensureAlpha().raw().toBuffer();
+                for (let i = 0; i < cropW * cropH; i++) {
+                  aiRaw[i * 4 + 3] = croppedSoftMask[i];
+                }
+                const aiWithAlpha = await sharp(aiRaw, { raw: { width: cropW, height: cropH, channels: 4 } }).png().toBuffer();
+
+                // 合成回原图
+                const compositeResult = await sharp(originalBuf)
+                  .composite([{ input: aiWithAlpha, left: cropX, top: cropY, blend: 'over' }])
+                  .jpeg({ quality: 92 })
+                  .toBuffer();
+
+                const compositeDataUrl = `data:image/jpeg;base64,${compositeResult.toString('base64')}`;
+                pollResult.imageUrl = compositeDataUrl;
+                console.log(`[poll-task] Mask composite with cropInfo: JPEG (${(compositeResult.length / 1024).toFixed(0)}KB)`);
+              } else {
+                // 无 cropInfo：蒙版是全图尺寸的，直接做全图合成
+                const fullMask = await sharp(maskBuf)
+                  .threshold(127)
+                  .blur(12)
+                  .grayscale()
+                  .raw()
+                  .toBuffer();
+
+                const aiRaw = await sharp(resultOrigSize).ensureAlpha().raw().toBuffer();
+                for (let i = 0; i < origW * origH; i++) {
+                  aiRaw[i * 4 + 3] = fullMask[i];
+                }
+                const aiWithAlpha = await sharp(aiRaw, { raw: { width: origW, height: origH, channels: 4 } }).png().toBuffer();
+
+                const compositeResult = await sharp(originalBuf)
+                  .composite([{ input: aiWithAlpha, left: 0, top: 0, blend: 'over' }])
+                  .jpeg({ quality: 92 })
+                  .toBuffer();
+
+                const compositeDataUrl = `data:image/jpeg;base64,${compositeResult.toString('base64')}`;
+                pollResult.imageUrl = compositeDataUrl;
+                console.log(`[poll-task] Mask composite (full image): JPEG (${(compositeResult.length / 1024).toFixed(0)}KB)`);
+              }
+
+              // 清除 compositeInfo，避免前端再做二次合成
+              if (compositeRegistryResult.compositeInfo) {
+                compositeRegistryResult.compositeInfo = undefined;
+              }
+            }
+          } catch (maskCompositeErr) {
+            console.warn('[poll-task] Mask/erase composite failed, using raw AI result:', maskCompositeErr instanceof Error ? maskCompositeErr.message : maskCompositeErr);
+          }
+        }
+
         await appendUserJsonl(userId, 'images', { type: 'completed', providerId: providerName, model: model || regUsedModel || '', taskId, imageUrl: pollResult.imageUrl });
       }
       // ★ 更新任务注册中心状态（包含 result，后续 poll 可直接从 registry 返回）

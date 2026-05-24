@@ -372,7 +372,7 @@ export function adjustRequestForProfile(
 ): { body: Record<string, unknown>; endpoint: ImageEndpoint } {
   const { hasImage = false, isEditEndpoint = false } = options;
   // ★ 防御空 body 导致后续解构崩溃
-  let body = requestBody ? { ...requestBody } : {};
+  const body = requestBody ? { ...requestBody } : {};
 
   // --- Size format conversion ---
   if (profile.sizeFormat === 'pixel' && body.size && typeof body.size === 'string') {

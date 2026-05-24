@@ -1608,12 +1608,13 @@ export async function POST(request: NextRequest) {
       // 关键: 不用camera/rotate/orbit/move/transform等变换词
       // 只描述"新视角下的画面" + "保持一切外观不变"
       const multiAnglePrompt = prompt || (
-        `The same scene now viewed from a different angle: ${viewDescription}${zoomVisual}. ` +
-        `Every object, person, and element keeps exactly the same appearance, color, shape, ` +
-        `size, clothing, and position relative to each other. ` +
-        `The art style, color palette, and visual quality are identical. ` +
-        `Only the viewing angle has changed, as if the entire scene is a single 3D diorama ` +
-        `and we are simply looking at it from a different position.`
+        `Reimagine this EXACT scene from a new viewpoint: ${viewDescription}${zoomVisual}. ` +
+        `Every person, animal, object, building, tree, and detail must appear in the new view ` +
+        `with their front/back/side facing the new direction — they are NOT standing still ` +
+        `while only the ground changes. Every element physically rotates with the scene as one ` +
+        `rigid 3D world. Faces, bodies, buildings, and objects all show their new angle. ` +
+        `Keep every element's identity, color, style, and relative position unchanged. ` +
+        `This is the same world seen from a different position, not a different world.`
       );
 
       // Use original image aspect ratio
@@ -2438,6 +2439,7 @@ export async function POST(request: NextRequest) {
                     apiKey: eraseCandidate?.apiKey,
                     advancedParams: eraseCandidate?.advancedParams,
                     compositeInfo: {
+                      originalImageUrl: imageUrl,
                       aiInputW,
                       aiInputH,
                       origW,
@@ -2455,8 +2457,9 @@ export async function POST(request: NextRequest) {
                   action,
                   engine: 'ai-erase-async',
                   usedModel: eraseResult.usedModel,
-                  // 蒙版合成信息：前端轮询到结果后需要这些信息来合成
+                  // 蒙版合成信息：poll-task 轮询到结果后用这些数据做蒙版合成
                   compositeInfo: {
+                    originalImageUrl: imageUrl,
                     aiInputW,
                     aiInputH,
                     origW,
@@ -2636,8 +2639,8 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // 异步结果 - 返回 taskId 给前端轮询，前端做蒙版合成
-      // ★ 注册异步蒙版修图任务（存储提供商信息，供 poll-task 轮询远端API）
+      // 异步结果 - 返回 taskId 给前端轮询，poll-task 会做蒙版合成
+      // ★ 注册异步蒙版修图任务（存储提供商信息 + 合成所需数据，供 poll-task 轮询后做蒙版合成）
       if (result.taskId) {
         const usedCandidate = candidateModels.find(c => c.model === result.usedModel) || candidateModels[0];
         registerTask(result.taskId, 'mask', '蒙版修图');
@@ -2650,6 +2653,16 @@ export async function POST(request: NextRequest) {
             apiKey: usedCandidate?.apiKey,
             advancedParams: usedCandidate?.advancedParams,
             cropInfo,
+            // ★ 合成所需数据：poll-task 轮询到结果后用这些数据做蒙版合成
+            compositeInfo: {
+              originalImageUrl: imageUrl,
+              maskDataUrl: croppedMaskDataUrl,
+              cropInfo,
+              origW,
+              origH,
+              aiInputW: cropInfo?.cropW || origW,
+              aiInputH: cropInfo?.cropH || origH,
+            },
           }
         });
       }
