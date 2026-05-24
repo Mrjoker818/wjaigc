@@ -594,7 +594,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       console.warn('LLM collaboration failed, using original prompt:', llmErr);
     }
 
-    const editInstruction = `Edit this image according to the following instruction: ${effectivePrompt}. Maintain the overall composition and style while making the requested changes.`;
+    const editInstruction = `Edit this image according to the following instruction: ${effectivePrompt}. Maintain the overall composition and style while making the requested changes.${size ? ` Output image size: ${size}.` : ''}${quality ? ` Output quality: ${quality}.` : ''}`;
 
     // ========== 6. 调用 API（全兼容模式） ==========
     updateTaskStage(taskId, '编辑中');
@@ -723,6 +723,17 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     // 编辑指令
     contentParts.push({ type: 'text', text: editInstruction });
 
+    // 比例到像素尺寸映射（与 /images/edits 和 /images/generations 路径一致）
+    const sizeMap: Record<string, string> = {
+      '1:1': '1024x1024', '16:9': '1792x1024', '9:16': '1024x1792',
+      '4:3': '1024x768', '3:4': '768x1024', '2:3': '768x1024', '3:2': '1024x768',
+      '1:2': '512x1024', '2:1': '1024x512',
+      '1024': '1024x1024', '1536': '1536x1536', '2048': '2048x2048',
+    };
+    let outputSize = size;
+    if (sizeMap[size]) outputSize = sizeMap[size];
+    else if (size && !size.includes('x')) outputSize = `${size}x${size}`;
+
     // 构建 chat/completions 请求体
     const chatRequestBody: Record<string, unknown> = {
       model,
@@ -733,6 +744,11 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       max_tokens: 4096,
       stream: false,
     };
+
+    // ★ 将 size、quality、n 参数传递给 chat/completions（兼容提供商如 apimart 等会使用这些参数）
+    if (outputSize) chatRequestBody.size = outputSize;
+    if (quality) chatRequestBody.quality = quality;
+    if (count > 1) chatRequestBody.n = count;
 
     const chatResponse = await fetchWithV1Retry(
       effectiveBaseUrl,
@@ -885,6 +901,8 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                 messages: [{ role: 'user', content: contentParts }],
                 max_tokens: 4096,
                 stream: false,
+                ...(outputSize ? { size: outputSize } : {}),
+                ...(quality ? { quality } : {}),
               }),
               signal: AbortSignal.timeout(120000),
             });
