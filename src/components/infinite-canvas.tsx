@@ -25,7 +25,7 @@ import {
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
-  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart
+  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush
 } from 'lucide-react';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
 import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
@@ -9894,90 +9894,245 @@ export function InfiniteCanvas({
         {showHelpModal && (
           <div className="absolute inset-0 z-50 flex items-center justify-center" onClick={() => setShowHelpModal(null)}>
             <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-            <div className={`relative w-[360px] max-h-[70vh] rounded-2xl border shadow-2xl overflow-hidden ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a]/80 border-white/[0.14]'}`} onClick={(e) => e.stopPropagation()}>
-              <div className={`flex items-center justify-between px-5 py-3.5 border-b ${isMonochrome ? 'border-gray-100' : 'border-white/[0.14]'}`}>
+            <div className={`relative rounded-2xl border shadow-2xl overflow-hidden ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a]/95 border-white/[0.14]'}`} style={{ width: 560, maxHeight: '80vh' }} onClick={(e) => e.stopPropagation()}>
+              {/* Header */}
+              <div className={`flex items-center justify-between px-5 py-3 border-b ${isMonochrome ? 'border-gray-100' : 'border-white/[0.14]'}`}>
                 <div className="flex items-center gap-2">
                   {showHelpModal === 'instructions' ? <Info size={16} className={isMonochrome ? 'text-gray-700' : 'text-[#d4af37]'} /> : <FileText size={16} className={isMonochrome ? 'text-gray-700' : 'text-[#d4af37]'} />}
-                  <span className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>{showHelpModal === 'instructions' ? '操作说明' : '更新内容'}</span>
+                  <span className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>{showHelpModal === 'instructions' ? '使用说明' : '更新内容'}</span>
                 </div>
                 <button onClick={() => setShowHelpModal(null)} className={`p-1 rounded-lg transition-colors ${isMonochrome ? 'text-blue-400 hover:text-blue-600 hover:bg-blue-50' : 'text-[#666] hover:text-white hover:bg-[#2a2a2a]'}`}><X size={16} /></button>
               </div>
-              <div className={`px-5 py-4 overflow-y-auto max-h-[55vh] text-sm space-y-4 ${isMonochrome ? 'text-gray-700' : 'text-[#ccc]'}`}>
+              <div className={`overflow-y-auto ${isMonochrome ? 'text-gray-700' : 'text-[#ccc]'}`} style={{ maxHeight: 'calc(80vh - 52px)' }}>
                 {showHelpModal === 'instructions' ? (
-                  <>
+                  <div className="p-5 space-y-5">
+                    {/* 画布概览截图 */}
+                    <div className="rounded-xl overflow-hidden border" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)' }}>
+                      <img src="/api/help-image?file=canvas-overview.jpeg" alt="画布概览" className="w-full" loading="lazy" />
+                    </div>
+
+                    {/* 画布操作 */}
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>画布操作</div>
-                      <div className="space-y-2">
-                        {[['左键单击', '选择图片'], ['左键拖拽空白区域', '框选多图'], ['Ctrl+左键', '多选图片/参考融合'], ['Alt+左键', '标记图片为参考图'], ['长按左键拖动图片', '移动图片'], ['空格+拖动 / 长按中键', '平移画布'], ['滚轮 / Ctrl+滚轮', '缩放画布'], ['右键', '上下文菜单'], ['Ctrl+D', '复制选中图片'], ['Ctrl+Z', '撤回操作'], ['ESC', '退出编辑/取消选择'], ['Delete', '删除选中图片']].map(([k, v]) => (
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                        {[['左键单击', '选择图片'], ['左键拖拽空白', '框选多图'], ['Ctrl+左键', '多选/参考融合'], ['Alt+左键', '标记参考图'], ['长按拖动图片', '移动图片'], ['空格+拖动', '平移画布'], ['滚轮', '缩放画布'], ['右键', '上下文菜单'], ['Ctrl+D', '复制图片'], ['Ctrl+Z', '撤回操作'], ['ESC', '退出编辑'], ['Delete', '删除图片']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
                         ))}
                       </div>
                     </div>
-                    <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-[#1a1a1a]/85'}`} />
+
+                    <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-white/[0.06]'}`} />
+
+                    {/* 图片操作工具栏 */}
                     <div>
-                      <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>图片操作工具栏</div>
-                      <div className="space-y-2">
-                        {[['放大', '智能补细节，变大变高清'], ['移除背景', '一键去背景，生成透明底图+蒙版'], ['SVG智能描摹', '彩色/黑白矢量化，多级质量预设'], ['擦除', '画笔涂抹消除，本地LaMa优先+AI修复'], ['蒙版', '精准遮罩控制，AI重新生成指定区域'], ['编辑元素', '按元素智能分层，独立编辑'], ['图生图', '基于当前图风格/构图/角色/IP融合生成'], ['多角度', '多视角3D旋转生成图片'], ['转3D', '生成3D模型预览'], ['扩展', '向四周延伸画面，自动补齐'], ['裁切', '自由/预设比例裁切'], ['Agent编排', '智能编排多工具，自动选择最佳方案'], ['下载', 'PNG/SVG/PSD多格式下载']].map(([k, v]) => (
-                          <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
-                        ))}
+                      <div className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>图片编辑工具</div>
+                      <div className="space-y-3">
+                        {/* 擦除 */}
+                        <div className={`rounded-lg p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-white/[0.03]'}`}>
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <Eraser size={13} className={isMonochrome ? 'text-gray-600' : 'text-[#d4af37]'} />
+                            <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>擦除</span>
+                            <span className={`text-xs ml-auto ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>画笔涂抹消除，自动修复</span>
+                          </div>
+                          <div className="rounded-lg overflow-hidden border mt-2" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)' }}>
+                            <img src="/api/help-image?file=erase-tool.jpeg" alt="擦除" className="w-full" loading="lazy" />
+                          </div>
+                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>涂抹要消除的区域，本地 LaMa/ZITS/Anime-Lama 优先修复，AI 智能修复兜底</p>
+                        </div>
+
+                        {/* 蒙版 */}
+                        <div className={`rounded-lg p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-white/[0.03]'}`}>
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <Brush size={13} className={isMonochrome ? 'text-gray-600' : 'text-[#d4af37]'} />
+                            <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>蒙版</span>
+                            <span className={`text-xs ml-auto ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>精准遮罩，AI 重新生成</span>
+                          </div>
+                          <div className="rounded-lg overflow-hidden border mt-2" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)' }}>
+                            <img src="/api/help-image?file=mask-tool.jpeg" alt="蒙版" className="w-full" loading="lazy" />
+                          </div>
+                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>画白色区域标记要重新生成的部分，输入提示词描述，AI 仅在蒙版区域生成新内容</p>
+                        </div>
+
+                        {/* 移除背景 */}
+                        <div className={`rounded-lg p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-white/[0.03]'}`}>
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <Scissors size={13} className={isMonochrome ? 'text-gray-600' : 'text-[#d4af37]'} />
+                            <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>移除背景</span>
+                            <span className={`text-xs ml-auto ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>一键去背景，输出主体图+蒙版</span>
+                          </div>
+                          <div className="rounded-lg overflow-hidden border mt-2" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)' }}>
+                            <img src="/api/help-image?file=remove-bg.jpeg" alt="移除背景" className="w-full" loading="lazy" />
+                          </div>
+                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>自动分离主体与背景，同时生成白底主体图和黑白蒙版图，本地 BiRefNet/U2Net 优先</p>
+                        </div>
+
+                        {/* 放大 */}
+                        <div className={`rounded-lg p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-white/[0.03]'}`}>
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <ZoomIn size={13} className={isMonochrome ? 'text-gray-600' : 'text-[#d4af37]'} />
+                            <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>放大</span>
+                            <span className={`text-xs ml-auto ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>无损放大，智能补细节</span>
+                          </div>
+                          <div className="rounded-lg overflow-hidden border mt-2" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)' }}>
+                            <img src="/api/help-image?file=upscale.jpeg" alt="放大" className="w-full" loading="lazy" />
+                          </div>
+                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>选择放大模型和倍率（2x/4x），支持 PNG/JPG/WEBP 输出，upscayl-node NCNN 加速</p>
+                        </div>
+
+                        {/* 图生图 */}
+                        <div className={`rounded-lg p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-white/[0.03]'}`}>
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <ImagePlus size={13} className={isMonochrome ? 'text-gray-600' : 'text-[#d4af37]'} />
+                            <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>图生图</span>
+                            <span className={`text-xs ml-auto ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>风格/构图/角色/IP 融合</span>
+                          </div>
+                          <div className="rounded-lg overflow-hidden border mt-2" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)' }}>
+                            <img src="/api/help-image?file=img2img.jpeg" alt="图生图" className="w-full" loading="lazy" />
+                          </div>
+                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>基于当前图的风格/构图/角色/IP 融合生成新图，每类独立强度滑块 0-100% 控制</p>
+                        </div>
+
+                        {/* 语言修图 */}
+                        <div className={`rounded-lg p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-white/[0.03]'}`}>
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <Pencil size={13} className={isMonochrome ? 'text-gray-600' : 'text-[#d4af37]'} />
+                            <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>语言修图</span>
+                            <span className={`text-xs ml-auto ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>自然语言描述修改图片</span>
+                          </div>
+                          <div className="rounded-lg overflow-hidden border mt-2" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)' }}>
+                            <img src="/api/help-image?file=lang-edit.jpeg" alt="语言修图" className="w-full" loading="lazy" />
+                          </div>
+                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>用自然语言描述修改意图，支持 OpenAI（可区域涂抹）+ Gemini（智能理解），自动裁切适配比例</p>
+                        </div>
+
+                        {/* Agent 编排 */}
+                        <div className={`rounded-lg p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-white/[0.03]'}`}>
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <Bot size={13} className={isMonochrome ? 'text-gray-600' : 'text-[#d4af37]'} />
+                            <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>Agent 编排</span>
+                            <span className={`text-xs ml-auto ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>智能编排多工具</span>
+                          </div>
+                          <div className="rounded-lg overflow-hidden border mt-2" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)' }}>
+                            <img src="/api/help-image?file=agent-edit.jpeg" alt="Agent编排" className="w-full" loading="lazy" />
+                          </div>
+                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>AI 自动选择和组合工具（修图/生图/分析/调色），多轮决策直至完成</p>
+                        </div>
+
+                        {/* SVG 智能描摹 */}
+                        <div className={`rounded-lg p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-white/[0.03]'}`}>
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <PenTool size={13} className={isMonochrome ? 'text-gray-600' : 'text-[#d4af37]'} />
+                            <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>SVG 智能描摹</span>
+                            <span className={`text-xs ml-auto ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>位图转矢量图</span>
+                          </div>
+                          <div className="rounded-lg overflow-hidden border mt-2" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)' }}>
+                            <img src="/api/help-image?file=svg-trace.jpeg" alt="SVG智能描摹" className="w-full" loading="lazy" />
+                          </div>
+                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>彩色/黑白两种矢量化模式，多级质量预设（快速/均衡/高清/极致）</p>
+                        </div>
+
+                        {/* 扩展 */}
+                        <div className={`rounded-lg p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-white/[0.03]'}`}>
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <Expand size={13} className={isMonochrome ? 'text-gray-600' : 'text-[#d4af37]'} />
+                            <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>扩展</span>
+                            <span className={`text-xs ml-auto ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>向四周延伸画面</span>
+                          </div>
+                          <div className="rounded-lg overflow-hidden border mt-2" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)' }}>
+                            <img src="/api/help-image?file=extend.jpeg" alt="扩展" className="w-full" loading="lazy" />
+                          </div>
+                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>支持缩放比例（1x-4x）和画面比例预设，AI 自动补齐延伸内容</p>
+                        </div>
+
+                        {/* 其他工具简表 */}
+                        <div className={`rounded-lg p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-white/[0.03]'}`}>
+                          <div className="flex items-center gap-2 mb-2">
+                            <MoreHorizontal size={13} className={isMonochrome ? 'text-gray-600' : 'text-[#d4af37]'} />
+                            <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>其他工具</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                            {[['编辑元素', '按元素智能分层'], ['多角度', '多视角旋转生成'], ['转3D', '生成3D模型预览'], ['裁切', '自由/预设比例裁切'], ['下载', 'PNG/SVG/PSD多格式']].map(([k, v]) => (
+                              <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
+                            ))}
+                          </div>
+                        </div>
                       </div>
                     </div>
-                    <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-[#1a1a1a]/85'}`} />
+
+                    <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-white/[0.06]'}`} />
+
+                    {/* 组与参考图 */}
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>组与参考图</div>
-                      <div className="space-y-2">
-                        {[['多图右键', '创建组'], ['组标题栏折叠按钮', '折叠/展开组内容'], ['长按组标题栏拖动', '移动整个组'], ['Alt+左键点击图片', '标记为参考图（紫色R标记）'], ['参考图标记', '自动添加到创意描述文本框'], ['Backspace（光标起始处）', '删除最后一个参考图标记']].map(([k, v]) => (
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                        {[['多图右键', '创建组'], ['组标题栏', '折叠/展开组'], ['长按组标题', '移动整个组'], ['Alt+左键', '标记参考图（紫色R）'], ['参考图标记', '自动添加到描述'], ['Backspace', '删除参考图标记']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
                         ))}
                       </div>
                     </div>
-                    <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-[#1a1a1a]/85'}`} />
+
+                    <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-white/[0.06]'}`} />
+
+                    {/* Oh My Prompt */}
+                    <div>
+                      <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>Oh My Prompt</div>
+                      <div className="rounded-lg overflow-hidden border mb-2" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)' }}>
+                        <img src="/api/help-image?file=oh-my-prompt.jpeg" alt="Oh My Prompt" className="w-full" loading="lazy" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                        {[['资源库', '精选提示词模板'], ['图片识词', 'AI 识别图片关键词'], ['提示词优化', '增强/扩展/精简'], ['一键发送', '填充到生成面板']].map(([k, v]) => (
+                          <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-white/[0.06]'}`} />
+
+                    {/* 左上角工具栏 */}
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>左上角工具栏</div>
-                      <div className="space-y-2">
-                        {[['Oh My Prompt', '提示词管理与图片识词'], ['参考融合', 'Ctrl+Click选择参考图融合生成'], ['设置', '应用配置'], ['主题切换', '黑白/彩色模式切换'], ['用户管理', '多用户切换与管理'], ['项目数据', '项目保存与加载'], ['管理员系统', 'API与模型配置（仅管理员）'], ['使用说明', '操作与更新内容']].map(([k, v]) => (
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                        {[['Oh My Prompt', '提示词管理'], ['参考融合', 'Ctrl+Click融合生成'], ['设置', '应用配置'], ['主题切换', '黑白/彩色切换'], ['用户管理', '多用户管理'], ['项目数据', '项目保存加载'], ['管理员系统', 'API配置（管理员）'], ['使用说明', '操作与更新']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
                         ))}
                       </div>
                     </div>
-                    <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-[#1a1a1a]/85'}`} />
+
+                    <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-white/[0.06]'}`} />
+
+                    {/* 底部工具栏 */}
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>底部工具栏</div>
-                      <div className="space-y-2">
-                        {[['选择工具', '默认模式，点击/框选图片'], ['抓手工具', '平移画布'], ['图片上传', '上传本地图片到画布'], ['图像生成器', 'AI图像生成（金色按钮）'], ['语言修图', '自然语言描述修改图片'], ['Agent', '智能编排多工具编辑'], ['图层', '打开Layer Graph设计工程'], ['缩放控制', '放大/缩小/百分比/重置视图']].map(([k, v]) => (
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                        {[['选择工具', '点击/框选图片'], ['抓手工具', '平移画布'], ['图片上传', '上传本地图片'], ['图像生成器', 'AI生成（金色按钮）'], ['语言修图', '自然语言修改图片'], ['Agent', '智能编排多工具'], ['六面体', '6面贴图预览'], ['缩放控制', '放大/缩小/重置']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
                         ))}
                       </div>
                     </div>
-                  </>
+                  </div>
                 ) : (
-                  <div>
-                    <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>{APP_VERSION_LABEL}</div>
+                  <div className="p-5">
+                    <div className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>{APP_VERSION_LABEL}</div>
                     <div className="space-y-2.5">
                       {[
-                        '13大图片工具：放大/移除背景/SVG智能描摹/擦除/蒙版/编辑元素/图生图/多角度/转3D/扩展/裁切/Agent编排/下载',
-                        '移除背景：一键去背景，同时生成透明底图+黑白蒙版，本地rembg优先+AI兜底',
-                        'SVG智能描摹：彩色/黑白矢量化，多级质量预设，矢量模型API→LLM fallback→本地vtracer兜底',
-                        '擦除：画笔涂抹消除，本地LaMa/ZITS/Anime-Lama优先，AI修复+边界扩散兜底',
-                        '蒙版：精准遮罩控制，AI重新生成指定区域，后端精确蒙版合成，前端直接显示结果',
-                        '图生图：基于当前图的风格/构图/角色/IP融合生成，独立强度滑块控制',
-                        '语言修图：自然语言描述修改图片，支持OpenAI+Gemini，画面比例/质量/数量参数已生效',
-                        '编辑元素：根据图片元素进行智能分层，独立编辑',
-                        '多角度：3D旋转视角生成，全场景元素跟随角度变化',
-                        '扩展：比例预设 + AI向四周延伸画面',
-                        'Agent编排：智能编排多工具（修图/生图/分析/调色），自动循环决策',
-                        '任务管理：统一任务注册中心，SSE实时推送进度，支持取消任务和队列排队',
-                        '图片压缩上传：前端canvas压缩+后端sharp压缩，自动优化大图',
-                        'API协议验证：管理员一键验证API提供商兼容性',
-                        'Alt+Click标记参考图：标记画布图片为参考图，自动添加到创意描述',
-                        'Ctrl+Click参考融合：选择画布图片直接融合生成',
-                        '组功能：多图右键创建组，支持折叠/展开/拖动',
-                        'Ctrl+Z无限撤回：纯ref同步管理，流畅操作',
-                        '下载：PNG/SVG/PSD三种格式，PSD支持Basic/Pro/Studio模式',
-                        '服务器端API密钥管理：管理员统一配置，用户无需输入Key',
-                        'API兼容层：通用多提供商适配，input_fidelity自动转换为strength',
+                        '图片编辑工具：放大/移除背景/SVG描摹/擦除/蒙版/编辑元素/图生图/多角度/转3D/扩展/裁切/Agent编排/下载',
+                        '移除背景：同时生成白底主体图和黑白蒙版图，本地 BiRefNet/U2Net/Silueta 优先',
+                        '擦除：本地 LaMa/ZITS/Anime-Lama 优先，AI 修复+边界扩散兜底',
+                        '蒙版：AI 重新生成指定区域，结果直接显示，无涂抹痕迹',
+                        '图生图：风格/构图/角色/IP 融合生成，每类独立强度滑块',
+                        '语言修图：支持 OpenAI+Gemini，自动裁切适配比例，不变形',
+                        'Agent 编排：智能选择修图/生图/分析/调色工具，多轮循环决策',
+                        'SVG 智能描摹：彩色/黑白矢量化，多级质量预设',
+                        'API 排序：管理员可调整 API 列表顺序',
+                        '任务管理：统一任务注册中心，SSE 实时推送进度，支持取消和排队',
+                        '图片压缩上传：前端 canvas+后端 sharp 双重压缩',
+                        'API 协议验证：管理员一键验证提供商兼容性',
+                        'Alt+Click 标记参考图，Ctrl+Click 参考融合',
+                        'Ctrl+Z 无限撤回，组功能（右键创建/折叠/拖动）',
+                        '下载：PNG/SVG/PSD 三种格式，PSD 支持 Basic/Pro/Studio 模式',
+                        '服务器端 API 密钥管理 + 通用多提供商兼容层',
                       ].map((item, i) => (
-                        <div key={i} className="flex items-start gap-2"><span className={`mt-1.5 w-1 h-1 rounded-full flex-shrink-0 ${isMonochrome ? 'bg-gray-400' : 'bg-[#d4af37]'}`} /><span>{item}</span></div>
+                        <div key={i} className="flex items-start gap-2"><span className={`mt-1.5 w-1 h-1 rounded-full flex-shrink-0 ${isMonochrome ? 'bg-gray-400' : 'bg-[#d4af37]'}`} /><span className="text-xs">{item}</span></div>
                       ))}
                     </div>
                   </div>
