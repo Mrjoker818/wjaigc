@@ -9935,7 +9935,7 @@ export function InfiniteCanvas({
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>左上角工具栏</div>
                       <div className="space-y-2">
-                        {[['Oh My Prompt', '提示词管理与图片识词'], ['参考融合', 'Ctrl+Click选择参考图融合生成'], ['设置', '应用配置'], ['主题切换', '黑白/彩色模式切换'], ['用户管理', '多用户切换与管理'], ['项目数据', '项目保存与加载'], ['管理员系统', 'API与模型配置（仅管理员）'], ['使用说明', '操作与更新内容'], ['任务管理', '查看/取消进行中的任务']].map(([k, v]) => (
+                        {[['Oh My Prompt', '提示词管理与图片识词'], ['参考融合', 'Ctrl+Click选择参考图融合生成'], ['设置', '应用配置'], ['主题切换', '黑白/彩色模式切换'], ['用户管理', '多用户切换与管理'], ['项目数据', '项目保存与加载'], ['管理员系统', 'API与模型配置（仅管理员）'], ['使用说明', '操作与更新内容']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
                         ))}
                       </div>
