@@ -69,25 +69,44 @@ export const DEFAULT_REMOVEBG_MODEL = 'u2net';
 /** 检查 Python + 依赖是否可用（比仅检查模型文件更准确） */
 let _pythonEnvChecked = false;
 let _pythonEnvAvailable = false;
+let _pythonEnvCheckTime = 0;
+const PYTHON_ENV_CACHE_TTL = 5 * 60 * 1000; // 5分钟缓存过期
 
-async function checkPythonEnv(): Promise<boolean> {
-  if (_pythonEnvChecked) return _pythonEnvAvailable;
+async function checkPythonEnv(mode: 'erase' | 'removebg' = 'erase'): Promise<boolean> {
+  // 缓存5分钟过期，允许重新检测（环境可能后来安装了依赖）
+  const now = Date.now();
+  if (_pythonEnvChecked && (now - _pythonEnvCheckTime) < PYTHON_ENV_CACHE_TTL) return _pythonEnvAvailable;
   _pythonEnvChecked = true;
+  _pythonEnvCheckTime = now;
 
   try {
     const { execSync } = await import('child_process');
-    // 检查 Python 解释器是否可用（优先 .venv 持久化环境）
     const pythonBin = PYTHON_BIN;
+    // 检查 Python 解释器是否可用
     execSync(`which ${pythonBin}`, { stdio: 'ignore', timeout: 3000 });
-    // 检查 torch 是否安装
-    execSync(`${pythonBin} -c "import torch"`, { stdio: 'ignore', timeout: 10000 });
-    // 检查 iopaint 是否安装
-    execSync(`${pythonBin} -c "import iopaint"`, { stdio: 'ignore', timeout: 10000 });
-    _pythonEnvAvailable = true;
-    console.log(`[IOPaint] Python environment check passed (${pythonBin} + torch + iopaint available)`);
-  } catch {
+    // 擦除模式需要 torch + iopaint；RemoveBG 模式只需要 rembg
+    if (mode === 'removebg') {
+      execSync(`${pythonBin} -c "import rembg"`, { stdio: 'ignore', timeout: 10000 });
+      _pythonEnvAvailable = true;
+      console.log(`[IOPaint] Python environment check passed for RemoveBG (${pythonBin} + rembg available)`);
+    } else {
+      // 擦除模式：先检查 torch，再尝试 iopaint；如果 iopaint 不可用，检查脚本文件是否存在（脚本可独立运行）
+      execSync(`${pythonBin} -c "import torch"`, { stdio: 'ignore', timeout: 10000 });
+      try {
+        execSync(`${pythonBin} -c "import iopaint"`, { stdio: 'ignore', timeout: 10000 });
+      } catch {
+        // iopaint 未安装但脚本文件存在，仍然可用（脚本会动态加载模型）
+        if (!fs.existsSync(ERASE_SCRIPT)) {
+          throw new Error('iopaint not installed and erase script not found');
+        }
+        console.log('[IOPaint] iopaint package not installed, but erase script exists - will try direct execution');
+      }
+      _pythonEnvAvailable = true;
+      console.log(`[IOPaint] Python environment check passed for erase (${pythonBin} + torch available)`);
+    }
+  } catch (e) {
     _pythonEnvAvailable = false;
-    console.log('[IOPaint] Python environment check failed (python3/torch/iopaint not available), skipping local IOPaint');
+    console.log(`[IOPaint] Python environment check failed for ${mode} (python3/torch not available), skipping local processing`);
   }
   return _pythonEnvAvailable;
 }

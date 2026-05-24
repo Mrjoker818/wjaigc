@@ -83,7 +83,7 @@ export async function postProcessLocalRemoveBG(
  * @param originalImageUrl 原始图片 URL 或 Buffer（支持 data URL、本地路径、外部 URL）
  */
 export async function postProcessAIRemoveBG(
-  _aiResultUrl: string,
+  aiResultUrl: string,
   originalImageUrl?: string | Buffer
 ): Promise<RemoveBGResult | null> {
   try {
@@ -92,25 +92,87 @@ export async function postProcessAIRemoveBG(
       return null;
     }
 
-    // 获取原图数据（支持 data URL、本地路径、外部 URL）
+    // 获取原图数据
     let origBuffer: Buffer;
     if (Buffer.isBuffer(originalImageUrl)) {
       origBuffer = originalImageUrl;
     } else {
-      // 使用共享的 fetchImageBuffer，支持 data URL、本地路径、S3、外部 URL 等
       origBuffer = await fetchImageBuffer(originalImageUrl);
     }
 
-    // 用本地 rembg 生成蒙版并应用（Python 端完成所有处理）
+    // 获取 AI 结果图片
+    let aiBuffer: Buffer | null = null;
+    try {
+      if (aiResultUrl && !aiResultUrl.startsWith('data:')) {
+        aiBuffer = await fetchImageBuffer(aiResultUrl);
+      } else if (aiResultUrl) {
+        aiBuffer = await fetchImageBuffer(aiResultUrl);
+      }
+    } catch (e) {
+      console.warn('[postProcessAIRemoveBG] Failed to fetch AI result:', e);
+    }
+
+    // 策略1: 如果 AI 结果有透明通道 (alpha)，直接从 AI 结果提取蒙版
+    if (aiBuffer) {
+      try {
+        const sharp = (await import('sharp')).default;
+        const aiMeta = await sharp(aiBuffer).metadata();
+        const hasAlpha = aiMeta.channels === 4 || aiMeta.hasAlpha;
+
+        if (hasAlpha) {
+          console.log('[postProcessAIRemoveBG] AI result has alpha channel, extracting mask directly');
+          // 提取 alpha 通道作为蒙版
+          const { data: raw, info } = await sharp(aiBuffer)
+            .ensureAlpha()
+            .raw()
+            .toBuffer({ resolveWithObject: true });
+
+          const w = info.width;
+          const h = info.height;
+          const pixelCount = w * h;
+          const alphaChannel = Buffer.alloc(pixelCount);
+          for (let i = 0; i < pixelCount; i++) {
+            alphaChannel[i] = raw[i * 4 + 3]; // RGBA 中的 A
+          }
+
+          // 计算透明像素占比，判断蒙版是否有效
+          let transparentCount = 0;
+          for (let i = 0; i < pixelCount; i++) {
+            if (alphaChannel[i] < 128) transparentCount++;
+          }
+          const transparencyRatio = transparentCount / pixelCount;
+
+          if (transparencyRatio > 0.01 && transparencyRatio < 0.99) {
+            // 蒙版有效：生成黑白蒙版图
+            const maskBuffer = await sharp(alphaChannel, { raw: { width: w, height: h, channels: 1 } })
+              .threshold(128)
+              .png()
+              .toBuffer();
+
+            // 保存 RGBA 结果和蒙版
+            return await postProcessLocalRemoveBG(
+              aiBuffer.toString('base64'),
+              maskBuffer.toString('base64')
+            );
+          } else {
+            console.log(`[postProcessAIRemoveBG] AI alpha not useful (transparency: ${(transparencyRatio * 100).toFixed(1)}%), falling back to rembg`);
+          }
+        }
+      } catch (e) {
+        console.warn('[postProcessAIRemoveBG] Failed to extract alpha from AI result:', e);
+      }
+    }
+
+    // 策略2: AI 结果没有有效透明通道，用本地 rembg 生成蒙版（使用高质量模型）
+    console.log('[postProcessAIRemoveBG] Using rembg to generate mask from original image');
     const { generateRemoveBgMask } = await import('./image-tools/iopaint-client');
-    const maskResult = await generateRemoveBgMask(origBuffer, 'u2net');
+    const maskResult = await generateRemoveBgMask(origBuffer, 'isnet-general-use');
     
     if (!maskResult || !maskResult.success || !maskResult.rgbaBase64) {
-      console.log('[postProcessAIRemoveBG] Failed to generate RGBA result');
+      console.log('[postProcessAIRemoveBG] Failed to generate RGBA result with rembg');
       return null;
     }
 
-    // 使用 Python 输出的 RGBA PNG + 蒙版 PNG
     return await postProcessLocalRemoveBG(maskResult.rgbaBase64, maskResult.maskBase64);
   } catch (err) {
     console.error('[postProcessAIRemoveBG] Error:', err);

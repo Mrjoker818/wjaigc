@@ -1541,24 +1541,11 @@ export async function POST(request: NextRequest) {
       const maAspectRatio = body.aspectRatio || findClosestAspectRatio(`${maOrigW}:${maOrigH}`);
 
       // Build optimized prompt for multi-angle rotation
-      // Key: The prompt must clearly convey "re-render from a different 3D angle" not "rotate the 2D image"
-      //
-      // ★ 重要区分：
-      // - angleMode === 'image' (主体模式): 只旋转原图中的主体元素，背景保持不变
-      //   策略：input_fidelity: 'high' 保留背景 + 强提示只旋转主体
-      //   AI 理解：将主体视为独立 3D 物体，从新角度重新渲染其外观
-      // - angleMode === 'camera' (摄像头模式): 移动虚拟摄像机，整个场景重新渲染
-      //   策略：正常生成 + 提示模拟摄像机运动
-      //   AI 理解：保持场景中所有物体位置不变，改变观察视角
+      // angleMode === 'image': 只旋转主体，背景不变
+      // angleMode === 'camera': 虚拟摄像机运动，整个场景重新渲染
       const multiAnglePrompt = prompt || (angleMode === 'image'
-        ? `CRITICAL TASK: Rotate ONLY the main subject/object in this image by ${yawText} in 3D space. The background, environment, and all surroundings MUST remain EXACTLY as they are — do NOT change, shift, or re-render the background at all.
-
-SUBJECT ROTATION: Treat the main subject as a standalone 3D object. Show how it looks when rotated ${yawText}, viewed from ${pitchText}, with ${dollyText}. Reconstruct its unseen sides/angles plausibly. Keep the same identity, materials, colors, proportions, and details.
-
-BACKGROUND PRESERVATION: The background is SACRED — it must be pixel-identical to the original. Same scene, same lighting, same composition, same colors. Only the main subject changes its 3D orientation.
-
-This is a PARTIAL edit: subject rotates, background stays fixed. Do NOT rotate the entire image canvas. Do NOT move the camera. Do NOT change the background.`
-        : `Simulate a virtual camera movement around this scene: the camera orbits to yaw ${yawText}, pitch ${pitchText}, with ${dollyText}. All objects and subjects remain fixed in their positions — only the viewpoint changes. Re-render the entire scene from this new camera position, preserving all subjects, objects, materials, colors, environment, and mood. Infer unseen geometry and surfaces based on the visible context. The result should look like a real photograph taken from the new camera position, with correct perspective, depth, occlusion, shadows, and reflections. Do NOT rotate the 2D image canvas.`);
+        ? `Edit this image to show the main subject as if it has been physically rotated ${yawText} in 3D space, viewed from ${pitchText}, with ${dollyText}. The subject is a real 3D object — reconstruct its unseen sides based on context. Keep the same identity, face, clothing, product, design, materials, labels, text, colors, proportions, and lighting style. IMPORTANT: Only rotate the main subject itself, the background and surroundings must remain completely unchanged. Do NOT rotate the entire image canvas.`
+        : `Edit this image as if moving a virtual camera around the scene: camera orbits to yaw ${yawText}, pitch ${pitchText}, ${dollyText}. The scene and subject remain fixed in place. Re-render the entire scene from this new camera position, preserving all subjects, objects, materials, colors, environment, and mood. Infer unseen geometry and surfaces based on the visible context. Do NOT rotate the 2D image canvas.`);
 
       // Resolve image to base64 for maximum content preservation
       const multiAngleBase64 = await resolveImageToBase64(imageUrl);
@@ -1577,7 +1564,7 @@ This is a PARTIAL edit: subject rotates, background stays fixed. Do NOT rotate t
             size: maAspectRatio,
             n: 1,
             image: multiAngleBase64,
-            input_fidelity: 'high',
+            input_fidelity: angleMode === 'image' ? 'medium' : 'high',
           }), '多角度(edits)', '/images/edits');
           console.info(`[multi-angle] Successfully used /images/edits endpoint`);
         } else {
@@ -1599,7 +1586,7 @@ This is a PARTIAL edit: subject rotates, background stays fixed. Do NOT rotate t
           n: 1,
           image_urls: [imageUrl],
           ...(multiAngleBase64 ? { image: multiAngleBase64 } : {}),
-          input_fidelity: 'high',
+          input_fidelity: angleMode === 'image' ? 'medium' : 'high',
         }), '多角度(generations)');
       }
 
