@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev -p 5000",
     "build": "pnpm install && next build",
-    "start": "node server.js",
+    "start": "next start -p 5000",
     "lint": "eslint",
     "ts-check": "tsc -p tsconfig.json",
     "postinstall": "bash scripts/prepare-tools.sh 2>/dev/null || true"
