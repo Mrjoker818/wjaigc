@@ -422,7 +422,19 @@ export function adjustRequestForProfile(
       body.input_fidelity = 'high';
     }
   }
+  // ★ 当 input_fidelity 被显式设置但提供商不支持时，转换为 strength 参数
+  // input_fidelity='low' → strength=0.85 (大幅变化，如多角度功能)
+  // input_fidelity='medium' → strength=0.65 (中等变化)
+  // input_fidelity='high' → 不设置 strength (保持默认行为)
   if (!profile.supportsInputFidelity || endpoint !== '/images/edits') {
+    const requestedFidelity = body.input_fidelity as string | undefined;
+    if (requestedFidelity === 'low' && body.strength === undefined) {
+      // 提供商不支持 input_fidelity，但用户需要大幅变化 → 用 strength 控制
+      body.strength = 0.85;
+    } else if (requestedFidelity === 'medium' && body.strength === undefined) {
+      body.strength = 0.65;
+    }
+    // high 或未设置 → 不添加 strength，保持默认行为
     delete body.input_fidelity;
   }
 

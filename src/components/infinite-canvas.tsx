@@ -3606,8 +3606,12 @@ export function InfiniteCanvas({
         drawY = cropInfo.cropY;
       }
       resultCtx.drawImage(resultImg, drawX, drawY, drawW, drawH);
-      // 蒙版修图模式：对裁剪边缘做羽化处理
+      // 蒙版修图模式：对裁剪边缘做羽化处理 + 应用蒙版alpha通道
       if (!isErase) {
+        // ★ 修复叠加bug：蒙版修图必须应用蒙版alpha通道，不能仅做边缘羽化
+        // 否则裁剪区域内蒙版外的区域也会显示AI结果，产生叠加效果
+        
+        // 1) 先对裁剪边缘做羽化处理
         const edgeFeather = 24;
         const patchData = resultCtx.getImageData(0, 0, origW, origH);
         const cropRight = cropInfo.cropX + cropInfo.cropW - 1;
@@ -3629,6 +3633,25 @@ export function InfiniteCanvas({
             }
           }
         }
+        
+        // 2) 应用蒙版alpha通道：仅蒙版白色区域显示AI结果，蒙版黑色区域保持原图
+        const WHITE_START = 160;
+        const BLACK_START = 4;
+        for (let i = 0; i < maskData.data.length; i += 4) {
+          const maskValue = maskData.data[i]; // R channel (模糊后)
+          let maskAlpha: number;
+          if (maskValue >= WHITE_START) {
+            maskAlpha = 255;
+          } else if (maskValue <= BLACK_START) {
+            maskAlpha = 0;
+          } else {
+            maskAlpha = Math.round(((maskValue - BLACK_START) / (WHITE_START - BLACK_START)) * 255);
+          }
+          // 取蒙版alpha和边缘羽化alpha的较小值，确保蒙版外区域完全透明
+          const currentAlpha = patchData.data[i + 3];
+          patchData.data[i + 3] = Math.min(currentAlpha, maskAlpha);
+        }
+        
         resultCtx.putImageData(patchData, 0, 0);
         ctx.drawImage(resultCanvas, 0, 0);
         return canvas.toDataURL('image/png');

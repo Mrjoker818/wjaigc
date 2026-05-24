@@ -937,11 +937,18 @@ async function autoTrySubmitImageTask(
       // ModelCapabilityError → 检查是否是宽高比问题，可以重试
       if (err instanceof ModelCapabilityError) {
         if (!ratioRetryDone && (errMsg.includes('ratio') || errMsg.includes('宽高比') || errMsg.includes('aspect'))) {
-          // 宽高比不被支持，用 1:1 重试所有模型
+          // 宽高比不被支持，用 1:1 重试模型（跳过已失败的模型，避免双重API调用）
           console.warn(`[image-edit] ${operation}: Aspect ratio not supported, retrying with 1:1`);
           ratioRetryDone = true;
-          // 重新尝试所有候选模型，但使用 1:1 比例
+          // 记录当前及之前已失败的模型，避免对同一模型重复提交导致双重API调用
+          const failedModelIndex = candidateModels.indexOf(candidate);
+          const failedModelSet = new Set(candidateModels.slice(0, failedModelIndex + 1).map(c => c.model));
+          // 用 1:1 比例重试尚未失败的候选模型
           for (const retryCandidate of candidateModels) {
+            if (failedModelSet.has(retryCandidate.model)) {
+              console.log(`[image-edit] ${operation}: Skipping already-failed model ${retryCandidate.model} in 1:1 retry`);
+              continue;
+            }
             try {
               const retryBody = buildRequestBody(retryCandidate.model);
               // 强制设置 size 为 1:1
@@ -1546,67 +1553,73 @@ export async function POST(request: NextRequest) {
 
     if (action === 'multi_angle') {
       // ============================================================
-      // 多角度 (Multi-Angle) v7
+      // 多角度 (Multi-Angle) v8
+      // ============================================================
+      // 用户原则:
+      // 1. 全场景3D视角变化, 不针对单一元素
+      // 2. 不得出现元素偏移/分离
+      // 3. 不得改变固有元素(颜色/造型/风格)
+      // 4. 倾斜角度必须识别
       //
-      // 核心教训:
-      // 1. strength参数有毒 — OpenAI /images/edits 不支持strength,
-      //    APImart等提供商将strength解释为"重写N%的图像",
-      //    导致元素剧变。绝对不能传strength。
-      // 2. originalPrompt让AI变成文生图 — 当prompt包含场景描述时,
-      //    AI会忽略原图,从文字重新生成场景→元素全部改变。
-      // 3. prompt应该是"编辑指令"而非"画面描述" — 告诉AI做什么,
-      //    而非描述结果长什么样。
-      // 4. input_fidelity: 'high' 是唯一需要的保真控制 —
-      //    它告诉API"尽量保留原图的风格/色彩/细节"
+      // 技术分析:
+      // - input_fidelity='high' → API只做微调 → 角度变化无效(v7的问题)
+      // - input_fidelity='low'  → API自由创作 → 需靠prompt精确约束元素/风格
+      // - input_fidelity='medium' → 折中 → 角度变化不足
       //
-      // v7 策略:
-      // - prompt: 纯编辑指令, 不含场景描述, <20词
-      // - 不传strength (让API用默认值)
-      // - input_fidelity: 'high'
-      // - 倾斜放在旋转前面
+      // v8 策略:
+      // - input_fidelity: 'low' (允许大幅度视角变换)
+      // - prompt: 描述"新视角下的结果画面" + "保持所有元素外观不变"
+      // - 倾斜描述使用视觉化语言(看到什么)而非技术术语
+      // - 不传strength (避免不同提供商解释不一致)
       // ============================================================
 
       const absRot = Math.abs(rotation);
       const absTilt = Math.abs(tilt);
 
-      // ── 视角术语 (标准摄影/绘画术语) ──
+      // ── 倾斜 (Tilt/Pitch) — 视觉化描述新视角能看到什么 ──
+      const tiltVisual = tilt === 0 ? '' :
+        tilt > 0 && absTilt <= 20 ? 'looking slightly upward, ground plane tilts away' :
+        tilt > 0 && absTilt <= 45 ? 'looking upward from below, seeing undersides of objects, ground recedes steeply' :
+        tilt > 0 ? "extreme low-angle from ground level, looking straight up, sky/ceiling dominates" :
+        absTilt <= 20 ? 'looking slightly downward, tops of objects become partially visible' :
+        absTilt <= 45 ? 'looking down from above, seeing the tops of everything, ground plane clearly visible' :
+        "bird's-eye view from directly overhead, looking straight down, only top surfaces visible";
 
-      // Tilt (俯仰) — 放在前面, 防止被AI忽略
-      const pitchTerm = tilt === 0 ? '' :
-        tilt > 0 && absTilt <= 20 ? 'slightly low-angle' :
-        tilt > 0 && absTilt <= 45 ? 'low-angle' :
-        tilt > 0 ? "worm's-eye" :
-        absTilt <= 20 ? 'slightly high-angle' :
-        absTilt <= 45 ? 'high-angle' :
-        "bird's-eye";
+      // ── 旋转 (Rotation/Yaw) — 视觉化描述新视角能看到什么 ──
+      const yawVisual = rotation === 0 ? '' :
+        absRot <= 25 ? (rotation > 0 ? 'left side of the scene now visible, right side receding' : 'right side of the scene now visible, left side receding') :
+        absRot <= 55 ? (rotation > 0 ? 'mostly seeing the left side of everything, original front now faces right' : 'mostly seeing the right side of everything, original front now faces left') :
+        (rotation > 0 ? 'side view from the left, original front is no longer visible' : 'side view from the right, original front is no longer visible');
 
-      // Rotation (偏航)
-      const yawTerm = rotation === 0 ? '' :
-        absRot <= 25 ? (rotation > 0 ? 'slightly left' : 'slightly right') :
-        absRot <= 55 ? (rotation > 0 ? '3/4 left' : '3/4 right') :
-        (rotation > 0 ? 'left profile' : 'right profile');
-
-      // Zoom (景别)
+      // ── 缩放 (Zoom) ──
       const zoomIdx = typeof zoom === 'number' ? zoom : 1;
-      const shotTerm = zoomIdx === 0 ? 'close-up' : zoomIdx === 2 ? 'wide shot' : '';
+      const zoomVisual = zoomIdx === 0 ? ', zoomed in close-up' : zoomIdx === 2 ? ', zoomed out wide shot' : '';
 
-      // 组合视角术语
-      const viewParts: string[] = [];
-      if (pitchTerm) viewParts.push(pitchTerm);
-      if (yawTerm) viewParts.push(yawTerm);
-      if (shotTerm) viewParts.push(shotTerm);
-      const viewDesc = viewParts.length > 0 ? viewParts.join(' ') : 'frontal';
+      // ── 组合: 描述"新视角下的结果画面应该长什么样" ──
+      const viewClauses: string[] = [];
+      if (tiltVisual) viewClauses.push(tiltVisual);
+      if (yawVisual) viewClauses.push(yawVisual);
+
+      const viewDescription = viewClauses.length > 0
+        ? viewClauses.join('; ')
+        : 'frontal view, same angle as original';
+
+      // v8 Prompt: 描述新视角结果 + 元素/风格保持约束
+      // 关键: 不用camera/rotate/orbit/move/transform等变换词
+      // 只描述"新视角下的画面" + "保持一切外观不变"
+      const multiAnglePrompt = prompt || (
+        `The same scene now viewed from a different angle: ${viewDescription}${zoomVisual}. ` +
+        `Every object, person, and element keeps exactly the same appearance, color, shape, ` +
+        `size, clothing, and position relative to each other. ` +
+        `The art style, color palette, and visual quality are identical. ` +
+        `Only the viewing angle has changed, as if the entire scene is a single 3D diorama ` +
+        `and we are simply looking at it from a different position.`
+      );
 
       // Use original image aspect ratio
       const maOrigW = body.originalWidth || 1024;
       const maOrigH = body.originalHeight || 1024;
       const maAspectRatio = body.aspectRatio || findClosestAspectRatio(`${maOrigW}:${maOrigH}`);
-
-      // ── v7 Prompt: 纯编辑指令, 不含场景描述 ──
-      // 关键: 不使用originalPrompt! 那会让AI变成文生图
-      // 不使用变换词(camera/rotate/orbit/move), 那会让AI独立变换元素
-      // 只用: "Show this image from [视角] view"
-      const multiAnglePrompt = prompt || `Show this image from a ${viewDesc} view`;
 
       // Resolve image to base64 for maximum content preservation
       const multiAngleBase64 = await resolveImageToBase64(imageUrl);
@@ -1623,12 +1636,13 @@ export async function POST(request: NextRequest) {
             size: maAspectRatio,
             n: 1,
             image: multiAngleBase64,
-            // ★ 不传strength! OpenAI /images/edits不支持,
-            //   其他提供商可能将strength解释为"重写N%的图像"
-            //   导致元素剧变。让API使用默认值。
-            input_fidelity: 'high' as const,
+            // ★ 不传strength — 避免不同提供商解释不一致
+            // ★ input_fidelity: 'low' — 允许大幅度视角变换
+            //   'high'只做微调→角度变化无效(v7问题)
+            //   'low'需靠prompt约束保持元素/风格
+            input_fidelity: 'low' as const,
           }), '多角度(edits)', '/images/edits');
-          console.info(`[multi-angle] Used /images/edits, fidelity=high, no strength, rotation=${rotation}, tilt=${tilt}`);
+          console.info(`[multi-angle] Used /images/edits, fidelity=low, no strength, rotation=${rotation}, tilt=${tilt}`);
         } else {
           throw new ModelCapabilityError('No base64 image available for edits endpoint');
         }
