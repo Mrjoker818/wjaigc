@@ -281,17 +281,32 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
             });
             const pollData = await pollResp.json();
 
-            if (pollData.status === 'completed' && pollData.result) {
+            if (pollData.status === 'completed') {
               clearInterval(pollInterval);
               setProgress(100);
               setProgressLabel('精修完成');
-              const urls = pollData.result.directImageUrls || pollData.result.imageUrls || [];
+              // 从 result 中提取图片 URL
+              const resultData = pollData.result || {};
+              const urls = resultData.directImageUrls || resultData.imageUrls || [];
+              // 兼容单图结果格式
+              const finalUrls = urls.length > 0 ? urls : (resultData.imageUrl ? [resultData.imageUrl] : []);
+              // 兼容 maskUrl
+              const maskUrl = resultData.maskUrl || null;
               const label = refineMode === 'expert' ? '专家精修' : '标准精修';
-              setResults(urls.map((url: string) => ({ imageUrl: url, label })));
+              if (finalUrls.length > 0) {
+                setResults(finalUrls.map((url: string, idx: number) => ({ 
+                  imageUrl: url, 
+                  maskUrl: idx === 0 ? maskUrl : null,
+                  label 
+                })));
+              } else {
+                setResults([]);
+                setProgressLabel('未获取到精修结果');
+              }
               setIsProcessing(false);
             } else if (pollData.status === 'failed') {
               clearInterval(pollInterval);
-              setProgressLabel('精修失败');
+              setProgressLabel(pollData.error || '精修失败');
               setIsProcessing(false);
               setResults([]);
             } else {
@@ -447,6 +462,14 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                 >
                   <X size={14} />
                 </button>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="absolute bottom-2 right-2 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1"
+                  style={{ background: accentColor, color: '#000' }}
+                >
+                  <Upload size={12} />
+                  重新选择
+                </button>
               </div>
             ) : (
               <div
@@ -500,7 +523,13 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                 <img src={sourceImage} alt="Source" className="w-12 h-12 object-cover rounded-md" style={{ border: `1px solid ${borderColor}` }} />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm truncate" style={{ color: textColor }}>已选择图片</p>
-                  <button onClick={() => setActiveTab('upload')} className="text-xs" style={{ color: accentColor }}>更换图片</button>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setActiveTab('upload')} className="text-xs" style={{ color: accentColor }}>更换图片</button>
+                    <button onClick={() => fileInputRef.current?.click()} className="text-xs flex items-center gap-0.5" style={{ color: accentColor }}>
+                      <Upload size={10} />
+                      重新上传
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
