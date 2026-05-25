@@ -5,7 +5,7 @@ import {
   Palette, Plus, Trash2, Edit3, Check, X, Sparkles,
   ChevronDown, ChevronUp, Image as ImageIcon, Loader2,
   Wand2, LayoutGrid, Eye, Copy, Upload, Type,
-  SwatchBook, Globe, Heart, Tag, Zap, ArrowRight
+  SwatchBook, Tag, Zap, ArrowRight, Camera, FileImage
 } from 'lucide-react';
 
 // ========== Brand Kit Type ==========
@@ -48,43 +48,42 @@ const defaultColors = {
 // ========== Scene Type Options ==========
 const SCENE_TYPES = [
   { id: 'poster', name: '海报', icon: '🖼️', desc: '宣传海报' },
-  { id: 'social_media', name: '社交媒体', icon: '📱', desc: '社交平台配图' },
+  { id: 'social_media', name: '社交媒体', icon: '📱', desc: '社交配图' },
   { id: 'business_card', name: '名片', icon: '💳', desc: '商务名片' },
   { id: 'packaging', name: '包装', icon: '📦', desc: '产品包装' },
   { id: 'banner', name: '横幅', icon: '🏴', desc: '广告横幅' },
-  { id: 'logo_variation', name: 'Logo 变体', icon: '⭐', desc: 'Logo 延展' },
+  { id: 'logo_variation', name: 'Logo变体', icon: '⭐', desc: 'Logo延展' },
   { id: 'letterhead', name: '信头纸', icon: '📝', desc: '文件信头' },
-  { id: 'merchandise', name: '周边商品', icon: '👕', desc: '周边设计' },
+  { id: 'merchandise', name: '周边', icon: '👕', desc: '周边设计' },
 ];
 
-// ========== Section Header ==========
-function SectionHeader({ icon: Icon, title, isGold, action }: {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  isGold: boolean;
-  action?: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center gap-2 mb-3">
-      <Icon className={`w-3.5 h-3.5 ${isGold ? 'text-[#d4af37]' : 'text-primary'}`} />
-      <span className={`text-xs font-semibold tracking-wide uppercase ${isGold ? 'text-gray-400' : 'text-muted-foreground'}`}>
-        {title}
-      </span>
-      <div className={`flex-1 h-px ${isGold ? 'bg-white/5' : 'bg-border'}`} />
-      {action}
-    </div>
-  );
+// ========== Shared Styles ==========
+function useTheme(isGold: boolean) {
+  return {
+    bg: isGold ? 'bg-[#111]' : 'bg-card',
+    surface: isGold ? 'bg-[#1a1a1a]' : 'bg-muted/30',
+    surfaceHover: isGold ? 'hover:bg-[#222]' : 'hover:bg-muted/50',
+    border: isGold ? 'border-white/[0.06]' : 'border-border',
+    borderLight: isGold ? 'border-white/[0.04]' : 'border-border/50',
+    text: isGold ? 'text-gray-200' : 'text-foreground',
+    textSec: isGold ? 'text-gray-500' : 'text-muted-foreground',
+    textTri: isGold ? 'text-gray-600' : 'text-muted-foreground/60',
+    accent: isGold ? 'text-[#d4af37]' : 'text-primary',
+    accentBg: isGold ? 'bg-[#d4af37]/10' : 'bg-primary/10',
+    accentBorder: isGold ? 'border-[#d4af37]/30' : 'border-primary/30',
+    accentText: isGold ? 'text-[#d4af37]' : 'text-primary',
+    inputBg: isGold ? 'bg-[#1a1a1a]' : 'bg-muted/50',
+    inputBorder: isGold ? 'border-white/[0.08]' : 'border-border/60',
+  };
 }
 
-// ========== Color Picker Component ==========
-function ColorPicker({ value, onChange, label, isGold }: {
-  value: string;
-  onChange: (v: string) => void;
-  label: string;
-  isGold: boolean;
+// ========== Compact Color Swatch ==========
+function ColorSwatch({ value, onChange, label, isGold }: {
+  value: string; onChange: (v: string) => void; label: string; isGold: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const t = useTheme(isGold);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -95,42 +94,149 @@ function ColorPicker({ value, onChange, label, isGold }: {
   }, []);
 
   return (
-    <div ref={ref} className="flex flex-col items-center gap-1.5 relative group">
-      <div className="relative">
-        <button
-          onClick={() => setOpen(!open)}
-          className="w-10 h-10 rounded-lg border-2 transition-all duration-200 hover:scale-110 hover:shadow-lg active:scale-95"
-          style={{
-            backgroundColor: value,
-            borderColor: isGold ? 'rgba(212,175,55,0.3)' : 'rgba(255,255,255,0.1)',
-            boxShadow: `0 2px 8px ${value}40`,
-          }}
-          title={label}
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md transition-colors hover:bg-white/5"
+        title={`${label}: ${value}`}
+      >
+        <div
+          className="w-5 h-5 rounded shrink-0 ring-1 ring-inset ring-white/10"
+          style={{ backgroundColor: value }}
         />
-        {open && (
-          <div className="absolute top-12 left-1/2 -translate-x-1/2 z-50 p-2 rounded-lg border border-border bg-popover shadow-xl">
-            <input
-              type="color"
-              value={value}
-              onChange={e => onChange(e.target.value)}
-              className="w-28 h-28 rounded cursor-pointer border-0"
-              autoFocus
-            />
-            <div className="flex items-center gap-1 mt-2 px-1">
-              <input
-                type="text"
-                value={value}
-                onChange={e => /^#[0-9a-fA-F]{0,6}$/.test(e.target.value) && onChange(e.target.value)}
-                className="flex-1 bg-muted border border-border rounded px-2 py-1 text-xs font-mono text-foreground text-center"
-                maxLength={7}
-              />
-            </div>
+        <span className={`text-[10px] ${t.textSec} truncate`}>{label}</span>
+        <span className={`text-[10px] font-mono ml-auto ${t.textTri}`}>{value}</span>
+      </button>
+      {open && (
+        <div className={`absolute left-0 right-0 top-full mt-1 z-50 p-2 rounded-lg ${t.bg} border ${t.border} shadow-xl`}>
+          <input
+            type="color" value={value} onChange={e => onChange(e.target.value)}
+            className="w-full h-24 rounded cursor-pointer border-0"
+            autoFocus
+          />
+          <input
+            type="text" value={value}
+            onChange={e => /^#[0-9a-fA-F]{0,6}$/.test(e.target.value) && onChange(e.target.value)}
+            className={`w-full mt-1.5 ${t.inputBg} border ${t.inputBorder} rounded px-2 py-1 text-[10px] font-mono text-center ${t.text}`}
+            maxLength={7}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ========== Image Uploader ==========
+function ImageUploader({ onImageReady, isGold, compact }: {
+  onImageReady: (url: string) => void;
+  isGold: boolean;
+  compact?: boolean;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const t = useTheme(isGold);
+
+  const handleFile = async (file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    setUploading(true);
+    try {
+      // Create preview
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const dataUrl = ev.target?.result as string;
+        setPreview(dataUrl);
+      };
+      reader.readAsDataURL(file);
+
+      // Upload via save-image API
+      const reader2 = new FileReader();
+      const dataUrlPromise = new Promise<string>((resolve) => {
+        reader2.onload = (ev) => resolve(ev.target?.result as string);
+        reader2.readAsDataURL(file);
+      });
+      const dataUrl = await dataUrlPromise;
+
+      const resp = await fetch('/api/save-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: dataUrl }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        onImageReady(data.url || data.path || dataUrl);
+      } else {
+        // Fallback: use data URL directly for vision analysis
+        onImageReady(dataUrl);
+      }
+    } catch {
+      // Fallback: use data URL
+      const reader3 = new FileReader();
+      reader3.onload = (ev) => onImageReady(ev.target?.result as string);
+      reader3.readAsDataURL(file);
+    }
+    setUploading(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  };
+
+  if (compact) {
+    return (
+      <>
+        <input
+          ref={fileRef} type="file" accept="image/*" className="hidden"
+          onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+        />
+        <button
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-200 ${t.accentBg} ${t.accentText} ${t.accentBorder} border disabled:opacity-40`}
+        >
+          {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+          {uploading ? '上传中...' : '上传识别'}
+        </button>
+      </>
+    );
+  }
+
+  return (
+    <div
+      onDrop={handleDrop}
+      onDragOver={e => e.preventDefault()}
+      onClick={() => fileRef.current?.click()}
+      className={`relative rounded-lg border-2 border-dashed cursor-pointer transition-all duration-200 overflow-hidden ${
+        isGold ? 'border-white/10 hover:border-[#d4af37]/30 bg-[#1a1a1a]' : 'border-border hover:border-primary/30 bg-muted/20'
+      } ${preview ? 'h-28' : 'h-24'}`}
+    >
+      <input
+        ref={fileRef} type="file" accept="image/*" className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+      />
+      {uploading ? (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-10">
+          <Loader2 className={`w-5 h-5 animate-spin ${isGold ? 'text-[#d4af37]' : 'text-primary'}`} />
+        </div>
+      ) : null}
+      {preview ? (
+        <div className="relative h-full w-full">
+          <img src={preview} alt="brand" className="w-full h-full object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+          <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between">
+            <span className="text-[10px] text-white/80">点击更换图片</span>
+            <Sparkles className="w-3 h-3 text-[#d4af37]" />
           </div>
-        )}
-      </div>
-      <span className={`text-[10px] ${isGold ? 'text-gray-500' : 'text-muted-foreground'} group-hover:text-foreground transition-colors`}>
-        {label}
-      </span>
+        </div>
+      ) : (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
+          <Upload className={`w-5 h-5 ${t.textTri}`} />
+          <span className={`text-[10px] ${t.textTri}`}>拖拽或点击上传品牌素材</span>
+          <span className={`text-[9px] ${t.textTri}`}>自动识别品牌色彩与风格</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -145,7 +251,8 @@ function BrandKitEditor({ kit, onSave, onCancel, isGold }: {
   const [editKit, setEditKit] = useState<Partial<BrandKit>>(kit);
   const [keywordInput, setKeywordInput] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
-  const [activeSection, setActiveSection] = useState<string | null>(null);
+  const t = useTheme(isGold);
+  const inputCls = `w-full ${t.inputBg} border ${t.inputBorder} rounded-lg px-3 py-2 text-sm ${t.text} placeholder:text-gray-600 focus:outline-none focus:ring-1 focus:ring-[#d4af37]/30 focus:border-[#d4af37]/30 transition-all`;
 
   const handleAddKeyword = () => {
     if (keywordInput.trim()) {
@@ -160,6 +267,46 @@ function BrandKitEditor({ kit, onSave, onCancel, isGold }: {
     setEditKit({ ...editKit, styleKeywords: newKeywords });
   };
 
+  // Analyze from uploaded image
+  const handleImageAnalyze = async (imageUrl: string) => {
+    setAnalyzing(true);
+    try {
+      const resp = await fetch('/api/brand-kit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'analyze-image', imageUrl, brandName: editKit.name }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.brandDNA) {
+          const dna = data.brandDNA;
+          const newKit = { ...editKit };
+          // Map brandDNA fields to editKit
+          if (dna.primaryColor) newKit.colors = { ...newKit.colors!, primary: dna.primaryColor };
+          if (dna.secondaryColors?.[0]) newKit.colors = { ...newKit.colors!, secondary: dna.secondaryColors[0] };
+          if (dna.secondaryColors?.[1]) newKit.colors = { ...newKit.colors!, accent: dna.secondaryColors[1] };
+          if (dna.styleKeywords?.length) newKit.styleKeywords = [...(newKit.styleKeywords || []), ...dna.styleKeywords.filter((k: string) => !(newKit.styleKeywords || []).includes(k))];
+          if (dna.mood) newKit.mood = dna.mood;
+          if (dna.industry) newKit.industry = dna.industry;
+          if (dna.description) newKit.description = dna.description;
+          if (dna.fontFamily) {
+            const ff = dna.fontFamily.toLowerCase();
+            if (ff.includes('serif') && !ff.includes('sans')) newKit.fontStyle = 'serif';
+            else if (ff.includes('handwrit') || ff.includes('script')) newKit.fontStyle = 'handwriting';
+            else if (ff.includes('display') || ff.includes('decorative')) newKit.fontStyle = 'display';
+            else if (ff.includes('mono')) newKit.fontStyle = 'monospace';
+          }
+          newKit.brandDna = JSON.stringify(dna, null, 2);
+          setEditKit(newKit);
+        }
+      }
+    } catch (e) {
+      console.error('Brand image analysis failed:', e);
+    }
+    setAnalyzing(false);
+  };
+
+  // Analyze from kit data
   const handleAnalyze = async () => {
     setAnalyzing(true);
     try {
@@ -180,119 +327,94 @@ function BrandKitEditor({ kit, onSave, onCancel, isGold }: {
     setAnalyzing(false);
   };
 
-  const bg = isGold ? 'bg-[#141414]' : 'bg-card';
-  const textC = isGold ? 'text-gray-200' : 'text-foreground';
-  const accentC = isGold ? 'text-[#d4af37]' : 'text-primary';
-  const sectionBg = isGold ? 'bg-[#1c1c1c] hover:bg-[#222]' : 'bg-muted/40 hover:bg-muted/60';
-  const inputCls = `w-full bg-muted/60 border border-border/50 rounded-lg px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/30 transition-all`;
-
   return (
-    <div className={`${bg} rounded-xl border border-border overflow-hidden`}>
-      {/* Header */}
-      <div className={`px-4 py-3 border-b ${isGold ? 'border-white/5 bg-[#1a1a1a]' : 'border-border bg-muted/30'}`}>
+    <div className={`rounded-xl ${t.bg} overflow-hidden`}>
+      {/* Header Bar */}
+      <div className={`flex items-center justify-between px-3 py-2.5 ${isGold ? 'bg-[#1a1a1a] border-b border-white/[0.04]' : 'bg-muted/20 border-b border-border/50'}`}>
         <div className="flex items-center gap-2">
-          <div className={`w-1 h-4 rounded-full ${isGold ? 'bg-[#d4af37]' : 'bg-primary'}`} />
-          <span className={`text-sm font-semibold ${textC}`}>
-            {editKit.id ? '编辑品牌' : '创建品牌'}
-          </span>
+          <div className={`w-1 h-3.5 rounded-full ${isGold ? 'bg-[#d4af37]' : 'bg-primary'}`} />
+          <span className={`text-xs font-semibold ${t.text}`}>{editKit.id ? '编辑品牌' : '创建品牌'}</span>
         </div>
+        <ImageUploader onImageReady={handleImageAnalyze} isGold={isGold} compact />
       </div>
 
-      <div className="p-4 space-y-5">
-        {/* ===== Brand Info Section ===== */}
-        <div>
-          <SectionHeader icon={Type} title="基本信息" isGold={isGold} />
-          <div className="space-y-3">
-            <input
-              type="text"
-              value={editKit.name || ''}
-              onChange={e => setEditKit({ ...editKit, name: e.target.value })}
-              className={inputCls}
-              placeholder="品牌名称"
-            />
-            <textarea
-              value={editKit.description || ''}
-              onChange={e => setEditKit({ ...editKit, description: e.target.value })}
-              className={`${inputCls} resize-none`}
-              rows={2}
-              placeholder="品牌核心价值、定位和个性..."
-            />
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={`text-[10px] ${isGold ? 'text-gray-500' : 'text-muted-foreground'} mb-1 block`}>行业</label>
-                <select
-                  value={editKit.industry || ''}
-                  onChange={e => setEditKit({ ...editKit, industry: e.target.value })}
-                  className={inputCls}
-                >
-                  <option value="">选择行业</option>
-                  <option value="tech">科技</option>
-                  <option value="fashion">时尚</option>
-                  <option value="food">餐饮</option>
-                  <option value="health">健康</option>
-                  <option value="education">教育</option>
-                  <option value="finance">金融</option>
-                  <option value="entertainment">娱乐</option>
-                  <option value="beauty">美妆</option>
-                  <option value="sports">运动</option>
-                  <option value="travel">旅行</option>
-                  <option value="other">其他</option>
-                </select>
-              </div>
-              <div>
-                <label className={`text-[10px] ${isGold ? 'text-gray-500' : 'text-muted-foreground'} mb-1 block`}>情绪调性</label>
-                <select
-                  value={editKit.mood || ''}
-                  onChange={e => setEditKit({ ...editKit, mood: e.target.value })}
-                  className={inputCls}
-                >
-                  <option value="">选择调性</option>
-                  <option value="professional">专业</option>
-                  <option value="playful">活泼</option>
-                  <option value="luxury">奢华</option>
-                  <option value="minimal">极简</option>
-                  <option value="warm">温馨</option>
-                  <option value="bold">大胆</option>
-                  <option value="elegant">优雅</option>
-                  <option value="energetic">活力</option>
-                  <option value="calm">沉稳</option>
-                  <option value="creative">创意</option>
-                </select>
-              </div>
-            </div>
+      <div className="p-3 space-y-3.5 max-h-[60vh] overflow-y-auto">
+        {/* ===== Upload & Image Preview ===== */}
+        <ImageUploader
+          onImageReady={handleImageAnalyze}
+          isGold={isGold}
+        />
+
+        {/* ===== Brand Info ===== */}
+        <div className="space-y-2.5">
+          <input
+            type="text"
+            value={editKit.name || ''}
+            onChange={e => setEditKit({ ...editKit, name: e.target.value })}
+            className={inputCls}
+            placeholder="品牌名称 *"
+          />
+          <textarea
+            value={editKit.description || ''}
+            onChange={e => setEditKit({ ...editKit, description: e.target.value })}
+            className={`${inputCls} resize-none`}
+            rows={2}
+            placeholder="品牌核心价值、定位和个性..."
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <select
+              value={editKit.industry || ''}
+              onChange={e => setEditKit({ ...editKit, industry: e.target.value })}
+              className={`${inputCls} text-xs`}
+            >
+              <option value="">选择行业</option>
+              {['tech|科技','fashion|时尚','food|餐饮','health|健康','education|教育','finance|金融','entertainment|娱乐','beauty|美妆','sports|运动','travel|旅行','other|其他'].map(o => {
+                const [v, l] = o.split('|');
+                return <option key={v} value={v}>{l}</option>;
+              })}
+            </select>
+            <select
+              value={editKit.mood || ''}
+              onChange={e => setEditKit({ ...editKit, mood: e.target.value })}
+              className={`${inputCls} text-xs`}
+            >
+              <option value="">选择调性</option>
+              {['professional|专业','playful|活泼','luxury|奢华','minimal|极简','warm|温馨','bold|大胆','elegant|优雅','energetic|活力','calm|沉稳','creative|创意'].map(o => {
+                const [v, l] = o.split('|');
+                return <option key={v} value={v}>{l}</option>;
+              })}
+            </select>
           </div>
         </div>
 
-        {/* ===== Colors Section ===== */}
+        {/* ===== Colors ===== */}
         <div>
-          <SectionHeader icon={SwatchBook} title="品牌色彩" isGold={isGold} />
-          <div className={`p-3 rounded-lg ${isGold ? 'bg-[#1c1c1c]' : 'bg-muted/30'}`}>
-            {/* Color Preview Bar */}
-            <div className="flex gap-1 mb-3 rounded-lg overflow-hidden h-6">
-              {Object.entries(editKit.colors || defaultColors).map(([key, color]) => (
-                <div
-                  key={key}
-                  className="flex-1 transition-all duration-300 hover:flex-[2]"
-                  style={{ backgroundColor: color }}
-                  title={`${key}: ${color}`}
-                />
-              ))}
-            </div>
-            {/* Color Pickers */}
-            <div className="flex items-start justify-between px-1">
-              <ColorPicker label="主色" value={editKit.colors?.primary || defaultColors.primary} onChange={v => setEditKit({ ...editKit, colors: { ...editKit.colors!, primary: v } })} isGold={isGold} />
-              <ColorPicker label="辅色" value={editKit.colors?.secondary || defaultColors.secondary} onChange={v => setEditKit({ ...editKit, colors: { ...editKit.colors!, secondary: v } })} isGold={isGold} />
-              <ColorPicker label="强调" value={editKit.colors?.accent || defaultColors.accent} onChange={v => setEditKit({ ...editKit, colors: { ...editKit.colors!, accent: v } })} isGold={isGold} />
-              <ColorPicker label="背景" value={editKit.colors?.background || defaultColors.background} onChange={v => setEditKit({ ...editKit, colors: { ...editKit.colors!, background: v } })} isGold={isGold} />
-              <ColorPicker label="文字" value={editKit.colors?.text || defaultColors.text} onChange={v => setEditKit({ ...editKit, colors: { ...editKit.colors!, text: v } })} isGold={isGold} />
-            </div>
+          <div className="flex items-center gap-1.5 mb-2">
+            <SwatchBook className={`w-3 h-3 ${t.accent}`} />
+            <span className={`text-[10px] font-semibold uppercase tracking-wider ${t.textSec}`}>品牌色彩</span>
+          </div>
+          {/* Color preview bar */}
+          <div className="flex gap-0.5 mb-2 rounded-md overflow-hidden h-4">
+            {Object.values(editKit.colors || defaultColors).map((color, i) => (
+              <div key={i} className="flex-1" style={{ backgroundColor: color }} />
+            ))}
+          </div>
+          <div className={`rounded-lg ${t.surface} p-1 space-y-0.5`}>
+            <ColorSwatch label="主色" value={editKit.colors?.primary || defaultColors.primary} onChange={v => setEditKit({ ...editKit, colors: { ...editKit.colors!, primary: v } })} isGold={isGold} />
+            <ColorSwatch label="辅色" value={editKit.colors?.secondary || defaultColors.secondary} onChange={v => setEditKit({ ...editKit, colors: { ...editKit.colors!, secondary: v } })} isGold={isGold} />
+            <ColorSwatch label="强调" value={editKit.colors?.accent || defaultColors.accent} onChange={v => setEditKit({ ...editKit, colors: { ...editKit.colors!, accent: v } })} isGold={isGold} />
+            <ColorSwatch label="背景" value={editKit.colors?.background || defaultColors.background} onChange={v => setEditKit({ ...editKit, colors: { ...editKit.colors!, background: v } })} isGold={isGold} />
+            <ColorSwatch label="文字" value={editKit.colors?.text || defaultColors.text} onChange={v => setEditKit({ ...editKit, colors: { ...editKit.colors!, text: v } })} isGold={isGold} />
           </div>
         </div>
 
-        {/* ===== Font Style Section ===== */}
+        {/* ===== Font Style ===== */}
         <div>
-          <SectionHeader icon={Type} title="字体风格" isGold={isGold} />
-          <div className="grid grid-cols-5 gap-2">
+          <div className="flex items-center gap-1.5 mb-2">
+            <Type className={`w-3 h-3 ${t.accent}`} />
+            <span className={`text-[10px] font-semibold uppercase tracking-wider ${t.textSec}`}>字体风格</span>
+          </div>
+          <div className="grid grid-cols-5 gap-1.5">
             {([
               { key: 'serif' as const, label: '衬线', sample: 'Ser' },
               { key: 'sans-serif' as const, label: '无衬线', sample: 'San' },
@@ -303,114 +425,101 @@ function BrandKitEditor({ kit, onSave, onCancel, isGold }: {
               <button
                 key={fs.key}
                 onClick={() => setEditKit({ ...editKit, fontStyle: fs.key })}
-                className={`flex flex-col items-center gap-1 px-2 py-2.5 rounded-lg border transition-all duration-200 ${
+                className={`flex flex-col items-center gap-0.5 px-1 py-2 rounded-lg border transition-all duration-200 ${
                   editKit.fontStyle === fs.key
-                    ? isGold ? 'border-[#d4af37]/50 bg-[#d4af37]/10 shadow-sm shadow-[#d4af37]/10' : 'border-primary/50 bg-primary/10 shadow-sm shadow-primary/10'
-                    : `border-border/50 ${sectionBg}`
+                    ? `${t.accentBg} ${t.accentBorder}`
+                    : `${t.borderLight} ${t.surface} ${t.surfaceHover}`
                 }`}
               >
-                <span className={`text-lg font-bold ${
-                  editKit.fontStyle === fs.key
-                    ? isGold ? 'text-[#d4af37]' : 'text-primary'
-                    : isGold ? 'text-gray-500' : 'text-muted-foreground'
-                }`} style={{ fontFamily: fs.key }}>
-                  {fs.sample}
-                </span>
-                <span className={`text-[10px] ${
-                  editKit.fontStyle === fs.key ? accentC : isGold ? 'text-gray-500' : 'text-muted-foreground'
-                }`}>
-                  {fs.label}
-                </span>
+                <span className={`text-base font-bold ${
+                  editKit.fontStyle === fs.key ? t.accentText : t.textTri
+                }`} style={{ fontFamily: fs.key }}>{fs.sample}</span>
+                <span className={`text-[9px] ${
+                  editKit.fontStyle === fs.key ? t.accentText : t.textTri
+                }`}>{fs.label}</span>
               </button>
             ))}
           </div>
         </div>
 
-        {/* ===== Style Keywords Section ===== */}
+        {/* ===== Style Keywords ===== */}
         <div>
-          <SectionHeader icon={Tag} title="风格关键词" isGold={isGold} />
-          <div className="space-y-2.5">
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={keywordInput}
-                onChange={e => setKeywordInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleAddKeyword()}
-                className={`${inputCls} flex-1`}
-                placeholder="输入关键词，回车添加..."
-              />
-              <button
-                onClick={handleAddKeyword}
-                disabled={!keywordInput.trim()}
-                className={`px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200 disabled:opacity-30 ${
-                  isGold ? 'bg-[#d4af37]/15 text-[#d4af37] hover:bg-[#d4af37]/25' : 'bg-primary/10 text-primary hover:bg-primary/20'
-                }`}
-              >
-                <Plus className="w-4 h-4" />
-              </button>
-            </div>
-            {(editKit.styleKeywords || []).length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {(editKit.styleKeywords || []).map((kw, idx) => (
-                  <span
-                    key={idx}
-                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-200 hover:scale-105 ${
-                      isGold ? 'bg-[#d4af37]/12 text-[#d4af37] border border-[#d4af37]/20' : 'bg-primary/8 text-primary border border-primary/15'
-                    }`}
-                  >
-                    {kw}
-                    <button
-                      onClick={() => handleRemoveKeyword(idx)}
-                      className="ml-0.5 hover:text-destructive transition-colors"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
+          <div className="flex items-center gap-1.5 mb-2">
+            <Tag className={`w-3 h-3 ${t.accent}`} />
+            <span className={`text-[10px] font-semibold uppercase tracking-wider ${t.textSec}`}>风格关键词</span>
           </div>
+          <div className="flex gap-1.5 mb-2">
+            <input
+              type="text"
+              value={keywordInput}
+              onChange={e => setKeywordInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleAddKeyword()}
+              className={`${inputCls} flex-1 text-xs py-1.5`}
+              placeholder="输入关键词，回车添加..."
+            />
+            <button
+              onClick={handleAddKeyword}
+              disabled={!keywordInput.trim()}
+              className={`px-2 rounded-lg transition-all duration-200 disabled:opacity-30 ${t.accentBg} ${t.accentText}`}
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          {(editKit.styleKeywords || []).length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {(editKit.styleKeywords || []).map((kw, idx) => (
+                <span
+                  key={idx}
+                  className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-medium ${t.accentBg} ${t.accentText}`}
+                >
+                  {kw}
+                  <button onClick={() => handleRemoveKeyword(idx)} className="ml-0.5 hover:text-destructive transition-colors">
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* ===== Brand DNA Section ===== */}
+        {/* ===== Brand DNA (if exists) ===== */}
         {editKit.brandDna && (
           <div>
-            <SectionHeader icon={Sparkles} title="品牌 DNA" isGold={isGold} />
-            <div className={`text-xs leading-relaxed ${isGold ? 'text-gray-400' : 'text-muted-foreground'} bg-muted/30 rounded-lg p-3 max-h-40 overflow-y-auto whitespace-pre-wrap border border-border/30`}>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <Sparkles className={`w-3 h-3 ${t.accent}`} />
+              <span className={`text-[10px] font-semibold uppercase tracking-wider ${t.textSec}`}>品牌 DNA</span>
+            </div>
+            <div className={`text-[10px] leading-relaxed ${t.textSec} ${t.surface} rounded-lg p-2.5 max-h-28 overflow-y-auto whitespace-pre-wrap`}>
               {editKit.brandDna}
             </div>
           </div>
         )}
 
         {/* ===== Actions ===== */}
-        <div className="flex items-center gap-2 pt-1">
+        <div className="flex items-center gap-2 pt-1 pb-1">
           <button
             onClick={handleAnalyze}
             disabled={analyzing || !editKit.name}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200 disabled:opacity-40 ${
-              isGold ? 'bg-[#d4af37]/15 text-[#d4af37] hover:bg-[#d4af37]/25' : 'bg-primary/10 text-primary hover:bg-primary/20'
-            }`}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-200 disabled:opacity-30 ${t.accentBg} ${t.accentText}`}
           >
-            {analyzing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
-            {analyzing ? '分析中...' : 'AI 分析 DNA'}
+            {analyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+            {analyzing ? '分析中...' : 'AI 分析'}
           </button>
           <div className="flex-1" />
           <button
             onClick={onCancel}
-            className={`px-4 py-2 rounded-lg text-xs ${isGold ? 'text-gray-500 hover:text-gray-300 hover:bg-white/5' : 'text-muted-foreground hover:text-foreground hover:bg-muted'} transition-all duration-200`}
+            className={`px-3 py-1.5 rounded-lg text-[11px] ${t.textSec} hover:${t.text} transition-all duration-200`}
           >
             取消
           </button>
           <button
             onClick={() => onSave(editKit)}
             disabled={!editKit.name}
-            className={`flex items-center gap-1.5 px-5 py-2 rounded-lg text-xs font-semibold transition-all duration-200 disabled:opacity-40 ${
-              isGold
-                ? 'bg-[#d4af37] text-black hover:bg-[#d4af37]/85 shadow-sm shadow-[#d4af37]/20'
-                : 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm shadow-primary/20'
+            className={`flex items-center gap-1 px-4 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-200 disabled:opacity-30 ${
+              isGold ? 'bg-[#d4af37] text-black hover:bg-[#d4af37]/85' : 'bg-primary text-primary-foreground hover:bg-primary/90'
             }`}
           >
-            <Check className="w-3.5 h-3.5" />
+            <Check className="w-3 h-3" />
             保存
           </button>
         </div>
@@ -430,104 +539,78 @@ function BrandKitCard({ kit, selected, onSelect, onEdit, onDelete, onBatchGenera
   isGold: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const accentC = isGold ? '#d4af37' : '';
+  const t = useTheme(isGold);
 
   return (
     <div
-      className={`rounded-xl border transition-all duration-300 overflow-hidden cursor-pointer group ${
+      className={`rounded-lg border transition-all duration-200 overflow-hidden cursor-pointer ${
         selected
-          ? isGold ? 'border-[#d4af37]/40 bg-[#d4af37]/5 shadow-sm shadow-[#d4af37]/10' : 'border-primary/40 bg-primary/5 shadow-sm shadow-primary/10'
-          : `border-border/50 ${isGold ? 'bg-[#1a1a1a] hover:border-white/10' : 'bg-card hover:border-primary/20'}`
+          ? `${t.accentBorder} ${t.accentBg}`
+          : `${t.borderLight} ${t.bg} hover:border-white/10`
       }`}
       onClick={onSelect}
     >
-      {/* Color Strip at Top */}
-      <div className="flex h-1.5">
-        <div className="flex-1 transition-all duration-300" style={{ backgroundColor: kit.colors.primary }} />
-        <div className="flex-1 transition-all duration-300" style={{ backgroundColor: kit.colors.secondary }} />
-        <div className="flex-1 transition-all duration-300" style={{ backgroundColor: kit.colors.accent }} />
+      {/* Color strip */}
+      <div className="flex h-1">
+        <div className="flex-1" style={{ backgroundColor: kit.colors.primary }} />
+        <div className="flex-1" style={{ backgroundColor: kit.colors.secondary }} />
+        <div className="flex-1" style={{ backgroundColor: kit.colors.accent }} />
       </div>
 
       {/* Header */}
-      <div className="flex items-center gap-3 px-3.5 py-3">
-        <div className="flex flex-col items-center">
-          <div className="w-5 h-5 rounded-full border border-white/10 shadow-sm" style={{ backgroundColor: kit.colors.primary }} />
-          <div className="flex gap-0.5 mt-1">
-            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: kit.colors.secondary }} />
-            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: kit.colors.accent }} />
+      <div className="flex items-center gap-2.5 px-3 py-2.5">
+        <div className="flex flex-col items-center gap-0.5">
+          <div className="w-5 h-5 rounded-full ring-1 ring-inset ring-white/10" style={{ backgroundColor: kit.colors.primary }} />
+          <div className="flex gap-0.5">
+            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: kit.colors.secondary }} />
+            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: kit.colors.accent }} />
           </div>
         </div>
 
         <div className="flex-1 min-w-0">
-          <div className={`text-sm font-semibold truncate ${isGold ? 'text-gray-200' : 'text-foreground'}`}>
-            {kit.name}
-          </div>
+          <div className={`text-xs font-semibold truncate ${t.text}`}>{kit.name}</div>
           {kit.industry && (
-            <div className={`text-[10px] mt-0.5 ${isGold ? 'text-gray-600' : 'text-muted-foreground'}`}>
+            <div className={`text-[9px] mt-0.5 ${t.textTri}`}>
               {kit.industry}{kit.mood ? ` · ${kit.mood}` : ''}
             </div>
           )}
         </div>
 
-        <div className="flex items-center gap-0.5" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-0.5 shrink-0" onClick={e => e.stopPropagation()}>
           <button
             onClick={onBatchGenerate}
-            className={`p-1.5 rounded-lg transition-all duration-200 ${
-              isGold ? 'text-[#d4af37] hover:bg-[#d4af37]/15' : 'text-primary hover:bg-primary/10'
-            }`}
-            title="批量生成品牌构件"
+            className={`p-1 rounded-md transition-colors ${t.accentText} hover:bg-white/5`}
+            title="批量生成"
           >
-            <LayoutGrid className="w-4 h-4" />
+            <LayoutGrid className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setExpanded(!expanded)}
-            className={`p-1.5 rounded-lg transition-all duration-200 ${isGold ? 'text-gray-600 hover:text-gray-400 hover:bg-white/5' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
+            className={`p-1 rounded-md transition-colors ${t.textSec} hover:${t.text}`}
           >
-            {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
           </button>
         </div>
       </div>
 
-      {/* Expanded Details */}
-      <div className={`overflow-hidden transition-all duration-300 ${expanded ? 'max-h-60 opacity-100' : 'max-h-0 opacity-0'}`}>
-        <div className={`px-3.5 pb-3 border-t ${isGold ? 'border-white/5' : 'border-border'} pt-2.5 space-y-2.5`}>
-          {kit.description && (
-            <p className={`text-xs leading-relaxed ${isGold ? 'text-gray-500' : 'text-muted-foreground'}`}>{kit.description}</p>
-          )}
-
-          {/* Style Keywords */}
+      {/* Expanded */}
+      <div className={`overflow-hidden transition-all duration-200 ${expanded ? 'max-h-48 opacity-100' : 'max-h-0 opacity-0'}`}>
+        <div className={`px-3 pb-2.5 pt-2 ${isGold ? 'border-t border-white/[0.04]' : 'border-t border-border/50'} space-y-2`}>
+          {kit.description && <p className={`text-[10px] leading-relaxed ${t.textSec}`}>{kit.description}</p>}
           {kit.styleKeywords.length > 0 && (
             <div className="flex flex-wrap gap-1">
-              {kit.styleKeywords.slice(0, 8).map((kw, i) => (
-                <span key={i} className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
-                  isGold ? 'bg-[#d4af37]/8 text-[#d4af37]/80' : 'bg-primary/5 text-primary/80'
-                }`}>
-                  {kw}
-                </span>
+              {kit.styleKeywords.slice(0, 6).map((kw, i) => (
+                <span key={i} className={`text-[9px] px-1.5 py-0.5 rounded-full ${t.accentBg} ${t.accentText}`}>{kw}</span>
               ))}
-              {kit.styleKeywords.length > 8 && (
-                <span className={`text-[10px] px-1.5 py-0.5 ${isGold ? 'text-gray-600' : 'text-muted-foreground'}`}>
-                  +{kit.styleKeywords.length - 8}
-                </span>
-              )}
+              {kit.styleKeywords.length > 6 && <span className={`text-[9px] ${t.textTri}`}>+{kit.styleKeywords.length - 6}</span>}
             </div>
           )}
-
-          {/* Brand DNA Preview */}
-          {kit.brandDna && (
-            <div className={`text-[10px] leading-relaxed ${isGold ? 'text-gray-600' : 'text-muted-foreground'} bg-muted/20 rounded-lg p-2 max-h-16 overflow-y-auto whitespace-pre-wrap`}>
-              <Sparkles className="w-3 h-3 inline mr-1" style={{ color: accentC }} />
-              {kit.brandDna.split('\n').slice(0, 2).join('\n')}...
-            </div>
-          )}
-
-          {/* Actions */}
-          <div className="flex items-center gap-2 pt-0.5">
-            <button onClick={onEdit} className={`text-[10px] flex items-center gap-1 px-2 py-1 rounded-md transition-colors ${isGold ? 'text-gray-500 hover:text-gray-300 hover:bg-white/5' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}>
-              <Edit3 className="w-3 h-3" /> 编辑
+          <div className="flex items-center gap-2">
+            <button onClick={onEdit} className={`text-[10px] flex items-center gap-0.5 px-1.5 py-0.5 rounded-md ${t.textSec} hover:${t.text} transition-colors`}>
+              <Edit3 className="w-2.5 h-2.5" /> 编辑
             </button>
-            <button onClick={onDelete} className="text-[10px] flex items-center gap-1 px-2 py-1 rounded-md text-destructive/70 hover:text-destructive hover:bg-destructive/5 transition-colors">
-              <Trash2 className="w-3 h-3" /> 删除
+            <button onClick={onDelete} className="text-[10px] flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-red-500/60 hover:text-red-500 transition-colors">
+              <Trash2 className="w-2.5 h-2.5" /> 删除
             </button>
           </div>
         </div>
@@ -551,6 +634,8 @@ function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageMo
   const [results, setResults] = useState<Array<{scene: string; prompt: string; url?: string}>>([]);
   const [taskIds, setTaskIds] = useState<string[]>([]);
   const [polling, setPolling] = useState(false);
+  const t = useTheme(isGold);
+  const inputCls = `w-full ${t.inputBg} border ${t.inputBorder} rounded-lg px-2.5 py-1.5 text-xs ${t.text} focus:outline-none focus:ring-1 focus:ring-[#d4af37]/30 transition-all`;
 
   const toggleScene = (id: string) => {
     setSelectedScenes(prev =>
@@ -562,7 +647,6 @@ function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageMo
     if (selectedScenes.length === 0) return;
     setGenerating(true);
     setResults([]);
-
     try {
       const resp = await fetch('/api/brand-kit', {
         method: 'POST',
@@ -576,14 +660,11 @@ function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageMo
           aspectRatio,
         }),
       });
-
       if (resp.ok) {
         const data = await resp.json();
         setResults(data.prompts?.map((p: {scene: string; prompt: string}) => ({
-          scene: p.scene,
-          prompt: p.prompt,
+          scene: p.scene, prompt: p.prompt,
         })) || []);
-
         if (data.taskIds?.length > 0) {
           setTaskIds(data.taskIds);
           setPolling(true);
@@ -605,26 +686,19 @@ function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageMo
     const completed = new Set<string>();
     const maxAttempts = 120;
     let attempts = 0;
-
     const poll = async () => {
       if (completed.size >= tIds.length || attempts >= maxAttempts) {
-        setGenerating(false);
-        setPolling(false);
-        return;
+        setGenerating(false); setPolling(false); return;
       }
-
       attempts++;
-
       for (const tid of tIds) {
         if (completed.has(tid)) continue;
-
         try {
           const resp = await fetch('/api/poll-task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ taskId: tid }),
           });
-
           if (resp.ok) {
             const data = await resp.json();
             if (data.status === 'completed' && data.result?.url) {
@@ -640,216 +714,145 @@ function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageMo
           }
         } catch {}
       }
-
       if (completed.size < tIds.length) {
         setTimeout(poll, 5000);
       } else {
-        setGenerating(false);
-        setPolling(false);
+        setGenerating(false); setPolling(false);
       }
     };
-
     poll();
   };
 
   const handleAddToCanvas = () => {
     const urls = results.filter(r => r.url).map(r => r.url!);
-    if (urls.length > 0 && onAddImages) {
-      onAddImages(urls);
-    }
+    if (urls.length > 0 && onAddImages) onAddImages(urls);
     onClose();
   };
-
-  const bg = isGold ? 'bg-[#141414]' : 'bg-card';
-  const textC = isGold ? 'text-gray-200' : 'text-foreground';
-  const inputCls = `w-full bg-muted/60 border border-border/50 rounded-lg px-2.5 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all`;
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div
-        className={`${bg} rounded-2xl border border-border shadow-2xl w-[580px] max-h-[85vh] overflow-hidden`}
+        className={`${isGold ? 'bg-[#111]' : 'bg-card'} rounded-2xl border ${t.border} shadow-2xl w-[520px] max-h-[80vh] overflow-hidden`}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className={`flex items-center gap-3 px-5 py-4 border-b ${isGold ? 'border-white/5' : 'border-border'}`}>
-          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isGold ? 'bg-[#d4af37]/15' : 'bg-primary/10'}`}>
-            <LayoutGrid className={`w-4 h-4 ${isGold ? 'text-[#d4af37]' : 'text-primary'}`} />
+        <div className={`flex items-center gap-2.5 px-4 py-3 ${isGold ? 'border-b border-white/[0.04]' : 'border-b border-border'}`}>
+          <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${t.accentBg}`}>
+            <LayoutGrid className={`w-3.5 h-3.5 ${t.accentText}`} />
           </div>
           <div>
-            <h3 className={`text-sm font-semibold ${textC}`}>批量生成品牌构件</h3>
-            <p className={`text-[10px] mt-0.5 ${isGold ? 'text-gray-600' : 'text-muted-foreground'}`}>
-              {kit.name} · AI 自动生成品牌延展设计
-            </p>
+            <h3 className={`text-sm font-semibold ${t.text}`}>批量生成品牌构件</h3>
+            <p className={`text-[10px] ${t.textTri}`}>{kit.name} · AI 自动生成</p>
           </div>
           <div className="flex-1" />
-          <button onClick={onClose} className={`p-1.5 rounded-lg transition-colors ${isGold ? 'text-gray-600 hover:text-gray-400 hover:bg-white/5' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}>
+          <button onClick={onClose} className={`p-1 rounded-lg ${t.textSec} hover:${t.text} transition-colors`}>
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="p-5 space-y-5 overflow-y-auto max-h-[calc(85vh-68px)]">
+        <div className="p-4 space-y-4 overflow-y-auto max-h-[calc(80vh-52px)]">
           {/* Scene Selection */}
-          <div>
-            <SectionHeader icon={LayoutGrid} title="选择场景类型" isGold={isGold} />
-            <div className="grid grid-cols-4 gap-2">
-              {SCENE_TYPES.map(st => {
-                const isSelected = selectedScenes.includes(st.id);
-                return (
-                  <button
-                    key={st.id}
-                    onClick={() => toggleScene(st.id)}
-                    className={`relative px-2 py-3 rounded-xl border text-xs transition-all duration-200 flex flex-col items-center gap-1.5 ${
-                      isSelected
-                        ? isGold ? 'border-[#d4af37]/40 bg-[#d4af37]/10 shadow-sm shadow-[#d4af37]/10' : 'border-primary/40 bg-primary/10 shadow-sm shadow-primary/10'
-                        : `border-border/50 ${isGold ? 'bg-[#1c1c1c] hover:border-white/10' : 'bg-muted/30 hover:border-primary/20'}`
-                    }`}
-                  >
-                    <span className="text-lg">{st.icon}</span>
-                    <span className={`font-medium ${isSelected ? (isGold ? 'text-[#d4af37]' : 'text-primary') : (isGold ? 'text-gray-400' : 'text-foreground')}`}>
-                      {st.name}
-                    </span>
-                    <span className={`text-[9px] ${isGold ? 'text-gray-600' : 'text-muted-foreground'}`}>{st.desc}</span>
-                    {isSelected && (
-                      <div className={`absolute top-1.5 right-1.5 w-3.5 h-3.5 rounded-full flex items-center justify-center ${isGold ? 'bg-[#d4af37]' : 'bg-primary'}`}>
-                        <Check className="w-2.5 h-2.5 text-white" />
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+          <div className="grid grid-cols-4 gap-1.5">
+            {SCENE_TYPES.map(st => {
+              const sel = selectedScenes.includes(st.id);
+              return (
+                <button
+                  key={st.id}
+                  onClick={() => toggleScene(st.id)}
+                  className={`relative px-1.5 py-2 rounded-lg border text-[10px] transition-all duration-200 flex flex-col items-center gap-0.5 ${
+                    sel ? `${t.accentBg} ${t.accentBorder}` : `${t.borderLight} ${t.surface} ${t.surfaceHover}`
+                  }`}
+                >
+                  <span className="text-base">{st.icon}</span>
+                  <span className={`font-medium ${sel ? t.accentText : t.text}`}>{st.name}</span>
+                  {sel && <div className={`absolute top-1 right-1 w-3 h-3 rounded-full flex items-center justify-center ${isGold ? 'bg-[#d4af37]' : 'bg-primary'}`}><Check className="w-2 h-2 text-white" /></div>}
+                </button>
+              );
+            })}
           </div>
 
-          {/* Settings Row */}
-          <div>
-            <SectionHeader icon={Zap} title="生成设置" isGold={isGold} />
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className={`text-[10px] ${isGold ? 'text-gray-500' : 'text-muted-foreground'} mb-1 block`}>每场景数量</label>
-                <select
-                  value={count}
-                  onChange={e => setCount(Number(e.target.value))}
-                  className={inputCls}
-                >
-                  <option value={1}>1 张</option>
-                  <option value={2}>2 张</option>
-                  <option value={3}>3 张</option>
-                </select>
-              </div>
-              <div>
-                <label className={`text-[10px] ${isGold ? 'text-gray-500' : 'text-muted-foreground'} mb-1 block`}>画面比例</label>
-                <select
-                  value={aspectRatio}
-                  onChange={e => setAspectRatio(e.target.value)}
-                  className={inputCls}
-                >
-                  <option value="1:1">1:1 方形</option>
-                  <option value="16:9">16:9 横版</option>
-                  <option value="9:16">9:16 竖版</option>
-                  <option value="4:3">4:3 横版</option>
-                </select>
-              </div>
-              <div>
-                <label className={`text-[10px] ${isGold ? 'text-gray-500' : 'text-muted-foreground'} mb-1 block`}>图像模型</label>
-                <div className={`text-xs px-2.5 py-2 bg-muted/40 border border-border/50 rounded-lg ${isGold ? 'text-gray-500' : 'text-muted-foreground'} truncate`}>
-                  {currentImageModel || '默认'}
-                </div>
+          {/* Settings */}
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <span className={`text-[9px] ${t.textTri} mb-1 block`}>每场景数量</span>
+              <select value={count} onChange={e => setCount(Number(e.target.value))} className={inputCls}>
+                <option value={1}>1 张</option>
+                <option value={2}>2 张</option>
+                <option value={3}>3 张</option>
+              </select>
+            </div>
+            <div>
+              <span className={`text-[9px] ${t.textTri} mb-1 block`}>画面比例</span>
+              <select value={aspectRatio} onChange={e => setAspectRatio(e.target.value)} className={inputCls}>
+                <option value="1:1">1:1 方形</option>
+                <option value="16:9">16:9 横版</option>
+                <option value="9:16">9:16 竖版</option>
+                <option value="4:3">4:3 横版</option>
+              </select>
+            </div>
+            <div>
+              <span className={`text-[9px] ${t.textTri} mb-1 block`}>图像模型</span>
+              <div className={`${t.inputBg} border ${t.inputBorder} rounded-lg px-2.5 py-1.5 text-[10px] ${t.textSec} truncate`}>
+                {currentImageModel || '默认'}
               </div>
             </div>
           </div>
 
           {/* Summary */}
-          <div className={`flex items-center gap-2 text-xs p-3 rounded-lg ${isGold ? 'bg-[#1c1c1c] text-gray-400 border border-white/5' : 'bg-muted/30 text-muted-foreground border border-border/30'}`}>
-            <Sparkles className={`w-3.5 h-3.5 ${isGold ? 'text-[#d4af37]' : 'text-primary'}`} />
-            <span>将生成 <strong className={isGold ? 'text-[#d4af37]' : 'text-primary'}>{selectedScenes.length}</strong> 个场景 × <strong className={isGold ? 'text-[#d4af37]' : 'text-primary'}>{count}</strong> 张 = <strong className={isGold ? 'text-[#d4af37]' : 'text-primary'}>{selectedScenes.length * count}</strong> 张品牌构件</span>
+          <div className={`flex items-center gap-1.5 text-[10px] px-3 py-2 rounded-lg ${t.surface} ${t.textSec}`}>
+            <Zap className={`w-3 h-3 ${t.accentText}`} />
+            <span>将生成 <strong className={t.accentText}>{selectedScenes.length * count}</strong> 张品牌构件</span>
           </div>
 
           {/* Generate Button */}
           <button
             onClick={handleGenerate}
             disabled={generating || selectedScenes.length === 0}
-            className={`w-full py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all duration-200 disabled:opacity-40 ${
-              isGold
-                ? 'bg-[#d4af37] text-black hover:bg-[#d4af37]/85 shadow-lg shadow-[#d4af37]/20'
-                : 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20'
+            className={`w-full py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all duration-200 disabled:opacity-30 ${
+              isGold ? 'bg-[#d4af37] text-black hover:bg-[#d4af37]/85' : 'bg-primary text-primary-foreground hover:bg-primary/90'
             }`}
           >
             {generating ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                {polling ? '生成中，等待结果...' : '正在生成提示词...'}
-              </>
+              <><Loader2 className="w-3.5 h-3.5 animate-spin" />{polling ? '生成中...' : '生成提示词...'}</>
             ) : (
-              <>
-                <Sparkles className="w-4 h-4" />
-                批量生成品牌构件
-              </>
+              <><Sparkles className="w-3.5 h-3.5" />批量生成</>
             )}
           </button>
 
           {/* Results */}
           {results.length > 0 && (
-            <div>
-              <SectionHeader icon={Eye} title="生成结果" isGold={isGold} />
-              <div className="space-y-2">
-                {results.map((r, i) => (
-                  <div
-                    key={i}
-                    className={`flex gap-3 p-2.5 rounded-xl border transition-all duration-300 ${
-                      r.url
-                        ? isGold ? 'border-[#d4af37]/20 bg-[#d4af37]/5' : 'border-primary/20 bg-primary/5'
-                        : `${isGold ? 'border-white/5 bg-[#1c1c1c]' : 'border-border bg-muted/30'}`
-                    }`}
-                  >
-                    {r.url ? (
-                      <img
-                        src={r.url}
-                        alt={r.scene}
-                        className="w-16 h-16 object-cover rounded-lg border border-border/30"
-                      />
-                    ) : (
-                      <div className={`w-16 h-16 rounded-lg flex items-center justify-center ${generating ? 'animate-pulse' : ''} ${isGold ? 'bg-[#222]' : 'bg-muted'}`}>
-                        {generating ? (
-                          <Loader2 className={`w-5 h-5 animate-spin ${isGold ? 'text-[#d4af37]' : 'text-primary'}`} />
-                        ) : (
-                          <ImageIcon className="w-5 h-5 text-muted-foreground/50" />
-                        )}
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className={`text-xs font-semibold ${textC}`}>
-                        {SCENE_TYPES.find(s => s.id === r.scene)?.icon} {SCENE_TYPES.find(s => s.id === r.scene)?.name || r.scene}
-                      </div>
-                      <p className={`text-[10px] mt-0.5 leading-relaxed ${isGold ? 'text-gray-500' : 'text-muted-foreground'} line-clamp-2`}>
-                        {r.prompt}
-                      </p>
-                      {r.url && (
-                        <button
-                          onClick={() => navigator.clipboard.writeText(r.prompt)}
-                          className="mt-1 text-[10px] flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          <Copy className="w-3 h-3" /> 复制提示词
-                        </button>
-                      )}
+            <div className="space-y-1.5">
+              <span className={`text-[10px] font-medium ${t.textSec}`}>生成结果</span>
+              {results.map((r, i) => (
+                <div key={i} className={`flex gap-2.5 p-2 rounded-lg border ${r.url ? t.accentBorder : t.borderLight} ${t.surface}`}>
+                  {r.url ? (
+                    <img src={r.url} alt={r.scene} className="w-14 h-14 object-cover rounded-md shrink-0" />
+                  ) : (
+                    <div className={`w-14 h-14 rounded-md flex items-center justify-center ${generating ? 'animate-pulse' : ''} ${isGold ? 'bg-[#222]' : 'bg-muted'}`}>
+                      {generating ? <Loader2 className={`w-4 h-4 animate-spin ${t.accentText}`} /> : <ImageIcon className="w-4 h-4 text-gray-600" />}
                     </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className={`text-[10px] font-semibold ${t.text}`}>
+                      {SCENE_TYPES.find(s => s.id === r.scene)?.icon} {SCENE_TYPES.find(s => s.id === r.scene)?.name || r.scene}
+                    </div>
+                    <p className={`text-[9px] mt-0.5 leading-relaxed ${t.textSec} line-clamp-2`}>{r.prompt}</p>
+                    {r.url && (
+                      <button onClick={() => navigator.clipboard.writeText(r.prompt)} className="mt-0.5 text-[9px] flex items-center gap-0.5 text-gray-600 hover:text-gray-400 transition-colors">
+                        <Copy className="w-2.5 h-2.5" /> 复制
+                      </button>
+                    )}
                   </div>
-                ))}
-
-                {/* Add to Canvas */}
-                {results.some(r => r.url) && (
-                  <button
-                    onClick={handleAddToCanvas}
-                    className={`w-full py-2.5 rounded-xl text-sm font-medium border transition-all duration-200 flex items-center justify-center gap-2 ${
-                      isGold
-                        ? 'border-[#d4af37]/40 text-[#d4af37] hover:bg-[#d4af37]/10'
-                        : 'border-primary/40 text-primary hover:bg-primary/5'
-                    }`}
-                  >
-                    <ArrowRight className="w-4 h-4" />
-                    添加到画布
-                  </button>
-                )}
-              </div>
+                </div>
+              ))}
+              {results.some(r => r.url) && (
+                <button
+                  onClick={handleAddToCanvas}
+                  className={`w-full py-2 rounded-xl text-xs font-medium border transition-colors flex items-center justify-center gap-1.5 ${t.accentBorder} ${t.accentText} hover:${t.accentBg}`}
+                >
+                  <ArrowRight className="w-3.5 h-3.5" /> 添加到画布
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -860,7 +863,6 @@ function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageMo
 
 // ========== Main Brand Kit Panel ==========
 export default function BrandKitPanel({ isGold, onAddImages }: BrandKitPanelProps) {
-  // 获取当前图像模型（从 localStorage 读取 generation-panel 的选择）
   const [currentImageModel, setCurrentImageModel] = useState<string>('');
   useEffect(() => {
     const readModel = () => {
@@ -876,17 +878,15 @@ export default function BrandKitPanel({ isGold, onAddImages }: BrandKitPanelProp
     const interval = setInterval(readModel, 2000);
     return () => clearInterval(interval);
   }, []);
+
   const [kits, setKits] = useState<BrandKit[]>([]);
   const [selectedKitId, setSelectedKitId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [editKit, setEditKit] = useState<Partial<BrandKit> | null>(null);
   const [batchDialog, setBatchDialog] = useState<BrandKit | null>(null);
   const [loading, setLoading] = useState(true);
+  const t = useTheme(isGold);
 
-  const accentC = isGold ? 'text-[#d4af37]' : 'text-primary';
-  const textC = isGold ? 'text-gray-200' : 'text-foreground';
-
-  // Load brand kits
   const loadKits = useCallback(async () => {
     try {
       const resp = await fetch('/api/brand-kit');
@@ -900,11 +900,9 @@ export default function BrandKitPanel({ isGold, onAddImages }: BrandKitPanelProp
 
   useEffect(() => { loadKits(); }, [loadKits]);
 
-  // Create new brand kit
   const handleCreate = () => {
     setEditKit({
-      name: '',
-      description: '',
+      name: '', description: '',
       colors: { ...defaultColors },
       fontStyle: 'sans-serif',
       styleKeywords: [],
@@ -913,13 +911,11 @@ export default function BrandKitPanel({ isGold, onAddImages }: BrandKitPanelProp
     setEditing(true);
   };
 
-  // Edit existing kit
   const handleEdit = (kit: BrandKit) => {
     setEditKit({ ...kit });
     setEditing(true);
   };
 
-  // Save kit (create or update)
   const handleSave = async (kitData: Partial<BrandKit>) => {
     const action = kitData.id ? 'update' : 'create';
     try {
@@ -938,7 +934,6 @@ export default function BrandKitPanel({ isGold, onAddImages }: BrandKitPanelProp
     loadKits();
   };
 
-  // Delete kit
   const handleDelete = async (id: string) => {
     try {
       await fetch('/api/brand-kit', {
@@ -955,38 +950,31 @@ export default function BrandKitPanel({ isGold, onAddImages }: BrandKitPanelProp
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-40">
-        <div className="flex flex-col items-center gap-2">
-          <Loader2 className={`w-5 h-5 animate-spin ${isGold ? 'text-[#d4af37]' : 'text-primary'}`} />
-          <span className={`text-xs ${isGold ? 'text-gray-600' : 'text-muted-foreground'}`}>加载品牌构件...</span>
-        </div>
+      <div className="flex items-center justify-center h-32">
+        <Loader2 className={`w-4 h-4 animate-spin ${t.accentText}`} />
       </div>
     );
   }
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className={`w-6 h-6 rounded-md flex items-center justify-center ${isGold ? 'bg-[#d4af37]/15' : 'bg-primary/10'}`}>
-            <Palette className={`w-3.5 h-3.5 ${accentC}`} />
+      <div className="flex items-center justify-between mb-3 shrink-0">
+        <div className="flex items-center gap-2">
+          <div className={`w-5 h-5 rounded flex items-center justify-center ${t.accentBg}`}>
+            <Palette className={`w-3 h-3 ${t.accentText}`} />
           </div>
-          <span className={`text-sm font-semibold ${textC}`}>品牌构件</span>
+          <span className={`text-xs font-semibold ${t.text}`}>品牌构件</span>
           {kits.length > 0 && (
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${isGold ? 'bg-[#d4af37]/10 text-[#d4af37]' : 'bg-primary/10 text-primary'}`}>
-              {kits.length}
-            </span>
+            <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${t.accentBg} ${t.accentText}`}>{kits.length}</span>
           )}
         </div>
         <button
           onClick={handleCreate}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
-            isGold ? 'bg-[#d4af37]/12 text-[#d4af37] hover:bg-[#d4af37]/20 shadow-sm shadow-[#d4af37]/5' : 'bg-primary/10 text-primary hover:bg-primary/20 shadow-sm shadow-primary/5'
-          }`}
+          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all duration-200 ${t.accentBg} ${t.accentText}`}
         >
-          <Plus className="w-3.5 h-3.5" />
-          新建品牌
+          <Plus className="w-3 h-3" />
+          新建
         </button>
       </div>
 
@@ -1002,30 +990,23 @@ export default function BrandKitPanel({ isGold, onAddImages }: BrandKitPanelProp
 
       {/* Kit List */}
       {!editing && (
-        <>
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
           {kits.length === 0 ? (
-            <div className={`text-center py-10 rounded-xl border-2 border-dashed transition-colors ${
-              isGold ? 'border-white/10 text-gray-700' : 'border-border text-muted-foreground'
-            }`}>
-              <div className={`w-12 h-12 rounded-2xl mx-auto mb-3 flex items-center justify-center ${isGold ? 'bg-white/5' : 'bg-muted'}`}>
-                <Palette className="w-6 h-6 opacity-30" />
+            <div className={`text-center py-8 rounded-xl border-2 border-dashed ${isGold ? 'border-white/[0.06]' : 'border-border'}`}>
+              <div className={`w-10 h-10 rounded-xl mx-auto mb-2 flex items-center justify-center ${isGold ? 'bg-white/5' : 'bg-muted'}`}>
+                <Palette className={`w-5 h-5 ${t.textTri}`} />
               </div>
-              <p className={`text-xs font-medium ${isGold ? 'text-gray-500' : 'text-muted-foreground'}`}>尚未创建品牌套件</p>
-              <p className={`text-[10px] mt-1.5 ${isGold ? 'text-gray-700' : 'text-muted-foreground/60'}`}>
-                创建品牌套件后可批量生成品牌构件
-              </p>
+              <p className={`text-[10px] font-medium ${t.textSec}`}>尚未创建品牌套件</p>
+              <p className={`text-[9px] mt-1 ${t.textTri}`}>上传品牌素材自动识别风格</p>
               <button
                 onClick={handleCreate}
-                className={`mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium transition-all duration-200 ${
-                  isGold ? 'bg-[#d4af37]/12 text-[#d4af37] hover:bg-[#d4af37]/20' : 'bg-primary/10 text-primary hover:bg-primary/20'
-                }`}
+                className={`mt-2 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-medium transition-all duration-200 ${t.accentBg} ${t.accentText}`}
               >
-                <Plus className="w-3.5 h-3.5" />
-                创建第一个品牌
+                <Plus className="w-3 h-3" /> 创建品牌
               </button>
             </div>
           ) : (
-            <div className="space-y-2">
+            <>
               {kits.map(kit => (
                 <BrandKitCard
                   key={kit.id}
@@ -1038,24 +1019,22 @@ export default function BrandKitPanel({ isGold, onAddImages }: BrandKitPanelProp
                   isGold={isGold}
                 />
               ))}
-            </div>
+            </>
           )}
+        </div>
+      )}
 
-          {/* Quick batch generate if kit is selected */}
-          {selectedKit && !editing && (
-            <button
-              onClick={() => setBatchDialog(selectedKit)}
-              className={`w-full py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-200 ${
-                isGold
-                  ? 'bg-[#d4af37] text-black hover:bg-[#d4af37]/85 shadow-lg shadow-[#d4af37]/20'
-                  : 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20'
-              }`}
-            >
-              <LayoutGrid className="w-4 h-4" />
-              批量生成 {selectedKit.name} 构件
-            </button>
-          )}
-        </>
+      {/* Batch generate button */}
+      {selectedKit && !editing && (
+        <button
+          onClick={() => setBatchDialog(selectedKit)}
+          className={`w-full py-2 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 mt-2 shrink-0 transition-all duration-200 ${
+            isGold ? 'bg-[#d4af37] text-black hover:bg-[#d4af37]/85' : 'bg-primary text-primary-foreground hover:bg-primary/90'
+          }`}
+        >
+          <LayoutGrid className="w-3.5 h-3.5" />
+          批量生成 {selectedKit.name}
+        </button>
       )}
 
       {/* Batch Generate Dialog */}

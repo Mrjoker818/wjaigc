@@ -71,6 +71,7 @@ export async function POST(request: NextRequest) {
 
     switch (action) {
       case 'analyze': return handleAnalyze(body);
+      case 'analyze-image': return handleAnalyzeImage(body);
       case 'generate': return handleGenerate(body);
       default:
         return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
@@ -192,6 +193,112 @@ Focus on: color palette, typography personality, visual style, emotional tone, a
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('[brand-kit] Analyze error:', message);
     return NextResponse.json({ error: `品牌分析失败: ${message}` }, { status: 500 });
+  }
+}
+
+// ─── Analyze-Image: Extract Brand DNA from uploaded images ──────────
+
+async function handleAnalyzeImage(body: {
+  imageUrl: string;
+  brandName?: string;
+  llmModel?: string;
+}) {
+  const { imageUrl, brandName, llmModel } = body;
+
+  if (!imageUrl) {
+    return NextResponse.json({ error: '请提供品牌素材图片' }, { status: 400 });
+  }
+
+  const llmInfo = await getLLMProvider(llmModel);
+  if (!llmInfo) {
+    return NextResponse.json({ error: '未找到可用的 LLM 模型，请在管理员系统中配置聊天模型' }, { status: 400 });
+  }
+
+  const { provider, modelId } = llmInfo;
+  const baseUrl = provider.baseUrl || '';
+  const apiKey = provider.apiKey || '';
+
+  const analyzePrompt = `You are a professional brand design expert. Analyze the provided brand material image and extract the Brand DNA.
+
+${brandName ? `Brand name: ${brandName}` : ''}
+
+Please extract and return a JSON object with the following structure (respond ONLY with valid JSON, no markdown):
+{
+  "primaryColor": "hex color code of the primary brand color",
+  "secondaryColors": ["hex1", "hex2", "hex3"],
+  "fontFamily": "font family description (e.g., 'sans-serif, modern, geometric')",
+  "styleKeywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"],
+  "toneKeywords": ["tone1", "tone2", "tone3"],
+  "avoidKeywords": ["anti-style1", "anti-style2", "anti-style3"],
+  "layoutStyle": "description of layout patterns (e.g., 'clean minimal with generous whitespace')",
+  "description": "2-3 sentence brand personality summary",
+  "mood": "one of: professional, playful, luxury, minimal, warm, bold, elegant, energetic, calm, creative",
+  "industry": "one of: tech, fashion, food, health, education, finance, entertainment, beauty, sports, travel, other"
+}
+
+Focus on: color palette extraction (be precise with hex codes), typography personality, visual style, emotional tone, and layout patterns. Identify the most dominant colors from the image.`;
+
+  try {
+    const response = await fetchWithV1Retry(
+      baseUrl,
+      '/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: modelId,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: analyzePrompt },
+                { type: 'image_url', image_url: { url: imageUrl, detail: 'high' } }
+              ]
+            }
+          ],
+          max_tokens: 1000,
+          temperature: 0.3,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      return NextResponse.json(
+        { error: `LLM API 错误 (${response.status}): ${errText.slice(0, 200)}` },
+        { status: response.status }
+      );
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || '';
+
+    // Parse JSON from response
+    let brandDNA: BrandDNAType;
+    try {
+      brandDNA = JSON.parse(content);
+    } catch {
+      const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (jsonMatch) {
+        brandDNA = JSON.parse(jsonMatch[1].trim());
+      } else {
+        const objMatch = content.match(/\{[\s\S]*\}/);
+        if (objMatch) {
+          brandDNA = JSON.parse(objMatch[0]);
+        } else {
+          return NextResponse.json({ error: '无法解析品牌分析结果' }, { status: 500 });
+        }
+      }
+    }
+
+    return NextResponse.json({ brandDNA });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[brand-kit] Analyze-image error:', message);
+    return NextResponse.json({ error: `品牌图片分析失败: ${message}` }, { status: 500 });
   }
 }
 
