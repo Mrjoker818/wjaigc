@@ -1294,7 +1294,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       <button
         key={modelKey}
         onClick={() => handleModelSelect(modelKey)}
-        className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-all border-b ${thBorderLight} last:border-b-0 ${
+        className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-all border-b ${thBorderLight} last:border-b-0 ${
           isSelected
             ? `${thAccentLight} ${thAccentLightText}`
             : thDropdownItem
@@ -1309,7 +1309,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               : <span className="text-[8px] px-1 py-0.5 bg-orange-500/20 text-orange-400 rounded">仅文字修图</span>
             }
           </div>
-          <div className={`text-[10px] ${thTextMuted} truncate`}>{model.providerName}{hint ? ` · ${hint}` : ''}</div>
+          <div className={`text-xs ${thTextMuted} truncate`}>{model.providerName}{hint ? ` · ${hint}` : ''}</div>
         </div>
         {isSelected && <Check size={12} className={`${isMonochrome ? "text-blue-500" : "text-[#d4af37]"} flex-shrink-0`} />}
       </button>
@@ -1376,11 +1376,11 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         >
           <GripVertical size={14} style={{ color: isMonochrome ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.3)' }} />
           <Pencil size={15} style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }} />
-          <span className="text-sm font-semibold flex-1" style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }}>
+          <span className="text-base font-semibold flex-1" style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }}>
             语言修图
           </span>
           {selectedModel && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: isMonochrome ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.5)', background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
+            <span className="text-xs px-1.5 py-0.5 rounded" style={{ color: isMonochrome ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.5)', background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
               {selectedModel}
             </span>
           )}
@@ -1409,24 +1409,24 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                   <Plus className={`h-6 w-6 ${thTextMuted} ${isMonochrome ? 'group-hover:text-blue-500' : 'group-hover:text-[#d4af37]'} transition-colors`} />
                 </div>
                 <span className={`text-xs ${thTextMuted} ${isMonochrome ? 'group-hover:text-gray-600' : 'group-hover:text-[#888]'} transition-colors`}>添加要修图的图片</span>
-                <span className={`text-[10px] ${thTextDim}`}>从画布选择或上传本地图片</span>
+                <span className={`text-xs ${thTextDim}`}>从画布选择或上传本地图片</span>
               </button>
 
               {/* 选择主图弹窗 */}
               {mainPickerOpen && (
                 <div className={`mt-2 max-h-48 overflow-y-auto rounded-lg border ${thDropdown}`}>
-                  <div className={`px-2 py-1 text-[9px] ${thTextMuted} uppercase tracking-wider border-b ${thBorderLight} sticky top-0 ${thBgDeep}`}>选择图片</div>
+                  <div className={`px-2 py-1 text-xs ${thTextMuted} uppercase tracking-wider border-b ${thBorderLight} sticky top-0 ${thBgDeep}`}>选择图片</div>
                   {/* 从画布选择 */}
                   {canvasImages && canvasImages.length > 0 && canvasImages.map(ci => (
                     <button
                       key={ci.id}
                       onClick={() => handleSelectMainFromCanvas(ci)}
-                      className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs ${thDropdownItem} transition-all border-b ${thBorderLight} last:border-b-0`}
+                      className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-sm ${thDropdownItem} transition-all border-b ${thBorderLight} last:border-b-0`}
                     >
                       <img src={ci.url} alt="" className="w-8 h-8 object-cover rounded flex-shrink-0" crossOrigin="anonymous" />
                       <div className="flex-1 min-w-0">
-                        <div className={`truncate text-[11px]`}>{ci.prompt || ci.url.split('/').pop() || '图片'}</div>
-                        <div className={`text-[9px] ${thTextMuted}`}>{ci.originalWidth || 0}x{ci.originalHeight || 0}</div>
+                        <div className={`truncate text-sm`}>{ci.prompt || ci.url.split('/').pop() || '图片'}</div>
+                        <div className={`text-xs ${thTextMuted}`}>{ci.originalWidth || 0}x{ci.originalHeight || 0}</div>
                       </div>
                       <Plus className={`h-3 w-3 ${thAccentIcon} flex-shrink-0`} />
                     </button>
@@ -1434,12 +1434,12 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                   {/* 上传按钮 */}
                   <button
                     onClick={() => mainFileInputRef.current?.click()}
-                    className={`w-full flex items-center gap-2 px-2 py-2 text-left text-xs ${thDropdownItem} ${isMonochrome ? 'hover:text-gray-900' : 'hover:text-[#d4af37]'} transition-all`}
+                    className={`w-full flex items-center gap-2 px-2 py-2 text-left text-sm ${thDropdownItem} ${isMonochrome ? 'hover:text-gray-900' : 'hover:text-[#d4af37]'} transition-all`}
                   >
                     <div className={`w-8 h-8 rounded ${isMonochrome ? 'bg-gray-200' : 'bg-[#2a2a2a]'} flex items-center justify-center flex-shrink-0`}>
                       <Upload className={`h-3.5 w-3.5 ${isMonochrome ? "text-blue-400" : thTextMuted}`} />
                     </div>
-                    <span className="text-[11px]">上传本地图片</span>
+                    <span className="text-sm">上传本地图片</span>
                   </button>
                   <input
                     ref={mainFileInputRef}
@@ -1469,7 +1469,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               >
                 <Plus className="h-3 w-3" />
               </button>
-              <span className={`text-[9px] ${thAccent} font-mono px-0.5 min-w-[32px] text-center`}>{Math.round(previewZoom * 100)}%</span>
+              <span className={`text-xs ${thAccent} font-mono px-0.5 min-w-[32px] text-center`}>{Math.round(previewZoom * 100)}%</span>
               <button
                 onClick={(e) => { e.stopPropagation(); setPreviewZoom(prev => Math.max(0.2, prev - 0.25)); }}
                 className={`p-1 rounded ${isMonochrome ? 'bg-gray-200/80 text-gray-500 hover:text-gray-800' : 'bg-[#2a2a2a]/80 text-[#888] hover:text-white'} transition-colors`}
@@ -1488,7 +1488,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
             {/* 更换图片按钮 - 固定在容器左上角，主图标记右侧 */}
             <div className="absolute top-1 left-1 z-20 flex items-center gap-1" onMouseDown={e => e.stopPropagation()}>
-              <span className={`text-[9px] px-1.5 py-0.5 ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-[#d4af37]/80 text-black'} rounded font-medium`}>原图</span>
+              <span className={`text-xs px-1.5 py-0.5 ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-[#d4af37]/80 text-black'} rounded font-medium`}>原图</span>
               <button
                 onClick={(e) => { e.stopPropagation(); setMainPickerOpen(!mainPickerOpen); }}
                 className={`p-0.5 rounded ${isMonochrome ? 'bg-gray-200/80 text-gray-500 hover:text-gray-800' : 'bg-[#2a2a2a]/80 text-[#888] hover:text-[#d4af37]'} transition-colors`}
@@ -1498,31 +1498,31 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               </button>
               {mainPickerOpen && (
                 <div className={`absolute top-full left-0 mt-1 min-w-[180px] max-h-48 overflow-y-auto rounded-lg border ${thDropdown} z-30`}>
-                  <div className={`px-2 py-1 text-[9px] ${thTextMuted} uppercase tracking-wider border-b ${thBorderLight} sticky top-0 ${thBgDeep}`}>更换图片</div>
+                  <div className={`px-2 py-1 text-xs ${thTextMuted} uppercase tracking-wider border-b ${thBorderLight} sticky top-0 ${thBgDeep}`}>更换图片</div>
                   {canvasImages && canvasImages.length > 0 && canvasImages.filter(ci => ci.url !== currentImageUrl).map(ci => (
                     <button
                       key={ci.id}
                       onClick={() => { handleSelectMainFromCanvas(ci); setMainPickerOpen(false); }}
-                      className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs ${thDropdownItem} transition-all border-b ${thBorderLight} last:border-b-0`}
+                      className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-sm ${thDropdownItem} transition-all border-b ${thBorderLight} last:border-b-0`}
                     >
                       <img src={ci.url} alt="" className="w-8 h-8 object-cover rounded flex-shrink-0" crossOrigin="anonymous" />
                       <div className="flex-1 min-w-0">
-                        <div className={`truncate text-[11px]`}>{ci.prompt || ci.url.split('/').pop() || '图片'}</div>
-                        <div className={`text-[9px] ${thTextMuted}`}>{ci.originalWidth || 0}x{ci.originalHeight || 0}</div>
+                        <div className={`truncate text-sm`}>{ci.prompt || ci.url.split('/').pop() || '图片'}</div>
+                        <div className={`text-xs ${thTextMuted}`}>{ci.originalWidth || 0}x{ci.originalHeight || 0}</div>
                       </div>
                     </button>
                   ))}
                   {(!canvasImages || canvasImages.filter(ci => ci.url !== currentImageUrl).length === 0) && (
-                    <div className={`px-2 py-3 text-[10px] ${thTextMuted} text-center`}>画布上没有其他图片</div>
+                    <div className={`px-2 py-3 text-xs ${thTextMuted} text-center`}>画布上没有其他图片</div>
                   )}
                   <button
                     onClick={() => { mainFileInputRef.current?.click(); setMainPickerOpen(false); }}
-                    className={`w-full flex items-center gap-2 px-2 py-2 text-left text-xs ${thDropdownItem} ${isMonochrome ? 'hover:text-gray-900' : 'hover:text-[#d4af37]'} transition-all`}
+                    className={`w-full flex items-center gap-2 px-2 py-2 text-left text-sm ${thDropdownItem} ${isMonochrome ? 'hover:text-gray-900' : 'hover:text-[#d4af37]'} transition-all`}
                   >
                     <div className={`w-8 h-8 rounded ${isMonochrome ? 'bg-gray-200' : 'bg-[#2a2a2a]'} flex items-center justify-center flex-shrink-0`}>
                       <Upload className={`h-3.5 w-3.5 ${isMonochrome ? "text-blue-400" : thTextMuted}`} />
                     </div>
-                    <span className="text-[11px]">上传本地图片</span>
+                    <span className="text-sm">上传本地图片</span>
                   </button>
                 </div>
               )}
@@ -1533,7 +1533,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             <div className="absolute bottom-1 left-1 right-1 z-20 flex items-center justify-center pointer-events-none">
               <div className={`flex items-center gap-1 px-2 py-0.5 ${isMonochrome ? 'bg-white/80 border border-gray-200' : 'bg-[#1a1a1a]/85 border border-white/[0.14]'} rounded`}>
                 <Pencil className={`h-3 w-3 ${thAccentIcon}`} />
-                <span className={`text-[9px] ${thAccent}`}>涂抹区域 + 文字描述 = 精准修图</span>
+                <span className={`text-xs ${thAccent}`}>涂抹区域 + 文字描述 = 精准修图</span>
               </div>
             </div>
             )}
@@ -1581,7 +1581,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           {/* ★ 参考图区域 */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <span className={`text-[10px] ${thTextSecondary} flex items-center gap-1`}>
+              <span className={`text-sm ${thTextSecondary} flex items-center gap-1`}>
                 <ImageIcon className={`h-3 w-3 ${thAccentIcon}`} />
                 参考图
                 {referenceImages.length > 0 && (
@@ -1593,7 +1593,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                 {canvasImages && canvasImages.length > (currentImageUrl ? 1 : 0) && (
                   <button
                     onClick={() => setRefPickerOpen(!refPickerOpen)}
-                    className={`flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] ${thBg} border ${thBorder} rounded ${isMonochrome ? 'text-gray-500 hover:text-gray-900 hover:border-gray-400' : 'text-[#aaa] hover:text-[#d4af37] hover:border-[#d4af37]'} transition-all`}
+                    className={`flex items-center gap-0.5 px-1.5 py-0.5 text-xs ${thBg} border ${thBorder} rounded ${isMonochrome ? 'text-gray-500 hover:text-gray-900 hover:border-gray-400' : 'text-[#aaa] hover:text-[#d4af37] hover:border-[#d4af37]'} transition-all`}
                   >
                     <Plus className="h-2.5 w-2.5" />画布选图
                   </button>
@@ -1601,7 +1601,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                 {/* 本地上传 */}
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className={`flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] ${thBg} border ${thBorder} rounded ${isMonochrome ? 'text-gray-500 hover:text-gray-900 hover:border-gray-400' : 'text-[#aaa] hover:text-[#d4af37] hover:border-[#d4af37]'} transition-all`}
+                  className={`flex items-center gap-0.5 px-1.5 py-0.5 text-xs ${thBg} border ${thBorder} rounded ${isMonochrome ? 'text-gray-500 hover:text-gray-900 hover:border-gray-400' : 'text-[#aaa] hover:text-[#d4af37] hover:border-[#d4af37]'} transition-all`}
                 >
                   <Upload className="h-2.5 w-2.5" />上传
                 </button>
@@ -1659,7 +1659,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                 ))}
               </div>
             ) : (
-              <div className={`text-[10px] ${thTextMuted} py-1.5 text-center border ${thBorderDashed} rounded-lg`}>
+              <div className={`text-xs ${thTextMuted} py-1.5 text-center border ${thBorderDashed} rounded-lg`}>
                 添加参考图帮助AI更好理解修图意图
               </div>
             )}
@@ -1667,17 +1667,17 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             {/* 从画布选择参考图弹窗 */}
             {refPickerOpen && availableCanvasImages.length > 0 && (
               <div className={`mt-1.5 max-h-32 overflow-y-auto rounded-lg border ${thDropdown}`}>
-                <div className={`px-2 py-1 text-[9px] ${thTextMuted} uppercase tracking-wider border-b ${thBorderLight} sticky top-0 ${thBgDeep}`}>选择画布图片</div>
+                <div className={`px-2 py-1 text-xs ${thTextMuted} uppercase tracking-wider border-b ${thBorderLight} sticky top-0 ${thBgDeep}`}>选择画布图片</div>
                 {availableCanvasImages.map(ci => (
                   <button
                     key={ci.id}
                     onClick={() => handleAddRefFromCanvas(ci)}
-                    className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs ${thDropdownItem} transition-all border-b ${thBorderLight} last:border-b-0`}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-sm ${thDropdownItem} transition-all border-b ${thBorderLight} last:border-b-0`}
                   >
                     <img src={ci.url} alt="" className="w-8 h-8 object-cover rounded flex-shrink-0" crossOrigin="anonymous" />
                     <div className="flex-1 min-w-0">
-                      <div className={`truncate text-[11px]`}>{ci.prompt || ci.url.split('/').pop() || '图片'}</div>
-                      <div className={`text-[9px] ${thTextMuted}`}>{ci.originalWidth || 0}x{ci.originalHeight || 0}</div>
+                      <div className={`truncate text-sm`}>{ci.prompt || ci.url.split('/').pop() || '图片'}</div>
+                      <div className={`text-xs ${thTextMuted}`}>{ci.originalWidth || 0}x{ci.originalHeight || 0}</div>
                     </div>
                     <Plus className={`h-3 w-3 ${thAccentIcon} flex-shrink-0`} />
                   </button>
@@ -1685,7 +1685,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               </div>
             )}
             {refPickerOpen && availableCanvasImages.length === 0 && (
-              <div className={`mt-1.5 px-3 py-2 text-[10px] ${thTextMuted} text-center border ${thBorder} rounded-lg ${thBgDeep}`}>
+              <div className={`mt-1.5 px-3 py-2 text-xs ${thTextMuted} text-center border ${thBorder} rounded-lg ${thBgDeep}`}>
                 画布上没有其他可添加的图片
               </div>
             )}
@@ -1695,7 +1695,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           <div className="flex items-center gap-1.5 px-1">
             <button
               onClick={() => currentModelSupportsMask && setTool('brush')}
-              className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-all ${
+              className={`flex items-center gap-1 px-2 py-1 rounded text-sm transition-all ${
                 !currentModelSupportsMask
                   ? isMonochrome ? 'bg-gray-100 text-gray-300 border border-gray-100 cursor-not-allowed' : 'bg-[#1a1a1a]/85 text-[#444] border border-[#1a1a1a] cursor-not-allowed'
                   : tool === 'brush'
@@ -1707,7 +1707,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             </button>
             <button
               onClick={() => currentModelSupportsMask && setTool('eraser')}
-              className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-all ${
+              className={`flex items-center gap-1 px-2 py-1 rounded text-sm transition-all ${
                 !currentModelSupportsMask
                   ? isMonochrome ? 'bg-gray-100 text-gray-300 border border-gray-100 cursor-not-allowed' : 'bg-[#1a1a1a]/85 text-[#444] border border-[#1a1a1a] cursor-not-allowed'
                   : tool === 'eraser'
@@ -1719,7 +1719,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             </button>
             <button
               onClick={() => currentModelSupportsMask && clearMask()}
-              className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-all ${
+              className={`flex items-center gap-1 px-2 py-1 rounded text-sm transition-all ${
                 !currentModelSupportsMask
                   ? isMonochrome ? 'bg-gray-100 text-gray-300 border border-gray-100 cursor-not-allowed' : 'bg-[#1a1a1a]/85 text-[#444] border border-[#1a1a1a] cursor-not-allowed'
                   : isMonochrome ? 'bg-gray-100 text-gray-500 hover:text-gray-900 border border-gray-200' : 'bg-[#1a1a1a]/85 text-[#888] hover:text-white border border-white/[0.14]'
@@ -1728,7 +1728,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               <Trash2 className="h-3 w-3" />清除
             </button>
             <div className="flex-1" />
-            <span className={`text-[10px] ${thTextMuted}`}>笔触</span>
+            <span className={`text-xs ${thTextMuted}`}>笔触</span>
             <input
               type="range"
               min="10"
@@ -1738,7 +1738,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               disabled={!currentModelSupportsMask}
               className={`w-14 h-0.5 rounded appearance-none ${isMonochrome ? 'accent-gray-900' : 'accent-[#d4af37]'} ${!currentModelSupportsMask ? 'opacity-30 cursor-not-allowed' : `cursor-pointer ${isMonochrome ? 'bg-gray-200' : 'bg-[#2a2a2a]'}`}`}
             />
-            <span className={`text-[10px] font-mono w-4 ${currentModelSupportsMask ? (isMonochrome ? 'text-gray-900' : 'text-[#d4af37]') : (isMonochrome ? 'text-gray-300' : 'text-[#444]')}`}>{brushSize}</span>
+            <span className={`text-xs font-mono w-4 ${currentModelSupportsMask ? (isMonochrome ? 'text-gray-900' : 'text-[#d4af37]') : (isMonochrome ? 'text-gray-300' : 'text-[#444]')}`}>{brushSize}</span>
           </div>
 
           {/* 编辑指令 */}
@@ -1748,25 +1748,25 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="描述修改内容，如：把背景换成日落..."
-              className={`w-full h-14 ${thInput} rounded-lg px-3 py-2 text-xs ${thTextPlaceholder} resize-none transition-colors`}
+              className={`w-full h-14 ${thInput} rounded-lg px-3 py-2 text-sm ${thTextPlaceholder} resize-none transition-colors`}
             />
-            <p className={`text-[10px] ${thTextMuted} mt-0.5`}>Enter 提交 · Shift+Enter 换行</p>
+            <p className={`text-xs ${thTextMuted} mt-0.5`}>Enter 提交 · Shift+Enter 换行</p>
           </div>
 
           {/* 图像模型选择 - 执行修图 */}
           <div>
             <div className="flex items-center gap-1 mb-0.5">
-              <span className={`text-[10px] ${thTextSecondary}`}>图像模型</span>
+              <span className={`text-sm ${thTextSecondary}`}>图像模型</span>
               <span className="text-[8px] text-green-400/70">执行修图</span>
             </div>
             <button
               onClick={() => setModelListExpanded(!modelListExpanded)}
-              className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg ${thInput} text-xs ${isMonochrome ? "hover:border-gray-400" : "hover:border-[#d4af37]"} transition-all`}
+              className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg ${thInput} text-sm ${isMonochrome ? "hover:border-gray-400" : "hover:border-[#d4af37]"} transition-all`}
             >
               <span className="flex items-center gap-1.5">
                 <span className={`w-1.5 h-1.5 rounded-full ${currentModelSupportsMask ? 'bg-green-500' : 'bg-amber-500'}`} />
                 {currentModelName}
-                <span className={`text-[9px] ${currentModelSupportsMask ? 'text-green-500' : 'text-amber-500'}`}>
+                <span className={`text-xs ${currentModelSupportsMask ? 'text-green-500' : 'text-amber-500'}`}>
                   {currentModelSupportsMask ? '支持涂抹' : '仅文字修图'}
                 </span>
               </span>
@@ -1775,13 +1775,13 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
             {modelListExpanded && (
               <div className={`mt-1 max-h-56 overflow-y-auto rounded-lg border ${thDropdown}`}>
-                <div className={`px-2 py-1 text-[9px] ${thTextMuted} uppercase tracking-wider border-b ${thBorderLight}`}>图像模型</div>
+                <div className={`px-2 py-1 text-sm ${thTextMuted} uppercase tracking-wider border-b ${thBorderLight}`}>图像模型</div>
                 {imageModels.length > 0 ? imageModels.map(model => {
                   const key = `server::${model.providerId}::${model.id}`;
                   const isSelected = selectedModelKey === key;
                   return renderModelItem(model, key, isSelected, model.supportsMask);
                 }) : (
-                  <div className={`px-3 py-3 text-center text-[10px] ${thTextMuted}`}>
+                  <div className={`px-3 py-3 text-center text-xs ${thTextMuted}`}>
                     管理员系统中暂无图像模型
                   </div>
                 )}
@@ -1792,17 +1792,17 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           {/* LLM 协作模型 - 分析原图+优化指令 */}
           <div>
             <div className="flex items-center gap-1 mb-0.5">
-              <span className={`text-[10px] ${thTextSecondary}`}>LLM 协作模型</span>
+              <span className={`text-sm ${thTextSecondary}`}>LLM 协作模型</span>
               <span className="text-[8px] text-blue-400/70">分析原图 + 优化指令</span>
             </div>
             <button
               onClick={() => setLlmListExpanded(!llmListExpanded)}
-              className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg ${thInput} text-xs ${isMonochrome ? (selectedLlmKey ? "hover:border-blue-400" : "border-blue-400") : (selectedLlmKey ? "hover:border-[#d4af37]" : "border-[#d4af37]/50")} transition-all`}
+              className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg ${thInput} text-sm ${isMonochrome ? (selectedLlmKey ? "hover:border-blue-400" : "border-blue-400") : (selectedLlmKey ? "hover:border-[#d4af37]" : "border-[#d4af37]/50")} transition-all`}
             >
               <span className="flex items-center gap-1.5">
                 <span className={`w-1.5 h-1.5 rounded-full ${selectedLlmKey ? "bg-blue-400" : isMonochrome ? "bg-blue-500 animate-pulse" : "bg-[#d4af37] animate-pulse"}`} />
                 {currentLlmModelName}
-                <span className={`text-[9px] ${selectedLlmKey ? "text-blue-400" : isMonochrome ? "text-blue-500" : "text-[#d4af37]"}`}>
+                <span className={`text-xs ${selectedLlmKey ? "text-blue-400" : isMonochrome ? "text-blue-500" : "text-[#d4af37]"}`}>
                   {selectedLlmKey ? '协作模式' : '请选择'}
                 </span>
               </span>
@@ -1811,7 +1811,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
             {llmListExpanded && (
               <div className={`mt-1 max-h-48 overflow-y-auto rounded-lg border ${thDropdown}`}>
-                <div className={`px-2 py-1 text-[9px] ${thTextMuted} uppercase tracking-wider border-b ${thBorderLight}`}>
+                <div className={`px-2 py-1 text-sm ${thTextMuted} uppercase tracking-wider border-b ${thBorderLight}`}>
                   LLM 模型 — 分析原图内容，优化编辑指令
                 </div>
                 {llmModels.length > 0 ? llmModels.map(model => {
@@ -1822,7 +1822,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                     <button
                       key={key}
                       onClick={() => handleLlmSelect(key)}
-                      className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-all border-b ${thBorderLight} last:border-b-0 ${
+                      className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-all border-b ${thBorderLight} last:border-b-0 ${
                         isSelected
                           ? `${thAccentLight} ${thAccentLightText}`
                           : thDropdownItem
@@ -1833,20 +1833,20 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                           {model.name}
                           {hasDuplicate && <span className="text-[8px] px-1 py-0.5 bg-blue-400/20 text-blue-400 rounded">{model.providerName}</span>}
                         </div>
-                        <div className={`text-[10px] ${thTextMuted} truncate`}>{model.providerName} · 分析原图+优化指令</div>
+                        <div className={`text-xs ${thTextMuted} truncate`}>{model.providerName} · 分析原图+优化指令</div>
                       </div>
                       {isSelected && <Check size={12} className={`${isMonochrome ? "text-blue-500" : "text-[#d4af37]"} flex-shrink-0`} />}
                     </button>
                   );
                 }) : (
-                  <div className={`px-3 py-3 text-center text-[10px] ${thTextMuted}`}>
+                  <div className={`px-3 py-3 text-center text-xs ${thTextMuted}`}>
                     管理员系统中暂无LLM模型
                   </div>
                 )}
               </div>
             )}
             {!selectedLlmKey && (
-              <div className={`mt-0.5 text-[9px] flex items-center gap-1 ${isMonochrome ? "text-gray-500" : "text-[#d4af37]/70"}`}>
+              <div className={`mt-0.5 text-xs flex items-center gap-1 ${isMonochrome ? "text-gray-500" : "text-[#d4af37]/70"}`}>
                 <Sparkles className="h-2.5 w-2.5" />
                 选择LLM模型可智能分析原图，生成精准编辑指令
               </div>
@@ -1876,31 +1876,31 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           {/* 参数行 - 画面比例/质量/数量 三列 */}
           <div className="grid grid-cols-3 gap-2">
             <div>
-              <label className={`text-[10px] ${thTextSecondary} mb-0.5 block`}>画面比例</label>
+              <label className={`text-sm ${thTextSecondary} mb-0.5 block`}>画面比例</label>
               <select
                 value={aspectRatio}
                 onChange={(e) => setAspectRatio(e.target.value)}
-                className={`w-full px-2 py-1 ${thInput} rounded text-[11px] appearance-none cursor-pointer focus:outline-none`}
+                className={`w-full px-2 py-1 ${thInput} rounded text-sm appearance-none cursor-pointer focus:outline-none`}
               >
                 {ASPECT_RATIOS.map(r => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
             <div>
-              <label className={`text-[10px] ${thTextSecondary} mb-0.5 block`}>图片质量</label>
+              <label className={`text-sm ${thTextSecondary} mb-0.5 block`}>图片质量</label>
               <select
                 value={quality}
                 onChange={(e) => setQuality(e.target.value)}
-                className={`w-full px-2 py-1 ${thInput} rounded text-[11px] appearance-none cursor-pointer focus:outline-none`}
+                className={`w-full px-2 py-1 ${thInput} rounded text-sm appearance-none cursor-pointer focus:outline-none`}
               >
                 {QUALITIES.map(q => <option key={q.value} value={q.value}>{q.label}</option>)}
               </select>
             </div>
             <div>
-              <label className={`text-[10px] ${thTextSecondary} mb-0.5 block`}>生图数量</label>
+              <label className={`text-sm ${thTextSecondary} mb-0.5 block`}>生图数量</label>
               <select
                 value={outputCount}
                 onChange={(e) => setOutputCount(Number(e.target.value))}
-                className={`w-full px-2 py-1 ${thInput} rounded text-[11px] appearance-none cursor-pointer focus:outline-none`}
+                className={`w-full px-2 py-1 ${thInput} rounded text-sm appearance-none cursor-pointer focus:outline-none`}
               >
                 {COUNTS.map(c => <option key={c} value={c}>{c}张</option>)}
               </select>
@@ -1909,7 +1909,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
           {/* 错误 */}
           {error && (
-            <div className="px-3 py-1.5 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-[11px]">
+            <div className="px-3 py-1.5 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
               {error}
             </div>
           )}
@@ -1930,7 +1930,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           {/* 编辑历史 */}
           {history.length > 0 && (
             <div className={`pt-2 border-t ${thBorder}`}>
-              <div className={`flex items-center gap-1.5 text-[10px] ${thTextSecondary} mb-1`}>
+              <div className={`flex items-center gap-1.5 text-sm ${thTextSecondary} mb-1`}>
                 <History className="h-3 w-3" />
                 <span className={`font-medium ${isMonochrome ? "text-gray-900" : "text-[#d4af37]"}`}>编辑历史</span>
               </div>
@@ -1939,7 +1939,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                   <button
                     key={item.id}
                     onClick={() => handleHistoryClick(index)}
-                    className={`w-full text-left px-2 py-1 rounded text-[10px] transition-all flex items-center gap-1 ${
+                    className={`w-full text-left px-2 py-1 rounded text-xs transition-all flex items-center gap-1 ${
                       index === currentHistoryIndex
                         ? `${isMonochrome ? 'bg-gray-200 text-gray-900' : 'bg-[#d4af37]/20 text-[#d4af37]'}`
                         : `${isMonochrome ? 'bg-gray-100 text-gray-500 hover:text-gray-900' : 'bg-[#1a1a1a]/85 text-[#888] hover:text-white'}`
@@ -1967,14 +1967,14 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           data-popup
         >
           <div className={`flex items-center justify-between px-3 py-2 border-b ${thBorder}`}>
-            <h3 className={`text-[11px] font-medium ${thText} flex items-center gap-1.5`}>
+            <h3 className={`text-sm font-medium ${thText} flex items-center gap-1.5`}>
               <ImageIcon className={`h-3.5 w-3.5 ${isMonochrome ? "text-blue-500" : "text-[#d4af37]"}`} />
               修图结果
             </h3>
             {resultImages.length > 0 && (
               <button
                 onClick={() => handleConfirmResult()}
-                className={`px-2 py-0.5 text-[10px] ${isMonochrome ? "bg-blue-500 hover:bg-blue-600 text-white" : "bg-[#d4af37] hover:bg-[#daa520] text-black"} rounded font-medium transition-all`}
+                className={`px-2 py-0.5 text-xs ${isMonochrome ? "bg-blue-500 hover:bg-blue-600 text-white" : "bg-[#d4af37] hover:bg-[#daa520] text-black"} rounded font-medium transition-all`}
               >
                 确认使用{resultImages.length > 1 && selectedResultIndexes.size > 0 ? ` (${selectedResultIndexes.size})` : ''}
               </button>
@@ -1995,7 +1995,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                         <div className={`absolute inset-0 border-2 ${isMonochrome ? "border-gray-200" : "border-white/[0.14]"} rounded-full`} />
                         <div className={`absolute inset-0 border-2 ${isMonochrome ? "border-gray-900" : "border-[#d4af37]"} rounded-full animate-spin`} />
                       </div>
-                      <span className={`text-[9px] ${thTextMuted}`}>生成中 {outputCount > 1 ? `(${i + 1}/${outputCount})` : `${loadingProgress}%`}</span>
+                      <span className={`text-xs ${thTextMuted}`}>生成中 {outputCount > 1 ? `(${i + 1}/${outputCount})` : `${loadingProgress}%`}</span>
                     </div>
                   );
                 })}
@@ -2012,7 +2012,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                           setSelectedResultIndexes(new Set(resultImages.map((_, i) => i)));
                         }
                       }}
-                      className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded transition-colors ${
+                      className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded transition-colors ${
                         selectedResultIndexes.size === resultImages.length
                           ? `${isMonochrome ? 'bg-blue-500 text-white font-medium' : 'bg-[#d4af37] text-black font-medium'}`
                           : `${isMonochrome ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-[#2a2a2a] text-[#999] hover:bg-[#3a3a3a]'}`
@@ -2026,7 +2026,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                       </svg>
                       全选
                     </button>
-                    <span className={`text-[10px] ${thTextMuted}`}>已选 {selectedResultIndexes.size}/{resultImages.length}</span>
+                    <span className={`text-xs ${thTextMuted}`}>已选 {selectedResultIndexes.size}/{resultImages.length}</span>
                   </div>
                 )}
                 {resultImages.map((url, idx) => {
@@ -2065,11 +2065,11 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                       )}
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center">
                         {resultImages.length > 1 ? (
-                          <span className={`opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-white ${isMonochrome ? "bg-blue-500" : "bg-[#d4af37]"} px-2 py-1 rounded`}>
+                          <span className={`opacity-0 group-hover:opacity-100 transition-opacity text-xs text-white ${isMonochrome ? "bg-blue-500" : "bg-[#d4af37]"} px-2 py-1 rounded`}>
                             {isSelected ? '取消选择' : '选择'}
                           </span>
                         ) : (
-                          <span className={`opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-white ${isMonochrome ? "bg-blue-500" : "bg-[#d4af37]"} px-2 py-1 rounded`}>点击使用</span>
+                          <span className={`opacity-0 group-hover:opacity-100 transition-opacity text-xs text-white ${isMonochrome ? "bg-blue-500" : "bg-[#d4af37]"} px-2 py-1 rounded`}>点击使用</span>
                         )}
                       </div>
                     </div>
@@ -2085,16 +2085,16 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={isMonochrome ? "#374151" : "#d4af37"} strokeWidth="2">
                       <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
                     </svg>
-                    <span className={`${isMonochrome ? "text-gray-900" : "text-[#d4af37]"} text-[10px] font-semibold`}>AI 识别到编辑区域</span>
+                    <span className={`${isMonochrome ? "text-gray-900" : "text-[#d4af37]"} text-xs font-semibold`}>AI 识别到编辑区域</span>
                   </div>
                   <button
                     onClick={() => { setPendingAutoRegions([]); setAutoMaskPreview(null); }}
-                    className={`${isMonochrome ? "text-gray-400 hover:text-gray-700" : "text-[#666] hover:text-[#999]"} text-[10px]`}
+                    className={`${isMonochrome ? "text-gray-400 hover:text-gray-700" : "text-[#666] hover:text-[#999]"} text-xs`}
                   >✕</button>
                 </div>
                 <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
                   {pendingAutoRegions.map((region, idx) => (
-                    <span key={idx} className={`inline-flex items-center gap-1 text-[9px] ${isMonochrome ? "text-gray-600 bg-gray-100" : "text-[#bbb] bg-[#2a2a2a]"} rounded px-1.5 py-0.5`}>
+                    <span key={idx} className={`inline-flex items-center gap-1 text-xs ${isMonochrome ? "text-gray-600 bg-gray-100" : "text-[#bbb] bg-[#2a2a2a]"} rounded px-1.5 py-0.5`}>
                       <span className={`${isMonochrome ? "text-gray-900" : "text-[#d4af37]"} font-mono`}>{idx + 1}</span>
                       {region.label || `区域 ${idx + 1}`}
                     </span>
@@ -2103,13 +2103,13 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                 <div className="flex gap-1.5">
                   <button
                     onClick={handleConfirmAutoMask}
-                    className={`px-2.5 py-1 text-[10px] ${isMonochrome ? "bg-blue-500 hover:bg-blue-600 text-white" : "bg-[#d4af37] hover:bg-[#daa520] text-black"} rounded font-medium transition-all`}
+                    className={`px-2.5 py-1 text-xs ${isMonochrome ? "bg-blue-500 hover:bg-blue-600 text-white" : "bg-[#d4af37] hover:bg-[#daa520] text-black"} rounded font-medium transition-all`}
                   >
                     应用蒙版
                   </button>
                   <button
                     onClick={() => { setPendingAutoRegions([]); setAutoMaskPreview(null); }}
-                    className={`px-2.5 py-1 text-[10px] ${isMonochrome ? "bg-gray-100 hover:bg-gray-200 text-gray-500" : "bg-[#2a2a2a] hover:bg-[#3a3a3a] text-[#999]"} rounded font-medium transition-all`}
+                    className={`px-2.5 py-1 text-xs ${isMonochrome ? "bg-gray-100 hover:bg-gray-200 text-gray-500" : "bg-[#2a2a2a] hover:bg-[#3a3a3a] text-[#999]"} rounded font-medium transition-all`}
                   >
                     跳过
                   </button>

@@ -445,10 +445,10 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         >
           <GripVertical size={14} style={{ color: isMonochrome ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.3)' }} />
           <ShoppingBag size={15} style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }} />
-          <span className="text-sm font-semibold flex-1" style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }}>
+          <span className="text-base font-semibold flex-1" style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }}>
             品牌电商
           </span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: isMonochrome ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.5)', background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
+          <span className="text-xs px-1.5 py-0.5 rounded" style={{ color: isMonochrome ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.5)', background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
             模板批量生成
           </span>
           <button
@@ -471,7 +471,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`px-3.5 py-2 text-xs font-medium rounded-t-lg transition-colors ${
+                className={`px-3.5 py-2 text-sm font-medium rounded-t-lg transition-colors ${
                   active
                     ? isMonochrome ? 'bg-gray-50 text-blue-600 border border-b-0 border-gray-200' : 'bg-[#111] text-[#d4af37] border border-b-0 border-white/[0.08]'
                     : isMonochrome ? 'text-gray-400 hover:text-gray-600' : 'text-[#666] hover:text-[#999]'
@@ -490,15 +490,15 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           {activeTab === 'template' && (
             <div className="space-y-3">
               <div className="flex items-center justify-between mb-1">
-                <p className={`text-xs ${textSub}`}>选择需要生成的商品图类型（可多选）</p>
+                <p className={`text-sm ${textSub}`}>选择需要生成的商品图类型（可多选）</p>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setSelectedTemplates(new Set(templates.map(t => t.id)))}
-                    className={`text-xs ${accentText} hover:underline`}
+                    className={`text-sm ${accentText} hover:underline`}
                   >全选</button>
                   <button
                     onClick={() => setSelectedTemplates(new Set())}
-                    className={`text-xs ${textMuted} hover:underline`}
+                    className={`text-sm ${textMuted} hover:underline`}
                   >清空</button>
                 </div>
               </div>
@@ -528,12 +528,12 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
                         <span className="text-lg leading-none mt-0.5">{tpl.icon}</span>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
-                            <span className={`text-xs font-semibold ${text}`}>{tpl.name}</span>
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded-md ${catColor}`}>
+                            <span className={`text-sm font-semibold ${text}`}>{tpl.name}</span>
+                            <span className={`text-xs px-1.5 py-0.5 rounded-md ${catColor}`}>
                               {categoryLabel[tpl.category]}
                             </span>
                           </div>
-                          <p className={`text-[11px] ${textMuted} leading-relaxed`}>{tpl.description}</p>
+                          <p className={`text-sm ${textMuted} leading-relaxed`}>{tpl.description}</p>
                           <div className="flex items-center gap-2 mt-2">
                             {/* Aspect ratio visual */}
                             <div className={`flex items-center gap-1.5`}>
@@ -541,7 +541,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
                                 className={`rounded-sm border ${isMonochrome ? 'border-gray-300' : 'border-white/20'}`}
                                 style={{ width: vis.width, height: vis.height, backgroundColor: isMonochrome ? '#e5e7eb' : '#333' }}
                               />
-                              <span className={`text-[10px] font-mono ${textMuted}`}>{tpl.aspectRatio}</span>
+                              <span className={`text-xs font-mono ${textMuted}`}>{tpl.aspectRatio}</span>
                             </div>
                           </div>
                         </div>
@@ -558,7 +558,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
             <div className="space-y-4">
               {/* Model selection */}
               <div>
-                <label className={`block text-xs font-medium ${textSub} mb-1.5`}>生成模型 <span className="text-red-400">*</span></label>
+                <label className={`block text-sm font-medium ${textSub} mb-1.5`}>生成模型 <span className="text-red-400">*</span></label>
                 <div className="relative" ref={modelDropdownRef}>
                   <button
                     onClick={() => setShowModelDropdown(!showModelDropdown)}
@@ -591,7 +591,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
                         >
                           <div className="font-medium">{m.name}</div>
                           {m.providerName && (
-                            <div className={`text-[10px] mt-0.5 ${textMuted}`}>
+                            <div className={`text-xs mt-0.5 ${textMuted}`}>
                               <span className="inline-flex items-center gap-1">
                                 <span className={`inline-block w-1.5 h-1.5 rounded-full ${isMonochrome ? 'bg-gray-400' : 'bg-primary'}`}></span>
                                 {m.providerName}
@@ -611,7 +611,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
 
               {/* LLM Model selection */}
               <div>
-                <label className={`block text-xs font-medium ${textSub} mb-1.5`}>LLM 辅助模型 <span className={`text-[10px] ${textMuted}`}>(可选，AI优化提示词)</span></label>
+                <label className={`block text-sm font-medium ${textSub} mb-1.5`}>LLM 辅助模型 <span className={`text-xs ${textMuted}`}>(可选，AI优化提示词)</span></label>
                 <div className="relative" ref={llmDropdownRef}>
                   <button
                     onClick={() => setShowLlmDropdown(!showLlmDropdown)}
@@ -643,7 +643,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
                         >
                           <div className="font-medium">{m.name}</div>
                           {m.providerName && (
-                            <div className={`text-[10px] mt-0.5 ${textMuted}`}>
+                            <div className={`text-xs mt-0.5 ${textMuted}`}>
                               <span className="inline-flex items-center gap-1">
                                 <span className={`inline-block w-1.5 h-1.5 rounded-full ${isMonochrome ? 'bg-gray-400' : 'bg-primary'}`}></span>
                                 {m.providerName}
@@ -676,7 +676,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
                     {isAssisting ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
                     {isAssisting ? 'AI 优化中...' : 'AI 辅助优化设计'}
                   </button>
-                  <p className={`text-[10px] mt-1 ${textMuted}`}>LLM将优化商品描述、补充场景和风格关键词</p>
+                  <p className={`text-xs mt-1 ${textMuted}`}>LLM将优化商品描述、补充场景和风格关键词</p>
                 </div>
               )}
 
@@ -684,7 +684,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
 
               {/* Product description */}
               <div>
-                <label className={`block text-xs font-medium ${textSub} mb-1.5`}>商品描述 <span className="text-red-400">*</span></label>
+                <label className={`block text-sm font-medium ${textSub} mb-1.5`}>商品描述 <span className="text-red-400">*</span></label>
                 <textarea
                   value={productDesc}
                   onChange={e => setProductDesc(e.target.value)}
@@ -697,7 +697,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
               {/* Main text / Secondary text */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className={`block text-xs font-medium ${textSub} mb-1.5`}>主标题文字</label>
+                  <label className={`block text-sm font-medium ${textSub} mb-1.5`}>主标题文字</label>
                   <input
                     type="text"
                     value={mainText}
@@ -707,7 +707,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
                   />
                 </div>
                 <div>
-                  <label className={`block text-xs font-medium ${textSub} mb-1.5`}>副标题文字</label>
+                  <label className={`block text-sm font-medium ${textSub} mb-1.5`}>副标题文字</label>
                   <input
                     type="text"
                     value={secondaryText}
@@ -720,7 +720,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
 
               {/* Accent symbol */}
               <div>
-                <label className={`block text-xs font-medium ${textSub} mb-1.5`}>强调符号</label>
+                <label className={`block text-sm font-medium ${textSub} mb-1.5`}>强调符号</label>
                 <input
                   type="text"
                   value={accentSymbol}
@@ -732,7 +732,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
 
               {/* Scene description */}
               <div>
-                <label className={`block text-xs font-medium ${textSub} mb-1.5`}>场景描述</label>
+                <label className={`block text-sm font-medium ${textSub} mb-1.5`}>场景描述</label>
                 <input
                   type="text"
                   value={sceneDesc}
@@ -744,7 +744,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
 
               {/* Style extra */}
               <div>
-                <label className={`block text-xs font-medium ${textSub} mb-1.5`}>风格补充</label>
+                <label className={`block text-sm font-medium ${textSub} mb-1.5`}>风格补充</label>
                 <input
                   type="text"
                   value={styleExtra}
@@ -756,17 +756,17 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
 
               {/* Brand colors */}
               <div>
-                <label className={`block text-xs font-medium ${textSub} mb-1.5`}>
+                <label className={`block text-sm font-medium ${textSub} mb-1.5`}>
                   <Palette size={12} className="inline mr-1" />品牌色 (最多5个)
                 </label>
                 <div className="flex flex-wrap gap-2 mb-2">
                   {brandColors.map(c => (
                     <div key={c} className="flex items-center gap-1.5 group">
                       <div className="w-6 h-6 rounded-md border border-white/10" style={{ backgroundColor: c }} />
-                      <span className={`text-[11px] font-mono ${textSub}`}>{c}</span>
+                      <span className={`text-sm font-mono ${textSub}`}>{c}</span>
                       <button
                         onClick={() => removeBrandColor(c)}
-                        className={`opacity-0 group-hover:opacity-100 text-[10px] ${textMuted} hover:text-red-400 transition-opacity`}
+                        className={`opacity-0 group-hover:opacity-100 text-xs ${textMuted} hover:text-red-400 transition-opacity`}
                       >✕</button>
                     </div>
                   ))}
@@ -788,14 +788,14 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
                   />
                   <button
                     onClick={addBrandColor}
-                    className={`px-3 py-2 rounded-lg text-xs font-medium ${accent} ${accentHover} ${isMonochrome ? 'text-white' : 'text-black'} transition-colors`}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium ${accent} ${accentHover} ${isMonochrome ? 'text-white' : 'text-black'} transition-colors`}
                   >添加</button>
                 </div>
               </div>
 
               {/* Reference image upload */}
               <div>
-                <label className={`block text-xs font-medium ${textSub} mb-1.5`}>参考图 (可选)</label>
+                <label className={`block text-sm font-medium ${textSub} mb-1.5`}>参考图 (可选)</label>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -809,11 +809,11 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                       <button
                         onClick={() => fileInputRef.current?.click()}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium ${accent} ${isMonochrome ? 'text-white' : 'text-black'}`}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium ${accent} ${isMonochrome ? 'text-white' : 'text-black'}`}
                       >更换</button>
                       <button
                         onClick={() => { setRefImage(''); setRefImageFile(null); }}
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500 text-white"
+                        className="px-3 py-1.5 rounded-lg text-sm font-medium bg-red-500 text-white"
                       >移除</button>
                     </div>
                   </div>
@@ -825,7 +825,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
                     }`}
                   >
                     <Upload size={18} />
-                    <span className="text-xs">点击上传商品参考图</span>
+                    <span className="text-sm">点击上传商品参考图</span>
                   </button>
                 )}
               </div>
@@ -841,12 +841,12 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
                   <div className="flex items-center gap-3 mb-3">
                     <Loader2 size={18} className={`animate-spin ${accentText}`} />
                     <div className="flex-1">
-                      <p className={`text-xs font-medium ${text}`}>{progressLabel || '正在生成...'}</p>
-                      <p className={`text-[11px] ${textMuted}`}>已选择 {selectedTemplates.size} 个模板</p>
+                      <p className={`text-sm font-medium ${text}`}>{progressLabel || '正在生成...'}</p>
+                      <p className={`text-sm ${textMuted}`}>已选择 {selectedTemplates.size} 个模板</p>
                     </div>
                     <button
                       onClick={handleCancel}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-medium ${isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-[#2a2a2a] text-gray-300 hover:bg-[#333]'}`}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium ${isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-[#2a2a2a] text-gray-300 hover:bg-[#333]'}`}
                     >取消</button>
                   </div>
                   <div className={`w-full h-1.5 rounded-full overflow-hidden ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`}>
@@ -872,13 +872,13 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
                         <div className={`w-full aspect-square flex items-center justify-center ${isMonochrome ? 'bg-gray-100' : 'bg-[#222]'}`}>
                           <div className="text-center px-3">
                             <X size={20} className="text-red-400 mx-auto mb-1" />
-                            <p className="text-[10px] text-red-400">{r.error?.slice(0, 50) || '生成失败'}</p>
+                            <p className="text-xs text-red-400">{r.error?.slice(0, 50) || '生成失败'}</p>
                           </div>
                         </div>
                       )}
                       <div className={`px-3 py-2 ${isMonochrome ? 'bg-gray-50' : 'bg-[#1a1a1a]'}`}>
-                        <p className={`text-xs font-medium ${text}`}>{r.templateName}</p>
-                        {r.error && <p className="text-[10px] text-red-400 truncate">{r.error}</p>}
+                        <p className={`text-sm font-medium ${text}`}>{r.templateName}</p>
+                        {r.error && <p className="text-xs text-red-400 truncate">{r.error}</p>}
                       </div>
                     </div>
                   ))}
@@ -890,7 +890,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
                 <div className={`text-center py-12 ${textMuted}`}>
                   <ImageIcon size={36} className="mx-auto mb-3 opacity-30" />
                   <p className="text-sm">尚未生成结果</p>
-                  <p className="text-xs mt-1">选择模板并配置参数后，点击生成按钮</p>
+                  <p className="text-sm mt-1">选择模板并配置参数后，点击生成按钮</p>
                 </div>
               )}
             </div>
@@ -901,14 +901,14 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         <div className={`flex items-center justify-between px-5 py-3.5 border-t ${border} ${bg}`}>
           <div className="flex items-center gap-2">
             {selectedTemplates.size > 0 && (
-              <span className={`text-xs ${textSub}`}>
+              <span className={`text-sm ${textSub}`}>
                 已选 <span className={accentText}>{selectedTemplates.size}</span> 个模板
               </span>
             )}
             {successResults.length > 0 && (
               <button
                 onClick={handleAddToCanvas}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${accent} ${isMonochrome ? 'text-white' : 'text-black'} ${accentHover} transition-colors`}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium ${accent} ${isMonochrome ? 'text-white' : 'text-black'} ${accentHover} transition-colors`}
               >
                 <Sparkles size={12} />
                 添加到画布 ({successResults.length})
@@ -918,12 +918,12 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              className={`px-4 py-2 rounded-lg text-xs font-medium ${isMonochrome ? 'text-gray-600 hover:bg-gray-100' : 'text-gray-400 hover:bg-[#2a2a2a]'} transition-colors`}
+              className={`px-4 py-2 rounded-lg text-sm font-medium ${isMonochrome ? 'text-gray-600 hover:bg-gray-100' : 'text-gray-400 hover:bg-[#2a2a2a]'} transition-colors`}
             >关闭</button>
             <button
               onClick={handleGenerate}
               disabled={isGenerating || !selectedTemplates.size || !productDesc.trim() || !selectedModel}
-              className={`flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-semibold transition-all ${
+              className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
                 isGenerating || !selectedTemplates.size || !productDesc.trim() || !selectedModel
                   ? isMonochrome ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-[#333] text-[#555] cursor-not-allowed'
                   : `${accent} ${isMonochrome ? 'text-white' : 'text-black'} ${accentHover} shadow-lg`

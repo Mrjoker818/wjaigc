@@ -373,10 +373,10 @@ export function AgentEditor({
       >
         <GripVertical size={14} style={{ color: mutedColor }} />
         <Zap size={15} style={{ color: accentColor }} />
-        <span className="text-sm font-semibold flex-1" style={{ color: accentColor }}>
+        <span className="text-base font-semibold flex-1" style={{ color: accentColor }}>
           Agent 编排
         </span>
-        <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: mutedColor, background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
+        <span className="text-xs px-1.5 py-0.5 rounded" style={{ color: mutedColor, background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
           智能工具选择
         </span>
         <button
@@ -422,7 +422,7 @@ export function AgentEditor({
               </button>
             </div>
             {imagePrompt && (
-              <p className="text-[10px] mt-1 truncate" style={{ color: mutedColor }}>
+              <p className="text-xs mt-1 truncate" style={{ color: mutedColor }}>
                 {imagePrompt}
               </p>
             )}
@@ -439,7 +439,7 @@ export function AgentEditor({
               }}
             >
               <ImagePlus size={20} />
-              <span className="text-[10px]">从画布选择图片</span>
+              <span className="text-xs">从画布选择图片</span>
             </button>
           </div>
         )}
@@ -454,12 +454,12 @@ export function AgentEditor({
                   style={{ width: `${Math.max(progress, 2)}%`, backgroundColor: accentColor }}
                 />
               </div>
-              <span className="text-[10px] shrink-0" style={{ color: mutedColor }}>
+              <span className="text-xs shrink-0" style={{ color: mutedColor }}>
                 {progress}%
               </span>
             </div>
             {progressLabel && (
-              <p className="text-[10px] mt-0.5 truncate" style={{ color: mutedColor }}>
+              <p className="text-xs mt-0.5 truncate" style={{ color: mutedColor }}>
                 {progressLabel}
               </p>
             )}
@@ -471,7 +471,7 @@ export function AgentEditor({
           <div className="px-3">
             <button
               onClick={(e) => { e.stopPropagation(); setStepsExpanded(!stepsExpanded); }}
-              className="flex items-center gap-1 text-[10px] w-full py-1"
+              className="flex items-center gap-1 text-xs w-full py-1"
               style={{ color: accentDim }}
             >
               {stepsExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
@@ -480,7 +480,7 @@ export function AgentEditor({
             {stepsExpanded && (
               <div className="space-y-0.5 pb-1">
                 {steps.map((step, i) => (
-                  <div key={i} className="flex items-start gap-1 text-[10px]" style={{ color: mutedColor }}>
+                  <div key={i} className="flex items-start gap-1 text-xs" style={{ color: mutedColor }}>
                     {step.success ? (
                       <CheckCircle2 size={10} className="shrink-0 mt-0.5" style={{ color: '#4caf50' }} />
                     ) : (
@@ -519,7 +519,7 @@ export function AgentEditor({
         {/* 错误提示 */}
         {error && (
           <div className="px-3 pb-1">
-            <div className="text-[10px] px-2 py-1.5 rounded flex items-start gap-1.5" style={{ color: '#ef5350', backgroundColor: isMonochrome ? '#fff0f0' : 'rgba(239,83,80,0.1)' }}>
+            <div className="text-xs px-2 py-1.5 rounded flex items-start gap-1.5" style={{ color: '#ef5350', backgroundColor: isMonochrome ? '#fff0f0' : 'rgba(239,83,80,0.1)' }}>
               <XCircle size={10} className="shrink-0 mt-0.5" />
               <span className="flex-1 break-all">{error}</span>
               <button
@@ -538,12 +538,12 @@ export function AgentEditor({
       <div className="shrink-0 flex flex-col" style={{ borderTop: `1px solid ${borderColor}` }}>
         {/* 轮次选择 */}
         <div className="flex items-center gap-1.5 px-3 pt-2 pb-1">
-          <span className="text-[10px]" style={{ color: mutedColor }}>轮次:</span>
+          <span className="text-xs" style={{ color: mutedColor }}>轮次:</span>
           {[3, 5, 8].map(r => (
             <button
               key={r}
               onClick={(e) => { e.stopPropagation(); setMaxRounds(r); }}
-              className="px-1.5 py-0.5 rounded text-[10px] transition-colors"
+              className="px-1.5 py-0.5 rounded text-sm transition-colors"
               style={{
                 backgroundColor: maxRounds === r ? accentColor : 'transparent',
                 color: maxRounds === r ? (isMonochrome ? '#fff' : '#1a1a1a') : mutedColor,
@@ -561,7 +561,7 @@ export function AgentEditor({
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="描述你想要的编辑效果..."
-            className="w-full rounded px-2 py-1.5 text-xs resize-none focus:outline-none"
+            className="w-full rounded px-2 py-1.5 text-sm resize-none focus:outline-none"
             style={{
               height: textareaHeight,
               backgroundColor: bgInput,
@@ -580,7 +580,7 @@ export function AgentEditor({
           {isProcessing ? (
             <button
               onClick={(e) => { e.stopPropagation(); handleCancel(); }}
-              className="flex-1 py-1.5 rounded text-xs font-medium transition-colors flex items-center justify-center gap-1"
+              className="flex-1 py-1.5 rounded text-sm font-medium transition-colors flex items-center justify-center gap-1"
               style={{
                 backgroundColor: '#ef5350',
                 color: '#fff',
@@ -592,7 +592,7 @@ export function AgentEditor({
             <button
               onClick={(e) => { e.stopPropagation(); handleSubmit(); }}
               disabled={!prompt.trim() && !imageUrl}
-              className="flex-1 py-1.5 rounded text-xs font-medium transition-colors"
+              className="flex-1 py-1.5 rounded text-sm font-medium transition-colors"
               style={{
                 backgroundColor: accentColor,
                 color: isMonochrome ? '#fff' : '#1a1a1a',
@@ -605,7 +605,7 @@ export function AgentEditor({
           {resultImageUrl && !isProcessing && (
             <button
               onClick={(e) => { e.stopPropagation(); handleApplyResult(); }}
-              className="px-3 py-1.5 rounded text-xs font-medium transition-colors"
+              className="px-3 py-1.5 rounded text-sm font-medium transition-colors"
               style={{
                 backgroundColor: '#4caf50',
                 color: '#fff',
