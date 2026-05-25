@@ -68,6 +68,7 @@ export function AgentEditor({
   });
   const [hasPosition, setHasPosition] = useState(true);
   const isDragging = useRef(false);
+  const [isDraggingState, setIsDraggingState] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -278,6 +279,7 @@ export function AgentEditor({
     e.preventDefault();
     e.stopPropagation();
     isDragging.current = true;
+    setIsDraggingState(true);
     // 如果还没有设置过位置，先从当前面板位置计算
     if (!hasPosition && panelRef.current) {
       const rect = panelRef.current.getBoundingClientRect();
@@ -295,6 +297,7 @@ export function AgentEditor({
     } else {
       // panelRef not available yet, skip drag start
       isDragging.current = false;
+      setIsDraggingState(false);
     }
     const onMouseMove = (ev: MouseEvent) => {
       if (!isDragging.current) return;
@@ -307,6 +310,7 @@ export function AgentEditor({
     const onMouseUp = (ev: MouseEvent) => {
       ev.stopPropagation();
       isDragging.current = false;
+      setIsDraggingState(false);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
     };
@@ -351,9 +355,13 @@ export function AgentEditor({
         width: 320,
         maxHeight: '85vh',
         backgroundColor: bgPanel,
-        border: `1px solid ${borderColor}`,
+        border: isDraggingState
+          ? `2px solid ${accentColor}`
+          : `1px solid ${borderColor}`,
         borderRadius: 10,
-        boxShadow: isMonochrome ? '0 4px 20px rgba(0,0,0,0.1)' : '0 4px 20px rgba(0,0,0,0.5)',
+        boxShadow: isDraggingState
+          ? (isMonochrome ? '0 0 24px rgba(37,99,235,0.25), 0 4px 20px rgba(0,0,0,0.1)' : '0 0 24px rgba(212,175,55,0.3), 0 4px 20px rgba(0,0,0,0.5)')
+          : (isMonochrome ? '0 4px 20px rgba(0,0,0,0.1)' : '0 4px 20px rgba(0,0,0,0.5)'),
         backdropFilter: isMonochrome ? 'none' : 'blur(24px)',
         WebkitBackdropFilter: isMonochrome ? 'none' : 'blur(24px)',
         color: textColor,

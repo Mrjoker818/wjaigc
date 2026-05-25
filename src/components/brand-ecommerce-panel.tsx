@@ -98,6 +98,46 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   const llmDropdownRef = useRef<HTMLDivElement>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ─── Drag state ───
+  const panelW = 680;
+  const panelH = 600;
+  const [position, setPosition] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return { x: Math.max(0, (window.innerWidth - panelW) / 2), y: Math.max(0, (window.innerHeight - panelH) / 2) };
+    }
+    return { x: 0, y: 0 };
+  });
+  const isDragging = useRef(false);
+  const [isDraggingState, setIsDraggingState] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+
+  // ─── Drag handlers ───
+  const handlePanelDragStart = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest('button')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    isDragging.current = true;
+    setIsDraggingState(true);
+    dragStart.current = { x: e.clientX - position.x, y: e.clientY - position.y };
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isDragging.current) return;
+      ev.stopPropagation();
+      setPosition({ x: ev.clientX - dragStart.current.x, y: ev.clientY - dragStart.current.y });
+    };
+    const onMouseUp = (ev: MouseEvent) => {
+      ev.stopPropagation();
+      isDragging.current = false;
+      setIsDraggingState(false);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
+  const accentColor = isMonochrome ? '#2563eb' : '#d4af37';
   const modelDropdownRef = useRef<HTMLDivElement>(null);
 
   // ─── Load templates ───────────────────────────────────────────
@@ -418,30 +458,40 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
 
   return (
     <div
-      className={`fixed inset-0 z-[200] flex items-center justify-center`}
+      className="fixed z-[150]"
       data-floating-panel="true"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{
+        left: position.x,
+        top: position.y,
+        width: panelW,
+        maxHeight: '85vh',
+      }}
+      onClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
     >
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-
       {/* Panel */}
       <div
         data-floating-panel="true"
-        className={`relative w-[680px] max-h-[85vh] rounded-2xl border shadow-2xl overflow-hidden flex flex-col ${
-          isMonochrome
-            ? 'bg-white border-gray-200 shadow-gray-300/30'
-            : 'bg-gradient-to-b from-[#1c1c1c] to-[#141414] border-white/[0.1] shadow-black/60'
-        }`}
+        className="rounded-2xl overflow-hidden flex flex-col"
+        style={{
+          backgroundColor: isMonochrome ? '#fff' : '#1c1c1c',
+          border: isDraggingState
+            ? `2px solid ${accentColor}`
+            : `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)'}`,
+          boxShadow: isDraggingState
+            ? (isMonochrome ? '0 0 24px rgba(37,99,235,0.25), 0 25px 50px -12px rgba(0,0,0,0.25)' : '0 0 24px rgba(212,175,55,0.3), 0 25px 50px -12px rgba(0,0,0,0.5)')
+            : (isMonochrome ? '0 25px 50px -12px rgba(0,0,0,0.15)' : '0 25px 50px -12px rgba(0,0,0,0.5)'),
+          maxHeight: '85vh',
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* ── Header (unified title bar) ── */}
         <div
-          className="flex items-center gap-2 px-3 py-2 select-none shrink-0"
+          className="flex items-center gap-2 px-3 py-2 select-none shrink-0 cursor-grab active:cursor-grabbing"
           style={{ borderBottom: `1px solid ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)'}` }}
+          onMouseDown={handlePanelDragStart}
         >
           <GripVertical size={14} style={{ color: isMonochrome ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.3)' }} />
           <ShoppingBag size={15} style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }} />

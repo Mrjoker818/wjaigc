@@ -1361,8 +1361,20 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       {/* 主编辑器面板 */}
       <div
         ref={containerRef}
-        className={`fixed z-[200] w-[440px] ${thPanel} border rounded-xl shadow-2xl overflow-hidden`}
-        style={{ left: position.x, top: position.y, maxHeight: '85vh' }}
+        className={`fixed z-[200] w-[440px] ${isDragging ? '' : thPanel} rounded-xl overflow-hidden`}
+        style={{
+          left: position.x,
+          top: position.y,
+          maxHeight: '85vh',
+          backgroundColor: isMonochrome ? '#fff' : 'rgba(26,26,26,0.8)',
+          backdropFilter: isMonochrome ? 'none' : 'blur(16px)',
+          border: isDragging
+            ? `2px solid ${isMonochrome ? '#2563eb' : '#d4af37'}`
+            : `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.14)'}`,
+          boxShadow: isDragging
+            ? (isMonochrome ? '0 0 24px rgba(37,99,235,0.25), 0 25px 50px -12px rgba(0,0,0,0.25)' : '0 0 24px rgba(212,175,55,0.3), 0 25px 50px -12px rgba(0,0,0,0.5)')
+            : (isMonochrome ? '0 25px 50px -12px rgba(0,0,0,0.25)' : '0 25px 50px -12px rgba(0,0,0,0.5)'),
+        }}
         onMouseDown={e => e.stopPropagation()}
         onPointerDown={e => e.stopPropagation()}
         data-popup

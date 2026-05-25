@@ -76,6 +76,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   });
   const [hasPosition, setHasPosition] = useState(true);
   const isDragging = useRef(false);
+  const [isDraggingState, setIsDraggingState] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -184,6 +185,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
     e.preventDefault();
     e.stopPropagation();
     isDragging.current = true;
+    setIsDraggingState(true);
     if (!hasPosition && panelRef.current) {
       const rect = panelRef.current.getBoundingClientRect();
       setPosition({ x: rect.left, y: rect.top });
@@ -203,6 +205,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
     const onMouseUp = (ev: MouseEvent) => {
       ev.stopPropagation();
       isDragging.current = false;
+      setIsDraggingState(false);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
     };
@@ -329,9 +332,12 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         width: 460,
         maxHeight: '85vh',
         backgroundColor: bgPanel,
-        border: `1px solid ${borderColor}`,
-        borderRadius: 10,
-        boxShadow: shadow,
+        border: isDraggingState
+          ? `2px solid ${accentColor}`
+          : `1px solid ${borderColor}`,
+        boxShadow: isDraggingState
+          ? (isMonochrome ? '0 0 24px rgba(37,99,235,0.25), 0 8px 32px rgba(0,0,0,0.12)' : '0 0 24px rgba(212,175,55,0.3), 0 8px 32px rgba(0,0,0,0.5)')
+          : shadow,
         backdropFilter: backdrop,
         WebkitBackdropFilter: backdrop,
         color: textColor,
