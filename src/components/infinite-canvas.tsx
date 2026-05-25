@@ -25,7 +25,7 @@ import {
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
-  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag
+  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan
 } from 'lucide-react';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
 import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
@@ -41,6 +41,7 @@ const ModelViewer3D = dynamic(() => import('@/components/model-viewer-3d'), { ss
 const PsdLayerEditor = lazy(() => import('@/components/psd-editor/PsdLayerEditor'));
 const AgentEditor = lazy(() => import('@/components/agent-editor').then(m => ({ default: m.AgentEditor })));
 const BrandEcommercePanel = lazy(() => import('@/components/brand-ecommerce-panel').then(m => ({ default: m.BrandEcommercePanel })));
+const RefineEnginePanel = lazy(() => import('@/components/refine-engine-panel'));
 
 
 /* ====== Multi-Angle Sphere Preview (Canvas 2D) ====== */
@@ -425,6 +426,10 @@ export function InfiniteCanvas({
 
   // Brand e-commerce state
   const [showBrandEcommerce, setShowBrandEcommerce] = useState(false);
+
+  // Refine engine state
+  const [showRefineEngine, setShowRefineEngine] = useState(false);
+  const [refineEngineImageUrl, setRefineEngineImageUrl] = useState<string>('');
   const [agentSelectingImage, setAgentSelectingImage] = useState(false);
 
   // View state
@@ -656,7 +661,7 @@ export function InfiniteCanvas({
     if (typeof window !== 'undefined') {
       try { const saved = localStorage.getItem('wujie_toolbar_order'); if (saved) return JSON.parse(saved); } catch {}
     }
-    return ['放大','移除背景','SVG智能描摹','擦除','蒙版','编辑元素','多角度','转3D','扩展','裁切','语言修图','Agent编排','下载'];
+    return ['放大','移除背景','SVG智能描摹','擦除','蒙版','编辑元素','多角度','转3D','扩展','裁切','精修引擎','语言修图','Agent编排','下载'];
   });
   const [toolbarHiddenItems, setToolbarHiddenItems] = useState<Set<string>>(() => {
     if (typeof window !== 'undefined') {
@@ -5535,7 +5540,7 @@ export function InfiniteCanvas({
     '放大': 'text-blue-600', '移除背景': 'text-pink-500', 'SVG智能描摹': 'text-emerald-500',
     '擦除': 'text-orange-500', '蒙版': 'text-violet-500', '编辑元素': 'text-cyan-500',
     '多角度': 'text-teal-500', '转3D': 'text-indigo-500', '扩展': 'text-amber-500',
-    '裁切': 'text-rose-500', '语言修图': 'text-sky-500', 'Agent编排': 'text-fuchsia-500',
+    '裁切': 'text-rose-500', '精修引擎': 'text-violet-500', '语言修图': 'text-sky-500', 'Agent编排': 'text-fuchsia-500',
     '下载': 'text-gray-600',
   };
   const imageActions = [
@@ -5549,6 +5554,7 @@ export function InfiniteCanvas({
     { icon: <Box size={14} className={isMonochrome ? monoColors['转3D'] : ''} />, label: '转3D', desc: '生成3D模型预览', action: handleOpen3D },
     { icon: <Expand size={14} className={isMonochrome ? monoColors['扩展'] : ''} />, label: '扩展', desc: '向四周延伸画面，自动补齐背景', action: handleOpenExpand },
     { icon: <Scissors size={14} className={isMonochrome ? monoColors['裁切'] : ''} />, label: '裁切', desc: '自由/预设比例裁切', action: handleOpenCrop },
+    { icon: <Scan size={14} className={isMonochrome ? monoColors['精修引擎'] : ''} />, label: '精修引擎', desc: 'AI智能精修：人物/商品/画质/色调', action: () => { const img = selectedImageData || selectedImage; setRefineEngineImageUrl(img?.url || ''); setShowRefineEngine(true); } },
     { icon: <Pencil size={14} className={isMonochrome ? monoColors['语言修图'] : ''} />, label: '语言修图', desc: '用自然语言描述修改图片', action: () => { if (selectedImage) onEditImage?.(selectedImage); else onEditImage?.(null); } },
     { icon: <Bot size={14} className={isMonochrome ? monoColors['Agent编排'] : ''} />, label: 'Agent编排', desc: '智能编排多工具编辑图片', action: () => { const img = selectedImageData || selectedImage; if (img) { setAgentEditImage(img); } else { setAgentEditImage(null); } setShowAgentEditor(true); } },
     { icon: <Download size={14} className={isMonochrome ? monoColors['下载'] : ''} />, label: '下载', desc: 'PNG/SVG/PSD下载', action: handleOpenDownload },
@@ -9179,6 +9185,19 @@ export function InfiniteCanvas({
           </Suspense>
         )}
 
+        {/* ====== REFINE ENGINE PANEL ====== */}
+        {showRefineEngine && (
+          <Suspense fallback={null}>
+            <RefineEnginePanel
+              onClose={() => setShowRefineEngine(false)}
+              onAddImage={(url: string) => {
+                onAddImages?.([url]);
+              }}
+              initialImageUrl={refineEngineImageUrl}
+            />
+          </Suspense>
+        )}
+
 
         {/* ====== PSD LAYER EDITOR MODAL ====== */}
         {showPsdEditor && psdEditorImageUrl && (
@@ -9767,7 +9786,7 @@ export function InfiniteCanvas({
                     >
                       <span className={`${
                         isMonochrome
-                          ? action.label === '放大' ? 'text-emerald-500' : action.label === '移除背景' ? 'text-violet-500' : action.label === 'SVG智能描摹' || action.label === 'SVG描摹' ? 'text-pink-500' : action.label === '擦除' ? 'text-orange-500' : action.label === '蒙版' ? 'text-cyan-500' : action.label === '编辑元素' ? 'text-amber-500' : action.label === '扩展' ? 'text-blue-500' : action.label === '图生图' ? 'text-indigo-500' : action.label === '裁切' ? 'text-rose-500' : action.label === '下载' ? 'text-teal-500' : action.label === 'Agent编排' ? 'text-purple-500' : action.label === '语言修图' ? 'text-fuchsia-500' : 'text-blue-500'
+                          ? action.label === '放大' ? 'text-emerald-500' : action.label === '移除背景' ? 'text-violet-500' : action.label === 'SVG智能描摹' || action.label === 'SVG描摹' ? 'text-pink-500' : action.label === '擦除' ? 'text-orange-500' : action.label === '蒙版' ? 'text-cyan-500' : action.label === '编辑元素' ? 'text-amber-500' : action.label === '扩展' ? 'text-blue-500' : action.label === '图生图' ? 'text-indigo-500' : action.label === '裁切' ? 'text-rose-500' : action.label === '精修引擎' ? 'text-violet-500' : action.label === '下载' ? 'text-teal-500' : action.label === 'Agent编排' ? 'text-purple-500' : action.label === '语言修图' ? 'text-fuchsia-500' : 'text-blue-500'
                           : ''
                       }`}>{action.icon}</span>
                       <span>{action.label}</span>
@@ -10138,7 +10157,7 @@ export function InfiniteCanvas({
                     <div className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>{APP_VERSION_LABEL}</div>
                     <div className="space-y-2.5">
                       {[
-                        '图片编辑工具：放大/移除背景/SVG描摹/擦除/蒙版/编辑元素/图生图/多角度/转3D/扩展/裁切/Agent编排/下载',
+                        '图片编辑工具：放大/移除背景/SVG描摹/擦除/蒙版/编辑元素/图生图/多角度/转3D/扩展/裁切/精修引擎/Agent编排/下载',
                         '移除背景：同时生成白底主体图和黑白蒙版图，本地 BiRefNet/U2Net/Silueta 优先',
                         '擦除：本地 LaMa/ZITS/Anime-Lama 优先，AI 修复+边界扩散兜底',
                         '蒙版：AI 重新生成指定区域，结果直接显示，无涂抹痕迹',
@@ -10493,6 +10512,20 @@ export function InfiniteCanvas({
         >
           <ShoppingBag className="h-4 w-4" />
           <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-black/90 text-white'}`}>品牌电商</span>
+        </button>
+
+        {/* Refine Engine - 精修引擎 */}
+        <button
+          onClick={() => { setRefineEngineImageUrl(''); setShowRefineEngine(true); }}
+          className={`tool-btn p-2 rounded-xl transition-all relative group ${
+            isMonochrome
+              ? 'text-violet-600 hover:text-violet-700 hover:bg-violet-50'
+              : 'text-[#888] hover:text-white hover:bg-white/10'
+          }`}
+          title="精修引擎"
+        >
+          <Scan className="h-4 w-4" />
+          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-black/90 text-white'}`}>精修引擎</span>
         </button>
 
         <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`} />

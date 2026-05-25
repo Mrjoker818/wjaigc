@@ -16,7 +16,7 @@ import { EventEmitter } from 'events';
 
 // ─── 类型 ────────────────────────────────────────────────────────────
 
-export type TaskType = 'generate' | 'image-edit' | 'edit' | 'svg-trace' | 'upscale' | 'removebg' | 'extend' | 'mask' | 'erase' | 'vectorize' | 'segment' | 'batch' | 'outpaint' | 'multi-angle' | 'brand-generate' | 'brand-ecommerce';
+export type TaskType = 'generate' | 'image-edit' | 'edit' | 'svg-trace' | 'upscale' | 'removebg' | 'extend' | 'mask' | 'erase' | 'vectorize' | 'segment' | 'batch' | 'outpaint' | 'multi-angle' | 'brand-generate' | 'brand-ecommerce' | 'refine-engine';
 export type TaskStatus = 'queued' | 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
 export interface TaskInfo {
