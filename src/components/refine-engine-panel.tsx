@@ -161,12 +161,14 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // ─── Switch tab when image is set ───
+  // ─── Switch tab when image is first uploaded (not when user manually navigates) ───
+  const switchToSettingsRef = useRef(false);
   useEffect(() => {
-    if (sourceImage && activeTab === 'upload') {
+    if (switchToSettingsRef.current && sourceImage) {
       setActiveTab('settings');
+      switchToSettingsRef.current = false;
     }
-  }, [sourceImage, activeTab]);
+  }, [sourceImage]);
 
   // ─── Derived state ───
   const selectedCategoryName = categories.find(c => c.id === selectedCategory)?.name || '默认';
@@ -229,7 +231,10 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
           body: JSON.stringify({ imageUrl: dataUrl }),
         });
         const data = await resp.json();
-        if (data.url) setSourceImage(data.url);
+        if (data.url) {
+          setSourceImage(data.url);
+          switchToSettingsRef.current = true; // trigger auto-switch to settings
+        }
       };
       reader.onerror = () => console.error('File read failed');
       reader.readAsDataURL(file);
@@ -449,7 +454,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                   <X size={14} />
                 </button>
                 <button
-                  onClick={() => { setSourceImage(''); setTimeout(() => fileInputRef.current?.click(), 100); }}
+                  onClick={() => { if (fileInputRef.current) { fileInputRef.current.value = ''; fileInputRef.current.click(); } }}
                   className="absolute bottom-2 right-2 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors"
                   style={{ background: 'rgba(0,0,0,0.7)', color: '#fff' }}
                   title="重新选择图片"
@@ -487,6 +492,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
               type="file"
               accept="image/*"
               className="hidden"
+              onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
               onChange={e => {
                 const file = e.target.files?.[0];
                 if (file) handleFileUpload(file);
@@ -510,7 +516,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                 <img src={sourceImage} alt="Source" className="w-12 h-12 object-cover rounded-md" style={{ border: `1px solid ${borderColor}` }} />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm truncate" style={{ color: textColor }}>已选择图片</p>
-                  <button onClick={() => setActiveTab('upload')} className="text-xs" style={{ color: accentColor }}>更换图片</button>
+                  <button onClick={() => { if (fileInputRef.current) { fileInputRef.current.value = ''; fileInputRef.current.click(); } }} className="text-xs" style={{ color: accentColor }}>更换图片</button>
                 </div>
               </div>
             )}

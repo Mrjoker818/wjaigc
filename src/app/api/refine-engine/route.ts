@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, getPublicModels, getPublicApiProviders } from '@/lib/server-api-config';
 import type { ApiProvider } from '@/lib/universal-api-types';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, isEditsEndpointRejected, stripEditsOnlyFields } from '@/lib/api-compatibility';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 
@@ -211,33 +211,6 @@ export async function GET() {
   });
 }
 
-  // ─── Helper: Resolve imageUrl to accessible URL ───
-  async function resolveImageUrl(imageUrl: string, req: NextRequest): Promise<string> {
-    // Already a full HTTP URL
-    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) return imageUrl;
-    // Data URL: upload to server first
-    if (imageUrl.startsWith('data:')) {
-      try {
-        const saveResp = await fetch(new URL('/api/save-image', req.url).href, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageUrl }),
-        });
-        if (saveResp.ok) {
-          const saveData = await saveResp.json();
-          if (saveData.url) return saveData.url;
-        }
-      } catch { /* fallback to original */ }
-    }
-    // Relative path: convert to absolute URL
-    if (imageUrl.startsWith('/')) {
-      const host = req.headers.get('host');
-      const protocol = req.headers.get('x-forwarded-proto') || 'https';
-      if (host) return `${protocol}://${host}${imageUrl}`;
-    }
-    return imageUrl;
-  }
-
   // ─── Helper: Get image provider ───
 async function getImageProvider(model?: string): Promise<ApiProvider | null> {
   if (model) {
@@ -347,12 +320,9 @@ export async function POST(request: NextRequest) {
       const taskId = `refine-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       registerTask(taskId, 'refine-engine', `精修: ${productName || MODE_LABELS[refineMode] || '产品'}`);
 
-      // Resolve image URL to accessible HTTP URL before async processing
-      const accessibleImageUrl = await resolveImageUrl(imageUrl, request);
-
-      // Start async processing
+      // Start async processing (processRefine handles image URL resolution internally)
       processRefine(taskId, {
-        imageUrl: accessibleImageUrl,
+        imageUrl: imageUrl,
         prompt,
         model: selectedModel,
         provider,
@@ -386,7 +356,7 @@ async function processRefine(
 
   const compatProfile = resolveCompatProfile(params.provider);
 
-  updateTaskProgress(taskId, { progress: 30, label: '调用AI模型生成...' });
+  updateTaskProgress(taskId, { progress: 20, label: '准备参考图片...' });
 
   // Build request body
   const rawBody: Record<string, unknown> = {
@@ -396,20 +366,103 @@ async function processRefine(
     size: getAspectSize(params.aspectRatio),
   };
 
-  // Add reference image for image-to-image (URL already resolved before async call)
+  // ─── Prepare image for API ───
+  // Follow the same pattern as /api/generate: provide both image_urls (accessible URLs)
+  // and image (base64 for /images/edits endpoint)
   if (params.imageUrl) {
-    rawBody.image = params.imageUrl;
-    rawBody.image_urls = [params.imageUrl];
+    let imageAsBase64: string | undefined;
+
+    // 1) Local path: read from filesystem and convert to base64
+    if (params.imageUrl.startsWith('/api/serve-upload/') || params.imageUrl.startsWith('/uploads/')) {
+      try {
+        const fs = await import('fs/promises');
+        const path = await import('path');
+        const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
+        const publicDir = path.join(workspacePath, 'public');
+        let filePath = '';
+        if (params.imageUrl.startsWith('/api/serve-upload/')) {
+          const fileName = params.imageUrl.replace('/api/serve-upload/', '');
+          filePath = path.join(publicDir, 'uploads', fileName);
+        } else {
+          filePath = path.join(publicDir, params.imageUrl.replace(/^\//, ''));
+        }
+        const resolved = path.resolve(filePath);
+        if (resolved.startsWith(publicDir)) {
+          const imgBuf = await fs.readFile(resolved);
+          const ext = path.extname(resolved).toLowerCase();
+          const mimeMap: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
+          const mime = mimeMap[ext] || 'image/png';
+          imageAsBase64 = `data:${mime};base64,${imgBuf.toString('base64')}`;
+        }
+      } catch (localErr) {
+        console.warn('[refine-engine] Failed to read local image:', localErr);
+      }
+    }
+    // 2) HTTP URL: download and convert to base64
+    else if (params.imageUrl.startsWith('http://') || params.imageUrl.startsWith('https://')) {
+      try {
+        const imgResp = await fetch(params.imageUrl, { signal: AbortSignal.timeout(15000) });
+        if (imgResp.ok) {
+          const imgBuf = Buffer.from(await imgResp.arrayBuffer());
+          const contentType = imgResp.headers.get('content-type') || 'image/png';
+          imageAsBase64 = `data:${contentType};base64,${imgBuf.toString('base64')}`;
+        }
+      } catch (imgErr) {
+        console.warn('[refine-engine] Failed to download image:', imgErr);
+      }
+    }
+    // 3) Already base64 data URL
+    else if (params.imageUrl.startsWith('data:')) {
+      imageAsBase64 = params.imageUrl;
+    }
+
+    // Compress large base64 images (>1MB) to reduce API request size
+    if (imageAsBase64 && imageAsBase64.length > 1_000_000) {
+      try {
+        const sharp = (await import('sharp')).default;
+        const base64Data = imageAsBase64.split(',')[1];
+        const imgBuf = Buffer.from(base64Data, 'base64');
+        const compressed = await sharp(imgBuf)
+          .resize(1536, 1536, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 90 })
+          .toBuffer();
+        imageAsBase64 = `data:image/jpeg;base64,${compressed.toString('base64')}`;
+      } catch (compressErr) {
+        console.warn('[refine-engine] Image compression failed:', compressErr);
+      }
+    }
+
+    // Provide both fields for maximum compatibility:
+    // - image (base64): Required by /images/edits, AI must process this as source image
+    // - image_urls (HTTP URLs): Used by /images/generations for reference-based generation
+    if (imageAsBase64) {
+      rawBody.image = imageAsBase64;
+    }
+    if (params.imageUrl.startsWith('http')) {
+      rawBody.image_urls = [params.imageUrl];
+    } else if (imageAsBase64) {
+      // For local/data images, image_urls is not useful (base64 too large for URL field)
+      // The image field (base64) is sufficient
+    }
+
     rawBody.strength = 0.7;
   }
 
-  const { body: apiBody, endpoint: apiEndpoint } = adjustRequestForProfile(rawBody, compatProfile, { hasImage: !!params.imageUrl });
+  // Enhance prompt for image-to-image: instruct AI to use the reference image
+  if (params.imageUrl) {
+    rawBody.prompt = `[img2img] Preserve the structure, style and key elements of the reference image. ${params.prompt}`;
+  }
+
+  const hasImageFlag = !!(rawBody.image || rawBody.image_urls);
+  const { body: apiBody, endpoint: apiEndpoint } = adjustRequestForProfile(rawBody, compatProfile, { hasImage: hasImageFlag });
   const path = apiEndpoint || '/images/generations';
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${params.provider.apiKey}`,
   };
+
+  updateTaskProgress(taskId, { progress: 40, label: '调用AI模型生成...' });
 
   try {
     const response = await fetchWithV1Retry(params.provider.baseUrl, path, {
@@ -420,6 +473,53 @@ async function processRefine(
 
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
+
+      // Check if /images/edits is rejected → fallback to /images/generations
+      if (isEditsEndpointRejected(response.status, errText)) {
+        console.info('[refine-engine] /images/edits rejected, falling back to /images/generations...');
+        const fallbackBody = stripEditsOnlyFields(apiBody);
+
+        // Enhance prompt for /images/generations with image_urls
+        if (fallbackBody.image_urls && Array.isArray(fallbackBody.image_urls) && (fallbackBody.image_urls as string[]).length > 0) {
+          fallbackBody.prompt = `[IMAGE-TO-IMAGE MODE] You MUST use the provided reference image as the mandatory source/base for generation. Do NOT generate from scratch. ${String(fallbackBody.prompt || '')}`;
+        }
+
+        const fallbackResp = await fetchWithV1Retry(params.provider.baseUrl, '/images/generations', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(fallbackBody),
+        }, true, 120000);
+
+        if (!fallbackResp.ok) {
+          const fallbackErrText = await fallbackResp.text().catch(() => '');
+          throw new Error(`API错误 (${fallbackResp.status}): ${fallbackErrText.slice(0, 200)}`);
+        }
+
+        const fallbackResult = await fallbackResp.json();
+        const fallbackParsed = parseResponseForProfile(fallbackResult, compatProfile);
+        if (fallbackParsed.directImageUrls && fallbackParsed.directImageUrls.length > 0) {
+          updateTaskProgress(taskId, {
+            status: 'completed',
+            progress: 100,
+            label: '精修完成',
+            result: { directImageUrls: fallbackParsed.directImageUrls },
+          });
+          return;
+        } else if (fallbackParsed.taskIds && fallbackParsed.taskIds.length > 0) {
+          updateTaskProgress(taskId, { progress: 60, label: '等待模型生成...' });
+          const pollResult = await pollForResult(fallbackParsed.taskIds[0], params.provider.baseUrl, params.provider.apiKey, compatProfile);
+          updateTaskProgress(taskId, {
+            status: 'completed',
+            progress: 100,
+            label: '精修完成',
+            result: { directImageUrls: [pollResult] },
+          });
+          return;
+        } else {
+          throw new Error('模型未返回图片结果');
+        }
+      }
+
       throw new Error(`API错误 (${response.status}): ${errText.slice(0, 200)}`);
     }
 
