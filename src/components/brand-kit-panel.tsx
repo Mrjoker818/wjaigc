@@ -65,9 +65,9 @@ function useTheme(isGold: boolean) {
     surfaceHover: isGold ? 'hover:bg-[#222]' : 'hover:bg-muted/50',
     border: isGold ? 'border-white/[0.06]' : 'border-border',
     borderLight: isGold ? 'border-white/[0.04]' : 'border-border/50',
-    text: isGold ? 'text-gray-200' : 'text-foreground',
-    textSec: isGold ? 'text-gray-500' : 'text-muted-foreground',
-    textTri: isGold ? 'text-gray-600' : 'text-muted-foreground/60',
+    text: isGold ? 'text-gray-100' : 'text-foreground',
+    textSec: isGold ? 'text-gray-400' : 'text-muted-foreground',
+    textTri: isGold ? 'text-gray-500' : 'text-muted-foreground/60',
     accent: isGold ? 'text-[#d4af37]' : 'text-primary',
     accentBg: isGold ? 'bg-[#d4af37]/10' : 'bg-primary/10',
     accentBorder: isGold ? 'border-[#d4af37]/30' : 'border-primary/30',
@@ -141,7 +141,6 @@ function ImageUploader({ onImageReady, isGold, compact }: {
     if (!file.type.startsWith('image/')) return;
     setUploading(true);
     try {
-      // Create preview
       const reader = new FileReader();
       reader.onload = (ev) => {
         const dataUrl = ev.target?.result as string;
@@ -149,7 +148,6 @@ function ImageUploader({ onImageReady, isGold, compact }: {
       };
       reader.readAsDataURL(file);
 
-      // Upload via save-image API
       const reader2 = new FileReader();
       const dataUrlPromise = new Promise<string>((resolve) => {
         reader2.onload = (ev) => resolve(ev.target?.result as string);
@@ -166,11 +164,9 @@ function ImageUploader({ onImageReady, isGold, compact }: {
         const data = await resp.json();
         onImageReady(data.url || data.path || dataUrl);
       } else {
-        // Fallback: use data URL directly for vision analysis
         onImageReady(dataUrl);
       }
     } catch {
-      // Fallback: use data URL
       const reader3 = new FileReader();
       reader3.onload = (ev) => onImageReady(ev.target?.result as string);
       reader3.readAsDataURL(file);
@@ -252,7 +248,7 @@ function BrandKitEditor({ kit, onSave, onCancel, isGold }: {
   const [keywordInput, setKeywordInput] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const t = useTheme(isGold);
-  const inputCls = `w-full ${t.inputBg} border ${t.inputBorder} rounded-lg px-3 py-2 text-sm ${t.text} placeholder:text-gray-600 focus:outline-none focus:ring-1 focus:ring-[#d4af37]/30 focus:border-[#d4af37]/30 transition-all`;
+  const inputCls = `w-full ${t.inputBg} border ${t.inputBorder} rounded-lg px-3 py-2 text-sm ${t.text} placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#d4af37]/30 focus:border-[#d4af37]/30 transition-all`;
 
   const handleAddKeyword = () => {
     if (keywordInput.trim()) {
@@ -281,7 +277,6 @@ function BrandKitEditor({ kit, onSave, onCancel, isGold }: {
         if (data.brandDNA) {
           const dna = data.brandDNA;
           const newKit = { ...editKit };
-          // Map brandDNA fields to editKit
           if (dna.primaryColor) newKit.colors = { ...newKit.colors!, primary: dna.primaryColor };
           if (dna.secondaryColors?.[0]) newKit.colors = { ...newKit.colors!, secondary: dna.secondaryColors[0] };
           if (dna.secondaryColors?.[1]) newKit.colors = { ...newKit.colors!, accent: dna.secondaryColors[1] };
@@ -328,9 +323,9 @@ function BrandKitEditor({ kit, onSave, onCancel, isGold }: {
   };
 
   return (
-    <div className={`rounded-xl ${t.bg} overflow-hidden`}>
+    <div className="flex flex-col flex-1 min-h-0">
       {/* Header Bar */}
-      <div className={`flex items-center justify-between px-3 py-2.5 ${isGold ? 'bg-[#1a1a1a] border-b border-white/[0.04]' : 'bg-muted/20 border-b border-border/50'}`}>
+      <div className={`flex items-center justify-between px-3 py-2.5 shrink-0 ${isGold ? 'bg-[#1a1a1a] border-b border-white/[0.06]' : 'bg-muted/20 border-b border-border/50'}`}>
         <div className="flex items-center gap-2">
           <div className={`w-1 h-3.5 rounded-full ${isGold ? 'bg-[#d4af37]' : 'bg-primary'}`} />
           <span className={`text-xs font-semibold ${t.text}`}>{editKit.id ? '编辑品牌' : '创建品牌'}</span>
@@ -338,14 +333,15 @@ function BrandKitEditor({ kit, onSave, onCancel, isGold }: {
         <ImageUploader onImageReady={handleImageAnalyze} isGold={isGold} compact />
       </div>
 
-      <div className="p-3 space-y-3.5 max-h-[60vh] overflow-y-auto">
-        {/* ===== Upload & Image Preview ===== */}
+      {/* Scrollable Content */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3.5">
+        {/* Upload & Image Preview */}
         <ImageUploader
           onImageReady={handleImageAnalyze}
           isGold={isGold}
         />
 
-        {/* ===== Brand Info ===== */}
+        {/* Brand Info */}
         <div className="space-y-2.5">
           <input
             type="text"
@@ -387,7 +383,7 @@ function BrandKitEditor({ kit, onSave, onCancel, isGold }: {
           </div>
         </div>
 
-        {/* ===== Colors ===== */}
+        {/* Colors */}
         <div>
           <div className="flex items-center gap-1.5 mb-2">
             <SwatchBook className={`w-3 h-3 ${t.accent}`} />
@@ -408,7 +404,7 @@ function BrandKitEditor({ kit, onSave, onCancel, isGold }: {
           </div>
         </div>
 
-        {/* ===== Font Style ===== */}
+        {/* Font Style */}
         <div>
           <div className="flex items-center gap-1.5 mb-2">
             <Type className={`w-3 h-3 ${t.accent}`} />
@@ -442,7 +438,7 @@ function BrandKitEditor({ kit, onSave, onCancel, isGold }: {
           </div>
         </div>
 
-        {/* ===== Style Keywords ===== */}
+        {/* Style Keywords */}
         <div>
           <div className="flex items-center gap-1.5 mb-2">
             <Tag className={`w-3 h-3 ${t.accent}`} />
@@ -482,7 +478,7 @@ function BrandKitEditor({ kit, onSave, onCancel, isGold }: {
           )}
         </div>
 
-        {/* ===== Brand DNA (if exists) ===== */}
+        {/* Brand DNA (if exists) */}
         {editKit.brandDna && (
           <div>
             <div className="flex items-center gap-1.5 mb-1.5">
@@ -494,35 +490,35 @@ function BrandKitEditor({ kit, onSave, onCancel, isGold }: {
             </div>
           </div>
         )}
+      </div>
 
-        {/* ===== Actions ===== */}
-        <div className="flex items-center gap-2 pt-1 pb-1">
-          <button
-            onClick={handleAnalyze}
-            disabled={analyzing || !editKit.name}
-            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-200 disabled:opacity-30 ${t.accentBg} ${t.accentText}`}
-          >
-            {analyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
-            {analyzing ? '分析中...' : 'AI 分析'}
-          </button>
-          <div className="flex-1" />
-          <button
-            onClick={onCancel}
-            className={`px-3 py-1.5 rounded-lg text-[11px] ${t.textSec} hover:${t.text} transition-all duration-200`}
-          >
-            取消
-          </button>
-          <button
-            onClick={() => onSave(editKit)}
-            disabled={!editKit.name}
-            className={`flex items-center gap-1 px-4 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-200 disabled:opacity-30 ${
-              isGold ? 'bg-[#d4af37] text-black hover:bg-[#d4af37]/85' : 'bg-primary text-primary-foreground hover:bg-primary/90'
-            }`}
-          >
-            <Check className="w-3 h-3" />
-            保存
-          </button>
-        </div>
+      {/* Fixed Bottom Actions */}
+      <div className={`flex items-center gap-2 px-3 py-2.5 shrink-0 ${isGold ? 'bg-[#111] border-t border-white/[0.06]' : 'bg-card border-t border-border/50'}`}>
+        <button
+          onClick={handleAnalyze}
+          disabled={analyzing || !editKit.name}
+          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-200 disabled:opacity-30 ${t.accentBg} ${t.accentText}`}
+        >
+          {analyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+          {analyzing ? '分析中...' : 'AI 分析'}
+        </button>
+        <div className="flex-1" />
+        <button
+          onClick={onCancel}
+          className={`px-3 py-1.5 rounded-lg text-[11px] ${t.textSec} hover:${t.text} transition-all duration-200`}
+        >
+          取消
+        </button>
+        <button
+          onClick={() => onSave(editKit)}
+          disabled={!editKit.name}
+          className={`flex items-center gap-1 px-4 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-200 disabled:opacity-30 ${
+            isGold ? 'bg-[#d4af37] text-black hover:bg-[#d4af37]/85' : 'bg-primary text-primary-foreground hover:bg-primary/90'
+          }`}
+        >
+          <Check className="w-3 h-3" />
+          保存
+        </button>
       </div>
     </div>
   );
@@ -736,7 +732,7 @@ function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageMo
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className={`flex items-center gap-2.5 px-4 py-3 ${isGold ? 'border-b border-white/[0.04]' : 'border-b border-border'}`}>
+        <div className={`flex items-center gap-2.5 px-4 py-3 ${isGold ? 'border-b border-white/[0.06]' : 'border-b border-border'}`}>
           <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${t.accentBg}`}>
             <LayoutGrid className={`w-3.5 h-3.5 ${t.accentText}`} />
           </div>
@@ -978,7 +974,7 @@ export default function BrandKitPanel({ isGold, onAddImages }: BrandKitPanelProp
         </button>
       </div>
 
-      {/* Editor */}
+      {/* Editor - takes full height when editing */}
       {editing && editKit && (
         <BrandKitEditor
           kit={editKit}

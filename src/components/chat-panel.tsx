@@ -2612,10 +2612,12 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
       )}
       {/* Brand Kit 品牌构件 */}
       {activeTab === 'brandkit' && (
+      <div className="flex-1 flex flex-col overflow-hidden min-h-0">
         <BrandKitPanel
           isGold={isGold}
           onAddImages={onAddImages}
         />
+      </div>
       )}
       {/* 第三方模型调用弹窗 */}
       <ThirdPartyModelDialog
