@@ -211,7 +211,34 @@ export async function GET() {
   });
 }
 
-// ─── Helper: Get image provider ───
+  // ─── Helper: Resolve imageUrl to accessible URL ───
+  async function resolveImageUrl(imageUrl: string, req: NextRequest): Promise<string> {
+    // Already a full HTTP URL
+    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) return imageUrl;
+    // Data URL: upload to server first
+    if (imageUrl.startsWith('data:')) {
+      try {
+        const saveResp = await fetch(new URL('/api/save-image', req.url).href, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl }),
+        });
+        if (saveResp.ok) {
+          const saveData = await saveResp.json();
+          if (saveData.url) return saveData.url;
+        }
+      } catch { /* fallback to original */ }
+    }
+    // Relative path: convert to absolute URL
+    if (imageUrl.startsWith('/')) {
+      const host = req.headers.get('host');
+      const protocol = req.headers.get('x-forwarded-proto') || 'https';
+      if (host) return `${protocol}://${host}${imageUrl}`;
+    }
+    return imageUrl;
+  }
+
+  // ─── Helper: Get image provider ───
 async function getImageProvider(model?: string): Promise<ApiProvider | null> {
   if (model) {
     const p = await findProviderForModel(model);
@@ -320,9 +347,12 @@ export async function POST(request: NextRequest) {
       const taskId = `refine-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       registerTask(taskId, 'refine-engine', `精修: ${productName || MODE_LABELS[refineMode] || '产品'}`);
 
+      // Resolve image URL to accessible HTTP URL before async processing
+      const accessibleImageUrl = await resolveImageUrl(imageUrl, request);
+
       // Start async processing
       processRefine(taskId, {
-        imageUrl,
+        imageUrl: accessibleImageUrl,
         prompt,
         model: selectedModel,
         provider,
@@ -366,9 +396,10 @@ async function processRefine(
     size: getAspectSize(params.aspectRatio),
   };
 
-  // If imageUrl is provided, add as reference image for image-to-image
+  // Add reference image for image-to-image (URL already resolved before async call)
   if (params.imageUrl) {
     rawBody.image = params.imageUrl;
+    rawBody.image_urls = [params.imageUrl];
     rawBody.strength = 0.7;
   }
 

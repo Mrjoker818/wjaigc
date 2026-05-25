@@ -444,8 +444,18 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                   onClick={() => setSourceImage('')}
                   className="absolute top-2 right-2 p-1.5 rounded-full transition-colors"
                   style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}
+                  title="移除图片"
                 >
                   <X size={14} />
+                </button>
+                <button
+                  onClick={() => { setSourceImage(''); setTimeout(() => fileInputRef.current?.click(), 100); }}
+                  className="absolute bottom-2 right-2 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors"
+                  style={{ background: 'rgba(0,0,0,0.7)', color: '#fff' }}
+                  title="重新选择图片"
+                >
+                  <Upload size={12} />
+                  重新选择
                 </button>
               </div>
             ) : (
