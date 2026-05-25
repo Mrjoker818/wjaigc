@@ -5567,7 +5567,7 @@ export function InfiniteCanvas({
   // 根据 toolbarItemOrder 和 toolbarHiddenItems 过滤/排序工具栏
   // 确保新增的工具项（localStorage中可能没有）也能显示
   const allActionLabels = imageActions.map(a => a.label);
-  const fullOrder = [...toolbarItemOrder];
+  const fullOrder = [...toolbarItemOrder].filter(label => allActionLabels.includes(label));
   for (const label of allActionLabels) {
     if (!fullOrder.includes(label)) fullOrder.push(label);
   }
@@ -9807,7 +9807,7 @@ export function InfiniteCanvas({
                     >
                       <span className={`${
                         isMonochrome
-                          ? action.label === '放大' ? 'text-emerald-500' : action.label === '移除背景' ? 'text-violet-500' : action.label === 'SVG智能描摹' || action.label === 'SVG描摹' ? 'text-pink-500' : action.label === '擦除' ? 'text-orange-500' : action.label === '蒙版' ? 'text-cyan-500' : action.label === '编辑元素' ? 'text-amber-500' : action.label === '扩展' ? 'text-blue-500' : action.label === '图生图' ? 'text-indigo-500' : action.label === '裁切' ? 'text-rose-500' : action.label === '精修引擎' ? 'text-violet-500' : action.label === '下载' ? 'text-teal-500' : action.label === 'Agent编排' ? 'text-purple-500' : action.label === '语言修图' ? 'text-fuchsia-500' : 'text-blue-500'
+                          ? action.label === '放大' ? 'text-emerald-500' : action.label === '移除背景' ? 'text-violet-500' : action.label === 'SVG智能描摹' || action.label === 'SVG描摹' ? 'text-pink-500' : action.label === '擦除' ? 'text-orange-500' : action.label === '蒙版' ? 'text-cyan-500' : action.label === '编辑元素' ? 'text-amber-500' : action.label === '扩展' ? 'text-blue-500' : action.label === '裁切' ? 'text-rose-500' : action.label === '精修引擎' ? 'text-violet-500' : action.label === '下载' ? 'text-teal-500' : action.label === 'Agent编排' ? 'text-purple-500' : action.label === '语言修图' ? 'text-fuchsia-500' : 'text-blue-500'
                           : ''
                       }`}>{action.icon}</span>
                       <span>{action.label}</span>
@@ -10042,19 +10042,6 @@ export function InfiniteCanvas({
                           <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>选择放大模型和倍率（2x/4x），支持 PNG/JPG/WEBP 输出，upscayl-node NCNN 加速</p>
                         </div>
 
-                        {/* 图生图 */}
-                        <div className={`rounded-lg p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-white/[0.03]'}`}>
-                          <div className="flex items-center gap-2 mb-1.5">
-                            <ImagePlus size={13} className={isMonochrome ? 'text-gray-600' : 'text-[#d4af37]'} />
-                            <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>图生图</span>
-                            <span className={`text-xs ml-auto ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>风格/构图/角色/IP 融合</span>
-                          </div>
-                          <div className="rounded-lg overflow-hidden border mt-2" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)' }}>
-                            <img src="/api/help-image?file=img2img.jpeg" alt="图生图" className="w-full" loading="lazy" />
-                          </div>
-                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>基于当前图的风格/构图/角色/IP 融合生成新图，每类独立强度滑块 0-100% 控制</p>
-                        </div>
-
                         {/* 语言修图 */}
                         <div className={`rounded-lg p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-white/[0.03]'}`}>
                           <div className="flex items-center gap-2 mb-1.5">
@@ -10178,11 +10165,10 @@ export function InfiniteCanvas({
                     <div className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>{APP_VERSION_LABEL}</div>
                     <div className="space-y-2.5">
                       {[
-                        '图片编辑工具：放大/移除背景/SVG描摹/擦除/蒙版/编辑元素/图生图/多角度/转3D/扩展/裁切/精修引擎/Agent编排/下载',
+                        '图片编辑工具：放大/移除背景/SVG描摹/擦除/蒙版/编辑元素/多角度/转3D/扩展/裁切/精修引擎/Agent编排/下载',
                         '移除背景：同时生成白底主体图和黑白蒙版图，本地 BiRefNet/U2Net/Silueta 优先',
                         '擦除：本地 LaMa/ZITS/Anime-Lama 优先，AI 修复+边界扩散兜底',
                         '蒙版：AI 重新生成指定区域，结果直接显示，无涂抹痕迹',
-                        '图生图：风格/构图/角色/IP 融合生成，每类独立强度滑块',
                         '语言修图：支持 OpenAI+Gemini，自动裁切适配比例，不变形',
                         'Agent 编排：智能选择修图/生图/分析/调色工具，多轮循环决策',
                         'SVG 智能描摹：彩色/黑白矢量化，多级质量预设',
