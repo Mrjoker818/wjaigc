@@ -507,17 +507,16 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                   <span style={{ color: accentColor }}>◆</span>
                   字体风格
                 </label>
-                {/* Level 1: Category tabs (horizontal scroll) */}
-                <div className="flex gap-1 overflow-x-auto pb-1 mb-2" style={{ scrollbarWidth: 'none' }}>
+                {/* Level 1: Category tabs (flex-wrap) */}
+                <div className="flex flex-wrap gap-1 mb-2">
                   {styleCategories.map((cat) => (
                     <button
                       key={cat.id}
                       onClick={() => { setPrimaryStyleCategory(cat.id); setSecondaryStyle(cat.subStyles[0]?.name || ''); }}
-                      className="shrink-0"
                       style={{
-                        padding: '4px 12px',
+                        padding: '4px 10px',
                         borderRadius: 20,
-                        fontSize: 12,
+                        fontSize: 11,
                         fontWeight: 500,
                         border: `1px solid ${primaryStyleCategory === cat.id ? accentColor : borderColorLight}`,
                         background: primaryStyleCategory === cat.id ? (isMonochrome ? 'rgba(59,130,246,0.1)' : 'rgba(212,175,55,0.15)') : 'transparent',
