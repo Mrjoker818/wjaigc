@@ -154,6 +154,21 @@ body {
   background: rgba(212,175,55,0.1);
 }
 
+/* Model dropdown item */
+.model-item {
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border-left: 2px solid transparent;
+}
+.model-item:hover {
+  background: rgba(212,175,55,0.08);
+}
+.model-item.active {
+  background: rgba(212,175,55,0.12);
+  border-left-color: #d4af37;
+}
+
 /* Toggle switch */
 .toggle-switch {
   width: 40px;
@@ -508,7 +523,49 @@ body {
           </div>
         </div>
 
-        <!-- 4. Advanced Parameters (collapsible) -->
+        <!-- 4. Model Selection -->
+        <div>
+          <label class="block text-xs font-medium text-on-surface-variant mb-2">
+            <i data-lucide="cpu" class="w-3.5 h-3.5 inline-block mr-1 text-primary align-text-bottom"></i>
+            生图模型
+          </label>
+          <div class="relative" id="modelDropdownWrap">
+            <button id="btnModelDropdown" class="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm transition-colors" style="background: #0a0a0a; border: 1px solid #2a2a2a; color: #f5f5f5;">
+              <span id="modelDisplayText" class="truncate">gemini-2.5-flash-preview-05-20</span>
+              <i data-lucide="chevron-down" class="w-3.5 h-3.5 flex-shrink-0 ml-2 transition-transform" id="modelDropdownArrow" style="color: #6b7280;"></i>
+            </button>
+            <div id="modelDropdown" class="absolute top-full left-0 right-0 mt-1 rounded-lg shadow-xl z-20 max-h-48 overflow-y-auto custom-scrollbar hidden" style="background: #141414; border: 1px solid #2a2a2a;">
+              <!-- Model items loaded dynamically -->
+              <div class="model-item active" data-model="gemini-2.5-flash-preview-05-20" data-provider="APImart">
+                <div class="text-sm text-on-surface">gemini-2.5-flash-preview-05-20</div>
+                <div class="text-[11px] text-on-surface-variant/60 mt-0.5">APImart</div>
+              </div>
+              <div class="model-item" data-model="dall-e-3" data-provider="OpenAI">
+                <div class="text-sm text-on-surface">dall-e-3</div>
+                <div class="text-[11px] text-on-surface-variant/60 mt-0.5">OpenAI</div>
+              </div>
+              <div class="model-item" data-model="gpt-image-2" data-provider="OpenAI">
+                <div class="text-sm text-on-surface">gpt-image-2</div>
+                <div class="text-[11px] text-on-surface-variant/60 mt-0.5">OpenAI</div>
+              </div>
+              <div class="model-item" data-model="stable-diffusion-xl" data-provider="Stability AI">
+                <div class="text-sm text-on-surface">stable-diffusion-xl</div>
+                <div class="text-[11px] text-on-surface-variant/60 mt-0.5">Stability AI</div>
+              </div>
+              <div class="model-item" data-model="midjourney-v6" data-provider="APImart">
+                <div class="text-sm text-on-surface">midjourney-v6</div>
+                <div class="text-[11px] text-on-surface-variant/60 mt-0.5">APImart</div>
+              </div>
+              <div class="model-item" data-model="flux-pro-1.1" data-provider="BlackForest">
+                <div class="text-sm text-on-surface">flux-pro-1.1</div>
+                <div class="text-[11px] text-on-surface-variant/60 mt-0.5">BlackForest</div>
+              </div>
+            </div>
+          </div>
+          <p class="text-[10px] text-on-surface-variant/40 mt-1">模型由管理员后台统一配置管理</p>
+        </div>
+
+        <!-- 5. Advanced Parameters (collapsible) -->
         <div>
           <button id="btnToggleAdvanced" class="flex items-center gap-1.5 text-xs font-medium text-on-surface-variant hover:text-primary transition-colors w-full">
             <i data-lucide="settings-2" class="w-3.5 h-3.5 text-primary"></i>
@@ -1030,6 +1087,42 @@ $(function() {
   $('#bgOptions').on('click', '.chip-btn', function() {
     $('#bgOptions .chip-btn').removeClass('active');
     $(this).addClass('active');
+  });
+
+  // ========== Model dropdown ==========
+  const $modelDropdown = $('#modelDropdown');
+  const $modelArrow = $('#modelDropdownArrow');
+  const $modelDisplay = $('#modelDisplayText');
+
+  $('#btnModelDropdown').on('click', function(e) {
+    e.stopPropagation();
+    const isHidden = $modelDropdown.hasClass('hidden');
+    if (isHidden) {
+      $modelDropdown.removeClass('hidden');
+      $modelArrow.css('transform', 'rotate(180deg)');
+    } else {
+      $modelDropdown.addClass('hidden');
+      $modelArrow.css('transform', 'rotate(0deg)');
+    }
+  });
+
+  // Model item selection
+  $modelDropdown.on('click', '.model-item', function(e) {
+    e.stopPropagation();
+    const modelName = $(this).data('model');
+    $modelDropdown.find('.model-item').removeClass('active');
+    $(this).addClass('active');
+    $modelDisplay.text(modelName);
+    $modelDropdown.addClass('hidden');
+    $modelArrow.css('transform', 'rotate(0deg)');
+  });
+
+  // Close dropdown on outside click
+  $(document).on('click', function(e) {
+    if (!$(e.target).closest('#modelDropdownWrap').length) {
+      $modelDropdown.addClass('hidden');
+      $modelArrow.css('transform', 'rotate(0deg)');
+    }
   });
 
   // ========== Toggle 即梦增强 ==========
