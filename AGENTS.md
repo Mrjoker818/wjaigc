@@ -38,6 +38,10 @@ src/
 │       ├── task-events/route.ts      # SSE任务事件推送 API (替代轮询，实时推送)
 │       ├── queue-position/route.ts   # 队列位置查询 API (排队中任务的位置)
 │       ├── verify-protocol/route.ts  # API协议验证 API (管理员面板一键验证提供商协议)
+│       ├── font-design/
+│       │   ├── plan/route.ts        # 字境大师-设计方案+风格库API (GET风格库, POST生成方案+提示词)
+│       │   ├── prompt/route.ts      # 字境大师-即梦提示词API (完整版/精简版/增强版/黑底白字/透明Logo)
+│       │   └── generate-image/route.ts # 字境大师-图片生成API (异步提交+轮询, 复用poll-task)
 │       ├── upscayl/route.ts        # [旧] 无损放大 API (向后兼容)
 │       ├── image/
 │       │   ├── health/route.ts     # 本地图像工具健康检测 API
@@ -54,6 +58,7 @@ src/
 │   ├── image-preview.tsx           # 图片预览组件
 │   ├── image-editor.tsx             # 语言修图编辑器组件 (自然语言描述修改图片)
 │   ├── agent-editor.tsx             # Agent编排编辑器组件 (智能选择工具，多轮编辑)
+│   ├── font-design-panel.tsx        # 字境大师Pro字体设计面板 (黑金/单色双主题, 左右分栏)
 │   ├── model-viewer-3d.tsx         # 3D 模型预览组件
 │   ├── image-editor/
 │   │   ├── ImageEditPanel.tsx      # 擦除/蒙版修图浮窗面板 (黑金UI)

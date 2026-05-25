@@ -42,7 +42,7 @@ const PsdLayerEditor = lazy(() => import('@/components/psd-editor/PsdLayerEditor
 const AgentEditor = lazy(() => import('@/components/agent-editor').then(m => ({ default: m.AgentEditor })));
 const BrandEcommercePanel = lazy(() => import('@/components/brand-ecommerce-panel').then(m => ({ default: m.BrandEcommercePanel })));
 const RefineEnginePanel = lazy(() => import('@/components/refine-engine-panel'));
-
+const FontDesignPanel = lazy(() => import('@/components/font-design-panel'));
 
 /* ====== Multi-Angle Sphere Preview (Canvas 2D) ====== */
 function MultiAngleSpherePreview({
@@ -431,6 +431,9 @@ export function InfiniteCanvas({
   const [showRefineEngine, setShowRefineEngine] = useState(false);
   const [refineEngineImageUrl, setRefineEngineImageUrl] = useState<string>('');
   const [agentSelectingImage, setAgentSelectingImage] = useState(false);
+
+  // Font design state
+  const [showFontDesign, setShowFontDesign] = useState(false);
 
   // View state
   const [viewOffset, setViewOffset] = useState({ x: initialViewState?.offsetX ?? 0, y: initialViewState?.offsetY ?? 0 });
@@ -9200,6 +9203,19 @@ export function InfiniteCanvas({
           </Suspense>
         )}
 
+        {/* ====== FONT DESIGN PANEL ====== */}
+        {showFontDesign && (
+          <Suspense fallback={null}>
+            <FontDesignPanel
+              isMonochrome={isMonochrome}
+              onClose={() => setShowFontDesign(false)}
+              onAddImages={(urls: string[]) => {
+                onAddImages?.(urls);
+              }}
+            />
+          </Suspense>
+        )}
+
 
         {/* ====== PSD LAYER EDITOR MODAL ====== */}
         {showPsdEditor && psdEditorImageUrl && (
@@ -10531,6 +10547,20 @@ export function InfiniteCanvas({
         >
           <Scan className="h-4 w-4" />
           <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-black/90 text-white'}`}>精修引擎</span>
+        </button>
+
+        {/* Font Design - 字境大师 */}
+        <button
+          onClick={() => setShowFontDesign(true)}
+          className={`tool-btn p-2 rounded-xl transition-all relative group ${
+            isMonochrome
+              ? 'text-amber-600 hover:text-amber-700 hover:bg-amber-50'
+              : 'text-[#d4af37] hover:text-[#f0d060] hover:bg-[#d4af37]/10'
+          }`}
+          title="字境大师"
+        >
+          <span className="text-sm font-bold leading-none">字</span>
+          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-black/90 text-white'}`}>字境大师</span>
         </button>
 
         <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`} />
