@@ -39,13 +39,30 @@ export interface TaskEvent {
 }
 
 // ─── 核心存储 ─────────────────────────────────────────────────────────
+// 使用 globalThis 确保跨路由共享同一实例（Next.js dev 模式下模块可能被多次实例化）
 
-const taskRegistry = new Map<string, TaskInfo>();
-const cancelledTasks = new Set<string>();
+interface GlobalTaskStore {
+  registry: Map<string, TaskInfo>;
+  cancelled: Set<string>;
+  eventBus: EventEmitter;
+}
 
-// SSE 事件总线
-const taskEventBus = new EventEmitter();
-taskEventBus.setMaxListeners(200); // 支持大量SSE连接
+function getGlobalTaskStore(): GlobalTaskStore {
+  const key = '__wujie_task_store__';
+  if (!(globalThis as Record<string, unknown>)[key]) {
+    (globalThis as Record<string, unknown>)[key] = {
+      registry: new Map<string, TaskInfo>(),
+      cancelled: new Set<string>(),
+      eventBus: new EventEmitter(),
+    };
+    ((globalThis as Record<string, unknown>)[key] as GlobalTaskStore).eventBus.setMaxListeners(200);
+  }
+  return (globalThis as Record<string, unknown>)[key] as GlobalTaskStore;
+}
+
+const taskRegistry = getGlobalTaskStore().registry;
+const cancelledTasks = getGlobalTaskStore().cancelled;
+const taskEventBus = getGlobalTaskStore().eventBus;
 
 // ─── 任务操作 ─────────────────────────────────────────────────────────
 

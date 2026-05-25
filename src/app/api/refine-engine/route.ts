@@ -52,6 +52,24 @@ async function persistResultImage(imageUrl: string): Promise<string> {
   }
 }
 
+// ─── Global Result Cache (shared across routes in dev mode) ───
+interface RefineResult {
+  directImageUrls: string[];
+  completedAt: number;
+}
+function getGlobalRefineResults(): Map<string, RefineResult> {
+  if (!(globalThis as Record<string, unknown>).__wujie_refine_results__) {
+    (globalThis as Record<string, unknown>).__wujie_refine_results__ = new Map<string, RefineResult>();
+  }
+  return (globalThis as Record<string, unknown>).__wujie_refine_results__ as Map<string, RefineResult>;
+}
+function setRefineResult(taskId: string, result: RefineResult) {
+  getGlobalRefineResults().set(taskId, result);
+}
+export function getRefineResult(taskId: string): RefineResult | undefined {
+  return getGlobalRefineResults().get(taskId);
+}
+
 // ─── Material Library ───
 const MATERIAL_LIBRARY: Record<string, { material: string; reflectIndex: number; renderFocus: string }> = {
   alcohol: {
@@ -367,35 +385,22 @@ export async function POST(request: NextRequest) {
       const taskId = `refine-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       registerTask(taskId, 'refine-engine', `精修: ${productName || MODE_LABELS[refineMode] || '产品'}`);
 
-      // Start processing and wait for the result (synchronous mode)
-      // This avoids the dev-mode task-registry not being shared across route workers
-      let processError: string | null = null;
-      const result = await processRefine(taskId, {
+      // Register task in global registry so poll-task can find it
+      registerTask(taskId, 'refine-engine', '精修处理中');
+
+      // Fire-and-forget: process in background, store result in task-registry
+      // Frontend polls /api/poll-task to get progress and results
+      processRefine(taskId, {
         imageUrl: imageUrl,
         prompt,
         model: selectedModel,
         provider,
         aspectRatio: aspectRatio || '1:1',
       }).catch((err: Error) => {
-        processError = err.message;
-        return null;
+        updateTaskProgress(taskId, { status: 'failed', error: err.message });
       });
 
-      // If processRefine returned a result directly, send it back immediately
-      if (result && result.directImageUrls && result.directImageUrls.length > 0) {
-        return NextResponse.json({
-          success: true,
-          directImageUrls: result.directImageUrls,
-          taskId,
-        });
-      }
-
-      // If processing failed, return error
-      if (processError) {
-        return NextResponse.json({ success: false, error: processError, taskId }, { status: 500 });
-      }
-
-      // Fallback: return taskId for polling (should rarely happen)
+      // Return taskId immediately for polling
       return NextResponse.json({ success: true, taskId });
     }
 
@@ -417,6 +422,7 @@ async function processRefine(
     aspectRatio: string;
   }
 ): Promise<{ directImageUrls: string[] }> {
+  console.log(`[refine-engine] processRefine START taskId=${taskId}`);
   updateTaskProgress(taskId, { status: 'processing', progress: 10, label: '构建精修提示词...' });
 
   const compatProfile = resolveCompatProfile(params.provider);
@@ -581,6 +587,7 @@ async function processRefine(
         if (fallbackParsed.directImageUrls && fallbackParsed.directImageUrls.length > 0) {
           updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
           const persistedUrls = await Promise.all(fallbackParsed.directImageUrls.map(persistResultImage));
+          setRefineResult(taskId, { directImageUrls: persistedUrls, completedAt: Date.now() });
           updateTaskProgress(taskId, {
             status: 'completed',
             progress: 100,
@@ -593,6 +600,7 @@ async function processRefine(
           const pollResult = await pollForResult(fallbackParsed.taskIds[0], params.provider.baseUrl, params.provider.apiKey, compatProfile);
           updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
           const persistedUrl = await persistResultImage(pollResult);
+          setRefineResult(taskId, { directImageUrls: [persistedUrl], completedAt: Date.now() });
           updateTaskProgress(taskId, {
             status: 'completed',
             progress: 100,
@@ -616,6 +624,7 @@ async function processRefine(
     if (parsed.directImageUrls && parsed.directImageUrls.length > 0) {
       updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
       const persistedUrls = await Promise.all(parsed.directImageUrls.map(persistResultImage));
+      setRefineResult(taskId, { directImageUrls: persistedUrls, completedAt: Date.now() });
       updateTaskProgress(taskId, {
         status: 'completed',
         progress: 100,
@@ -629,6 +638,7 @@ async function processRefine(
       const pollResult = await pollForResult(parsed.taskIds[0], params.provider.baseUrl, params.provider.apiKey, compatProfile);
       updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
       const persistedUrl = await persistResultImage(pollResult);
+      setRefineResult(taskId, { directImageUrls: [persistedUrl], completedAt: Date.now() });
       updateTaskProgress(taskId, {
         status: 'completed',
         progress: 100,

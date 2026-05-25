@@ -6,6 +6,26 @@ import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-re
 
 export const dynamic = 'force-dynamic';
 
+// ─── Global Result Cache (survives module re-instantiation in dev mode) ────
+function getBrandResultStore(): Map<string, Record<string, unknown>> {
+  const g = globalThis as Record<string, unknown>;
+  if (!g.__wujie_brand_results) g.__wujie_brand_results = new Map<string, Record<string, unknown>>();
+  return g.__wujie_brand_results as Map<string, Record<string, unknown>>;
+}
+function setBrandResult(taskId: string, result: Record<string, unknown>) {
+  getBrandResultStore().set(taskId, { ...result, _cachedAt: Date.now() });
+}
+export function getBrandResult(taskId: string): Record<string, unknown> | undefined {
+  const store = getBrandResultStore();
+  const r = store.get(taskId);
+  // Expire after 30 minutes
+  if (r && Date.now() - ((r as Record<string, unknown>)._cachedAt as number) > 30 * 60 * 1000) {
+    store.delete(taskId);
+    return undefined;
+  }
+  return r;
+}
+
 // ─── E-commerce JSON Template Definitions ─────────────────────────
 
 // ─── Style Fidelity Anchors (风格保真锚点) ──────────────────────────
@@ -426,11 +446,13 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        const taskResult = { results };
         updateTaskProgress(taskId, {
           status: 'completed',
           progress: 100,
-          result: { results },
+          result: taskResult,
         });
+        setBrandResult(taskId, taskResult);
       })();
 
       return NextResponse.json({ success: true, taskId });

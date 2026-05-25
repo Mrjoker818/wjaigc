@@ -7,6 +7,8 @@ import { postProcessAIRemoveBG } from '@/lib/remove-bg-postprocess';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { getEditTask, deleteEditTask } from '@/lib/edit-task-store';
 import { isTaskCancelled, updateTaskProgress, getTaskInfo, releaseQueueSlot } from '@/lib/task-registry';
+import { getRefineResult } from '@/app/api/refine-engine/route';
+import { getBrandResult } from '@/app/api/brand-ecommerce/route';
 
 export const dynamic = 'force-dynamic';
 
@@ -125,16 +127,33 @@ export async function POST(request: NextRequest) {
     // ★ 检查 task-registry 中的任务
     const registryTask = getTaskInfo(taskId);
     if (registryTask) {
+      const taskType = registryTask.type;
       if (registryTask.status === 'completed') {
         // ★ 释放队列槽位
         releaseQueueSlot(taskId);
+        // ★ 对于 refine-engine / brand-ecommerce，同时检查 globalThis 缓存
+        let taskResult = registryTask.result;
+        if (!taskResult && registryTask.type === 'refine-engine') {
+          const cached = getRefineResult(taskId);
+          if (cached) {
+            console.log(`[poll-task] 从 globalThis 缓存获取 refine-engine 结果: ${taskId}`);
+            taskResult = cached;
+          }
+        }
+        if (!taskResult && registryTask.type === 'brand-ecommerce') {
+          const cached = getBrandResult(taskId);
+          if (cached) {
+            console.log(`[poll-task] 从 globalThis 缓存获取 brand-ecommerce 结果: ${taskId}`);
+            taskResult = cached;
+          }
+        }
         return NextResponse.json({
           success: true,
           status: 'completed',
           progress: registryTask.progress,
-          result: registryTask.result,
-          imageUrl: (registryTask.result as Record<string, unknown>)?.imageUrl as string | undefined,
-          maskUrl: (registryTask.result as Record<string, unknown>)?.maskUrl as string | undefined,
+          result: taskResult,
+          imageUrl: (taskResult as unknown as Record<string, unknown>)?.imageUrl as string | undefined,
+          maskUrl: (taskResult as unknown as Record<string, unknown>)?.maskUrl as string | undefined,
         }, { status: 200 });
       }
       if (registryTask.status === 'failed') {
@@ -159,7 +178,7 @@ export async function POST(request: NextRequest) {
       // ★ 关键修复：queued / processing 状态不直接返回！
       // 对于所有远端异步任务类型，必须继续查询远端API获取真实状态
       // 只有纯本地任务（edit/agent-edit）才由后端自行更新 registry，直接返回
-      const LOCAL_TASK_TYPES = ['edit', 'agent-edit', 'refine-engine'];
+      const LOCAL_TASK_TYPES = ['edit', 'agent-edit', 'refine-engine', 'brand-ecommerce'];
       if (LOCAL_TASK_TYPES.includes(registryTask.type)) {
         // 纯本地任务：由后端自行更新 registry，直接返回当前状态
         return NextResponse.json({
@@ -170,6 +189,42 @@ export async function POST(request: NextRequest) {
         }, { status: 200 });
       }
       // 远端异步任务（generate/mask/erase/outpaint/multi-angle/removebg 等）：继续往下走，查询远端 API
+    }
+
+    // ★ refine-engine/brand-ecommerce 兜底：如果 task-registry 中没有，
+    // 但 globalThis 缓存中有结果，直接返回
+    if (!registryTask) {
+      // 先检查 refine-engine 缓存
+      const refineCached = getRefineResult(taskId);
+      if (refineCached) {
+        console.log(`[poll-task] task-registry 未找到，从 globalThis 缓存返回 refine-engine 结果: ${taskId}`);
+        return NextResponse.json({
+          success: true,
+          status: 'completed',
+          progress: 100,
+          result: refineCached,
+          imageUrl: ((refineCached as unknown) as Record<string, unknown>)?.imageUrl as string | undefined,
+          maskUrl: ((refineCached as unknown) as Record<string, unknown>)?.maskUrl as string | undefined,
+        }, { status: 200 });
+      }
+      // 再检查 brand-ecommerce 缓存
+      const brandCached = getBrandResult(taskId);
+      if (brandCached) {
+        console.log(`[poll-task] task-registry 未找到，从 globalThis 缓存返回 brand-ecommerce 结果: ${taskId}`);
+        return NextResponse.json({
+          success: true,
+          status: 'completed',
+          progress: 100,
+          result: brandCached,
+        }, { status: 200 });
+      }
+      // 既不在 registry 也不在缓存，返回 processing 状态让前端继续轮询
+      return NextResponse.json({
+        success: true,
+        status: 'processing',
+        progress: 10,
+        label: '处理中...',
+      }, { status: 200 });
     }
 
     if (!taskId) {
