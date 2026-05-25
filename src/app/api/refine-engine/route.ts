@@ -5,14 +5,6 @@ import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile 
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 
-// ─── Mode Labels ───
-const MODE_LABELS: Record<string, string> = {
-  skin: '人物精修',
-  product: '商品精修',
-  sharpen: '画质提升',
-  tone: '色调精修',
-};
-
 // ─── Material Library ───
 const MATERIAL_LIBRARY: Record<string, { material: string; reflectIndex: number; renderFocus: string }> = {
   alcohol: {
@@ -105,72 +97,11 @@ const VIEW_ANGLES: Record<string, string> = {
 // ─── Core Constraints ───
 const BASE_CONSTRAINTS = 'Strict geometric normalization, perfectly symmetrical, zero distortion, factory-perfect condition, 8K resolution, vector-sharp logos and text, pure white background RGB(255,255,255), no fingerprints/watermarks/dust/scratches.';
 
-// ─── Panel Prompt Generator (for refine-engine-panel modes) ───
-function generatePanelPrompt(params: {
-  panelMode: string;
-  preset: string;
-  intensity: number;
-  customPrompt: string;
-}): string {
-  const intensityPct = params.intensity;
-  const strengthLabel = intensityPct >= 80 ? 'strong' : intensityPct >= 50 ? 'moderate' : 'subtle';
-
-  const BASE = '8K resolution, ultra-high detail, professional quality, no artifacts, no noise, perfectly sharp.';
-
-  let prompt = '';
-
-  switch (params.panelMode) {
-    case 'skin': {
-      const skinPresets: Record<string, string> = {
-        light: 'Natural fair skin tone, subtle whitening while preserving natural skin texture and pores, even skin tone, remove blemishes and spots',
-        smooth: 'Soft-focus skin smoothing, silky smooth complexion, gentle airbrushed effect, reduce visible pores and fine lines while maintaining facial structure',
-        vivid: 'Vibrant and lively skin tone, enhance natural rosy complexion, boost skin vitality and color, healthy radiant glow',
-        film: 'Film-grain aesthetic skin, vintage film color grading, cinematic skin tone with slight warm cast, nostalgic texture feel',
-      };
-      const skinDesc = skinPresets[params.preset] || skinPresets.light;
-      prompt = `Portrait refinement: ${skinDesc}. ${strengthLabel} effect intensity at ${intensityPct}%. Retain facial features, eye details, hair texture. ${BASE} Negative: deformed, blurry, distorted face, extra fingers, mutation.`;
-      break;
-    }
-    case 'product': {
-      const productPresets: Record<string, string> = {
-        clean: 'Remove all blemishes, dust, reflections, fingerprints, watermarks. Pristine clean product surface, spotless presentation',
-        texture: 'Enhance material texture details, amplify surface grain and weave patterns, bring out micro-details of material composition',
-        highlight: 'Boost highlight areas and specular reflections, create premium luminous quality, emphasize best product features with strategic lighting',
-        shadow: 'Optimize shadow depth and layering, add dimensional depth through controlled shadow gradation, professional studio shadow rendering',
-      };
-      const productDesc = productPresets[params.preset] || productPresets.clean;
-      prompt = `Product refinement on pure white background: ${productDesc}. ${strengthLabel} effect intensity at ${intensityPct}%. ${BASE} Strict geometric normalization, perfectly symmetrical, factory-perfect condition. Negative: fingerprints, watermarks, dust, scratches, distortion.`;
-      break;
-    }
-    case 'sharpen': {
-      const sharpenPresets: Record<string, string> = {
-        denoise: 'Intelligent noise reduction, remove grain and artifacts while preserving fine details, clean signal restoration',
-        sharpen: 'Edge enhancement and sharpening, increase edge clarity and definition, crisp detail recovery without halos',
-        upscale: 'Super-resolution upscaling, 2x resolution enhancement with detail synthesis, add missing fine details intelligently',
-        hdr: 'High dynamic range optimization, recover shadow details, compress highlights, expand tonal range for professional HDR look',
-      };
-      const sharpenDesc = sharpenPresets[params.preset] || sharpenPresets.denoise;
-      prompt = `Image quality enhancement: ${sharpenDesc}. ${strengthLabel} effect intensity at ${intensityPct}%. ${BASE} Maintain original composition and colors. Negative: over-smoothed, waxy, artificial, banding, posterization.`;
-      break;
-    }
-    case 'tone': {
-      const tonePresets: Record<string, string> = {
-        warm: 'Warm color grading, golden-amber tones, cozy and inviting atmosphere, warm highlights with slightly cool shadows for depth',
-        cool: 'Cool-toned color grading, blue-cyan spectrum, clean and fresh feeling, cool highlights with neutral shadow tones',
-        cinematic: 'Cinematic color grading, teal-and-orange split toning, film-like color depth, theatrical atmosphere, professional colorist look',
-        vintage: 'Vintage retro color grading, faded warm tones, slight color shift toward sepia, nostalgic film aesthetic with subtle grain',
-        custom: params.customPrompt || 'Custom color grading as described',
-      };
-      const toneDesc = tonePresets[params.preset] || tonePresets.warm;
-      prompt = `Color tone refinement: ${toneDesc}. ${strengthLabel} effect intensity at ${intensityPct}%. Preserve image structure and composition. ${BASE} Negative: oversaturated, color banding, unnatural hue shifts, clipped channels.`;
-      break;
-    }
-    default:
-      prompt = `General image refinement, enhance quality and details. ${BASE} Negative: blurry, distorted, artifacts.`;
-  }
-
-  return prompt;
-}
+// ─── Mode labels for task display ───
+const MODE_LABELS: Record<string, string> = {
+  standard: '标准精修',
+  expert: '专家精修',
+};
 
 // ─── Product Refinement Prompt Generator ───
 function generateRefinePrompt(params: {
@@ -354,10 +285,6 @@ export async function POST(request: NextRequest) {
         mode,
         model,
         aspectRatio,
-        // Panel params
-        preset,
-        intensity,
-        customPrompt,
       } = body;
 
       if (!imageUrl) {
@@ -376,32 +303,22 @@ export async function POST(request: NextRequest) {
 
       const selectedModel = model || provider.selectedModels?.[0];
 
-      // Generate the refinement prompt
-      let prompt: string;
-      const panelMode = mode as string;
-      if (['skin', 'product', 'sharpen', 'tone'].includes(panelMode)) {
-        prompt = generatePanelPrompt({
-          panelMode,
-          preset: preset || '',
-          intensity: intensity ?? 70,
-          customPrompt: customPrompt || '',
-        });
-      } else {
-        prompt = generateRefinePrompt({
-          productCategory: productCategory || 'default',
-          productName: productName || '',
-          materialType: materialType || '',
-          reflectIndex: reflectIndex ?? undefined,
-          lightingPreset: lightingPreset || 'soft_studio',
-          viewAngle: viewAngle || 'front',
-          customInstructions: customInstructions || '',
-          mode: mode || 'standard',
-        });
-      }
+      // Generate the refinement prompt (standard / expert mode)
+      const refineMode = (mode === 'expert') ? 'expert' : 'standard';
+      const prompt = generateRefinePrompt({
+        productCategory: productCategory || 'default',
+        productName: productName || '',
+        materialType: materialType || '',
+        reflectIndex: reflectIndex ?? undefined,
+        lightingPreset: lightingPreset || 'soft_studio',
+        viewAngle: viewAngle || 'front',
+        customInstructions: customInstructions || '',
+        mode: refineMode,
+      });
 
       // Register task
       const taskId = `refine-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      registerTask(taskId, 'refine-engine', `精修: ${productName || MODE_LABELS[panelMode] || '产品'}`);
+      registerTask(taskId, 'refine-engine', `精修: ${productName || MODE_LABELS[refineMode] || '产品'}`);
 
       // Start async processing
       processRefine(taskId, {

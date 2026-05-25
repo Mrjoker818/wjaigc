@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  X, Upload, Sparkles, Image as ImageIcon, Palette,
-  Scan, Sun, Settings, Loader2, Check, ChevronDown,
-  Monitor, ZoomIn, Layers, Eye
+  X, Upload, Sparkles, Image as ImageIcon,
+  Scan, Loader2, ChevronDown,
+  Eye, GripVertical, Sun, Camera, Package, Cpu, Wand2, Sliders
 } from 'lucide-react';
 
 /* ─── types ─── */
@@ -15,95 +15,136 @@ interface ImageModel {
   providerName: string;
 }
 
+interface CategoryPreset {
+  id: string;
+  name: string;
+  material: string;
+  reflectIndex: number;
+  renderFocus: string;
+}
+
+interface LightingPreset {
+  id: string;
+  name: string;
+  description: string;
+}
+
+interface ViewAnglePreset {
+  id: string;
+  name: string;
+  description: string;
+}
+
 interface RefineResult {
   imageUrl: string;
   label: string;
 }
 
 interface Props {
+  isMonochrome?: boolean;
   onClose: () => void;
   onAddImage?: (url: string) => void;
   initialImageUrl?: string;
 }
 
-/* ─── preset configs ─── */
-const MODES = [
-  { id: 'skin', name: '人物精修', icon: '👤', desc: '磨皮/美白/去瑕疵/塑形', color: '#f472b6' },
-  { id: 'product', name: '商品精修', icon: '📦', desc: '去污/增强质感/补光', color: '#60a5fa' },
-  { id: 'sharpen', name: '画质提升', icon: '🔍', desc: '降噪/锐化/超分辨率', color: '#34d399' },
-  { id: 'tone', name: '色调精修', icon: '🎨', desc: '调色/风格化/氛围', color: '#a78bfa' },
-] as const;
+/* ─── component ─── */
+export default function RefineEnginePanel({ isMonochrome = false, onClose, onAddImage, initialImageUrl }: Props) {
+  // ─── Theme tokens ───
+  const bgPanel = isMonochrome ? 'rgba(255,255,255,0.98)' : 'rgba(20,20,20,0.97)';
+  const bgDeep = isMonochrome ? '#f9fafb' : '#111111';
+  const bgInput = isMonochrome ? '#f3f4f6' : '#0d0d0d';
+  const borderColor = isMonochrome ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.08)';
+  const borderColorLight = isMonochrome ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.04)';
+  const textColor = isMonochrome ? '#111827' : '#f3f4f6';
+  const textSubColor = isMonochrome ? '#6b7280' : '#9ca3af';
+  const textMutedColor = isMonochrome ? '#9ca3af' : '#6b7280';
+  const accentColor = isMonochrome ? '#2563eb' : '#d4af37';
+  const accentHover = isMonochrome ? '#1d4ed8' : '#e0b840';
+  const accentBg = isMonochrome ? 'rgba(37,99,235,0.08)' : 'rgba(212,175,55,0.1)';
+  const accentBgHover = isMonochrome ? 'rgba(37,99,235,0.15)' : 'rgba(212,175,55,0.18)';
+  const accentBorder = isMonochrome ? 'rgba(37,99,235,0.3)' : 'rgba(212,175,55,0.35)';
+  const mutedColor = isMonochrome ? '#d1d5db' : '#4b5563';
+  const shadow = isMonochrome ? '0 8px 32px rgba(0,0,0,0.12)' : '0 8px 32px rgba(0,0,0,0.5)';
+  const backdrop = isMonochrome ? 'none' : 'blur(24px)';
 
-const SKIN_PRESETS = [
-  { id: 'light', name: '自然白皙', desc: '自然美白，保留肤质纹理' },
-  { id: 'smooth', name: '柔焦磨皮', desc: '平滑肌肤，柔焦效果' },
-  { id: 'vivid', name: '鲜艳活力', desc: '增强气色，鲜活表现' },
-  { id: 'film', name: '胶片质感', desc: '复古胶片肤色风格' },
-];
+  // ─── Drag state ───
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [hasPosition, setHasPosition] = useState(false);
+  const isDragging = useRef(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+  const panelRef = useRef<HTMLDivElement>(null);
 
-const PRODUCT_PRESETS = [
-  { id: 'clean', name: '纯净去污', desc: '去除瑕疵、灰尘、反光' },
-  { id: 'texture', name: '质感增强', desc: '强化材质纹理细节' },
-  { id: 'highlight', name: '高光提亮', desc: '突出产品亮点区域' },
-  { id: 'shadow', name: '阴影优化', desc: '优化阴影层次和深度' },
-];
-
-const SHARPEN_PRESETS = [
-  { id: 'denoise', name: '智能降噪', desc: '去除噪点，保留细节' },
-  { id: 'sharpen', name: '锐化增强', desc: '增强边缘清晰度' },
-  { id: 'upscale', name: '超分辨率', desc: '2倍分辨率提升' },
-  { id: 'hdr', name: 'HDR增强', desc: '高动态范围优化' },
-];
-
-const TONE_PRESETS = [
-  { id: 'warm', name: '暖色调', desc: '暖黄橙色调，温馨氛围' },
-  { id: 'cool', name: '冷色调', desc: '蓝青色调，清新感' },
-  { id: 'cinematic', name: '电影感', desc: '电影级色彩分级' },
-  { id: 'vintage', name: '复古色调', desc: '怀旧复古色调' },
-  { id: 'custom', name: '自定义', desc: '输入自定义色调描述' },
-];
-
-export default function RefineEnginePanel({ onClose, onAddImage, initialImageUrl }: Props) {
-  /* ─── state ─── */
-  const [activeMode, setActiveMode] = useState<string>('skin');
+  // ─── Panel state ───
+  const [refineMode, setRefineMode] = useState<'standard' | 'expert'>('standard');
   const [sourceImage, setSourceImage] = useState<string>(initialImageUrl || '');
   const [selectedModel, setSelectedModel] = useState('');
   const [models, setModels] = useState<ImageModel[]>([]);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
-  const [selectedPreset, setSelectedPreset] = useState('light');
-  const [intensity, setIntensity] = useState(70);
-  const [customPrompt, setCustomPrompt] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [progressLabel, setProgressLabel] = useState('');
   const [results, setResults] = useState<RefineResult[]>([]);
-  const [activeTab, setActiveTab] = useState<'upload' | 'settings' | 'results'>('upload');
+  const [activeTab, setActiveTab] = useState<'upload' | 'settings' | 'results'>(
+    initialImageUrl ? 'settings' : 'upload'
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
 
-  /* ─── load models ─── */
+  // ─── Product refinement state ───
+  const [categories, setCategories] = useState<CategoryPreset[]>([]);
+  const [lightings, setLightings] = useState<LightingPreset[]>([]);
+  const [viewAngles, setViewAngles] = useState<ViewAnglePreset[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState('default');
+  const [selectedLighting, setSelectedLighting] = useState('soft_studio');
+  const [selectedViewAngle, setSelectedViewAngle] = useState('front');
+  const [productName, setProductName] = useState('');
+  const [customMaterial, setCustomMaterial] = useState('');
+  const [customInstructions, setCustomInstructions] = useState('');
+  const [reflectIndex, setReflectIndex] = useState(0.4);
+
+  // ─── Load presets & models ───
   useEffect(() => {
     (async () => {
       try {
-        const resp = await fetch('/api/models?type=image');
-        const data = await resp.json();
-        const imageModels: ImageModel[] = (data.models || []).map((m: Record<string, unknown>) => {
-          const provider = (data.providers || []).find((p: Record<string, unknown>) => p.id === m.providerId);
-          return {
-            id: m.id as string,
-            name: (m.name as string) || (m.id as string),
-            providerId: m.providerId as string,
-            providerName: (provider?.displayName as string) || (provider?.name as string) || '未知提供商',
-          };
+        // Load presets from API
+        const presetResp = await fetch('/api/refine-engine');
+        const presetData = await presetResp.json();
+        if (presetData.success) {
+          setCategories(presetData.categories || []);
+          setLightings(presetData.lightings || []);
+          setViewAngles(presetData.viewAngles || []);
+        }
+      } catch (err) {
+        console.error('Failed to load presets:', err);
+      }
+      try {
+        // Load models
+        const modelResp = await fetch('/api/refine-engine', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'models' }),
         });
-        setModels(imageModels);
-        if (imageModels.length > 0) setSelectedModel(imageModels[0].id);
+        const modelData = await modelResp.json();
+        if (modelData.success) {
+          const imageModels: ImageModel[] = (modelData.models || []).map((m: Record<string, unknown>) => {
+            const provider = (modelData.providers || []).find((p: Record<string, unknown>) => p.id === m.providerId);
+            return {
+              id: m.id as string,
+              name: (m.name as string) || (m.id as string),
+              providerId: m.providerId as string,
+              providerName: (provider?.displayName as string) || (provider?.name as string) || '未知提供商',
+            };
+          });
+          setModels(imageModels);
+          if (imageModels.length > 0) setSelectedModel(imageModels[0].id);
+        }
       } catch (err) {
         console.error('Failed to load models:', err);
       }
     })();
   }, []);
 
-  /* ─── close dropdown on outside click ─── */
+  // ─── Close dropdown on outside click ───
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
@@ -114,25 +155,58 @@ export default function RefineEnginePanel({ onClose, onAddImage, initialImageUrl
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  /* ─── switch tab when image is set ─── */
+  // ─── Switch tab when image is set ───
   useEffect(() => {
     if (sourceImage && activeTab === 'upload') {
       setActiveTab('settings');
     }
   }, [sourceImage, activeTab]);
 
-  /* ─── get presets for current mode ─── */
-  const getCurrentPresets = useCallback(() => {
-    switch (activeMode) {
-      case 'skin': return SKIN_PRESETS;
-      case 'product': return PRODUCT_PRESETS;
-      case 'sharpen': return SHARPEN_PRESETS;
-      case 'tone': return TONE_PRESETS;
-      default: return [];
+  // ─── Update material/reflect when category changes ───
+  useEffect(() => {
+    const cat = categories.find(c => c.id === selectedCategory);
+    if (cat) {
+      setCustomMaterial(cat.material);
+      setReflectIndex(cat.reflectIndex);
     }
-  }, [activeMode]);
+  }, [selectedCategory, categories]);
 
-  /* ─── handle file upload ─── */
+  // ─── Drag handlers ───
+  const handlePanelDragStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    isDragging.current = true;
+    if (!hasPosition && panelRef.current) {
+      const rect = panelRef.current.getBoundingClientRect();
+      setPosition({ x: rect.left, y: rect.top });
+      setHasPosition(true);
+      dragStart.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    } else if (hasPosition) {
+      dragStart.current = { x: e.clientX - position.x, y: e.clientY - position.y };
+    } else {
+      isDragging.current = false;
+      return;
+    }
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isDragging.current) return;
+      ev.stopPropagation();
+      setPosition({ x: ev.clientX - dragStart.current.x, y: ev.clientY - dragStart.current.y });
+    };
+    const onMouseUp = (ev: MouseEvent) => {
+      ev.stopPropagation();
+      isDragging.current = false;
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
+  const stopPropagation = useCallback((e: React.MouseEvent | React.PointerEvent) => {
+    e.stopPropagation();
+  }, []);
+
+  // ─── Handle file upload ───
   const handleFileUpload = async (file: File) => {
     const formData = new FormData();
     formData.append('image', file);
@@ -145,32 +219,39 @@ export default function RefineEnginePanel({ onClose, onAddImage, initialImageUrl
     }
   };
 
-  /* ─── handle refine ─── */
+  // ─── Handle refine ───
   const handleRefine = async () => {
     if (!sourceImage || !selectedModel) return;
     setIsProcessing(true);
     setProgress(10);
+    setProgressLabel('提交任务...');
     setResults([]);
     setActiveTab('results');
 
     try {
+      const body: Record<string, unknown> = {
+        action: 'refine',
+        imageUrl: sourceImage,
+        mode: refineMode,
+        model: selectedModel,
+        productCategory: selectedCategory,
+        productName: productName || '产品',
+        materialType: customMaterial,
+        reflectIndex,
+        lightingPreset: selectedLighting,
+        viewAngle: selectedViewAngle,
+        customInstructions,
+      };
+
       const resp = await fetch('/api/refine-engine', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'refine',
-          imageUrl: sourceImage,
-          mode: activeMode,
-          preset: selectedPreset,
-          intensity,
-          customPrompt,
-          model: selectedModel,
-        }),
+        body: JSON.stringify(body),
       });
       const data = await resp.json();
 
       if (data.taskId) {
-        // Poll for async result
+        setProgressLabel('精修处理中...');
         setProgress(30);
         const pollInterval = setInterval(async () => {
           try {
@@ -184,16 +265,19 @@ export default function RefineEnginePanel({ onClose, onAddImage, initialImageUrl
             if (pollData.status === 'completed' && pollData.result) {
               clearInterval(pollInterval);
               setProgress(100);
+              setProgressLabel('精修完成');
               const urls = pollData.result.directImageUrls || pollData.result.imageUrls || [];
-              const label = MODES.find(m => m.id === activeMode)?.name || '精修';
+              const label = refineMode === 'expert' ? '专家精修' : '标准精修';
               setResults(urls.map((url: string) => ({ imageUrl: url, label })));
               setIsProcessing(false);
             } else if (pollData.status === 'failed') {
               clearInterval(pollInterval);
+              setProgressLabel('精修失败');
               setIsProcessing(false);
               setResults([]);
             } else {
               setProgress(prev => Math.min(prev + 5, 90));
+              if (pollData.progress) setProgressLabel(pollData.label || '精修处理中...');
             }
           } catch {
             clearInterval(pollInterval);
@@ -201,14 +285,15 @@ export default function RefineEnginePanel({ onClose, onAddImage, initialImageUrl
           }
         }, 2000);
       } else if (data.directImageUrls || data.imageUrls) {
-        // Direct result
         setProgress(100);
+        setProgressLabel('精修完成');
         const urls = data.directImageUrls || data.imageUrls || [];
-        const label = MODES.find(m => m.id === activeMode)?.name || '精修';
+        const label = refineMode === 'expert' ? '专家精修' : '标准精修';
         setResults(urls.map((url: string) => ({ imageUrl: url, label })));
         setIsProcessing(false);
       } else if (data.error) {
         console.error('Refine error:', data.error);
+        setProgressLabel('精修失败');
         setIsProcessing(false);
       }
     } catch (err) {
@@ -217,48 +302,107 @@ export default function RefineEnginePanel({ onClose, onAddImage, initialImageUrl
     }
   };
 
-  /* ─── get model display name ─── */
+  // ─── Model display name ───
   const getModelDisplay = (modelId: string) => {
     const model = models.find(m => m.id === modelId);
     if (!model) return modelId;
     return `${model.providerName} · ${model.name}`;
   };
 
-  /* ─── render ─── */
+  // ─── Render ───
   return (
     <div
+      ref={panelRef}
       data-floating-panel
-      onPointerDown={e => e.stopPropagation()}
-      onWheel={e => e.stopPropagation()}
-      className="fixed right-4 top-16 bottom-20 w-[420px] z-[80] flex flex-col rounded-xl overflow-hidden"
-      style={{ background: 'rgba(15,15,15,0.97)', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
+      className="fixed z-[150]"
+      style={{
+        left: hasPosition ? position.x : 'auto',
+        top: hasPosition ? position.y : 80,
+        right: hasPosition ? undefined : 20,
+        width: 360,
+        maxHeight: '85vh',
+        backgroundColor: bgPanel,
+        border: `1px solid ${borderColor}`,
+        borderRadius: 10,
+        boxShadow: shadow,
+        backdropFilter: backdrop,
+        WebkitBackdropFilter: backdrop,
+        color: textColor,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}
+      onMouseDown={stopPropagation}
+      onPointerDown={stopPropagation}
     >
-      {/* ─── Header ─── */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10" style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.15), rgba(59,130,246,0.1))' }}>
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-purple-400" />
-          <span className="text-[15px] font-semibold text-gray-100">精修引擎</span>
-        </div>
-        <button onClick={onClose} className="p-1 rounded-md hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors">
-          <X className="w-4 h-4" />
+      {/* ─── Header (draggable) ─── */}
+      <div
+        className="flex items-center gap-2 px-3 py-2 cursor-move select-none shrink-0"
+        style={{ borderBottom: `1px solid ${borderColor}` }}
+        onMouseDown={handlePanelDragStart}
+      >
+        <GripVertical size={14} style={{ color: mutedColor }} />
+        <Scan size={15} style={{ color: accentColor }} />
+        <span className="text-sm font-semibold flex-1" style={{ color: accentColor }}>
+          精修引擎
+        </span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: textSubColor, background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
+          Mr. joker 商业标准
+        </span>
+        <button
+          onClick={onClose}
+          className="p-1 rounded-md transition-colors"
+          style={{ color: textMutedColor }}
+          onMouseEnter={e => (e.currentTarget.style.color = textColor)}
+          onMouseLeave={e => (e.currentTarget.style.color = textMutedColor)}
+        >
+          <X size={14} />
         </button>
       </div>
 
-      {/* ─── Tabs ─── */}
-      <div className="flex border-b border-white/10">
+      {/* ─── Mode Toggle ─── */}
+      <div
+        className="flex shrink-0"
+        style={{ borderBottom: `1px solid ${borderColor}` }}
+      >
         {[
-          { id: 'upload' as const, label: '上传图片', icon: <Upload className="w-3.5 h-3.5" /> },
-          { id: 'settings' as const, label: '精修设置', icon: <Settings className="w-3.5 h-3.5" /> },
-          { id: 'results' as const, label: '精修结果', icon: <Eye className="w-3.5 h-3.5" /> },
+          { id: 'standard' as const, label: '标准模式', icon: <Sliders size={13} /> },
+          { id: 'expert' as const, label: '专家模式', icon: <Cpu size={13} /> },
+        ].map(mode => (
+          <button
+            key={mode.id}
+            onClick={() => setRefineMode(mode.id)}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors"
+            style={{
+              color: refineMode === mode.id ? accentColor : textMutedColor,
+              borderBottom: refineMode === mode.id ? `2px solid ${accentColor}` : '2px solid transparent',
+              background: refineMode === mode.id ? accentBg : 'transparent',
+            }}
+          >
+            {mode.icon}
+            {mode.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ─── Tabs ─── */}
+      <div
+        className="flex shrink-0"
+        style={{ borderBottom: `1px solid ${borderColor}` }}
+      >
+        {[
+          { id: 'upload' as const, label: '上传图片', icon: <Upload size={12} /> },
+          { id: 'settings' as const, label: '精修设置', icon: <Wand2 size={12} /> },
+          { id: 'results' as const, label: '精修结果', icon: <Eye size={12} /> },
         ].map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium transition-colors ${
-              activeTab === tab.id
-                ? 'text-purple-300 border-b-2 border-purple-400 bg-purple-500/10'
-                : 'text-gray-500 hover:text-gray-300'
-            }`}
+            className="flex-1 flex items-center justify-center gap-1 py-2 text-[11px] font-medium transition-colors"
+            style={{
+              color: activeTab === tab.id ? accentColor : textMutedColor,
+              borderBottom: activeTab === tab.id ? `1.5px solid ${accentColor}` : '1.5px solid transparent',
+            }}
           >
             {tab.icon}
             {tab.label}
@@ -267,32 +411,41 @@ export default function RefineEnginePanel({ onClose, onAddImage, initialImageUrl
       </div>
 
       {/* ─── Content ─── */}
-      <div className="flex-1 overflow-y-auto min-h-0">
+      <div className="flex-1 overflow-y-auto min-h-0" style={{ background: bgDeep }}>
         {/* ─── Upload Tab ─── */}
         {activeTab === 'upload' && (
-          <div className="p-4 space-y-4">
-            {/* Source image preview */}
+          <div className="p-3 space-y-3">
             {sourceImage ? (
-              <div className="relative rounded-lg overflow-hidden border border-white/10">
-                <img src={sourceImage} alt="Source" className="w-full h-auto max-h-[300px] object-contain bg-black/30" />
+              <div className="relative rounded-lg overflow-hidden" style={{ border: `1px solid ${borderColor}` }}>
+                <img src={sourceImage} alt="Source" className="w-full h-auto max-h-[240px] object-contain" style={{ background: isMonochrome ? '#e5e7eb' : 'rgba(0,0,0,0.3)' }} />
                 <button
                   onClick={() => setSourceImage('')}
-                  className="absolute top-2 right-2 p-1 rounded-full bg-black/60 hover:bg-black/80 text-white transition-colors"
+                  className="absolute top-2 right-2 p-1 rounded-full transition-colors"
+                  style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}
                 >
-                  <X className="w-4 h-4" />
+                  <X size={12} />
                 </button>
               </div>
             ) : (
               <div
                 onClick={() => fileInputRef.current?.click()}
-                className="flex flex-col items-center justify-center gap-3 p-8 rounded-lg border-2 border-dashed border-white/15 hover:border-purple-400/40 cursor-pointer transition-colors"
+                className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed cursor-pointer transition-colors"
+                style={{
+                  borderColor: borderColorLight,
+                  background: isMonochrome ? 'rgba(0,0,0,0.02)' : 'rgba(255,255,255,0.02)',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.borderColor = accentBorder)}
+                onMouseLeave={e => (e.currentTarget.style.borderColor = borderColorLight)}
               >
-                <div className="w-14 h-14 rounded-full bg-purple-500/15 flex items-center justify-center">
-                  <Upload className="w-7 h-7 text-purple-400" />
+                <div
+                  className="w-12 h-12 rounded-full flex items-center justify-center"
+                  style={{ background: accentBg }}
+                >
+                  <Upload size={20} style={{ color: accentColor }} />
                 </div>
                 <div className="text-center">
-                  <p className="text-sm text-gray-300 mb-1">点击上传或拖拽图片</p>
-                  <p className="text-xs text-gray-500">支持 JPG / PNG / WebP</p>
+                  <p className="text-xs" style={{ color: textColor }}>点击上传或拖拽图片</p>
+                  <p className="text-[10px] mt-0.5" style={{ color: textMutedColor }}>支持 JPG / PNG / WebP</p>
                 </div>
               </div>
             )}
@@ -308,173 +461,220 @@ export default function RefineEnginePanel({ onClose, onAddImage, initialImageUrl
               }}
             />
 
-            {/* Quick select from canvas */}
-            {onAddImage && (
-              <div className="text-center">
-                <p className="text-xs text-gray-500 mb-2">或在画布中选择已有图片</p>
-                <p className="text-[11px] text-gray-600">选中画布图片后，通过图片工具栏的"精修引擎"按钮打开</p>
-              </div>
+            {onAddImage && !sourceImage && (
+              <p className="text-[10px] text-center" style={{ color: textMutedColor }}>
+                选中画布图片后，可通过图片工具栏的"精修引擎"按钮直接打开
+              </p>
             )}
-
-            {/* Model selection in upload tab */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-gray-400">生图模型</label>
-              <div className="relative" ref={modelDropdownRef}>
-                <button
-                  onClick={() => setShowModelDropdown(!showModelDropdown)}
-                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg bg-white/5 border border-white/10 text-sm text-gray-200 hover:border-purple-400/30 transition-colors"
-                >
-                  <span>{selectedModel ? getModelDisplay(selectedModel) : '选择模型'}</span>
-                  <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${showModelDropdown ? 'rotate-180' : ''}`} />
-                </button>
-                {showModelDropdown && (
-                  <div className="absolute top-full left-0 right-0 mt-1 rounded-lg bg-[#1a1a1a] border border-white/10 shadow-xl z-10 max-h-64 overflow-y-auto">
-                    {models.length === 0 ? (
-                      <div className="px-3 py-4 text-xs text-gray-500 text-center">暂无可用模型，请在管理员系统添加</div>
-                    ) : (
-                      models.map(m => (
-                        <button
-                          key={`${m.id}-${m.providerId}`}
-                          onClick={() => { setSelectedModel(m.id); setShowModelDropdown(false); }}
-                          className={`w-full px-3 py-2.5 text-left hover:bg-white/5 transition-colors ${
-                            selectedModel === m.id ? 'bg-purple-500/15' : ''
-                          }`}
-                        >
-                          <div className="text-sm text-gray-200">{m.name}</div>
-                          <div className="text-xs text-gray-500 mt-0.5">{m.providerName}</div>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
         )}
 
         {/* ─── Settings Tab ─── */}
         {activeTab === 'settings' && (
-          <div className="p-4 space-y-5">
-            {/* Source preview thumbnail */}
+          <div className="p-3 space-y-3">
+            {/* Source thumbnail */}
             {sourceImage && (
-              <div className="flex items-center gap-3 p-2 rounded-lg bg-white/5">
-                <img src={sourceImage} alt="Source" className="w-12 h-12 object-cover rounded-md" />
+              <div className="flex items-center gap-2 p-2 rounded-lg" style={{ background: isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)' }}>
+                <img src={sourceImage} alt="Source" className="w-10 h-10 object-cover rounded-md" style={{ border: `1px solid ${borderColor}` }} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs text-gray-300 truncate">已选择图片</p>
-                  <button onClick={() => setActiveTab('upload')} className="text-[11px] text-purple-400 hover:underline">更换图片</button>
+                  <p className="text-[11px] truncate" style={{ color: textColor }}>已选择图片</p>
+                  <button onClick={() => setActiveTab('upload')} className="text-[10px]" style={{ color: accentColor }}>更换图片</button>
                 </div>
               </div>
             )}
 
-            {/* Mode selector */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-gray-400">精修模式</label>
-              <div className="grid grid-cols-2 gap-2">
-                {MODES.map(mode => (
-                  <button
-                    key={mode.id}
-                    onClick={() => { setActiveMode(mode.id); setSelectedPreset(getCurrentPresetsForMode(mode.id)[0]?.id || ''); }}
-                    className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border transition-all ${
-                      activeMode === mode.id
-                        ? 'border-purple-400/50 bg-purple-500/10'
-                        : 'border-white/8 bg-white/3 hover:border-white/15'
-                    }`}
-                  >
-                    <span className="text-lg">{mode.icon}</span>
-                    <div className="text-left">
-                      <div className="text-xs font-medium text-gray-200">{mode.name}</div>
-                      <div className="text-[10px] text-gray-500">{mode.desc}</div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Preset selector */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-gray-400">效果预设</label>
-              <div className="grid grid-cols-2 gap-2">
-                {getCurrentPresets().map(preset => (
-                  <button
-                    key={preset.id}
-                    onClick={() => setSelectedPreset(preset.id)}
-                    className={`px-3 py-2 rounded-lg border text-left transition-all ${
-                      selectedPreset === preset.id
-                        ? 'border-purple-400/50 bg-purple-500/10'
-                        : 'border-white/8 bg-white/3 hover:border-white/15'
-                    }`}
-                  >
-                    <div className="text-xs font-medium text-gray-200">{preset.name}</div>
-                    <div className="text-[10px] text-gray-500 mt-0.5">{preset.desc}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Intensity slider */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-gray-400">精修强度</label>
-                <span className="text-xs text-purple-300 font-mono">{intensity}%</span>
-              </div>
+            {/* Product name */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium" style={{ color: textSubColor }}>产品名称</label>
               <input
-                type="range"
-                min={10}
-                max={100}
-                value={intensity}
-                onChange={e => setIntensity(Number(e.target.value))}
-                className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+                type="text"
+                value={productName}
+                onChange={e => setProductName(e.target.value)}
+                placeholder="如：高端白酒、智能手表..."
+                className="w-full px-2.5 py-2 rounded-md text-xs outline-none transition-colors"
                 style={{
-                  background: `linear-gradient(to right, #a78bfa ${intensity}%, rgba(255,255,255,0.1) ${intensity}%)`,
+                  background: bgInput,
+                  border: `1px solid ${borderColor}`,
+                  color: textColor,
                 }}
+                onFocus={e => (e.currentTarget.style.borderColor = accentBorder)}
+                onBlur={e => (e.currentTarget.style.borderColor = borderColor)}
               />
-              <div className="flex justify-between text-[10px] text-gray-600">
-                <span>轻微</span>
-                <span>适中</span>
-                <span>强烈</span>
+            </div>
+
+            {/* Category selector */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium" style={{ color: textSubColor }}>产品品类</label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {categories.map(cat => (
+                  <button
+                    key={cat.id}
+                    onClick={() => setSelectedCategory(cat.id)}
+                    className="px-2 py-1.5 rounded-md text-[10px] font-medium transition-all text-center"
+                    style={{
+                      background: selectedCategory === cat.id ? accentBg : isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${selectedCategory === cat.id ? accentBorder : borderColorLight}`,
+                      color: selectedCategory === cat.id ? accentColor : textSubColor,
+                    }}
+                  >
+                    {cat.name}
+                  </button>
+                ))}
               </div>
             </div>
 
-            {/* Custom prompt (for tone/custom) */}
-            {(activeMode === 'tone' && selectedPreset === 'custom') && (
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-gray-400">自定义色调描述</label>
-                <textarea
-                  value={customPrompt}
-                  onChange={e => setCustomPrompt(e.target.value)}
-                  placeholder="描述你想要的色调效果，如：温暖的日落金色调，带一点橙色光晕..."
-                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-gray-200 placeholder:text-gray-600 resize-none focus:outline-none focus:border-purple-400/30"
-                  rows={3}
-                />
+            {/* Lighting selector */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium flex items-center gap-1" style={{ color: textSubColor }}>
+                <Sun size={11} /> 光影方案
+              </label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {lightings.map(light => (
+                  <button
+                    key={light.id}
+                    onClick={() => setSelectedLighting(light.id)}
+                    className="px-2 py-1.5 rounded-md text-[10px] font-medium transition-all text-center"
+                    style={{
+                      background: selectedLighting === light.id ? accentBg : isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${selectedLighting === light.id ? accentBorder : borderColorLight}`,
+                      color: selectedLighting === light.id ? accentColor : textSubColor,
+                    }}
+                  >
+                    {light.name}
+                  </button>
+                ))}
               </div>
+            </div>
+
+            {/* View angle selector */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium flex items-center gap-1" style={{ color: textSubColor }}>
+                <Camera size={11} /> 视角
+              </label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {viewAngles.map(va => (
+                  <button
+                    key={va.id}
+                    onClick={() => setSelectedViewAngle(va.id)}
+                    className="px-2 py-1.5 rounded-md text-[10px] font-medium transition-all text-center"
+                    style={{
+                      background: selectedViewAngle === va.id ? accentBg : isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${selectedViewAngle === va.id ? accentBorder : borderColorLight}`,
+                      color: selectedViewAngle === va.id ? accentColor : textSubColor,
+                    }}
+                  >
+                    {va.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Expert-only: Material & Reflect & Custom */}
+            {refineMode === 'expert' && (
+              <>
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-medium" style={{ color: textSubColor }}>材质描述</label>
+                  <input
+                    type="text"
+                    value={customMaterial}
+                    onChange={e => setCustomMaterial(e.target.value)}
+                    placeholder="如：超透玻璃、磨砂铝合金..."
+                    className="w-full px-2.5 py-2 rounded-md text-xs outline-none transition-colors"
+                    style={{
+                      background: bgInput,
+                      border: `1px solid ${borderColor}`,
+                      color: textColor,
+                    }}
+                    onFocus={e => (e.currentTarget.style.borderColor = accentBorder)}
+                    onBlur={e => (e.currentTarget.style.borderColor = borderColor)}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-medium" style={{ color: textSubColor }}>反光指数</label>
+                    <span className="text-[11px] font-mono" style={{ color: accentColor }}>{reflectIndex.toFixed(1)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={10}
+                    step={1}
+                    value={Math.round(reflectIndex * 10)}
+                    onChange={e => setReflectIndex(Number(e.target.value) / 10)}
+                    className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+                    style={{
+                      background: `linear-gradient(to right, ${accentColor} ${reflectIndex * 100}%, ${borderColorLight} ${reflectIndex * 100}%)`,
+                    }}
+                  />
+                  <div className="flex justify-between text-[9px]" style={{ color: textMutedColor }}>
+                    <span>哑光 0.0</span>
+                    <span>镜面 1.0</span>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-medium" style={{ color: textSubColor }}>自定义指令</label>
+                  <textarea
+                    value={customInstructions}
+                    onChange={e => setCustomInstructions(e.target.value)}
+                    placeholder="附加精修指令，如：强调瓶身光泽，增强烫金质感..."
+                    className="w-full px-2.5 py-2 rounded-md text-xs outline-none resize-none transition-colors"
+                    style={{
+                      background: bgInput,
+                      border: `1px solid ${borderColor}`,
+                      color: textColor,
+                    }}
+                    rows={2}
+                    onFocus={e => (e.currentTarget.style.borderColor = accentBorder)}
+                    onBlur={e => (e.currentTarget.style.borderColor = borderColor)}
+                  />
+                </div>
+              </>
             )}
 
             {/* Model selection */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-gray-400">生图模型</label>
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium" style={{ color: textSubColor }}>生图模型</label>
               <div className="relative" ref={modelDropdownRef}>
                 <button
                   onClick={() => setShowModelDropdown(!showModelDropdown)}
-                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg bg-white/5 border border-white/10 text-sm text-gray-200 hover:border-purple-400/30 transition-colors"
+                  className="w-full flex items-center justify-between px-2.5 py-2 rounded-md text-xs transition-colors"
+                  style={{
+                    background: bgInput,
+                    border: `1px solid ${borderColor}`,
+                    color: textColor,
+                  }}
                 >
                   <span>{selectedModel ? getModelDisplay(selectedModel) : '选择模型'}</span>
-                  <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${showModelDropdown ? 'rotate-180' : ''}`} />
+                  <ChevronDown
+                    size={14}
+                    style={{ color: textMutedColor, transform: showModelDropdown ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.15s' }}
+                  />
                 </button>
                 {showModelDropdown && (
-                  <div className="absolute top-full left-0 right-0 mt-1 rounded-lg bg-[#1a1a1a] border border-white/10 shadow-xl z-10 max-h-64 overflow-y-auto">
+                  <div
+                    className="absolute top-full left-0 right-0 mt-1 rounded-md shadow-xl z-10 max-h-48 overflow-y-auto"
+                    style={{ background: bgPanel, border: `1px solid ${borderColor}` }}
+                  >
                     {models.length === 0 ? (
-                      <div className="px-3 py-4 text-xs text-gray-500 text-center">暂无可用模型</div>
+                      <div className="px-3 py-3 text-[11px] text-center" style={{ color: textMutedColor }}>
+                        暂无可用模型，请在管理员系统添加
+                      </div>
                     ) : (
                       models.map(m => (
                         <button
                           key={`${m.id}-${m.providerId}`}
                           onClick={() => { setSelectedModel(m.id); setShowModelDropdown(false); }}
-                          className={`w-full px-3 py-2.5 text-left hover:bg-white/5 transition-colors ${
-                            selectedModel === m.id ? 'bg-purple-500/15' : ''
-                          }`}
+                          className="w-full px-3 py-2 text-left transition-colors"
+                          style={{
+                            background: selectedModel === m.id ? accentBg : 'transparent',
+                          }}
+                          onMouseEnter={e => (e.currentTarget.style.background = accentBgHover)}
+                          onMouseLeave={e => (e.currentTarget.style.background = selectedModel === m.id ? accentBg : 'transparent')}
                         >
-                          <div className="text-sm text-gray-200">{m.name}</div>
-                          <div className="text-xs text-gray-500 mt-0.5">{m.providerName}</div>
+                          <div className="text-xs" style={{ color: textColor }}>{m.name}</div>
+                          <div className="text-[10px] mt-0.5" style={{ color: textMutedColor }}>{m.providerName}</div>
                         </button>
                       ))
                     )}
@@ -487,62 +687,65 @@ export default function RefineEnginePanel({ onClose, onAddImage, initialImageUrl
 
         {/* ─── Results Tab ─── */}
         {activeTab === 'results' && (
-          <div className="p-4 space-y-4">
+          <div className="p-3 space-y-3">
             {isProcessing ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-4">
+              <div className="flex flex-col items-center justify-center py-10 gap-3">
                 <div className="relative">
-                  <Loader2 className="w-10 h-10 text-purple-400 animate-spin" />
-                  <Sparkles className="w-5 h-5 text-purple-300 absolute -top-1 -right-1 animate-pulse" />
+                  <Loader2 size={32} className="animate-spin" style={{ color: accentColor }} />
+                  <Sparkles size={14} className="absolute -top-1 -right-1 animate-pulse" style={{ color: accentColor }} />
                 </div>
                 <div className="text-center">
-                  <p className="text-sm text-gray-200">精修处理中...</p>
-                  <p className="text-xs text-gray-500 mt-1">AI正在优化您的图片</p>
+                  <p className="text-xs" style={{ color: textColor }}>{progressLabel || '精修处理中...'}</p>
+                  <p className="text-[10px] mt-0.5" style={{ color: textMutedColor }}>AI正在优化您的产品图片</p>
                 </div>
-                {/* Progress bar */}
-                <div className="w-full max-w-xs h-1.5 rounded-full bg-white/10 overflow-hidden">
+                <div className="w-full max-w-[200px] h-1.5 rounded-full overflow-hidden" style={{ background: borderColorLight }}>
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-purple-500 to-blue-400 transition-all duration-500"
-                    style={{ width: `${progress}%` }}
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{ width: `${progress}%`, background: accentColor }}
                   />
                 </div>
-                <span className="text-xs text-gray-500">{progress}%</span>
+                <span className="text-[10px] font-mono" style={{ color: textMutedColor }}>{progress}%</span>
               </div>
             ) : results.length > 0 ? (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-400">精修完成 · {results.length} 张结果</span>
+                  <span className="text-[11px]" style={{ color: textSubColor }}>精修完成 · {results.length} 张结果</span>
                   <button
                     onClick={handleRefine}
-                    className="text-xs text-purple-400 hover:text-purple-300 flex items-center gap-1"
+                    className="text-[11px] flex items-center gap-1 transition-colors"
+                    style={{ color: accentColor }}
                   >
-                    <Sparkles className="w-3 h-3" /> 重新精修
+                    <Sparkles size={11} /> 重新精修
                   </button>
                 </div>
+
                 {/* Before/After comparison */}
                 {sourceImage && (
                   <div className="grid grid-cols-2 gap-2">
                     <div className="space-y-1">
-                      <span className="text-[10px] text-gray-500">原图</span>
-                      <img src={sourceImage} alt="Original" className="w-full rounded-lg border border-white/10" />
+                      <span className="text-[9px]" style={{ color: textMutedColor }}>原图</span>
+                      <img src={sourceImage} alt="Original" className="w-full rounded-md" style={{ border: `1px solid ${borderColor}` }} />
                     </div>
                     <div className="space-y-1">
-                      <span className="text-[10px] text-purple-400">精修后</span>
-                      <img src={results[0].imageUrl} alt="Refined" className="w-full rounded-lg border border-purple-400/30" />
+                      <span className="text-[9px]" style={{ color: accentColor }}>精修后</span>
+                      <img src={results[0].imageUrl} alt="Refined" className="w-full rounded-md" style={{ border: `1px solid ${accentBorder}` }} />
                     </div>
                   </div>
                 )}
-                {/* All results */}
+
+                {/* Multiple results */}
                 {results.length > 1 && (
-                  <div className="space-y-2">
-                    <span className="text-[10px] text-gray-500">全部结果</span>
+                  <div className="space-y-1.5">
+                    <span className="text-[9px]" style={{ color: textMutedColor }}>全部结果</span>
                     <div className="grid grid-cols-2 gap-2">
                       {results.map((r, i) => (
                         <div key={i} className="relative group">
-                          <img src={r.imageUrl} alt={r.label} className="w-full rounded-lg border border-white/10" />
-                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
+                          <img src={r.imageUrl} alt={r.label} className="w-full rounded-md" style={{ border: `1px solid ${borderColor}` }} />
+                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-md flex items-center justify-center">
                             <button
                               onClick={() => onAddImage?.(r.imageUrl)}
-                              className="px-2 py-1 text-[10px] bg-purple-500/80 text-white rounded-md hover:bg-purple-500 transition-colors"
+                              className="px-2 py-1 text-[10px] rounded-md text-white transition-colors"
+                              style={{ background: accentColor }}
                             >
                               添加到画布
                             </button>
@@ -552,23 +755,26 @@ export default function RefineEnginePanel({ onClose, onAddImage, initialImageUrl
                     </div>
                   </div>
                 )}
-                {/* Add to canvas button for single result */}
+
+                {/* Single result add button */}
                 {results.length === 1 && (
                   <button
                     onClick={() => onAddImage?.(results[0].imageUrl)}
-                    className="w-full py-2.5 rounded-lg text-sm font-medium text-white transition-colors flex items-center justify-center gap-2"
-                    style={{ background: 'linear-gradient(135deg, #8b5cf6, #6366f1)' }}
+                    className="w-full py-2.5 rounded-md text-xs font-medium text-white transition-colors flex items-center justify-center gap-1.5"
+                    style={{ background: accentColor }}
+                    onMouseEnter={e => (e.currentTarget.style.background = accentHover)}
+                    onMouseLeave={e => (e.currentTarget.style.background = accentColor)}
                   >
-                    <ImageIcon className="w-4 h-4" />
+                    <ImageIcon size={14} />
                     添加到画布
                   </button>
                 )}
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center py-12 gap-3">
-                <Scan className="w-10 h-10 text-gray-600" />
-                <p className="text-sm text-gray-400">暂无精修结果</p>
-                <p className="text-xs text-gray-600">请在"精修设置"中配置参数后开始精修</p>
+              <div className="flex flex-col items-center justify-center py-10 gap-2">
+                <Scan size={32} style={{ color: textMutedColor }} />
+                <p className="text-xs" style={{ color: textSubColor }}>暂无精修结果</p>
+                <p className="text-[10px]" style={{ color: textMutedColor }}>请在"精修设置"中配置参数后开始精修</p>
               </div>
             )}
           </div>
@@ -576,37 +782,37 @@ export default function RefineEnginePanel({ onClose, onAddImage, initialImageUrl
       </div>
 
       {/* ─── Bottom Action ─── */}
-      <div className="shrink-0 p-4 border-t border-white/10 bg-[#111]/80">
-        {activeTab !== 'results' ? (
+      <div
+        className="shrink-0 px-3 py-3 flex gap-2"
+        style={{
+          borderTop: `1px solid ${borderColor}`,
+          background: isMonochrome ? 'rgba(255,255,255,0.6)' : 'rgba(17,17,17,0.8)',
+        }}
+      >
+        {activeTab === 'settings' && (
           <button
-            onClick={() => { setActiveTab('results'); handleRefine(); }}
+            onClick={handleRefine}
             disabled={!sourceImage || !selectedModel || isProcessing}
-            className="w-full py-2.5 rounded-lg text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all"
-            style={{ background: sourceImage && selectedModel ? 'linear-gradient(135deg, #8b5cf6, #6366f1)' : 'rgba(255,255,255,0.05)' }}
+            className="w-full py-2.5 rounded-md text-xs font-medium text-white flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40"
+            style={{ background: accentColor }}
+            onMouseEnter={e => { if (!e.currentTarget.disabled) e.currentTarget.style.background = accentHover; }}
+            onMouseLeave={e => { e.currentTarget.style.background = accentColor; }}
           >
-            {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            {!sourceImage ? '请先上传图片' : !selectedModel ? '请选择模型' : '开始精修'}
+            {isProcessing ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+            {isProcessing ? '精修中...' : '开始精修'}
           </button>
-        ) : !isProcessing && results.length === 0 ? (
+        )}
+        {activeTab === 'upload' && sourceImage && (
           <button
             onClick={() => setActiveTab('settings')}
-            className="w-full py-2.5 rounded-lg text-sm font-medium text-gray-300 bg-white/5 hover:bg-white/10 transition-colors"
+            className="w-full py-2.5 rounded-md text-xs font-medium text-white flex items-center justify-center gap-1.5 transition-colors"
+            style={{ background: accentColor }}
           >
-            返回设置
+            <Wand2 size={13} />
+            下一步：精修设置
           </button>
-        ) : null}
+        )}
       </div>
     </div>
   );
-}
-
-/* ─── helper: get presets for a mode ─── */
-function getCurrentPresetsForMode(mode: string) {
-  switch (mode) {
-    case 'skin': return SKIN_PRESETS;
-    case 'product': return PRODUCT_PRESETS;
-    case 'sharpen': return SHARPEN_PRESETS;
-    case 'tone': return TONE_PRESETS;
-    default: return [];
-  }
 }
