@@ -27,6 +27,20 @@ export class UserManager {
   private static instance: UserManager;
   private multiUserData: MultiUserData | null = null;
   private currentUserId: string | null = null;
+  private _serverSyncReady = false; // 在 loadProjectsFromServer 成功前阻止 syncToServer 上传空数据
+  private _onProjectsChanged: (() => void) | null = null;
+
+  /** 注册项目数据变更回调（用于跨设备同步时刷新 UI），返回取消订阅函数 */
+  onProjectsChanged(callback: (() => void) | null): () => void {
+    this._onProjectsChanged = callback;
+    return () => { if (this._onProjectsChanged === callback) this._onProjectsChanged = null; };
+  }
+
+  private notifyProjectsChanged() {
+    if (this._onProjectsChanged) {
+      try { this._onProjectsChanged(); } catch { /* best effort */ }
+    }
+  }
 
   private constructor() {
     this.loadData();
@@ -184,6 +198,10 @@ export class UserManager {
     if (!this.currentUserId || !this.multiUserData) return;
     const userData = this.multiUserData.userData[this.currentUserId];
     if (!userData) return;
+    if (!this._serverSyncReady) {
+      console.log('[Sync] syncToServer: blocked — server data not yet loaded, skip to prevent overwrite');
+      return;
+    }
 
     try {
       // 只同步项目数据（最关键的画布数据）
@@ -198,30 +216,46 @@ export class UserManager {
         updatedAt: p.updatedAt,
       }));
 
-      await fetch('/api/user-data/sync', {
+      const syncRes = await fetch('/api/user-data/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ key: 'projects', value: projectsPayload }),
       });
-    } catch {
-      // 服务器同步是尽力而为，失败不影响本地功能
+      if (!syncRes.ok) {
+        console.warn('[Sync] syncToServer: server returned', syncRes.status);
+      } else {
+        console.log('[Sync] syncToServer: success, projects=', projectsPayload.length);
+      }
+    } catch (error) {
+      console.error('[Sync] syncToServer error:', error);
     }
   }
 
   /** 从服务器加载当前用户的项目数据 */
-  async loadProjectsFromServer(): Promise<void> {
-    if (!this.currentUserId || !this.multiUserData) return;
+  async loadProjectsFromServer(retryCount = 2): Promise<boolean> {
+    if (!this.currentUserId || !this.multiUserData) return false;
     const userData = this.multiUserData.userData[this.currentUserId];
-    if (!userData) return;
+    if (!userData) return false;
 
     try {
       const res = await fetch('/api/user-data/sync?key=projects', {
         credentials: 'include',
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        console.warn('[Sync] loadProjectsFromServer: server returned', res.status);
+        // 重试：登录后 session cookie 可能尚未生效
+        if (retryCount > 0) {
+          await new Promise(r => setTimeout(r, 1000));
+          return this.loadProjectsFromServer(retryCount - 1);
+        }
+        return false;
+      }
       const data = await res.json() as { success: boolean; value?: unknown };
-      if (!data.success || !data.value) return;
+      if (!data.success || data.value === undefined || data.value === null) {
+        console.warn('[Sync] loadProjectsFromServer: unsuccessful response', data);
+        return false;
+      }
 
       // value 可能是字符串（需要 JSON.parse）或已解析的对象
       let serverProjects: Project[];
@@ -229,18 +263,20 @@ export class UserManager {
         try {
           serverProjects = JSON.parse(data.value) as Project[];
         } catch {
-          return;
+          return false;
         }
       } else if (Array.isArray(data.value)) {
         serverProjects = data.value as Project[];
       } else {
-        return;
+        return false;
       }
-      if (serverProjects.length === 0) return;
+
+      if (serverProjects.length === 0 && userData.projects.length === 0) {
+        console.log('[Sync] loadProjectsFromServer: both local and server empty');
+        return true;
+      }
 
       // 合并策略：按项目 ID 合并，保留更新时间更晚的版本
-      const serverProjectIds = new Set(serverProjects.map(p => p.id));
-      const localOnlyProjects = userData.projects.filter(p => !serverProjectIds.has(p.id));
       const localHasData = userData.projects.length > 0;
       const serverHasData = serverProjects.length > 0;
 
@@ -271,9 +307,18 @@ export class UserManager {
       }
       // 如果只有本地数据，不做任何修改
 
+      this._serverSyncReady = true; // 标记服务器数据已加载，允许后续 syncToServer
       this.saveData();
-    } catch {
-      // 加载失败不影响本地功能
+      this.notifyProjectsChanged(); // 通知 UI 刷新
+      console.log('[Sync] loadProjectsFromServer: server=', serverProjects.length, 'local=', userData.projects.length);
+      return true;
+    } catch (error) {
+      console.error('[Sync] loadProjectsFromServer error:', error);
+      if (retryCount > 0) {
+        await new Promise(r => setTimeout(r, 1000));
+        return this.loadProjectsFromServer(retryCount - 1);
+      }
+      return false;
     }
   }
 

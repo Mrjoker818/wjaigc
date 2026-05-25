@@ -182,6 +182,8 @@ function CanvasApp() {
           const userMgr = UserManagerCore.getInstance();
           const hydratedUser = await userMgr.upsertUserFromServer(data.user);
           setCurrentUser(hydratedUser);
+          // 确保从服务器加载最新项目数据（跨设备同步保障）
+          await userMgr.loadProjectsFromServer();
           // Auto-load most recent project or create default
           try {
             const projects = userMgr.getProjects();
@@ -515,6 +517,42 @@ function CanvasApp() {
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [images, currentProject, currentUser?.id]);
+
+  // 定期从服务器同步项目数据（跨设备/跨浏览器数据同步）
+  useEffect(() => {
+    if (!currentUser) return;
+    const syncInterval = setInterval(async () => {
+      try {
+        const userMgr = UserManagerCore.getInstance();
+        await userMgr.loadProjectsFromServer();
+      } catch { /* best effort */ }
+    }, 30000); // 每30秒同步一次
+    return () => clearInterval(syncInterval);
+  }, [currentUser]);
+
+  // 监听服务器项目数据变化（周期同步/跨设备同步触发的更新）
+  useEffect(() => {
+    if (!currentUser) return;
+    const userMgr = UserManagerCore.getInstance();
+    const unsubscribe = userMgr.onProjectsChanged(() => {
+      try {
+        const projects = userMgr.getProjects();
+        const curProjectId = currentProject?.id;
+        if (curProjectId) {
+          const latest = projects.find(p => p.id === curProjectId);
+          if (latest) {
+            setCurrentProject(latest);
+            if (latest.canvasImages) {
+              setImages(latest.canvasImages.map(img => ({ ...img })));
+            }
+          }
+        }
+        // 项目列表可能变化（如其他设备新建了项目）
+        setCurrentUser({ ...currentUser }); // 触发 UI 刷新
+      } catch { /* best effort */ }
+    });
+    return () => { if (typeof unsubscribe === 'function') unsubscribe(); };
+  }, [currentUser, currentProject?.id]);
 
   const handleGenerate = useCallback(async (params: GenerationParams) => {
     // 增加活跃任务计数
@@ -2281,13 +2319,15 @@ function CanvasApp() {
           onClose={() => setShowUserManager(false)}
           currentImageCount={images.length}
           currentProjectId={currentProject?.id}
-          onLogin={(user) => {
+          onLogin={async (user) => {
             if (user) {
               setCurrentUser(user);
               setShowUserManager(false);
               // Auto-load most recent project or create default
               try {
                 const userMgr = UserManagerCore.getInstance();
+                // 确保从服务器加载最新项目数据（跨设备同步保障）
+                await userMgr.loadProjectsFromServer();
                 const projects = userMgr.getProjects();
                 if (projects.length > 0) {
                   const project = projects[0];
