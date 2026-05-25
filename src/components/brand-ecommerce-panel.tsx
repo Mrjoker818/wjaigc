@@ -235,10 +235,18 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
 
   const handleFileUpload = useCallback(async (file: File) => {
     setRefImageFile(file);
-    const formData = new FormData();
-    formData.append('image', file);
     try {
-      const resp = await fetch('/api/save-image', { method: 'POST', body: formData });
+      const reader = new FileReader();
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const resp = await fetch('/api/save-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: dataUrl }),
+      });
       const data = await resp.json();
       if (data.url) {
         setRefImage(data.url);

@@ -219,12 +219,20 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
 
   // ─── Handle file upload ───
   const handleFileUpload = async (file: File) => {
-    const formData = new FormData();
-    formData.append('image', file);
     try {
-      const resp = await fetch('/api/save-image', { method: 'POST', body: formData });
-      const data = await resp.json();
-      if (data.url) setSourceImage(data.url);
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const dataUrl = reader.result as string;
+        const resp = await fetch('/api/save-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: dataUrl }),
+        });
+        const data = await resp.json();
+        if (data.url) setSourceImage(data.url);
+      };
+      reader.onerror = () => console.error('File read failed');
+      reader.readAsDataURL(file);
     } catch (err) {
       console.error('Upload failed:', err);
     }
