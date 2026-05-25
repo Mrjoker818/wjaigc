@@ -52,6 +52,10 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
   const [newUserPassword, setNewUserPassword] = useState('123456');
   const [newUserEmail, setNewUserEmail] = useState('');
   const [confirmDlg, setConfirmDlg] = useState<{ open: boolean; title: string; message: string; variant?: 'danger' | 'warning'; onConfirm: () => void; onCancel: () => void }>({ open: false, title: '', message: '', onConfirm: () => {}, onCancel: () => {} });
+  const [editingUser, setEditingUser] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [resetPwdUser, setResetPwdUser] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState('');
 
   const [apiName, setApiName] = useState('');
   const [apiBaseUrl, setApiBaseUrl] = useState('');
@@ -248,6 +252,42 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
         });
         await refresh();
         window.dispatchEvent(new Event('wujie-admin-users-updated'));
+        setConfirmDlg(prev => ({ ...prev, open: false }));
+      },
+      onCancel: () => setConfirmDlg(prev => ({ ...prev, open: false })),
+    });
+  };
+
+  const handleRenameUser = async (userId: string) => {
+    if (!editName.trim()) return;
+    await fetch('/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ action: 'update', userId, updates: { name: editName.trim() } }),
+    });
+    setEditingUser(null);
+    setEditName('');
+    await refresh();
+    window.dispatchEvent(new Event('wujie-admin-users-updated'));
+  };
+
+  const handleResetPassword = async (userId: string) => {
+    if (!newPassword.trim() || newPassword.trim().length < 4) return;
+    setConfirmDlg({
+      open: true,
+      title: '重置密码',
+      message: `确定将密码重置为 "${newPassword.trim()}" 吗？`,
+      variant: 'warning',
+      onConfirm: async () => {
+        await fetch('/api/admin/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ action: 'update', userId, updates: { password: newPassword.trim() } }),
+        });
+        setResetPwdUser(null);
+        setNewPassword('');
         setConfirmDlg(prev => ({ ...prev, open: false }));
       },
       onCancel: () => setConfirmDlg(prev => ({ ...prev, open: false })),
@@ -631,37 +671,82 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
 
               <div className="space-y-2">
                 {users.map(user => (
-                  <div key={user.id} className={`rounded-xl border p-4 flex items-center gap-3 ${softClass}`}>
-                    <div className="w-10 h-10 rounded-xl bg-[#d4af37] text-black flex items-center justify-center font-bold">{user.name.slice(0, 1).toUpperCase()}</div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-semibold truncate">{user.name}</p>
-                        <span className={`text-xs px-2 py-0.5 rounded ${user.role === 'admin' ? 'bg-[#d4af37]/20 text-[#d4af37]' : isGold ? 'bg-[#222] text-[#888]' : 'bg-gray-200 text-gray-600'}`}>{user.role === 'admin' ? '管理员' : '用户'}</span>
-                        <span className={`text-xs px-2 py-0.5 rounded ${user.status === 'disabled' ? 'bg-red-500/15 text-red-400' : 'bg-green-500/15 text-green-500'}`}>{user.status === 'disabled' ? '已禁用' : '正常'}</span>
-                      </div>
-                      <p className={`text-xs mt-1 truncate ${isGold ? 'text-[#666]' : 'text-gray-500'}`}>{user.storageFolder || `users/${user.id}`}</p>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {(Object.keys(userPermissionLabels) as UserPermissionKey[]).map((key) => {
-                          const enabled = user.apiPermissions?.[key] ?? true;
-                          return (
-                            <button
-                              key={key}
-                              type="button"
-                              onClick={() => void handleToggleUserPermission(user, key)}
-                              className={`px-2 py-1 rounded-md text-xs border ${enabled ? 'bg-[#d4af37]/15 text-[#d4af37] border-[#d4af37]/30' : isGold ? 'bg-[#151515] text-[#666] border-[#2a2a2a]' : 'bg-white text-gray-400 border-gray-200'}`}
-                            >
-                              {userPermissionLabels[key]}{enabled ? '' : ' off'}
+                  <div key={user.id} className={`rounded-xl border p-4 ${softClass}`}>
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-[#d4af37] text-black flex items-center justify-center font-bold shrink-0">{user.name.slice(0, 1).toUpperCase()}</div>
+                      <div className="flex-1 min-w-0">
+                        {editingUser === user.id ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              className={`h-8 px-2 rounded-lg border text-sm flex-1 ${inputClass}`}
+                              value={editName}
+                              onChange={e => setEditName(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') void handleRenameUser(user.id); if (e.key === 'Escape') { setEditingUser(null); setEditName(''); } }}
+                              autoFocus
+                            />
+                            <button onClick={() => void handleRenameUser(user.id)} className="px-2 py-1 rounded-lg bg-[#d4af37] text-black text-xs font-semibold">保存</button>
+                            <button onClick={() => { setEditingUser(null); setEditName(''); }} className={`px-2 py-1 rounded-lg text-xs border ${isGold ? 'border-[#2a2a2a] text-[#888]' : 'border-gray-200 text-gray-500'}`}>取消</button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-semibold truncate">{user.name}</p>
+                            <button aria-label={`修改用户名 ${user.name}`} onClick={() => { setEditingUser(user.id); setEditName(user.name); }} className={`p-1 rounded ${isGold ? 'hover:bg-[#222]' : 'hover:bg-gray-100'}`} title="改名">
+                              <Pencil className="w-3.5 h-3.5 text-blue-400" />
                             </button>
-                          );
-                        })}
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className={`text-xs px-2 py-0.5 rounded ${user.role === 'admin' ? 'bg-[#d4af37]/20 text-[#d4af37]' : isGold ? 'bg-[#222] text-[#888]' : 'bg-gray-200 text-gray-600'}`}>{user.role === 'admin' ? '管理员' : '用户'}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded ${user.status === 'disabled' ? 'bg-red-500/15 text-red-400' : 'bg-green-500/15 text-green-500'}`}>{user.status === 'disabled' ? '已禁用' : '正常'}</span>
+                        </div>
+                        <p className={`text-xs mt-1 truncate ${isGold ? 'text-[#666]' : 'text-gray-500'}`}>{user.storageFolder || `users/${user.id}`}</p>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button aria-label={`${user.status === 'disabled' ? '启用' : '禁用'}用户 ${user.name}`} onClick={() => handleToggleUser(user)} disabled={user.role === 'admin'} className={`p-2 rounded-lg ${isGold ? 'hover:bg-[#222]' : 'hover:bg-gray-100'} disabled:opacity-30`} title={user.status === 'disabled' ? '启用' : '禁用'}>
+                          {user.status === 'disabled' ? <CheckCircle2 className="w-4 h-4 text-green-500" /> : <Ban className="w-4 h-4 text-amber-500" />}
+                        </button>
+                        <button aria-label={`重置密码 ${user.name}`} onClick={() => { setResetPwdUser(user.id); setNewPassword(''); }} disabled={user.role === 'admin'} className={`p-2 rounded-lg ${isGold ? 'hover:bg-[#222]' : 'hover:bg-gray-100'} disabled:opacity-30`} title="重置密码">
+                          <KeyRound className="w-4 h-4 text-amber-400" />
+                        </button>
+                        <button aria-label={`删除用户 ${user.name}`} onClick={() => handleDeleteUser(user)} disabled={user.role === 'admin'} className={`p-2 rounded-lg ${isGold ? 'hover:bg-red-950/40' : 'hover:bg-red-50'} disabled:opacity-30`} title="删除">
+                          <Trash2 className="w-4 h-4 text-red-500" />
+                        </button>
                       </div>
                     </div>
-                    <button aria-label={`${user.status === 'disabled' ? '启用' : '禁用'}用户 ${user.name}`} onClick={() => handleToggleUser(user)} disabled={user.role === 'admin'} className={`p-2 rounded-lg ${isGold ? 'hover:bg-[#222]' : 'hover:bg-gray-100'} disabled:opacity-30`} title={user.status === 'disabled' ? '启用' : '禁用'}>
-                      {user.status === 'disabled' ? <CheckCircle2 className="w-4 h-4 text-green-500" /> : <Ban className="w-4 h-4 text-amber-500" />}
-                    </button>
-                    <button aria-label={`删除用户 ${user.name}`} onClick={() => handleDeleteUser(user)} disabled={user.role === 'admin'} className={`p-2 rounded-lg ${isGold ? 'hover:bg-red-950/40' : 'hover:bg-red-50'} disabled:opacity-30`} title="删除">
-                      <Trash2 className="w-4 h-4 text-red-500" />
-                    </button>
+                    {/* 重置密码区域 */}
+                    {resetPwdUser === user.id && (
+                      <div className={`mt-3 pt-3 border-t ${isGold ? 'border-[#2a2a2a]' : 'border-gray-200'}`}>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="password"
+                            className={`h-8 px-2 rounded-lg border text-sm flex-1 ${inputClass}`}
+                            placeholder="输入新密码（至少4位）"
+                            value={newPassword}
+                            onChange={e => setNewPassword(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') void handleResetPassword(user.id); if (e.key === 'Escape') { setResetPwdUser(null); setNewPassword(''); } }}
+                            autoFocus
+                          />
+                          <button onClick={() => void handleResetPassword(user.id)} disabled={!newPassword.trim() || newPassword.trim().length < 4} className="px-2 py-1 rounded-lg bg-amber-500 text-black text-xs font-semibold disabled:opacity-40">确认重置</button>
+                          <button onClick={() => { setResetPwdUser(null); setNewPassword(''); }} className={`px-2 py-1 rounded-lg text-xs border ${isGold ? 'border-[#2a2a2a] text-[#888]' : 'border-gray-200 text-gray-500'}`}>取消</button>
+                        </div>
+                      </div>
+                    )}
+                    {/* 权限标签 */}
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {(Object.keys(userPermissionLabels) as UserPermissionKey[]).map((key) => {
+                        const enabled = user.apiPermissions?.[key] ?? true;
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => void handleToggleUserPermission(user, key)}
+                            className={`px-2 py-1 rounded-md text-xs border ${enabled ? 'bg-[#d4af37]/15 text-[#d4af37] border-[#d4af37]/30' : isGold ? 'bg-[#151515] text-[#666] border-[#2a2a2a]' : 'bg-white text-gray-400 border-gray-200'}`}
+                          >
+                            {userPermissionLabels[key]}{enabled ? '' : ' off'}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 ))}
               </div>
