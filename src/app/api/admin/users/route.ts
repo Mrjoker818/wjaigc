@@ -40,13 +40,14 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json() as {
-      action?: 'create' | 'update' | 'delete' | 'listUserData' | 'getUserData' | 'deleteUserData';
+      action?: 'create' | 'update' | 'delete' | 'list-data' | 'get-data' | 'delete-data' | 'listUserData' | 'getUserData' | 'deleteUserData';
       userId?: string;
       name?: string;
       password?: string;
       email?: string;
       updates?: Record<string, unknown>;
       dataKey?: string;
+      key?: string;
     };
 
     if (body.action === 'create') {
@@ -82,27 +83,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: deleted, deleted });
     }
 
-    if (body.action === 'listUserData') {
+    if (body.action === 'list-data' || body.action === 'listUserData') {
       if (!body.userId) {
         return NextResponse.json({ success: false, error: 'Missing userId' }, { status: 400 });
       }
       const dataKeys = await dbListUserData(body.userId);
-      return NextResponse.json({ success: true, dataKeys });
+      // 兼容两种响应格式：dataKeys 和 keys
+      return NextResponse.json({ success: true, dataKeys, keys: dataKeys });
     }
 
-    if (body.action === 'getUserData') {
-      if (!body.userId || !body.dataKey) {
+    if (body.action === 'get-data' || body.action === 'getUserData') {
+      const effectiveKey = body.dataKey || body.key;
+      if (!body.userId || !effectiveKey) {
         return NextResponse.json({ success: false, error: 'Missing userId or dataKey' }, { status: 400 });
       }
-      const value = await dbGetUserData(body.userId, String(body.dataKey));
-      return NextResponse.json({ success: true, dataKey: body.dataKey, value });
+      const value = await dbGetUserData(body.userId, String(effectiveKey));
+      return NextResponse.json({ success: true, dataKey: effectiveKey, value });
     }
 
-    if (body.action === 'deleteUserData') {
-      if (!body.userId || !body.dataKey) {
+    if (body.action === 'delete-data' || body.action === 'deleteUserData') {
+      const effectiveKey = body.dataKey || body.key;
+      if (!body.userId || !effectiveKey) {
         return NextResponse.json({ success: false, error: 'Missing userId or dataKey' }, { status: 400 });
       }
-      const deleted = await dbDeleteUserData(body.userId, String(body.dataKey));
+      const deleted = await dbDeleteUserData(body.userId, String(effectiveKey));
       return NextResponse.json({ success: deleted });
     }
 

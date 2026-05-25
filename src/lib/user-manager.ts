@@ -238,10 +238,9 @@ export class UserManager {
       }
       if (serverProjects.length === 0) return;
 
-      // 合并策略：以服务器数据为主，但保留本地独有的项目
+      // 合并策略：按项目 ID 合并，保留更新时间更晚的版本
       const serverProjectIds = new Set(serverProjects.map(p => p.id));
       const localOnlyProjects = userData.projects.filter(p => !serverProjectIds.has(p.id));
-      // 如果服务器有项目且本地为空，或服务器项目更新时间更晚，则使用服务器数据
       const localHasData = userData.projects.length > 0;
       const serverHasData = serverProjects.length > 0;
 
@@ -249,8 +248,26 @@ export class UserManager {
         // 本地无数据，直接使用服务器数据
         userData.projects = serverProjects;
       } else if (localHasData && serverHasData) {
-        // 双方都有数据，合并（服务器优先，保留本地独有的）
-        userData.projects = [...serverProjects, ...localOnlyProjects];
+        // 双方都有数据，按项目 ID 逐个合并：保留 updatedAt 更新的版本
+        const localProjectMap = new Map(userData.projects.map(p => [p.id, p]));
+        const mergedProjects: Project[] = [];
+        for (const sp of serverProjects) {
+          const lp = localProjectMap.get(sp.id);
+          if (lp) {
+            // 同 ID 项目：取更新时间更晚的版本
+            const localTime = lp.updatedAt || lp.createdAt || 0;
+            const serverTime = sp.updatedAt || sp.createdAt || 0;
+            mergedProjects.push(serverTime >= localTime ? sp : lp);
+            localProjectMap.delete(sp.id);
+          } else {
+            mergedProjects.push(sp);
+          }
+        }
+        // 保留本地独有的项目
+        for (const lp of localProjectMap.values()) {
+          mergedProjects.push(lp);
+        }
+        userData.projects = mergedProjects;
       }
       // 如果只有本地数据，不做任何修改
 
@@ -299,21 +316,26 @@ export class UserManager {
       this.multiUserData.users[index] = nextUser;
     }
 
-    if (!this.multiUserData.userData[nextUser.id]) {
+    const isExistingUser = !!this.multiUserData.userData[nextUser.id];
+
+    if (!isExistingUser) {
       this.multiUserData.userData[nextUser.id] = {
         user: nextUser,
         projects: [],
         apiKeys: [],
         usageStats: [],
       };
-      // 新用户（localStorage为空），从服务器加载项目数据
-      const prevUserId = this.currentUserId;
-      this.currentUserId = nextUser.id;
-      await this.loadProjectsFromServer();
-      this.currentUserId = prevUserId || nextUser.id;
     } else {
       this.multiUserData.userData[nextUser.id].user = nextUser;
     }
+
+    // 始终尝试从服务器加载项目数据（解决跨设备同步问题）
+    // ensureDefaultAdmin() 可能在 localStorage 中创建了空的用户条目，
+    // 导致上面的 isExistingUser 为 true 但项目实际为空
+    const prevUserId = this.currentUserId;
+    this.currentUserId = nextUser.id;
+    await this.loadProjectsFromServer();
+    this.currentUserId = prevUserId || nextUser.id;
 
     this.currentUserId = nextUser.id;
     this.saveData();
