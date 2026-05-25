@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
-import { X, Download, ZoomIn, ZoomOut, Maximize2, RotateCcw, Move, Box, Image, Eye, ChevronDown } from 'lucide-react';
+import { X, Download, ZoomIn, ZoomOut, Maximize2, RotateCcw, Move, Box, Image, Eye, ChevronDown, GripVertical } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
 /*  Simple Error Boundary for Three.js loading failures                */
@@ -428,28 +428,23 @@ export default function ModelViewer3D({
       onContextMenu={(e) => e.preventDefault()}
     >
       <div className="relative w-[92vw] max-w-[1200px] h-[85vh] max-h-[800px] rounded-2xl border border-[#2a2a2a]/80 bg-gradient-to-b from-[#141414] to-[#0a0a0a] overflow-hidden flex flex-col shadow-2xl shadow-black/50">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-[#2a2a2a]/60 bg-[#0d0d0d]/80 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#d4af37] to-[#b8860b] flex items-center justify-center">
-              <Box size={16} className="text-black" />
-            </div>
-            <div>
-              <div className="text-sm font-semibold text-white">3D 模型预览</div>
-              {modelInfo && (
-                <div className="text-xs text-[#666] mt-0.5">
-                  {modelInfo.format} · {formatNumber(modelInfo.faces)} 面 · {formatNumber(modelInfo.vertices)} 顶点
-                  {modelInfo.fileSize ? ` · ${modelInfo.fileSize}` : ''}
-                  {modelInfo.animations > 0 ? ` · ${modelInfo.animations} 动画` : ''}
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
+        {/* Header (unified design) */}
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-[#2a2a2a]/60 bg-[#0d0d0d]/80 shrink-0 select-none">
+          <GripVertical size={14} style={{ color: 'rgba(255,255,255,0.3)' }} />
+          <Box size={15} style={{ color: '#d4af37' }} />
+          <span className="text-sm font-semibold flex-1" style={{ color: '#d4af37' }}>
+            3D 模型预览
+          </span>
+          {modelInfo && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: 'rgba(255,255,255,0.5)', background: 'rgba(255,255,255,0.06)' }}>
+              {modelInfo.format} · {formatNumber(modelInfo.faces)} 面
+            </span>
+          )}
+          <div className="flex items-center gap-1">
             {/* Sidebar toggle */}
             <button
               onClick={() => setShowSidebar(!showSidebar)}
-              className="p-2 rounded-lg text-[#777] hover:text-white hover:bg-white/5 transition-all"
+              className="p-1.5 rounded-md text-[#777] hover:text-white hover:bg-white/5 transition-all"
               title={showSidebar ? '隐藏侧栏' : '显示侧栏'}
             >
               <ChevronDown size={14} className={`transition-transform ${showSidebar ? 'rotate-0' : '-rotate-90'}`} />
@@ -487,9 +482,12 @@ export default function ModelViewer3D({
             )}
             <button
               onClick={onClose}
-              className="p-2 rounded-lg text-[#777] hover:text-white hover:bg-white/5 transition-all"
+              className="p-1 rounded-md transition-colors"
+              style={{ color: 'rgba(255,255,255,0.4)' }}
+              onMouseEnter={e => (e.currentTarget.style.color = '#fff')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.4)')}
             >
-              <X size={16} />
+              <X size={14} />
             </button>
           </div>
         </div>

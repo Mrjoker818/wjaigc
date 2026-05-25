@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { X, ShoppingBag, Upload, Sparkles, Loader2, Check, ChevronDown, Image as ImageIcon, Palette, RefreshCw, Settings } from 'lucide-react';
+import { X, ShoppingBag, Upload, Sparkles, Loader2, Check, ChevronDown, Image as ImageIcon, Palette, RefreshCw, Settings, GripVertical } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -438,26 +438,27 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         }`}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* ── Header ── */}
-        <div className={`flex items-center justify-between px-5 py-3.5 border-b ${border}`}>
-          <div className="flex items-center gap-3">
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-              isMonochrome ? 'bg-blue-100' : 'bg-[#d4af37]/15'
-            }`}>
-              <ShoppingBag size={16} className={accentText} />
-            </div>
-            <div>
-              <h2 className={`text-sm font-semibold ${text}`}>品牌电商</h2>
-              <p className={`text-xs ${textMuted}`}>JSON 模板批量生成商品图</p>
-            </div>
-          </div>
+        {/* ── Header (unified title bar) ── */}
+        <div
+          className="flex items-center gap-2 px-3 py-2 select-none shrink-0"
+          style={{ borderBottom: `1px solid ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)'}` }}
+        >
+          <GripVertical size={14} style={{ color: isMonochrome ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.3)' }} />
+          <ShoppingBag size={15} style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }} />
+          <span className="text-sm font-semibold flex-1" style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }}>
+            品牌电商
+          </span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: isMonochrome ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.5)', background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
+            模板批量生成
+          </span>
           <button
             onClick={onClose}
-            className={`p-1.5 rounded-lg transition-colors ${
-              isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-[#555] hover:text-white hover:bg-[#2a2a2a]'
-            }`}
+            className="p-1 rounded-md transition-colors"
+            style={{ color: isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)' }}
+            onMouseEnter={e => (e.currentTarget.style.color = isMonochrome ? '#000' : '#fff')}
+            onMouseLeave={e => (e.currentTarget.style.color = isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)')}
           >
-            <X size={16} />
+            <X size={14} />
           </button>
         </div>
 

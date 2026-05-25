@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { X, GripVertical, RefreshCw, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle, ImagePlus, Minus } from 'lucide-react';
+import { X, GripVertical, RefreshCw, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle, ImagePlus, Minus, Zap } from 'lucide-react';
 
 interface AgentEditorProps {
   imageUrl?: string;
@@ -58,8 +58,15 @@ export function AgentEditor({
   const [taskId, setTaskId] = useState<string | null>(null);
 
   // 拖动状态
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [hasPosition, setHasPosition] = useState(false);
+  const [position, setPosition] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const panelW = 420;
+      const panelH = 580;
+      return { x: Math.max(0, (window.innerWidth - panelW) / 2), y: Math.max(0, (window.innerHeight - panelH) / 2) };
+    }
+    return { x: 0, y: 0 };
+  });
+  const [hasPosition, setHasPosition] = useState(true);
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
@@ -339,9 +346,8 @@ export function AgentEditor({
       ref={panelRef}
       className="fixed z-[150]"
       style={{
-        left: hasPosition ? position.x : 'auto',
-        top: hasPosition ? position.y : 80,
-        right: hasPosition ? undefined : 20,
+        left: position.x,
+        top: position.y,
         width: 320,
         maxHeight: '85vh',
         backgroundColor: bgPanel,
@@ -366,12 +372,16 @@ export function AgentEditor({
         onMouseDown={handlePanelDragStart}
       >
         <GripVertical size={14} style={{ color: mutedColor }} />
+        <Zap size={15} style={{ color: accentColor }} />
         <span className="text-sm font-semibold flex-1" style={{ color: accentColor }}>
           Agent 编排
         </span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: mutedColor, background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
+          智能工具选择
+        </span>
         <button
           onClick={(e) => { e.stopPropagation(); onClose(); }}
-          className="p-1 rounded hover:bg-white/10 transition-colors"
+          className="p-1 rounded-md transition-colors"
           style={{ color: mutedColor }}
         >
           <X size={14} />

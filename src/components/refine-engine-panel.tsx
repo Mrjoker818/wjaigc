@@ -68,8 +68,13 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   const backdrop = isMonochrome ? 'none' : 'blur(24px)';
 
   // ─── Drag state ───
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [hasPosition, setHasPosition] = useState(false);
+  const [position, setPosition] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return { x: (window.innerWidth - 420) / 2, y: (window.innerHeight - 560) / 2 };
+    }
+    return { x: 0, y: 0 };
+  });
+  const [hasPosition, setHasPosition] = useState(true);
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
@@ -319,10 +324,9 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
       data-floating-panel
       className="fixed z-[150]"
       style={{
-        left: hasPosition ? position.x : 'auto',
-        top: hasPosition ? position.y : 80,
-        right: hasPosition ? undefined : 20,
-        width: 360,
+        left: position.x,
+        top: position.y,
+        width: 420,
         maxHeight: '85vh',
         backgroundColor: bgPanel,
         border: `1px solid ${borderColor}`,

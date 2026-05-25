@@ -391,7 +391,12 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   // 拖拽状态
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const [position, setPosition] = useState({ x: 100, y: 100 });
+  const [position, setPosition] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return { x: Math.max(0, (window.innerWidth - 360) / 2), y: Math.max(0, (window.innerHeight - 560) / 2) };
+    }
+    return { x: 100, y: 100 };
+  });
 
   // ★ 参考图拖拽排序状态
   const [dragRefIdx, setDragRefIdx] = useState<number | null>(null);

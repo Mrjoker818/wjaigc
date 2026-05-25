@@ -25,7 +25,7 @@ import {
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
-  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan
+  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical
 } from 'lucide-react';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
 import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
@@ -2516,13 +2516,14 @@ export function InfiniteCanvas({
 
   /** 创建六面体组 */
   const handleCreateHexCube = useCallback(() => {
-    // 在视口中心创建
+    // 在视口中心创建，使用屏幕坐标直接定位
     const vpX = (typeof window !== 'undefined' ? window.innerWidth / 2 : 500);
     const vpY = (typeof window !== 'undefined' ? window.innerHeight / 2 : 400);
-    // 计算画布坐标：将屏幕中心映射到画布坐标
-    const cx = (vpX - viewOffset.x) / zoom;
-    const cy = (vpY - viewOffset.y) / zoom;
-    const group = createHexCubeGroup({ x: cx - 250, y: cy - 200 });
+    // 将屏幕坐标转换为画布坐标，但使用固定偏移让面板在视口中心
+    const panelWidth = 500;
+    const panelHeight = 400;
+    // 直接使用屏幕坐标作为偏移基准
+    const group = createHexCubeGroup({ x: (vpX - panelWidth / 2 - viewOffset.x) / zoom, y: (vpY - panelHeight / 2 - viewOffset.y) / zoom });
     // 设置当前模型
     const currentModelInfo = getCurrentModel();
     group.toolbar.model = currentModelInfo.model;
@@ -9257,9 +9258,9 @@ export function InfiniteCanvas({
                 onMouseDown={(e) => e.stopPropagation()}
                 onWheel={(e) => e.stopPropagation()}
               >
-                {/* Title bar */}
+                {/* Title bar (unified design) */}
                 <div
-                  className="flex items-center justify-between px-4 py-2 select-none cursor-grab active:cursor-grabbing rounded-t-2xl"
+                  className="flex items-center gap-2 px-3 py-2 select-none cursor-grab active:cursor-grabbing rounded-t-2xl"
                   style={{
                     background: isMonochrome ? '#f3f4f6' : '#1a1a1a',
                     borderBottom: `1px solid ${isMonochrome ? '#e5e7eb' : '#333'}`,
@@ -9275,14 +9276,16 @@ export function InfiniteCanvas({
                     hexCubeDragReadyRef.current = true;
                   }}
                 >
-                  <div className="flex items-center gap-2">
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke={isMonochrome ? "#3b82f6" : "#d4af37"} strokeWidth="2">
-                      <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                      <path d="M2 17l10 5 10-5" />
-                      <path d="M2 12l10 5 10-5" />
-                    </svg>
-                    <span className="text-sm font-semibold" style={{ color: isMonochrome ? '#3b82f6' : '#d4af37' }}>六面体</span>
-                  </div>
+                  <GripVertical size={14} style={{ color: isMonochrome ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.3)' }} />
+                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke={isMonochrome ? "#6b6b6b" : "#d4af37"} strokeWidth="2">
+                    <path d="M21 16V8l-9-5-9 5v8l9 5 9-5z" />
+                    <path d="M12 3v18" />
+                    <path d="M3 8l9 5 9-5" />
+                  </svg>
+                  <span className="text-sm font-semibold flex-1" style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }}>六面体</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: isMonochrome ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.5)', background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
+                    6面贴图
+                  </span>
                   <div className="flex items-center gap-1">
                     <button
                       className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
@@ -9292,18 +9295,19 @@ export function InfiniteCanvas({
                       }}
                       title={hcg.isCollapsed ? '展开' : '折叠'}
                     >
-                      <svg className="w-4 h-4 transition-transform" style={{ color: isMonochrome ? '#3b82f6' : '#d4af37', transform: hcg.isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <svg className="w-4 h-4 transition-transform" style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37', transform: hcg.isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="6 9 12 15 18 9" />
                       </svg>
                     </button>
                     <button
-                      className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-red-500/20 transition-colors"
+                      className="p-1 rounded-md transition-colors"
                       onClick={(e) => { e.stopPropagation(); deleteHexCubeGroup(hcg.id); }}
                       title="关闭"
+                      style={{ color: isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)' }}
+                      onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
+                      onMouseLeave={e => (e.currentTarget.style.color = isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)')}
                     >
-                      <svg className="w-3.5 h-3.5" style={{ color: '#ef4444' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                      </svg>
+                      <X size={14} />
                     </button>
                   </div>
                 </div>
@@ -10397,7 +10401,7 @@ export function InfiniteCanvas({
       })()}
 
       {/* Floating pill toolbar - always on top (z-50) */}
-      <div className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 border rounded-2xl px-3 py-2 flex items-center gap-1.5 shadow-2xl ${
+      <div data-toolbar="bottom-toolbar" className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 border rounded-2xl px-3 py-2 flex items-center gap-1.5 shadow-2xl ${
         isMonochrome 
           ? 'bg-white border-gray-200/80' 
           : 'bg-[#1a1a1a] border-[#333]'
