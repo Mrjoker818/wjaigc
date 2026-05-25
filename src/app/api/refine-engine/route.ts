@@ -5,6 +5,53 @@ import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile,
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 
+// ─── Persist result image to local server ───
+// External API URLs may expire or be CORS-blocked; persisting locally ensures reliability
+async function persistResultImage(imageUrl: string): Promise<string> {
+  try {
+    // If already a local URL, no need to persist
+    if (imageUrl.startsWith('/api/serve-upload/') || imageUrl.startsWith('/uploads/')) {
+      return imageUrl;
+    }
+    // If data URL, upload to save-image API
+    if (imageUrl.startsWith('data:')) {
+      const resp = await fetch('http://localhost:5000/api/save-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.url) return data.url;
+      }
+      return imageUrl;  // Fallback to original
+    }
+    // If external HTTP URL, download and persist
+    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+      const imgResp = await fetch(imageUrl, { signal: AbortSignal.timeout(30000) });
+      if (imgResp.ok) {
+        const contentType = imgResp.headers.get('content-type') || 'image/png';
+        const buffer = Buffer.from(await imgResp.arrayBuffer());
+        const base64 = `data:${contentType};base64,${buffer.toString('base64')}`;
+        const resp = await fetch('http://localhost:5000/api/save-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: base64 }),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.url) return data.url;
+        }
+      }
+      return imageUrl;  // Fallback to original
+    }
+    return imageUrl;
+  } catch (err) {
+    console.warn('[refine-engine] Failed to persist result image:', err);
+    return imageUrl;  // Always fallback to original URL
+  }
+}
+
 // ─── Material Library ───
 const MATERIAL_LIBRARY: Record<string, { material: string; reflectIndex: number; renderFocus: string }> = {
   alcohol: {
@@ -498,21 +545,25 @@ async function processRefine(
         const fallbackResult = await fallbackResp.json();
         const fallbackParsed = parseResponseForProfile(fallbackResult, compatProfile);
         if (fallbackParsed.directImageUrls && fallbackParsed.directImageUrls.length > 0) {
+          updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
+          const persistedUrls = await Promise.all(fallbackParsed.directImageUrls.map(persistResultImage));
           updateTaskProgress(taskId, {
             status: 'completed',
             progress: 100,
             label: '精修完成',
-            result: { directImageUrls: fallbackParsed.directImageUrls },
+            result: { directImageUrls: persistedUrls },
           });
           return;
         } else if (fallbackParsed.taskIds && fallbackParsed.taskIds.length > 0) {
           updateTaskProgress(taskId, { progress: 60, label: '等待模型生成...' });
           const pollResult = await pollForResult(fallbackParsed.taskIds[0], params.provider.baseUrl, params.provider.apiKey, compatProfile);
+          updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
+          const persistedUrl = await persistResultImage(pollResult);
           updateTaskProgress(taskId, {
             status: 'completed',
             progress: 100,
             label: '精修完成',
-            result: { directImageUrls: [pollResult] },
+            result: { directImageUrls: [persistedUrl] },
           });
           return;
         } else {
@@ -529,21 +580,25 @@ async function processRefine(
     const parsed = parseResponseForProfile(result, compatProfile);
 
     if (parsed.directImageUrls && parsed.directImageUrls.length > 0) {
+      updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
+      const persistedUrls = await Promise.all(parsed.directImageUrls.map(persistResultImage));
       updateTaskProgress(taskId, {
         status: 'completed',
         progress: 100,
         label: '精修完成',
-        result: { directImageUrls: parsed.directImageUrls },
+        result: { directImageUrls: persistedUrls },
       });
     } else if (parsed.taskIds && parsed.taskIds.length > 0) {
       // Poll for async result
       updateTaskProgress(taskId, { progress: 50, label: '等待模型生成...' });
       const pollResult = await pollForResult(parsed.taskIds[0], params.provider.baseUrl, params.provider.apiKey, compatProfile);
+      updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
+      const persistedUrl = await persistResultImage(pollResult);
       updateTaskProgress(taskId, {
         status: 'completed',
         progress: 100,
         label: '精修完成',
-        result: { directImageUrls: [pollResult] },
+        result: { directImageUrls: [persistedUrl] },
       });
     } else {
       throw new Error('模型未返回图片结果');
@@ -560,16 +615,17 @@ async function pollForResult(
   apiKey: string,
   profile: ReturnType<typeof resolveCompatProfile>
 ): Promise<string> {
-  const maxAttempts = 60;
+  // ★ 增加轮询超时：部分模型生成耗时较长（如213秒），需要足够长的轮询时间
+  const maxAttempts = 120;  // 120 × 3s = 360s (6 minutes)
   const interval = 3000;
   for (let i = 0; i < maxAttempts; i++) {
     if (isTaskCancelled(taskId)) throw new Error('任务已取消');
     await new Promise(r => setTimeout(r, interval));
     try {
       const pollUrl = `${baseUrl}/tasks/${taskId}`;
-      const resp = await fetch(pollUrl, {
+      const resp = await fetchWithV1Retry(baseUrl, `/tasks/${taskId}`, {
         headers: { Authorization: `Bearer ${apiKey}` },
-      });
+      }, true, 15000);
       if (resp.ok) {
         const data = await resp.json();
         const parsed = parseResponseForProfile(data, profile);

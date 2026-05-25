@@ -163,6 +163,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
 
   // ─── Switch tab when image is first uploaded (not when user manually navigates) ───
   const switchToSettingsRef = useRef(false);
+  const pollAttemptRef = useRef(0);
   useEffect(() => {
     if (switchToSettingsRef.current && sourceImage) {
       setActiveTab('settings');
@@ -276,8 +277,17 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
 
       if (data.taskId) {
         setProgressLabel('精修处理中...');
+        pollAttemptRef.current = 0;
         setProgress(30);
         const pollInterval = setInterval(async () => {
+          pollAttemptRef.current++;
+          // Safety: stop polling after 7 minutes (210 attempts × 2s)
+          if (pollAttemptRef.current > 210) {
+            clearInterval(pollInterval);
+            setProgressLabel('超时，请重试');
+            setIsProcessing(false);
+            return;
+          }
           try {
             const pollResp = await fetch('/api/poll-task', {
               method: 'POST',
@@ -296,16 +306,25 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
               setIsProcessing(false);
             } else if (pollData.status === 'failed') {
               clearInterval(pollInterval);
-              setProgressLabel('精修失败');
+              setProgressLabel(pollData.error || '精修失败');
+              setIsProcessing(false);
+              setResults([]);
+            } else if (pollData.status === 'cancelled') {
+              clearInterval(pollInterval);
+              setProgressLabel('任务已取消');
               setIsProcessing(false);
               setResults([]);
             } else {
-              setProgress(prev => Math.min(prev + 5, 90));
+              // Still processing — update progress but don't stop polling
+              setProgress(prev => Math.min(prev + 2, 95));
               if (pollData.progress) setProgressLabel(pollData.label || '精修处理中...');
+              else if (pollData.status === 'processing' || pollData.status === 'queued') {
+                setProgressLabel(pollData.status === 'queued' ? '排队中...' : '精修处理中...');
+              }
             }
-          } catch {
-            clearInterval(pollInterval);
-            setIsProcessing(false);
+          } catch (pollErr) {
+            // Don't stop polling on transient network errors — just log and continue
+            console.warn('[refine-engine] Poll error (will retry):', pollErr);
           }
         }, 2000);
       } else if (data.directImageUrls || data.imageUrls) {
