@@ -8,6 +8,7 @@ import {
   updateManagedUser,
 } from '@/lib/server-auth';
 import type { User } from '@/lib/user-types';
+import { dbListUserData, dbGetUserData, dbDeleteUserData } from '@/lib/db-storage';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,12 +40,13 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json() as {
-      action?: 'create' | 'update' | 'delete';
+      action?: 'create' | 'update' | 'delete' | 'listUserData' | 'getUserData' | 'deleteUserData';
       userId?: string;
       name?: string;
       password?: string;
       email?: string;
       updates?: Record<string, unknown>;
+      dataKey?: string;
     };
 
     if (body.action === 'create') {
@@ -78,6 +80,30 @@ export async function POST(request: NextRequest) {
       }
       const deleted = await deleteManagedUser(body.userId);
       return NextResponse.json({ success: deleted, deleted });
+    }
+
+    if (body.action === 'listUserData') {
+      if (!body.userId) {
+        return NextResponse.json({ success: false, error: 'Missing userId' }, { status: 400 });
+      }
+      const dataKeys = await dbListUserData(body.userId);
+      return NextResponse.json({ success: true, dataKeys });
+    }
+
+    if (body.action === 'getUserData') {
+      if (!body.userId || !body.dataKey) {
+        return NextResponse.json({ success: false, error: 'Missing userId or dataKey' }, { status: 400 });
+      }
+      const value = await dbGetUserData(body.userId, String(body.dataKey));
+      return NextResponse.json({ success: true, dataKey: body.dataKey, value });
+    }
+
+    if (body.action === 'deleteUserData') {
+      if (!body.userId || !body.dataKey) {
+        return NextResponse.json({ success: false, error: 'Missing userId or dataKey' }, { status: 400 });
+      }
+      const deleted = await dbDeleteUserData(body.userId, String(body.dataKey));
+      return NextResponse.json({ success: deleted });
     }
 
     const users = await listManagedUsers();

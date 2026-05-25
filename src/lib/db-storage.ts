@@ -218,6 +218,22 @@ export async function dbSetUserData(userId: string, key: string, value: unknown)
   }
 }
 
+export async function dbListUserData(userId: string): Promise<{ dataKey: string; updatedAt: number }[]> {
+  try {
+    const result = await execSql(
+      'SELECT data_key, updated_at FROM wujie_user_data WHERE user_id = $1 ORDER BY data_key ASC',
+      [userId]
+    );
+    return (result.rows as { data_key: string; updated_at: number }[]).map(r => ({
+      dataKey: r.data_key,
+      updatedAt: r.updated_at,
+    }));
+  } catch (e) {
+    console.error('[db-storage] dbListUserData error:', e);
+    return [];
+  }
+}
+
 export async function dbDeleteUserData(userId: string, key?: string): Promise<boolean> {
   try {
     if (key) {

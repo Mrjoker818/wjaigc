@@ -7,7 +7,7 @@ import type { NextRequest } from 'next/server';
 import type { User } from './user-types';
 import { ensureUserDataDirs, getUserDataDir } from './server-user-storage';
 import { getServerSystemDir, getServerUsersDir } from './server-data-root';
-import { dbReadUsers, dbWriteUsers } from './db-storage';
+import { dbReadUsers, dbWriteUsers, dbDeleteUser, dbDeleteUserData } from './db-storage';
 
 const SYSTEM_DIR = getServerSystemDir();
 const USERS_PATH = path.join(SYSTEM_DIR, 'users.json');
@@ -337,6 +337,10 @@ export async function deleteManagedUser(userId: string): Promise<boolean> {
 
   file.users.splice(index, 1);
   await writeStore(file);
+
+  // Also delete from database directly (writeStore only upserts, never deletes)
+  await dbDeleteUser(userId);
+  await dbDeleteUserData(userId);
 
   const userDir = path.resolve(getUserDataDir(userId));
   const rootDir = path.resolve(getServerUsersDir());

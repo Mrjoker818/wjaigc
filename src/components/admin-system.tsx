@@ -70,6 +70,14 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
   const [isTesting, setIsTesting] = useState(false);
   const [isTestingNew, setIsTestingNew] = useState(false);
   const [testNewResult, setTestNewResult] = useState<{ success: boolean; message: string; modelCount?: number; error?: string } | null>(null);
+
+  // Data tab state
+  const [selectedDataUser, setSelectedDataUser] = useState<string | null>(null);
+  const [userDataKeys, setUserDataKeys] = useState<{ dataKey: string; updatedAt: number }[]>([]);
+  const [userDataLoading, setUserDataLoading] = useState(false);
+  const [viewingDataKey, setViewingDataKey] = useState<string | null>(null);
+  const [viewingDataValue, setViewingDataValue] = useState<unknown>(null);
+  const [viewingDataLoading, setViewingDataLoading] = useState(false);
   const [verifyResult, setVerifyResult] = useState<{ providerId: string; success: boolean; summary: string; tests: Array<{ name: string; status: string; detail: string }> } | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [apiBalances, setApiBalances] = useState<Array<{
@@ -102,6 +110,70 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
       setProviders([]);
     }
   }, []);
+
+  const loadUserData = useCallback(async (userId: string) => {
+    setSelectedDataUser(userId);
+    setUserDataKeys([]);
+    setViewingDataValue(null);
+    setViewingDataKey(null);
+    try {
+      const response = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'list-data', userId }),
+        credentials: 'include',
+      });
+      const data = await response.json();
+      if (data.success) {
+        setUserDataKeys(data.keys || []);
+      }
+    } catch {
+      setUserDataKeys([]);
+    }
+  }, []);
+
+  const loadDataDetail = useCallback(async (userId: string, key: string) => {
+    setViewingDataValue(null);
+    setViewingDataKey(key);
+    setViewingDataLoading(true);
+    try {
+      const response = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'get-data', userId, key }),
+        credentials: 'include',
+      });
+      const data = await response.json();
+      if (data.success) {
+        setViewingDataValue(data.value);
+      } else {
+        setViewingDataValue({ error: data.error || '加载失败' });
+      }
+    } catch {
+      setViewingDataValue({ error: '请求失败' });
+    } finally {
+      setViewingDataLoading(false);
+    }
+  }, []);
+
+  const deleteUserData = useCallback(async (userId: string, key: string) => {
+    try {
+      const response = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete-data', userId, key }),
+        credentials: 'include',
+      });
+      const data = await response.json();
+      if (data.success) {
+        await loadUserData(userId);
+        if (viewingDataKey === key) {
+          setViewingDataValue(null);
+          setViewingDataKey(null);
+        }
+      }
+    } catch { /* ignore */ }
+  }, [loadUserData, viewingDataKey]);
 
   const refreshBalances = useCallback(async () => {
     try {
@@ -924,16 +996,94 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
 
           {activeTab === 'data' && (
             <div className={`rounded-xl border p-5 ${softClass}`}>
-              <h3 className="text-sm font-semibold mb-3">用户数据文件夹</h3>
-              <div className="space-y-2">
-                {users.map(user => (
-                  <div key={user.id} className={`rounded-lg px-3 py-2 flex justify-between text-sm ${isGold ? 'bg-[#0d0d0d]' : 'bg-white'}`}>
-                    <span>{user.name}</span>
-                    <span className={isGold ? 'text-[#777]' : 'text-gray-500'}>{user.storageFolder || `users/${user.id}`}</span>
+              <h3 className="text-sm font-semibold mb-3">用户数据管理</h3>
+              <div className="flex gap-4 min-h-[400px]">
+                {/* Left: User list */}
+                <div className="w-1/3 border-r pr-3">
+                  <div className={`text-xs font-medium mb-2 ${isGold ? 'text-[#999]' : 'text-gray-500'}`}>选择用户</div>
+                  <div className="space-y-1 max-h-[500px] overflow-y-auto">
+                    {users.map(user => (
+                      <button
+                        key={user.id}
+                        onClick={() => loadUserData(user.id)}
+                        className={`w-full text-left rounded-lg px-3 py-2 text-sm transition-colors ${
+                          selectedDataUser === user.id
+                            ? isGold ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-primary/10 text-primary'
+                            : isGold ? 'bg-[#0d0d0d] hover:bg-[#1a1a1a] text-gray-200' : 'bg-white hover:bg-gray-50 text-gray-700'
+                        }`}
+                      >
+                        <div className="font-medium">{user.name}</div>
+                        <div className={`text-xs mt-0.5 ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>{user.id}</div>
+                      </button>
+                    ))}
                   </div>
-                ))}
+                </div>
+                {/* Right: Data keys + detail */}
+                <div className="flex-1 flex gap-4 min-w-0">
+                  {/* Data keys list */}
+                  <div className="w-1/2 border-r pr-3">
+                    <div className={`text-xs font-medium mb-2 ${isGold ? 'text-[#999]' : 'text-gray-500'}`}>
+                      {selectedDataUser ? '数据条目' : '请先选择用户'}
+                    </div>
+                    {selectedDataUser ? (
+                      userDataKeys.length > 0 ? (
+                        <div className="space-y-1 max-h-[500px] overflow-y-auto">
+                          {userDataKeys.map((dk) => (
+                            <div
+                              key={dk.dataKey}
+                              className={`group rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors flex items-center justify-between gap-2 ${
+                                viewingDataKey === dk.dataKey
+                                  ? isGold ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-primary/10 text-primary'
+                                  : isGold ? 'bg-[#0d0d0d] hover:bg-[#1a1a1a]' : 'bg-white hover:bg-gray-50'
+                              }`}
+                              onClick={() => loadDataDetail(selectedDataUser, dk.dataKey)}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate font-medium">{dk.dataKey}</div>
+                                <div className={`text-xs mt-0.5 ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>
+                                  {dk.updatedAt ? new Date(dk.updatedAt).toLocaleString('zh-CN') : ''}
+                                </div>
+                              </div>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); deleteUserData(selectedDataUser, dk.dataKey); }}
+                                className={`opacity-0 group-hover:opacity-100 shrink-0 p-1 rounded transition-opacity ${
+                                  isGold ? 'hover:bg-red-500/20 text-red-400' : 'hover:bg-red-50 text-red-500'
+                                }`}
+                                title="删除此数据"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className={`text-xs ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>该用户暂无数据</div>
+                      )
+                    ) : (
+                      <div className={`text-xs ${isGold ? 'text-[#555]' : 'text-gray-300'}`}>← 点击左侧用户查看数据</div>
+                    )}
+                  </div>
+                  {/* Data detail */}
+                  <div className="w-1/2 min-w-0">
+                    <div className={`text-xs font-medium mb-2 ${isGold ? 'text-[#999]' : 'text-gray-500'}`}>
+                      {viewingDataKey ? `数据详情: ${viewingDataKey}` : '数据内容'}
+                    </div>
+                    {viewingDataLoading ? (
+                      <div className={`text-xs ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>加载中...</div>
+                    ) : viewingDataValue !== null ? (
+                      <div className={`rounded-lg p-3 text-xs font-mono max-h-[500px] overflow-auto ${
+                        isGold ? 'bg-[#0d0d0d] text-gray-300' : 'bg-gray-50 text-gray-700'
+                      }`}>
+                        <pre className="whitespace-pre-wrap break-all">{typeof viewingDataValue === 'string' ? viewingDataValue : JSON.stringify(viewingDataValue, null, 2)}</pre>
+                      </div>
+                    ) : (
+                      <div className={`text-xs ${isGold ? 'text-[#555]' : 'text-gray-300'}`}>
+                        {selectedDataUser ? '← 点击左侧条目查看详情' : ''}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-              <p className={`text-xs mt-4 ${isGold ? 'text-[#777]' : 'text-gray-500'}`}>用户登录或创建时会在服务器 `data/users/{'{userId}'}` 下创建对应文件夹；生成、聊天、上传和导出记录会按用户隔离保存，并可通过 .wujie 文件导入导出。</p>
             </div>
           )}
         </div>
