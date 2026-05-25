@@ -331,6 +331,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         top: position.y,
         width: 460,
         maxHeight: '85vh',
+        borderRadius: 12,
         backgroundColor: bgPanel,
         border: isDraggingState
           ? `2px solid ${accentColor}`
