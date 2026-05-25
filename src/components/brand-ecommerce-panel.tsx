@@ -28,8 +28,13 @@ interface ImageModel {
   name: string;
   providerId: string;
   providerName: string;
-  providerBaseUrl: string;
-  providerApiKeyPreview: string;
+}
+
+interface LlmModel {
+  id: string;
+  name: string;
+  providerId: string;
+  providerName: string;
 }
 
 interface GenerateResult {
@@ -68,20 +73,29 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   const [selectedTemplates, setSelectedTemplates] = useState<Set<string>>(new Set());
   const [models, setModels] = useState<ImageModel[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
+  const [llmModels, setLlmModels] = useState<LlmModel[]>([]);
+  const [selectedLlmModel, setSelectedLlmModel] = useState('');
   const [productDesc, setProductDesc] = useState('');
   const [styleExtra, setStyleExtra] = useState('');
+  const [mainText, setMainText] = useState('');
+  const [secondaryText, setSecondaryText] = useState('');
+  const [accentSymbol, setAccentSymbol] = useState('');
   const [sceneDesc, setSceneDesc] = useState('modern minimalist interior');
   const [brandColors, setBrandColors] = useState<string[]>([]);
   const [colorInput, setColorInput] = useState('');
   const [refImage, setRefImage] = useState(referenceImageUrl || '');
   const [refImageFile, setRefImageFile] = useState<File | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isAssisting, setIsAssisting] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
   const [results, setResults] = useState<GenerateResult[]>([]);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [activeTab, setActiveTab] = useState<'template' | 'settings' | 'results'>('template');
+  const [showLlmDropdown, setShowLlmDropdown] = useState(false);
+  const [llmAssisting, setLlmAssisting] = useState(false);
+  const llmDropdownRef = useRef<HTMLDivElement>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
@@ -108,6 +122,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   // ─── Load models from admin API ──────────────────────────────
 
   useEffect(() => {
+    // Load image models
     fetch('/api/models?type=image')
       .then(r => r.json())
       .then(data => {
@@ -122,8 +137,6 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
               name: m.name,
               providerId: m.providerId || '',
               providerName: prov?.name || '',
-              providerBaseUrl: prov?.baseUrl || '',
-              providerApiKeyPreview: prov?.apiKeyPreview || '',
             };
           });
           setModels(mapped);
@@ -132,6 +145,34 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
             setSelectedModel(saved);
           } else if (mapped.length) {
             setSelectedModel(mapped[0].id);
+          }
+        }
+      })
+      .catch(() => {});
+
+    // Load LLM models
+    fetch('/api/models?type=chat')
+      .then(r => r.json())
+      .then(data => {
+        const providers: ProviderInfo[] = data.providers || [];
+        const providerMap = new Map(providers.map((p: ProviderInfo) => [p.id, p]));
+        const modelList = data.models || [];
+        if (modelList.length) {
+          const mapped = modelList.map((m: { id: string; name: string; providerId?: string }) => {
+            const prov = providerMap.get(m.providerId || '');
+            return {
+              id: m.id,
+              name: m.name,
+              providerId: m.providerId || '',
+              providerName: prov?.name || '',
+            };
+          });
+          setLlmModels(mapped);
+          const saved = localStorage.getItem('wujie_selected_llm_model');
+          if (saved && mapped.some((m: LlmModel) => m.id === saved)) {
+            setSelectedLlmModel(saved);
+          } else if (mapped.length) {
+            setSelectedLlmModel(mapped[0].id);
           }
         }
       })
@@ -296,6 +337,42 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
     }
     setIsGenerating(false);
   }, [taskId]);
+
+  // ─── LLM AI Assist ────────────────────────────────────────────
+
+  const handleAiAssist = useCallback(async () => {
+    if (!selectedLlmModel || !productDesc.trim()) return;
+    setIsAssisting(true);
+    try {
+      const resp = await fetch('/api/brand-ecommerce', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'assist',
+          productDesc: productDesc.trim(),
+          sceneDesc: sceneDesc.trim(),
+          templateIds: Array.from(selectedTemplates),
+          model: selectedLlmModel,
+        }),
+      });
+      const data = await resp.json();
+      if (data.error) {
+        console.error('AI assist error:', data.error);
+      } else if (data.suggestions) {
+        const s = data.suggestions;
+        if (s.mainText && !mainText) setMainText(s.mainText);
+        if (s.secondaryText && !secondaryText) setSecondaryText(s.secondaryText);
+        if (s.accentSymbol && !accentSymbol) setAccentSymbol(s.accentSymbol);
+        if (s.styleExtra && !styleExtra.trim()) setStyleExtra(s.styleExtra);
+        if (s.sceneDesc && !sceneDesc.trim()) setSceneDesc(s.sceneDesc);
+        if (s.subjectAction) setProductDesc(prev => prev.includes(s.subjectAction) ? prev : `${prev}，${s.subjectAction}`);
+        if (s.backgroundElements) setSceneDesc(prev => prev ? `${prev}，${s.backgroundElements}` : s.backgroundElements);
+      }
+    } catch (err) {
+      console.error('AI assist failed:', err);
+    }
+    setIsAssisting(false);
+  }, [selectedLlmModel, productDesc, sceneDesc, selectedTemplates, mainText, secondaryText, accentSymbol, styleExtra]);
 
   // ─── Category labels ─────────────────────────────────────────
 
@@ -507,12 +584,13 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
                           }`}
                         >
                           <div className="font-medium">{m.name}</div>
-                          <div className={`text-[10px] mt-0.5 ${textMuted}`}>
-                            {m.providerName && <span className="mr-1.5">{m.providerName}</span>}
-                            {m.providerBaseUrl && <span className="font-mono opacity-60">{m.providerBaseUrl.replace(/^https?:\/\//, '')}</span>}
-                          </div>
-                          {m.providerApiKeyPreview && (
-                            <div className={`text-[10px] font-mono ${textMuted} opacity-50`}>Key: {m.providerApiKeyPreview}</div>
+                          {m.providerName && (
+                            <div className={`text-[10px] mt-0.5 ${textMuted}`}>
+                              <span className="inline-flex items-center gap-1">
+                                <span className={`inline-block w-1.5 h-1.5 rounded-full ${isMonochrome ? 'bg-gray-400' : 'bg-primary'}`}></span>
+                                {m.providerName}
+                              </span>
+                            </div>
                           )}
                         </button>
                       )) : (
@@ -525,6 +603,79 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
                 </div>
               </div>
 
+              {/* LLM Model selection */}
+              <div>
+                <label className={`block text-xs font-medium ${textSub} mb-1.5`}>LLM 辅助模型 <span className={`text-[10px] ${textMuted}`}>(可选，AI优化提示词)</span></label>
+                <div className="relative" ref={llmDropdownRef}>
+                  <button
+                    onClick={() => setShowLlmDropdown(!showLlmDropdown)}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm ${inputBg} ${text} transition-colors ${inputFocus} focus:outline-none focus:ring-2`}
+                  >
+                    <span className="truncate">
+                      {selectedLlmModel
+                        ? (llmModels.find(m => m.id === selectedLlmModel)?.name || selectedLlmModel)
+                        : '选择LLM模型...'}
+                    </span>
+                    <ChevronDown size={14} className={textMuted} />
+                  </button>
+                  {showLlmDropdown && (
+                    <div className={`absolute z-50 top-full mt-1 w-full rounded-lg border shadow-xl max-h-64 overflow-y-auto ${
+                      isMonochrome ? 'bg-white border-gray-200' : 'bg-[#222] border-white/[0.1]'
+                    }`}>
+                      {llmModels.length ? llmModels.map(m => (
+                        <button
+                          key={m.id}
+                          onClick={() => {
+                            setSelectedLlmModel(m.id);
+                            setShowLlmDropdown(false);
+                          }}
+                          className={`w-full text-left px-3 py-2.5 text-sm transition-colors ${
+                            m.id === selectedLlmModel
+                              ? isMonochrome ? 'bg-blue-50 text-blue-600' : 'bg-[#d4af37]/10 text-[#d4af37]'
+                              : isMonochrome ? 'text-gray-700 hover:bg-gray-50' : 'text-gray-300 hover:bg-[#2a2a2a]'
+                          }`}
+                        >
+                          <div className="font-medium">{m.name}</div>
+                          {m.providerName && (
+                            <div className={`text-[10px] mt-0.5 ${textMuted}`}>
+                              <span className="inline-flex items-center gap-1">
+                                <span className={`inline-block w-1.5 h-1.5 rounded-full ${isMonochrome ? 'bg-gray-400' : 'bg-primary'}`}></span>
+                                {m.providerName}
+                              </span>
+                            </div>
+                          )}
+                        </button>
+                      )) : (
+                        <div className={`px-3 py-4 text-center text-sm ${textMuted}`}>
+                          暂无可用LLM模型，请在管理员后台配置
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* AI Assist Design */}
+              {selectedLlmModel && (
+                <div>
+                  <button
+                    onClick={handleAiAssist}
+                    disabled={isAssisting || !productDesc.trim()}
+                    className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors ${
+                      isAssisting
+                        ? isMonochrome ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-[#2a2a2a] text-gray-500 border-white/[0.05] cursor-not-allowed'
+                        : isMonochrome ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100' : 'bg-[#d4af37]/10 text-[#d4af37] border-[#d4af37]/20 hover:bg-[#d4af37]/20'
+                    } ${!productDesc.trim() ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    {isAssisting ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                    {isAssisting ? 'AI 优化中...' : 'AI 辅助优化设计'}
+                  </button>
+                  <p className={`text-[10px] mt-1 ${textMuted}`}>LLM将优化商品描述、补充场景和风格关键词</p>
+                </div>
+              )}
+
+              <div className={`border-t ${isMonochrome ? 'border-gray-200' : 'border-white/[0.06]'}`}></div>
+
               {/* Product description */}
               <div>
                 <label className={`block text-xs font-medium ${textSub} mb-1.5`}>商品描述 <span className="text-red-400">*</span></label>
@@ -534,6 +685,42 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
                   placeholder="描述你的商品，如：高端无线降噪耳机，磨砂黑色，金属质感..."
                   rows={3}
                   className={`w-full px-3 py-2.5 rounded-lg border text-sm ${inputBg} ${text} ${inputFocus} focus:outline-none focus:ring-2 resize-none placeholder:${isMonochrome ? 'text-gray-400' : 'text-gray-600'}`}
+                />
+              </div>
+
+              {/* Main text / Secondary text */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={`block text-xs font-medium ${textSub} mb-1.5`}>主标题文字</label>
+                  <input
+                    type="text"
+                    value={mainText}
+                    onChange={e => setMainText(e.target.value)}
+                    placeholder="如：新品上市"
+                    className={`w-full px-3 py-2.5 rounded-lg border text-sm ${inputBg} ${text} ${inputFocus} focus:outline-none focus:ring-2`}
+                  />
+                </div>
+                <div>
+                  <label className={`block text-xs font-medium ${textSub} mb-1.5`}>副标题文字</label>
+                  <input
+                    type="text"
+                    value={secondaryText}
+                    onChange={e => setSecondaryText(e.target.value)}
+                    placeholder="如：限时特惠"
+                    className={`w-full px-3 py-2.5 rounded-lg border text-sm ${inputBg} ${text} ${inputFocus} focus:outline-none focus:ring-2`}
+                  />
+                </div>
+              </div>
+
+              {/* Accent symbol */}
+              <div>
+                <label className={`block text-xs font-medium ${textSub} mb-1.5`}>强调符号</label>
+                <input
+                  type="text"
+                  value={accentSymbol}
+                  onChange={e => setAccentSymbol(e.target.value)}
+                  placeholder="如：✦ ★ ♦ ◆ →"
+                  className={`w-full px-3 py-2.5 rounded-lg border text-sm ${inputBg} ${text} ${inputFocus} focus:outline-none focus:ring-2`}
                 />
               </div>
 
