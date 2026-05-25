@@ -217,6 +217,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   // ★ LLM自动区域识别 + 自动Mask
   const [autoMaskPreview, setAutoMaskPreview] = useState<string | null>(null); // 预览用data URL
 
+  // ★ 输入框展开状态
+  const [promptExpanded, setPromptExpanded] = useState(false);
+
   const [pendingAutoRegions, setPendingAutoRegions] = useState<Array<{ label: string; bounds: { x: number; y: number; width: number; height: number } }>>([]);
 
   // 当前选中的图像模型
@@ -1754,14 +1757,22 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           </div>
 
           {/* 编辑指令 */}
-          <div>
+          <div className="relative">
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="描述修改内容，如：把背景换成日落..."
-              className={`w-full h-14 ${thInput} rounded-lg px-3 py-2 text-sm ${thTextPlaceholder} resize-none transition-colors`}
+              className={`w-full ${promptExpanded ? 'h-32' : 'h-14'} ${thInput} rounded-lg px-3 py-2 text-sm ${thTextPlaceholder} resize-none transition-all duration-200`}
             />
+            <button
+              type="button"
+              onClick={() => setPromptExpanded(!promptExpanded)}
+              className={`absolute right-1.5 ${promptExpanded ? 'bottom-1.5' : 'bottom-1.5'} p-0.5 rounded ${isMonochrome ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-[#2a2a2a] text-[#555]'} transition-colors`}
+              title={promptExpanded ? '收起输入框' : '展开输入框'}
+            >
+              {promptExpanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+            </button>
             <p className={`text-xs ${thTextMuted} mt-0.5`}>Enter 提交 · Shift+Enter 换行</p>
           </div>
 
@@ -1889,8 +1900,8 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             </div>
           )}
 
-          {/* 参数行 - 画面比例/质量 两列 + 生图数量 */}
-          <div className="grid grid-cols-2 gap-2.5">
+          {/* 参数行 - 画面比例/质量/生图数量 一行三列 */}
+          <div className="grid grid-cols-3 gap-2">
             <div>
               <label className={`text-xs ${thTextSecondary} mb-1 block`}>画面比例</label>
               <select
