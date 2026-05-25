@@ -1,0 +1,1222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>字境大师 Pro - 无界AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        surface: '#0a0a0a',
+        'surface-container': '#141414',
+        'surface-elevated': '#1c1c1c',
+        'on-surface': '#f5f5f5',
+        'on-surface-variant': '#a1a1aa',
+        primary: '#d4af37',
+        'primary-hover': '#e5c34a',
+        'on-primary': '#0a0a0a',
+        outline: '#2a2a2a',
+        'outline-variant': '#1a1a1a',
+        'gold-dark': '#8b7225',
+        'gold-light': '#f0d060',
+      },
+      fontFamily: {
+        sans: ['"Noto Sans SC"', 'system-ui', 'sans-serif'],
+      }
+    }
+  }
+}
+</script>
+<style>
+@theme {
+  --color-surface: #0a0a0a;
+  --color-surface-container: #141414;
+  --color-on-surface: #f5f5f5;
+  --color-on-surface-variant: #a1a1aa;
+  --color-primary: #d4af37;
+  --color-on-primary: #0a0a0a;
+  --color-outline: #2a2a2a;
+  --color-outline-variant: #1a1a1a;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Noto Sans SC', system-ui, sans-serif;
+  background: #0a0a0a;
+  color: #f5f5f5;
+  overflow: hidden;
+  height: 100vh;
+}
+
+/* Scrollbar styles */
+.custom-scrollbar::-webkit-scrollbar { width: 5px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 10px; }
+.custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
+
+/* Chip button base */
+.chip-btn {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid #2a2a2a;
+  background: #141414;
+  color: #a1a1aa;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  user-select: none;
+}
+.chip-btn:hover {
+  border-color: #d4af37;
+  color: #d4af37;
+  background: rgba(212,175,55,0.08);
+}
+.chip-btn.active {
+  border-color: #d4af37;
+  background: rgba(212,175,55,0.15);
+  color: #d4af37;
+  box-shadow: 0 0 8px rgba(212,175,55,0.15);
+}
+
+/* Tab button */
+.tab-btn {
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #a1a1aa;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+}
+.tab-btn:hover { color: #f5f5f5; }
+.tab-btn.active {
+  color: #d4af37;
+  border-bottom-color: #d4af37;
+}
+
+/* Gold gradient button */
+.btn-gold {
+  background: linear-gradient(135deg, #d4af37, #b8972e, #e5c34a);
+  color: #0a0a0a;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+.btn-gold:hover {
+  box-shadow: 0 0 20px rgba(212,175,55,0.4), 0 0 40px rgba(212,175,55,0.15);
+  transform: translateY(-1px);
+}
+.btn-gold::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(45deg, transparent, rgba(255,255,255,0.1), transparent);
+  transform: rotate(45deg) translateX(-100%);
+  transition: transform 0.6s ease;
+}
+.btn-gold:hover::after { transform: rotate(45deg) translateX(100%); }
+
+/* Secondary button */
+.btn-secondary {
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid #2a2a2a;
+  background: #1c1c1c;
+  color: #d4af37;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-secondary:hover {
+  border-color: #d4af37;
+  background: rgba(212,175,55,0.1);
+}
+
+/* Toggle switch */
+.toggle-switch {
+  width: 40px;
+  height: 22px;
+  border-radius: 11px;
+  background: #2a2a2a;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.3s ease;
+}
+.toggle-switch.active { background: #d4af37; }
+.toggle-switch::after {
+  content: '';
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #f5f5f5;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.3s ease;
+}
+.toggle-switch.active::after { transform: translateX(18px); }
+
+/* Card glow on hover */
+.plan-card {
+  border-left: 3px solid #d4af37;
+  background: #141414;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+.plan-card:hover {
+  background: #1c1c1c;
+  box-shadow: 0 0 15px rgba(212,175,55,0.12), 0 4px 12px rgba(0,0,0,0.3);
+  border-left-color: #e5c34a;
+}
+
+/* Image card overlay */
+.image-card {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 1px solid #2a2a2a;
+  transition: all 0.3s ease;
+}
+.image-card:hover { border-color: #d4af37; }
+.image-card .overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.image-card:hover .overlay { opacity: 1; }
+
+/* Skeleton loading */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, #1c1c1c 25%, #2a2a2a 50%, #1c1c1c 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 6px;
+}
+
+/* Category tab scroll */
+.style-tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+.style-tabs::-webkit-scrollbar { display: none; }
+.style-tab {
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid #2a2a2a;
+  background: transparent;
+  color: #a1a1aa;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.style-tab:hover { border-color: #d4af37; color: #d4af37; }
+.style-tab.active {
+  background: rgba(212,175,55,0.15);
+  border-color: #d4af37;
+  color: #d4af37;
+}
+
+/* Color swatch */
+.color-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: all 0.2s ease;
+  position: relative;
+}
+.color-swatch:hover { transform: scale(1.15); }
+.color-swatch.active { border-color: #d4af37; box-shadow: 0 0 8px rgba(212,175,55,0.3); }
+
+/* Floating window animation */
+@keyframes panelSlideUp {
+  from { opacity: 0; transform: translateY(30px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.panel-enter { animation: panelSlideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+/* Collapsible section */
+.collapse-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease;
+}
+.collapse-content.expanded { max-height: 600px; }
+
+/* History item hover */
+.history-item {
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #1a1a1a;
+  background: #141414;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+.history-item:hover {
+  border-color: #2a2a2a;
+  background: #1c1c1c;
+}
+.history-item .history-actions {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.history-item:hover .history-actions { opacity: 1; }
+
+/* Prompt area */
+.prompt-area {
+  background: #0a0a0a;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 16px;
+  font-size: 13px;
+  line-height: 1.8;
+  color: #e5e5e5;
+  min-height: 160px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.prompt-area-gold {
+  border-color: rgba(212,175,55,0.4);
+  box-shadow: inset 0 0 20px rgba(212,175,55,0.03);
+}
+
+/* Toolbar button */
+.toolbar-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: #1c1c1c;
+  border: 1px solid #2a2a2a;
+  color: #a1a1aa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-weight: 700;
+  font-size: 18px;
+}
+.toolbar-btn:hover {
+  border-color: #d4af37;
+  color: #d4af37;
+  background: rgba(212,175,55,0.08);
+}
+.toolbar-btn.active {
+  background: rgba(212,175,55,0.15);
+  border-color: #d4af37;
+  color: #d4af37;
+  box-shadow: 0 0 12px rgba(212,175,55,0.2);
+}
+
+/* Tooltip */
+[data-tooltip] { position: relative; }
+[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  background: #2a2a2a;
+  color: #f5f5f5;
+  font-size: 11px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 999;
+}
+
+/* Fade-in for tab content */
+.tab-content { display: none; }
+.tab-content.active { display: block; animation: fadeIn 0.25s ease; }
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Close button */
+.close-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid #2a2a2a;
+  background: transparent;
+  color: #a1a1aa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.close-btn:hover {
+  background: rgba(255,60,60,0.1);
+  border-color: rgba(255,60,60,0.3);
+  color: #ff5555;
+}
+</style>
+</head>
+<body class="flex items-center justify-center h-screen bg-surface">
+
+<!-- Canvas background simulation -->
+<div class="fixed inset-0 bg-surface" style="background-image: radial-gradient(circle at 50% 50%, rgba(212,175,55,0.02) 0%, transparent 70%);">
+  <!-- Grid dots -->
+  <svg class="absolute inset-0 w-full h-full opacity-[0.03]">
+    <defs>
+      <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+        <circle cx="20" cy="20" r="1" fill="#d4af37"/>
+      </pattern>
+    </defs>
+    <rect width="100%" height="100%" fill="url(#grid)"/>
+  </svg>
+</div>
+
+<!-- Main floating window -->
+<div id="fontDesignPanel" class="panel-enter relative flex flex-col rounded-xl overflow-hidden shadow-2xl" style="width: 1100px; height: 720px; background: #0f0f0f; border: 1px solid #2a2a2a; box-shadow: 0 0 60px rgba(0,0,0,0.6), 0 0 20px rgba(212,175,55,0.05);">
+
+  <!-- Window header -->
+  <header class="flex items-center justify-between px-5 py-3 border-b" style="border-color: #1a1a1a; background: linear-gradient(180deg, #161616, #0f0f0f);">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm" style="background: linear-gradient(135deg, #d4af37, #8b7225); color: #0a0a0a;">字</div>
+      <div>
+        <h1 class="text-sm font-semibold text-on-surface tracking-wide">字境大师 Pro</h1>
+        <p class="text-[11px] text-on-surface-variant mt-0.5">中文标题字 / KV文字 / 封面字 / 文字Logo 设计器</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <button id="btnMinimize" class="close-btn" data-tooltip="最小化">
+        <i data-lucide="minus" class="w-4 h-4"></i>
+      </button>
+      <button id="btnClosePanel" class="close-btn" data-tooltip="关闭">
+        <i data-lucide="x" class="w-4 h-4"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main content: left + right -->
+  <div class="flex flex-1 overflow-hidden">
+
+    <!-- ==================== LEFT PANEL: Parameters (38%) ==================== -->
+    <div id="leftPanel" class="flex flex-col border-r custom-scrollbar" style="width: 38%; border-color: #1a1a1a; overflow-y: auto;">
+
+      <div class="flex-1 p-4 space-y-4">
+
+        <!-- 1. Text Input -->
+        <div>
+          <label class="block text-xs font-medium text-on-surface-variant mb-2">
+            <i data-lucide="type" class="w-3.5 h-3.5 inline-block mr-1 text-primary align-text-bottom"></i>
+            输入要设计的中文文字
+          </label>
+          <div class="relative">
+            <input id="textInput" type="text" value="好好养自己" placeholder="请输入中文标题、活动主题、封面标题或文字Logo名称" class="w-full px-3 py-2.5 rounded-lg text-sm text-on-surface placeholder-on-surface-variant/50 outline-none transition-all" style="background: #0a0a0a; border: 1px solid #2a2a2a;" onfocus="this.style.borderColor='#d4af37'" onblur="this.style.borderColor='#2a2a2a'">
+            <button id="btnRandomExample" class="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] px-2 py-1 rounded-md font-medium text-primary transition-all" style="background: rgba(212,175,55,0.1); border: 1px solid rgba(212,175,55,0.2);">
+              随机示例
+            </button>
+          </div>
+          <p class="text-[10px] text-on-surface-variant/60 mt-1">建议 2-20 个中文字符</p>
+        </div>
+
+        <!-- 2. Scene Selection -->
+        <div>
+          <label class="block text-xs font-medium text-on-surface-variant mb-2">
+            <i data-lucide="layout-grid" class="w-3.5 h-3.5 inline-block mr-1 text-primary align-text-bottom"></i>
+            使用场景
+          </label>
+          <div class="grid grid-cols-4 gap-1.5" id="sceneGrid">
+            <button class="chip-btn active" data-scene="KV主标题">KV主标题</button>
+            <button class="chip-btn" data-scene="封面标题">封面标题</button>
+            <button class="chip-btn" data-scene="文字Logo">文字Logo</button>
+            <button class="chip-btn" data-scene="活动主题字">活动主题字</button>
+            <button class="chip-btn" data-scene="门头招牌">门头招牌</button>
+            <button class="chip-btn" data-scene="小红书封面">小红书封面</button>
+            <button class="chip-btn" data-scene="抖音封面">抖音封面</button>
+            <button class="chip-btn" data-scene="商业海报">商业海报</button>
+            <button class="chip-btn" data-scene="音乐封面">音乐封面</button>
+            <button class="chip-btn" data-scene="电影海报">电影海报</button>
+            <button class="chip-btn" data-scene="网站Logo">网站Logo</button>
+            <button class="chip-btn" data-scene="App图标">App图标</button>
+          </div>
+        </div>
+
+        <!-- 3. Font Style Selection -->
+        <div>
+          <label class="block text-xs font-medium text-on-surface-variant mb-2">
+            <i data-lucide="palette" class="w-3.5 h-3.5 inline-block mr-1 text-primary align-text-bottom"></i>
+            字体风格
+          </label>
+          <!-- Level 1: Category tabs -->
+          <div class="style-tabs mb-2" id="styleTabs">
+            <button class="style-tab active" data-category="智能推荐">智能推荐</button>
+            <button class="style-tab" data-category="商业标题字">商业标题字</button>
+            <button class="style-tab" data-category="文字Logo">文字Logo</button>
+            <button class="style-tab" data-category="潮流年轻">潮流年轻</button>
+            <button class="style-tab" data-category="东方国风">东方国风</button>
+            <button class="style-tab" data-category="情绪叙事">情绪叙事</button>
+            <button class="style-tab" data-category="科技未来">科技未来</button>
+            <button class="style-tab" data-category="质感特效">质感特效</button>
+            <button class="style-tab" data-category="行业场景">行业场景</button>
+          </div>
+          <!-- Level 2: Sub-style grid -->
+          <div id="subStyleGrid" class="grid grid-cols-4 gap-1.5 min-h-[80px]">
+            <!-- Default: 智能推荐 sub-styles -->
+            <button class="chip-btn active" data-substyle="可爱治愈字">可爱治愈字</button>
+            <button class="chip-btn" data-substyle="商业高级字">商业高级字</button>
+            <button class="chip-btn" data-substyle="东方轻养生字">东方轻养生字</button>
+            <button class="chip-btn" data-substyle="圆角连笔字">圆角连笔字</button>
+          </div>
+        </div>
+
+        <!-- 4. Advanced Parameters (collapsible) -->
+        <div>
+          <button id="btnToggleAdvanced" class="flex items-center gap-1.5 text-xs font-medium text-on-surface-variant hover:text-primary transition-colors w-full">
+            <i data-lucide="settings-2" class="w-3.5 h-3.5 text-primary"></i>
+            高级参数
+            <i data-lucide="chevron-down" class="w-3.5 h-3.5 ml-auto transition-transform" id="advancedArrow"></i>
+          </button>
+
+          <div id="advancedContent" class="collapse-content mt-2 space-y-3">
+            <!-- 画面比例 -->
+            <div>
+              <p class="text-[11px] text-on-surface-variant/70 mb-1.5">画面比例</p>
+              <div class="flex gap-1.5 flex-wrap" id="ratioOptions">
+                <button class="chip-btn active" data-ratio="横版16:9">横版16:9</button>
+                <button class="chip-btn" data-ratio="正方形1:1">正方形1:1</button>
+                <button class="chip-btn" data-ratio="竖版9:16">竖版9:16</button>
+                <button class="chip-btn" data-ratio="透明背景Logo">透明背景Logo</button>
+              </div>
+            </div>
+
+            <!-- 字体颜色 -->
+            <div>
+              <p class="text-[11px] text-on-surface-variant/70 mb-1.5">字体颜色</p>
+              <div class="flex gap-2 flex-wrap items-center" id="colorOptions">
+                <div class="color-swatch active" data-color="白色" style="background: #ffffff;" data-tooltip="白色"></div>
+                <div class="color-swatch" data-color="黑色" style="background: #1a1a1a; border: 1px solid #2a2a2a;" data-tooltip="黑色"></div>
+                <div class="color-swatch" data-color="金色" style="background: linear-gradient(135deg, #d4af37, #b8972e);" data-tooltip="金色"></div>
+                <div class="color-swatch" data-color="红色" style="background: #dc2626;" data-tooltip="红色"></div>
+                <div class="color-swatch" data-color="黑金" style="background: linear-gradient(135deg, #1a1a1a 50%, #d4af37 50%);" data-tooltip="黑金"></div>
+                <div class="color-swatch" data-color="红金" style="background: linear-gradient(135deg, #dc2626 50%, #d4af37 50%);" data-tooltip="红金"></div>
+                <div class="color-swatch" data-color="银色" style="background: linear-gradient(135deg, #c0c0c0, #808080);" data-tooltip="银色"></div>
+                <div class="color-swatch" data-color="渐变" style="background: linear-gradient(135deg, #d4af37, #dc2626, #7c3aed);" data-tooltip="渐变"></div>
+                <div class="color-swatch" data-color="霓虹蓝" style="background: linear-gradient(135deg, #00f0ff, #0066ff);" data-tooltip="霓虹蓝"></div>
+                <div class="color-swatch" data-color="暖橙" style="background: #f97316;" data-tooltip="暖橙"></div>
+              </div>
+            </div>
+
+            <!-- 背景类型 -->
+            <div>
+              <p class="text-[11px] text-on-surface-variant/70 mb-1.5">背景类型</p>
+              <div class="flex gap-1.5 flex-wrap" id="bgOptions">
+                <button class="chip-btn" data-bg="纯色背景">纯色背景</button>
+                <button class="chip-btn" data-bg="透明背景">透明背景</button>
+                <button class="chip-btn active" data-bg="高级留白">高级留白</button>
+                <button class="chip-btn" data-bg="商业KV背景">商业KV背景</button>
+                <button class="chip-btn" data-bg="暗黑背景">暗黑背景</button>
+                <button class="chip-btn" data-bg="黑金背景">黑金背景</button>
+              </div>
+            </div>
+
+            <!-- 即梦增强模式 -->
+            <div class="flex items-center justify-between pt-1">
+              <div>
+                <p class="text-[11px] text-on-surface-variant/70">即梦增强模式</p>
+                <p class="text-[10px] text-on-surface-variant/40 mt-0.5">自动强化提示词，减少中文乱码和错字</p>
+              </div>
+              <div id="toggleJimeng" class="toggle-switch active"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Action buttons at bottom -->
+      <div class="p-4 pt-0 space-y-2 border-t" style="border-color: #1a1a1a; background: linear-gradient(0deg, #0f0f0f, transparent);">
+        <div class="pt-3">
+          <button id="btnGenerate" class="btn-gold w-full py-3 text-sm rounded-lg flex items-center justify-center gap-2">
+            <i data-lucide="sparkles" class="w-4 h-4"></i>
+            生成字体方案
+          </button>
+        </div>
+        <div class="flex gap-2">
+          <button id="btnGenPrompt" class="btn-secondary flex-1 text-center">生成即梦提示词</button>
+          <button id="btnBwTest" class="btn-secondary flex-1 text-center">黑底白字测试</button>
+          <button id="btnGenImage" class="btn-secondary flex-1 text-center">直接生成图片</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== RIGHT PANEL: Results (62%) ==================== -->
+    <div id="rightPanel" class="flex flex-col" style="width: 62%;">
+
+      <!-- Tab bar -->
+      <div class="flex border-b px-4" style="border-color: #1a1a1a; background: #0f0f0f;">
+        <button class="tab-btn active" data-tab="plans">设计方案</button>
+        <button class="tab-btn" data-tab="prompts">即梦提示词</button>
+        <button class="tab-btn" data-tab="images">生成图片</button>
+        <button class="tab-btn" data-tab="history">历史记录</button>
+      </div>
+
+      <!-- Tab content area -->
+      <div class="flex-1 overflow-y-auto custom-scrollbar p-4" style="background: #0a0a0a;">
+
+        <!-- ========== Tab 1: 设计方案 ========== -->
+        <div id="tabPlans" class="tab-content active">
+
+          <!-- 列表-方案1 -->
+          <div class="plan-card" data-plan="1">
+            <div class="flex items-start justify-between mb-2">
+              <div>
+                <h3 class="text-sm font-semibold text-on-surface">年轻治愈商业版</h3>
+                <span class="inline-block text-[10px] px-1.5 py-0.5 rounded mt-1 font-medium" style="background: rgba(212,175,55,0.15); color: #d4af37;">推荐指数 ★★★★★</span>
+              </div>
+              <span class="text-[10px] text-on-surface-variant/50">方案 1</span>
+            </div>
+            <div class="space-y-1.5 text-[12px]">
+              <p><span class="text-on-surface-variant">风格定位：</span><span class="text-on-surface">圆润舒展，商业高级感 + 年轻治愈气质，适合快消品/养生品牌KV</span></p>
+              <p><span class="text-on-surface-variant">笔画处理：</span><span class="text-on-surface">连笔圆角，笔画延展自然，收笔圆润，横细竖粗有节奏感</span></p>
+              <p><span class="text-on-surface-variant">图形融合：</span><span class="text-on-surface">云气+太阳元素自然融入"养"字，暗示温暖与滋养</span></p>
+              <p><span class="text-on-surface-variant">色彩质感：</span><span class="text-on-surface">黑金配色，金属质感，高级留白背景，商业感与治愈感平衡</span></p>
+            </div>
+          </div>
+
+          <!-- 列表-方案2 -->
+          <div class="plan-card" data-plan="2">
+            <div class="flex items-start justify-between mb-2">
+              <div>
+                <h3 class="text-sm font-semibold text-on-surface">东方轻养生版</h3>
+                <span class="inline-block text-[10px] px-1.5 py-0.5 rounded mt-1 font-medium" style="background: rgba(212,175,55,0.15); color: #d4af37;">推荐指数 ★★★★☆</span>
+              </div>
+              <span class="text-[10px] text-on-surface-variant/50">方案 2</span>
+            </div>
+            <div class="space-y-1.5 text-[12px]">
+              <p><span class="text-on-surface-variant">风格定位：</span><span class="text-on-surface">新中式极简 + 东方轻养生感，行书韵味与商业可读性兼顾</span></p>
+              <p><span class="text-on-surface-variant">笔画处理：</span><span class="text-on-surface">行书飞白局部点缀，笔画断中有连，保留手写温度</span></p>
+              <p><span class="text-on-surface-variant">图形融合：</span><span class="text-on-surface">草本植物融入"养"字底部笔画，东方意境自然呈现</span></p>
+              <p><span class="text-on-surface-variant">色彩质感：</span><span class="text-on-surface">红金配色，纸纹质感背景，东方美与现代感融合</span></p>
+            </div>
+          </div>
+
+          <!-- 列表-方案3 -->
+          <div class="plan-card" data-plan="3">
+            <div class="flex items-start justify-between mb-2">
+              <div>
+                <h3 class="text-sm font-semibold text-on-surface">潮流活力版</h3>
+                <span class="inline-block text-[10px] px-1.5 py-0.5 rounded mt-1 font-medium" style="background: rgba(212,175,55,0.1); color: #b8972e;">推荐指数 ★★★★☆</span>
+              </div>
+              <span class="text-[10px] text-on-surface-variant/50">方案 3</span>
+            </div>
+            <div class="space-y-1.5 text-[12px]">
+              <p><span class="text-on-surface-variant">风格定位：</span><span class="text-on-surface">潮流涂鸦 + 青春活力感，适合快闪活动/年轻品牌KV</span></p>
+              <p><span class="text-on-surface-variant">笔画处理：</span><span class="text-on-surface">夸张变形，笔画拉伸有弹性，Q弹可爱感，局部分量加粗</span></p>
+              <p><span class="text-on-surface-variant">图形融合：</span><span class="text-on-surface">便利店元素融入"养"字，霓虹灯光效，年轻都市感</span></p>
+              <p><span class="text-on-surface-variant">色彩质感：</span><span class="text-on-surface">暖橙+霓虹蓝渐变，霓虹发光质感，活力氛围背景</span></p>
+            </div>
+          </div>
+
+          <!-- 列表-方案4 -->
+          <div class="plan-card" data-plan="4">
+            <div class="flex items-start justify-between mb-2">
+              <div>
+                <h3 class="text-sm font-semibold text-on-surface">极简商业版</h3>
+                <span class="inline-block text-[10px] px-1.5 py-0.5 rounded mt-1 font-medium" style="background: rgba(212,175,55,0.1); color: #b8972e;">推荐指数 ★★★☆☆</span>
+              </div>
+              <span class="text-[10px] text-on-surface-variant/50">方案 4</span>
+            </div>
+            <div class="space-y-1.5 text-[12px]">
+              <p><span class="text-on-surface-variant">风格定位：</span><span class="text-on-surface">商业极简风格，国际感品牌字，简约大气适合多场景延展</span></p>
+              <p><span class="text-on-surface-variant">笔画处理：</span><span class="text-on-surface">几何切割，笔画精简为直线和圆弧，结构严谨，黑白适配</span></p>
+              <p><span class="text-on-surface-variant">图形融合：</span><span class="text-on-surface">不融合图形，纯字体结构设计，强调字形识别度</span></p>
+              <p><span class="text-on-surface-variant">色彩质感：</span><span class="text-on-surface">银色金属质感，纯色高级背景，简洁专业商业气质</span></p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ========== Tab 2: 即梦提示词 ========== -->
+        <div id="tabPrompts" class="tab-content">
+          <!-- Full prompt -->
+          <div class="mb-4">
+            <div class="flex items-center justify-between mb-2">
+              <p class="text-xs font-medium text-on-surface-variant">完整提示词</p>
+              <button id="btnCopyPrompt" class="btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1">
+                <i data-lucide="copy" class="w-3 h-3"></i> 复制提示词
+              </button>
+            </div>
+            <div id="fullPromptArea" class="prompt-area prompt-area-gold custom-scrollbar text-[12px] leading-relaxed">
+中文字体设计，文字内容为"好好养自己"，只保留这几个中文文字，不要出现其他任何文字。
+
+使用场景：KV主标题。
+字体风格：年轻治愈商业版，圆润舒展，商业高级感与年轻治愈气质融合。
+画面构图：字体居中，占据画面主体，整体构图简洁清晰。
+字形结构：字形结构清晰，笔画经过艺术化改造，但必须保持中文可读性。
+笔画处理：连笔圆角，笔画延展自然，收笔圆润，横细竖粗有节奏感。
+图形融合：云气和太阳元素自然融入"养"字笔画，不影响文字识别。
+颜色材质：字体颜色为黑金，质感为金属光泽。
+背景：高级留白，干净简洁的商业级背景。
+画面比例：16:9。
+
+严格要求：不要英文，不要拼音，不要乱码，不要多余文字，不要重复文字，不要水印，不要复杂背景。文字必须清晰可读，小尺寸下仍然可以识别。
+            </div>
+          </div>
+
+          <!-- Short version -->
+          <div class="mb-4">
+            <div class="flex items-center justify-between mb-2">
+              <p class="text-xs font-medium text-on-surface-variant">精简版提示词</p>
+              <button id="btnCopyShort" class="btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1">
+                <i data-lucide="copy" class="w-3 h-3"></i> 复制精简版
+              </button>
+            </div>
+            <div class="prompt-area custom-scrollbar text-[12px]" style="min-height: 80px; max-height: 120px;">
+中文字体设计，文字"好好养自己"，只保留这几个中文。风格：年轻治愈商业版。黑金金属质感，高级留白背景，16:9。不要英文、拼音、乱码、重复字。
+            </div>
+          </div>
+
+          <!-- Enhanced version -->
+          <div class="mb-4">
+            <div class="flex items-center justify-between mb-2">
+              <p class="text-xs font-medium text-on-surface-variant">
+                增强版提示词
+                <span class="inline-block text-[10px] px-1.5 py-0.5 rounded ml-1" style="background: rgba(212,175,55,0.15); color: #d4af37;">即梦增强</span>
+              </p>
+              <button id="btnCopyEnhanced" class="btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1">
+                <i data-lucide="copy" class="w-3 h-3"></i> 复制增强版
+              </button>
+            </div>
+            <div class="prompt-area prompt-area-gold custom-scrollbar text-[12px] leading-relaxed" style="min-height: 120px; max-height: 180px;">
+中文字体设计，文字内容为"好好养自己"，只保留这几个中文文字，不要出现其他任何文字，绝对不要英文、不要拼音、不要乱码。
+
+使用场景：品牌KV主视觉主标题。
+字体风格：年轻治愈商业版，圆润舒展，兼具商业高级感与年轻治愈气质，参考高端快消品牌字体设计。
+画面构图：字体居中，占据画面主体位置，整体构图简洁清晰，留白充分。
+字形结构：字形结构清晰可辨，笔画经过精心艺术化改造，但绝对保持中文可读性，小尺寸下仍可识别。
+笔画处理：连笔圆角处理，笔画延展自然流畅，收笔圆润，横细竖粗形成视觉节奏感。
+图形融合：云气和太阳元素巧妙自然融入"养"字相关笔画，图形元素与文字结构浑然一体，绝不影响文字识别度。
+颜色材质：字体主色调为黑金配色，呈现金属光泽质感，反射温润光芒。
+背景：高级留白风格背景，干净简洁的商业级背景，不喧宾夺主。
+画面比例：16:9宽幅构图。
+
+严格限制条件：1）绝对不要英文文字；2）绝对不要拼音；3）绝对不要乱码；4）绝对不要多余文字；5）绝对不要重复文字；6）绝对不要水印；7）绝对不要复杂背景；8）文字必须清晰可读；9）小尺寸下仍然可以识别；10）画面只出现"好好养自己"这五个中文字。
+            </div>
+          </div>
+
+          <!-- Action buttons -->
+          <div class="flex gap-2 flex-wrap">
+            <button id="btnSendToImage" class="btn-gold px-4 py-2 text-xs rounded-lg flex items-center gap-1.5">
+              <i data-lucide="send" class="w-3.5 h-3.5"></i>
+              发送到图像生成
+            </button>
+            <button class="btn-secondary text-xs py-2 px-3 flex items-center gap-1">
+              <i data-lucide="bookmark" class="w-3 h-3"></i> 保存到提示词库
+            </button>
+          </div>
+        </div>
+
+        <!-- ========== Tab 3: 生成图片 ========== -->
+        <div id="tabImages" class="tab-content">
+          <!-- 2x2 image grid -->
+          <div class="grid grid-cols-2 gap-3 mb-4">
+            <!-- 列表-图片版本1 -->
+            <div class="image-card">
+              <div class="skeleton w-full" style="aspect-ratio: 16/10;"></div>
+              <div class="overlay">
+                <button class="btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1">
+                  <i data-lucide="plus-circle" class="w-3 h-3"></i> 加入画布
+                </button>
+                <button class="btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1">
+                  <i data-lucide="download" class="w-3 h-3"></i> 下载
+                </button>
+              </div>
+            </div>
+            <!-- 列表-图片版本2 -->
+            <div class="image-card">
+              <div class="skeleton w-full" style="aspect-ratio: 16/10;"></div>
+              <div class="overlay">
+                <button class="btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1">
+                  <i data-lucide="plus-circle" class="w-3 h-3"></i> 加入画布
+                </button>
+                <button class="btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1">
+                  <i data-lucide="download" class="w-3 h-3"></i> 下载
+                </button>
+              </div>
+            </div>
+            <!-- 列表-图片版本3 -->
+            <div class="image-card">
+              <div class="skeleton w-full" style="aspect-ratio: 16/10;"></div>
+              <div class="overlay">
+                <button class="btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1">
+                  <i data-lucide="plus-circle" class="w-3 h-3"></i> 加入画布
+                </button>
+                <button class="btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1">
+                  <i data-lucide="download" class="w-3 h-3"></i> 下载
+                </button>
+              </div>
+            </div>
+            <!-- 列表-图片版本4 -->
+            <div class="image-card">
+              <div class="skeleton w-full" style="aspect-ratio: 16/10;"></div>
+              <div class="overlay">
+                <button class="btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1">
+                  <i data-lucide="plus-circle" class="w-3 h-3"></i> 加入画布
+                </button>
+                <button class="btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1">
+                  <i data-lucide="download" class="w-3 h-3"></i> 下载
+                </button>
+              </div>
+            </div>
+          </div>
+          <p class="text-[11px] text-on-surface-variant/50 text-center mb-3">4 版方案对比生成中，请稍候...</p>
+          <!-- Bottom actions -->
+          <div class="flex gap-2">
+            <button class="btn-secondary flex-1 text-center py-2 text-xs flex items-center justify-center gap-1">
+              <i data-lucide="refresh-cw" class="w-3 h-3"></i> 重新生成
+            </button>
+            <button class="btn-secondary flex-1 text-center py-2 text-xs flex items-center justify-center gap-1">
+              <i data-lucide="grid-3x3" class="w-3 h-3"></i> 生成4版对比
+            </button>
+            <button class="btn-gold flex-1 py-2 text-xs flex items-center justify-center gap-1">
+              <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> 全部加入画布
+            </button>
+          </div>
+        </div>
+
+        <!-- ========== Tab 4: 历史记录 ========== -->
+        <div id="tabHistory" class="tab-content">
+          <div class="space-y-2">
+
+            <!-- 历史记录-项目1 -->
+            <div class="history-item flex items-center gap-3">
+              <div class="w-12 h-12 rounded-lg skeleton flex-shrink-0"></div>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium text-on-surface truncate">好好养自己</p>
+                <p class="text-[11px] text-on-surface-variant">KV主标题 · 年轻治愈商业版 · 黑金</p>
+                <p class="text-[10px] text-on-surface-variant/40 mt-0.5">2026-05-25 22:30</p>
+              </div>
+              <div class="history-actions flex items-center gap-1 flex-shrink-0">
+                <button class="btn-secondary text-[10px] py-1 px-2">再次生成</button>
+                <button class="btn-secondary text-[10px] py-1 px-2">复制提示词</button>
+                <button class="text-on-surface-variant/40 hover:text-red-400 transition-colors p-1" data-tooltip="删除">
+                  <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- 历史记录-项目2 -->
+            <div class="history-item flex items-center gap-3">
+              <div class="w-12 h-12 rounded-lg skeleton flex-shrink-0"></div>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium text-on-surface truncate">生活有度·食养相宜</p>
+                <p class="text-[11px] text-on-surface-variant">KV主标题 · 东方奢感字 · 红金</p>
+                <p class="text-[10px] text-on-surface-variant/40 mt-0.5">2026-05-25 21:15</p>
+              </div>
+              <div class="history-actions flex items-center gap-1 flex-shrink-0">
+                <button class="btn-secondary text-[10px] py-1 px-2">再次生成</button>
+                <button class="btn-secondary text-[10px] py-1 px-2">复制提示词</button>
+                <button class="text-on-surface-variant/40 hover:text-red-400 transition-colors p-1" data-tooltip="删除">
+                  <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- 历史记录-项目3 -->
+            <div class="history-item flex items-center gap-3">
+              <div class="w-12 h-12 rounded-lg skeleton flex-shrink-0"></div>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium text-on-surface truncate">无界AI</p>
+                <p class="text-[11px] text-on-surface-variant">文字Logo · 赛博科技字 · 银色</p>
+                <p class="text-[10px] text-on-surface-variant/40 mt-0.5">2026-05-25 20:08</p>
+              </div>
+              <div class="history-actions flex items-center gap-1 flex-shrink-0">
+                <button class="btn-secondary text-[10px] py-1 px-2">再次生成</button>
+                <button class="btn-secondary text-[10px] py-1 px-2">复制提示词</button>
+                <button class="text-on-surface-variant/40 hover:text-red-400 transition-colors p-1" data-tooltip="删除">
+                  <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- 历史记录-项目4 -->
+            <div class="history-item flex items-center gap-3">
+              <div class="w-12 h-12 rounded-lg skeleton flex-shrink-0"></div>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium text-on-surface truncate">门槛</p>
+                <p class="text-[11px] text-on-surface-variant">音乐封面 · 情绪电影字 · 白色</p>
+                <p class="text-[10px] text-on-surface-variant/40 mt-0.5">2026-05-25 18:42</p>
+              </div>
+              <div class="history-actions flex items-center gap-1 flex-shrink-0">
+                <button class="btn-secondary text-[10px] py-1 px-2">再次生成</button>
+                <button class="btn-secondary text-[10px] py-1 px-2">复制提示词</button>
+                <button class="text-on-surface-variant/40 hover:text-red-400 transition-colors p-1" data-tooltip="删除">
+                  <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- 历史记录-项目5 -->
+            <div class="history-item flex items-center gap-3">
+              <div class="w-12 h-12 rounded-lg skeleton flex-shrink-0"></div>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium text-on-surface truncate">养你的24小时便利店</p>
+                <p class="text-[11px] text-on-surface-variant">活动主题字 · 潮流涂鸦字 · 霓虹蓝</p>
+                <p class="text-[10px] text-on-surface-variant/40 mt-0.5">2026-05-25 16:10</p>
+              </div>
+              <div class="history-actions flex items-center gap-1 flex-shrink-0">
+                <button class="btn-secondary text-[10px] py-1 px-2">再次生成</button>
+                <button class="btn-secondary text-[10px] py-1 px-2">复制提示词</button>
+                <button class="text-on-surface-variant/40 hover:text-red-400 transition-colors p-1" data-tooltip="删除">
+                  <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                </button>
+                </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Bottom Toolbar Preview -->
+<div id="bottomToolbar" class="fixed bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-2 rounded-xl" style="background: rgba(20,20,20,0.95); border: 1px solid #2a2a2a; backdrop-filter: blur(12px); box-shadow: 0 8px 32px rgba(0,0,0,0.5);">
+  <div class="toolbar-btn" data-tooltip="选择" data-tool="select">
+    <i data-lucide="mouse-pointer-2" class="w-5 h-5"></i>
+  </div>
+  <div class="toolbar-btn" data-tooltip="平移" data-tool="pan">
+    <i data-lucide="hand" class="w-5 h-5"></i>
+  </div>
+  <div class="w-px h-7" style="background: #2a2a2a;"></div>
+  <div class="toolbar-btn" data-tooltip="上传" data-tool="upload">
+    <i data-lucide="upload" class="w-5 h-5"></i>
+  </div>
+  <div class="w-px h-7" style="background: #2a2a2a;"></div>
+  <div class="toolbar-btn" data-tooltip="AI聊天" data-tool="chat">
+    <i data-lucide="message-square" class="w-5 h-5"></i>
+  </div>
+  <div class="toolbar-btn active" data-tooltip="字体设计" data-tool="font" id="toolbarFontBtn">
+    <span class="font-bold text-base">字</span>
+  </div>
+  <div class="toolbar-btn" data-tooltip="Agent" data-tool="agent">
+    <i data-lucide="bot" class="w-5 h-5"></i>
+  </div>
+  <div class="w-px h-7" style="background: #2a2a2a;"></div>
+  <div class="toolbar-btn" data-tooltip="放大" data-tool="zoomin">
+    <i data-lucide="zoom-in" class="w-5 h-5"></i>
+  </div>
+  <div class="flex items-center gap-1 px-1">
+    <span class="text-[11px] text-on-surface-variant">100%</span>
+  </div>
+  <div class="toolbar-btn" data-tooltip="缩小" data-tool="zoomout">
+    <i data-lucide="zoom-out" class="w-5 h-5"></i>
+  </div>
+</div>
+
+<script>
+lucide.createIcons();
+
+$(function() {
+
+  // ========== Sub-style data per category ==========
+  const subStyles = {
+    '智能推荐': ['可爱治愈字','商业高级字','东方轻养生字','圆角连笔字'],
+    '商业标题字': ['商业高级','商业极简','商业轻奢','高级留白','国际感品牌字','时尚广告字','电商促销标题字','营销爆点标题字','杂志封面字','轻品牌感标题字'],
+    '文字Logo': ['极简文字Logo','几何字标','黑白识别型Logo','图形融合字标','印章型中文Logo','现代中式Logo','潮牌字标','科技字标','儿童品牌字标','可商用延展字标'],
+    '潮流年轻': ['潮流涂鸦字','青春活力字','街头感标题字','手写潮流字','连笔动感字','Q弹可爱字','夸张变形字','综艺感标题字','泡泡字','涂抹喷漆字'],
+    '东方国风': ['东方奢感字','新中式极简字','国潮书法字','行书标题字','隶书设计字','印章篆刻风','飞白书法字','水墨意境字','古风海报字','节气国风字'],
+    '情绪叙事': ['情绪电影字','暗黑叙事字','孤独伤感字','烟雾氛围字','破碎感标题字','压抑悬疑字','回忆颗粒字','手写情绪字','诗意文艺字','戏剧张力字'],
+    '科技未来': ['赛博科技字','AI未来字','机械结构字','数字切割字','光效发光字','故障风字体','黑金科技字','数据流标题字','太空未来字','极客极简字'],
+    '质感特效': ['金属字','镜面反射字','玻璃字','水晶字','霓虹发光字','液态字','毛绒字','塑料感字','纸雕字','立体浮雕字'],
+    '行业场景': ['酒类品牌标题字','养生品牌标题字','快闪活动标题字','便利店主题字','音乐封面字','电影海报字','节日促销字','小红书封面字','网站Logo字','App图标字']
+  };
+
+  // ========== Random examples ==========
+  const examples = [
+    '好好养自己','生活有度·食养相宜','养你的随身热点','无界AI','门槛',
+    '嗯','冬天就要热点养','养你的24小时便利店','不该靠近的人'
+  ];
+
+  // ========== Tab switching ==========
+  $('.tab-btn').on('click', function() {
+    const tab = $(this).data('tab');
+    $('.tab-btn').removeClass('active');
+    $(this).addClass('active');
+    $('.tab-content').removeClass('active');
+    $('#tab' + tab.charAt(0).toUpperCase() + tab.slice(1)).addClass('active');
+  });
+
+  // ========== Scene chip selection ==========
+  $('#sceneGrid').on('click', '.chip-btn', function() {
+    $('#sceneGrid .chip-btn').removeClass('active');
+    $(this).addClass('active');
+  });
+
+  // ========== Style category tabs ==========
+  $('#styleTabs').on('click', '.style-tab', function() {
+    const category = $(this).data('category');
+    $('#styleTabs .style-tab').removeClass('active');
+    $(this).addClass('active');
+
+    // Rebuild sub-style grid
+    const styles = subStyles[category] || [];
+    const $grid = $('#subStyleGrid');
+    $grid.empty();
+    styles.forEach(function(s, i) {
+      const activeClass = i === 0 ? ' active' : '';
+      $grid.append('<button class="chip-btn' + activeClass + '" data-substyle="' + s + '">' + s + '</button>');
+    });
+  });
+
+  // Sub-style chip selection (delegated)
+  $('#subStyleGrid').on('click', '.chip-btn', function() {
+    $('#subStyleGrid .chip-btn').removeClass('active');
+    $(this).addClass('active');
+  });
+
+  // ========== Ratio selection ==========
+  $('#ratioOptions').on('click', '.chip-btn', function() {
+    $('#ratioOptions .chip-btn').removeClass('active');
+    $(this).addClass('active');
+  });
+
+  // ========== Color selection ==========
+  $('#colorOptions').on('click', '.color-swatch', function() {
+    $('#colorOptions .color-swatch').removeClass('active');
+    $(this).addClass('active');
+  });
+
+  // ========== Background selection ==========
+  $('#bgOptions').on('click', '.chip-btn', function() {
+    $('#bgOptions .chip-btn').removeClass('active');
+    $(this).addClass('active');
+  });
+
+  // ========== Toggle 即梦增强 ==========
+  $('#toggleJimeng').on('click', function() {
+    $(this).toggleClass('active');
+  });
+
+  // ========== Advanced params toggle ==========
+  $('#btnToggleAdvanced').on('click', function() {
+    const $content = $('#advancedContent');
+    const $arrow = $('#advancedArrow');
+    $content.toggleClass('expanded');
+    if ($content.hasClass('expanded')) {
+      $arrow.css('transform', 'rotate(180deg)');
+    } else {
+      $arrow.css('transform', 'rotate(0deg)');
+    }
+  });
+
+  // ========== Random example ==========
+  $('#btnRandomExample').on('click', function() {
+    const currentVal = $('#textInput').val();
+    let newVal;
+    do {
+      newVal = examples[Math.floor(Math.random() * examples.length)];
+    } while (newVal === currentVal && examples.length > 1);
+    $('#textInput').val(newVal);
+  });
+
+  // ========== Close panel ==========
+  $('#btnClosePanel').on('click', function() {
+    $('#fontDesignPanel').css({
+      opacity: 0,
+      transform: 'translateY(20px) scale(0.97)',
+      transition: 'all 0.25s ease'
+    });
+    setTimeout(function() {
+      $('#fontDesignPanel').hide();
+      $('#toolbarFontBtn').removeClass('active');
+    }, 250);
+  });
+
+  // ========== Minimize panel ==========
+  $('#btnMinimize').on('click', function() {
+    $('#fontDesignPanel').css({
+      opacity: 0,
+      transform: 'translateY(20px) scale(0.97)',
+      transition: 'all 0.25s ease'
+    });
+    setTimeout(function() {
+      $('#fontDesignPanel').hide();
+      $('#toolbarFontBtn').removeClass('active');
+    }, 250);
+  });
+
+  // ========== Toolbar font button toggles panel ==========
+  $('#toolbarFontBtn').on('click', function() {
+    const $panel = $('#fontDesignPanel');
+    if ($panel.is(':visible')) {
+      $panel.css({
+        opacity: 0,
+        transform: 'translateY(20px) scale(0.97)',
+        transition: 'all 0.25s ease'
+      });
+      setTimeout(function() {
+        $panel.hide();
+        $('#toolbarFontBtn').removeClass('active');
+      }, 250);
+    } else {
+      $panel.show();
+      setTimeout(function() {
+        $panel.css({
+          opacity: 1,
+          transform: 'translateY(0) scale(1)',
+          transition: 'all 0.35s cubic-bezier(0.16, 1, 0.3, 1)'
+        });
+        $('#toolbarFontBtn').addClass('active');
+      }, 10);
+    }
+  });
+
+  // ========== Toolbar other buttons ==========
+  $('.toolbar-btn').not('#toolbarFontBtn').on('click', function() {
+    // Simulate toolbar button click - toggle active state visually
+    // In real app, each tool would activate its respective mode
+  });
+
+  // ========== Generate button ==========
+  $('#btnGenerate').on('click', function() {
+    // Simulate generating: switch to plans tab, add a brief loading state
+    const $btn = $(this);
+    const originalText = $btn.html();
+    $btn.html('<svg class="animate-spin w-4 h-4 inline mr-1" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="32" stroke-linecap="round"/></svg> 生成中...');
+    $btn.css('pointer-events', 'none');
+
+    setTimeout(function() {
+      $btn.html(originalText);
+      $btn.css('pointer-events', '');
+      // Switch to plans tab
+      $('.tab-btn[data-tab="plans"]').trigger('click');
+      lucide.createIcons();
+    }, 1200);
+  });
+
+  // ========== Copy prompt buttons ==========
+  $('#btnCopyPrompt, #btnCopyShort, #btnCopyEnhanced').on('click', function() {
+    const btnId = $(this).attr('id');
+    let text = '';
+    if (btnId === 'btnCopyPrompt') {
+      text = $('#fullPromptArea').text();
+    } else if (btnId === 'btnCopyShort') {
+      text = $('#tabPrompts .prompt-area').eq(1).text();
+    } else {
+      text = $('#tabPrompts .prompt-area').eq(2).text();
+    }
+
+    // Copy to clipboard
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(function() {
+        showCopyToast($(this));
+      }.bind(this));
+    } else {
+      // Fallback
+      const $tmp = $('<textarea>');
+      $('body').append($tmp);
+      $tmp.val(text).select();
+      document.execCommand('copy');
+      $tmp.remove();
+      showCopyToast($(this));
+    }
+  });
+
+  function showCopyToast($triggerBtn) {
+    const $toast = $('<div class="fixed top-6 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-xs font-medium z-[9999]" style="background: rgba(212,175,55,0.15); border: 1px solid rgba(212,175,55,0.3); color: #d4af37;">已复制到剪贴板</div>');
+    $('body').append($toast);
+    setTimeout(function() { $toast.fadeOut(300, function() { $toast.remove(); }); }, 1500);
+  }
+
+  // ========== Generate prompt button ==========
+  $('#btnGenPrompt').on('click', function() {
+    $('.tab-btn[data-tab="prompts"]').trigger('click');
+  });
+
+  // ========== B/W test button ==========
+  $('#btnBwTest').on('click', function() {
+    $('.tab-btn[data-tab="prompts"]').trigger('click');
+    // In real app, would switch to a B/W test prompt version
+    showCopyToast($(this));
+  });
+
+  // ========== Direct generate image ==========
+  $('#btnGenImage').on('click', function() {
+    $('.tab-btn[data-tab="images"]').trigger('click');
+  });
+
+  // ========== History item: 再次生成 ==========
+  $('#tabHistory').on('click', '.history-actions button', function() {
+    const action = $(this).text().trim();
+    if (action === '再次生成') {
+      // In real app: would re-populate params and trigger generation
+      $('#btnGenerate').trigger('click');
+    } else if (action === '复制提示词') {
+      showCopyToast($(this));
+    }
+  });
+
+  // ========== History item: delete ==========
+  $('#tabHistory').on('click', '[data-tooltip="删除"]', function() {
+    $(this).closest('.history-item').css({
+      opacity: 0,
+      transform: 'translateX(20px)',
+      transition: 'all 0.3s ease'
+    });
+    setTimeout(function() {
+      $(this).closest('.history-item').remove();
+    }.bind(this), 300);
+  });
+
+  // ========== Plan card: click to select ==========
+  $('#tabPlans').on('click', '.plan-card', function() {
+    $('#tabPlans .plan-card').css('border-left-color', '#d4af37');
+    $(this).css('border-left-color', '#e5c34a');
+    // In real app: would update the selected plan and refresh prompt
+  });
+
+});
+</script>
+
+</body>
+</html>
