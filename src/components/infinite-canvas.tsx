@@ -5999,8 +5999,13 @@ export function InfiniteCanvas({
         {/* Empty state */}
         {images.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="text-center space-y-4 max-w-xs">
+            <div className="text-center space-y-3 max-w-sm">
               <div className={`text-2xl font-light ${isMonochrome ? 'text-gray-400' : 'text-gray-300'}`}>无限画布</div>
+              <div className={`text-xs leading-relaxed space-y-1 ${isMonochrome ? 'text-gray-400' : 'text-gray-500'}`}>
+                <p>拖入图片 / 上传图片 / AI 生成图片到画布</p>
+                <p>左键选择 · 滚轮缩放 · 空格+拖动平移 · 右键菜单</p>
+                <p>底部工具栏：图像生成 · 修图 · Agent编排 · 字境大师 · 精修引擎 · 品牌电商</p>
+              </div>
               <div className="flex items-center justify-center gap-3 pointer-events-auto">
                 <button onClick={() => setShowHelpModal('instructions')} className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-all border ${isMonochrome ? 'text-blue-600 border-blue-200 hover:text-blue-700 hover:border-blue-400' : 'text-[#888] border-white/[0.14] hover:text-[#d4af37] hover:border-[#d4af37]/40'}`}>
                   <Info size={14} /> 操作说明
@@ -6009,7 +6014,6 @@ export function InfiniteCanvas({
                   <FileText size={14} /> 更新内容
                 </button>
               </div>
-              <div className={`text-xs ${isMonochrome ? 'text-gray-500' : 'text-gray-500'}`}>点击下方按钮开始创作</div>
             </div>
           </div>
         )}
@@ -10062,10 +10066,37 @@ export function InfiniteCanvas({
                             <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>Agent 编排</span>
                             <span className={`text-xs ml-auto ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>智能编排多工具</span>
                           </div>
-                          <div className="rounded-lg overflow-hidden border mt-2" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)' }}>
-                            <img src="/api/help-image?file=agent-edit.jpeg" alt="Agent编排" className="w-full" loading="lazy" />
-                          </div>
                           <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>AI 自动选择和组合工具（修图/生图/分析/调色），多轮决策直至完成</p>
+                        </div>
+
+                        {/* 字境大师 Pro */}
+                        <div className={`rounded-lg p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-white/[0.03]'}`}>
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <Type size={13} className={isMonochrome ? 'text-gray-600' : 'text-[#d4af37]'} />
+                            <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>字境大师 Pro</span>
+                            <span className={`text-xs ml-auto ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>AI 字体设计与生成</span>
+                          </div>
+                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>9 大字体风格库 + 12 种使用场景 + AI 设计方案生成，支持即梦提示词增强和黑底白字/透明Logo模式</p>
+                        </div>
+
+                        {/* 精修引擎 */}
+                        <div className={`rounded-lg p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-white/[0.03]'}`}>
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <Scan size={13} className={isMonochrome ? 'text-gray-600' : 'text-[#d4af37]'} />
+                            <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>精修引擎</span>
+                            <span className={`text-xs ml-auto ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>产品商业级精修</span>
+                          </div>
+                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>标准/专家双模式，AI 商业级产品精修，适合电商和广告场景</p>
+                        </div>
+
+                        {/* 品牌电商 */}
+                        <div className={`rounded-lg p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-white/[0.03]'}`}>
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <ShoppingBag size={13} className={isMonochrome ? 'text-gray-600' : 'text-[#d4af37]'} />
+                            <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>品牌电商</span>
+                            <span className={`text-xs ml-auto ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>电商视觉生成</span>
+                          </div>
+                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>品牌电商视觉内容生成，商品场景图/营销素材一键出图</p>
                         </div>
 
                         {/* SVG 智能描摹 */}
@@ -10101,7 +10132,7 @@ export function InfiniteCanvas({
                             <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>其他工具</span>
                           </div>
                           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                            {[['编辑元素', '按元素智能分层'], ['多角度', '多视角旋转生成'], ['转3D', '生成3D模型预览'], ['裁切', '自由/预设比例裁切'], ['下载', 'PNG/SVG/PSD多格式']].map(([k, v]) => (
+                            {[['编辑元素', '按元素智能分层'], ['多角度', '多视角旋转生成'], ['转3D', '生成3D模型预览'], ['裁切', '自由/预设比例裁切'], ['字境大师', 'AI字体设计与生成'], ['精修引擎', '产品商业级精修'], ['品牌电商', '电商视觉内容生成'], ['下载', 'PNG/SVG/PSD多格式']].map(([k, v]) => (
                               <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
                             ))}
                           </div>
@@ -10142,7 +10173,7 @@ export function InfiniteCanvas({
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>左上角工具栏</div>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                        {[['Oh My Prompt', '提示词管理'], ['参考融合', 'Ctrl+Click融合生成'], ['设置', '应用配置'], ['主题切换', '黑白/彩色切换'], ['用户管理', '多用户管理'], ['项目数据', '项目保存加载'], ['管理员系统', 'API配置（管理员）'], ['使用说明', '操作与更新']].map(([k, v]) => (
+                        {[['Oh My Prompt', '提示词管理'], ['参考融合', 'Ctrl+Click融合生成'], ['设置', '应用配置'], ['主题切换', '黑白/彩色切换'], ['用户管理', '多用户管理'], ['项目数据', '项目保存加载'], ['管理员系统', 'API配置（管理员）'], ['使用说明', '操作与更新'], ['字境大师', 'AI字体设计（底部栏）']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
                         ))}
                       </div>
@@ -10154,7 +10185,7 @@ export function InfiniteCanvas({
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>底部工具栏</div>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                        {[['选择工具', '点击/框选图片'], ['抓手工具', '平移画布'], ['图片上传', '上传本地图片'], ['图像生成器', 'AI生成（金色按钮）'], ['语言修图', '自然语言修改图片'], ['Agent', '智能编排多工具'], ['六面体', '6面贴图预览'], ['缩放控制', '放大/缩小/重置']].map(([k, v]) => (
+                        {[['选择工具', '点击/框选图片'], ['抓手工具', '平移画布'], ['图片上传', '上传本地图片'], ['图像生成器', 'AI生成（金色按钮）'], ['语言修图', '自然语言修改图片'], ['Agent编排', '智能编排多工具'], ['品牌电商', '电商视觉生成'], ['精修引擎', '产品商业级精修'], ['字境大师', 'AI字体设计与生成'], ['六面体', '6面贴图预览'], ['缩放控制', '放大/缩小/重置']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>{v}</span></div>
                         ))}
                       </div>
@@ -10165,14 +10196,17 @@ export function InfiniteCanvas({
                     <div className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isMonochrome ? 'text-gray-400' : 'text-[#d4af37]'}`}>{APP_VERSION_LABEL}</div>
                     <div className="space-y-2.5">
                       {[
-                        '图片编辑工具：放大/移除背景/SVG描摹/擦除/蒙版/编辑元素/多角度/转3D/扩展/裁切/精修引擎/Agent编排/下载',
+                        '字境大师 Pro：9大字体风格库 + 12种使用场景 + AI设计方案生成 + 即梦提示词增强',
+                        '字境大师：支持完整版/黑底白字/透明Logo三种提示词模式，AI字体图片一键生成',
+                        '精修引擎：标准/专家双模式，AI商业级产品精修，适合电商和广告场景',
+                        '品牌电商：品牌电商视觉内容生成，商品场景图/营销素材一键出图',
+                        '图片编辑工具：放大/移除背景/SVG描摹/擦除/蒙版/编辑元素/多角度/转3D/扩展/裁切/Agent编排/下载',
                         '移除背景：同时生成白底主体图和黑白蒙版图，本地 BiRefNet/U2Net/Silueta 优先',
                         '擦除：本地 LaMa/ZITS/Anime-Lama 优先，AI 修复+边界扩散兜底',
                         '蒙版：AI 重新生成指定区域，结果直接显示，无涂抹痕迹',
                         '语言修图：支持 OpenAI+Gemini，自动裁切适配比例，不变形',
                         'Agent 编排：智能选择修图/生图/分析/调色工具，多轮循环决策',
                         'SVG 智能描摹：彩色/黑白矢量化，多级质量预设',
-                        'API 排序：管理员可调整 API 列表顺序',
                         '任务管理：统一任务注册中心，SSE 实时推送进度，支持取消和排队',
                         '图片压缩上传：前端 canvas+后端 sharp 双重压缩',
                         'API 协议验证：管理员一键验证提供商兼容性',
