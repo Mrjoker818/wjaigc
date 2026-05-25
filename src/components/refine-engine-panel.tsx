@@ -323,18 +323,28 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
 
       // Handle error responses
       if (!data.success && data.error) {
+        console.error('[refine-engine-panel] API error:', data.error);
         setProgressLabel('精修失败: ' + data.error);
         setIsProcessing(false);
         return;
       }
 
       // ★ Sync mode: result returned directly from POST
-      if (data.directImageUrls && data.directImageUrls.length > 0) {
-        console.log('[refine-engine-panel] Got directImageUrls:', data.directImageUrls);
+      const directUrls = data.directImageUrls || data.imageUrls || [];
+      if (directUrls.length > 0) {
+        console.log('[refine-engine-panel] Got directImageUrls:', directUrls);
         setProgress(100);
         setProgressLabel('精修完成');
         const label = refineMode === 'expert' ? '专家精修' : '标准精修';
-        setResults(data.directImageUrls.map((url: string) => ({ imageUrl: url, label })));
+        setResults(directUrls.map((url: string) => ({ imageUrl: url, label })));
+        setIsProcessing(false);
+        return;
+      }
+
+      // ★ If server returned success but no images — it's a failure
+      if (data.success && !data.taskId) {
+        console.error('[refine-engine-panel] Sync mode returned success but no images');
+        setProgressLabel('精修完成但未返回图片');
         setIsProcessing(false);
         return;
       }
@@ -395,18 +405,8 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
             console.warn('[refine-engine-panel] Poll error (will retry):', pollErr);
           }
         }, 2000);
-      } else if (data.directImageUrls || data.imageUrls) {
-        setProgress(100);
-        setProgressLabel('精修完成');
-        const urls = data.directImageUrls || data.imageUrls || [];
-        const label = refineMode === 'expert' ? '专家精修' : '标准精修';
-        setResults(urls.map((url: string) => ({ imageUrl: url, label })));
-        setIsProcessing(false);
-      } else if (data.error) {
-        console.error('Refine error:', data.error);
-        setProgressLabel('精修失败');
-        setIsProcessing(false);
       } else {
+        // No taskId and no directImageUrls — unknown response
         console.error('[refine-engine-panel] Unexpected response:', data);
         setProgressLabel('精修失败：未知响应');
         setIsProcessing(false);
@@ -826,60 +826,60 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
               </div>
             </div>
 
-            {/* Aspect ratio selector */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium flex items-center gap-1.5" style={{ color: textSubColor }}>
-                <Ratio size={14} /> 画面比例
+            {/* Aspect ratio selector - single row */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium flex items-center gap-1" style={{ color: textSubColor }}>
+                <Ratio size={12} /> 画面比例
               </label>
-              <div className="grid grid-cols-4 gap-1.5">
+              <div className="flex flex-wrap gap-1">
                 {getSupportedAspectRatios().map(ratio => {
                   const isActive = aspectRatio === ratio;
                   return (
                     <button
                       key={ratio}
                       onClick={() => setAspectRatio(ratio)}
-                      className="flex flex-col items-center gap-1 px-1.5 py-2 rounded-md text-xs font-medium transition-all"
+                      className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-all"
                       style={{
                         background: isActive ? accentBg : isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)',
                         border: `1px solid ${isActive ? accentBorder : borderColorLight}`,
                         color: isActive ? accentColor : textSubColor,
                       }}
                     >
-                      {/* Mini ratio shape preview */}
+                      {/* Inline mini ratio shape */}
                       <div
-                        className="rounded-sm"
+                        className="rounded-[1px]"
                         style={{
                           width: (() => {
                             const [w] = ratio.split(':').map(Number);
                             const h = Number(ratio.split(':')[1]);
-                            const maxDim = 18;
-                            return Math.max(6, (w / Math.max(w, h)) * maxDim);
+                            const maxDim = 10;
+                            return Math.max(4, (w / Math.max(w, h)) * maxDim);
                           })(),
                           height: (() => {
                             const [w, h] = ratio.split(':').map(Number);
-                            const maxDim = 18;
-                            return Math.max(6, (h / Math.max(w, h)) * maxDim);
+                            const maxDim = 10;
+                            return Math.max(4, (h / Math.max(w, h)) * maxDim);
                           })(),
-                          background: isActive ? accentColor : textMutedColor,
+                          border: `1px solid ${isActive ? accentColor : textMutedColor}`,
                           opacity: isActive ? 1 : 0.5,
                         }}
                       />
-                      <span>{ratio}</span>
+                      {ratio}
                     </button>
                   );
                 })}
               </div>
-              <div className="text-xs" style={{ color: textMutedColor }}>
-                输出尺寸: {getPixelSize(aspectRatio)}
+              <div className="text-[10px]" style={{ color: textMutedColor }}>
+                {getPixelSize(aspectRatio)}
               </div>
             </div>
 
-            {/* Quality selector */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium flex items-center gap-1.5" style={{ color: textSubColor }}>
-                <BadgeCheck size={14} /> 画面质量
+            {/* Quality selector - single row */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium flex items-center gap-1" style={{ color: textSubColor }}>
+                <BadgeCheck size={12} /> 画面质量
               </label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="flex flex-wrap gap-1">
                 {getSupportedQualities().map(q => {
                   const isActive = quality === q;
                   const displayName = SHARED_QUALITY_DISPLAY_NAMES[q] || q;
@@ -887,7 +887,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                     <button
                       key={q}
                       onClick={() => setQuality(q)}
-                      className="px-2 py-2 rounded-md text-xs font-medium transition-all text-center"
+                      className="px-2.5 py-1 rounded text-[11px] font-medium transition-all text-center"
                       style={{
                         background: isActive ? accentBg : isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)',
                         border: `1px solid ${isActive ? accentBorder : borderColorLight}`,
@@ -907,88 +907,112 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         {activeTab === 'results' && (
           <div className="p-4 space-y-4">
             {isProcessing ? (
-              <div className="flex flex-col items-center justify-center py-10 gap-3">
-                <div className="relative">
-                  <Loader2 size={36} className="animate-spin" style={{ color: accentColor }} />
-                  <Sparkles size={16} className="absolute -top-1 -right-1 animate-pulse" style={{ color: accentColor }} />
+              /* ── Processing: show aspect-ratio-matched placeholder ── */
+              <div className="flex flex-col items-center gap-3">
+                {/* Aspect-ratio-matched loading frame */}
+                <div
+                  className="w-full rounded-lg overflow-hidden flex items-center justify-center"
+                  style={{
+                    aspectRatio: (() => {
+                      const [w, h] = aspectRatio.split(':').map(Number);
+                      return `${w} / ${h}`;
+                    })(),
+                    background: isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.04)',
+                    border: `1px dashed ${borderColorLight}`,
+                    maxHeight: '320px',
+                  }}
+                >
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="relative">
+                      <Loader2 size={28} className="animate-spin" style={{ color: accentColor }} />
+                      <Sparkles size={12} className="absolute -top-0.5 -right-0.5 animate-pulse" style={{ color: accentColor }} />
+                    </div>
+                    <span className="text-xs" style={{ color: textMutedColor }}>{progressLabel || '精修处理中...'}</span>
+                  </div>
                 </div>
-                <div className="text-center">
-                  <p className="text-sm" style={{ color: textColor }}>{progressLabel || '精修处理中...'}</p>
-                  <p className="text-xs mt-1" style={{ color: textMutedColor }}>AI正在优化您的产品图片</p>
-                </div>
-                <div className="w-full max-w-[220px] h-2 rounded-full overflow-hidden" style={{ background: borderColorLight }}>
+                {/* Progress bar */}
+                <div className="w-full max-w-[220px] h-1.5 rounded-full overflow-hidden" style={{ background: borderColorLight }}>
                   <div
                     className="h-full rounded-full transition-all duration-500"
                     style={{ width: `${progress}%`, background: accentColor }}
                   />
                 </div>
-                <span className="text-xs font-mono" style={{ color: textMutedColor }}>{progress}%</span>
+                <span className="text-[11px] font-mono" style={{ color: textMutedColor }}>{progress}%</span>
               </div>
             ) : results.length > 0 ? (
-              <div className="space-y-4">
+              /* ── Results: aspect-ratio-matched image frames ── */
+              <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm" style={{ color: textSubColor }}>精修完成 · {results.length} 张结果</span>
+                  <span className="text-xs" style={{ color: textSubColor }}>精修完成 · {results.length} 张</span>
                   <button
                     onClick={handleRefine}
-                    className="text-xs flex items-center gap-1.5 transition-colors"
+                    className="text-[11px] flex items-center gap-1 transition-colors"
                     style={{ color: accentColor }}
                   >
-                    <Sparkles size={13} /> 重新精修
+                    <Sparkles size={11} /> 重新精修
                   </button>
                 </div>
 
-                {/* Before/After comparison */}
-                {sourceImage && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <span className="text-xs" style={{ color: textMutedColor }}>原图</span>
-                      <img src={sourceImage} alt="Original" className="w-full rounded-md" style={{ border: `1px solid ${borderColor}` }} />
+                {/* Result images in aspect-ratio frames */}
+                <div className="space-y-3">
+                  {results.map((r, i) => (
+                    <div key={i} className="relative group">
+                      {/* Aspect-ratio-matched image frame */}
+                      <div
+                        className="w-full rounded-lg overflow-hidden"
+                        style={{
+                          aspectRatio: (() => {
+                            const [w, h] = aspectRatio.split(':').map(Number);
+                            return `${w} / ${h}`;
+                          })(),
+                          border: `2px solid ${i === 0 ? accentBorder : borderColor}`,
+                          maxHeight: '320px',
+                          background: isMonochrome ? 'rgba(0,0,0,0.02)' : 'rgba(255,255,255,0.02)',
+                        }}
+                      >
+                        <img
+                          src={r.imageUrl}
+                          alt={r.label}
+                          className="w-full h-full object-contain"
+                          onLoad={() => console.log(`[refine-engine-panel] Image ${i} loaded:`, r.imageUrl.slice(0, 80))}
+                          onError={(e) => console.error(`[refine-engine-panel] Image ${i} FAILED to load:`, r.imageUrl.slice(0, 80), e)}
+                        />
+                      </div>
+                      {/* Hover overlay with add-to-canvas button */}
+                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center">
+                        <button
+                          onClick={() => onAddImage?.(r.imageUrl)}
+                          className="px-3 py-1.5 text-xs rounded-md text-white transition-colors flex items-center gap-1"
+                          style={{ background: accentColor }}
+                        >
+                          <ImageIcon size={12} /> 添加到画布
+                        </button>
+                      </div>
+                      {results.length > 1 && (
+                        <span className="absolute top-2 left-2 px-1.5 py-0.5 rounded text-[10px] font-medium text-white" style={{ background: 'rgba(0,0,0,0.5)' }}>
+                          {i + 1}
+                        </span>
+                      )}
                     </div>
-                    <div className="space-y-1.5">
-                      <span className="text-xs" style={{ color: accentColor }}>精修后</span>
-                      <img src={results[0].imageUrl} alt="Refined" className="w-full rounded-md" style={{ border: `1px solid ${accentBorder}` }} />
-                    </div>
-                  </div>
-                )}
+                  ))}
+                </div>
 
-                {/* Multiple results */}
-                {results.length > 1 && (
-                  <div className="space-y-2">
-                    <span className="text-xs" style={{ color: textMutedColor }}>全部结果</span>
-                    <div className="grid grid-cols-2 gap-3">
-                      {results.map((r, i) => (
-                        <div key={i} className="relative group">
-                          <img src={r.imageUrl} alt={r.label} className="w-full rounded-md" style={{ border: `1px solid ${borderColor}` }} />
-                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-md flex items-center justify-center">
-                            <button
-                              onClick={() => onAddImage?.(r.imageUrl)}
-                              className="px-3 py-1.5 text-xs rounded-md text-white transition-colors"
-                              style={{ background: accentColor }}
-                            >
-                              添加到画布
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Single result add button */}
-                {results.length === 1 && (
-                  <button
-                    onClick={() => onAddImage?.(results[0].imageUrl)}
-                    className="w-full py-3 rounded-md text-sm font-medium text-white transition-colors flex items-center justify-center gap-2"
-                    style={{ background: accentColor }}
-                    onMouseEnter={e => (e.currentTarget.style.background = accentHover)}
-                    onMouseLeave={e => (e.currentTarget.style.background = accentColor)}
-                  >
-                    <ImageIcon size={15} />
-                    添加到画布
-                  </button>
-                )}
+                {/* Add all to canvas button */}
+                <button
+                  onClick={() => {
+                    results.forEach(r => onAddImage?.(r.imageUrl));
+                  }}
+                  className="w-full py-2.5 rounded-md text-sm font-medium text-white transition-colors flex items-center justify-center gap-2"
+                  style={{ background: accentColor }}
+                  onMouseEnter={e => (e.currentTarget.style.background = accentHover)}
+                  onMouseLeave={e => (e.currentTarget.style.background = accentColor)}
+                >
+                  <ImageIcon size={14} />
+                  {results.length === 1 ? '添加到画布' : `全部添加到画布 (${results.length})`}
+                </button>
               </div>
             ) : (
+              /* ── No results ── */
               <div className="flex flex-col items-center justify-center py-10 gap-3">
                 <Scan size={36} style={{ color: textMutedColor }} />
                 <p className="text-sm" style={{ color: textSubColor }}>暂无精修结果</p>
