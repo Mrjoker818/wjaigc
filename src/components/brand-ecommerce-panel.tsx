@@ -419,13 +419,18 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   return (
     <div
       className={`fixed inset-0 z-[200] flex items-center justify-center`}
+      data-floating-panel="true"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onWheel={(e) => e.stopPropagation()}
     >
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
 
       {/* Panel */}
       <div
+        data-floating-panel="true"
         className={`relative w-[680px] max-h-[85vh] rounded-2xl border shadow-2xl overflow-hidden flex flex-col ${
           isMonochrome
             ? 'bg-white border-gray-200 shadow-gray-300/30'

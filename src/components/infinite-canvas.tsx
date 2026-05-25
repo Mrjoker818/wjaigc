@@ -1625,6 +1625,12 @@ export function InfiniteCanvas({
 
   // Mouse handlers
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    // Skip if event originates from a floating panel/popup/modal/toolbar
+    const target = e.target as HTMLElement;
+    if (target?.closest?.('[data-floating-panel], [data-popup], [data-modal], [data-toolbar]')) {
+      return;
+    }
+
     // Close any open model dropdown
     setOpenModelDropdownGroupId(null);
 
