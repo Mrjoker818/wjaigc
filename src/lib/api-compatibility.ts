@@ -211,6 +211,53 @@ export function buildPollUrl(
 }
 
 /**
+ * Extract an image URL from an API poll response using robust 5-path parsing.
+ * Same logic as /api/poll-task route's response handling.
+ * Returns the first found image URL, or null if none found.
+ */
+export function extractImageUrl(pollData: Record<string, unknown>): string | null {
+  // Path 1: data.result.images[0].url / .image_url / .src
+  const result = pollData?.result as Record<string, unknown> | undefined;
+  if (result) {
+    const images = result.images as Array<Record<string, unknown>> | undefined;
+    if (images?.length) {
+      const first = images[0];
+      const url = first?.url || first?.image_url || first?.src;
+      if (typeof url === 'string' && url) return url;
+    }
+    // Path 2: data.result.b64_json
+    if (result.b64_json && typeof result.b64_json === 'string') {
+      return `data:image/png;base64,${result.b64_json}`;
+    }
+  }
+  // Path 3: data.output[0].url / .image_url
+  const output = pollData?.output as Array<Record<string, unknown>> | undefined;
+  if (output?.length) {
+    const url = output[0]?.url || output[0]?.image_url;
+    if (typeof url === 'string' && url) return url;
+  }
+  // Path 4: data.data[0].url / .image_url / .b64_json
+  const nestedData = pollData?.data as Array<Record<string, unknown>> | undefined;
+  if (Array.isArray(nestedData) && nestedData.length) {
+    const url = nestedData[0]?.url || nestedData[0]?.image_url || nestedData[0]?.b64_json;
+    if (typeof url === 'string' && url) {
+      if (url.startsWith('data:') || url.startsWith('http')) return url;
+      return `data:image/png;base64,${url}`;
+    }
+  }
+  // Path 5: data.image_url / data.url (single image format)
+  const singleUrl = pollData?.image_url || pollData?.url;
+  if (typeof singleUrl === 'string' && singleUrl) return singleUrl;
+  // Extra: data.data.image_url / data.data.url (nested single)
+  if (nestedData && !Array.isArray(nestedData)) {
+    const dataObj = nestedData as Record<string, unknown>;
+    const nestedUrl = dataObj?.image_url || dataObj?.url;
+    if (typeof nestedUrl === 'string' && nestedUrl) return nestedUrl;
+  }
+  return null;
+}
+
+/**
  * Resolve the compatibility profile for a given provider.
  *
  * Resolution order:

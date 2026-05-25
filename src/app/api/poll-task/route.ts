@@ -178,7 +178,8 @@ export async function POST(request: NextRequest) {
       // ★ 关键修复：queued / processing 状态不直接返回！
       // 对于所有远端异步任务类型，必须继续查询远端API获取真实状态
       // 只有纯本地任务（edit/agent-edit）才由后端自行更新 registry，直接返回
-      const LOCAL_TASK_TYPES = ['edit', 'agent-edit', 'refine-engine', 'brand-ecommerce'];
+      // ★ refine-engine/brand-ecommerce 使用远端 API（APImart等），需要远程轮询
+      const LOCAL_TASK_TYPES = ['edit', 'agent-edit'];
       if (LOCAL_TASK_TYPES.includes(registryTask.type)) {
         // 纯本地任务：由后端自行更新 registry，直接返回当前状态
         return NextResponse.json({
@@ -188,7 +189,21 @@ export async function POST(request: NextRequest) {
           label: registryTask.label,
         }, { status: 200 });
       }
-      // 远端异步任务（generate/mask/erase/outpaint/multi-angle/removebg 等）：继续往下走，查询远端 API
+      // ★ refine-engine/brand-ecommerce：检查 registry 中是否已有直接结果（同步模式返回的）
+      if ((registryTask.type === 'refine-engine' || registryTask.type === 'brand-ecommerce') && registryTask.result) {
+        const directResult = registryTask.result as Record<string, unknown>;
+        const directUrls = directResult.directImageUrls as string[] | undefined;
+        if (directUrls && directUrls.length > 0) {
+          console.log(`[poll-task] ${registryTask.type} 任务有直接结果，返回: ${taskId}`);
+          return NextResponse.json({
+            success: true,
+            status: 'completed',
+            progress: 100,
+            result: directResult,
+          }, { status: 200 });
+        }
+      }
+      // 远端异步任务（generate/mask/erase/outpaint/multi-angle/removebg/refine-engine/brand-ecommerce 等）：继续往下走，查询远端 API
     }
 
     // ★ refine-engine/brand-ecommerce 兜底：如果 task-registry 中没有，
@@ -271,9 +286,13 @@ export async function POST(request: NextRequest) {
       profile = resolveCompatProfile(provider);
     }
 
-    // 解析兼容性档案 - 确定轮询 URL 格式
-    const pollUrl = buildPollUrl(apiBaseUrl, taskId, profile);
-    console.log(`[poll-task] Polling taskId=${taskId}, provider=${providerName}, model=${model || regUsedModel || ''}, pollUrl=${pollUrl?.substring(0, 100)}...`);
+    // ★ 解析兼容性档案 - 确定轮询 URL 格式
+    // 对于 refine-engine/brand-ecommerce，使用注册表中存储的 remoteTaskId（APImart 的任务ID）
+    // 而不是本地的 taskId（refine-xxx），否则 APImart 无法识别
+    const regRemoteTaskId = regResultForProvider.remoteTaskId as string | undefined;
+    const effectiveTaskId = regRemoteTaskId || taskId;
+    const pollUrl = buildPollUrl(apiBaseUrl, effectiveTaskId, profile);
+    console.log(`[poll-task] Polling taskId=${taskId}, remoteTaskId=${regRemoteTaskId || 'N/A'}, effectiveTaskId=${effectiveTaskId}, provider=${providerName}, model=${model || regUsedModel || ''}, pollUrl=${pollUrl?.substring(0, 100)}...`);
 
     if (!pollUrl) {
       // 该提供商不支持轮询（直接返回模式），不应该到这里
@@ -443,7 +462,7 @@ export async function POST(request: NextRequest) {
       if (!sourceImageUrl) {
         const nestedData = taskData?.data as Array<Record<string, unknown>> | undefined;
         if (nestedData && Array.isArray(nestedData) && nestedData.length > 0) {
-          const rawUrl = nestedData[0].url || nestedData[0].b64_json;
+          const rawUrl = nestedData[0].url || nestedData[0].image_url || nestedData[0].b64_json;
           if (typeof rawUrl === 'string') {
             sourceImageUrl = rawUrl.startsWith('data:') ? rawUrl : rawUrl;
           }

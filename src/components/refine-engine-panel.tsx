@@ -373,14 +373,29 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
             const pollData = await pollResp.json();
             console.log(`[refine-engine-panel] Poll #${pollAttemptRef.current}: status=${pollData.status}, progress=${pollData.progress}, hasResult=${!!pollData.result}`);
 
-            if (pollData.status === 'completed' && pollData.result) {
+            if (pollData.status === 'completed') {
               clearInterval(pollInterval);
               setProgress(100);
               setProgressLabel('精修完成');
-              const urls = pollData.result.directImageUrls || pollData.result.imageUrls || [];
-              console.log('[refine-engine-panel] Poll completed, urls:', urls);
-              const label = refineMode === 'expert' ? '专家精修' : '标准精修';
-              setResults(urls.map((url: string) => ({ imageUrl: url, label })));
+              // Support two response formats:
+              // 1. pollData.result.directImageUrls (from refine-engine sync mode)
+              // 2. pollData.imageUrl (from poll-task remote polling — APImart async)
+              const resultUrls: string[] = [];
+              if (pollData.result?.directImageUrls) {
+                resultUrls.push(...pollData.result.directImageUrls);
+              } else if (pollData.result?.imageUrls) {
+                resultUrls.push(...pollData.result.imageUrls);
+              }
+              if (pollData.imageUrl && !resultUrls.includes(pollData.imageUrl)) {
+                resultUrls.push(pollData.imageUrl);
+              }
+              console.log('[refine-engine-panel] Poll completed, urls:', resultUrls, 'raw:', JSON.stringify(pollData).substring(0, 500));
+              if (resultUrls.length > 0) {
+                const label = refineMode === 'expert' ? '专家精修' : '标准精修';
+                setResults(resultUrls.map((url: string) => ({ imageUrl: url, label })));
+              } else {
+                setProgressLabel('精修完成但未获取到图片');
+              }
               setIsProcessing(false);
             } else if (pollData.status === 'failed') {
               clearInterval(pollInterval);

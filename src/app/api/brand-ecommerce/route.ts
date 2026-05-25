@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, getPublicModels } from '@/lib/server-api-config';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl } from '@/lib/api-compatibility';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 
@@ -24,6 +24,47 @@ export function getBrandResult(taskId: string): Record<string, unknown> | undefi
     return undefined;
   }
   return r;
+}
+
+// ─── Persist result image to local server ────
+async function persistResultImage(imageUrl: string): Promise<string> {
+  try {
+    if (imageUrl.startsWith('/api/serve-upload/') || imageUrl.startsWith('/uploads/')) return imageUrl;
+    if (imageUrl.startsWith('data:')) {
+      const resp = await fetch('http://localhost:5000/api/save-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.url) return data.url;
+      }
+      return imageUrl;
+    }
+    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+      const imgResp = await fetch(imageUrl, { signal: AbortSignal.timeout(30000) });
+      if (imgResp.ok) {
+        const contentType = imgResp.headers.get('content-type') || 'image/png';
+        const buffer = Buffer.from(await imgResp.arrayBuffer());
+        const base64 = `data:${contentType};base64,${buffer.toString('base64')}`;
+        const resp = await fetch('http://localhost:5000/api/save-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: base64 }),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.url) return data.url;
+        }
+      }
+      return imageUrl;
+    }
+    return imageUrl;
+  } catch (err) {
+    console.warn('[brand-ecommerce] Failed to persist result image:', err);
+    return imageUrl;
+  }
 }
 
 // ─── E-commerce JSON Template Definitions ─────────────────────────
@@ -398,31 +439,33 @@ export async function POST(request: NextRequest) {
             const parsed = parseResponseForProfile(respData, compatProfile);
 
             if (parsed.directImageUrls?.length) {
-              results.push({ templateId: tpl.id, templateName: tpl.name, imageUrl: parsed.directImageUrls[0] });
+              const persistedUrl = await persistResultImage(parsed.directImageUrls[0]);
+              results.push({ templateId: tpl.id, templateName: tpl.name, imageUrl: persistedUrl || parsed.directImageUrls[0] });
             } else if (parsed.taskIds?.length) {
-              // Poll for async result
-              const pollTaskId = parsed.taskIds[0];
+              // Poll for async result — use same robust parsing as /api/poll-task
+              const remoteTaskId = parsed.taskIds[0];
               let pollAttempts = 0;
-              const maxPollAttempts = 60;
+              const maxPollAttempts = 80;
               while (pollAttempts < maxPollAttempts) {
                 if (isTaskCancelled(taskId)) break;
                 await new Promise(r => setTimeout(r, 3000));
                 pollAttempts++;
                 try {
-                  const pollResp = await fetchWithV1Retry(provider.baseUrl, `/tasks/${pollTaskId}`, {
+                  const pollUrl = buildPollUrl(provider.baseUrl, remoteTaskId, compatProfile);
+                  if (!pollUrl) { results.push({ templateId: tpl.id, templateName: tpl.name, error: '无法构建轮询URL' }); break; }
+                  // ★ buildPollUrl returns a FULL URL — use fetch() directly, NOT fetchWithV1Retry
+                  const pollResp = await fetch(pollUrl, {
                     method: 'GET',
                     headers: { 'Authorization': `Bearer ${provider.apiKey}` },
-                  }, true, 15000);
+                    signal: AbortSignal.timeout(30000),
+                  });
                   if (pollResp.ok) {
                     const pollData = await pollResp.json();
-                    // Try to extract image URL from various response formats
-                    const imgUrl = pollData?.data?.image_url
-                      || pollData?.data?.images?.[0]?.url
-                      || pollData?.output?.image_url
-                      || pollData?.image_url
-                      || pollData?.data?.url;
+                    // ★ Robust 5-path image URL extraction (same as poll-task route)
+                    const imgUrl = extractImageUrl(pollData);
                     if (imgUrl) {
-                      results.push({ templateId: tpl.id, templateName: tpl.name, imageUrl: imgUrl });
+                      const persistedUrl = await persistResultImage(imgUrl);
+                      results.push({ templateId: tpl.id, templateName: tpl.name, imageUrl: persistedUrl || imgUrl });
                       break;
                     }
                     const status = pollData?.status || pollData?.data?.status;
