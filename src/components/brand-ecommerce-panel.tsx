@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { X, ShoppingBag, Upload, Sparkles, Loader2, Check, ChevronDown, Image as ImageIcon, Palette, RefreshCw } from 'lucide-react';
+import { X, ShoppingBag, Upload, Sparkles, Loader2, Check, ChevronDown, Image as ImageIcon, Palette, RefreshCw, Settings } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -16,11 +16,20 @@ interface EcomTemplate {
   category: string;
 }
 
+interface ProviderInfo {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKeyPreview: string;
+}
+
 interface ImageModel {
   id: string;
   name: string;
-  providerName: string;
   providerId: string;
+  providerName: string;
+  providerBaseUrl: string;
+  providerApiKeyPreview: string;
 }
 
 interface GenerateResult {
@@ -96,25 +105,28 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       .catch(() => {});
   }, []);
 
-  // ─── Load models ─────────────────────────────────────────────
+  // ─── Load models from admin API ──────────────────────────────
 
   useEffect(() => {
-    fetch('/api/brand-ecommerce', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'models' }),
-    })
+    fetch('/api/models?type=image')
       .then(r => r.json())
       .then(data => {
-        if (data.success && data.models?.length) {
-          const mapped = data.models.map((m: { id: string; name: string; providerName?: string; providerId?: string }) => ({
-            id: m.id,
-            name: m.name,
-            providerName: m.providerName || '',
-            providerId: m.providerId || '',
-          }));
+        const providers: ProviderInfo[] = data.providers || [];
+        const providerMap = new Map(providers.map((p: ProviderInfo) => [p.id, p]));
+        const modelList = data.models || [];
+        if (modelList.length) {
+          const mapped = modelList.map((m: { id: string; name: string; providerId?: string }) => {
+            const prov = providerMap.get(m.providerId || '');
+            return {
+              id: m.id,
+              name: m.name,
+              providerId: m.providerId || '',
+              providerName: prov?.name || '',
+              providerBaseUrl: prov?.baseUrl || '',
+              providerApiKeyPreview: prov?.apiKeyPreview || '',
+            };
+          });
           setModels(mapped);
-          // Try to use saved model from localStorage
           const saved = localStorage.getItem('wujie_selected_model');
           if (saved && mapped.some((m: ImageModel) => m.id === saved)) {
             setSelectedModel(saved);
@@ -186,6 +198,10 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
 
   const handleGenerate = useCallback(async () => {
     if (!selectedTemplates.size || !productDesc.trim()) return;
+    if (!selectedModel) {
+      setActiveTab('settings');
+      return;
+    }
     setIsGenerating(true);
     setResults([]);
     setProgress(0);
@@ -284,12 +300,14 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   // ─── Category labels ─────────────────────────────────────────
 
   const categoryLabel: Record<string, string> = {
-    product: '商品展示',
+    product: '白底主图',
     scene: '场景氛围',
     model: '模特展示',
+    detail: '详情组合',
     promo: '促销海报',
-    detail: '详情长图',
     social: '社交媒体',
+    creative: '创意合成',
+    brand: '品牌故事',
     tech: '科技数码',
   };
 
@@ -297,9 +315,11 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
     product: isMonochrome ? 'border-blue-300 bg-blue-50' : 'border-[#4a9eff]/30 bg-[#4a9eff]/10',
     scene: isMonochrome ? 'border-emerald-300 bg-emerald-50' : 'border-[#34d399]/30 bg-[#34d399]/10',
     model: isMonochrome ? 'border-pink-300 bg-pink-50' : 'border-[#f472b6]/30 bg-[#f472b6]/10',
-    promo: isMonochrome ? 'border-amber-300 bg-amber-50' : 'border-[#fbbf24]/30 bg-[#fbbf24]/10',
     detail: isMonochrome ? 'border-violet-300 bg-violet-50' : 'border-[#a78bfa]/30 bg-[#a78bfa]/10',
+    promo: isMonochrome ? 'border-amber-300 bg-amber-50' : 'border-[#fbbf24]/30 bg-[#fbbf24]/10',
     social: isMonochrome ? 'border-rose-300 bg-rose-50' : 'border-[#fb7185]/30 bg-[#fb7185]/10',
+    creative: isMonochrome ? 'border-orange-300 bg-orange-50' : 'border-[#fb923c]/30 bg-[#fb923c]/10',
+    brand: isMonochrome ? 'border-sky-300 bg-sky-50' : 'border-[#38bdf8]/30 bg-[#38bdf8]/10',
     tech: isMonochrome ? 'border-cyan-300 bg-cyan-50' : 'border-[#22d3ee]/30 bg-[#22d3ee]/10',
   };
 
@@ -455,7 +475,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
             <div className="space-y-4">
               {/* Model selection */}
               <div>
-                <label className={`block text-xs font-medium ${textSub} mb-1.5`}>生成模型</label>
+                <label className={`block text-xs font-medium ${textSub} mb-1.5`}>生成模型 <span className="text-red-400">*</span></label>
                 <div className="relative" ref={modelDropdownRef}>
                   <button
                     onClick={() => setShowModelDropdown(!showModelDropdown)}
@@ -469,7 +489,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
                     <ChevronDown size={14} className={textMuted} />
                   </button>
                   {showModelDropdown && (
-                    <div className={`absolute z-50 top-full mt-1 w-full rounded-lg border shadow-xl max-h-48 overflow-y-auto ${
+                    <div className={`absolute z-50 top-full mt-1 w-full rounded-lg border shadow-xl max-h-64 overflow-y-auto ${
                       isMonochrome ? 'bg-white border-gray-200' : 'bg-[#222] border-white/[0.1]'
                     }`}>
                       {models.length ? models.map(m => (
@@ -480,14 +500,20 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
                             setShowModelDropdown(false);
                             localStorage.setItem('wujie_selected_model', m.id);
                           }}
-                          className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                          className={`w-full text-left px-3 py-2.5 text-sm transition-colors ${
                             m.id === selectedModel
                               ? isMonochrome ? 'bg-blue-50 text-blue-600' : 'bg-[#d4af37]/10 text-[#d4af37]'
                               : isMonochrome ? 'text-gray-700 hover:bg-gray-50' : 'text-gray-300 hover:bg-[#2a2a2a]'
                           }`}
                         >
                           <div className="font-medium">{m.name}</div>
-                          {m.providerName && <div className={`text-[10px] ${textMuted}`}>{m.providerName}</div>}
+                          <div className={`text-[10px] mt-0.5 ${textMuted}`}>
+                            {m.providerName && <span className="mr-1.5">{m.providerName}</span>}
+                            {m.providerBaseUrl && <span className="font-mono opacity-60">{m.providerBaseUrl.replace(/^https?:\/\//, '')}</span>}
+                          </div>
+                          {m.providerApiKeyPreview && (
+                            <div className={`text-[10px] font-mono ${textMuted} opacity-50`}>Key: {m.providerApiKeyPreview}</div>
+                          )}
                         </button>
                       )) : (
                         <div className={`px-3 py-4 text-center text-sm ${textMuted}`}>
@@ -703,15 +729,17 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
             >关闭</button>
             <button
               onClick={handleGenerate}
-              disabled={isGenerating || !selectedTemplates.size || !productDesc.trim()}
+              disabled={isGenerating || !selectedTemplates.size || !productDesc.trim() || !selectedModel}
               className={`flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-semibold transition-all ${
-                isGenerating || !selectedTemplates.size || !productDesc.trim()
+                isGenerating || !selectedTemplates.size || !productDesc.trim() || !selectedModel
                   ? isMonochrome ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-[#333] text-[#555] cursor-not-allowed'
                   : `${accent} ${isMonochrome ? 'text-white' : 'text-black'} ${accentHover} shadow-lg`
               }`}
             >
               {isGenerating ? (
                 <><Loader2 size={13} className="animate-spin" />生成中...</>
+              ) : !selectedModel ? (
+                <><Settings size={13} />请先选择模型</>
               ) : (
                 <><Sparkles size={13} />批量生成</>
               )}

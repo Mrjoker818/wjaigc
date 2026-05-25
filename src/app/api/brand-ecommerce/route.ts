@@ -24,81 +24,101 @@ const ECOM_TEMPLATES: EcomTemplate[] = [
     id: 'white-bg',
     name: '白底主图',
     icon: '⬜',
-    description: '纯白背景商品展示，电商标准主图',
-    promptTemplate: 'Product photography of {product}, placed on pure white background, studio lighting, centered composition, professional product shot, clean and minimal, high resolution, e-commerce style, {style_extra}',
-    negativePrompt: 'low quality, blurry, distorted, deformed, watermark, text, signature, screenshot, compression artifacts, cluttered background, shadow on background',
+    description: '淘宝/京东/拼多多标准主图，纯白背景+阴影优化',
+    promptTemplate: '电商主图：{product}，纯白背景(RGB 255,255,255)，专业影棚灯光，居中构图，高清细节，产品阴影自然柔和，符合平台审核规范，适合手机端展示，{brand_color_prompt}{style_extra}',
+    negativePrompt: 'low quality, blurry, distorted, deformed, watermark, signature, screenshot, compression artifacts, cluttered background, gray edge, shadow on background, text, logo',
     aspectRatio: '1:1',
     category: 'product',
+  },
+  {
+    id: 'detail-page',
+    name: '详情页组合图',
+    icon: '📋',
+    description: '商品详情页三图组合：场景图+细节图+卖点图',
+    promptTemplate: '电商详情页：{product}，分为三个层次展示——场景层展示使用场景{scene}，细节层展示材质纹理和工艺细节，卖点层突出核心卖点，专业排版，{brand_color_prompt}{style_extra}',
+    negativePrompt: 'low quality, blurry, distorted, deformed, watermark, text overflow, messy layout, unprofessional',
+    aspectRatio: '3:4',
+    category: 'detail',
+  },
+  {
+    id: 'xiaohongshu',
+    name: '小红书封面',
+    icon: '📕',
+    description: '小红书竖版笔记封面，强化标题文字渲染',
+    promptTemplate: '小红书爆款封面：{product}，竖版构图，预留顶部20%空白区供APP叠加logo，{brand_color_prompt}强化标题文字渲染，精美排版，种草风格，吸引点击，{style_extra}',
+    negativePrompt: 'low quality, blurry, distorted, deformed, watermark, ugly, boring, dated, horizontal layout',
+    aspectRatio: '3:4',
+    category: 'social',
+  },
+  {
+    id: 'douyin',
+    name: '抖音橱窗图',
+    icon: '🎵',
+    description: '抖音横版商品橱窗封面，动态构图引导视线',
+    promptTemplate: '抖音商品橱窗封面：{product}，横版构图，动态构图引导视线，重点区域自动提亮，右下角预留行动号召按钮位置，{brand_color_prompt}适合短视频封面展示，{style_extra}',
+    negativePrompt: 'low quality, blurry, distorted, deformed, watermark, vertical layout, boring, static',
+    aspectRatio: '16:9',
+    category: 'social',
   },
   {
     id: 'scene-lifestyle',
     name: '场景氛围图',
     icon: '🏞️',
-    description: '商品融入生活场景，增强购买欲',
-    promptTemplate: 'Lifestyle product photography of {product}, placed in {scene}, natural lighting, warm and inviting atmosphere, depth of field, professional interior design, magazine quality, {style_extra}',
-    negativePrompt: 'low quality, blurry, distorted, deformed, watermark, ugly, unrealistic, cartoon, illustration',
+    description: '商品融入生活场景，增强购买欲和代入感',
+    promptTemplate: '场景氛围图：{product}，置于{scene}场景中，自然光线，温馨氛围，景深效果，杂志级品质，光影方向与产品高光位置匹配，自然融合不假合成感，{brand_color_prompt}{style_extra}',
+    negativePrompt: 'low quality, blurry, distorted, deformed, watermark, ugly, unrealistic, cartoon, fake composite, harsh edge',
     aspectRatio: '4:3',
     category: 'scene',
   },
   {
     id: 'model-wear',
-    name: '模特试穿图',
+    name: '模特展示图',
     icon: '👗',
-    description: '模特穿搭展示，突出上身效果',
-    promptTemplate: 'Fashion model wearing {product}, full body shot, professional studio lighting, neutral pose, clean background, fashion editorial style, high detail, {style_extra}',
-    negativePrompt: 'low quality, blurry, distorted face, deformed hands, extra limbs, watermark, ugly, unnatural pose',
+    description: '模特穿搭/使用展示，突出上身效果',
+    promptTemplate: '模特展示图：模特展示{product}，全身/半身照，专业影棚灯光，自然姿态，干净背景，时尚杂志风格，高细节，{brand_color_prompt}{style_extra}',
+    negativePrompt: 'low quality, blurry, distorted face, deformed hands, extra limbs, watermark, ugly, unnatural pose, fused fingers, long neck',
     aspectRatio: '3:4',
     category: 'model',
-  },
-  {
-    id: 'feature-poster',
-    name: '卖点海报',
-    icon: '📢',
-    description: '突出核心卖点，促销活动必备',
-    promptTemplate: 'Promotional product poster of {product}, dramatic lighting, vibrant colors, eye-catching composition, commercial advertising style, premium feel, gradient background, {style_extra}',
-    negativePrompt: 'low quality, blurry, distorted, deformed, watermark, text overflow, messy layout',
-    aspectRatio: '3:4',
-    category: 'promo',
   },
   {
     id: 'detail-closeup',
     name: '细节特写',
     icon: '🔍',
-    description: '展示材质纹理和工艺细节',
-    promptTemplate: 'Macro close-up photography of {product}, extreme detail showing texture and craftsmanship, professional studio lighting, shallow depth of field, product detail shot, {style_extra}',
+    description: '展示材质纹理和工艺细节，放大产品质感',
+    promptTemplate: '细节特写：{product}的细节特写，展示材质纹理和工艺细节，微距摄影，极浅景深，专业影棚灯光，高清锐利，{brand_color_prompt}{style_extra}',
     negativePrompt: 'low quality, blurry, out of focus, distorted, deformed, watermark, noise, grain',
     aspectRatio: '1:1',
     category: 'product',
   },
   {
-    id: 'a-plus',
-    name: 'A+详情图',
-    icon: '📋',
-    description: '亚马逊A+页面宽幅展示图',
-    promptTemplate: 'Wide banner product showcase of {product}, professional product arrangement, clean layout, e-commerce A+ content style, premium presentation, lifestyle elements, {style_extra}',
-    negativePrompt: 'low quality, blurry, distorted, deformed, watermark, cluttered, messy, unprofessional',
-    aspectRatio: '16:9',
-    category: 'detail',
+    id: 'brand-poster',
+    name: '品牌海报',
+    icon: '🎨',
+    description: '品牌视觉延展海报，保持品牌色一致性',
+    promptTemplate: '品牌海报：{product}，品牌视觉延展设计，保持品牌色一致性{brand_color_prompt}，专业广告级构图，高级质感，渐变背景，商业摄影风格，{style_extra}',
+    negativePrompt: 'low quality, blurry, distorted, deformed, watermark, text overflow, messy layout, inconsistent colors',
+    aspectRatio: '3:4',
+    category: 'promo',
   },
   {
-    id: 'social-media',
-    name: '社交媒体图',
-    icon: '📱',
-    description: '适合Instagram/小红书等社交平台',
-    promptTemplate: 'Social media product photo of {product}, trendy aesthetic, flat lay or styled shot, pastel or vibrant color palette, Instagram-worthy composition, Gen Z style, {style_extra}',
-    negativePrompt: 'low quality, blurry, distorted, deformed, watermark, boring, dated, uncool',
-    aspectRatio: '4:5',
-    category: 'social',
-  },
-  {
-    id: 'tech-minimal',
-    name: '科技极简图',
-    icon: '💎',
-    description: '3C数码产品专用，深色高级质感',
-    promptTemplate: 'Premium tech product photography of {product}, dark background with subtle gradient, dramatic rim lighting, floating or angled composition, futuristic feel, CES showcase style, {style_extra}',
-    negativePrompt: 'low quality, blurry, distorted, deformed, watermark, cheap, toy-like, unprofessional lighting',
+    id: 'creative-composite',
+    name: '创意合成图',
+    icon: '✨',
+    description: '创意视觉合成，打造差异化产品形象',
+    promptTemplate: '创意合成：{product}，创意视觉合成，超现实场景，梦幻光影，艺术化呈现，独特视觉语言，差异化产品形象，{brand_color_prompt}{style_extra}',
+    negativePrompt: 'low quality, blurry, distorted, deformed, watermark, boring, ordinary, plain',
     aspectRatio: '1:1',
-    category: 'tech',
+    category: 'creative',
+  },
+  {
+    id: 'packaging',
+    name: '包装展示图',
+    icon: '📦',
+    description: '产品包装盒/袋展示，突出品牌视觉',
+    promptTemplate: '包装展示：{product}的精美包装展示，包装盒/袋正面朝向镜头，品牌标识清晰可见，{brand_color_prompt}高级质感包装材料，柔和打光，{style_extra}',
+    negativePrompt: 'low quality, blurry, distorted, deformed, watermark, damaged packaging, wrinkled',
+    aspectRatio: '3:4',
+    category: 'product',
   },
 ];
 
@@ -165,16 +185,17 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '未找到选中的模板' }, { status: 400 });
       }
 
-      // Build prompts for each template
-      const colorHint = brandColors?.length
-        ? `color palette: ${brandColors.join(', ')}`
+      // Build brand color prompt (文章强调品牌色一致性，支持HEX色值注入)
+      const brandColorPrompt = brandColors?.length
+        ? `主色调${brandColors[0]}${brandColors[1] ? '，辅色' + brandColors[1] : ''}${brandColors[2] ? '，强调色' + brandColors[2] : ''}，严格保持品牌色一致性`
         : '';
-      const styleParts = [styleExtra, colorHint].filter(Boolean).join(', ');
+      const styleParts = [styleExtra].filter(Boolean).join(', ');
 
       const tasks = selectedTemplates.map(tpl => {
         const prompt = tpl.promptTemplate
           .replace('{product}', productDesc)
-          .replace('{scene}', body.sceneDesc || 'modern minimalist interior')
+          .replace('{scene}', body.sceneDesc || '现代简约室内场景')
+          .replace('{brand_color_prompt}', brandColorPrompt)
           .replace('{style_extra}', styleParts);
         const negPrompt = tpl.negativePrompt;
         const dims = resolveDimensions(tpl.aspectRatio);
@@ -302,9 +323,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'models') {
-      // Return available image models from admin config
+      // Return available image models from admin config with provider info
       const models = await getPublicModels('image');
-      return NextResponse.json({ success: true, models });
+      const { getPublicApiProviders } = await import('@/lib/server-api-config');
+      const providers = await getPublicApiProviders();
+      const imageProviders = providers.filter(p => p.isEnabled && (p.modelType === 'image' || p.modelType === 'universal' || p.modelType === 'general'));
+      return NextResponse.json({ success: true, models, providers: imageProviders });
     }
 
     return NextResponse.json({ error: '未知操作' }, { status: 400 });
