@@ -320,24 +320,52 @@ export async function POST(request: NextRequest) {
             };
 
             // Add reference image if provided (img2img)
-            if (referenceImageUrl) {
-              reqBody.image_url = referenceImageUrl;
+            // Resolve image URL: data URLs need to be uploaded first
+            let accessibleImageUrl = referenceImageUrl;
+            if (referenceImageUrl && referenceImageUrl.startsWith('data:')) {
+              try {
+                const saveResp = await fetch(new URL('/api/save-image', request.url).href, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ imageUrl: referenceImageUrl }),
+                });
+                if (saveResp.ok) {
+                  const saveData = await saveResp.json();
+                  if (saveData.url) accessibleImageUrl = saveData.url;
+                }
+              } catch { /* fallback to original */ }
+            }
+
+            if (accessibleImageUrl) {
+              reqBody.image = accessibleImageUrl;
+              reqBody.image_urls = [accessibleImageUrl];
               reqBody.strength = 0.5;
             }
 
-            const { body: apiBody, endpoint: apiEndpoint } = adjustRequestForProfile(reqBody, compatProfile, { hasImage: !!referenceImageUrl });
-            const path = apiEndpoint || '/images/generations';
+            const { body: apiBody, endpoint: apiEndpoint } = adjustRequestForProfile(reqBody, compatProfile, { hasImage: !!accessibleImageUrl });
+            let path = apiEndpoint || '/images/generations';
 
             const headers: Record<string, string> = {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${provider.apiKey}`,
             };
 
-            const resp = await fetchWithV1Retry(provider.baseUrl, path, {
+            let resp = await fetchWithV1Retry(provider.baseUrl, path, {
               method: 'POST',
               headers,
               body: JSON.stringify(apiBody),
             }, true, 120000);
+
+            // Fallback: /images/edits → /images/generations
+            if (!resp.ok && path === '/images/edits') {
+              const { body: fallbackBody, endpoint: fallbackEndpoint } = adjustRequestForProfile(reqBody, compatProfile, { hasImage: false });
+              const fallbackPath = fallbackEndpoint || '/images/generations';
+              resp = await fetchWithV1Retry(provider.baseUrl, fallbackPath, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(fallbackBody),
+              }, true, 120000);
+            }
 
             if (!resp.ok) {
               const errText = await resp.text().catch(() => '');
