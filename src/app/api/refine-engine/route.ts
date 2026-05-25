@@ -367,17 +367,35 @@ export async function POST(request: NextRequest) {
       const taskId = `refine-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       registerTask(taskId, 'refine-engine', `精修: ${productName || MODE_LABELS[refineMode] || '产品'}`);
 
-      // Start async processing (processRefine handles image URL resolution internally)
-      processRefine(taskId, {
+      // Start processing and wait for the result (synchronous mode)
+      // This avoids the dev-mode task-registry not being shared across route workers
+      let processError: string | null = null;
+      const result = await processRefine(taskId, {
         imageUrl: imageUrl,
         prompt,
         model: selectedModel,
         provider,
         aspectRatio: aspectRatio || '1:1',
       }).catch((err: Error) => {
-        updateTaskProgress(taskId, { status: 'failed', error: err.message });
+        processError = err.message;
+        return null;
       });
 
+      // If processRefine returned a result directly, send it back immediately
+      if (result && result.directImageUrls && result.directImageUrls.length > 0) {
+        return NextResponse.json({
+          success: true,
+          directImageUrls: result.directImageUrls,
+          taskId,
+        });
+      }
+
+      // If processing failed, return error
+      if (processError) {
+        return NextResponse.json({ success: false, error: processError, taskId }, { status: 500 });
+      }
+
+      // Fallback: return taskId for polling (should rarely happen)
       return NextResponse.json({ success: true, taskId });
     }
 
@@ -398,7 +416,7 @@ async function processRefine(
     provider: ApiProvider;
     aspectRatio: string;
   }
-) {
+): Promise<{ directImageUrls: string[] }> {
   updateTaskProgress(taskId, { status: 'processing', progress: 10, label: '构建精修提示词...' });
 
   const compatProfile = resolveCompatProfile(params.provider);
@@ -481,15 +499,31 @@ async function processRefine(
 
     // Provide both fields for maximum compatibility:
     // - image (base64): Required by /images/edits, AI must process this as source image
-    // - image_urls (HTTP URLs): Used by /images/generations for reference-based generation
+    // - image_urls (HTTP URLs): Required by /images/generations (APImart etc.) for reference-based generation
     if (imageAsBase64) {
       rawBody.image = imageAsBase64;
     }
+    // image_urls MUST be an HTTP-accessible URL for providers like APImart
     if (params.imageUrl.startsWith('http')) {
       rawBody.image_urls = [params.imageUrl];
     } else if (imageAsBase64) {
-      // For local/data images, image_urls is not useful (base64 too large for URL field)
-      // The image field (base64) is sufficient
+      // For local/data images, upload to our server to get an HTTP URL for image_urls field
+      try {
+        const saveRes = await fetch('http://localhost:5000/api/save-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: imageAsBase64.startsWith('data:') ? imageAsBase64 : `data:image/png;base64,${imageAsBase64}` }),
+        });
+        if (saveRes.ok) {
+          const saveData = await saveRes.json();
+          if (saveData.url) {
+            rawBody.image_urls = [saveData.url];
+            console.log('[refine-engine] Uploaded image for image_urls:', saveData.url);
+          }
+        }
+      } catch (saveErr) {
+        console.warn('[refine-engine] Failed to upload image for image_urls:', saveErr);
+      }
     }
 
     rawBody.strength = 0.7;
@@ -497,7 +531,7 @@ async function processRefine(
 
   // Enhance prompt for image-to-image: instruct AI to use the reference image
   if (params.imageUrl) {
-    rawBody.prompt = `[img2img] Preserve the structure, style and key elements of the reference image. ${params.prompt}`;
+    rawBody.prompt = `[img2img] IMPORTANT: You MUST preserve the EXACT same product/subject from the reference image - same shape, same brand, same identity. Only apply the requested style/rendering changes. ${params.prompt}`;
   }
 
   const hasImageFlag = !!(rawBody.image || rawBody.image_urls);
@@ -553,7 +587,7 @@ async function processRefine(
             label: '精修完成',
             result: { directImageUrls: persistedUrls },
           });
-          return;
+          return { directImageUrls: persistedUrls };
         } else if (fallbackParsed.taskIds && fallbackParsed.taskIds.length > 0) {
           updateTaskProgress(taskId, { progress: 60, label: '等待模型生成...' });
           const pollResult = await pollForResult(fallbackParsed.taskIds[0], params.provider.baseUrl, params.provider.apiKey, compatProfile);
@@ -565,7 +599,7 @@ async function processRefine(
             label: '精修完成',
             result: { directImageUrls: [persistedUrl] },
           });
-          return;
+          return { directImageUrls: [persistedUrl] };
         } else {
           throw new Error('模型未返回图片结果');
         }
@@ -588,6 +622,7 @@ async function processRefine(
         label: '精修完成',
         result: { directImageUrls: persistedUrls },
       });
+      return { directImageUrls: persistedUrls };
     } else if (parsed.taskIds && parsed.taskIds.length > 0) {
       // Poll for async result
       updateTaskProgress(taskId, { progress: 50, label: '等待模型生成...' });
@@ -600,12 +635,14 @@ async function processRefine(
         label: '精修完成',
         result: { directImageUrls: [persistedUrl] },
       });
+      return { directImageUrls: [persistedUrl] };
     } else {
       throw new Error('模型未返回图片结果');
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     updateTaskProgress(taskId, { status: 'failed', error: message });
+    throw err; // Re-throw so the POST handler can return the error
   }
 }
 

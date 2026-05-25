@@ -268,13 +268,35 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         customInstructions,
       };
 
+      setProgress(10);
+      setProgressLabel('正在精修，请耐心等待...');
+
       const resp = await fetch('/api/refine-engine', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(360000), // 6 minutes timeout for sync processing
       });
       const data = await resp.json();
 
+      // Handle error responses
+      if (!data.success && data.error) {
+        setProgressLabel('精修失败: ' + data.error);
+        setIsProcessing(false);
+        return;
+      }
+
+      // Synchronous mode: result returned directly from POST
+      if (data.directImageUrls && data.directImageUrls.length > 0) {
+        setProgress(100);
+        setProgressLabel('精修完成');
+        const label = refineMode === 'expert' ? '专家精修' : '标准精修';
+        setResults(data.directImageUrls.map((url: string) => ({ imageUrl: url, label })));
+        setIsProcessing(false);
+        return;
+      }
+
+      // Fallback: poll mode (for backwards compatibility)
       if (data.taskId) {
         setProgressLabel('精修处理中...');
         pollAttemptRef.current = 0;
@@ -341,6 +363,11 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
       }
     } catch (err) {
       console.error('Refine failed:', err);
+      if (err instanceof DOMException && err.name === 'TimeoutError') {
+        setProgressLabel('精修超时，请重试');
+      } else {
+        setProgressLabel('精修失败，请重试');
+      }
       setIsProcessing(false);
     }
   };
