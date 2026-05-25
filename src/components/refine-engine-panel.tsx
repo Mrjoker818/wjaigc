@@ -162,6 +162,9 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
     }
   }, [sourceImage, activeTab]);
 
+  // ─── Derived state ───
+  const selectedCategoryName = categories.find(c => c.id === selectedCategory)?.name || '默认';
+
   // ─── Update material/reflect when category changes ───
   useEffect(() => {
     const cat = categories.find(c => c.id === selectedCategory);
@@ -347,7 +350,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
           精修引擎
         </span>
         <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: textSubColor, background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
-          Mr. joker 商业标准
+          {selectedCategoryName} · {refineMode === 'expert' ? '专家精修' : '标准精修'}
         </span>
         <button
           onClick={onClose}

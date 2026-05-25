@@ -228,6 +228,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     return imageModels.find(m => m.providerId === providerId && m.id === modelId) || null;
   })();
 
+  // 当前选中的图像模型显示名
+  const selectedModel = currentImageModel ? `${currentImageModel.name || currentImageModel.id}` : '';
+
   // 当前选中的图像模型是否支持蒙版涂抹
   // - supportsMask=true: OpenAI/Flux/SD 系列，支持原生 mask 或可靠理解蒙版参考图
   // - supportsMask=false: Gemini 系列，AI 无法可靠理解蒙版语义，仅支持文字修图
@@ -1362,15 +1365,28 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         {/* Header - 可拖拽 */}
         <div
           data-panel-header
-          className={`flex items-center justify-between px-4 py-3 border-b ${thHeader} cursor-move`}
+          className="flex items-center gap-2 px-3 py-2 cursor-move select-none shrink-0"
+          style={{ borderBottom: `1px solid ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)'}` }}
           onMouseDown={handleDragStart}
         >
-          <h2 className={`text-sm font-semibold ${thTitle} flex items-center gap-2`}>
-            <Pencil className={`h-4 w-4 ${thAccentIcon}`} />
+          <GripVertical size={14} style={{ color: isMonochrome ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.3)' }} />
+          <Pencil size={15} style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }} />
+          <span className="text-sm font-semibold flex-1" style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }}>
             语言修图
-          </h2>
-          <button onClick={() => { setEditContextHistory([]); setAutoMaskPreview(null); setPendingAutoRegions([]); onClose(); }} className={`p-1 rounded-lg ${thCloseBtn} transition-colors`}>
-            <X className="h-4 w-4" />
+          </span>
+          {selectedModel && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: isMonochrome ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.5)', background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
+              {selectedModel}
+            </span>
+          )}
+          <button
+            onClick={() => { setEditContextHistory([]); setAutoMaskPreview(null); setPendingAutoRegions([]); onClose(); }}
+            className="p-1 rounded-md transition-colors"
+            style={{ color: isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)' }}
+            onMouseEnter={e => (e.currentTarget.style.color = isMonochrome ? '#000' : '#fff')}
+            onMouseLeave={e => (e.currentTarget.style.color = isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)')}
+          >
+            <X size={14} />
           </button>
         </div>
 
