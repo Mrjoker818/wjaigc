@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare } from 'lucide-react';
+import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Palette } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -17,6 +17,7 @@ import { getModelDisplayName } from '@/lib/model-name-map';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
+import BrandKitPanel from './brand-kit-panel';
 
 interface Message {
   id: string;
@@ -269,7 +270,6 @@ interface ChatPanelProps {
   onChatModelChange?: (info: { model: string; providerId: string; apiKey: string; baseUrl: string; providerPreset?: string } | null) => void;
 }
 
-// Helper: check if a URL looks like an image URL
 function isImageUrl(url: string): boolean {
   // Has image extension
   if (/\.(png|jpg|jpeg|gif|webp|svg|bmp|ico|tiff?)(\?.*)?$/i.test(url)) return true;
@@ -978,7 +978,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showChatSettings, setShowChatSettings] = useState(true);
   // 提示词大师相关状态
-  const [activeTab, setActiveTab] = useState<'chat' | 'optimizer'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'optimizer' | 'brandkit'>('chat');
   const [optimizerInput, setOptimizerInput] = useState('');
   const [optimizerOutputEn, setOptimizerOutputEn] = useState('');
   const [optimizerOutputCn, setOptimizerOutputCn] = useState('');
@@ -1814,6 +1814,21 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
               <Wand2 size={13} />
               提示词大师
             </button>
+            <button
+              onClick={() => setActiveTab('brandkit')}
+              className={`relative z-10 px-2.5 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
+                activeTab === 'brandkit'
+                  ? isGold
+                    ? 'bg-[#d4af37]/15 text-[#d4af37] shadow-sm'
+                    : 'bg-white text-gray-900 shadow-sm'
+                  : isGold
+                    ? 'text-[#666] hover:text-[#999]'
+                    : 'text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              <Palette size={13} />
+              品牌构件
+            </button>
           </div>
           {activeTab === 'chat' && (
             <div className="flex items-center gap-0.5">
@@ -2594,6 +2609,13 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
           </div>
         </div>
       </div>
+      )}
+      {/* Brand Kit 品牌构件 */}
+      {activeTab === 'brandkit' && (
+        <BrandKitPanel
+          isGold={isGold}
+          onAddImages={onAddImages}
+        />
       )}
       {/* 第三方模型调用弹窗 */}
       <ThirdPartyModelDialog
