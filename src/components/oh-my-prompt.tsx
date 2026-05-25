@@ -7,7 +7,8 @@ import {
   GripVertical, Copy, ExternalLink, Eye, Languages,
   Tag, Image, FileText, Loader2, ChevronLeft, RefreshCw,
   Bookmark, BookmarkCheck, ArrowRight, Zap,
-  Maximize2, Minimize2, Download, Upload, Shuffle, Star, Clock, BarChart3
+  Maximize2, Minimize2, Download, Upload, Shuffle, Star, Clock, BarChart3,
+  Bot, ShoppingBag, Send, Settings2, Palette, LayoutGrid
 } from 'lucide-react';
 
 // ===== Types =====
@@ -100,6 +101,40 @@ export interface OmpSettings {
 }
 
 const STORAGE_KEY = 'oh-my-prompt-data-v2';
+
+// ===== Agent / Ecommerce Types (from oh-my-prompt repo) =====
+export type AgentTemplateCategory = 'general' | 'ecommerce'
+export type EcommercePlatform = 'amazon' | 'taobao' | 'jd' | 'pinduoduo' | 'temu' | 'shein'
+export type EcommerceMarket = 'china' | 'usa' | 'europe' | 'japan' | 'southeast_asia'
+export type EcommerceLanguage = 'zh' | 'en' | 'ja'
+export type EcommerceAspectRatio = '1:1' | '4:3' | '3:4' | '16:9' | '9:16'
+
+export interface GeneralAgentSections {
+  subject?: string
+  style?: string
+  lighting?: string
+  colors?: string
+  composition?: string
+  materials?: string
+  mood?: string
+  negativePrompt?: string
+}
+
+export interface EcommercePromptItem {
+  type: string
+  typeEn: string
+  prompt: string
+  aspectRatio: string
+  details?: {
+    subject?: string
+    scene?: string
+    composition?: string
+    lighting?: string
+    style?: string
+    sellingPoint?: string
+    parameters?: string
+  }
+}
 
 // ===== Category Icon/Color Mapping =====
 const CATEGORY_ICONS: Record<string, { icon: string; color: string }> = {
@@ -281,7 +316,7 @@ interface OhMyPromptProps {
 
 export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAnalyzing, isOpen, onClose, themeStyle, embedded = false, visionResult, floating = false }: OhMyPromptProps) {
   const [settings, setSettings] = useState<OmpSettings>(loadSettings);
-  const [activeTab, setActiveTab] = useState<'insert' | 'manage' | 'resource' | 'vision'>('resource');
+  const [activeTab, setActiveTab] = useState<'insert' | 'manage' | 'resource' | 'vision' | 'agent' | 'ecommerce'>('resource');
   const [searchQuery, setSearchQuery] = useState('');
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const [editingCatName, setEditingCatName] = useState('');
@@ -301,6 +336,20 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const panelRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Agent / Ecommerce state
+  const [agentInput, setAgentInput] = useState('');
+  const [agentGenerating, setAgentGenerating] = useState(false);
+  const [agentResult, setAgentResult] = useState<{ prompt: string; sections?: GeneralAgentSections } | null>(null);
+  const [agentError, setAgentError] = useState('');
+  const [ecomPlatform, setEcomPlatform] = useState<EcommercePlatform>('taobao');
+  const [ecomMarket, setEcomMarket] = useState<EcommerceMarket>('china');
+  const [ecomLanguage, setEcomLanguage] = useState<EcommerceLanguage>('zh');
+  const [ecomAspectRatio, setEcomAspectRatio] = useState<EcommerceAspectRatio>('1:1');
+  const [ecomSellingPoints, setEcomSellingPoints] = useState('');
+  const [ecomGenerating, setEcomGenerating] = useState(false);
+  const [ecomResult, setEcomResult] = useState<EcommercePromptItem[] | null>(null);
+  const [ecomError, setEcomError] = useState('');
 
   // Floating window state
   const floatWin = useFloatingWindow(540, 720);
@@ -412,6 +461,63 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
     if (allPrompts.length === 0) return;
     setRandomPrompt(allPrompts[Math.floor(Math.random() * allPrompts.length)]);
   }, [resourcePrompts]);
+
+  // ===== Agent Generate =====
+  const handleAgentGenerate = useCallback(async () => {
+    if (!agentInput.trim()) return;
+    setAgentGenerating(true);
+    setAgentError('');
+    setAgentResult(null);
+    try {
+      const res = await fetch('/api/omp-agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inputText: agentInput, templateCategory: 'general' }),
+      });
+      const data = await res.json();
+      if (!data.success) { setAgentError(data.error || '生成失败'); return; }
+      const result = data.data;
+      setAgentResult({ prompt: result.prompt, sections: result.agentResult?.sections });
+    } catch (err) {
+      setAgentError(err instanceof Error ? err.message : '网络错误');
+    } finally {
+      setAgentGenerating(false);
+    }
+  }, [agentInput]);
+
+  // ===== Ecommerce Generate =====
+  const handleEcommerceGenerate = useCallback(async () => {
+    if (!agentInput.trim()) return;
+    setEcomGenerating(true);
+    setEcomError('');
+    setEcomResult(null);
+    try {
+      const res = await fetch('/api/omp-agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          inputText: agentInput,
+          templateCategory: 'ecommerce',
+          ecommerceConfig: {
+            platform: ecomPlatform,
+            market: ecomMarket,
+            language: ecomLanguage,
+            aspectRatio: ecomAspectRatio,
+            setStructure: 'smart',
+            sellingPoints: ecomSellingPoints,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) { setEcomError(data.error || '生成失败'); return; }
+      const result = data.data;
+      setEcomResult(result.ecommercePrompts?.prompts || null);
+    } catch (err) {
+      setEcomError(err instanceof Error ? err.message : '网络错误');
+    } finally {
+      setEcomGenerating(false);
+    }
+  }, [agentInput, ecomPlatform, ecomMarket, ecomLanguage, ecomAspectRatio, ecomSellingPoints]);
 
   // ===== Export / Import =====
   const handleExport = useCallback(() => {
@@ -911,6 +1017,183 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
           ) : renderVisionResult()}
         </div>
       )}
+
+      {/* Agent Tab */}
+      {activeTab === 'agent' && (
+        <div className="flex flex-col h-full">
+          <div className="p-3 space-y-3">
+            <div className="flex items-center gap-2 mb-1">
+              <Bot className={`w-4 h-4 ${tc.accent}`} />
+              <span className={`text-sm font-semibold ${tc.text}`}>AI 提示词增强</span>
+            </div>
+            <p className={`text-xs leading-relaxed ${tc.textSec}`}>
+              输入简短描述，AI 自动扩展为专业级的图像生成提示词，包含主体、风格、光影、色彩、构图等维度。
+            </p>
+            <textarea
+              className={`w-full h-24 text-xs p-2.5 rounded-lg resize-none outline-none ${isMonochrome ? 'bg-gray-50 text-gray-800 border border-gray-200 focus:border-blue-300' : 'bg-[#1a1a1a] text-[#ccc] border border-[#333] focus:border-[#d4af37]/50'}`}
+              placeholder="描述你想要的画面，例如：一个赛博朋克风格的未来城市..."
+              value={agentInput}
+              onChange={(e) => setAgentInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAgentGenerate(); }}
+            />
+            <button
+              className={`w-full py-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${agentGenerating ? (isMonochrome ? 'bg-blue-300 text-white' : 'bg-[#d4af37]/50 text-black') : (isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-[#d4af37] text-black hover:bg-[#e5c147]')}`}
+              onClick={handleAgentGenerate}
+              disabled={agentGenerating || !agentInput.trim()}
+            >
+              {agentGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+              {agentGenerating ? '增强中...' : 'AI 增强'}
+            </button>
+            {agentError && (
+              <div className={`text-xs p-2 rounded-lg ${isMonochrome ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-red-900/20 text-red-400 border border-red-800/30'}`}>{agentError}</div>
+            )}
+            {agentResult && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className={`text-xs font-medium ${tc.textSec}`}>增强结果</span>
+                  <div className="flex items-center gap-1">
+                    <button className={`p-1 rounded text-xs ${isMonochrome ? 'hover:bg-gray-200 text-gray-400' : 'hover:bg-[#333] text-[#888]'}`} onClick={() => copyPrompt(agentResult.prompt)} title="复制"><Copy className="w-3 h-3" /></button>
+                    <button className={`p-1.5 rounded text-xs font-medium ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-[#d4af37] text-black'}`} onClick={() => onInsertPrompt(agentResult.prompt)}>插入</button>
+                  </div>
+                </div>
+                <div className={`text-xs leading-relaxed p-2.5 rounded-lg whitespace-pre-wrap ${isMonochrome ? 'bg-gray-50 text-gray-800 border border-gray-100' : 'bg-[#1a1a1a] text-[#ccc] border border-[#222]'}`}>
+                  {agentResult.prompt}
+                </div>
+                {agentResult.sections && Object.keys(agentResult.sections).length > 0 && (
+                  <div className={`p-2 rounded-lg space-y-1 ${isMonochrome ? 'bg-gray-50 border border-gray-100' : 'bg-[#1a1a1a] border border-[#222]'}`}>
+                    {Object.entries(agentResult.sections).map(([key, value]) => {
+                      if (!value) return null;
+                      const labelMap: Record<string, string> = { subject: '主体', style: '风格', lighting: '光影', colors: '色彩', composition: '构图', materials: '材质', mood: '氛围', negativePrompt: '排除' };
+                      return (
+                        <div key={key} className="flex items-start gap-2 text-xs">
+                          <span className={`font-medium min-w-[32px] ${tc.accent}`}>{labelMap[key] || key}</span>
+                          <span className={tc.text}>{value}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Ecommerce Tab */}
+      {activeTab === 'ecommerce' && (
+        <div className="flex flex-col h-full">
+          <div className="p-3 space-y-3">
+            <div className="flex items-center gap-2 mb-1">
+              <ShoppingBag className={`w-4 h-4 ${tc.accent}`} />
+              <span className={`text-sm font-semibold ${tc.text}`}>电商套图生成</span>
+            </div>
+            <p className={`text-xs leading-relaxed ${tc.textSec}`}>
+              一键生成电商产品套图提示词，覆盖主图、场景图、细节图、卖点图等。
+            </p>
+            {/* Product description input */}
+            <textarea
+              className={`w-full h-20 text-xs p-2.5 rounded-lg resize-none outline-none ${isMonochrome ? 'bg-gray-50 text-gray-800 border border-gray-200 focus:border-blue-300' : 'bg-[#1a1a1a] text-[#ccc] border border-[#333] focus:border-[#d4af37]/50'}`}
+              placeholder="描述商品，例如：一款白色蓝牙耳机，简约设计..."
+              value={agentInput}
+              onChange={(e) => setAgentInput(e.target.value)}
+            />
+            {/* Selling points */}
+            <textarea
+              className={`w-full h-14 text-xs p-2.5 rounded-lg resize-none outline-none ${isMonochrome ? 'bg-gray-50 text-gray-800 border border-gray-200 focus:border-blue-300' : 'bg-[#1a1a1a] text-[#ccc] border border-[#333] focus:border-[#d4af37]/50'}`}
+              placeholder="核心卖点（可选），例如：降噪、长续航、轻便"
+              value={ecomSellingPoints}
+              onChange={(e) => setEcomSellingPoints(e.target.value)}
+            />
+            {/* Config grid */}
+            <div className="grid grid-cols-2 gap-2">
+              {/* Platform */}
+              <div>
+                <div className={`text-xs mb-1 ${tc.textSec}`}>平台</div>
+                <select className={`w-full text-xs p-1.5 rounded-lg outline-none ${isMonochrome ? 'bg-gray-50 text-gray-800 border border-gray-200' : 'bg-[#1a1a1a] text-[#ccc] border border-[#333]'}`} value={ecomPlatform} onChange={(e) => setEcomPlatform(e.target.value as EcommercePlatform)}>
+                  <option value="taobao">淘宝</option>
+                  <option value="jd">京东</option>
+                  <option value="pinduoduo">拼多多</option>
+                  <option value="amazon">Amazon</option>
+                  <option value="temu">Temu</option>
+                  <option value="shein">SHEIN</option>
+                </select>
+              </div>
+              {/* Market */}
+              <div>
+                <div className={`text-xs mb-1 ${tc.textSec}`}>市场</div>
+                <select className={`w-full text-xs p-1.5 rounded-lg outline-none ${isMonochrome ? 'bg-gray-50 text-gray-800 border border-gray-200' : 'bg-[#1a1a1a] text-[#ccc] border border-[#333]'}`} value={ecomMarket} onChange={(e) => setEcomMarket(e.target.value as EcommerceMarket)}>
+                  <option value="china">中国</option>
+                  <option value="usa">美国</option>
+                  <option value="europe">欧洲</option>
+                  <option value="japan">日本</option>
+                  <option value="southeast_asia">东南亚</option>
+                </select>
+              </div>
+              {/* Language */}
+              <div>
+                <div className={`text-xs mb-1 ${tc.textSec}`}>语言</div>
+                <select className={`w-full text-xs p-1.5 rounded-lg outline-none ${isMonochrome ? 'bg-gray-50 text-gray-800 border border-gray-200' : 'bg-[#1a1a1a] text-[#ccc] border border-[#333]'}`} value={ecomLanguage} onChange={(e) => setEcomLanguage(e.target.value as EcommerceLanguage)}>
+                  <option value="zh">中文</option>
+                  <option value="en">English</option>
+                  <option value="ja">日本語</option>
+                </select>
+              </div>
+              {/* Aspect Ratio */}
+              <div>
+                <div className={`text-xs mb-1 ${tc.textSec}`}>比例</div>
+                <select className={`w-full text-xs p-1.5 rounded-lg outline-none ${isMonochrome ? 'bg-gray-50 text-gray-800 border border-gray-200' : 'bg-[#1a1a1a] text-[#ccc] border border-[#333]'}`} value={ecomAspectRatio} onChange={(e) => setEcomAspectRatio(e.target.value as EcommerceAspectRatio)}>
+                  <option value="1:1">1:1</option>
+                  <option value="4:3">4:3</option>
+                  <option value="3:4">3:4</option>
+                  <option value="16:9">16:9</option>
+                  <option value="9:16">9:16</option>
+                </select>
+              </div>
+            </div>
+            {/* Generate button */}
+            <button
+              className={`w-full py-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${ecomGenerating ? (isMonochrome ? 'bg-blue-300 text-white' : 'bg-[#d4af37]/50 text-black') : (isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-[#d4af37] text-black hover:bg-[#e5c147]')}`}
+              onClick={handleEcommerceGenerate}
+              disabled={ecomGenerating || !agentInput.trim()}
+            >
+              {ecomGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LayoutGrid className="w-3.5 h-3.5" />}
+              {ecomGenerating ? '生成套图中...' : '生成套图'}
+            </button>
+            {ecomError && (
+              <div className={`text-xs p-2 rounded-lg ${isMonochrome ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-red-900/20 text-red-400 border border-red-800/30'}`}>{ecomError}</div>
+            )}
+            {/* Results */}
+            {ecomResult && ecomResult.length > 0 && (
+              <div className="space-y-2">
+                <div className={`text-xs font-medium ${tc.textSec}`}>套图提示词 ({ecomResult.length} 张)</div>
+                {ecomResult.map((item, idx) => (
+                  <div key={idx} className={`p-2.5 rounded-lg ${isMonochrome ? 'bg-gray-50 border border-gray-100' : 'bg-[#1a1a1a] border border-[#222]'}`}>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-xs font-medium ${tc.accent}`}>{item.type}</span>
+                        <span className={`text-xs ${tc.textMuted}`}>{item.typeEn}</span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${isMonochrome ? 'bg-blue-50 text-blue-600' : 'bg-[#333] text-[#888]'}`}>{item.aspectRatio}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button className={`p-0.5 rounded ${isMonochrome ? 'hover:bg-gray-200 text-gray-400' : 'hover:bg-[#333] text-[#888]'}`} onClick={() => copyPrompt(item.prompt)} title="复制"><Copy className="w-3 h-3" /></button>
+                        <button className={`p-1 rounded text-xs font-medium ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-[#d4af37] text-black'}`} onClick={() => onInsertPrompt(item.prompt)}>插入</button>
+                      </div>
+                    </div>
+                    <div className={`text-xs leading-relaxed ${tc.textSec}`}>{item.prompt}</div>
+                    {item.details && (
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {Object.entries(item.details).map(([k, v]) => v ? (
+                          <span key={k} className={`text-xs px-1.5 py-0.5 rounded ${isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-[#333] text-[#aaa]'}`}>{v}</span>
+                        ) : null)}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 
@@ -937,7 +1220,7 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
           >
             <Sparkles className={`w-4 h-4 ${tc.accentText}`} />
             <span className={`text-sm font-semibold ${tc.accentText}`}>灵感提示词库</span>
-            <span className={`text-xs ${tc.textMuted}`}>v2.0</span>
+            <span className={`text-xs ${tc.textMuted}`}>v3.0</span>
             <div className="flex-1" />
             <button className={`p-1 rounded ${isMonochrome ? 'hover:bg-gray-200 text-gray-400' : 'hover:bg-[#333] text-[#666]'}`} onClick={floatWin.toggleMaximize} title={floatWin.isMaximized ? '还原' : '最大化'}>
               {floatWin.isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
@@ -951,18 +1234,20 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
           <div className={`flex border-b ${tc.border}`}>
             {[
               { id: 'resource' as const, label: '资源库', icon: <Lightbulb className="w-3 h-3" /> },
+              { id: 'agent' as const, label: 'AI增强', icon: <Bot className="w-3 h-3" /> },
+              { id: 'ecommerce' as const, label: '电商套图', icon: <ShoppingBag className="w-3 h-3" /> },
               { id: 'insert' as const, label: '我的', icon: <Bookmark className="w-3 h-3" /> },
               { id: 'manage' as const, label: '管理', icon: <FolderPlus className="w-3 h-3" /> },
-              { id: 'vision' as const, label: '图片识词', icon: <Eye className="w-3 h-3" /> },
+              { id: 'vision' as const, label: '识词', icon: <Eye className="w-3 h-3" /> },
             ].map(tab => (
-              <button key={tab.id} className={`flex-1 flex items-center justify-center gap-1 py-2 text-xs transition-colors ${activeTab === tab.id ? isMonochrome ? 'text-blue-600 border-b-2 border-blue-500 bg-blue-50/50' : 'text-[#d4af37] border-b-2 border-[#d4af37] bg-[#d4af37]/5' : isMonochrome ? 'text-gray-500 hover:text-gray-700' : 'text-[#888] hover:text-[#ccc]'}`} onClick={() => setActiveTab(tab.id)}>
+              <button key={tab.id} className={`flex-1 flex items-center justify-center gap-0.5 py-2 text-xs transition-colors ${activeTab === tab.id ? isMonochrome ? 'text-blue-600 border-b-2 border-blue-500 bg-blue-50/50' : 'text-[#d4af37] border-b-2 border-[#d4af37] bg-[#d4af37]/5' : isMonochrome ? 'text-gray-500 hover:text-gray-700' : 'text-[#888] hover:text-[#ccc]'}`} onClick={() => setActiveTab(tab.id)}>
                 {tab.icon} {tab.label}
               </button>
             ))}
           </div>
 
           {/* Search */}
-          {activeTab !== 'vision' && (
+          {!['vision', 'agent', 'ecommerce'].includes(activeTab) && (
             <div className={`px-3 py-2 border-b ${tc.border}`}>
               <div className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 ${tc.bgInput}`}>
                 <Search className={`w-3 h-3 ${tc.textMuted}`} />
@@ -979,7 +1264,7 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
 
           {/* Footer */}
           <div className={`px-3 py-1.5 border-t text-xs text-center ${tc.border} ${tc.textMuted}`}>
-            点击提示词 → 插入 | 悬停图片 ✨ → 识词 | 资源库 {resourceCategories.length} 类
+            点击提示词 → 插入 | AI增强 / 电商套图 / 识词
           </div>
 
           {/* Resize handle */}
@@ -1010,16 +1295,18 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
       <div className={`flex border-b ${tc.border}`}>
         {[
           { id: 'resource' as const, label: '资源库', icon: <Lightbulb className="w-3 h-3" /> },
+          { id: 'agent' as const, label: 'AI增强', icon: <Bot className="w-3 h-3" /> },
+          { id: 'ecommerce' as const, label: '电商套图', icon: <ShoppingBag className="w-3 h-3" /> },
           { id: 'insert' as const, label: '我的', icon: <Bookmark className="w-3 h-3" /> },
           { id: 'manage' as const, label: '管理', icon: <FolderPlus className="w-3 h-3" /> },
-          { id: 'vision' as const, label: '图片识词', icon: <Eye className="w-3 h-3" /> },
+          { id: 'vision' as const, label: '识词', icon: <Eye className="w-3 h-3" /> },
         ].map(tab => (
-          <button key={tab.id} className={`flex-1 flex items-center justify-center gap-1 py-2 text-xs transition-colors ${activeTab === tab.id ? isMonochrome ? 'text-blue-600 border-b-2 border-blue-500 bg-blue-50/50' : 'text-[#d4af37] border-b-2 border-[#d4af37] bg-[#d4af37]/5' : isMonochrome ? 'text-gray-500 hover:text-gray-700' : 'text-[#888] hover:text-[#ccc]'}`} onClick={() => setActiveTab(tab.id)}>
+          <button key={tab.id} className={`flex-1 flex items-center justify-center gap-0.5 py-2 text-xs transition-colors ${activeTab === tab.id ? isMonochrome ? 'text-blue-600 border-b-2 border-blue-500 bg-blue-50/50' : 'text-[#d4af37] border-b-2 border-[#d4af37] bg-[#d4af37]/5' : isMonochrome ? 'text-gray-500 hover:text-gray-700' : 'text-[#888] hover:text-[#ccc]'}`} onClick={() => setActiveTab(tab.id)}>
             {tab.icon} {tab.label}
           </button>
         ))}
       </div>
-      {activeTab !== 'vision' && (
+      {!['vision', 'agent', 'ecommerce'].includes(activeTab) && (
         <div className={`px-3 py-2 border-b ${tc.border}`}>
           <div className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 ${tc.bgInput}`}>
             <Search className={`w-3 h-3 ${tc.textMuted}`} />
