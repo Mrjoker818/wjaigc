@@ -70,7 +70,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   // ─── Drag state ───
   const [position, setPosition] = useState(() => {
     if (typeof window !== 'undefined') {
-      return { x: (window.innerWidth - 420) / 2, y: (window.innerHeight - 560) / 2 };
+      return { x: (window.innerWidth - 460) / 2, y: (window.innerHeight - 580) / 2 };
     }
     return { x: 0, y: 0 };
   });
@@ -326,7 +326,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
       style={{
         left: position.x,
         top: position.y,
-        width: 420,
+        width: 460,
         maxHeight: '85vh',
         backgroundColor: bgPanel,
         border: `1px solid ${borderColor}`,
@@ -344,16 +344,16 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
     >
       {/* ─── Header (draggable) ─── */}
       <div
-        className="flex items-center gap-2 px-3 py-2 cursor-move select-none shrink-0"
+        className="flex items-center gap-2 px-4 py-2.5 cursor-move select-none shrink-0"
         style={{ borderBottom: `1px solid ${borderColor}` }}
         onMouseDown={handlePanelDragStart}
       >
-        <GripVertical size={14} style={{ color: mutedColor }} />
-        <Scan size={15} style={{ color: accentColor }} />
-        <span className="text-sm font-semibold flex-1" style={{ color: accentColor }}>
+        <GripVertical size={16} style={{ color: mutedColor }} />
+        <Scan size={17} style={{ color: accentColor }} />
+        <span className="text-base font-semibold flex-1" style={{ color: accentColor }}>
           精修引擎
         </span>
-        <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: textSubColor, background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
+        <span className="text-xs px-2 py-0.5 rounded" style={{ color: textSubColor, background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
           {selectedCategoryName} · {refineMode === 'expert' ? '专家精修' : '标准精修'}
         </span>
         <button
@@ -363,7 +363,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
           onMouseEnter={e => (e.currentTarget.style.color = textColor)}
           onMouseLeave={e => (e.currentTarget.style.color = textMutedColor)}
         >
-          <X size={14} />
+          <X size={16} />
         </button>
       </div>
 
@@ -373,13 +373,13 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         style={{ borderBottom: `1px solid ${borderColor}` }}
       >
         {[
-          { id: 'standard' as const, label: '标准模式', icon: <Sliders size={13} /> },
-          { id: 'expert' as const, label: '专家模式', icon: <Cpu size={13} /> },
+          { id: 'standard' as const, label: '标准模式', icon: <Sliders size={15} /> },
+          { id: 'expert' as const, label: '专家模式', icon: <Cpu size={15} /> },
         ].map(mode => (
           <button
             key={mode.id}
             onClick={() => setRefineMode(mode.id)}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors"
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-medium transition-colors"
             style={{
               color: refineMode === mode.id ? accentColor : textMutedColor,
               borderBottom: refineMode === mode.id ? `2px solid ${accentColor}` : '2px solid transparent',
@@ -398,14 +398,14 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         style={{ borderBottom: `1px solid ${borderColor}` }}
       >
         {[
-          { id: 'upload' as const, label: '上传图片', icon: <Upload size={12} /> },
-          { id: 'settings' as const, label: '精修设置', icon: <Wand2 size={12} /> },
-          { id: 'results' as const, label: '精修结果', icon: <Eye size={12} /> },
+          { id: 'upload' as const, label: '上传图片', icon: <Upload size={14} /> },
+          { id: 'settings' as const, label: '精修设置', icon: <Wand2 size={14} /> },
+          { id: 'results' as const, label: '精修结果', icon: <Eye size={14} /> },
         ].map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className="flex-1 flex items-center justify-center gap-1 py-2 text-[11px] font-medium transition-colors"
+            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors"
             style={{
               color: activeTab === tab.id ? accentColor : textMutedColor,
               borderBottom: activeTab === tab.id ? `1.5px solid ${accentColor}` : '1.5px solid transparent',
@@ -421,22 +421,22 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
       <div className="flex-1 overflow-y-auto min-h-0" style={{ background: bgDeep }}>
         {/* ─── Upload Tab ─── */}
         {activeTab === 'upload' && (
-          <div className="p-3 space-y-3">
+          <div className="p-4 space-y-4">
             {sourceImage ? (
               <div className="relative rounded-lg overflow-hidden" style={{ border: `1px solid ${borderColor}` }}>
                 <img src={sourceImage} alt="Source" className="w-full h-auto max-h-[240px] object-contain" style={{ background: isMonochrome ? '#e5e7eb' : 'rgba(0,0,0,0.3)' }} />
                 <button
                   onClick={() => setSourceImage('')}
-                  className="absolute top-2 right-2 p-1 rounded-full transition-colors"
+                  className="absolute top-2 right-2 p-1.5 rounded-full transition-colors"
                   style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}
                 >
-                  <X size={12} />
+                  <X size={14} />
                 </button>
               </div>
             ) : (
               <div
                 onClick={() => fileInputRef.current?.click()}
-                className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed cursor-pointer transition-colors"
+                className="flex flex-col items-center justify-center gap-3 p-8 rounded-lg border-2 border-dashed cursor-pointer transition-colors"
                 style={{
                   borderColor: borderColorLight,
                   background: isMonochrome ? 'rgba(0,0,0,0.02)' : 'rgba(255,255,255,0.02)',
@@ -445,14 +445,14 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                 onMouseLeave={e => (e.currentTarget.style.borderColor = borderColorLight)}
               >
                 <div
-                  className="w-12 h-12 rounded-full flex items-center justify-center"
+                  className="w-14 h-14 rounded-full flex items-center justify-center"
                   style={{ background: accentBg }}
                 >
-                  <Upload size={20} style={{ color: accentColor }} />
+                  <Upload size={24} style={{ color: accentColor }} />
                 </div>
                 <div className="text-center">
-                  <p className="text-xs" style={{ color: textColor }}>点击上传或拖拽图片</p>
-                  <p className="text-[10px] mt-0.5" style={{ color: textMutedColor }}>支持 JPG / PNG / WebP</p>
+                  <p className="text-sm" style={{ color: textColor }}>点击上传或拖拽图片</p>
+                  <p className="text-xs mt-1" style={{ color: textMutedColor }}>支持 JPG / PNG / WebP</p>
                 </div>
               </div>
             )}
@@ -469,7 +469,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
             />
 
             {onAddImage && !sourceImage && (
-              <p className="text-[10px] text-center" style={{ color: textMutedColor }}>
+              <p className="text-xs text-center" style={{ color: textMutedColor }}>
                 选中画布图片后，可通过图片工具栏的"精修引擎"按钮直接打开
               </p>
             )}
@@ -478,27 +478,27 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
 
         {/* ─── Settings Tab ─── */}
         {activeTab === 'settings' && (
-          <div className="p-3 space-y-3">
+          <div className="p-4 space-y-4">
             {/* Source thumbnail */}
             {sourceImage && (
-              <div className="flex items-center gap-2 p-2 rounded-lg" style={{ background: isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)' }}>
-                <img src={sourceImage} alt="Source" className="w-10 h-10 object-cover rounded-md" style={{ border: `1px solid ${borderColor}` }} />
+              <div className="flex items-center gap-3 p-2.5 rounded-lg" style={{ background: isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)' }}>
+                <img src={sourceImage} alt="Source" className="w-12 h-12 object-cover rounded-md" style={{ border: `1px solid ${borderColor}` }} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-[11px] truncate" style={{ color: textColor }}>已选择图片</p>
-                  <button onClick={() => setActiveTab('upload')} className="text-[10px]" style={{ color: accentColor }}>更换图片</button>
+                  <p className="text-sm truncate" style={{ color: textColor }}>已选择图片</p>
+                  <button onClick={() => setActiveTab('upload')} className="text-xs" style={{ color: accentColor }}>更换图片</button>
                 </div>
               </div>
             )}
 
             {/* Product name */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-medium" style={{ color: textSubColor }}>产品名称</label>
+            <div className="space-y-2">
+              <label className="text-sm font-medium" style={{ color: textSubColor }}>产品名称</label>
               <input
                 type="text"
                 value={productName}
                 onChange={e => setProductName(e.target.value)}
                 placeholder="如：高端白酒、智能手表..."
-                className="w-full px-2.5 py-2 rounded-md text-xs outline-none transition-colors"
+                className="w-full px-3 py-2.5 rounded-md text-sm outline-none transition-colors"
                 style={{
                   background: bgInput,
                   border: `1px solid ${borderColor}`,
@@ -510,14 +510,14 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
             </div>
 
             {/* Category selector */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-medium" style={{ color: textSubColor }}>产品品类</label>
-              <div className="grid grid-cols-3 gap-1.5">
+            <div className="space-y-2">
+              <label className="text-sm font-medium" style={{ color: textSubColor }}>产品品类</label>
+              <div className="grid grid-cols-3 gap-2">
                 {categories.map(cat => (
                   <button
                     key={cat.id}
                     onClick={() => setSelectedCategory(cat.id)}
-                    className="px-2 py-1.5 rounded-md text-[10px] font-medium transition-all text-center"
+                    className="px-2 py-2 rounded-md text-xs font-medium transition-all text-center"
                     style={{
                       background: selectedCategory === cat.id ? accentBg : isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)',
                       border: `1px solid ${selectedCategory === cat.id ? accentBorder : borderColorLight}`,
@@ -531,16 +531,16 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
             </div>
 
             {/* Lighting selector */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-medium flex items-center gap-1" style={{ color: textSubColor }}>
-                <Sun size={11} /> 光影方案
+            <div className="space-y-2">
+              <label className="text-sm font-medium flex items-center gap-1.5" style={{ color: textSubColor }}>
+                <Sun size={14} /> 光影方案
               </label>
-              <div className="grid grid-cols-3 gap-1.5">
+              <div className="grid grid-cols-3 gap-2">
                 {lightings.map(light => (
                   <button
                     key={light.id}
                     onClick={() => setSelectedLighting(light.id)}
-                    className="px-2 py-1.5 rounded-md text-[10px] font-medium transition-all text-center"
+                    className="px-2 py-2 rounded-md text-xs font-medium transition-all text-center"
                     style={{
                       background: selectedLighting === light.id ? accentBg : isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)',
                       border: `1px solid ${selectedLighting === light.id ? accentBorder : borderColorLight}`,
@@ -554,16 +554,16 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
             </div>
 
             {/* View angle selector */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-medium flex items-center gap-1" style={{ color: textSubColor }}>
-                <Camera size={11} /> 视角
+            <div className="space-y-2">
+              <label className="text-sm font-medium flex items-center gap-1.5" style={{ color: textSubColor }}>
+                <Camera size={14} /> 视角
               </label>
-              <div className="grid grid-cols-3 gap-1.5">
+              <div className="grid grid-cols-3 gap-2">
                 {viewAngles.map(va => (
                   <button
                     key={va.id}
                     onClick={() => setSelectedViewAngle(va.id)}
-                    className="px-2 py-1.5 rounded-md text-[10px] font-medium transition-all text-center"
+                    className="px-2 py-2 rounded-md text-xs font-medium transition-all text-center"
                     style={{
                       background: selectedViewAngle === va.id ? accentBg : isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)',
                       border: `1px solid ${selectedViewAngle === va.id ? accentBorder : borderColorLight}`,
@@ -579,14 +579,14 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
             {/* Expert-only: Material & Reflect & Custom */}
             {refineMode === 'expert' && (
               <>
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-medium" style={{ color: textSubColor }}>材质描述</label>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium" style={{ color: textSubColor }}>材质描述</label>
                   <input
                     type="text"
                     value={customMaterial}
                     onChange={e => setCustomMaterial(e.target.value)}
                     placeholder="如：超透玻璃、磨砂铝合金..."
-                    className="w-full px-2.5 py-2 rounded-md text-xs outline-none transition-colors"
+                    className="w-full px-3 py-2.5 rounded-md text-sm outline-none transition-colors"
                     style={{
                       background: bgInput,
                       border: `1px solid ${borderColor}`,
@@ -597,10 +597,10 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                   />
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-medium" style={{ color: textSubColor }}>反光指数</label>
-                    <span className="text-[11px] font-mono" style={{ color: accentColor }}>{reflectIndex.toFixed(1)}</span>
+                    <label className="text-sm font-medium" style={{ color: textSubColor }}>反光指数</label>
+                    <span className="text-sm font-mono" style={{ color: accentColor }}>{reflectIndex.toFixed(1)}</span>
                   </div>
                   <input
                     type="range"
@@ -609,24 +609,24 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                     step={1}
                     value={Math.round(reflectIndex * 10)}
                     onChange={e => setReflectIndex(Number(e.target.value) / 10)}
-                    className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+                    className="w-full h-2 rounded-full appearance-none cursor-pointer"
                     style={{
                       background: `linear-gradient(to right, ${accentColor} ${reflectIndex * 100}%, ${borderColorLight} ${reflectIndex * 100}%)`,
                     }}
                   />
-                  <div className="flex justify-between text-[9px]" style={{ color: textMutedColor }}>
+                  <div className="flex justify-between text-xs" style={{ color: textMutedColor }}>
                     <span>哑光 0.0</span>
                     <span>镜面 1.0</span>
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-medium" style={{ color: textSubColor }}>自定义指令</label>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium" style={{ color: textSubColor }}>自定义指令</label>
                   <textarea
                     value={customInstructions}
                     onChange={e => setCustomInstructions(e.target.value)}
                     placeholder="附加精修指令，如：强调瓶身光泽，增强烫金质感..."
-                    className="w-full px-2.5 py-2 rounded-md text-xs outline-none resize-none transition-colors"
+                    className="w-full px-3 py-2.5 rounded-md text-sm outline-none resize-none transition-colors"
                     style={{
                       background: bgInput,
                       border: `1px solid ${borderColor}`,
@@ -641,12 +641,12 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
             )}
 
             {/* Model selection */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-medium" style={{ color: textSubColor }}>生图模型</label>
+            <div className="space-y-2">
+              <label className="text-sm font-medium" style={{ color: textSubColor }}>生图模型</label>
               <div className="relative" ref={modelDropdownRef}>
                 <button
                   onClick={() => setShowModelDropdown(!showModelDropdown)}
-                  className="w-full flex items-center justify-between px-2.5 py-2 rounded-md text-xs transition-colors"
+                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-md text-sm transition-colors"
                   style={{
                     background: bgInput,
                     border: `1px solid ${borderColor}`,
@@ -665,7 +665,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                     style={{ background: bgPanel, border: `1px solid ${borderColor}` }}
                   >
                     {models.length === 0 ? (
-                      <div className="px-3 py-3 text-[11px] text-center" style={{ color: textMutedColor }}>
+                      <div className="px-3 py-3 text-xs text-center" style={{ color: textMutedColor }}>
                         暂无可用模型，请在管理员系统添加
                       </div>
                     ) : (
@@ -673,15 +673,15 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                         <button
                           key={`${m.id}-${m.providerId}`}
                           onClick={() => { setSelectedModel(m.id); setShowModelDropdown(false); }}
-                          className="w-full px-3 py-2 text-left transition-colors"
+                          className="w-full px-3 py-2.5 text-left transition-colors"
                           style={{
                             background: selectedModel === m.id ? accentBg : 'transparent',
                           }}
                           onMouseEnter={e => (e.currentTarget.style.background = accentBgHover)}
                           onMouseLeave={e => (e.currentTarget.style.background = selectedModel === m.id ? accentBg : 'transparent')}
                         >
-                          <div className="text-xs" style={{ color: textColor }}>{m.name}</div>
-                          <div className="text-[10px] mt-0.5" style={{ color: textMutedColor }}>{m.providerName}</div>
+                          <div className="text-sm" style={{ color: textColor }}>{m.name}</div>
+                          <div className="text-xs mt-0.5" style={{ color: textMutedColor }}>{m.providerName}</div>
                         </button>
                       ))
                     )}
@@ -694,47 +694,47 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
 
         {/* ─── Results Tab ─── */}
         {activeTab === 'results' && (
-          <div className="p-3 space-y-3">
+          <div className="p-4 space-y-4">
             {isProcessing ? (
               <div className="flex flex-col items-center justify-center py-10 gap-3">
                 <div className="relative">
-                  <Loader2 size={32} className="animate-spin" style={{ color: accentColor }} />
-                  <Sparkles size={14} className="absolute -top-1 -right-1 animate-pulse" style={{ color: accentColor }} />
+                  <Loader2 size={36} className="animate-spin" style={{ color: accentColor }} />
+                  <Sparkles size={16} className="absolute -top-1 -right-1 animate-pulse" style={{ color: accentColor }} />
                 </div>
                 <div className="text-center">
-                  <p className="text-xs" style={{ color: textColor }}>{progressLabel || '精修处理中...'}</p>
-                  <p className="text-[10px] mt-0.5" style={{ color: textMutedColor }}>AI正在优化您的产品图片</p>
+                  <p className="text-sm" style={{ color: textColor }}>{progressLabel || '精修处理中...'}</p>
+                  <p className="text-xs mt-1" style={{ color: textMutedColor }}>AI正在优化您的产品图片</p>
                 </div>
-                <div className="w-full max-w-[200px] h-1.5 rounded-full overflow-hidden" style={{ background: borderColorLight }}>
+                <div className="w-full max-w-[220px] h-2 rounded-full overflow-hidden" style={{ background: borderColorLight }}>
                   <div
                     className="h-full rounded-full transition-all duration-500"
                     style={{ width: `${progress}%`, background: accentColor }}
                   />
                 </div>
-                <span className="text-[10px] font-mono" style={{ color: textMutedColor }}>{progress}%</span>
+                <span className="text-xs font-mono" style={{ color: textMutedColor }}>{progress}%</span>
               </div>
             ) : results.length > 0 ? (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px]" style={{ color: textSubColor }}>精修完成 · {results.length} 张结果</span>
+                  <span className="text-sm" style={{ color: textSubColor }}>精修完成 · {results.length} 张结果</span>
                   <button
                     onClick={handleRefine}
-                    className="text-[11px] flex items-center gap-1 transition-colors"
+                    className="text-xs flex items-center gap-1.5 transition-colors"
                     style={{ color: accentColor }}
                   >
-                    <Sparkles size={11} /> 重新精修
+                    <Sparkles size={13} /> 重新精修
                   </button>
                 </div>
 
                 {/* Before/After comparison */}
                 {sourceImage && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <span className="text-[9px]" style={{ color: textMutedColor }}>原图</span>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <span className="text-xs" style={{ color: textMutedColor }}>原图</span>
                       <img src={sourceImage} alt="Original" className="w-full rounded-md" style={{ border: `1px solid ${borderColor}` }} />
                     </div>
-                    <div className="space-y-1">
-                      <span className="text-[9px]" style={{ color: accentColor }}>精修后</span>
+                    <div className="space-y-1.5">
+                      <span className="text-xs" style={{ color: accentColor }}>精修后</span>
                       <img src={results[0].imageUrl} alt="Refined" className="w-full rounded-md" style={{ border: `1px solid ${accentBorder}` }} />
                     </div>
                   </div>
@@ -742,16 +742,16 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
 
                 {/* Multiple results */}
                 {results.length > 1 && (
-                  <div className="space-y-1.5">
-                    <span className="text-[9px]" style={{ color: textMutedColor }}>全部结果</span>
-                    <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-2">
+                    <span className="text-xs" style={{ color: textMutedColor }}>全部结果</span>
+                    <div className="grid grid-cols-2 gap-3">
                       {results.map((r, i) => (
                         <div key={i} className="relative group">
                           <img src={r.imageUrl} alt={r.label} className="w-full rounded-md" style={{ border: `1px solid ${borderColor}` }} />
                           <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-md flex items-center justify-center">
                             <button
                               onClick={() => onAddImage?.(r.imageUrl)}
-                              className="px-2 py-1 text-[10px] rounded-md text-white transition-colors"
+                              className="px-3 py-1.5 text-xs rounded-md text-white transition-colors"
                               style={{ background: accentColor }}
                             >
                               添加到画布
@@ -767,21 +767,21 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                 {results.length === 1 && (
                   <button
                     onClick={() => onAddImage?.(results[0].imageUrl)}
-                    className="w-full py-2.5 rounded-md text-xs font-medium text-white transition-colors flex items-center justify-center gap-1.5"
+                    className="w-full py-3 rounded-md text-sm font-medium text-white transition-colors flex items-center justify-center gap-2"
                     style={{ background: accentColor }}
                     onMouseEnter={e => (e.currentTarget.style.background = accentHover)}
                     onMouseLeave={e => (e.currentTarget.style.background = accentColor)}
                   >
-                    <ImageIcon size={14} />
+                    <ImageIcon size={15} />
                     添加到画布
                   </button>
                 )}
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center py-10 gap-2">
-                <Scan size={32} style={{ color: textMutedColor }} />
-                <p className="text-xs" style={{ color: textSubColor }}>暂无精修结果</p>
-                <p className="text-[10px]" style={{ color: textMutedColor }}>请在"精修设置"中配置参数后开始精修</p>
+              <div className="flex flex-col items-center justify-center py-10 gap-3">
+                <Scan size={36} style={{ color: textMutedColor }} />
+                <p className="text-sm" style={{ color: textSubColor }}>暂无精修结果</p>
+                <p className="text-xs" style={{ color: textMutedColor }}>请在"精修设置"中配置参数后开始精修</p>
               </div>
             )}
           </div>
@@ -790,7 +790,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
 
       {/* ─── Bottom Action ─── */}
       <div
-        className="shrink-0 px-3 py-3 flex gap-2"
+        className="shrink-0 px-4 py-3 flex gap-2"
         style={{
           borderTop: `1px solid ${borderColor}`,
           background: isMonochrome ? 'rgba(255,255,255,0.6)' : 'rgba(17,17,17,0.8)',
@@ -800,22 +800,22 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
           <button
             onClick={handleRefine}
             disabled={!sourceImage || !selectedModel || isProcessing}
-            className="w-full py-2.5 rounded-md text-xs font-medium text-white flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40"
+            className="w-full py-3 rounded-md text-sm font-medium text-white flex items-center justify-center gap-2 transition-colors disabled:opacity-40"
             style={{ background: accentColor }}
             onMouseEnter={e => { if (!e.currentTarget.disabled) e.currentTarget.style.background = accentHover; }}
             onMouseLeave={e => { e.currentTarget.style.background = accentColor; }}
           >
-            {isProcessing ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+            {isProcessing ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
             {isProcessing ? '精修中...' : '开始精修'}
           </button>
         )}
         {activeTab === 'upload' && sourceImage && (
           <button
             onClick={() => setActiveTab('settings')}
-            className="w-full py-2.5 rounded-md text-xs font-medium text-white flex items-center justify-center gap-1.5 transition-colors"
+            className="w-full py-3 rounded-md text-sm font-medium text-white flex items-center justify-center gap-2 transition-colors"
             style={{ background: accentColor }}
           >
-            <Wand2 size={13} />
+            <Wand2 size={15} />
             下一步：精修设置
           </button>
         )}
