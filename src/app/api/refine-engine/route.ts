@@ -381,27 +381,36 @@ export async function POST(request: NextRequest) {
         mode: refineMode,
       });
 
-      // Register task
+      // Register task for progress tracking
       const taskId = `refine-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       registerTask(taskId, 'refine-engine', `精修: ${productName || MODE_LABELS[refineMode] || '产品'}`);
 
-      // Register task in global registry so poll-task can find it
-      registerTask(taskId, 'refine-engine', '精修处理中');
-
-      // Fire-and-forget: process in background, store result in task-registry
-      // Frontend polls /api/poll-task to get progress and results
-      processRefine(taskId, {
-        imageUrl: imageUrl,
-        prompt,
-        model: selectedModel,
-        provider,
-        aspectRatio: aspectRatio || '1:1',
-      }).catch((err: Error) => {
-        updateTaskProgress(taskId, { status: 'failed', error: err.message });
-      });
-
-      // Return taskId immediately for polling
-      return NextResponse.json({ success: true, taskId });
+      // ★ Synchronous mode: await processRefine and return result directly
+      // This avoids cross-module task-registry issues in Next.js dev mode
+      try {
+        const result = await processRefine(taskId, {
+          imageUrl: imageUrl,
+          prompt,
+          model: selectedModel,
+          provider,
+          aspectRatio: aspectRatio || '1:1',
+          quality: body.quality || 'standard',
+        });
+        console.log(`[refine-engine] Sync result for taskId=${taskId}:`, JSON.stringify(result).slice(0, 200));
+        return NextResponse.json({
+          success: true,
+          taskId,
+          directImageUrls: result.directImageUrls || [],
+        });
+      } catch (procErr) {
+        const errMsg = procErr instanceof Error ? procErr.message : String(procErr);
+        console.error(`[refine-engine] processRefine FAILED taskId=${taskId}:`, errMsg);
+        return NextResponse.json({
+          success: false,
+          taskId,
+          error: errMsg,
+        });
+      }
     }
 
     return NextResponse.json({ error: '未知操作' }, { status: 400 });
@@ -420,6 +429,7 @@ async function processRefine(
     model: string;
     provider: ApiProvider;
     aspectRatio: string;
+    quality?: string;
   }
 ): Promise<{ directImageUrls: string[] }> {
   console.log(`[refine-engine] processRefine START taskId=${taskId}`);
@@ -436,6 +446,11 @@ async function processRefine(
     n: 1,
     size: getAspectSize(params.aspectRatio),
   };
+
+  // Add quality if specified and not standard/default
+  if (params.quality && params.quality !== 'standard' && params.quality !== 'auto') {
+    rawBody.quality = params.quality;
+  }
 
   // ─── Prepare image for API ───
   // Follow the same pattern as /api/generate: provide both image_urls (accessible URLs)
@@ -532,12 +547,23 @@ async function processRefine(
       }
     }
 
-    rawBody.strength = 0.7;
+    rawBody.strength = 0.55; // Lower strength for better subject preservation (0.55 instead of 0.7)
   }
 
   // Enhance prompt for image-to-image: instruct AI to use the reference image
+  // ★ Enhanced subject preservation: specific details, proportions, unique features
   if (params.imageUrl) {
-    rawBody.prompt = `[img2img] IMPORTANT: You MUST preserve the EXACT same product/subject from the reference image - same shape, same brand, same identity. Only apply the requested style/rendering changes. ${params.prompt}`;
+    rawBody.prompt = `[img2img] CRITICAL SUBJECT PRESERVATION RULES:
+1. You MUST preserve the EXACT same product/subject from the reference image — same shape, same brand identity, same visual identity. DO NOT replace with a different product.
+2. Preserve the subject's UNIQUE DETAILS: exact texture patterns, surface markings, label text, logo positions, embossing/debossing details, brand-specific design elements, engravings, and fine surface details.
+3. Preserve the subject's SIZE PROPORTIONS: the subject must occupy the same relative area of the frame, with identical width-to-height ratio and spatial positioning. The subject must not appear larger, smaller, stretched, or compressed compared to the reference.
+4. Preserve the subject's DISTINCTIVE FEATURES: specific curves, edges, contours, silhouette, and any characteristic shapes that make this product recognizable and distinct from other similar products.
+5. Preserve the subject's COLOR IDENTITY: brand colors, material colors, and specific color placements must remain faithful to the reference image.
+6. Preserve the subject's COMPOSITIONAL POSITION: maintain the same viewing angle, centering, and spatial relationship between subject and frame edges.
+7. ONLY apply the requested style/rendering/lighting/viewpoint changes — do NOT alter, replace, or reimagine the core subject itself.
+8. If the reference shows a specific product with distinctive design language (e.g., Apple minimalism, luxury ornate details), maintain that exact design language.
+9. If unsure about any detail, default to keeping it exactly as shown in the reference image rather than inventing new elements.
+${params.prompt}`;
   }
 
   const hasImageFlag = !!(rawBody.image || rawBody.image_urls);
@@ -583,10 +609,13 @@ async function processRefine(
         }
 
         const fallbackResult = await fallbackResp.json();
+        console.log(`[refine-engine] Fallback API response for taskId=${taskId}:`, JSON.stringify(fallbackResult).slice(0, 500));
         const fallbackParsed = parseResponseForProfile(fallbackResult, compatProfile);
+        console.log(`[refine-engine] Fallback parsed for taskId=${taskId}: directImageUrls=${fallbackParsed.directImageUrls?.length || 0}, taskIds=${fallbackParsed.taskIds?.length || 0}`);
         if (fallbackParsed.directImageUrls && fallbackParsed.directImageUrls.length > 0) {
           updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
           const persistedUrls = await Promise.all(fallbackParsed.directImageUrls.map(persistResultImage));
+          console.log(`[refine-engine] Fallback persisted ${persistedUrls.length} URLs for taskId=${taskId}`);
           setRefineResult(taskId, { directImageUrls: persistedUrls, completedAt: Date.now() });
           updateTaskProgress(taskId, {
             status: 'completed',
@@ -596,8 +625,10 @@ async function processRefine(
           });
           return { directImageUrls: persistedUrls };
         } else if (fallbackParsed.taskIds && fallbackParsed.taskIds.length > 0) {
+          console.log(`[refine-engine] Fallback got taskIds=${fallbackParsed.taskIds}, polling for taskId=${taskId}`);
           updateTaskProgress(taskId, { progress: 60, label: '等待模型生成...' });
           const pollResult = await pollForResult(fallbackParsed.taskIds[0], params.provider.baseUrl, params.provider.apiKey, compatProfile);
+          console.log(`[refine-engine] Fallback poll result for taskId=${taskId}:`, pollResult?.slice(0, 100));
           updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
           const persistedUrl = await persistResultImage(pollResult);
           setRefineResult(taskId, { directImageUrls: [persistedUrl], completedAt: Date.now() });
@@ -619,11 +650,14 @@ async function processRefine(
     updateTaskProgress(taskId, { progress: 70, label: '解析生成结果...' });
 
     const result = await response.json();
+    console.log(`[refine-engine] API raw response for taskId=${taskId}:`, JSON.stringify(result).slice(0, 500));
     const parsed = parseResponseForProfile(result, compatProfile);
+    console.log(`[refine-engine] Parsed response for taskId=${taskId}: directImageUrls=${parsed.directImageUrls?.length || 0}, taskIds=${parsed.taskIds?.length || 0}`);
 
     if (parsed.directImageUrls && parsed.directImageUrls.length > 0) {
       updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
       const persistedUrls = await Promise.all(parsed.directImageUrls.map(persistResultImage));
+      console.log(`[refine-engine] Persisted ${persistedUrls.length} direct URLs for taskId=${taskId}:`, persistedUrls);
       setRefineResult(taskId, { directImageUrls: persistedUrls, completedAt: Date.now() });
       updateTaskProgress(taskId, {
         status: 'completed',
@@ -631,13 +665,17 @@ async function processRefine(
         label: '精修完成',
         result: { directImageUrls: persistedUrls },
       });
+      console.log(`[refine-engine] Task ${taskId} marked as completed in registry`);
       return { directImageUrls: persistedUrls };
     } else if (parsed.taskIds && parsed.taskIds.length > 0) {
       // Poll for async result
+      console.log(`[refine-engine] Got taskIds=${parsed.taskIds}, starting polling for taskId=${taskId}`);
       updateTaskProgress(taskId, { progress: 50, label: '等待模型生成...' });
       const pollResult = await pollForResult(parsed.taskIds[0], params.provider.baseUrl, params.provider.apiKey, compatProfile);
+      console.log(`[refine-engine] Poll result for taskId=${taskId}:`, pollResult?.slice(0, 100));
       updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
       const persistedUrl = await persistResultImage(pollResult);
+      console.log(`[refine-engine] Persisted poll result for taskId=${taskId}:`, persistedUrl);
       setRefineResult(taskId, { directImageUrls: [persistedUrl], completedAt: Date.now() });
       updateTaskProgress(taskId, {
         status: 'completed',
@@ -645,8 +683,10 @@ async function processRefine(
         label: '精修完成',
         result: { directImageUrls: [persistedUrl] },
       });
+      console.log(`[refine-engine] Task ${taskId} (async) marked as completed in registry`);
       return { directImageUrls: [persistedUrl] };
     } else {
+      console.error(`[refine-engine] No directImageUrls or taskIds in response for taskId=${taskId}. Raw:`, JSON.stringify(result).slice(0, 300));
       throw new Error('模型未返回图片结果');
     }
   } catch (err) {

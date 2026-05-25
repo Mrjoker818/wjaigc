@@ -4,8 +4,17 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   X, Upload, Sparkles, Image as ImageIcon,
   Scan, Loader2, ChevronDown,
-  Eye, GripVertical, Sun, Camera, Package, Cpu, Wand2, Sliders
+  Eye, GripVertical, Sun, Camera, Package, Cpu, Wand2, Sliders, Ratio, BadgeCheck
 } from 'lucide-react';
+import {
+  MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS,
+  MODEL_QUALITIES as SHARED_MODEL_QUALITIES,
+  QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES,
+  DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS,
+  DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES,
+  ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS,
+  findModelConfig as sharedFindModelConfig,
+} from '@/lib/canvas-generation-group';
 
 /* ─── types ─── */
 interface ImageModel {
@@ -108,6 +117,10 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   const [customInstructions, setCustomInstructions] = useState('');
   const [reflectIndex, setReflectIndex] = useState(0.4);
 
+  // ─── Aspect ratio & quality state ───
+  const [aspectRatio, setAspectRatio] = useState('1:1');
+  const [quality, setQuality] = useState('standard');
+
   // ─── Load presets & models ───
   useEffect(() => {
     (async () => {
@@ -173,6 +186,23 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
 
   // ─── Derived state ───
   const selectedCategoryName = categories.find(c => c.id === selectedCategory)?.name || '默认';
+
+  // ─── Get supported aspect ratios for selected model ───
+  const getSupportedAspectRatios = useCallback(() => {
+    const pureModelId = selectedModel.includes('::') ? selectedModel.split('::').pop()! : selectedModel;
+    return sharedFindModelConfig(SHARED_MODEL_ASPECT_RATIOS, pureModelId) || SHARED_DEFAULT_ASPECT_RATIOS;
+  }, [selectedModel]);
+
+  // ─── Get supported qualities for selected model ───
+  const getSupportedQualities = useCallback(() => {
+    const pureModelId = selectedModel.includes('::') ? selectedModel.split('::').pop()! : selectedModel;
+    return sharedFindModelConfig(SHARED_MODEL_QUALITIES, pureModelId) || SHARED_DEFAULT_QUALITIES;
+  }, [selectedModel]);
+
+  // ─── Get pixel size hint for current aspect ratio ───
+  const getPixelSize = useCallback((ratio: string): string => {
+    return SHARED_ASPECT_RATIO_TO_PIXELS[ratio] || '1024x1024';
+  }, []);
 
   // ─── Update material/reflect when category changes ───
   useEffect(() => {
@@ -266,18 +296,30 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         lightingPreset: selectedLighting,
         viewAngle: selectedViewAngle,
         customInstructions,
+        aspectRatio,
+        quality,
       };
 
       setProgress(10);
       setProgressLabel('正在精修，请耐心等待...');
 
+      // ★ Show simulated progress while waiting for sync POST response
+      // Server processes synchronously and returns result directly
+      let simProgress = 10;
+      const progressInterval = setInterval(() => {
+        simProgress = Math.min(simProgress + Math.random() * 3, 90);
+        setProgress(Math.round(simProgress));
+      }, 2000);
+
       const resp = await fetch('/api/refine-engine', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(360000), // 6 minutes timeout for sync processing
+        signal: AbortSignal.timeout(600000), // 10 minutes timeout for sync processing
       });
+      clearInterval(progressInterval); // Stop simulated progress
       const data = await resp.json();
+      console.log('[refine-engine-panel] POST response:', JSON.stringify(data).slice(0, 300));
 
       // Handle error responses
       if (!data.success && data.error) {
@@ -286,8 +328,9 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         return;
       }
 
-      // Synchronous mode: result returned directly from POST
+      // ★ Sync mode: result returned directly from POST
       if (data.directImageUrls && data.directImageUrls.length > 0) {
+        console.log('[refine-engine-panel] Got directImageUrls:', data.directImageUrls);
         setProgress(100);
         setProgressLabel('精修完成');
         const label = refineMode === 'expert' ? '专家精修' : '标准精修';
@@ -296,8 +339,9 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         return;
       }
 
-      // Fallback: poll mode (for backwards compatibility)
+      // ★ Fallback: poll mode (if backend returns taskId without directImageUrls)
       if (data.taskId) {
+        console.log('[refine-engine-panel] No directImageUrls, falling back to poll mode with taskId:', data.taskId);
         setProgressLabel('精修处理中...');
         pollAttemptRef.current = 0;
         setProgress(30);
@@ -317,12 +361,14 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
               body: JSON.stringify({ taskId: data.taskId, model: selectedModel }),
             });
             const pollData = await pollResp.json();
+            console.log(`[refine-engine-panel] Poll #${pollAttemptRef.current}: status=${pollData.status}, progress=${pollData.progress}, hasResult=${!!pollData.result}`);
 
             if (pollData.status === 'completed' && pollData.result) {
               clearInterval(pollInterval);
               setProgress(100);
               setProgressLabel('精修完成');
               const urls = pollData.result.directImageUrls || pollData.result.imageUrls || [];
+              console.log('[refine-engine-panel] Poll completed, urls:', urls);
               const label = refineMode === 'expert' ? '专家精修' : '标准精修';
               setResults(urls.map((url: string) => ({ imageUrl: url, label })));
               setIsProcessing(false);
@@ -346,7 +392,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
             }
           } catch (pollErr) {
             // Don't stop polling on transient network errors — just log and continue
-            console.warn('[refine-engine] Poll error (will retry):', pollErr);
+            console.warn('[refine-engine-panel] Poll error (will retry):', pollErr);
           }
         }, 2000);
       } else if (data.directImageUrls || data.imageUrls) {
@@ -359,6 +405,10 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
       } else if (data.error) {
         console.error('Refine error:', data.error);
         setProgressLabel('精修失败');
+        setIsProcessing(false);
+      } else {
+        console.error('[refine-engine-panel] Unexpected response:', data);
+        setProgressLabel('精修失败：未知响应');
         setIsProcessing(false);
       }
     } catch (err) {
@@ -749,7 +799,16 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                       models.map(m => (
                         <button
                           key={`${m.id}-${m.providerId}`}
-                          onClick={() => { setSelectedModel(m.id); setShowModelDropdown(false); }}
+                          onClick={() => {
+                            setSelectedModel(m.id);
+                            setShowModelDropdown(false);
+                            // Reset aspect ratio and quality when model changes
+                            const pureModelId = m.id.includes('::') ? m.id.split('::').pop()! : m.id;
+                            const supportedRatios = sharedFindModelConfig(SHARED_MODEL_ASPECT_RATIOS, pureModelId) || SHARED_DEFAULT_ASPECT_RATIOS;
+                            setAspectRatio(supportedRatios[0] || '1:1');
+                            const supportedQuals = sharedFindModelConfig(SHARED_MODEL_QUALITIES, pureModelId) || SHARED_DEFAULT_QUALITIES;
+                            setQuality(supportedQuals[0] || 'standard');
+                          }}
                           className="w-full px-3 py-2.5 text-left transition-colors"
                           style={{
                             background: selectedModel === m.id ? accentBg : 'transparent',
@@ -764,6 +823,81 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                     )}
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* Aspect ratio selector */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium flex items-center gap-1.5" style={{ color: textSubColor }}>
+                <Ratio size={14} /> 画面比例
+              </label>
+              <div className="grid grid-cols-4 gap-1.5">
+                {getSupportedAspectRatios().map(ratio => {
+                  const isActive = aspectRatio === ratio;
+                  return (
+                    <button
+                      key={ratio}
+                      onClick={() => setAspectRatio(ratio)}
+                      className="flex flex-col items-center gap-1 px-1.5 py-2 rounded-md text-xs font-medium transition-all"
+                      style={{
+                        background: isActive ? accentBg : isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)',
+                        border: `1px solid ${isActive ? accentBorder : borderColorLight}`,
+                        color: isActive ? accentColor : textSubColor,
+                      }}
+                    >
+                      {/* Mini ratio shape preview */}
+                      <div
+                        className="rounded-sm"
+                        style={{
+                          width: (() => {
+                            const [w] = ratio.split(':').map(Number);
+                            const h = Number(ratio.split(':')[1]);
+                            const maxDim = 18;
+                            return Math.max(6, (w / Math.max(w, h)) * maxDim);
+                          })(),
+                          height: (() => {
+                            const [w, h] = ratio.split(':').map(Number);
+                            const maxDim = 18;
+                            return Math.max(6, (h / Math.max(w, h)) * maxDim);
+                          })(),
+                          background: isActive ? accentColor : textMutedColor,
+                          opacity: isActive ? 1 : 0.5,
+                        }}
+                      />
+                      <span>{ratio}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="text-xs" style={{ color: textMutedColor }}>
+                输出尺寸: {getPixelSize(aspectRatio)}
+              </div>
+            </div>
+
+            {/* Quality selector */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium flex items-center gap-1.5" style={{ color: textSubColor }}>
+                <BadgeCheck size={14} /> 画面质量
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {getSupportedQualities().map(q => {
+                  const isActive = quality === q;
+                  const displayName = SHARED_QUALITY_DISPLAY_NAMES[q] || q;
+                  return (
+                    <button
+                      key={q}
+                      onClick={() => setQuality(q)}
+                      className="px-2 py-2 rounded-md text-xs font-medium transition-all text-center"
+                      style={{
+                        background: isActive ? accentBg : isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)',
+                        border: `1px solid ${isActive ? accentBorder : borderColorLight}`,
+                        color: isActive ? accentColor : textSubColor,
+                      }}
+                    >
+                      {displayName}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>

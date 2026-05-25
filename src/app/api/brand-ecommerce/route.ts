@@ -312,14 +312,15 @@ export async function POST(request: NextRequest) {
       const taskId = `ecom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       registerTask(taskId, 'brand-ecommerce', `品牌电商生成 (${tasks.length}张)`);
 
-      // Start async generation
-      (async () => {
+      // ★ Synchronous mode: process all tasks and return results directly
+      // This avoids cross-module task-registry issues in Next.js dev mode
+      try {
         const results: Array<{ templateId: string; templateName: string; imageUrl?: string; error?: string }> = [];
 
         for (let i = 0; i < tasks.length; i++) {
           if (isTaskCancelled(taskId)) {
             updateTaskProgress(taskId, { status: 'cancelled', progress: i / tasks.length });
-            return;
+            break;
           }
 
           const { template: tpl, prompt, negPrompt, dims } = tasks[i];
@@ -453,9 +454,23 @@ export async function POST(request: NextRequest) {
           result: taskResult,
         });
         setBrandResult(taskId, taskResult);
-      })();
+        console.log(`[brand-ecommerce] Sync completed taskId=${taskId}, results=${results.length}`);
 
-      return NextResponse.json({ success: true, taskId });
+        // ★ Return results directly (sync mode)
+        return NextResponse.json({
+          success: true,
+          taskId,
+          results: taskResult.results,
+        });
+      } catch (procErr) {
+        const errMsg = procErr instanceof Error ? procErr.message : String(procErr);
+        console.error(`[brand-ecommerce] processBrand FAILED taskId=${taskId}:`, errMsg);
+        return NextResponse.json({
+          success: false,
+          taskId,
+          error: errMsg,
+        });
+      }
     }
 
     if (action === 'models') {

@@ -297,6 +297,13 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
     setActiveTab('results');
 
     try {
+      // ★ Simulated progress while waiting for sync POST response
+      let simProgress = 5;
+      const progressInterval = setInterval(() => {
+        simProgress = Math.min(simProgress + Math.random() * 5, 90);
+        setProgress(Math.round(simProgress));
+      }, 3000);
+
       const resp = await fetch('/api/brand-ecommerce', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -310,13 +317,23 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           referenceImageUrl: refImage,
           brandColors,
         }),
+        signal: AbortSignal.timeout(600000), // 10 minutes timeout for sync processing
       });
+      clearInterval(progressInterval);
       const data = await resp.json();
       if (data.error) {
         setResults([{ templateId: 'error', templateName: '生成失败', error: data.error }]);
         setIsGenerating(false);
         return;
       }
+      // ★ Sync mode: results returned directly from POST
+      if (data.results && data.results.length > 0) {
+        console.log('[brand-ecommerce-panel] Got sync results:', data.results.length);
+        setResults(data.results);
+        setIsGenerating(false);
+        return;
+      }
+      // ★ Fallback: poll mode (if backend returns taskId without results)
       if (data.taskId) {
         setTaskId(data.taskId);
         // Start polling
