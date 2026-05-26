@@ -80,7 +80,12 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
-  const [imageTaskMap, setImageTaskMap] = useState<Record<string, { planIndex: number; variant: number; planTitle: string }>>({});
+  // Ref-based task tracking (no state, no re-renders, no useEffect polling bugs)
+  const activeTasksRef = useRef<Map<string, { planIndex: number; variant: number; planTitle: string }>>(new Map());
+  const pollingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const selectedModelRef = useRef(selectedModel);
+  // Keep selectedModelRef in sync
+  useEffect(() => { selectedModelRef.current = selectedModel; }, [selectedModel]);
 
   const [styleCategories, setStyleCategories] = useState<StyleCategory[]>([]);
   const [scenes, setScenes] = useState<SceneOption[]>([]);
@@ -108,8 +113,6 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const panelRef = useRef<HTMLDivElement>(null);
 
   const modelDropdownRef = useRef<HTMLDivElement>(null);
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const processedTaskIdsRef = useRef<Set<string>>(new Set()); // prevent duplicate image additions
 
   // ─── Drag handlers ───
   const handlePanelDragStart = (e: React.MouseEvent) => {
@@ -190,69 +193,70 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Unified polling for image generation tasks
-  // Uses functional state updates + processedTaskIdsRef to prevent stale closures and duplicates
-  useEffect(() => {
-    const taskIds = Object.keys(imageTaskMap);
-    if (taskIds.length === 0 || !isGeneratingImage) return;
-    // Reset processed set for new tasks that haven't been seen yet
-    for (const tid of taskIds) {
-      if (!processedTaskIdsRef.current.has(tid)) {
-        // New task, will be processed
+  // ─── Polling mechanism (ref-based, no useEffect) ───
+  // Starts polling after tasks are submitted. Uses setTimeout recursion instead of
+  // setInterval + useEffect to avoid stale closures, duplicate images, and loading stuck bugs.
+  const startPolling = useCallback(() => {
+    if (pollingTimerRef.current) return; // Already polling
+
+    const poll = async () => {
+      const taskIds = Array.from(activeTasksRef.current.keys());
+      if (taskIds.length === 0) {
+        setIsGeneratingImage(false);
+        pollingTimerRef.current = null;
+        return;
       }
-    }
-    let cancelled = false;
-    const pollOnce = async () => {
-      if (cancelled) return;
-      let remainingCount = 0;
+
+      let hasRemaining = false;
       for (const tid of taskIds) {
-        // Skip if already processed (prevents duplicates from re-renders or stale closures)
-        if (processedTaskIdsRef.current.has(tid)) continue;
         try {
           const res = await fetch('/api/poll-task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskId: tid, model: selectedModel }),
+            body: JSON.stringify({ taskId: tid, model: selectedModelRef.current }),
           });
           const data = await res.json();
           if (data.status === 'completed') {
-            // Mark as processed IMMEDIATELY to prevent any duplicate
-            processedTaskIdsRef.current.add(tid);
+            const meta = activeTasksRef.current.get(tid);
+            activeTasksRef.current.delete(tid);
             // Take ONLY 1 image from the result
             const urls: string[] = data.result?.directImageUrls || (data.imageUrl ? [data.imageUrl] : []);
             const firstUrl = urls[0];
-            if (firstUrl) {
-              const meta = imageTaskMap[tid];
-              if (meta) {
-                setGeneratedImages(prev => [...prev, { url: firstUrl, planIndex: meta.planIndex, variant: meta.variant, planTitle: meta.planTitle }]);
-              }
+            if (firstUrl && meta) {
+              setGeneratedImages(prev => [...prev, { url: firstUrl, planIndex: meta.planIndex, variant: meta.variant, planTitle: meta.planTitle }]);
             }
-            // Remove from task map
-            setImageTaskMap(prev => { const next = { ...prev }; delete next[tid]; return next; });
           } else if (data.status === 'failed') {
-            processedTaskIdsRef.current.add(tid);
-            setImageTaskMap(prev => { const next = { ...prev }; delete next[tid]; return next; });
+            activeTasksRef.current.delete(tid);
           } else {
-            remainingCount++;
+            hasRemaining = true;
           }
         } catch {
-          remainingCount++;
+          hasRemaining = true;
         }
       }
-      // If no remaining tasks, stop generating
-      if (remainingCount === 0 && !cancelled) {
+
+      // Check if there are still active tasks
+      if (activeTasksRef.current.size > 0) {
+        pollingTimerRef.current = setTimeout(poll, 3000);
+      } else {
         setIsGeneratingImage(false);
-        if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; }
+        pollingTimerRef.current = null;
       }
     };
-    // Poll immediately, then every 3 seconds
-    pollOnce();
-    pollIntervalRef.current = setInterval(pollOnce, 3000);
-    return () => {
-      cancelled = true;
-      if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; }
-    };
-  }, [imageTaskMap, isGeneratingImage, selectedModel]);
+
+    poll(); // Start immediately
+  }, []);
+
+  const stopPolling = useCallback(() => {
+    if (pollingTimerRef.current) {
+      clearTimeout(pollingTimerRef.current);
+      pollingTimerRef.current = null;
+    }
+    activeTasksRef.current.clear();
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => { return () => { stopPolling(); setIsGeneratingImage(false); }; }, [stopPolling]);
 
   const handleRandomExample = useCallback(() => {
     setText(RANDOM_EXAMPLES[Math.floor(Math.random() * RANDOM_EXAMPLES.length)]);
@@ -321,9 +325,9 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
 
   const handleGenerateImage = useCallback(async (mode: 'full' | 'black-on-white' | 'transparent-logo' = 'full') => {
     if (!text.trim()) return;
+    stopPolling();
     setIsGeneratingImage(true);
     setGeneratedImages([]);
-    processedTaskIdsRef.current.clear(); // Reset processed set for new generation
     setActiveTab('images');
     try {
       const res = await fetch('/api/font-design/generate-image', {
@@ -338,9 +342,9 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       });
       const data = await res.json();
       if (data.error) { showToast(data.error); setIsGeneratingImage(false); return; }
-      // Use imageTaskMap for polling (same as plan-based generation)
       if (data.taskId) {
-        setImageTaskMap({ [data.taskId]: { planIndex: 0, variant: 0, planTitle: mode === 'black-on-white' ? '黑底白字' : mode === 'transparent-logo' ? '透明Logo' : '完整版' } });
+        activeTasksRef.current.set(data.taskId, { planIndex: 0, variant: 0, planTitle: mode === 'black-on-white' ? '黑底白字' : mode === 'transparent-logo' ? '透明Logo' : '完整版' });
+        startPolling();
       } else {
         setIsGeneratingImage(false);
       }
@@ -349,17 +353,16 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       }
       setHistory(prev => [{ id: `h-${Date.now()}`, text, scene, style: secondaryStyle || primaryStyleCategory, prompt: data.prompt || '', createdAt: new Date().toLocaleString() }, ...prev]);
     } catch { showToast('生成图片失败'); setIsGeneratingImage(false); }
-  }, [text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast]);
+  }, [text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast, stopPolling, startPolling]);
 
   /** Generate 2 variant images for a single design plan */
   const handleGeneratePlanImage = useCallback(async (plan: DesignPlan, planIndex: number) => {
     if (!text.trim()) return;
+    stopPolling();
     setIsGeneratingImage(true);
     setGeneratedImages([]);
-    processedTaskIdsRef.current.clear(); // Reset processed set for new generation
     setActiveTab('images');
     try {
-      const newTaskMap: Record<string, { planIndex: number; variant: number; planTitle: string }> = {};
       // Submit 2 tasks with slightly different prompt variants
       for (let v = 0; v < 2; v++) {
         const variantSuffix = v === 0 ? '' : '，另一种构图布局和细节变化';
@@ -376,79 +379,83 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
         const data = await res.json();
         if (data.error) { showToast(`变体${v + 1}生成失败: ${data.error}`); continue; }
         if (data.taskId) {
-          newTaskMap[data.taskId] = { planIndex, variant: v, planTitle: plan.title };
+          activeTasksRef.current.set(data.taskId, { planIndex, variant: v, planTitle: plan.title });
         }
       }
-      if (Object.keys(newTaskMap).length > 0) {
-        setImageTaskMap(newTaskMap);
+      if (activeTasksRef.current.size > 0) {
+        startPolling();
       } else {
         setIsGeneratingImage(false);
       }
       setHistory(prev => [{ id: `h-${Date.now()}`, text, scene, style: plan.title || secondaryStyle || primaryStyleCategory, prompt: plan.prompt || '', createdAt: new Date().toLocaleString() }, ...prev]);
     } catch { showToast('生成图片失败'); setIsGeneratingImage(false); }
-  }, [text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast]);
+  }, [text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast, stopPolling, startPolling]);
 
-  /** Generate 2 variant images per plan × 4 plans = 8 different images total */
+  /** Generate 1 image per plan × 4 plans = 4 different images total */
   const handleGenerateAllPlanImages = useCallback(async () => {
     if (plans.length === 0) { showToast('请先生成设计方案'); return; }
+    stopPolling();
     setIsGeneratingImage(true);
     setGeneratedImages([]);
-    processedTaskIdsRef.current.clear(); // Reset processed set for new generation
     setActiveTab('images');
     try {
-      const newTaskMap: Record<string, { planIndex: number; variant: number; planTitle: string }> = {};
       for (let pi = 0; pi < plans.length; pi++) {
         const plan = plans[pi];
-        for (let v = 0; v < 2; v++) {
-          const variantSuffix = v === 0 ? '' : '，另一种构图布局和细节变化';
-          const res = await fetch('/api/font-design/generate-image', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              text, scene, primaryStyleCategory, secondaryStyle,
-              ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced,
-              model: selectedModel, mode: 'full', count: 1,
-              prompt: plan.prompt + variantSuffix,
-            }),
-          });
-          const data = await res.json();
-          if (data.error) { showToast(`方案"${plan.title}"变体${v + 1}生成失败: ${data.error}`); continue; }
-          if (data.taskId) {
-            newTaskMap[data.taskId] = { planIndex: pi, variant: v, planTitle: plan.title };
-          }
+        const res = await fetch('/api/font-design/generate-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text, scene, primaryStyleCategory, secondaryStyle,
+            ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced,
+            model: selectedModel, mode: 'full', count: 1,
+            prompt: plan.prompt,
+          }),
+        });
+        const data = await res.json();
+        if (data.error) { showToast(`方案"${plan.title}"生成失败: ${data.error}`); continue; }
+        if (data.taskId) {
+          activeTasksRef.current.set(data.taskId, { planIndex: pi, variant: 0, planTitle: plan.title });
         }
       }
-      if (Object.keys(newTaskMap).length > 0) {
-        setImageTaskMap(newTaskMap);
+      if (activeTasksRef.current.size > 0) {
+        startPolling();
       } else {
         setIsGeneratingImage(false);
       }
       setHistory(prev => [...plans.map((plan, i) => ({ id: `h-${Date.now()}-${i}`, text, scene, style: plan.title || secondaryStyle || primaryStyleCategory, prompt: plan.prompt || '', createdAt: new Date().toLocaleString() })), ...prev]);
     } catch { showToast('生成图片失败'); setIsGeneratingImage(false); }
-  }, [plans, text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast]);
+  }, [plans, text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast, stopPolling, startPolling]);
 
+  /** Black-on-white test: 2 images per plan × 4 plans = 8 different images */
   const handleBlackOnWhiteTest = useCallback(async () => {
     if (plans.length === 0) { showToast('请先生成字体方案'); return; }
+    stopPolling();
     setIsGeneratingImage(true);
     setGeneratedImages([]);
-    processedTaskIdsRef.current.clear(); // Reset processed set for new generation
+    setActiveTab('images');
     try {
-      const newTaskMap: Record<string, { planIndex: number; variant: number; planTitle: string }> = {};
       for (let i = 0; i < plans.length; i++) {
         const plan = plans[i];
         const planPrompt = plan.prompt || `文字内容"${text}"，${scene}场景，${secondaryStyle || primaryStyleCategory}风格`;
-        const blackOnWhitePrompt = `黑底白字测试: ${planPrompt}, pure black background, white text only, high contrast, clear letterforms, no decorative elements, no colors, stark monochrome, crisp edges`;
-        const resp = await fetch('/api/font-design/generate-image', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text, prompt: blackOnWhitePrompt, model: selectedModel, ratio, count: 1, color: '白色', background: '纯黑背景' }),
-        });
-        const data = await resp.json();
-        if (data.taskId) { newTaskMap[data.taskId] = { planIndex: i, variant: 2, planTitle: plan.title || `方案${i + 1}` }; }
-        else if (data.imageUrl) { setGeneratedImages(prev => [...prev, { url: data.imageUrl, planIndex: i, variant: 2, planTitle: plan.title || `方案${i + 1}` }]); }
+        // Submit 2 variants per plan
+        for (let v = 0; v < 2; v++) {
+          const variantSuffix = v === 0 ? '' : '，另一种构图布局和细节变化';
+          const blackOnWhitePrompt = `黑底白字测试: ${planPrompt}${variantSuffix}, pure black background, white text only, high contrast, clear letterforms, no decorative elements, no colors, stark monochrome, crisp edges`;
+          const resp = await fetch('/api/font-design/generate-image', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, prompt: blackOnWhitePrompt, model: selectedModel, ratio, count: 1, color: '白色', background: '纯黑背景' }),
+          });
+          const data = await resp.json();
+          if (data.taskId) {
+            activeTasksRef.current.set(data.taskId, { planIndex: i, variant: v, planTitle: (plan.title || `方案${i + 1}`) + ' 黑底白字' });
+          } else if (data.imageUrl) {
+            setGeneratedImages(prev => [...prev, { url: data.imageUrl, planIndex: i, variant: v, planTitle: (plan.title || `方案${i + 1}`) + ' 黑底白字' }]);
+          }
+        }
       }
-      if (Object.keys(newTaskMap).length > 0) { setImageTaskMap(newTaskMap); } else { setIsGeneratingImage(false); }
+      if (activeTasksRef.current.size > 0) { startPolling(); } else { setIsGeneratingImage(false); }
     } catch { showToast('黑底白字测试失败'); setIsGeneratingImage(false); }
-  }, [plans, text, scene, primaryStyleCategory, secondaryStyle, ratio, selectedModel, showToast]);
+  }, [plans, text, scene, primaryStyleCategory, secondaryStyle, ratio, selectedModel, showToast, stopPolling, startPolling]);
 
   const handleAddToCanvas = useCallback((url: string) => { onAddImages?.([url]); }, [onAddImages]);
 
