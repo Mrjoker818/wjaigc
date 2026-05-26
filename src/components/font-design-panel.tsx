@@ -5,7 +5,7 @@ import {
   X, Sparkles, Copy, Image as ImageIcon, Download, Loader2,
   ChevronDown, ChevronUp, RefreshCw, Star, Cpu, Wand2,
   Check, Shuffle, Trash2, Clock, Plus, GripVertical, Minus, PenTool,
-  Palette, Zap,
+  Palette, Zap, Search, List, Grid3X3, Maximize2,
 } from 'lucide-react';
 
 interface StyleSubCategory { id: string; name: string; prompt: string; }
@@ -22,27 +22,22 @@ interface HistoryItem {
   prompt: string; imageUrl?: string; createdAt: string;
 }
 
-interface GalleryItem {
-  id: string; title: string; keywords: string; style: string;
-  scene: string; imageUrl: string; prompt: string;
-  colorScheme?: string; background?: string; material?: string;
-  description?: string; tags?: string[];
+// Gallery data loaded from API
+interface GalleryDataItem {
+  id: string;
+  imageFile: string;
+  sourceUrl: string;
+  prompt: string;
+  displayText: string;
+  category: string;
+  categoryName: string;
 }
-
-const FONT_DESIGN_GALLERY: GalleryItem[] = [
-  { id: 'g1', title: '毛笔书法风格', keywords: '毛笔,书法,水墨,东方,禅意', style: 'brush-calligraphy', scene: '文化艺术', imageUrl: '', prompt: '中式毛笔书法字体设计，墨迹飞溅效果，笔画苍劲有力，水墨晕染质感，宣纸纹理背景，东方禅意美学，黑白灰为主色调', description: '苍劲有力的中式毛笔书法，墨迹飞溅，水墨晕染', tags: ['书法', '水墨', '东方'] },
-  { id: 'g2', title: '霓虹灯管风格', keywords: '霓虹,灯管,夜店,赛博朋克,发光', style: 'neon-tube', scene: '商业品牌', imageUrl: '', prompt: '霓虹灯管字体设计，发光灯管弯曲成型，暗色背景中发光，赛博朋克风格，粉色和青色光晕，玻璃管质感，城市夜景氛围', description: '赛博朋克霓虹灯管字体，暗夜发光', tags: ['霓虹', '赛博朋克', '发光'] },
-  { id: 'g3', title: '金属3D立体', keywords: '金属,3D,立体,铬合金,高端', style: 'metallic-3d', scene: '商业品牌', imageUrl: '', prompt: '金属3D立体字体设计，铬合金反射质感，镜面高光效果，深色背景，工业风金属光泽，字母厚度感强烈，高端奢华视觉', description: '铬合金3D立体字，镜面高光，工业奢华', tags: ['金属', '3D', '高端'] },
-  { id: 'g4', title: '手写水彩风格', keywords: '手写,水彩,温柔,艺术,浪漫', style: 'watercolor-hand', scene: '婚礼贺卡', imageUrl: '', prompt: '手写水彩字体设计，柔和笔触晕染，色彩渐变过渡，水彩画质感，温柔浪漫气息，花瓣装饰点缀，粉彩色调', description: '水彩手写体，柔和晕染，浪漫温柔', tags: ['水彩', '手写', '浪漫'] },
-  { id: 'g5', title: '像素复古风格', keywords: '像素,复古,8bit,游戏,怀旧', style: 'pixel-retro', scene: '游戏娱乐', imageUrl: '', prompt: '像素风格字体设计，8-bit复古游戏感，方块像素构成，鲜艳配色，怀旧游戏风格，霓虹边框，电子屏幕显示效果', description: '8-bit像素复古字体，怀旧游戏风', tags: ['像素', '复古', '游戏'] },
-  { id: 'g6', title: '花卉缠绕风格', keywords: '花卉,缠绕,藤蔓,自然,优雅', style: 'floral-ornate', scene: '婚礼贺卡', imageUrl: '', prompt: '花卉缠绕字体设计，花朵藤蔓围绕字母生长，精细线条勾勒，植物纹样装饰，优雅浪漫气质，浅色柔和背景', description: '花卉藤蔓缠绕，植物纹样装饰', tags: ['花卉', '自然', '优雅'] },
-  { id: 'g7', title: '未来科技风格', keywords: '未来,科技,全息,数字,科幻', style: 'futuristic-tech', scene: '科技产品', imageUrl: '', prompt: '未来科技字体设计，全息投影效果，数字代码雨背景，蓝紫色调发光，数据流动感，科幻界面风格，透明棱镜折射', description: '全息投影科技字体，数字代码流动', tags: ['科技', '全息', '未来'] },
-  { id: 'g8', title: '手作拼贴风格', keywords: '手作,拼贴,纸艺,手工,创意', style: 'collage-craft', scene: '创意设计', imageUrl: '', prompt: '手作拼贴字体设计，剪纸和杂志碎片拼贴，撕裂边缘效果，多层叠加质感，手工制作痕迹，色彩丰富混搭', description: '剪纸拼贴手作风格，多层叠加质感', tags: ['拼贴', '手作', '创意'] },
-  { id: 'g9', title: '极简线条风格', keywords: '极简,线条,现代,简约,几何', style: 'minimal-line', scene: '商业品牌', imageUrl: '', prompt: '极简线条字体设计，单线勾勒字母形态，几何构成原则，大量留白空间，黑白高对比，现代简约主义，优雅纤细笔画', description: '极简单线勾勒，几何构成，现代简约', tags: ['极简', '线条', '现代'] },
-  { id: 'g10', title: '火焰燃烧风格', keywords: '火焰,燃烧,炽热,能量,动感', style: 'flame-burning', scene: '运动品牌', imageUrl: '', prompt: '火焰燃烧字体设计，字母被烈焰包围，熔岩流淌效果，红橙黄渐变，炽热能量感，烟雾缭绕，黑暗背景衬托', description: '烈焰燃烧字体，熔岩流淌，能量感', tags: ['火焰', '动感', '炽热'] },
-  { id: 'g11', title: '冰雪结晶风格', keywords: '冰雪,结晶,冬天,清凉,精致', style: 'ice-crystal', scene: '节日活动', imageUrl: '', prompt: '冰雪结晶字体设计，冰晶冻霜质感，透明冰块折射光线，蓝色冷色调，雪花结晶纹理，冬天清凉氛围，光晕闪烁效果', description: '冰晶冻霜质感，雪花结晶，清凉透明', tags: ['冰雪', '结晶', '清凉'] },
-  { id: 'g12', title: '涂鸦街头风格', keywords: '涂鸦,街头,嘻哈,喷漆,叛逆', style: 'graffiti-street', scene: '街头文化', imageUrl: '', prompt: '涂鸦街头字体设计，喷漆涂鸦效果，粗犷笔触飞溅，鲜艳撞色搭配，砖墙纹理背景，嘻哈文化气息，叛逆不羁风格', description: '喷漆涂鸦街头风，粗犷笔触飞溅', tags: ['涂鸦', '街头', '嘻哈'] },
-];
+interface GalleryCategory {
+  id: string;
+  name: string;
+  count: number;
+}
+type GalleryViewMode = 'list' | 'thumbnail' | 'large';
 
 interface FontDesignPanelProps {
   isMonochrome?: boolean;
@@ -105,6 +100,14 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   // Gallery state
   const [galleryLoading, setGalleryLoading] = useState(false);
+  const [galleryItems, setGalleryItems] = useState<GalleryDataItem[]>([]);
+  const [galleryCategories, setGalleryCategories] = useState<GalleryCategory[]>([]);
+  const [galleryFilter, setGalleryFilter] = useState<string>('all');
+  const [galleryViewMode, setGalleryViewMode] = useState<GalleryViewMode>('thumbnail');
+  const [galleryPage, setGalleryPage] = useState(1);
+  const [galleryTotalPages, setGalleryTotalPages] = useState(1);
+  const [galleryTotalCount, setGalleryTotalCount] = useState(0);
+  const [gallerySearch, setGallerySearch] = useState('');
   // Ref-based task tracking (no state, no re-renders, no useEffect polling bugs)
   const activeTasksRef = useRef<Map<string, { planIndex: number; variant: number; planTitle: string }>>(new Map());
   const pollingTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -528,21 +531,66 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
 
   const handleAddToCanvas = useCallback((url: string) => { onAddImages?.([url]); }, [onAddImages]);
 
-  // Gallery: "一键制作同款" handler - fill left panel + auto generate 2 images
-  const handleUseInspiration = useCallback((item: GalleryItem) => {
-    // 1. Fill left panel settings from gallery item
-    setText(item.title + '，' + item.keywords);
-    setScene(item.scene);
-    setPrimaryStyleCategory(item.style);
+  // Gallery: load data from API
+  const loadGalleryData = useCallback(async (category?: string, page?: number, search?: string) => {
+    setGalleryLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (category && category !== 'all') params.set('category', category);
+      if (page) params.set('page', String(page));
+      if (search) params.set('search', search);
+      params.set('pageSize', '30');
+      const resp = await fetch(`/api/font-design/gallery?${params.toString()}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        setGalleryItems(data.items || []);
+        setGalleryCategories(data.categories || []);
+        setGalleryTotalPages(data.totalPages || 1);
+        setGalleryTotalCount(data.filteredCount || 0);
+      }
+    } catch (err) {
+      console.error('加载图库失败:', err);
+    } finally {
+      setGalleryLoading(false);
+    }
+  }, []);
+
+  // Load gallery on first tab visit
+  useEffect(() => {
+    if (activeTab === 'gallery' && galleryItems.length === 0 && !galleryLoading) {
+      loadGalleryData(galleryFilter, galleryPage, gallerySearch);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  // Gallery: "一键制作同款" handler for API-sourced items
+  const handleUseInspiration = useCallback((item: GalleryDataItem) => {
+    // Extract key text and keywords from the prompt
+    const promptText = item.prompt || '';
+    const displayText = item.displayText || '';
+    
+    // Fill text field with the display text
+    setText(displayText || '字体设计');
+    setScene('文化艺术');
+    
+    // Map category to primaryStyleCategory
+    const catToStyle: Record<string, string> = {
+      'cat-0': 'oriental', 'cat-1': 'modern', 'cat-2': 'handwriting',
+      'cat-3': 'dimensional', 'cat-4': 'oriental', 'cat-5': 'cute',
+      'cat-6': 'modern', 'cat-7': 'modern', 'cat-8': 'neon',
+      'cat-9': 'modern', 'cat-10': 'creative', 'cat-11': 'creative',
+    };
+    setPrimaryStyleCategory(catToStyle[item.category] || 'smart-recommend');
     setSecondaryStyle('');
-    // 2. Auto-generate 2 variant images with this item's prompt
+    
+    // Auto-generate 2 variant images with this item's prompt
     const model = selectedModel;
     if (!model) {
       setActiveTab('prompt');
       return;
     }
     const stylePrefix = buildStyleEnforcementPrefix();
-    const promptText = stylePrefix + item.prompt;
+    const finalPromptBase = stylePrefix + promptText;
     setGeneratedImages([]);
     activeTasksRef.current.clear();
     setIsGeneratingImage(true);
@@ -550,18 +598,17 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
 
     for (let vIdx = 0; vIdx < 2; vIdx++) {
       const variationHint = vIdx === 0 ? '，构图偏紧凑特写视角' : '，构图偏开阔全景视角';
-      const finalPrompt = promptText + variationHint;
+      const finalPrompt = finalPromptBase + variationHint;
       fetch('/api/font-design/generate-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: finalPrompt, model, ratio, mode: 'standard',
-          text: item.title, scene: item.scene, primaryStyleCategory: item.style,
-          color: item.colorScheme, background: item.background, material: item.material,
+          text: displayText, scene: '文化艺术', primaryStyleCategory: catToStyle[item.category] || 'smart-recommend',
         }),
       }).then(r => r.json()).then(data => {
         if (data.taskId) {
-          activeTasksRef.current.set(data.taskId, { planIndex: 0, variant: vIdx, planTitle: item.title });
+          activeTasksRef.current.set(data.taskId, { planIndex: 0, variant: vIdx, planTitle: item.categoryName + '灵感' });
           if (vIdx === 1) startPolling();
         }
       }).catch(err => {
@@ -571,52 +618,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     }
   }, [selectedModel, ratio, startPolling, buildStyleEnforcementPrefix]);
 
-  // Gallery: generate preview images for all gallery items
-  const handleGenerateGallery = useCallback(async () => {
-    if (isGeneratingImage || !selectedModel) return;
-    setIsGeneratingImage(true);
-    setGalleryLoading(true);
-    setGeneratedImages([]);
-    activeTasksRef.current.clear();
 
-    let submitted = 0;
-
-    for (const [idx, item] of FONT_DESIGN_GALLERY.entries()) {
-      try {
-        const resp = await fetch('/api/font-design/generate-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt: item.prompt,
-            model: selectedModel,
-            mode: 'complete',
-            size: '1024x1024',
-            text: item.title, scene: item.scene,
-            primaryStyleCategory: item.style,
-            color: item.colorScheme || '', background: item.background || '', material: item.material || '',
-          }),
-        });
-        const data = await resp.json();
-        if (data.taskId) {
-          activeTasksRef.current.set(data.taskId, {
-            planIndex: idx,
-            variant: 0,
-            planTitle: item.title,
-          });
-          submitted++;
-        }
-      } catch (e) {
-        console.error('Gallery generate failed for', item.title, e);
-      }
-    }
-
-    if (submitted > 0) {
-      startPolling();
-    } else {
-      setIsGeneratingImage(false);
-      setGalleryLoading(false);
-    }
-  }, [isGeneratingImage, selectedModel, startPolling]);
 
   const currentCategory = styleCategories.find(c => c.id === primaryStyleCategory);
 
@@ -1309,62 +1311,230 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
 
               {/* ========== Tab 4: 灵感图库 ========== */}
               {activeTab === 'gallery' && (
-                <div className="space-y-4">
-                  <div className="text-center mb-2">
-                    <Palette className="h-6 w-6 mx-auto mb-1.5 opacity-40" style={{ color: accentColor }} />
+                <div className="flex flex-col gap-3">
+                  {/* Header */}
+                  <div className="text-center">
+                    <Palette className="h-5 w-5 mx-auto mb-1 opacity-40" style={{ color: accentColor }} />
                     <p className="text-sm font-medium" style={{ color: textColor }}>即梦灵感图库</p>
-                    <p className="text-xs mt-1" style={{ color: subTextColor }}>精选字体设计灵感，点击&ldquo;一键制作同款&rdquo;快速开始创作</p>
+                    <p className="text-[10px] mt-0.5" style={{ color: subTextColor }}>
+                      {galleryTotalCount > 0 ? `${galleryTotalCount} 张精选字体设计灵感` : '精选字体设计灵感，一键制作同款'}
+                    </p>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    {FONT_DESIGN_GALLERY.map((item: GalleryItem) => (
-                      <div
-                        key={item.id}
-                        className="group relative overflow-hidden rounded-lg transition-all"
-                        style={{ border: `1px solid ${borderColor}`, background: cardBgColor, cursor: 'default' }}
-                      >
-                        {/* Image */}
-                        <div className="relative aspect-[4/3] overflow-hidden bg-black/20">
-                          <img
-                            src={item.imageUrl}
-                            alt={item.title}
-                            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                            loading="lazy"
-                          />
-                          {/* Hover overlay with button */}
-                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-all duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100">
+
+                  {/* Search + View mode toggle */}
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md" style={{ background: isMonochrome ? '#f3f4f6' : '#1c1c1c', border: `1px solid ${borderColor}` }}>
+                      <Search size={12} style={{ color: subTextColor }} />
+                      <input
+                        type="text"
+                        value={gallerySearch}
+                        onChange={e => { setGallerySearch(e.target.value); setGalleryPage(1); loadGalleryData(galleryFilter, 1, e.target.value); }}
+                        placeholder="搜索关键词..."
+                        className="flex-1 bg-transparent text-xs outline-none"
+                        style={{ color: textColor }}
+                      />
+                    </div>
+                    <div className="flex rounded-md overflow-hidden" style={{ border: `1px solid ${borderColor}` }}>
+                      {([['list', List], ['thumbnail', Grid3X3], ['large', Maximize2]] as const).map(([mode, Icon]) => (
+                        <button
+                          key={mode}
+                          onClick={() => setGalleryViewMode(mode)}
+                          className="p-1.5 transition-colors"
+                          style={{
+                            background: galleryViewMode === mode ? accentColor : (isMonochrome ? '#f3f4f6' : '#1c1c1c'),
+                            color: galleryViewMode === mode ? (isMonochrome ? '#fff' : '#000') : subTextColor,
+                          }}
+                          title={mode === 'list' ? '列表模式' : mode === 'thumbnail' ? '缩略图模式' : '大图模式'}
+                        >
+                          <Icon size={12} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Category filter pills */}
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      onClick={() => { setGalleryFilter('all'); setGalleryPage(1); loadGalleryData('all', 1, gallerySearch); }}
+                      className="px-2.5 py-1 rounded-full text-[10px] font-medium transition-colors"
+                      style={{
+                        background: galleryFilter === 'all' ? accentColor : (isMonochrome ? '#f3f4f6' : '#1c1c1c'),
+                        color: galleryFilter === 'all' ? (isMonochrome ? '#fff' : '#000') : subTextColor,
+                        border: `1px solid ${galleryFilter === 'all' ? accentColor : borderColor}`,
+                      }}
+                    >全部</button>
+                    {galleryCategories.map(cat => (
+                      <button
+                        key={cat.id}
+                        onClick={() => { setGalleryFilter(cat.id); setGalleryPage(1); loadGalleryData(cat.id, 1, gallerySearch); }}
+                        className="px-2.5 py-1 rounded-full text-[10px] font-medium transition-colors"
+                        style={{
+                          background: galleryFilter === cat.id ? accentColor : (isMonochrome ? '#f3f4f6' : '#1c1c1c'),
+                          color: galleryFilter === cat.id ? (isMonochrome ? '#fff' : '#000') : subTextColor,
+                          border: `1px solid ${galleryFilter === cat.id ? accentColor : borderColor}`,
+                        }}
+                      >{cat.name}({cat.count})</button>
+                    ))}
+                  </div>
+
+                  {/* Gallery content */}
+                  {galleryLoading ? (
+                    <div className="flex flex-col items-center py-10">
+                      <Loader2 className="h-5 w-5 animate-spin mb-2" style={{ color: accentColor }} />
+                      <p className="text-xs" style={{ color: subTextColor }}>加载图库中...</p>
+                    </div>
+                  ) : galleryItems.length === 0 ? (
+                    <div className="text-center py-10">
+                      <ImageIcon className="h-6 w-6 mx-auto mb-2 opacity-30" />
+                      <p className="text-xs" style={{ color: subTextColor }}>暂无灵感数据</p>
+                    </div>
+                  ) : galleryViewMode === 'list' ? (
+                    /* ========== LIST MODE ========== */
+                    <div className="flex flex-col gap-1.5">
+                      {galleryItems.map(item => (
+                        <div
+                          key={item.id}
+                          className="flex items-center gap-3 p-2 rounded-lg group transition-all"
+                          style={{ border: `1px solid ${borderColor}`, background: cardBgColor, cursor: 'default' }}
+                          onMouseEnter={e => { e.currentTarget.style.borderColor = borderColorLight; }}
+                          onMouseLeave={e => { e.currentTarget.style.borderColor = borderColor; }}
+                        >
+                          <div className="w-10 h-10 rounded overflow-hidden shrink-0" style={{ background: isMonochrome ? '#f3f4f6' : '#1c1c1c' }}>
+                            <img
+                              src={`/api/font-design/gallery-image?id=${item.id}`}
+                              alt={item.displayText || '灵感'}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                              onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                            />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium truncate" style={{ color: textColor }}>
+                              {item.displayText || item.categoryName}
+                            </p>
+                            <p className="text-[10px] line-clamp-1" style={{ color: subTextColor }}>
+                              {item.prompt.substring(0, 60)}...
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleUseInspiration(item)}
+                            className="shrink-0 px-2 py-1 rounded text-[10px] font-medium opacity-0 group-hover:opacity-100 transition-opacity"
+                            style={{ background: accentColor, color: isMonochrome ? '#fff' : '#000', cursor: 'pointer' }}
+                          >
+                            制作同款
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : galleryViewMode === 'thumbnail' ? (
+                    /* ========== THUMBNAIL MODE ========== */
+                    <div className="grid grid-cols-2 gap-2">
+                      {galleryItems.map(item => (
+                        <div
+                          key={item.id}
+                          className="group relative overflow-hidden rounded-lg transition-all"
+                          style={{ border: `1px solid ${borderColor}`, background: cardBgColor, cursor: 'default' }}
+                        >
+                          <div className="relative aspect-[4/3] overflow-hidden" style={{ background: isMonochrome ? '#f3f4f6' : '#111' }}>
+                            <img
+                              src={`/api/font-design/gallery-image?id=${item.id}`}
+                              alt={item.displayText || '灵感'}
+                              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                              loading="lazy"
+                              onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                            />
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-all duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100">
+                              <button
+                                onClick={() => handleUseInspiration(item)}
+                                className="px-2.5 py-1.5 rounded-md text-[10px] font-medium"
+                                style={{ background: accentColor, color: isMonochrome ? '#fff' : '#000', cursor: 'pointer' }}
+                              >
+                                一键制作同款
+                              </button>
+                            </div>
+                          </div>
+                          <div className="p-2">
+                            <p className="text-[10px] font-medium truncate" style={{ color: textColor }}>
+                              {item.displayText || item.categoryName}
+                            </p>
+                            <p className="text-[9px] mt-0.5 line-clamp-1" style={{ color: subTextColor }}>
+                              {item.prompt.substring(0, 40)}...
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    /* ========== LARGE IMAGE MODE ========== */
+                    <div className="flex flex-col gap-3">
+                      {galleryItems.map(item => (
+                        <div
+                          key={item.id}
+                          className="group relative overflow-hidden rounded-lg transition-all"
+                          style={{ border: `1px solid ${borderColor}`, background: cardBgColor, cursor: 'default' }}
+                        >
+                          <div className="relative aspect-[16/9] overflow-hidden" style={{ background: isMonochrome ? '#f3f4f6' : '#111' }}>
+                            <img
+                              src={`/api/font-design/gallery-image?id=${item.id}`}
+                              alt={item.displayText || '灵感'}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                              onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+                            <div className="absolute bottom-0 left-0 right-0 p-3">
+                              <p className="text-xs font-medium text-white truncate">{item.displayText || item.categoryName}</p>
+                              <p className="text-[10px] text-white/70 line-clamp-2 mt-0.5">{item.prompt.substring(0, 100)}</p>
+                            </div>
                             <button
                               onClick={() => handleUseInspiration(item)}
-                              className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
-                              style={{
-                                background: accentColor,
-                                color: isMonochrome ? '#fff' : '#000',
-                                border: 'none',
-                                cursor: 'pointer',
-                              }}
+                              className="absolute top-2 right-2 px-2.5 py-1.5 rounded-md text-[10px] font-medium opacity-0 group-hover:opacity-100 transition-opacity"
+                              style={{ background: accentColor, color: isMonochrome ? '#fff' : '#000', cursor: 'pointer' }}
                             >
                               一键制作同款
                             </button>
                           </div>
                         </div>
-                        {/* Info */}
-                        <div className="p-2.5">
-                          <p className="text-xs font-medium truncate" style={{ color: textColor }}>{item.title}</p>
-                          <p className="text-[10px] mt-0.5 line-clamp-2" style={{ color: subTextColor }}>{item.description}</p>
-                          <div className="flex flex-wrap gap-1 mt-1.5">
-                            {(item.tags || []).map((tag: string) => (
-                              <span
-                                key={tag}
-                                className="px-1.5 py-0.5 rounded text-[9px]"
-                                style={{ background: isMonochrome ? '#e5e5e5' : '#1a1a1a', color: subTextColor }}
-                              >
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Pagination */}
+                  {galleryTotalPages > 1 && (
+                    <div className="flex items-center justify-center gap-2 pt-1">
+                      <button
+                        onClick={() => { const p = Math.max(1, galleryPage - 1); setGalleryPage(p); loadGalleryData(galleryFilter, p, gallerySearch); }}
+                        disabled={galleryPage <= 1}
+                        className="px-2 py-1 rounded text-[10px]"
+                        style={{
+                          background: isMonochrome ? '#f3f4f6' : '#1c1c1c',
+                          color: galleryPage <= 1 ? subTextColor : textColor,
+                          border: `1px solid ${borderColor}`,
+                          cursor: galleryPage <= 1 ? 'not-allowed' : 'pointer',
+                          opacity: galleryPage <= 1 ? 0.5 : 1,
+                        }}
+                      >
+                        上一页
+                      </button>
+                      <span className="text-[10px]" style={{ color: subTextColor }}>
+                        {galleryPage} / {galleryTotalPages}
+                      </span>
+                      <button
+                        onClick={() => { const p = Math.min(galleryTotalPages, galleryPage + 1); setGalleryPage(p); loadGalleryData(galleryFilter, p, gallerySearch); }}
+                        disabled={galleryPage >= galleryTotalPages}
+                        className="px-2 py-1 rounded text-[10px]"
+                        style={{
+                          background: isMonochrome ? '#f3f4f6' : '#1c1c1c',
+                          color: galleryPage >= galleryTotalPages ? subTextColor : textColor,
+                          border: `1px solid ${borderColor}`,
+                          cursor: galleryPage >= galleryTotalPages ? 'not-allowed' : 'pointer',
+                          opacity: galleryPage >= galleryTotalPages ? 0.5 : 1,
+                        }}
+                      >
+                        下一页
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
