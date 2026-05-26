@@ -1706,6 +1706,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             )}
           </div>
 
+          {/* 分隔线 */}
+          <div className={`border-t ${thBorderLight}`} />
+
           {/* 画笔工具 - 始终显示 */}
           <div className="flex items-center gap-1.5 px-1">
             <button
@@ -1756,6 +1759,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             <span className={`text-xs font-mono w-5 text-center ${currentModelSupportsMask ? (isMonochrome ? 'text-gray-900' : 'text-[#d4af37]') : (isMonochrome ? 'text-gray-300' : 'text-[#444]')}`}>{brushSize}</span>
           </div>
 
+          {/* 分隔线 */}
+          <div className={`border-t ${thBorderLight}`} />
+
           {/* 编辑指令 */}
           <div className="relative">
             <textarea
@@ -1775,6 +1781,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             </button>
             <p className={`text-xs ${thTextMuted} mt-0.5`}>Enter 提交 · Shift+Enter 换行</p>
           </div>
+
+          {/* 分隔线 */}
+          <div className={`border-t ${thBorderLight}`} />
 
           {/* 图像模型选择 - 执行修图 */}
           <div>
@@ -1813,6 +1822,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               </div>
             )}
           </div>
+
+          {/* 分隔线 */}
+          <div className={`border-t ${thBorderLight}`} />
 
           {/* LLM 协作模型 - 分析原图+优化指令 */}
           <div>
@@ -1880,6 +1892,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             )}
           </div>
 
+          {/* 分隔线 */}
+          <div className={`border-t ${thBorderLight}`} />
+
           {/* 协作流程指示 */}
           {selectedLlmKey && selectedModelKey && (
             <div className={`flex items-center gap-2 px-2.5 py-1.5 rounded ${thBgDeep} border ${thBorderLight}`}>
@@ -1899,6 +1914,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               </div>
             </div>
           )}
+
+          {/* 分隔线 */}
+          <div className={`border-t ${thBorderLight}`} />
 
           {/* 参数行 - 画面比例/质量/生图数量 一行三列 */}
           <div className="grid grid-cols-3 gap-2">
@@ -1940,6 +1958,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               {error}
             </div>
           )}
+
+          {/* 分隔线 */}
+          <div className={`border-t ${thBorderLight}`} />
 
           {/* 生成按钮 */}
           <button
