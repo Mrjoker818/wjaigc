@@ -11,6 +11,25 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const projectId = searchParams.get('projectId');
     const materialsOnly = searchParams.get('materials') === 'true';
+    const versionsOnly = searchParams.get('versions') === 'true';
+
+    if (projectId && versionsOnly) {
+      const allMaterials = await dbListBrandMaterials(projectId);
+      const versions = allMaterials.filter(m => m.material_type === 'version' || m.status === 'version');
+      const parsedVersions = versions.map(v => {
+        let snapshot: Record<string, unknown> = {};
+        let note = '';
+        let targetType = 'full';
+        try {
+          const parsed = JSON.parse(v.prompt || '{}');
+          snapshot = parsed.snapshot || {};
+          note = parsed.note || '';
+          targetType = parsed.targetType || 'full';
+        } catch { /* ignore */ }
+        return { ...v, snapshot, note, targetType, id: v.id, versionName: v.title, createdAt: v.created_at };
+      });
+      return NextResponse.json({ success: true, versions: parsedVersions });
+    }
 
     if (projectId && materialsOnly) {
       const materials = await dbListBrandMaterials(projectId);
@@ -49,6 +68,8 @@ export async function POST(req: NextRequest) {
       case 'batch-generate': return await handleBatchGenerate(body);
       case 'save-material': return await handleSaveMaterial(body);
       case 'delete-material': return await handleDeleteMaterial(body);
+      case 'consistency-check': return await handleConsistencyCheck(body);
+      case 'save-version': return await handleSaveVersion(body);
       default:
         return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
     }
@@ -248,30 +269,44 @@ async function handleGenerateDirections(body: Record<string, unknown>) {
 }
 
 async function handleGenerateKV(body: Record<string, unknown>) {
-  const { brandName, direction, prompt: userPrompt, llmModel } = body;
+  const { brandName, brandDna, directionId, directionPrompt, theme, slogan, ratio, llmModel } = body;
   if (!brandName) return NextResponse.json({ error: '请先填写品牌名称' }, { status: 400 });
 
-  const directionStr = typeof direction === 'string' ? direction : JSON.stringify(direction || {});
+  const dnaStr = typeof brandDna === 'string' ? brandDna : JSON.stringify(brandDna || {});
+  const kvRatio = (ratio as string) || '16:9';
 
-  const prompt = `你是一个品牌视觉设计专家。请根据以下品牌信息和创意方向，生成主KV的图像生成Prompt：
+  const prompt = `你是一个品牌视觉设计专家。请根据以下品牌信息生成主KV（Key Visual）的图像生成Prompt：
 
 品牌名称：${brandName}
-创意方向：${directionStr}
-用户要求：${userPrompt || '无特殊要求'}
+品牌DNA：${dnaStr}
+${directionPrompt ? `创意方向Prompt：${directionPrompt}` : ''}
+${theme ? `主题文案：${theme}` : ''}
+${slogan ? `传播语/标语：${slogan}` : ''}
+画面比例：${kvRatio}
 
-请直接输出一段详细的图像生成Prompt，包含：
+请直接输出一段详细的图像生成Prompt，必须包含：
 1. 画面主体和构图
-2. 色彩方案
-3. 字体和文字排版规则
-4. 品牌元素应用方式
+2. 色彩方案（基于品牌DNA的主色和辅助色）
+3. 字体和文字排版规则（中文标题保护：所有中文文字必须完整呈现，不得变形模糊）
+4. Logo/品牌元素应用方式
 5. 画面氛围和质感
-6. 禁止事项
+6. 禁止事项（如禁止模糊变形、禁止水印）
 
 输出格式为纯文本Prompt，不要包含任何前缀或说明文字。`;
 
   try {
     const content = await callLLM(prompt);
-    return NextResponse.json({ success: true, prompt: content.trim() });
+    const kvPrompt = content.trim();
+    // Return as materials array for compatibility
+    return NextResponse.json({
+      success: true,
+      materials: [{
+        materialType: 'kv-main',
+        title: `主KV${theme ? ' - ' + theme : ''}`,
+        ratio: kvRatio,
+        prompt: kvPrompt,
+      }],
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'KV生成失败';
     return NextResponse.json({ error: msg }, { status: 500 });
@@ -343,4 +378,81 @@ async function handleDeleteMaterial(body: Record<string, unknown>) {
   if (!id) return NextResponse.json({ error: '缺少物料ID' }, { status: 400 });
   const ok = await dbDeleteBrandMaterial(id as string);
   return ok ? NextResponse.json({ success: true }) : NextResponse.json({ error: '删除物料失败' }, { status: 500 });
+}
+
+// ═══ Consistency Check ═══
+
+async function handleConsistencyCheck(body: Record<string, unknown>) {
+  const { brandName, brandDna, materials, llmModel } = body;
+  if (!brandName) return NextResponse.json({ error: '请先填写品牌名称' }, { status: 400 });
+
+  const dnaStr = typeof brandDna === 'string' ? brandDna : JSON.stringify(brandDna || {});
+  const materialsStr = JSON.stringify((materials as Record<string, unknown>[])?.map(m => ({
+    type: m.materialType, title: m.title, prompt: (m.prompt as string || '').slice(0, 200),
+  })) || []);
+
+  const prompt = `你是一个品牌一致性检测专家。请根据品牌DNA和已生成的物料Prompt，对5个维度进行一致性评分（0-100分），输出JSON格式：
+
+品牌名称：${brandName}
+品牌DNA：${dnaStr}
+物料列表：${materialsStr}
+
+请输出以下JSON结构（不要包含markdown代码块标记）：
+{
+  "logo": 分数(0-100, Logo是否在物料中正确使用),
+  "product": 分数(0-100, 产品图是否保真一致),
+  "ip": 分数(0-100, IP形象是否一致),
+  "brandColor": 分数(0-100, 品牌色是否统一),
+  "chinese": 分数(0-100, 中文标题是否清晰可读无变形),
+  "issues": ["问题1描述", "问题2描述"],
+  "suggestions": ["修复建议1", "修复建议2"]
+}`;
+
+  try {
+    const content = await callLLM(prompt);
+    let scores: Record<string, unknown>;
+    try {
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      scores = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+    } catch {
+      scores = {};
+    }
+    // Extract numeric scores
+    const result: Record<string, number> = {};
+    for (const key of ['logo', 'product', 'ip', 'brandColor', 'chinese']) {
+      const val = scores[key];
+      result[key] = typeof val === 'number' ? Math.min(100, Math.max(0, Math.round(val))) : 50;
+    }
+    return NextResponse.json({ success: true, scores: result, issues: scores.issues, suggestions: scores.suggestions });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '一致性检测失败';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+// ═══ Version Management ═══
+
+async function handleSaveVersion(body: Record<string, unknown>) {
+  const { projectId, targetType, versionName, note, snapshot } = body;
+  if (!projectId) return NextResponse.json({ error: '缺少项目ID' }, { status: 400 });
+
+  // Store version as a material with type 'version' for simplicity
+  const id = `ver-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const version = await dbUpsertBrandMaterial({
+    id,
+    project_id: projectId as string,
+    direction_id: (targetType as string) || 'full',
+    material_type: 'version',
+    title: (versionName as string) || 'V1',
+    ratio: '',
+    image_url: '',
+    prompt: JSON.stringify({
+      note: note || '',
+      snapshot: snapshot || {},
+      targetType: targetType || 'full',
+    }),
+    score: 0,
+    status: 'version',
+  });
+  return NextResponse.json({ success: true, version });
 }
