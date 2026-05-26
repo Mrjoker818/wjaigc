@@ -330,10 +330,10 @@ function generateTemplatePlans(params: {
 export async function GET() {
   return NextResponse.json({
     styleCategories: FONT_STYLE_CATEGORIES,
-    scenes: Object.keys(SCENE_MAP),
-    strokeOptions: Object.keys(STROKE_MAP),
-    graphicElements: Object.keys(GRAPHIC_MAP),
-    materials: Object.keys(MATERIAL_MAP),
+    scenes: Object.entries(SCENE_MAP).map(([name, description]) => ({ id: name, name, description })),
+    strokeOptions: Object.entries(STROKE_MAP).map(([name, description]) => ({ id: name, name, description })),
+    graphicElements: Object.entries(GRAPHIC_MAP).map(([name, description]) => ({ id: name, name, description })),
+    materials: Object.entries(MATERIAL_MAP).map(([name, description]) => ({ id: name, name, description })),
   });
 }
 
