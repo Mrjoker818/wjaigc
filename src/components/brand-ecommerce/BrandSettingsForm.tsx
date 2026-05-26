@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useCallback } from 'react';
-import { Upload, Palette, Sparkles, Loader2, ChevronDown, Package, GripVertical } from 'lucide-react';
+import { Upload, Palette, Sparkles, Loader2, ChevronDown, Package, GripVertical, ShieldCheck } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -68,6 +68,12 @@ interface Props {
   productImage: string;
   onProductImageUpload: (file: File) => void;
   onRemoveProductImage: () => void;
+
+  // Product consistency
+  productConsistencyMode: 'text' | 'fusion' | 'compose';
+  onConsistencyModeChange: (mode: 'text' | 'fusion' | 'compose') => void;
+  productConsistencyStrength: number;
+  onConsistencyStrengthChange: (strength: number) => void;
 
   isMonochrome?: boolean;
 }
@@ -144,6 +150,11 @@ export function BrandSettingsForm({
   productImage,
   onProductImageUpload,
   onRemoveProductImage,
+
+  productConsistencyMode,
+  onConsistencyModeChange,
+  productConsistencyStrength,
+  onConsistencyStrengthChange,
 
   isMonochrome = false,
 }: Props) {
@@ -472,6 +483,78 @@ export function BrandSettingsForm({
           </button>
         )}
       </FormSection>
+
+      {/* Product consistency mode — only shown when product image is uploaded */}
+      {productImage && (
+        <div className={`rounded-lg border p-3 space-y-3 ${isMonochrome ? 'border-blue-200 bg-blue-50/50' : 'border-[#d4af37]/20 bg-[#d4af37]/5'}`}>
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={14} className={isMonochrome ? 'text-blue-500' : 'text-[#d4af37]'} />
+            <span className={`text-sm font-medium ${isMonochrome ? 'text-blue-700' : 'text-[#d4af37]'}`}>
+              产品一致性
+            </span>
+          </div>
+
+          {/* Mode selector */}
+          <div className="flex gap-1.5">
+            {([
+              { mode: 'text' as const, label: '文本提示', desc: '关键词描述' },
+              { mode: 'fusion' as const, label: '图生图融合', desc: '风格迁移' },
+              { mode: 'compose' as const, label: '精准合成', desc: '蒙版保护' },
+            ]).map(({ mode, label, desc }) => (
+              <button
+                key={mode}
+                onClick={() => onConsistencyModeChange(mode)}
+                className={`flex-1 flex flex-col items-center gap-0.5 px-2 py-2 rounded-lg border text-xs transition-all cursor-pointer ${
+                  productConsistencyMode === mode
+                    ? isMonochrome
+                      ? 'border-blue-400 bg-blue-100 text-blue-700'
+                      : 'border-[#d4af37]/50 bg-[#d4af37]/15 text-[#d4af37]'
+                    : isMonochrome
+                      ? 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                      : 'border-white/[0.06] bg-[#111] text-gray-400 hover:border-white/[0.12]'
+                }`}
+              >
+                <span className="font-medium">{label}</span>
+                <span className="text-[10px] opacity-60">{desc}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Mode description */}
+          <p className={`text-xs leading-relaxed ${textMuted}`}>
+            {productConsistencyMode === 'text' && '通过文本提示词引导AI保持产品外观一致，兼容性最好，但一致性较弱'}
+            {productConsistencyMode === 'fusion' && '将产品图作为图生图输入，AI在产品基础上生成新场景，一致性中等'}
+            {productConsistencyMode === 'compose' && '自动提取产品蒙版，先生成场景图，再将原始产品精准合成回画面，一致性最强'}
+          </p>
+
+          {/* Strength slider — only for fusion mode */}
+          {productConsistencyMode === 'fusion' && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className={`text-xs ${textMuted}`}>融合强度</span>
+                <span className={`text-xs font-mono ${isMonochrome ? 'text-blue-600' : 'text-[#d4af37]'}`}>
+                  {productConsistencyStrength}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={20}
+                max={90}
+                step={5}
+                value={productConsistencyStrength}
+                onChange={e => onConsistencyStrengthChange(Number(e.target.value))}
+                className={`w-full h-1.5 rounded-full appearance-none cursor-pointer ${
+                  isMonochrome ? 'accent-blue-500' : 'accent-[#d4af37]'
+                }`}
+              />
+              <div className={`flex justify-between text-[10px] ${textMuted}`}>
+                <span>弱（更创意）</span>
+                <span>强（更忠实）</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -82,6 +82,8 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   const [refImageFile, setRefImageFile] = useState<File | null>(null);
   const [productImage, setProductImage] = useState('');
   const [productImageFile, setProductImageFile] = useState<File | null>(null);
+  const [productConsistencyMode, setProductConsistencyMode] = useState<'text' | 'fusion' | 'compose'>('text');
+  const [productConsistencyStrength, setProductConsistencyStrength] = useState(60);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isAssisting, setIsAssisting] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -315,6 +317,8 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           model: selectedModel,
           referenceImageUrl: refImage,
           productImageUrl: productImage,
+          productConsistencyMode: productImage ? productConsistencyMode : undefined,
+          productConsistencyStrength: productImage ? productConsistencyStrength : undefined,
           brandColors,
           variantCount: 2, // ★ Request 2 variants per template
         }),
@@ -709,6 +713,10 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
               productImage={productImage}
               onProductImageUpload={handleProductImageUpload}
               onRemoveProductImage={() => { setProductImage(''); setProductImageFile(null); }}
+              productConsistencyMode={productConsistencyMode}
+              onConsistencyModeChange={setProductConsistencyMode}
+              productConsistencyStrength={productConsistencyStrength}
+              onConsistencyStrengthChange={setProductConsistencyStrength}
               isMonochrome={isMonochrome}
             />
           )}

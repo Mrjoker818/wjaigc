@@ -3,6 +3,7 @@ import { findProviderForModel, getPublicModels } from '@/lib/server-api-config';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl } from '@/lib/api-compatibility';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
+import sharp from 'sharp';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,6 +66,181 @@ async function persistResultImage(imageUrl: string): Promise<string> {
     console.warn('[brand-ecommerce] Failed to persist result image:', err);
     return imageUrl;
   }
+}
+
+// ─── Product Consistency: Mask Generation & Compositing ─────────
+
+type ProductConsistencyMode = 'text-only' | 'img2img-fusion' | 'mask-composite';
+
+interface ProductMaskResult {
+  maskBuffer: Buffer;   // RGBA Buffer, white=product region, black=background
+  width: number;
+  height: number;
+}
+
+/**
+ * Generate a product mask from the product image using RemoveBG.
+ * Falls back to a simple alpha-based mask if RemoveBG is unavailable.
+ */
+async function generateProductMask(productImageUrl: string): Promise<ProductMaskResult | null> {
+  try {
+    // Try RemoveBG via iopaint-client
+    const { removeBgFromUrl } = await import('@/lib/image-tools/iopaint-client');
+    const result = await removeBgFromUrl(productImageUrl, 'birefnet-general-lite');
+    if (result.success && result.maskUrl) {
+      // Read the mask image
+      let maskFetchUrl = result.maskUrl;
+      if (maskFetchUrl.startsWith('/api/serve-upload/')) {
+        maskFetchUrl = `http://localhost:5000${maskFetchUrl}`;
+      }
+      const maskResp = await fetch(maskFetchUrl, { signal: AbortSignal.timeout(30000) });
+      if (maskResp.ok) {
+        const maskBuffer = Buffer.from(await maskResp.arrayBuffer());
+        const meta = await sharp(maskBuffer).metadata();
+        return { maskBuffer, width: meta.width || 512, height: meta.height || 512 };
+      }
+    }
+
+    // Fallback: generate mask from image alpha or luminance
+    return await generateSimpleMask(productImageUrl);
+  } catch (err) {
+    console.warn('[brand-ecommerce] Mask generation failed, falling back to simple mask:', err);
+    return await generateSimpleMask(productImageUrl);
+  }
+}
+
+/**
+ * Simple mask generation: load image, convert to grayscale, threshold.
+ * Bright areas are assumed to be product, dark areas are background.
+ * Also uses alpha channel if available.
+ */
+async function generateSimpleMask(imageUrl: string): Promise<ProductMaskResult | null> {
+  try {
+    let imageBuffer: Buffer;
+
+    if (imageUrl.startsWith('data:')) {
+      const base64Data = imageUrl.split(',')[1];
+      imageBuffer = Buffer.from(base64Data, 'base64');
+    } else if (imageUrl.startsWith('http')) {
+      const resp = await fetch(imageUrl, { signal: AbortSignal.timeout(30000) });
+      if (!resp.ok) return null;
+      imageBuffer = Buffer.from(await resp.arrayBuffer());
+    } else if (imageUrl.startsWith('/api/serve-upload/')) {
+      const resp = await fetch(`http://localhost:5000${imageUrl}`, { signal: AbortSignal.timeout(30000) });
+      if (!resp.ok) return null;
+      imageBuffer = Buffer.from(await resp.arrayBuffer());
+    } else {
+      return null;
+    }
+
+    // Use sharp to create a mask: extract alpha + luminance, threshold
+    const meta = await sharp(imageBuffer).metadata();
+    const w = meta.width || 512;
+    const h = meta.height || 512;
+
+    // If the image has alpha, use it; otherwise use luminance threshold
+    const hasAlpha = meta.channels === 4;
+    let maskPipeline = sharp(imageBuffer).resize(w, h);
+
+    if (hasAlpha) {
+      // Extract alpha channel as mask
+      maskPipeline = maskPipeline.extractChannel('alpha').threshold(128).toColorspace('srgb');
+    } else {
+      // Use luminance: assume product is brighter than background
+      maskPipeline = maskPipeline.grayscale().threshold(30).toColorspace('srgb');
+    }
+
+    const maskBuffer = await maskPipeline.png().toBuffer();
+    return { maskBuffer, width: w, height: h };
+  } catch (err) {
+    console.warn('[brand-ecommerce] Simple mask generation failed:', err);
+    return null;
+  }
+}
+
+/**
+ * Load image buffer from URL (data:, http, or relative path)
+ */
+async function loadImageBuffer(imageUrl: string): Promise<Buffer | null> {
+  try {
+    if (imageUrl.startsWith('data:')) {
+      const base64Data = imageUrl.split(',')[1];
+      return Buffer.from(base64Data, 'base64');
+    }
+    if (imageUrl.startsWith('http')) {
+      const resp = await fetch(imageUrl, { signal: AbortSignal.timeout(30000) });
+      if (!resp.ok) return null;
+      return Buffer.from(await resp.arrayBuffer());
+    }
+    if (imageUrl.startsWith('/api/serve-upload/')) {
+      const resp = await fetch(`http://localhost:5000${imageUrl}`, { signal: AbortSignal.timeout(30000) });
+      if (!resp.ok) return null;
+      return Buffer.from(await resp.arrayBuffer());
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Mask compositing: overlay the original product onto the generated scene
+ * using the product mask to precisely preserve product details.
+ *
+ * @param sceneBuffer - Generated scene image (full size)
+ * @param productBuffer - Original product image
+ * @param productMask - Product mask (white=product, black=background)
+ * @param strength - Blend strength 0-1 (1=full product overlay, 0=no overlay)
+ * @param featherRadius - Edge feathering in pixels for smooth blending
+ */
+async function compositeProductToScene(
+  sceneBuffer: Buffer,
+  productBuffer: Buffer,
+  productMask: Buffer,
+  strength: number = 0.85,
+  featherRadius: number = 8,
+): Promise<Buffer> {
+  // Ensure all images are the same size
+  const sceneMeta = await sharp(sceneBuffer).metadata();
+  const targetW = sceneMeta.width || 1024;
+  const targetH = sceneMeta.height || 1024;
+
+  const resizedProduct = await sharp(productBuffer).resize(targetW, targetH, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).ensureAlpha().raw().toBuffer();
+  const resizedMask = await sharp(productMask).resize(targetW, targetH, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).ensureAlpha().raw().toBuffer();
+  const sceneRaw = await sharp(sceneBuffer).resize(targetW, targetH).ensureAlpha().raw().toBuffer();
+
+  // Apply Gaussian blur to mask for feathering
+  const featheredMask = await sharp(productMask)
+    .resize(targetW, targetH, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .blur(featherRadius)
+    .ensureAlpha()
+    .raw()
+    .toBuffer();
+
+  const result = Buffer.from(sceneRaw);
+  const pixels = targetW * targetH;
+
+  for (let i = 0; i < pixels; i++) {
+    const idx = i * 4;
+    // Mask brightness (0=background, 255=product)
+    const maskVal = (featheredMask[idx] + featheredMask[idx + 1] + featheredMask[idx + 2]) / 3 / 255;
+    // Also check if product pixel has content (alpha > 0)
+    const productAlpha = resizedProduct[idx + 3] / 255;
+
+    const alpha = Math.min(maskVal, productAlpha) * strength;
+    if (alpha < 0.01) continue; // Skip background pixels
+
+    // Blend: alpha composite
+    const invAlpha = 1 - alpha;
+    result[idx]     = Math.round(resizedProduct[idx]     * alpha + sceneRaw[idx]     * invAlpha);
+    result[idx + 1] = Math.round(resizedProduct[idx + 1] * alpha + sceneRaw[idx + 1] * invAlpha);
+    result[idx + 2] = Math.round(resizedProduct[idx + 2] * alpha + sceneRaw[idx + 2] * invAlpha);
+    result[idx + 3] = 255; // Full opacity
+  }
+
+  return await sharp(result, { raw: { width: targetW, height: targetH, channels: 4 } })
+    .png({ quality: 95 })
+    .toBuffer();
 }
 
 // ─── E-commerce JSON Template Definitions ─────────────────────────
@@ -302,7 +478,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'generate') {
-      const { templateIds, productDesc, styleExtra, model, referenceImageUrl, productImageUrl, brandColors, variantCount } = body;
+      const { templateIds, productDesc, styleExtra, model, referenceImageUrl, productImageUrl, brandColors, variantCount, productConsistencyMode, productConsistencyStrength } = body;
       if (!templateIds?.length) {
         return NextResponse.json({ error: '请至少选择一个模板' }, { status: 400 });
       }
@@ -399,6 +575,12 @@ export async function POST(request: NextRequest) {
       const variantsPerTemplate = Math.max(1, Math.min(variantCount || 2, 4));
       const totalTasks = selectedTemplates.length * variantsPerTemplate;
 
+      // ★ Product consistency configuration
+      const consistencyMode: ProductConsistencyMode = productConsistencyMode || 'text-only';
+      const consistencyStrength = typeof productConsistencyStrength === 'number'
+        ? Math.max(0, Math.min(1, productConsistencyStrength))
+        : consistencyMode === 'text-only' ? 0 : consistencyMode === 'img2img-fusion' ? 0.5 : 0.85;
+
       // Register a task for tracking
       const taskId = `ecom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       registerTask(taskId, 'brand-ecommerce', `品牌电商生成 (${selectedTemplates.length}模板×${variantsPerTemplate}变体)`);
@@ -409,6 +591,22 @@ export async function POST(request: NextRequest) {
         try {
           const results: Array<{ templateId: string; templateName: string; imageUrl?: string; error?: string; variantIndex?: number; aspectRatio?: string }> = [];
           let completedCount = 0;
+
+          // Pre-compute product mask for mask-composite mode (inside async so POST returns immediately)
+          let productMaskResult: ProductMaskResult | null = null;
+          let productBuffer: Buffer | null = null;
+          if (productImageUrl && consistencyMode === 'mask-composite') {
+            updateTaskProgress(taskId, { status: 'processing', progress: 0, label: '正在提取产品蒙版...' });
+            const [maskResult, prodBuf] = await Promise.all([
+              generateProductMask(productImageUrl),
+              loadImageBuffer(productImageUrl),
+            ]);
+            productMaskResult = maskResult;
+            productBuffer = prodBuf;
+            if (!productMaskResult) {
+              console.warn('[brand-ecommerce] Mask generation failed, falling back to img2img-fusion mode');
+            }
+          }
 
           for (let t = 0; t < selectedTemplates.length; t++) {
             for (let v = 0; v < variantsPerTemplate; v++) {
@@ -435,9 +633,10 @@ export async function POST(request: NextRequest) {
                   size: `${taskInfo.dims.width}x${taskInfo.dims.height}`,
                 };
 
-                // Add reference image if provided (img2img)
+                // ★ Product consistency mode handling
                 const allImageUrls: string[] = [];
 
+                // Reference image (style/layout reference) — always added in all modes
                 if (referenceImageUrl) {
                   if (referenceImageUrl.startsWith('http')) {
                     reqBody.image = referenceImageUrl;
@@ -451,13 +650,37 @@ export async function POST(request: NextRequest) {
                   reqBody.strength = 0.5;
                 }
 
+                // Product image — handled differently per consistency mode
                 if (productImageUrl) {
-                  if (productImageUrl.startsWith('http')) {
-                    allImageUrls.push(productImageUrl);
-                  } else if (productImageUrl.startsWith('data:')) {
-                    allImageUrls.push(productImageUrl);
+                  if (consistencyMode === 'text-only') {
+                    // Mode 1: Text-only — just add product image to image_urls + prompt instruction
+                    if (productImageUrl.startsWith('http')) {
+                      allImageUrls.push(productImageUrl);
+                    } else if (productImageUrl.startsWith('data:')) {
+                      allImageUrls.push(productImageUrl);
+                    }
+                    reqBody.prompt = `[PRODUCT CONSISTENCY: The product in the generated image must exactly match the product shown in the product reference image — same shape, color, texture, proportions, and details. Do not alter or reinterpret the product design.]\n${reqBody.prompt || taskInfo.prompt}`;
+
+                  } else if (consistencyMode === 'img2img-fusion') {
+                    // Mode 2: img2img fusion — use product image as img2img input with strength
+                    if (productImageUrl.startsWith('http')) {
+                      reqBody.image = productImageUrl;
+                      allImageUrls.push(productImageUrl);
+                    } else if (productImageUrl.startsWith('data:')) {
+                      reqBody.image = productImageUrl;
+                      allImageUrls.push(productImageUrl);
+                    }
+                    reqBody.strength = consistencyStrength;
+                    // Also add text instruction for double reinforcement
+                    reqBody.prompt = `[PRODUCT CONSISTENCY: Maintain the exact product from the input image — same shape, color, texture, proportions. Scene/style should change but product must remain identical.]\n${reqBody.prompt || taskInfo.prompt}`;
+
+                  } else if (consistencyMode === 'mask-composite') {
+                    // Mode 3: Mask composite — generate scene WITHOUT product image in API,
+                    // then composite original product back using mask
+                    // Scene prompt: describe the scene/background but not the product
+                    reqBody.prompt = `[SCENE ONLY: Generate a product photography scene/background without the product itself. Leave the center area empty for product placement. The scene should have natural lighting and appropriate background for: ${productDesc}]\n${reqBody.prompt || taskInfo.prompt}`;
+                    // Don't add productImageUrl to image_urls — we'll composite after
                   }
-                  reqBody.prompt = `[PRODUCT CONSISTENCY: The product in the generated image must exactly match the product shown in the product reference image — same shape, color, texture, proportions, and details. Do not alter or reinterpret the product design.]\n${reqBody.prompt || taskInfo.prompt}`;
                 }
 
                 if (allImageUrls.length > 0) {
@@ -499,8 +722,28 @@ export async function POST(request: NextRequest) {
                 const parsed = parseResponseForProfile(respData, compatProfile);
 
                 if (parsed.directImageUrls?.length) {
-                  const persistedUrl = await persistResultImage(parsed.directImageUrls[0]);
-                  results.push({ templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, imageUrl: persistedUrl || parsed.directImageUrls[0], variantIndex: v, aspectRatio: tpl.aspectRatio });
+                  let resultImageUrl = parsed.directImageUrls[0];
+
+                  // ★ Mask composite: overlay original product onto generated scene
+                  if (consistencyMode === 'mask-composite' && productImageUrl && productMaskResult && productBuffer) {
+                    try {
+                      const sceneBuffer = await loadImageBuffer(resultImageUrl);
+                      if (sceneBuffer) {
+                        const composited = await compositeProductToScene(
+                          sceneBuffer, productBuffer, productMaskResult.maskBuffer, consistencyStrength,
+                        );
+                        // Persist composited result
+                        const base64Result = `data:image/png;base64,${composited.toString('base64')}`;
+                        const persistedComposited = await persistResultImage(base64Result);
+                        if (persistedComposited) resultImageUrl = persistedComposited;
+                      }
+                    } catch (compErr) {
+                      console.warn('[brand-ecommerce] Mask composite failed, using original result:', compErr);
+                    }
+                  }
+
+                  const persistedUrl = await persistResultImage(resultImageUrl);
+                  results.push({ templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, imageUrl: persistedUrl || resultImageUrl, variantIndex: v, aspectRatio: tpl.aspectRatio });
                 } else if (parsed.taskIds?.length) {
                   const remoteTaskId = parsed.taskIds[0];
                   let pollAttempts = 0;
@@ -521,8 +764,27 @@ export async function POST(request: NextRequest) {
                         const pollData = await pollResp.json();
                         const imgUrl = extractImageUrl(pollData);
                         if (imgUrl) {
-                          const persistedUrl = await persistResultImage(imgUrl);
-                          results.push({ templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, imageUrl: persistedUrl || imgUrl, variantIndex: v, aspectRatio: tpl.aspectRatio });
+                          let resultImageUrl = imgUrl;
+
+                          // ★ Mask composite for async results too
+                          if (consistencyMode === 'mask-composite' && productImageUrl && productMaskResult && productBuffer) {
+                            try {
+                              const sceneBuffer = await loadImageBuffer(imgUrl);
+                              if (sceneBuffer) {
+                                const composited = await compositeProductToScene(
+                                  sceneBuffer, productBuffer, productMaskResult.maskBuffer, consistencyStrength,
+                                );
+                                const base64Result = `data:image/png;base64,${composited.toString('base64')}`;
+                                const persistedComposited = await persistResultImage(base64Result);
+                                if (persistedComposited) resultImageUrl = persistedComposited;
+                              }
+                            } catch (compErr) {
+                              console.warn('[brand-ecommerce] Mask composite failed for async result:', compErr);
+                            }
+                          }
+
+                          const persistedUrl = await persistResultImage(resultImageUrl);
+                          results.push({ templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, imageUrl: persistedUrl || resultImageUrl, variantIndex: v, aspectRatio: tpl.aspectRatio });
                           break;
                         }
                         const status = pollData?.status || pollData?.data?.status;
