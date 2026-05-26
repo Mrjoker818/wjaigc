@@ -783,7 +783,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                   {plans.length === 0 && !isGeneratingPlan && (
                     <div className="text-center py-12" style={{ color: subTextColor }}>
                       <Sparkles className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                      <p className="text-sm">输入文字并点击"生成字体方案"</p>
+                      <p className="text-sm">输入文字并点击&ldquo;生成字体方案&rdquo;</p>
                       <p className="text-xs mt-1">系统将根据文字含义和风格偏好推荐设计方案</p>
                     </div>
                   )}
@@ -849,7 +849,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                   {!prompts && !isGeneratingPrompt && (
                     <div className="text-center py-12" style={{ color: subTextColor }}>
                       <Wand2 className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                      <p className="text-sm">输入文字并点击"即梦提示词"生成</p>
+                      <p className="text-sm">输入文字并点击&ldquo;即梦提示词&rdquo;生成</p>
                     </div>
                   )}
                   {isGeneratingPrompt && (
@@ -918,7 +918,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                   {generatedImages.length === 0 && !isGeneratingImage && (
                     <div className="text-center py-12" style={{ color: subTextColor }}>
                       <ImageIcon className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                      <p className="text-sm">点击"生图"或"发送到图像生成"生成字体设计图片</p>
+                      <p className="text-sm">点击&ldquo;生图&rdquo;或&ldquo;发送到图像生成&rdquo;生成字体设计图片</p>
                     </div>
                   )}
                   {isGeneratingImage && (
