@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { X, ShoppingBag, Loader2, Sparkles, Settings, GripVertical } from 'lucide-react';
 import { BrandTemplateSelector } from './brand-ecommerce/BrandTemplateSelector';
+import { type TemplateFieldValues } from './brand-ecommerce/template-fields';
 import { BrandSettingsForm } from './brand-ecommerce/BrandSettingsForm';
 import { BrandResultGallery, type GenerateResult } from './brand-ecommerce/BrandResultGallery';
 import { BrandAssetManager, type BrandAssetData } from './brand-ecommerce/BrandAssetManager';
@@ -84,6 +85,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   const [productImageFile, setProductImageFile] = useState<File | null>(null);
   const [productConsistencyMode, setProductConsistencyMode] = useState<'text' | 'fusion' | 'compose'>('text');
   const [productConsistencyStrength, setProductConsistencyStrength] = useState(60);
+  const [templateFieldValues, setTemplateFieldValues] = useState<Record<string, Record<string, string>>>({});
   const [isGenerating, setIsGenerating] = useState(false);
   const [isAssisting, setIsAssisting] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -321,6 +323,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           productConsistencyStrength: productImage ? productConsistencyStrength : undefined,
           brandColors,
           variantCount: 2, // ★ Request 2 variants per template
+          templateFieldValues,
         }),
         signal: AbortSignal.timeout(600000),
       });
@@ -560,6 +563,18 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
     setActiveTab('settings');
   }, [models]);
 
+  // ─── Template-specific field change handler ─────────────────────
+
+  const handleTemplateFieldChange = useCallback((templateId: string, fieldKey: string, value: string) => {
+    setTemplateFieldValues(prev => ({
+      ...prev,
+      [templateId]: {
+        ...(prev[templateId] || {}),
+        [fieldKey]: value,
+      },
+    }));
+  }, []);
+
   // ─── Success results count ────────────────────────────────────
 
   const successResults = results.filter(r => r.imageUrl);
@@ -717,6 +732,9 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
               onConsistencyModeChange={setProductConsistencyMode}
               productConsistencyStrength={productConsistencyStrength}
               onConsistencyStrengthChange={setProductConsistencyStrength}
+              selectedTemplateIds={Array.from(selectedTemplates)}
+              templateFieldValues={templateFieldValues}
+              onTemplateFieldChange={handleTemplateFieldChange}
               isMonochrome={isMonochrome}
             />
           )}

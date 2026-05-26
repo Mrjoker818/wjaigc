@@ -547,17 +547,54 @@ export async function POST(request: NextRequest) {
         lifestyle: STYLE_FIDELITY_ANCHORS.lifestyle,
       };
 
+      // Build template variables — templateFieldValues per-template overrides take priority
+      const tfv = (body.templateFieldValues || {}) as Record<string, Record<string, string>>;
+      const getTplField = (tplId: string, field: string, fallback: string = ''): string => {
+        const tplFields = tfv[tplId];
+        if (tplFields && tplFields[field] !== undefined && tplFields[field] !== '') return tplFields[field];
+        return fallback;
+      };
+
       const tasks = selectedTemplates.map(tpl => {
         const fidelity = tpl.fidelityAnchor ? fidelityMap[tpl.fidelityAnchor] || '' : '';
+        // Per-template field values override global values
+        const tplMainText = getTplField(tpl.id, 'mainText', mainText);
+        const tplSecondaryText = getTplField(tpl.id, 'secondaryText', secondaryText);
+        const tplSubjectAction = getTplField(tpl.id, 'subjectAction', subjectAction);
+        const tplBackgroundElements = getTplField(tpl.id, 'backgroundElements', backgroundElements);
+        const tplLocation = getTplField(tpl.id, 'location', location);
+        const tplProductOrProp = getTplField(tpl.id, 'productOrProp', productOrProp);
+        const tplAccentSymbol = getTplField(tpl.id, 'accentSymbol', accentSymbol);
+        const tplSellingPoints = getTplField(tpl.id, 'sellingPoints', '');
+        const tplDetailDesc = getTplField(tpl.id, 'detailDescription', '');
+        const tplUsageScene = getTplField(tpl.id, 'usageScene', '');
+        const tplMoodKeywords = getTplField(tpl.id, 'moodKeywords', '');
+        const tplPromotionInfo = getTplField(tpl.id, 'promotionInfo', '');
+        const tplTargetAudience = getTplField(tpl.id, 'targetAudience', '');
+        const tplCompositionNotes = getTplField(tpl.id, 'compositionNotes', '');
+        const tplCopywriting = getTplField(tpl.id, 'copywriting', '');
+
+        // Build extra prompt parts from template-specific fields
+        const extraParts: string[] = [];
+        if (tplSellingPoints) extraParts.push(`Key selling points: ${tplSellingPoints}`);
+        if (tplDetailDesc) extraParts.push(`Detail description: ${tplDetailDesc}`);
+        if (tplUsageScene) extraParts.push(`Usage scenario: ${tplUsageScene}`);
+        if (tplMoodKeywords) extraParts.push(`Mood/atmosphere: ${tplMoodKeywords}`);
+        if (tplPromotionInfo) extraParts.push(`Promotion info: ${tplPromotionInfo}`);
+        if (tplTargetAudience) extraParts.push(`Target audience: ${tplTargetAudience}`);
+        if (tplCompositionNotes) extraParts.push(`Composition notes: ${tplCompositionNotes}`);
+        if (tplCopywriting) extraParts.push(`Copy for image: ${tplCopywriting}`);
+        const extraPromptSuffix = extraParts.length > 0 ? '\n' + extraParts.join('. ') + '.' : '';
+
         const prompt = tpl.promptTemplate
           .replace(/\{SUBJECT\}/g, productDesc)
-          .replace(/\{SUBJECT_ACTION\}/g, subjectAction ? `\nSubject action: ${subjectAction}` : '')
-          .replace(/\{PRODUCT_OR_PROP\}/g, productOrProp)
-          .replace(/\{LOCATION\}/g, location || 'modern minimalist interior')
-          .replace(/\{BACKGROUND_ELEMENTS\}/g, backgroundElements ? `Background: ${backgroundElements}` : '')
-          .replace(/\{MAIN_TEXT\}/g, mainText)
-          .replace(/\{SECONDARY_TEXT\}/g, secondaryText)
-          .replace(/\{ACCENT_SYMBOL\}/g, accentSymbol)
+          .replace(/\{SUBJECT_ACTION\}/g, tplSubjectAction ? `\nSubject action: ${tplSubjectAction}` : '')
+          .replace(/\{PRODUCT_OR_PROP\}/g, tplProductOrProp)
+          .replace(/\{LOCATION\}/g, tplLocation || 'modern minimalist interior')
+          .replace(/\{BACKGROUND_ELEMENTS\}/g, tplBackgroundElements ? `Background: ${tplBackgroundElements}` : '')
+          .replace(/\{MAIN_TEXT\}/g, tplMainText)
+          .replace(/\{SECONDARY_TEXT\}/g, tplSecondaryText)
+          .replace(/\{ACCENT_SYMBOL\}/g, tplAccentSymbol)
           .replace(/\{ASPECT_RATIO\}/g, tpl.aspectRatio)
           .replace(/\{brand_color_prompt\}/g, brandColorPrompt)
           .replace(/\{style_extra\}/g, styleParts)
@@ -565,7 +602,7 @@ export async function POST(request: NextRequest) {
           .replace(/\{STYLE_FIDELITY_PRODUCT\}/g, fidelity === STYLE_FIDELITY_ANCHORS.product ? fidelity : '')
           .replace(/\{STYLE_FIDELITY_LIFESTYLE\}/g, fidelity === STYLE_FIDELITY_ANCHORS.lifestyle ? fidelity : '')
           .replace(/\n{3,}/g, '\n\n')
-          .trim();
+          .trim() + extraPromptSuffix;
         const negPrompt = tpl.negativePrompt;
         const dims = resolveDimensions(tpl.aspectRatio);
         return { template: tpl, prompt, negPrompt, dims };

@@ -2,6 +2,7 @@
 
 import { useRef, useCallback } from 'react';
 import { Upload, Palette, Sparkles, Loader2, ChevronDown, Package, GripVertical, ShieldCheck } from 'lucide-react';
+import { getTemplateFieldGroups, type TemplateFieldValues, type TemplateFieldDef } from './template-fields';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -74,6 +75,11 @@ interface Props {
   onConsistencyModeChange: (mode: 'text' | 'fusion' | 'compose') => void;
   productConsistencyStrength: number;
   onConsistencyStrengthChange: (strength: number) => void;
+
+  // Template-specific fields
+  selectedTemplateIds: string[];
+  templateFieldValues: TemplateFieldValues;
+  onTemplateFieldChange: (templateId: string, fieldKey: string, value: string) => void;
 
   isMonochrome?: boolean;
 }
@@ -156,6 +162,10 @@ export function BrandSettingsForm({
   productConsistencyStrength,
   onConsistencyStrengthChange,
 
+  selectedTemplateIds,
+  templateFieldValues,
+  onTemplateFieldChange,
+
   isMonochrome = false,
 }: Props) {
   const text = isMonochrome ? 'text-gray-900' : 'text-gray-100';
@@ -188,6 +198,143 @@ export function BrandSettingsForm({
 
   // Reusable input class
   const inputClass = `w-full px-3 py-2.5 rounded-lg border text-sm ${inputBg} ${text} ${inputFocus} focus:outline-none focus:ring-2 transition-colors`;
+
+  // ─── Template-specific field rendering ───
+
+  /** Render a single template field input */
+  const renderFieldInput = (templateId: string, field: TemplateFieldDef) => {
+    const currentValue = templateFieldValues[templateId]?.[field.key] ?? field.defaultValue ?? '';
+    const handleValueChange = (value: string) => onTemplateFieldChange(templateId, field.key, value);
+
+    if (field.type === 'select' && field.options) {
+      return (
+        <div className="space-y-1.5">
+          <select
+            value={currentValue}
+            onChange={e => handleValueChange(e.target.value)}
+            className={`w-full px-3 py-2.5 rounded-lg border text-sm cursor-pointer ${inputBg} ${text} ${inputFocus} focus:outline-none focus:ring-2 transition-colors appearance-none`}
+            style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}
+          >
+            <option value="">— 请选择 —</option>
+            {field.options.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+      );
+    }
+
+    if (field.type === 'textarea') {
+      return (
+        <textarea
+          value={currentValue}
+          onChange={e => handleValueChange(e.target.value)}
+          placeholder={field.placeholder}
+          rows={field.rows ?? 3}
+          className={`w-full px-3 py-2.5 rounded-lg border text-sm ${inputBg} ${text} ${inputFocus} focus:outline-none focus:ring-2 transition-colors resize-y`}
+        />
+      );
+    }
+
+    // Default: text input
+    return (
+      <input
+        type="text"
+        value={currentValue}
+        onChange={e => handleValueChange(e.target.value)}
+        placeholder={field.placeholder}
+        className={inputClass}
+      />
+    );
+  };
+
+  /** Render all template-specific field groups for selected templates */
+  const renderTemplateFields = () => {
+    // Collect unique field groups across all selected templates
+    const seenGroupKeys = new Set<string>();
+    const renderedGroups: { templateId: string; templateName: string; group: typeof import('./template-fields').TEMPLATE_FIELD_GROUPS[string][number] }[] = [];
+
+    for (const tplId of selectedTemplateIds) {
+      const groups = getTemplateFieldGroups(tplId);
+      if (groups.length === 0) continue;
+
+      // Get template name from API templates if available
+      const tplName = tplId; // Fallback to ID
+      for (const group of groups) {
+        const groupKey = `${tplId}:${group.title}`;
+        if (!seenGroupKeys.has(groupKey)) {
+          seenGroupKeys.add(groupKey);
+          renderedGroups.push({ templateId: tplId, templateName: tplName, group });
+        }
+      }
+    }
+
+    if (renderedGroups.length === 0) return null;
+
+    return (
+      <div className="space-y-4">
+        {/* Section header */}
+        <div className="flex items-center gap-2 mb-1">
+          <div className={`w-1 h-4 rounded-full ${isMonochrome ? 'bg-amber-500' : 'bg-[#d4af37]'}`} />
+          <span className={`text-xs font-semibold uppercase tracking-wider ${isMonochrome ? 'text-gray-500' : 'text-gray-400'}`}>
+            模板内容定制
+          </span>
+          <span className={`text-[10px] ${textMuted}`}>
+            · {selectedTemplateIds.length} 个已选模板
+          </span>
+        </div>
+
+        {/* Render each template's field groups */}
+        {selectedTemplateIds.map(tplId => {
+          const groups = getTemplateFieldGroups(tplId);
+          if (groups.length === 0) return null;
+
+          return (
+            <div key={tplId} className={`rounded-lg border ${border} overflow-hidden`}>
+              {/* Template header */}
+              <div className={`flex items-center gap-2 px-3 py-2 ${isMonochrome ? 'bg-gray-50' : 'bg-[#0d0d0d]'}`}>
+                <Package size={13} className={isMonochrome ? 'text-gray-400' : 'text-gray-500'} />
+                <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-700' : 'text-gray-300'}`}>
+                  {tplId}
+                </span>
+              </div>
+
+              {/* Field groups */}
+              <div className="px-3 py-3 space-y-4">
+                {groups.map(group => (
+                  <div key={group.title}>
+                    {/* Group title */}
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <span className="text-sm">{group.icon}</span>
+                      <span className={`text-xs font-medium ${isMonochrome ? 'text-gray-600' : 'text-gray-400'}`}>
+                        {group.title}
+                      </span>
+                    </div>
+
+                    {/* Fields */}
+                    <div className="space-y-3 pl-1">
+                      {group.fields.map(field => (
+                        <div key={field.key}>
+                          <label className={`flex items-center gap-1 text-xs font-medium mb-1 ${textMuted}`}>
+                            {field.label}
+                            {field.required && <span className="text-red-400">*</span>}
+                          </label>
+                          {renderFieldInput(tplId, field)}
+                          {field.hint && (
+                            <p className={`text-[10px] mt-1 ${textMuted} opacity-70`}>{field.hint}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -407,7 +554,11 @@ export function BrandSettingsForm({
       {/* ─── Divider ─── */}
       <div className={`border-t ${divider}`} />
 
-      {/* ─── Section: Images ─── */}
+      {/* ─── Section: Template-specific fields ─── */}
+      {selectedTemplateIds.length > 0 && renderTemplateFields()}
+
+      {/* ─── Divider ─── */}
+      <div className={`border-t ${divider}`} />
       <div className="flex items-center gap-2 mb-1">
         <div className={`w-1 h-4 rounded-full ${accent}`} />
         <span className={`text-xs font-semibold uppercase tracking-wider ${isMonochrome ? 'text-gray-500' : 'text-gray-400'}`}>
