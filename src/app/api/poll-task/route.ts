@@ -182,12 +182,17 @@ export async function POST(request: NextRequest) {
       const LOCAL_TASK_TYPES = ['edit', 'agent-edit', 'brand-ecommerce'];
       if (LOCAL_TASK_TYPES.includes(registryTask.type)) {
         // 纯本地任务：由后端自行更新 registry，直接返回当前状态
-        return NextResponse.json({
+        // ★ 增量结果：将 partialResults 传递给前端
+        const response: Record<string, unknown> = {
           success: true,
           status: registryTask.status,
           progress: registryTask.progress,
           label: registryTask.label,
-        }, { status: 200 });
+        };
+        if (registryTask.partialResults) {
+          response.partialResults = registryTask.partialResults;
+        }
+        return NextResponse.json(response, { status: 200 });
       }
       // ★ refine-engine/brand-ecommerce：检查 registry 中是否已有直接结果（同步模式返回的）
       if ((registryTask.type === 'refine-engine' || registryTask.type === 'brand-ecommerce') && registryTask.result) {

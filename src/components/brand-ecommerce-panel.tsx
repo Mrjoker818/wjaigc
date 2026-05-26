@@ -1,7 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { X, ShoppingBag, Upload, Sparkles, Loader2, Check, ChevronDown, Image as ImageIcon, Palette, RefreshCw, Settings, GripVertical, Package } from 'lucide-react';
+import { X, ShoppingBag, Loader2, Sparkles, Settings, GripVertical } from 'lucide-react';
+import { BrandTemplateSelector } from './brand-ecommerce/BrandTemplateSelector';
+import { BrandSettingsForm } from './brand-ecommerce/BrandSettingsForm';
+import { BrandResultGallery, type GenerateResult } from './brand-ecommerce/BrandResultGallery';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -37,13 +40,6 @@ interface LlmModel {
   providerName: string;
 }
 
-interface GenerateResult {
-  templateId: string;
-  templateName: string;
-  imageUrl?: string;
-  error?: string;
-}
-
 interface Props {
   isMonochrome?: boolean;
   onClose: () => void;
@@ -54,21 +50,19 @@ interface Props {
 // ─── Component ────────────────────────────────────────────────────
 
 export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages, referenceImageUrl }: Props) {
-  // Theme
+  // Theme shortcuts
   const bg = isMonochrome ? 'bg-white' : 'bg-[#1a1a1a]';
   const bgDeep = isMonochrome ? 'bg-gray-50' : 'bg-[#141414]';
   const border = isMonochrome ? 'border-gray-200' : 'border-white/[0.08]';
-  const borderLight = isMonochrome ? 'border-gray-100' : 'border-white/[0.05]';
   const text = isMonochrome ? 'text-gray-900' : 'text-gray-100';
   const textSub = isMonochrome ? 'text-gray-500' : 'text-gray-400';
   const textMuted = isMonochrome ? 'text-gray-400' : 'text-gray-500';
   const accent = isMonochrome ? 'bg-blue-500' : 'bg-[#d4af37]';
   const accentHover = isMonochrome ? 'hover:bg-blue-600' : 'hover:bg-[#e0b840]';
   const accentText = isMonochrome ? 'text-blue-500' : 'text-[#d4af37]';
-  const inputBg = isMonochrome ? 'bg-gray-50 border-gray-200' : 'bg-[#111] border-white/[0.08]';
-  const inputFocus = isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30';
+  const accentColor = isMonochrome ? '#2563eb' : '#d4af37';
 
-  // State
+  // ─── State ────────────────────────────────────────────────────
   const [templates, setTemplates] = useState<EcomTemplate[]>([]);
   const [selectedTemplates, setSelectedTemplates] = useState<Set<string>>(new Set());
   const [models, setModels] = useState<ImageModel[]>([]);
@@ -96,13 +90,10 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [activeTab, setActiveTab] = useState<'template' | 'settings' | 'results'>('template');
   const [showLlmDropdown, setShowLlmDropdown] = useState(false);
-  const [llmAssisting, setLlmAssisting] = useState(false);
   const llmDropdownRef = useRef<HTMLDivElement>(null);
+  const modelDropdownRef = useRef<HTMLDivElement>(null);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const productFileInputRef = useRef<HTMLInputElement>(null);
-
-  // ─── Drag state ───
+  // ─── Drag state ───────────────────────────────────────────────
   const panelW = 680;
   const panelH = 600;
   const [position, setPosition] = useState(() => {
@@ -115,7 +106,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   const [isDraggingState, setIsDraggingState] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
 
-  // ─── Drag handlers ───
+  // ─── Drag handlers ────────────────────────────────────────────
   const handlePanelDragStart = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
     if ((e.target as HTMLElement).closest('button')) return;
@@ -140,9 +131,6 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
     window.addEventListener('mouseup', onMouseUp);
   };
 
-  const accentColor = isMonochrome ? '#2563eb' : '#d4af37';
-  const modelDropdownRef = useRef<HTMLDivElement>(null);
-
   // ─── Load templates ───────────────────────────────────────────
 
   useEffect(() => {
@@ -155,17 +143,15 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       .then(data => {
         if (data.success) {
           setTemplates(data.templates);
-          // Default select: white-bg + scene-lifestyle
           setSelectedTemplates(new Set(['white-bg', 'scene-lifestyle']));
         }
       })
       .catch(() => {});
   }, []);
 
-  // ─── Load models from admin API ──────────────────────────────
+  // ─── Load models ──────────────────────────────────────────────
 
   useEffect(() => {
-    // Load image models
     fetch('/api/models?type=image')
       .then(r => r.json())
       .then(data => {
@@ -175,12 +161,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         if (modelList.length) {
           const mapped = modelList.map((m: { id: string; name: string; providerId?: string }) => {
             const prov = providerMap.get(m.providerId || '');
-            return {
-              id: m.id,
-              name: m.name,
-              providerId: m.providerId || '',
-              providerName: prov?.name || '',
-            };
+            return { id: m.id, name: m.name, providerId: m.providerId || '', providerName: prov?.name || '' };
           });
           setModels(mapped);
           const saved = localStorage.getItem('wujie_selected_model');
@@ -193,7 +174,6 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       })
       .catch(() => {});
 
-    // Load LLM models
     fetch('/api/models?type=chat')
       .then(r => r.json())
       .then(data => {
@@ -203,12 +183,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         if (modelList.length) {
           const mapped = modelList.map((m: { id: string; name: string; providerId?: string }) => {
             const prov = providerMap.get(m.providerId || '');
-            return {
-              id: m.id,
-              name: m.name,
-              providerId: m.providerId || '',
-              providerName: prov?.name || '',
-            };
+            return { id: m.id, name: m.name, providerId: m.providerId || '', providerName: prov?.name || '' };
           });
           setLlmModels(mapped);
           const saved = localStorage.getItem('wujie_selected_llm_model');
@@ -222,12 +197,15 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       .catch(() => {});
   }, []);
 
-  // ─── Close model dropdown on outside click ───────────────────
+  // ─── Close dropdowns on outside click ─────────────────────────
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
         setShowModelDropdown(false);
+      }
+      if (llmDropdownRef.current && !llmDropdownRef.current.contains(e.target as Node)) {
+        setShowLlmDropdown(false);
       }
     };
     document.addEventListener('mousedown', handler);
@@ -251,13 +229,9 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         body: JSON.stringify({ imageUrl: dataUrl }),
       });
       const data = await resp.json();
-      if (data.url) {
-        setRefImage(data.url);
-      }
+      if (data.url) setRefImage(data.url);
     } catch {
-      // Fallback to local blob
-      const blob = URL.createObjectURL(file);
-      setRefImage(blob);
+      setRefImage(URL.createObjectURL(file));
     }
   }, []);
 
@@ -276,12 +250,9 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         body: JSON.stringify({ imageUrl: dataUrl }),
       });
       const data = await resp.json();
-      if (data.url) {
-        setProductImage(data.url);
-      }
+      if (data.url) setProductImage(data.url);
     } catch {
-      const blob = URL.createObjectURL(file);
-      setProductImage(blob);
+      setProductImage(URL.createObjectURL(file));
     }
   }, []);
 
@@ -296,7 +267,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
     });
   }, []);
 
-  // ─── Add brand color ─────────────────────────────────────────
+  // ─── Add / remove brand color ────────────────────────────────
 
   const addBrandColor = useCallback(() => {
     const c = colorInput.trim();
@@ -310,7 +281,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
     setBrandColors(prev => prev.filter(x => x !== c));
   }, []);
 
-  // ─── Generate ────────────────────────────────────────────────
+  // ─── Generate (async submit + poll with incremental results) ──
 
   const handleGenerate = useCallback(async () => {
     if (!selectedTemplates.size || !productDesc.trim()) return;
@@ -324,7 +295,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
     setActiveTab('results');
 
     try {
-      // ★ Simulated progress while waiting for sync POST response
+      // ★ Simulated progress while waiting
       let simProgress = 5;
       const progressInterval = setInterval(() => {
         simProgress = Math.min(simProgress + Math.random() * 5, 90);
@@ -344,12 +315,12 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           referenceImageUrl: refImage,
           productImageUrl: productImage,
           brandColors,
+          variantCount: 2, // ★ Request 2 variants per template
         }),
-        signal: AbortSignal.timeout(600000), // 10 minutes timeout for sync processing
+        signal: AbortSignal.timeout(600000),
       });
       clearInterval(progressInterval);
 
-      // Check HTTP status first
       if (!resp.ok) {
         const errText = await resp.text().catch(() => '');
         console.error('[brand-ecommerce-panel] HTTP error:', resp.status, errText);
@@ -361,39 +332,36 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       let data: Record<string, unknown>;
       try {
         data = await resp.json();
-      } catch (parseErr) {
-        console.error('[brand-ecommerce-panel] JSON parse error:', parseErr);
+      } catch {
         setResults([{ templateId: 'error', templateName: '生成失败', error: '响应解析失败' }]);
         setIsGenerating(false);
         return;
       }
-
-      console.log('[brand-ecommerce-panel] API response:', JSON.stringify(data).slice(0, 300));
 
       if (data.error) {
         setResults([{ templateId: 'error', templateName: '生成失败', error: String(data.error) }]);
         setIsGenerating(false);
         return;
       }
-      // ★ Sync mode: results returned directly from POST
-      const results = data.results as Array<{ templateId: string; templateName: string; imageUrl?: string; error?: string }> | undefined;
-      if (results && results.length > 0) {
-        console.log('[brand-ecommerce-panel] Got sync results:', results.length, 'with images:', results.filter(r => r.imageUrl).length);
-        setResults(results);
+
+      // ★ Sync mode: results returned directly
+      const syncResults = data.results as GenerateResult[] | undefined;
+      if (syncResults && syncResults.length > 0) {
+        setResults(syncResults);
         setIsGenerating(false);
         return;
       }
-      // ★ Fallback: poll mode (if backend returns taskId without results)
+
+      // ★ Fallback: poll mode (async task)
       const respTaskId = data.taskId as string | undefined;
       if (respTaskId) {
-        console.log('[brand-ecommerce-panel] No sync results, polling taskId:', respTaskId);
         setTaskId(respTaskId);
         let pollAttempts = 0;
-        const maxPollAttempts = 120; // 120 * 3s = 6 minutes max
-        // Start polling
+        const maxPollAttempts = 120;
+
         const poll = async () => {
           if (pollAttempts >= maxPollAttempts) {
-            setResults([{ templateId: 'error', templateName: '生成失败', error: '轮询超时' }]);
+            setResults(prev => prev.length ? prev : [{ templateId: 'error', templateName: '生成失败', error: '轮询超时' }]);
             setIsGenerating(false);
             setTaskId(null);
             return;
@@ -406,7 +374,18 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
               body: JSON.stringify({ taskId: respTaskId }),
             });
             const pollData = await pollResp.json();
-            console.log('[brand-ecommerce-panel] Poll response:', pollData.status, pollData.progress);
+
+            // ★ Incremental: if partial results available, append them
+            if (pollData.partialResults && Array.isArray(pollData.partialResults)) {
+              setResults(prev => {
+                const existingIds = new Set(prev.map(r => `${r.templateId}-v${r.variantIndex ?? 0}`));
+                const newResults = (pollData.partialResults as GenerateResult[]).filter(
+                  (r: GenerateResult) => !existingIds.has(`${r.templateId}-v${r.variantIndex ?? 0}`)
+                );
+                return [...prev, ...newResults];
+              });
+            }
+
             if (pollData.status === 'completed' && pollData.result?.results) {
               setResults(pollData.result.results);
               setIsGenerating(false);
@@ -414,18 +393,13 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
               return;
             }
             if (pollData.status === 'failed' || pollData.status === 'cancelled') {
-              setResults([{ templateId: 'error', templateName: '生成失败', error: pollData.error || '任务失败' }]);
+              setResults(prev => prev.length ? prev : [{ templateId: 'error', templateName: '生成失败', error: pollData.error || '任务失败' }]);
               setIsGenerating(false);
               setTaskId(null);
               return;
             }
-            if (pollData.progress !== undefined) {
-              setProgress(pollData.progress);
-            }
-            if (pollData.label) {
-              setProgressLabel(pollData.label);
-            }
-            // Continue polling
+            if (pollData.progress !== undefined) setProgress(pollData.progress);
+            if (pollData.label) setProgressLabel(pollData.label);
             setTimeout(poll, 3000);
           } catch {
             setTimeout(poll, 3000);
@@ -433,8 +407,6 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         };
         setTimeout(poll, 3000);
       } else {
-        // Neither results nor taskId — unexpected response
-        console.error('[brand-ecommerce-panel] Unexpected API response:', JSON.stringify(data).slice(0, 200));
         setResults([{ templateId: 'error', templateName: '生成失败', error: 'API返回格式异常' }]);
         setIsGenerating(false);
       }
@@ -445,12 +417,12 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
     }
   }, [selectedTemplates, productDesc, styleExtra, sceneDesc, selectedModel, refImage, brandColors, productImage]);
 
-  // ─── Add result images to canvas ─────────────────────────────
+  // ─── Add to canvas ────────────────────────────────────────────
 
-  const handleAddToCanvas = useCallback(() => {
-    const urls = results.filter(r => r.imageUrl).map(r => r.imageUrl!);
-    if (urls.length && onAddImages) {
-      onAddImages(urls);
+  const handleAddToCanvas = useCallback((urls?: string[]) => {
+    const targetUrls = urls || results.filter(r => r.imageUrl).map(r => r.imageUrl!);
+    if (targetUrls.length && onAddImages) {
+      onAddImages(targetUrls);
     }
   }, [results, onAddImages]);
 
@@ -470,7 +442,65 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
     setIsGenerating(false);
   }, [taskId]);
 
-  // ─── LLM AI Assist ────────────────────────────────────────────
+  // ─── Regenerate single template ──────────────────────────────
+
+  const handleRegenerateTemplate = useCallback((templateId: string) => {
+    // Remove results for this template and re-generate just it
+    setResults(prev => prev.filter(r => r.templateId !== templateId));
+    // Trigger generation for just this template
+    if (!selectedModel || !productDesc.trim()) return;
+
+    setIsGenerating(true);
+    setProgress(0);
+    setProgressLabel('重新生成...');
+
+    fetch('/api/brand-ecommerce', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'generate',
+        templateIds: [templateId],
+        productDesc: productDesc.trim(),
+        styleExtra: styleExtra.trim(),
+        sceneDesc: sceneDesc.trim(),
+        model: selectedModel,
+        referenceImageUrl: refImage,
+        productImageUrl: productImage,
+        brandColors,
+        variantCount: 2,
+      }),
+      signal: AbortSignal.timeout(300000),
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.results) {
+          setResults(prev => [...prev.filter(r => r.templateId !== templateId), ...data.results]);
+        } else if (data.taskId) {
+          // Poll for single template
+          const pollId = data.taskId;
+          const poll = async () => {
+            try {
+              const pr = await fetch('/api/poll-task', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: pollId }) });
+              const pd = await pr.json();
+              if (pd.status === 'completed' && pd.result?.results) {
+                setResults(prev => [...prev.filter(r => r.templateId !== templateId), ...pd.result.results]);
+                setIsGenerating(false);
+                return;
+              }
+              if (pd.status === 'failed' || pd.status === 'cancelled') {
+                setIsGenerating(false);
+                return;
+              }
+              setTimeout(poll, 3000);
+            } catch { setTimeout(poll, 3000); }
+          };
+          setTimeout(poll, 2000);
+        }
+      })
+      .catch(() => setIsGenerating(false));
+  }, [selectedModel, productDesc, styleExtra, sceneDesc, refImage, productImage, brandColors]);
+
+  // ─── AI Assist ────────────────────────────────────────────────
 
   const handleAiAssist = useCallback(async () => {
     if (!selectedLlmModel || !productDesc.trim()) return;
@@ -506,62 +536,27 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
     setIsAssisting(false);
   }, [selectedLlmModel, productDesc, sceneDesc, selectedTemplates, mainText, secondaryText, accentSymbol, styleExtra]);
 
-  // ─── Category labels ─────────────────────────────────────────
-
-  const categoryLabel: Record<string, string> = {
-    product: '白底主图',
-    scene: '场景氛围',
-    model: '模特展示',
-    detail: '详情组合',
-    promo: '促销海报',
-    social: '社交媒体',
-    creative: '创意合成',
-    brand: '品牌故事',
-    tech: '科技数码',
-  };
-
-  const categoryAccent: Record<string, string> = {
-    product: isMonochrome ? 'border-blue-300 bg-blue-50' : 'border-[#4a9eff]/30 bg-[#4a9eff]/10',
-    scene: isMonochrome ? 'border-emerald-300 bg-emerald-50' : 'border-[#34d399]/30 bg-[#34d399]/10',
-    model: isMonochrome ? 'border-pink-300 bg-pink-50' : 'border-[#f472b6]/30 bg-[#f472b6]/10',
-    detail: isMonochrome ? 'border-violet-300 bg-violet-50' : 'border-[#a78bfa]/30 bg-[#a78bfa]/10',
-    promo: isMonochrome ? 'border-amber-300 bg-amber-50' : 'border-[#fbbf24]/30 bg-[#fbbf24]/10',
-    social: isMonochrome ? 'border-rose-300 bg-rose-50' : 'border-[#fb7185]/30 bg-[#fb7185]/10',
-    creative: isMonochrome ? 'border-orange-300 bg-orange-50' : 'border-[#fb923c]/30 bg-[#fb923c]/10',
-    brand: isMonochrome ? 'border-sky-300 bg-sky-50' : 'border-[#38bdf8]/30 bg-[#38bdf8]/10',
-    tech: isMonochrome ? 'border-cyan-300 bg-cyan-50' : 'border-[#22d3ee]/30 bg-[#22d3ee]/10',
-  };
-
-  // ─── Aspect ratio visual ─────────────────────────────────────
-
-  const aspectVisual = (ar: string) => {
-    const [w, h] = ar.split(':').map(Number);
-    const maxDim = 16;
-    const scale = maxDim / Math.max(w, h);
-    const vw = Math.round(w * scale);
-    const vh = Math.round(h * scale);
-    return { width: vw, height: vh };
-  };
-
-  // ─── Success results count ───────────────────────────────────
+  // ─── Success results count ────────────────────────────────────
 
   const successResults = results.filter(r => r.imageUrl);
-  const errorResults = results.filter(r => r.error);
+
+  // ─── Tab labels ──────────────────────────────────────────────
+
+  const tabLabels: Record<string, string> = {
+    template: '模板选择',
+    settings: '生成设置',
+    results: `生成结果${successResults.length ? ` (${successResults.length})` : ''}`,
+  };
 
   return (
     <div
       className="fixed z-[150]"
       data-floating-panel="true"
-      style={{
-        left: position.x,
-        top: position.y,
-        width: panelW,
-        maxHeight: '85vh',
-      }}
-      onClick={(e) => e.stopPropagation()}
-      onPointerDown={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
-      onWheel={(e) => e.stopPropagation()}
+      style={{ left: position.x, top: position.y, width: panelW, maxHeight: '85vh' }}
+      onClick={e => e.stopPropagation()}
+      onPointerDown={e => e.stopPropagation()}
+      onMouseDown={e => e.stopPropagation()}
+      onWheel={e => e.stopPropagation()}
     >
       {/* Panel */}
       <div
@@ -569,17 +564,15 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         className="rounded-2xl overflow-hidden flex flex-col"
         style={{
           backgroundColor: isMonochrome ? '#fff' : '#1c1c1c',
-          border: isDraggingState
-            ? `2px solid ${accentColor}`
-            : `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)'}`,
+          border: isDraggingState ? `2px solid ${accentColor}` : `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)'}`,
           boxShadow: isDraggingState
             ? (isMonochrome ? '0 0 24px rgba(37,99,235,0.25), 0 25px 50px -12px rgba(0,0,0,0.25)' : '0 0 24px rgba(212,175,55,0.3), 0 25px 50px -12px rgba(0,0,0,0.5)')
             : (isMonochrome ? '0 25px 50px -12px rgba(0,0,0,0.15)' : '0 25px 50px -12px rgba(0,0,0,0.5)'),
           maxHeight: '85vh',
         }}
-        onClick={(e) => e.stopPropagation()}
+        onClick={e => e.stopPropagation()}
       >
-        {/* ── Header (unified title bar) ── */}
+        {/* ── Header ── */}
         <div
           className="flex items-center gap-2 px-3 py-2 select-none shrink-0 cursor-grab active:cursor-grabbing"
           style={{ borderBottom: `1px solid ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)'}` }}
@@ -595,7 +588,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           </span>
           <button
             onClick={onClose}
-            className="p-1 rounded-md transition-colors"
+            className="p-1 rounded-md transition-colors cursor-pointer"
             style={{ color: isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)' }}
             onMouseEnter={e => (e.currentTarget.style.color = isMonochrome ? '#000' : '#fff')}
             onMouseLeave={e => (e.currentTarget.style.color = isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)')}
@@ -605,21 +598,20 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         </div>
 
         {/* ── Tab bar ── */}
-        <div className={`flex items-center gap-1 px-5 pt-3 pb-0`}>
+        <div className="flex items-center gap-1 px-5 pt-3 pb-0">
           {(['template', 'settings', 'results'] as const).map(tab => {
-            const labels = { template: '模板选择', settings: '生成设置', results: `生成结果${successResults.length ? ` (${successResults.length})` : ''}` };
             const active = activeTab === tab;
             return (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`px-3.5 py-2 text-sm font-medium rounded-t-lg transition-colors ${
+                className={`px-3.5 py-2 text-sm font-medium rounded-t-lg transition-colors cursor-pointer ${
                   active
                     ? isMonochrome ? 'bg-gray-50 text-blue-600 border border-b-0 border-gray-200' : 'bg-[#111] text-[#d4af37] border border-b-0 border-white/[0.08]'
                     : isMonochrome ? 'text-gray-400 hover:text-gray-600' : 'text-[#666] hover:text-[#999]'
                 }`}
               >
-                {labels[tab]}
+                {tabLabels[tab]}
               </button>
             );
           })}
@@ -628,467 +620,75 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         {/* ── Content ── */}
         <div className={`flex-1 overflow-y-auto px-5 py-4 ${bgDeep}`}>
 
-          {/* ── Tab: Template Selection ── */}
+          {/* Tab: Template Selection */}
           {activeTab === 'template' && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between mb-1">
-                <p className={`text-sm ${textSub}`}>选择需要生成的商品图类型（可多选）</p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setSelectedTemplates(new Set(templates.map(t => t.id)))}
-                    className={`text-sm ${accentText} hover:underline`}
-                  >全选</button>
-                  <button
-                    onClick={() => setSelectedTemplates(new Set())}
-                    className={`text-sm ${textMuted} hover:underline`}
-                  >清空</button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2.5">
-                {templates.map(tpl => {
-                  const selected = selectedTemplates.has(tpl.id);
-                  const catColor = categoryAccent[tpl.category] || categoryAccent.product;
-                  const vis = aspectVisual(tpl.aspectRatio);
-                  return (
-                    <button
-                      key={tpl.id}
-                      onClick={() => toggleTemplate(tpl.id)}
-                      className={`relative text-left p-3.5 rounded-xl border transition-all duration-200 ${
-                        selected
-                          ? `${catColor} border-current/30`
-                          : isMonochrome ? 'bg-white border-gray-200 hover:border-gray-300' : 'bg-[#1a1a1a] border-white/[0.05] hover:border-white/[0.12]'
-                      }`}
-                    >
-                      {/* Check mark */}
-                      {selected && (
-                        <div className={`absolute top-2 right-2 w-5 h-5 rounded-full flex items-center justify-center ${accent}`}>
-                          <Check size={12} className={isMonochrome ? 'text-white' : 'text-black'} />
-                        </div>
-                      )}
-                      <div className="flex items-start gap-3">
-                        <span className="text-lg leading-none mt-0.5">{tpl.icon}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className={`text-sm font-semibold ${text}`}>{tpl.name}</span>
-                            <span className={`text-xs px-1.5 py-0.5 rounded-md ${catColor}`}>
-                              {categoryLabel[tpl.category]}
-                            </span>
-                          </div>
-                          <p className={`text-sm ${textMuted} leading-relaxed`}>{tpl.description}</p>
-                          <div className="flex items-center gap-2 mt-2">
-                            {/* Aspect ratio visual */}
-                            <div className={`flex items-center gap-1.5`}>
-                              <div
-                                className={`rounded-sm border ${isMonochrome ? 'border-gray-300' : 'border-white/20'}`}
-                                style={{ width: vis.width, height: vis.height, backgroundColor: isMonochrome ? '#e5e7eb' : '#333' }}
-                              />
-                              <span className={`text-xs font-mono ${textMuted}`}>{tpl.aspectRatio}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            <BrandTemplateSelector
+              templates={templates}
+              selectedTemplates={selectedTemplates}
+              onToggle={toggleTemplate}
+              onSelectAll={() => setSelectedTemplates(new Set(templates.map(t => t.id)))}
+              onClearAll={() => setSelectedTemplates(new Set())}
+              isMonochrome={isMonochrome}
+            />
           )}
 
-          {/* ── Tab: Settings ── */}
+          {/* Tab: Settings */}
           {activeTab === 'settings' && (
-            <div className="space-y-4">
-              {/* Model selection */}
-              <div>
-                <label className={`block text-sm font-medium ${textSub} mb-1.5`}>生成模型 <span className="text-red-400">*</span></label>
-                <div className="relative" ref={modelDropdownRef}>
-                  <button
-                    onClick={() => setShowModelDropdown(!showModelDropdown)}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm ${inputBg} ${text} transition-colors ${inputFocus} focus:outline-none focus:ring-2`}
-                  >
-                    <span className="truncate">
-                      {selectedModel
-                        ? (models.find(m => m.id === selectedModel)?.name || selectedModel)
-                        : '选择模型...'}
-                    </span>
-                    <ChevronDown size={14} className={textMuted} />
-                  </button>
-                  {showModelDropdown && (
-                    <div className={`absolute z-50 top-full mt-1 w-full rounded-lg border shadow-xl max-h-64 overflow-y-auto ${
-                      isMonochrome ? 'bg-white border-gray-200' : 'bg-[#222] border-white/[0.1]'
-                    }`}>
-                      {models.length ? models.map(m => (
-                        <button
-                          key={m.id}
-                          onClick={() => {
-                            setSelectedModel(m.id);
-                            setShowModelDropdown(false);
-                            localStorage.setItem('wujie_selected_model', m.id);
-                          }}
-                          className={`w-full text-left px-3 py-2.5 text-sm transition-colors ${
-                            m.id === selectedModel
-                              ? isMonochrome ? 'bg-blue-50 text-blue-600' : 'bg-[#d4af37]/10 text-[#d4af37]'
-                              : isMonochrome ? 'text-gray-700 hover:bg-gray-50' : 'text-gray-300 hover:bg-[#2a2a2a]'
-                          }`}
-                        >
-                          <div className="font-medium">{m.name}</div>
-                          {m.providerName && (
-                            <div className={`text-xs mt-0.5 ${textMuted}`}>
-                              <span className="inline-flex items-center gap-1">
-                                <span className={`inline-block w-1.5 h-1.5 rounded-full ${isMonochrome ? 'bg-gray-400' : 'bg-primary'}`}></span>
-                                {m.providerName}
-                              </span>
-                            </div>
-                          )}
-                        </button>
-                      )) : (
-                        <div className={`px-3 py-4 text-center text-sm ${textMuted}`}>
-                          暂无可用模型，请在管理员后台配置图像模型
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* LLM Model selection */}
-              <div>
-                <label className={`block text-sm font-medium ${textSub} mb-1.5`}>LLM 辅助模型 <span className={`text-xs ${textMuted}`}>(可选，AI优化提示词)</span></label>
-                <div className="relative" ref={llmDropdownRef}>
-                  <button
-                    onClick={() => setShowLlmDropdown(!showLlmDropdown)}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm ${inputBg} ${text} transition-colors ${inputFocus} focus:outline-none focus:ring-2`}
-                  >
-                    <span className="truncate">
-                      {selectedLlmModel
-                        ? (llmModels.find(m => m.id === selectedLlmModel)?.name || selectedLlmModel)
-                        : '选择LLM模型...'}
-                    </span>
-                    <ChevronDown size={14} className={textMuted} />
-                  </button>
-                  {showLlmDropdown && (
-                    <div className={`absolute z-50 top-full mt-1 w-full rounded-lg border shadow-xl max-h-64 overflow-y-auto ${
-                      isMonochrome ? 'bg-white border-gray-200' : 'bg-[#222] border-white/[0.1]'
-                    }`}>
-                      {llmModels.length ? llmModels.map(m => (
-                        <button
-                          key={m.id}
-                          onClick={() => {
-                            setSelectedLlmModel(m.id);
-                            setShowLlmDropdown(false);
-                          }}
-                          className={`w-full text-left px-3 py-2.5 text-sm transition-colors ${
-                            m.id === selectedLlmModel
-                              ? isMonochrome ? 'bg-blue-50 text-blue-600' : 'bg-[#d4af37]/10 text-[#d4af37]'
-                              : isMonochrome ? 'text-gray-700 hover:bg-gray-50' : 'text-gray-300 hover:bg-[#2a2a2a]'
-                          }`}
-                        >
-                          <div className="font-medium">{m.name}</div>
-                          {m.providerName && (
-                            <div className={`text-xs mt-0.5 ${textMuted}`}>
-                              <span className="inline-flex items-center gap-1">
-                                <span className={`inline-block w-1.5 h-1.5 rounded-full ${isMonochrome ? 'bg-gray-400' : 'bg-primary'}`}></span>
-                                {m.providerName}
-                              </span>
-                            </div>
-                          )}
-                        </button>
-                      )) : (
-                        <div className={`px-3 py-4 text-center text-sm ${textMuted}`}>
-                          暂无可用LLM模型，请在管理员后台配置
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* AI Assist Design */}
-              {selectedLlmModel && (
-                <div>
-                  <button
-                    onClick={handleAiAssist}
-                    disabled={isAssisting || !productDesc.trim()}
-                    className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors ${
-                      isAssisting
-                        ? isMonochrome ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-[#2a2a2a] text-gray-500 border-white/[0.05] cursor-not-allowed'
-                        : isMonochrome ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100' : 'bg-[#d4af37]/10 text-[#d4af37] border-[#d4af37]/20 hover:bg-[#d4af37]/20'
-                    } ${!productDesc.trim() ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    {isAssisting ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                    {isAssisting ? 'AI 优化中...' : 'AI 辅助优化设计'}
-                  </button>
-                  <p className={`text-xs mt-1 ${textMuted}`}>LLM将优化商品描述、补充场景和风格关键词</p>
-                </div>
-              )}
-
-              <div className={`border-t ${isMonochrome ? 'border-gray-200' : 'border-white/[0.06]'}`}></div>
-
-              {/* Product description */}
-              <div>
-                <label className={`block text-sm font-medium ${textSub} mb-1.5`}>商品描述 <span className="text-red-400">*</span></label>
-                <textarea
-                  value={productDesc}
-                  onChange={e => setProductDesc(e.target.value)}
-                  placeholder="描述你的商品，如：高端无线降噪耳机，磨砂黑色，金属质感..."
-                  rows={3}
-                  className={`w-full px-3 py-2.5 rounded-lg border text-sm ${inputBg} ${text} ${inputFocus} focus:outline-none focus:ring-2 resize-none placeholder:${isMonochrome ? 'text-gray-400' : 'text-gray-600'}`}
-                />
-              </div>
-
-              {/* Main text / Secondary text */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={`block text-sm font-medium ${textSub} mb-1.5`}>主标题文字</label>
-                  <input
-                    type="text"
-                    value={mainText}
-                    onChange={e => setMainText(e.target.value)}
-                    placeholder="如：新品上市"
-                    className={`w-full px-3 py-2.5 rounded-lg border text-sm ${inputBg} ${text} ${inputFocus} focus:outline-none focus:ring-2`}
-                  />
-                </div>
-                <div>
-                  <label className={`block text-sm font-medium ${textSub} mb-1.5`}>副标题文字</label>
-                  <input
-                    type="text"
-                    value={secondaryText}
-                    onChange={e => setSecondaryText(e.target.value)}
-                    placeholder="如：限时特惠"
-                    className={`w-full px-3 py-2.5 rounded-lg border text-sm ${inputBg} ${text} ${inputFocus} focus:outline-none focus:ring-2`}
-                  />
-                </div>
-              </div>
-
-              {/* Accent symbol */}
-              <div>
-                <label className={`block text-sm font-medium ${textSub} mb-1.5`}>强调符号</label>
-                <input
-                  type="text"
-                  value={accentSymbol}
-                  onChange={e => setAccentSymbol(e.target.value)}
-                  placeholder="如：✦ ★ ♦ ◆ →"
-                  className={`w-full px-3 py-2.5 rounded-lg border text-sm ${inputBg} ${text} ${inputFocus} focus:outline-none focus:ring-2`}
-                />
-              </div>
-
-              {/* Scene description */}
-              <div>
-                <label className={`block text-sm font-medium ${textSub} mb-1.5`}>场景描述</label>
-                <input
-                  type="text"
-                  value={sceneDesc}
-                  onChange={e => setSceneDesc(e.target.value)}
-                  placeholder="场景图使用的环境描述，如：现代简约客厅、清新花园..."
-                  className={`w-full px-3 py-2.5 rounded-lg border text-sm ${inputBg} ${text} ${inputFocus} focus:outline-none focus:ring-2`}
-                />
-              </div>
-
-              {/* Style extra */}
-              <div>
-                <label className={`block text-sm font-medium ${textSub} mb-1.5`}>风格补充</label>
-                <input
-                  type="text"
-                  value={styleExtra}
-                  onChange={e => setStyleExtra(e.target.value)}
-                  placeholder="额外的风格关键词，如：高级感、奢华、清新自然..."
-                  className={`w-full px-3 py-2.5 rounded-lg border text-sm ${inputBg} ${text} ${inputFocus} focus:outline-none focus:ring-2`}
-                />
-              </div>
-
-              {/* Brand colors */}
-              <div>
-                <label className={`block text-sm font-medium ${textSub} mb-1.5`}>
-                  <Palette size={12} className="inline mr-1" />品牌色 (最多5个)
-                </label>
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {brandColors.map(c => (
-                    <div key={c} className="flex items-center gap-1.5 group">
-                      <div className="w-6 h-6 rounded-md border border-white/10" style={{ backgroundColor: c }} />
-                      <span className={`text-sm font-mono ${textSub}`}>{c}</span>
-                      <button
-                        onClick={() => removeBrandColor(c)}
-                        className={`opacity-0 group-hover:opacity-100 text-xs ${textMuted} hover:text-red-400 transition-opacity`}
-                      >✕</button>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    type="color"
-                    value={colorInput || '#000000'}
-                    onChange={e => setColorInput(e.target.value)}
-                    className="w-9 h-9 rounded-lg border cursor-pointer p-0.5"
-                  />
-                  <input
-                    type="text"
-                    value={colorInput}
-                    onChange={e => setColorInput(e.target.value)}
-                    placeholder="#HEX 或颜色名"
-                    className={`flex-1 px-3 py-2 rounded-lg border text-sm ${inputBg} ${text} ${inputFocus} focus:outline-none focus:ring-2`}
-                    onKeyDown={e => { if (e.key === 'Enter') addBrandColor(); }}
-                  />
-                  <button
-                    onClick={addBrandColor}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium ${accent} ${accentHover} ${isMonochrome ? 'text-white' : 'text-black'} transition-colors`}
-                  >添加</button>
-                </div>
-              </div>
-
-              {/* Reference image upload */}
-              <div>
-                <label className={`block text-sm font-medium ${textSub} mb-1.5`}>参考图 (可选)</label>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={e => { if (e.target.files?.[0]) handleFileUpload(e.target.files[0]); }}
-                />
-                {refImage ? (
-                  <div className={`relative rounded-lg overflow-hidden border ${border} group`}>
-                    <img src={refImage} alt="参考图" className="w-full h-32 object-cover" />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className={`px-3 py-1.5 rounded-lg text-sm font-medium ${accent} ${isMonochrome ? 'text-white' : 'text-black'}`}
-                      >更换</button>
-                      <button
-                        onClick={() => { setRefImage(''); setRefImageFile(null); }}
-                        className="px-3 py-1.5 rounded-lg text-sm font-medium bg-red-500 text-white"
-                      >移除</button>
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className={`w-full h-24 rounded-lg border-2 border-dashed flex flex-col items-center justify-center gap-1.5 transition-colors ${
-                      isMonochrome ? 'border-gray-300 hover:border-gray-400 text-gray-400' : 'border-white/[0.08] hover:border-white/[0.15] text-gray-500'
-                    }`}
-                  >
-                    <Upload size={18} />
-                    <span className="text-sm">点击上传商品参考图</span>
-                  </button>
-                )}
-              </div>
-
-              {/* Product image upload */}
-              <div>
-                <label className={`block text-sm font-medium ${textSub} mb-1.5`}>
-                  产品图 (可选)
-                  <span className={`text-xs ${textMuted} ml-1`}>· 保持产品一致性</span>
-                </label>
-                <input
-                  ref={productFileInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={e => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      const reader = new FileReader();
-                      reader.onload = ev => {
-                        setProductImage(ev.target?.result as string);
-                        setProductImageFile(file);
-                      };
-                      reader.readAsDataURL(file);
-                    }
-                    e.target.value = '';
-                  }}
-                />
-                {productImage ? (
-                  <div className="relative group">
-                    <img src={productImage} alt="产品图" className="w-full h-32 object-contain rounded-lg border border-white/[0.08]" />
-                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
-                      <button
-                        onClick={() => productFileInputRef.current?.click()}
-                        className={`px-3 py-1.5 rounded-md text-xs font-medium ${accent} ${accentHover} ${isMonochrome ? 'text-white' : 'text-black'} transition-colors`}
-                      >更换</button>
-                      <button
-                        onClick={() => { setProductImage(''); setProductImageFile(null); }}
-                        className="px-3 py-1.5 rounded-md text-xs font-medium bg-red-500/80 hover:bg-red-500 text-white transition-colors"
-                      >删除</button>
-                    </div>
-                    <div className={`mt-1 text-xs ${textMuted} text-center`}>产品图用于保持生成图中产品外观一致</div>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => productFileInputRef.current?.click()}
-                    className={`w-full h-24 rounded-lg border-2 border-dashed flex flex-col items-center justify-center gap-1.5 transition-colors ${
-                      isMonochrome ? 'border-gray-300 hover:border-gray-400 text-gray-400' : 'border-white/[0.08] hover:border-white/[0.15] text-gray-500'
-                    }`}
-                  >
-                    <Package size={18} />
-                    <span className="text-sm">点击上传产品图</span>
-                    <span className={`text-xs ${textMuted}`}>保持生成图中产品外观一致</span>
-                  </button>
-                )}
-              </div>
-            </div>
+            <BrandSettingsForm
+              models={models}
+              selectedModel={selectedModel}
+              onSelectModel={setSelectedModel}
+              showModelDropdown={showModelDropdown}
+              onToggleModelDropdown={() => setShowModelDropdown(v => !v)}
+              modelDropdownRef={modelDropdownRef}
+              llmModels={llmModels}
+              selectedLlmModel={selectedLlmModel}
+              onSelectLlmModel={setSelectedLlmModel}
+              showLlmDropdown={showLlmDropdown}
+              onToggleLlmDropdown={() => setShowLlmDropdown(v => !v)}
+              llmDropdownRef={llmDropdownRef}
+              isAssisting={isAssisting}
+              onAiAssist={handleAiAssist}
+              productDesc={productDesc}
+              onProductDescChange={setProductDesc}
+              mainText={mainText}
+              onMainTextChange={setMainText}
+              secondaryText={secondaryText}
+              onSecondaryTextChange={setSecondaryText}
+              accentSymbol={accentSymbol}
+              onAccentSymbolChange={setAccentSymbol}
+              sceneDesc={sceneDesc}
+              onSceneDescChange={setSceneDesc}
+              styleExtra={styleExtra}
+              onStyleExtraChange={setStyleExtra}
+              brandColors={brandColors}
+              colorInput={colorInput}
+              onColorInputChange={setColorInput}
+              onAddBrandColor={addBrandColor}
+              onRemoveBrandColor={removeBrandColor}
+              refImage={refImage}
+              onFileUpload={handleFileUpload}
+              onRemoveRefImage={() => { setRefImage(''); setRefImageFile(null); }}
+              productImage={productImage}
+              onProductImageUpload={handleProductImageUpload}
+              onRemoveProductImage={() => { setProductImage(''); setProductImageFile(null); }}
+              isMonochrome={isMonochrome}
+            />
           )}
 
-          {/* ── Tab: Results ── */}
+          {/* Tab: Results */}
           {activeTab === 'results' && (
-            <div className="space-y-3">
-              {/* Progress */}
-              {isGenerating && (
-                <div className={`rounded-xl border ${border} p-4`}>
-                  <div className="flex items-center gap-3 mb-3">
-                    <Loader2 size={18} className={`animate-spin ${accentText}`} />
-                    <div className="flex-1">
-                      <p className={`text-sm font-medium ${text}`}>{progressLabel || '正在生成...'}</p>
-                      <p className={`text-sm ${textMuted}`}>已选择 {selectedTemplates.size} 个模板</p>
-                    </div>
-                    <button
-                      onClick={handleCancel}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium ${isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-[#2a2a2a] text-gray-300 hover:bg-[#333]'}`}
-                    >取消</button>
-                  </div>
-                  <div className={`w-full h-1.5 rounded-full overflow-hidden ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`}>
-                    <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{ width: `${progress}%`, background: isMonochrome ? '#3b82f6' : 'linear-gradient(90deg, #d4af37, #f0d060, #d4af37)' }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Results grid */}
-              {results.length > 0 && (
-                <div className="grid grid-cols-2 gap-3">
-                  {results.map((r, i) => (
-                    <div key={i} className={`rounded-xl border overflow-hidden ${border}`}>
-                      {r.imageUrl ? (
-                        <div className="relative group">
-                          <img src={r.imageUrl} alt={r.templateName} className="w-full aspect-square object-cover" />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity" />
-                        </div>
-                      ) : (
-                        <div className={`w-full aspect-square flex items-center justify-center ${isMonochrome ? 'bg-gray-100' : 'bg-[#222]'}`}>
-                          <div className="text-center px-3">
-                            <X size={20} className="text-red-400 mx-auto mb-1" />
-                            <p className="text-xs text-red-400">{r.error?.slice(0, 50) || '生成失败'}</p>
-                          </div>
-                        </div>
-                      )}
-                      <div className={`px-3 py-2 ${isMonochrome ? 'bg-gray-50' : 'bg-[#1a1a1a]'}`}>
-                        <p className={`text-sm font-medium ${text}`}>{r.templateName}</p>
-                        {r.error && <p className="text-xs text-red-400 truncate">{r.error}</p>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Empty state */}
-              {!isGenerating && results.length === 0 && (
-                <div className={`text-center py-12 ${textMuted}`}>
-                  <ImageIcon size={36} className="mx-auto mb-3 opacity-30" />
-                  <p className="text-sm">尚未生成结果</p>
-                  <p className="text-sm mt-1">选择模板并配置参数后，点击生成按钮</p>
-                </div>
-              )}
-            </div>
+            <BrandResultGallery
+              results={results}
+              isGenerating={isGenerating}
+              progress={progress}
+              progressLabel={progressLabel}
+              selectedTemplateCount={selectedTemplates.size}
+              onCancel={handleCancel}
+              onAddToCanvas={handleAddToCanvas}
+              onRegenerateTemplate={handleRegenerateTemplate}
+              isMonochrome={isMonochrome}
+            />
           )}
         </div>
 
@@ -1102,8 +702,8 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
             )}
             {successResults.length > 0 && (
               <button
-                onClick={handleAddToCanvas}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium ${accent} ${isMonochrome ? 'text-white' : 'text-black'} ${accentHover} transition-colors`}
+                onClick={() => handleAddToCanvas()}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium ${accent} ${isMonochrome ? 'text-white' : 'text-black'} ${accentHover} transition-colors cursor-pointer`}
               >
                 <Sparkles size={12} />
                 添加到画布 ({successResults.length})
@@ -1113,12 +713,14 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              className={`px-4 py-2 rounded-lg text-sm font-medium ${isMonochrome ? 'text-gray-600 hover:bg-gray-100' : 'text-gray-400 hover:bg-[#2a2a2a]'} transition-colors`}
-            >关闭</button>
+              className={`px-4 py-2 rounded-lg text-sm font-medium ${isMonochrome ? 'text-gray-600 hover:bg-gray-100' : 'text-gray-400 hover:bg-[#2a2a2a]'} transition-colors cursor-pointer`}
+            >
+              关闭
+            </button>
             <button
               onClick={handleGenerate}
               disabled={isGenerating || !selectedTemplates.size || !productDesc.trim() || !selectedModel}
-              className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
+              className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
                 isGenerating || !selectedTemplates.size || !productDesc.trim() || !selectedModel
                   ? isMonochrome ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-[#333] text-[#555] cursor-not-allowed'
                   : `${accent} ${isMonochrome ? 'text-white' : 'text-black'} ${accentHover} shadow-lg`

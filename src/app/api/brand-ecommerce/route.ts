@@ -280,7 +280,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'generate') {
-      const { templateIds, productDesc, styleExtra, model, referenceImageUrl, productImageUrl, brandColors } = body;
+      const { templateIds, productDesc, styleExtra, model, referenceImageUrl, productImageUrl, brandColors, variantCount } = body;
       if (!templateIds?.length) {
         return NextResponse.json({ error: '请至少选择一个模板' }, { status: 400 });
       }
@@ -349,163 +349,166 @@ export async function POST(request: NextRequest) {
         return { template: tpl, prompt, negPrompt, dims };
       });
 
+      // ★ variantCount: how many variants per template (default 2)
+      const variantsPerTemplate = Math.max(1, Math.min(variantCount || 2, 4));
+      const totalTasks = selectedTemplates.length * variantsPerTemplate;
+
       // Register a task for tracking
       const taskId = `ecom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      registerTask(taskId, 'brand-ecommerce', `品牌电商生成 (${tasks.length}张)`);
+      registerTask(taskId, 'brand-ecommerce', `品牌电商生成 (${selectedTemplates.length}模板×${variantsPerTemplate}变体)`);
 
       // ★ Async mode: return taskId immediately, process in background
       // Fire-and-forget background processing
       (async () => {
         try {
-          const results: Array<{ templateId: string; templateName: string; imageUrl?: string; error?: string }> = [];
+          const results: Array<{ templateId: string; templateName: string; imageUrl?: string; error?: string; variantIndex?: number; aspectRatio?: string }> = [];
+          let completedCount = 0;
 
-          for (let i = 0; i < tasks.length; i++) {
-            if (isTaskCancelled(taskId)) {
-              updateTaskProgress(taskId, { status: 'cancelled', progress: i / tasks.length });
-              break;
-            }
+          for (let t = 0; t < selectedTemplates.length; t++) {
+            for (let v = 0; v < variantsPerTemplate; v++) {
+              if (isTaskCancelled(taskId)) {
+                updateTaskProgress(taskId, { status: 'cancelled', progress: completedCount / totalTasks * 100 });
+                break;
+              }
 
-            const { template: tpl, prompt, negPrompt, dims } = tasks[i];
-            updateTaskProgress(taskId, {
-              status: 'processing',
-              progress: Math.round((i / tasks.length) * 100),
-              label: `生成中: ${tpl.name} (${i + 1}/${tasks.length})`,
-            });
+              const tpl = selectedTemplates[t];
+              const taskInfo = tasks[t];
+              updateTaskProgress(taskId, {
+                status: 'processing',
+                progress: Math.round((completedCount / totalTasks) * 100),
+                label: `生成中: ${tpl.name} 变体${v + 1} (${completedCount + 1}/${totalTasks})`,
+              });
 
-            try {
-              const compatProfile = resolveCompatProfile(provider);
-              const reqBody: Record<string, unknown> = {
-                model: selectedModel,
-                prompt,
-                negative_prompt: negPrompt,
-                n: 1,
-                size: `${dims.width}x${dims.height}`,
-              };
+              try {
+                const compatProfile = resolveCompatProfile(provider);
+                const reqBody: Record<string, unknown> = {
+                  model: selectedModel,
+                  prompt: taskInfo.prompt,
+                  negative_prompt: taskInfo.negPrompt,
+                  n: 1,
+                  size: `${taskInfo.dims.width}x${taskInfo.dims.height}`,
+                };
 
-              // Add reference image if provided (img2img)
-              // Resolve image URLs: data URLs need to be uploaded first
-              const allImageUrls: string[] = [];
+                // Add reference image if provided (img2img)
+                const allImageUrls: string[] = [];
 
-              // ─── Reference image (风格参考图) ───
-              if (referenceImageUrl) {
-                if (referenceImageUrl.startsWith('http')) {
-                  reqBody.image = referenceImageUrl;
-                  allImageUrls.push(referenceImageUrl);
-                } else {
-                  // data: or relative path — use base64 data URL directly for API compatibility
-                  reqBody.image = referenceImageUrl;
-                  if (referenceImageUrl.startsWith('data:')) {
+                if (referenceImageUrl) {
+                  if (referenceImageUrl.startsWith('http')) {
+                    reqBody.image = referenceImageUrl;
                     allImageUrls.push(referenceImageUrl);
+                  } else {
+                    reqBody.image = referenceImageUrl;
+                    if (referenceImageUrl.startsWith('data:')) {
+                      allImageUrls.push(referenceImageUrl);
+                    }
                   }
+                  reqBody.strength = 0.5;
                 }
-                reqBody.strength = 0.5;
-              }
 
-              // ─── Product image (产品图，保持产品一致性) ───
-              if (productImageUrl) {
-                if (productImageUrl.startsWith('http')) {
-                  allImageUrls.push(productImageUrl);
-                } else if (productImageUrl.startsWith('data:')) {
-                  allImageUrls.push(productImageUrl);
+                if (productImageUrl) {
+                  if (productImageUrl.startsWith('http')) {
+                    allImageUrls.push(productImageUrl);
+                  } else if (productImageUrl.startsWith('data:')) {
+                    allImageUrls.push(productImageUrl);
+                  }
+                  reqBody.prompt = `[PRODUCT CONSISTENCY: The product in the generated image must exactly match the product shown in the product reference image — same shape, color, texture, proportions, and details. Do not alter or reinterpret the product design.]\n${reqBody.prompt || taskInfo.prompt}`;
                 }
-                // Add product consistency instruction to prompt
-                reqBody.prompt = `[PRODUCT CONSISTENCY: The product in the generated image must exactly match the product shown in the product reference image — same shape, color, texture, proportions, and details. Do not alter or reinterpret the product design.]\n${reqBody.prompt || prompt}`;
-              }
 
-              if (allImageUrls.length > 0) {
-                reqBody.image_urls = allImageUrls;
-              }
+                if (allImageUrls.length > 0) {
+                  reqBody.image_urls = allImageUrls;
+                }
 
-              const { body: apiBody, endpoint: apiEndpoint } = adjustRequestForProfile(reqBody, compatProfile, { hasImage: allImageUrls.length > 0 });
-              let path = apiEndpoint || '/images/generations';
+                const { body: apiBody, endpoint: apiEndpoint } = adjustRequestForProfile(reqBody, compatProfile, { hasImage: allImageUrls.length > 0 });
+                let path = apiEndpoint || '/images/generations';
 
-              const headers: Record<string, string> = {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${provider.apiKey}`,
-              };
+                const headers: Record<string, string> = {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${provider.apiKey}`,
+                };
 
-              let resp = await fetchWithV1Retry(provider.baseUrl, path, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(apiBody),
-              }, true, 120000);
-
-              // Fallback: /images/edits → /images/generations
-              if (!resp.ok && path === '/images/edits') {
-                const { body: fallbackBody, endpoint: fallbackEndpoint } = adjustRequestForProfile(reqBody, compatProfile, { hasImage: false });
-                const fallbackPath = fallbackEndpoint || '/images/generations';
-                resp = await fetchWithV1Retry(provider.baseUrl, fallbackPath, {
+                let resp = await fetchWithV1Retry(provider.baseUrl, path, {
                   method: 'POST',
                   headers,
-                  body: JSON.stringify(fallbackBody),
+                  body: JSON.stringify(apiBody),
                 }, true, 120000);
-              }
 
-              if (!resp.ok) {
-                const errText = await resp.text().catch(() => '');
-                results.push({ templateId: tpl.id, templateName: tpl.name, error: `API错误: ${errText.slice(0, 200)}` });
-                continue;
-              }
+                if (!resp.ok && path === '/images/edits') {
+                  const { body: fallbackBody, endpoint: fallbackEndpoint } = adjustRequestForProfile(reqBody, compatProfile, { hasImage: false });
+                  const fallbackPath = fallbackEndpoint || '/images/generations';
+                  resp = await fetchWithV1Retry(provider.baseUrl, fallbackPath, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(fallbackBody),
+                  }, true, 120000);
+                }
 
-              const respData = await resp.json();
-              const parsed = parseResponseForProfile(respData, compatProfile);
+                if (!resp.ok) {
+                  const errText = await resp.text().catch(() => '');
+                  results.push({ templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, error: `API错误: ${errText.slice(0, 200)}`, variantIndex: v, aspectRatio: tpl.aspectRatio });
+                  completedCount++;
+                  continue;
+                }
 
-              if (parsed.directImageUrls?.length) {
-                const persistedUrl = await persistResultImage(parsed.directImageUrls[0]);
-                results.push({ templateId: tpl.id, templateName: tpl.name, imageUrl: persistedUrl || parsed.directImageUrls[0] });
-              } else if (parsed.taskIds?.length) {
-                // Poll for async result — use same robust parsing as /api/poll-task
-                const remoteTaskId = parsed.taskIds[0];
-                let pollAttempts = 0;
-                const maxPollAttempts = 80;
-                while (pollAttempts < maxPollAttempts) {
-                  if (isTaskCancelled(taskId)) break;
-                  await new Promise(r => setTimeout(r, 3000));
-                  pollAttempts++;
-                  try {
-                    const pollUrl = buildPollUrl(provider.baseUrl, remoteTaskId, compatProfile);
-                    if (!pollUrl) { results.push({ templateId: tpl.id, templateName: tpl.name, error: '无法构建轮询URL' }); break; }
-                    // ★ buildPollUrl returns a FULL URL — use fetch() directly, NOT fetchWithV1Retry
-                    const pollResp = await fetch(pollUrl, {
-                      method: 'GET',
-                      headers: { 'Authorization': `Bearer ${provider.apiKey}` },
-                      signal: AbortSignal.timeout(30000),
-                    });
-                    if (pollResp.ok) {
-                      const pollData = await pollResp.json();
-                      // ★ Robust 5-path image URL extraction (same as poll-task route)
-                      const imgUrl = extractImageUrl(pollData);
-                      if (imgUrl) {
-                        const persistedUrl = await persistResultImage(imgUrl);
-                        results.push({ templateId: tpl.id, templateName: tpl.name, imageUrl: persistedUrl || imgUrl });
-                        break;
+                const respData = await resp.json();
+                const parsed = parseResponseForProfile(respData, compatProfile);
+
+                if (parsed.directImageUrls?.length) {
+                  const persistedUrl = await persistResultImage(parsed.directImageUrls[0]);
+                  results.push({ templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, imageUrl: persistedUrl || parsed.directImageUrls[0], variantIndex: v, aspectRatio: tpl.aspectRatio });
+                } else if (parsed.taskIds?.length) {
+                  const remoteTaskId = parsed.taskIds[0];
+                  let pollAttempts = 0;
+                  const maxPollAttempts = 80;
+                  while (pollAttempts < maxPollAttempts) {
+                    if (isTaskCancelled(taskId)) break;
+                    await new Promise(r => setTimeout(r, 3000));
+                    pollAttempts++;
+                    try {
+                      const pollUrl = buildPollUrl(provider.baseUrl, remoteTaskId, compatProfile);
+                      if (!pollUrl) { results.push({ templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, error: '无法构建轮询URL', variantIndex: v }); break; }
+                      const pollResp = await fetch(pollUrl, {
+                        method: 'GET',
+                        headers: { 'Authorization': `Bearer ${provider.apiKey}` },
+                        signal: AbortSignal.timeout(30000),
+                      });
+                      if (pollResp.ok) {
+                        const pollData = await pollResp.json();
+                        const imgUrl = extractImageUrl(pollData);
+                        if (imgUrl) {
+                          const persistedUrl = await persistResultImage(imgUrl);
+                          results.push({ templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, imageUrl: persistedUrl || imgUrl, variantIndex: v, aspectRatio: tpl.aspectRatio });
+                          break;
+                        }
+                        const status = pollData?.status || pollData?.data?.status;
+                        if (status === 'failed' || status === 'error') {
+                          results.push({ templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, error: '异步任务失败', variantIndex: v });
+                          break;
+                        }
                       }
-                      const status = pollData?.status || pollData?.data?.status;
-                      if (status === 'failed' || status === 'error') {
-                        results.push({ templateId: tpl.id, templateName: tpl.name, error: '异步任务失败' });
-                        break;
-                      }
+                    } catch {
+                      // Continue polling
                     }
-                  } catch {
-                    // Continue polling
                   }
+                  if (pollAttempts >= maxPollAttempts) {
+                    results.push({ templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, error: '生成超时', variantIndex: v });
+                  }
+                } else {
+                  results.push({ templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, error: 'API未返回图片', variantIndex: v });
                 }
-                if (pollAttempts >= maxPollAttempts) {
-                  results.push({ templateId: tpl.id, templateName: tpl.name, error: '生成超时' });
-                }
-              } else {
-                results.push({ templateId: tpl.id, templateName: tpl.name, error: 'API未返回图片' });
+              } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : '未知错误';
+                results.push({ templateId: selectedTemplates[t].id, templateName: `${selectedTemplates[t].name} V${v + 1}`, error: msg, variantIndex: v });
               }
-            } catch (err: unknown) {
-              const msg = err instanceof Error ? err.message : '未知错误';
-              results.push({ templateId: tpl.id, templateName: tpl.name, error: msg });
-            }
 
-            // Update progress after each template
-            updateTaskProgress(taskId, {
-              progress: Math.round(((i + 1) / tasks.length) * 100),
-              label: `已完成 ${i + 1}/${tasks.length}`,
-            });
+              completedCount++;
+
+              // ★ Incremental: push partial results via task-registry after each variant
+              updateTaskProgress(taskId, {
+                progress: Math.round((completedCount / totalTasks) * 100),
+                label: `已完成 ${completedCount}/${totalTasks}`,
+                partialResults: [...results], // ★ Frontend can read partial results via poll-task
+              });
+            }
           }
 
           const taskResult = { results };
@@ -530,7 +533,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: true,
         taskId,
-        message: `已提交 ${tasks.length} 个模板生成任务`,
+        message: `已提交 ${selectedTemplates.length} 个模板 × ${variantsPerTemplate} 变体 = ${totalTasks} 张生成任务`,
       });
     }
 

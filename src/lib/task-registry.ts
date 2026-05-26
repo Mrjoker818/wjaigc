@@ -28,6 +28,7 @@ export interface TaskInfo {
   result?: unknown;
   error?: string;
   queuePosition?: number; // 排队位置（0=不在排队）
+  partialResults?: unknown; // ★ 增量结果：部分已完成的子结果
   createdAt: number;
   updatedAt: number;
 }
@@ -85,7 +86,7 @@ export function registerTask(taskId: string, type: TaskType, label?: string): Ta
 /** 更新任务进度/状态 */
 export function updateTaskProgress(
   taskId: string,
-  update: Partial<Pick<TaskInfo, 'status' | 'progress' | 'label' | 'result' | 'error' | 'queuePosition'>>
+  update: Partial<Pick<TaskInfo, 'status' | 'progress' | 'label' | 'result' | 'error' | 'queuePosition' | 'partialResults'>>
 ): void {
   const task = taskRegistry.get(taskId);
   if (!task) return;
