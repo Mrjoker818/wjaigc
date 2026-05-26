@@ -5,6 +5,7 @@ import {
   X, Sparkles, Copy, Image as ImageIcon, Download, Loader2,
   ChevronDown, ChevronUp, RefreshCw, Star, Cpu, Wand2,
   Check, Shuffle, Trash2, Clock, Plus, GripVertical, Minus, PenTool,
+  Palette, Zap,
 } from 'lucide-react';
 
 interface StyleSubCategory { id: string; name: string; prompt: string; }
@@ -20,6 +21,27 @@ interface HistoryItem {
   id: string; text: string; scene: string; style: string;
   prompt: string; imageUrl?: string; createdAt: string;
 }
+
+interface GalleryItem {
+  id: string; title: string; keywords: string; style: string;
+  scene: string; imageUrl: string; prompt: string;
+  description?: string; tags?: string[];
+}
+
+const FONT_DESIGN_GALLERY: GalleryItem[] = [
+  { id: 'g1', title: '毛笔书法风格', keywords: '毛笔,书法,水墨,东方,禅意', style: 'brush-calligraphy', scene: '文化艺术', imageUrl: '', prompt: '中式毛笔书法字体设计，墨迹飞溅效果，笔画苍劲有力，水墨晕染质感，宣纸纹理背景，东方禅意美学，黑白灰为主色调', description: '苍劲有力的中式毛笔书法，墨迹飞溅，水墨晕染', tags: ['书法', '水墨', '东方'] },
+  { id: 'g2', title: '霓虹灯管风格', keywords: '霓虹,灯管,夜店,赛博朋克,发光', style: 'neon-tube', scene: '商业品牌', imageUrl: '', prompt: '霓虹灯管字体设计，发光灯管弯曲成型，暗色背景中发光，赛博朋克风格，粉色和青色光晕，玻璃管质感，城市夜景氛围', description: '赛博朋克霓虹灯管字体，暗夜发光', tags: ['霓虹', '赛博朋克', '发光'] },
+  { id: 'g3', title: '金属3D立体', keywords: '金属,3D,立体,铬合金,高端', style: 'metallic-3d', scene: '商业品牌', imageUrl: '', prompt: '金属3D立体字体设计，铬合金反射质感，镜面高光效果，深色背景，工业风金属光泽，字母厚度感强烈，高端奢华视觉', description: '铬合金3D立体字，镜面高光，工业奢华', tags: ['金属', '3D', '高端'] },
+  { id: 'g4', title: '手写水彩风格', keywords: '手写,水彩,温柔,艺术,浪漫', style: 'watercolor-hand', scene: '婚礼贺卡', imageUrl: '', prompt: '手写水彩字体设计，柔和笔触晕染，色彩渐变过渡，水彩画质感，温柔浪漫气息，花瓣装饰点缀，粉彩色调', description: '水彩手写体，柔和晕染，浪漫温柔', tags: ['水彩', '手写', '浪漫'] },
+  { id: 'g5', title: '像素复古风格', keywords: '像素,复古,8bit,游戏,怀旧', style: 'pixel-retro', scene: '游戏娱乐', imageUrl: '', prompt: '像素风格字体设计，8-bit复古游戏感，方块像素构成，鲜艳配色，怀旧游戏风格，霓虹边框，电子屏幕显示效果', description: '8-bit像素复古字体，怀旧游戏风', tags: ['像素', '复古', '游戏'] },
+  { id: 'g6', title: '花卉缠绕风格', keywords: '花卉,缠绕,藤蔓,自然,优雅', style: 'floral-ornate', scene: '婚礼贺卡', imageUrl: '', prompt: '花卉缠绕字体设计，花朵藤蔓围绕字母生长，精细线条勾勒，植物纹样装饰，优雅浪漫气质，浅色柔和背景', description: '花卉藤蔓缠绕，植物纹样装饰', tags: ['花卉', '自然', '优雅'] },
+  { id: 'g7', title: '未来科技风格', keywords: '未来,科技,全息,数字,科幻', style: 'futuristic-tech', scene: '科技产品', imageUrl: '', prompt: '未来科技字体设计，全息投影效果，数字代码雨背景，蓝紫色调发光，数据流动感，科幻界面风格，透明棱镜折射', description: '全息投影科技字体，数字代码流动', tags: ['科技', '全息', '未来'] },
+  { id: 'g8', title: '手作拼贴风格', keywords: '手作,拼贴,纸艺,手工,创意', style: 'collage-craft', scene: '创意设计', imageUrl: '', prompt: '手作拼贴字体设计，剪纸和杂志碎片拼贴，撕裂边缘效果，多层叠加质感，手工制作痕迹，色彩丰富混搭', description: '剪纸拼贴手作风格，多层叠加质感', tags: ['拼贴', '手作', '创意'] },
+  { id: 'g9', title: '极简线条风格', keywords: '极简,线条,现代,简约,几何', style: 'minimal-line', scene: '商业品牌', imageUrl: '', prompt: '极简线条字体设计，单线勾勒字母形态，几何构成原则，大量留白空间，黑白高对比，现代简约主义，优雅纤细笔画', description: '极简单线勾勒，几何构成，现代简约', tags: ['极简', '线条', '现代'] },
+  { id: 'g10', title: '火焰燃烧风格', keywords: '火焰,燃烧,炽热,能量,动感', style: 'flame-burning', scene: '运动品牌', imageUrl: '', prompt: '火焰燃烧字体设计，字母被烈焰包围，熔岩流淌效果，红橙黄渐变，炽热能量感，烟雾缭绕，黑暗背景衬托', description: '烈焰燃烧字体，熔岩流淌，能量感', tags: ['火焰', '动感', '炽热'] },
+  { id: 'g11', title: '冰雪结晶风格', keywords: '冰雪,结晶,冬天,清凉,精致', style: 'ice-crystal', scene: '节日活动', imageUrl: '', prompt: '冰雪结晶字体设计，冰晶冻霜质感，透明冰块折射光线，蓝色冷色调，雪花结晶纹理，冬天清凉氛围，光晕闪烁效果', description: '冰晶冻霜质感，雪花结晶，清凉透明', tags: ['冰雪', '结晶', '清凉'] },
+  { id: 'g12', title: '涂鸦街头风格', keywords: '涂鸦,街头,嘻哈,喷漆,叛逆', style: 'graffiti-street', scene: '街头文化', imageUrl: '', prompt: '涂鸦街头字体设计，喷漆涂鸦效果，粗犷笔触飞溅，鲜艳撞色搭配，砖墙纹理背景，嘻哈文化气息，叛逆不羁风格', description: '喷漆涂鸦街头风，粗犷笔触飞溅', tags: ['涂鸦', '街头', '嘻哈'] },
+];
 
 interface FontDesignPanelProps {
   isMonochrome?: boolean;
@@ -70,7 +92,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const [jimengEnhanced, setJimengEnhanced] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'plans' | 'prompt' | 'images' | 'history'>('plans');
+  const [activeTab, setActiveTab] = useState<'plans' | 'prompt' | 'images' | 'gallery' | 'history'>('plans');
   const [plans, setPlans] = useState<DesignPlan[]>([]);
   const [prompts, setPrompts] = useState<{ prompt: string; shortPrompt: string; enhancedPrompt: string; blackOnWhitePrompt: string; transparentLogoPrompt: string } | null>(null);
   type GeneratedImage = { url: string; planIndex: number; variant: number; planTitle?: string };
@@ -80,6 +102,8 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  // Gallery state
+  const [galleryLoading, setGalleryLoading] = useState(false);
   // Ref-based task tracking (no state, no re-renders, no useEffect polling bugs)
   const activeTasksRef = useRef<Map<string, { planIndex: number; variant: number; planTitle: string }>>(new Map());
   const pollingTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -363,9 +387,11 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     setGeneratedImages([]);
     setActiveTab('images');
     try {
-      // Submit 2 tasks with slightly different prompt variants
+      // Submit 2 tasks with significantly different prompt variants for high variation
       for (let v = 0; v < 2; v++) {
-        const variantSuffix = v === 0 ? '' : '，另一种构图布局和细节变化';
+        const variantPrompt = v === 0
+          ? `${plan.prompt}，极简留白构图，文字居中突出，大面积负空间，精致细节特写`
+          : `${plan.prompt}，丰富装饰构图，文字与图形元素交织，满版布局，视觉冲击力强`;
         const res = await fetch('/api/font-design/generate-image', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -373,7 +399,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
             text, scene, primaryStyleCategory, secondaryStyle,
             ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced,
             model: selectedModel, mode: 'full', count: 1,
-            prompt: plan.prompt + variantSuffix,
+            prompt: variantPrompt,
           }),
         });
         const data = await res.json();
@@ -391,7 +417,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     } catch { showToast('生成图片失败'); setIsGeneratingImage(false); }
   }, [text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast, stopPolling, startPolling]);
 
-  /** Generate 1 image per plan × 4 plans = 4 different images total */
+  /** Generate 2 varied images per plan × 4 plans = 8 different images total */
   const handleGenerateAllPlanImages = useCallback(async () => {
     if (plans.length === 0) { showToast('请先生成设计方案'); return; }
     stopPolling();
@@ -401,20 +427,27 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     try {
       for (let pi = 0; pi < plans.length; pi++) {
         const plan = plans[pi];
-        const res = await fetch('/api/font-design/generate-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text, scene, primaryStyleCategory, secondaryStyle,
-            ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced,
-            model: selectedModel, mode: 'full', count: 1,
-            prompt: plan.prompt,
-          }),
-        });
-        const data = await res.json();
-        if (data.error) { showToast(`方案"${plan.title}"生成失败: ${data.error}`); continue; }
-        if (data.taskId) {
-          activeTasksRef.current.set(data.taskId, { planIndex: pi, variant: 0, planTitle: plan.title });
+        const planPrompt = plan.prompt || `文字内容"${text}"，${scene}场景，${secondaryStyle || primaryStyleCategory}风格`;
+        // Submit 2 highly varied tasks per plan
+        for (let v = 0; v < 2; v++) {
+          const variantPrompt = v === 0
+            ? `${planPrompt}，极简留白构图，文字居中突出，大面积负空间，精致细节特写`
+            : `${planPrompt}，丰富装饰构图，文字与图形元素交织，满版布局，视觉冲击力强`;
+          const res = await fetch('/api/font-design/generate-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text, scene, primaryStyleCategory, secondaryStyle,
+              ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced,
+              model: selectedModel, mode: 'full', count: 1,
+              prompt: variantPrompt,
+            }),
+          });
+          const data = await res.json();
+          if (data.error) { showToast(`方案"${plan.title}"生成失败: ${data.error}`); continue; }
+          if (data.taskId) {
+            activeTasksRef.current.set(data.taskId, { planIndex: pi, variant: v, planTitle: plan.title });
+          }
         }
       }
       if (activeTasksRef.current.size > 0) {
@@ -437,10 +470,12 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       for (let i = 0; i < plans.length; i++) {
         const plan = plans[i];
         const planPrompt = plan.prompt || `文字内容"${text}"，${scene}场景，${secondaryStyle || primaryStyleCategory}风格`;
-        // Submit 2 variants per plan
+        // Submit 2 variants per plan with high variation
         for (let v = 0; v < 2; v++) {
-          const variantSuffix = v === 0 ? '' : '，另一种构图布局和细节变化';
-          const blackOnWhitePrompt = `黑底白字测试: ${planPrompt}${variantSuffix}, pure black background, white text only, high contrast, clear letterforms, no decorative elements, no colors, stark monochrome, crisp edges`;
+          const variantDesc = v === 0
+            ? '，极简留白构图，文字居中突出，大面积负空间'
+            : '，丰富装饰构图，满版布局，文字与装饰元素交织';
+          const blackOnWhitePrompt = `黑底白字测试: ${planPrompt}${variantDesc}, pure black background, white text only, high contrast, clear letterforms, no decorative elements, no colors, stark monochrome, crisp edges`;
           const resp = await fetch('/api/font-design/generate-image', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text, prompt: blackOnWhitePrompt, model: selectedModel, ratio, count: 1, color: '白色', background: '纯黑背景' }),
@@ -458,6 +493,88 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   }, [plans, text, scene, primaryStyleCategory, secondaryStyle, ratio, selectedModel, showToast, stopPolling, startPolling]);
 
   const handleAddToCanvas = useCallback((url: string) => { onAddImages?.([url]); }, [onAddImages]);
+
+  // Gallery: "一键制作同款" handler - fill left panel + auto generate 2 images
+  const handleUseInspiration = useCallback((item: GalleryItem) => {
+    // 1. Fill left panel settings from gallery item
+    setText(item.title + '，' + item.keywords);
+    setScene(item.scene);
+    setPrimaryStyleCategory(item.style);
+    setSecondaryStyle('');
+    // 2. Auto-generate 2 variant images with this item's prompt
+    const model = selectedModel;
+    if (!model) {
+      setActiveTab('prompt');
+      return;
+    }
+    const promptText = item.prompt;
+    setGeneratedImages([]);
+    activeTasksRef.current.clear();
+    setIsGeneratingImage(true);
+    setActiveTab('images');
+
+    for (let vIdx = 0; vIdx < 2; vIdx++) {
+      const variationHint = vIdx === 0 ? '，构图偏紧凑特写视角' : '，构图偏开阔全景视角';
+      const finalPrompt = promptText + variationHint;
+      fetch('/api/font-design/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: finalPrompt, model, ratio, mode: 'standard' }),
+      }).then(r => r.json()).then(data => {
+        if (data.taskId) {
+          activeTasksRef.current.set(data.taskId, { planIndex: 0, variant: vIdx, planTitle: item.title });
+          if (vIdx === 1) startPolling();
+        }
+      }).catch(err => {
+        console.error('灵感图生成失败:', err);
+        if (vIdx === 1) setIsGeneratingImage(false);
+      });
+    }
+  }, [selectedModel, ratio, startPolling]);
+
+  // Gallery: generate preview images for all gallery items
+  const handleGenerateGallery = useCallback(async () => {
+    if (isGeneratingImage || !selectedModel) return;
+    setIsGeneratingImage(true);
+    setGalleryLoading(true);
+    setGeneratedImages([]);
+    activeTasksRef.current.clear();
+
+    let submitted = 0;
+
+    for (const [idx, item] of FONT_DESIGN_GALLERY.entries()) {
+      try {
+        const resp = await fetch('/api/font-design/generate-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: item.prompt,
+            model: selectedModel,
+            mode: 'complete',
+            size: '1024x1024',
+          }),
+        });
+        const data = await resp.json();
+        if (data.taskId) {
+          activeTasksRef.current.set(data.taskId, {
+            planIndex: idx,
+            variant: 0,
+            planTitle: item.title,
+          });
+          submitted++;
+        }
+      } catch (e) {
+        console.error('Gallery generate failed for', item.title, e);
+      }
+    }
+
+    if (submitted > 0) {
+      startPolling();
+    } else {
+      setIsGeneratingImage(false);
+      setGalleryLoading(false);
+    }
+  }, [isGeneratingImage, selectedModel, startPolling]);
 
   const currentCategory = styleCategories.find(c => c.id === primaryStyleCategory);
   const accentColor = isMonochrome ? '#3b82f6' : '#d4af37';
@@ -535,7 +652,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     transition: 'all 0.2s ease',
   };
 
-  const tabLabels: Record<string, string> = { plans: '设计方案', prompt: '即梦提示词', images: '生成图片', history: '历史记录' };
+  const tabLabels: Record<string, string> = { plans: '设计方案', prompt: '即梦提示词', images: '生成图片', gallery: '灵感图库', history: '历史记录' };
 
   return (
     <div
@@ -905,7 +1022,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
           <div className="flex flex-col flex-1 overflow-hidden">
             {/* Tab bar */}
             <div className="flex px-4 shrink-0" style={{ borderBottom: `1px solid ${borderColor}`, background: bgPanel }}>
-              {(['plans', 'prompt', 'images', 'history'] as const).map((tab) => (
+              {(['plans', 'prompt', 'images', 'gallery', 'history'] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
@@ -1147,7 +1264,68 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                 </div>
               )}
 
-              {/* ========== Tab 4: 历史记录 ========== */}
+              {/* ========== Tab 4: 灵感图库 ========== */}
+              {activeTab === 'gallery' && (
+                <div className="space-y-4">
+                  <div className="text-center mb-2">
+                    <Palette className="h-6 w-6 mx-auto mb-1.5 opacity-40" style={{ color: accentColor }} />
+                    <p className="text-sm font-medium" style={{ color: textColor }}>即梦灵感图库</p>
+                    <p className="text-xs mt-1" style={{ color: subTextColor }}>精选字体设计灵感，点击&ldquo;一键制作同款&rdquo;快速开始创作</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {FONT_DESIGN_GALLERY.map((item: GalleryItem) => (
+                      <div
+                        key={item.id}
+                        className="group relative overflow-hidden rounded-lg transition-all"
+                        style={{ border: `1px solid ${borderColor}`, background: cardBgColor, cursor: 'default' }}
+                      >
+                        {/* Image */}
+                        <div className="relative aspect-[4/3] overflow-hidden bg-black/20">
+                          <img
+                            src={item.imageUrl}
+                            alt={item.title}
+                            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                            loading="lazy"
+                          />
+                          {/* Hover overlay with button */}
+                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-all duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100">
+                            <button
+                              onClick={() => handleUseInspiration(item)}
+                              className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                              style={{
+                                background: accentColor,
+                                color: isMonochrome ? '#fff' : '#000',
+                                border: 'none',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              一键制作同款
+                            </button>
+                          </div>
+                        </div>
+                        {/* Info */}
+                        <div className="p-2.5">
+                          <p className="text-xs font-medium truncate" style={{ color: textColor }}>{item.title}</p>
+                          <p className="text-[10px] mt-0.5 line-clamp-2" style={{ color: subTextColor }}>{item.description}</p>
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {(item.tags || []).map((tag: string) => (
+                              <span
+                                key={tag}
+                                className="px-1.5 py-0.5 rounded text-[9px]"
+                                style={{ background: isMonochrome ? '#e5e5e5' : '#1a1a1a', color: subTextColor }}
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ========== Tab 5: 历史记录 ========== */}
               {activeTab === 'history' && (
                 <div className="space-y-2">
                   {history.length === 0 && (
