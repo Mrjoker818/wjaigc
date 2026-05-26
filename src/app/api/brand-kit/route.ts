@@ -3,6 +3,7 @@ import { findProviderForModel } from '@/lib/server-api-config';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
+import { dbListBrandKits, dbUpsertBrandKit, dbDeleteBrandKit } from '@/lib/db-storage';
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -62,6 +63,40 @@ async function getLLMProvider(model?: string) {
   return null;
 }
 
+// ─── GET handler: List all brand kits ─────────────────────────────────
+
+export async function GET() {
+  try {
+    const rows = await dbListBrandKits();
+    const kits = rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      brandDNA: safeParseJSON(row.brand_dna),
+      colors: safeParseJSON(row.colors),
+      fontStyle: row.font_style,
+      styleKeywords: safeParseJSONArray(row.style_keywords),
+      referenceImages: safeParseJSONArray(row.reference_images),
+      isDefault: row.is_default,
+      createdAt: Number(row.created_at),
+      updatedAt: Number(row.updated_at),
+    }));
+    return NextResponse.json({ kits });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[brand-kit] GET error:', message);
+    return NextResponse.json({ kits: [] });
+  }
+}
+
+function safeParseJSON(str: string): Record<string, unknown> {
+  try { return JSON.parse(str || '{}'); } catch { return {}; }
+}
+
+function safeParseJSONArray(str: string): string[] {
+  try { return JSON.parse(str || '[]'); } catch { return []; }
+}
+
 // ─── POST handler ────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
@@ -73,6 +108,9 @@ export async function POST(request: NextRequest) {
       case 'analyze': return handleAnalyze(body);
       case 'analyze-image': return handleAnalyzeImage(body);
       case 'generate': return handleGenerate(body);
+      case 'create': return handleCreateKit(body);
+      case 'update': return handleUpdateKit(body);
+      case 'delete': return handleDeleteKit(body);
       default:
         return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
     }
@@ -525,6 +563,89 @@ async function handleGenerate(body: {
     scenarios: scenarios.map(s => ({ id: s.id, name: s.name, nameEn: s.nameEn, description: s.description })),
     total: totalScenarios,
   });
+}
+
+// ─── CRUD: Create / Update / Delete Brand Kits ──────────────────────
+
+async function handleCreateKit(body: Record<string, unknown>) {
+  const id = `kit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const kit = await dbUpsertBrandKit({
+    id,
+    name: (body.name as string) || '',
+    description: (body.description as string) || '',
+    brand_dna: JSON.stringify(body.brandDNA || body.brandDna || {}),
+    colors: JSON.stringify(body.colors || {}),
+    font_style: (body.fontStyle as string) || 'sans-serif',
+    style_keywords: JSON.stringify(body.styleKeywords || []),
+    reference_images: JSON.stringify(body.referenceImages || []),
+    is_default: false,
+  });
+  if (!kit) {
+    return NextResponse.json({ error: '保存品牌套件失败' }, { status: 500 });
+  }
+  return NextResponse.json({
+    kit: {
+      id: kit.id,
+      name: kit.name,
+      description: kit.description,
+      brandDNA: safeParseJSON(kit.brand_dna),
+      colors: safeParseJSON(kit.colors),
+      fontStyle: kit.font_style,
+      styleKeywords: safeParseJSONArray(kit.style_keywords),
+      referenceImages: safeParseJSONArray(kit.reference_images),
+      isDefault: kit.is_default,
+      createdAt: Number(kit.created_at),
+      updatedAt: Number(kit.updated_at),
+    }
+  });
+}
+
+async function handleUpdateKit(body: Record<string, unknown>) {
+  const id = body.id as string;
+  if (!id) {
+    return NextResponse.json({ error: '缺少品牌套件 ID' }, { status: 400 });
+  }
+  const kit = await dbUpsertBrandKit({
+    id,
+    name: body.name as string | undefined,
+    description: body.description as string | undefined,
+    brand_dna: (body.brandDNA || body.brandDna) ? JSON.stringify(body.brandDNA || body.brandDna) : undefined,
+    colors: body.colors ? JSON.stringify(body.colors) : undefined,
+    font_style: body.fontStyle as string | undefined,
+    style_keywords: body.styleKeywords ? JSON.stringify(body.styleKeywords) : undefined,
+    reference_images: body.referenceImages ? JSON.stringify(body.referenceImages) : undefined,
+    is_default: body.isDefault as boolean | undefined,
+  });
+  if (!kit) {
+    return NextResponse.json({ error: '更新品牌套件失败' }, { status: 500 });
+  }
+  return NextResponse.json({
+    kit: {
+      id: kit.id,
+      name: kit.name,
+      description: kit.description,
+      brandDNA: safeParseJSON(kit.brand_dna),
+      colors: safeParseJSON(kit.colors),
+      fontStyle: kit.font_style,
+      styleKeywords: safeParseJSONArray(kit.style_keywords),
+      referenceImages: safeParseJSONArray(kit.reference_images),
+      isDefault: kit.is_default,
+      createdAt: Number(kit.created_at),
+      updatedAt: Number(kit.updated_at),
+    }
+  });
+}
+
+async function handleDeleteKit(body: Record<string, unknown>) {
+  const id = body.id as string;
+  if (!id) {
+    return NextResponse.json({ error: '缺少品牌套件 ID' }, { status: 400 });
+  }
+  const ok = await dbDeleteBrandKit(id);
+  if (!ok) {
+    return NextResponse.json({ error: '删除品牌套件失败' }, { status: 500 });
+  }
+  return NextResponse.json({ success: true });
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────

@@ -544,6 +544,101 @@ export async function dbSetDefaultBrandAsset(userId: string, id: string): Promis
   }
 }
 
+// ─── Brand Kits (品牌构件) ──────────────────────────────────────────────────
+
+export interface DbBrandKit {
+  id: string;
+  name: string;
+  description: string;
+  brand_dna: string; // JSON string of BrandDNAType
+  colors: string; // JSON string of { primary, secondary[], accent, neutral }
+  font_style: string;
+  style_keywords: string; // JSON string of string[]
+  reference_images: string; // JSON string of string[]
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function dbListBrandKits(): Promise<DbBrandKit[]> {
+  try {
+    const { rows } = await execSql(
+      'SELECT * FROM wujie_brand_kits ORDER BY is_default DESC, updated_at DESC'
+    );
+    return rows as unknown as DbBrandKit[];
+  } catch (e) {
+    console.error('[db-storage] dbListBrandKits error:', e);
+    return [];
+  }
+}
+
+export async function dbGetBrandKit(id: string): Promise<DbBrandKit | null> {
+  try {
+    const { rows } = await execSql('SELECT * FROM wujie_brand_kits WHERE id = $1', [id]);
+    return (rows[0] as unknown as DbBrandKit) || null;
+  } catch (e) {
+    console.error('[db-storage] dbGetBrandKit error:', e);
+    return null;
+  }
+}
+
+export async function dbUpsertBrandKit(kit: Partial<DbBrandKit> & { id: string }): Promise<DbBrandKit | null> {
+  try {
+    const now = Date.now();
+    const existing = await dbGetBrandKit(kit.id);
+    if (existing) {
+      const { rows } = await execSql(
+        `UPDATE wujie_brand_kits SET name = $1, description = $2, brand_dna = $3, colors = $4, font_style = $5, style_keywords = $6, reference_images = $7, is_default = $8, updated_at = $9 WHERE id = $10 RETURNING *`,
+        [
+          kit.name ?? existing.name,
+          kit.description ?? existing.description,
+          kit.brand_dna ?? existing.brand_dna,
+          kit.colors ?? existing.colors,
+          kit.font_style ?? existing.font_style,
+          kit.style_keywords ?? existing.style_keywords,
+          kit.reference_images ?? existing.reference_images,
+          kit.is_default ?? existing.is_default,
+          now,
+          kit.id,
+        ]
+      );
+      return (rows[0] as unknown as DbBrandKit) || null;
+    } else {
+      const { rows } = await execSql(
+        `INSERT INTO wujie_brand_kits (id, name, description, brand_dna, colors, font_style, style_keywords, reference_images, is_default, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+        [
+          kit.id,
+          kit.name || '',
+          kit.description || '',
+          kit.brand_dna || '{}',
+          kit.colors || '{}',
+          kit.font_style || 'sans-serif',
+          kit.style_keywords || '[]',
+          kit.reference_images || '[]',
+          kit.is_default || false,
+          now,
+          now,
+        ]
+      );
+      return (rows[0] as unknown as DbBrandKit) || null;
+    }
+  } catch (e) {
+    console.error('[db-storage] dbUpsertBrandKit error:', e);
+    return null;
+  }
+}
+
+export async function dbDeleteBrandKit(id: string): Promise<boolean> {
+  try {
+    const { rowCount } = await execSql('DELETE FROM wujie_brand_kits WHERE id = $1', [id]);
+    return rowCount > 0;
+  } catch (e) {
+    console.error('[db-storage] dbDeleteBrandKit error:', e);
+    return false;
+  }
+}
+
 // ─── E-commerce Templates (动态模板管理) ──────────────────────────────────────
 
 export interface DbEcomTemplate {

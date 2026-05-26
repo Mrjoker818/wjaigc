@@ -266,6 +266,8 @@ function BrandKitEditor({ kit, onSave, onCancel, isGold }: {
   // Analyze from uploaded image
   const handleImageAnalyze = async (imageUrl: string) => {
     setAnalyzing(true);
+    // Add uploaded image to reference images
+    setEditKit(prev => prev ? { ...prev, referenceImages: [...(prev.referenceImages || []), imageUrl] } : prev);
     try {
       const resp = await fetch('/api/brand-kit', {
         method: 'POST',
@@ -308,12 +310,33 @@ function BrandKitEditor({ kit, onSave, onCancel, isGold }: {
       const resp = await fetch('/api/brand-kit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'analyze', kit: editKit }),
+        body: JSON.stringify({
+          action: 'analyze',
+          images: editKit.referenceImages || [],
+          brandName: editKit.name,
+        }),
       });
       if (resp.ok) {
         const data = await resp.json();
-        if (data.brandDna) {
-          setEditKit({ ...editKit, brandDna: data.brandDna });
+        if (data.brandDNA) {
+          const dna = data.brandDNA;
+          const newKit = { ...editKit };
+          if (dna.primaryColor) newKit.colors = { ...newKit.colors!, primary: dna.primaryColor };
+          if (dna.secondaryColors?.[0]) newKit.colors = { ...newKit.colors!, secondary: dna.secondaryColors[0] };
+          if (dna.secondaryColors?.[1]) newKit.colors = { ...newKit.colors!, accent: dna.secondaryColors[1] };
+          if (dna.styleKeywords?.length) newKit.styleKeywords = [...(newKit.styleKeywords || []), ...dna.styleKeywords.filter((k: string) => !(newKit.styleKeywords || []).includes(k))];
+          if (dna.mood) newKit.mood = dna.mood;
+          if (dna.industry) newKit.industry = dna.industry;
+          if (dna.description) newKit.description = dna.description;
+          if (dna.fontFamily) {
+            const ff = dna.fontFamily.toLowerCase();
+            if (ff.includes('serif') && !ff.includes('sans')) newKit.fontStyle = 'serif';
+            else if (ff.includes('handwrit') || ff.includes('script')) newKit.fontStyle = 'handwriting';
+            else if (ff.includes('display') || ff.includes('decorative')) newKit.fontStyle = 'display';
+            else if (ff.includes('mono')) newKit.fontStyle = 'monospace';
+          }
+          newKit.brandDna = JSON.stringify(dna, null, 2);
+          setEditKit(newKit);
         }
       }
     } catch (e) {
