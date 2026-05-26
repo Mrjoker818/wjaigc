@@ -31,6 +31,7 @@ interface GalleryDataItem {
   displayText: string;
   category: string;
   categoryName: string;
+  localPath?: string;
 }
 interface GalleryCategory {
   id: string;
@@ -1401,7 +1402,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                         >
                           <div className="w-10 h-10 rounded overflow-hidden shrink-0" style={{ background: isMonochrome ? '#f3f4f6' : '#1c1c1c' }}>
                             <img
-                              src={`/api/font-design/gallery-image?id=${item.id}`}
+                              src={`${item.localPath || `/api/font-design/gallery-image?id=${item.id}`}`}
                               alt={item.displayText || '灵感'}
                               className="w-full h-full object-cover"
                               loading="lazy"
@@ -1437,7 +1438,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                         >
                           <div className="relative aspect-[4/3] overflow-hidden" style={{ background: isMonochrome ? '#f3f4f6' : '#111' }}>
                             <img
-                              src={`/api/font-design/gallery-image?id=${item.id}`}
+                              src={`${item.localPath || `/api/font-design/gallery-image?id=${item.id}`}`}
                               alt={item.displayText || '灵感'}
                               className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                               loading="lazy"
@@ -1475,7 +1476,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                         >
                           <div className="relative aspect-[16/9] overflow-hidden" style={{ background: isMonochrome ? '#f3f4f6' : '#111' }}>
                             <img
-                              src={`/api/font-design/gallery-image?id=${item.id}`}
+                              src={`${item.localPath || `/api/font-design/gallery-image?id=${item.id}`}`}
                               alt={item.displayText || '灵感'}
                               className="w-full h-full object-cover"
                               loading="lazy"
