@@ -276,6 +276,28 @@ export async function POST(request: NextRequest) {
     const { action } = body;
 
     if (action === 'templates') {
+      // ★ Dynamic templates: load from database first, fallback to built-in
+      try {
+        const { dbGetEcomTemplates } = await import('@/lib/db-storage');
+        const dbTemplates = await dbGetEcomTemplates(true); // enabled only
+        if (dbTemplates.length > 0) {
+          // Map DB fields to frontend format
+          const templates = dbTemplates.map(t => ({
+            id: t.id,
+            name: t.name,
+            icon: t.icon,
+            description: t.description,
+            promptTemplate: t.prompt_template,
+            negativePrompt: t.negative_prompt,
+            aspectRatio: t.aspect_ratio,
+            category: t.category,
+            fidelityAnchor: t.fidelity_anchor,
+          }));
+          return NextResponse.json({ success: true, templates });
+        }
+      } catch {
+        // DB not available, fall through to built-in
+      }
       return NextResponse.json({ success: true, templates: ECOM_TEMPLATES });
     }
 
@@ -298,7 +320,31 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '未指定模型' }, { status: 400 });
       }
 
-      const selectedTemplates = ECOM_TEMPLATES.filter(t => templateIds.includes(t.id));
+      // ★ Dynamic template resolution: DB first, then fallback to built-in
+      let selectedTemplates: EcomTemplate[];
+      try {
+        const { dbGetEcomTemplate } = await import('@/lib/db-storage');
+        const dbResults = await Promise.all(templateIds.map((tid: string) => dbGetEcomTemplate(tid)));
+        const found = dbResults.filter(Boolean);
+        if (found.length > 0) {
+          selectedTemplates = found.map(t => ({
+            id: t!.id,
+            name: t!.name,
+            icon: t!.icon,
+            description: t!.description,
+            promptTemplate: t!.prompt_template,
+            negativePrompt: t!.negative_prompt,
+            aspectRatio: t!.aspect_ratio,
+            category: t!.category,
+            fidelityAnchor: t!.fidelity_anchor,
+          }));
+        } else {
+          selectedTemplates = ECOM_TEMPLATES.filter(t => templateIds.includes(t.id));
+        }
+      } catch {
+        selectedTemplates = ECOM_TEMPLATES.filter(t => templateIds.includes(t.id));
+      }
+
       if (!selectedTemplates.length) {
         return NextResponse.json({ error: '未找到选中的模板' }, { status: 400 });
       }
@@ -564,7 +610,23 @@ export async function POST(request: NextRequest) {
       const provider = await findProviderForModel(llmModel);
       if (!provider) return NextResponse.json({ error: '未找到该模型的API提供商配置' }, { status: 400 });
 
-      const template = ECOM_TEMPLATES.find((t: EcomTemplate) => t.id === templateId);
+      // ★ Dynamic template for assist
+      let template: EcomTemplate | undefined;
+      try {
+        const { dbGetEcomTemplate } = await import('@/lib/db-storage');
+        const dbTpl = await dbGetEcomTemplate(templateId);
+        if (dbTpl) {
+          template = {
+            id: dbTpl.id, name: dbTpl.name, icon: dbTpl.icon,
+            description: dbTpl.description, promptTemplate: dbTpl.prompt_template,
+            negativePrompt: dbTpl.negative_prompt, aspectRatio: dbTpl.aspect_ratio,
+            category: dbTpl.category, fidelityAnchor: dbTpl.fidelity_anchor,
+          };
+        }
+      } catch { /* ignore */ }
+      if (!template) {
+        template = ECOM_TEMPLATES.find((t: EcomTemplate) => t.id === templateId);
+      }
       const templateInfo = template ? `模板名称: ${template.name}, 模板描述: ${template.description}` : '未指定模板';
 
       const assistPrompts: Record<string, string> = {

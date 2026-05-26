@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { X, UserPlus, Trash2, Ban, CheckCircle2, KeyRound, Plug, RefreshCw, Activity, Wallet, Pencil, Zap, CheckCircle, XCircle, Loader2, Search, Settings, ChevronDown, Plus, ShieldCheck, AlertTriangle, ArrowUp, ArrowDown } from 'lucide-react';
+import { X, UserPlus, Trash2, Ban, CheckCircle2, KeyRound, Plug, RefreshCw, Activity, Wallet, Pencil, Zap, CheckCircle, XCircle, Loader2, Search, Settings, ChevronDown, Plus, ShieldCheck, AlertTriangle, ArrowUp, ArrowDown, ShoppingBag } from 'lucide-react';
 import { User } from '@/lib/user-types';
 import { ConfirmDialog } from './custom-dialogs';
 import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
@@ -47,7 +47,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
   const isGold = themeStyle === 'gold';
   const [users, setUsers] = useState<User[]>([]);
   const [providers, setProviders] = useState<AdminProvider[]>([]);
-  const [activeTab, setActiveTab] = useState<'users' | 'apis' | 'data'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'apis' | 'data' | 'ecom-templates'>('users');
   const [newUserName, setNewUserName] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('123456');
   const [newUserEmail, setNewUserEmail] = useState('');
@@ -82,6 +82,12 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
   const [viewingDataKey, setViewingDataKey] = useState<string | null>(null);
   const [viewingDataValue, setViewingDataValue] = useState<unknown>(null);
   const [viewingDataLoading, setViewingDataLoading] = useState(false);
+
+  // Ecom template tab state
+  const [ecomTemplates, setEcomTemplates] = useState<Array<Record<string, unknown>>>([]);
+  const [editingEcomTpl, setEditingEcomTpl] = useState<Record<string, unknown> | null>(null);
+  const [isEcomTplSaving, setIsEcomTplSaving] = useState(false);
+  const [showNewEcomTpl, setShowNewEcomTpl] = useState(false);
   const [verifyResult, setVerifyResult] = useState<{ providerId: string; success: boolean; summary: string; tests: Array<{ name: string; status: string; detail: string }> } | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [apiBalances, setApiBalances] = useState<Array<{
@@ -178,6 +184,93 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
       }
     } catch { /* ignore */ }
   }, [loadUserData, viewingDataKey]);
+
+  // ─── Ecom template CRUD ──────────────────────────────────────────
+
+  const loadEcomTemplates = useCallback(async () => {
+    try {
+      const resp = await fetch('/api/ecom-templates');
+      const data = await resp.json();
+      if (data.success) setEcomTemplates(data.templates || []);
+    } catch { /* ignore */ }
+  }, []);
+
+  const saveEcomTemplate = useCallback(async (tpl: Record<string, unknown>) => {
+    setIsEcomTplSaving(true);
+    try {
+      // Convert snake_case from DB row to camelCase for API
+      const payload: Record<string, unknown> = {
+        action: 'save',
+        id: tpl.id,
+        name: tpl.name,
+        icon: tpl.icon,
+        description: tpl.description,
+        promptTemplate: tpl.prompt_template || tpl.promptTemplate,
+        negativePrompt: tpl.negative_prompt || tpl.negativePrompt,
+        aspectRatio: tpl.aspect_ratio || tpl.aspectRatio,
+        category: tpl.category,
+        fidelityAnchor: tpl.fidelity_anchor || tpl.fidelityAnchor,
+        sortOrder: tpl.sort_order || tpl.sortOrder,
+        isEnabled: tpl.is_enabled !== undefined ? tpl.is_enabled : tpl.isEnabled,
+      };
+      const resp = await fetch('/api/ecom-templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (data.success) {
+        await loadEcomTemplates();
+        setEditingEcomTpl(null);
+        setShowNewEcomTpl(false);
+      } else {
+        alert(data.error || '保存失败');
+      }
+    } catch { alert('保存失败'); }
+    setIsEcomTplSaving(false);
+  }, [loadEcomTemplates]);
+
+  const deleteEcomTemplate = useCallback(async (id: string) => {
+    if (!confirm('确定删除此模板？')) return;
+    try {
+      const resp = await fetch('/api/ecom-templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', id }),
+      });
+      if ((await resp.json()).success) {
+        setEcomTemplates(prev => prev.filter(t => t.id !== id));
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const toggleEcomTemplateEnabled = useCallback(async (id: string, enabled: boolean) => {
+    try {
+      const resp = await fetch('/api/ecom-templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save', id, isEnabled: enabled }),
+      });
+      if ((await resp.json()).success) {
+        setEcomTemplates(prev => prev.map(t => t.id === id ? { ...t, is_enabled: enabled } : t));
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const moveEcomTemplateOrder = useCallback(async (id: string, direction: 'up' | 'down') => {
+    try {
+      await fetch('/api/ecom-templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reorder', id, direction }),
+      });
+      await loadEcomTemplates();
+    } catch { /* ignore */ }
+  }, [loadEcomTemplates]);
+
+  useEffect(() => {
+    void loadEcomTemplates();
+  }, [loadEcomTemplates]);
 
   const refreshBalances = useCallback(async () => {
     try {
@@ -635,10 +728,11 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
             ['users', '用户管理'],
             ['apis', 'API 管理'],
             ['data', '数据管理'],
+            ['ecom-templates', '电商模板'],
           ].map(([id, label]) => (
             <button
               key={id}
-              onClick={() => setActiveTab(id as 'users' | 'apis' | 'data')}
+              onClick={() => setActiveTab(id as 'users' | 'apis' | 'data' | 'ecom-templates')}
               aria-pressed={activeTab === id}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium ${activeTab === id ? 'bg-[#d4af37] text-black' : isGold ? 'text-[#888] hover:bg-[#1a1a1a]' : 'text-gray-500 hover:bg-gray-100'}`}
             >
@@ -1169,6 +1263,158 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* ── Tab: E-commerce Templates ── */}
+          {activeTab === 'ecom-templates' && (
+            <div className={`rounded-xl border p-5 ${softClass}`}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold flex items-center gap-2"><ShoppingBag className="w-4 h-4" />电商模板管理</h3>
+                <button
+                  onClick={() => {
+                    setEditingEcomTpl({
+                      id: `tpl_${Date.now()}`,
+                      name: '',
+                      icon: '📄',
+                      description: '',
+                      prompt_template: '',
+                      negative_prompt: 'low quality, blurry, distorted, deformed, watermark',
+                      aspect_ratio: '1:1',
+                      category: 'product',
+                      fidelity_anchor: '',
+                      sort_order: ecomTemplates.length + 1,
+                      is_enabled: true,
+                    });
+                    setShowNewEcomTpl(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#d4af37] text-black hover:bg-[#e0b840] transition-colors cursor-pointer"
+                >
+                  <Plus size={12} /> 新增模板
+                </button>
+              </div>
+
+              {/* Template list */}
+              <div className="space-y-2 max-h-[500px] overflow-y-auto">
+                {ecomTemplates.length === 0 ? (
+                  <div className={`text-center py-8 text-sm ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>
+                    暂无自定义模板，点击"新增模板"添加
+                  </div>
+                ) : ecomTemplates.map((tpl, idx) => (
+                  <div
+                    key={tpl.id as string}
+                    className={`flex items-center gap-3 rounded-lg px-4 py-3 ${isGold ? 'bg-[#0d0d0d] hover:bg-[#1a1a1a]' : 'bg-white hover:bg-gray-50'} transition-colors`}
+                  >
+                    {/* Icon + name */}
+                    <span className="text-lg">{tpl.icon as string || '📄'}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium truncate">{tpl.name as string || '未命名'}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${tpl.is_enabled ? (isGold ? 'bg-green-500/20 text-green-400' : 'bg-green-50 text-green-600') : (isGold ? 'bg-[#333] text-[#666]' : 'bg-gray-100 text-gray-400')}`}>
+                          {tpl.is_enabled ? '启用' : '禁用'}
+                        </span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${isGold ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-blue-50 text-blue-600'}`}>
+                          {(tpl.category as string) || 'product'}
+                        </span>
+                        <span className={`text-[10px] ${isGold ? 'text-[#555]' : 'text-gray-400'}`}>
+                          {tpl.aspect_ratio as string}
+                        </span>
+                      </div>
+                      <div className={`text-xs mt-0.5 truncate ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>
+                        {tpl.description as string || '无描述'}
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button onClick={() => moveEcomTemplateOrder(tpl.id as string, 'up')} disabled={idx === 0} className={`p-1 rounded transition-colors cursor-pointer disabled:opacity-30 ${isGold ? 'hover:bg-[#2a2a2a] text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`} title="上移">
+                        <ArrowUp size={12} />
+                      </button>
+                      <button onClick={() => moveEcomTemplateOrder(tpl.id as string, 'down')} disabled={idx === ecomTemplates.length - 1} className={`p-1 rounded transition-colors cursor-pointer disabled:opacity-30 ${isGold ? 'hover:bg-[#2a2a2a] text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`} title="下移">
+                        <ArrowDown size={12} />
+                      </button>
+                      <button onClick={() => toggleEcomTemplateEnabled(tpl.id as string, !tpl.is_enabled)} className={`p-1 rounded transition-colors cursor-pointer ${isGold ? 'hover:bg-[#2a2a2a]' : 'hover:bg-gray-100'}`} title={tpl.is_enabled ? '禁用' : '启用'}>
+                        {tpl.is_enabled ? <CheckCircle2 size={12} className="text-green-400" /> : <Ban size={12} className={isGold ? 'text-[#555]' : 'text-gray-300'} />}
+                      </button>
+                      <button onClick={() => { setEditingEcomTpl({ ...tpl }); setShowNewEcomTpl(false); }} className={`p-1 rounded transition-colors cursor-pointer ${isGold ? 'hover:bg-[#2a2a2a] text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`} title="编辑">
+                        <Pencil size={12} />
+                      </button>
+                      <button onClick={() => deleteEcomTemplate(tpl.id as string)} className={`p-1 rounded transition-colors cursor-pointer ${isGold ? 'hover:bg-red-500/20 text-red-400' : 'hover:bg-red-50 text-red-500'}`} title="删除">
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Edit/New template form */}
+              {(showNewEcomTpl || editingEcomTpl) && (
+                <div className={`mt-4 rounded-xl border p-4 ${softClass}`}>
+                  <h4 className="text-sm font-semibold mb-3">
+                    {showNewEcomTpl ? '新增模板' : `编辑模板: ${editingEcomTpl?.name || ''}`}
+                  </h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={labelClass} htmlFor="ecom-tpl-name">模板名称 *</label>
+                      <input id="ecom-tpl-name" className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="如：白底主图" value={(editingEcomTpl?.name as string) || ''} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, name: e.target.value } : null)} />
+                    </div>
+                    <div>
+                      <label className={labelClass} htmlFor="ecom-tpl-icon">图标</label>
+                      <input id="ecom-tpl-icon" className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="如：📦" value={(editingEcomTpl?.icon as string) || ''} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, icon: e.target.value } : null)} />
+                    </div>
+                    <div>
+                      <label className={labelClass} htmlFor="ecom-tpl-category">分类</label>
+                      <select id="ecom-tpl-category" className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} value={(editingEcomTpl?.category as string) || 'product'} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, category: e.target.value } : null)}>
+                        <option value="product">商品展示</option>
+                        <option value="scene">场景氛围</option>
+                        <option value="model">模特展示</option>
+                        <option value="graphic">平面设计</option>
+                        <option value="detail">细节展示</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className={labelClass} htmlFor="ecom-tpl-ratio">画面比例</label>
+                      <select id="ecom-tpl-ratio" className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} value={(editingEcomTpl?.aspect_ratio as string) || '1:1'} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, aspect_ratio: e.target.value } : null)}>
+                        <option value="1:1">1:1</option>
+                        <option value="4:3">4:3</option>
+                        <option value="3:4">3:4</option>
+                        <option value="16:9">16:9</option>
+                        <option value="9:16">9:16</option>
+                        <option value="3:2">3:2</option>
+                        <option value="2:3">2:3</option>
+                      </select>
+                    </div>
+                    <div className="col-span-2">
+                      <label className={labelClass} htmlFor="ecom-tpl-desc">描述</label>
+                      <input id="ecom-tpl-desc" className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="简短描述此模板的用途" value={(editingEcomTpl?.description as string) || ''} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, description: e.target.value } : null)} />
+                    </div>
+                    <div className="col-span-2">
+                      <label className={labelClass} htmlFor="ecom-tpl-prompt">提示词模板 *</label>
+                      <textarea id="ecom-tpl-prompt" className={`w-full h-28 px-3 py-2 rounded-lg border text-sm ${inputClass} resize-y`} placeholder="使用 {SUBJECT} {brand_color_prompt} {style_extra} 等占位符" value={(editingEcomTpl?.prompt_template as string) || ''} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, prompt_template: e.target.value } : null)} />
+                    </div>
+                    <div className="col-span-2">
+                      <label className={labelClass} htmlFor="ecom-tpl-neg">反向提示词</label>
+                      <textarea id="ecom-tpl-neg" className={`w-full h-16 px-3 py-2 rounded-lg border text-sm ${inputClass} resize-y`} placeholder="排除的低质量描述" value={(editingEcomTpl?.negative_prompt as string) || ''} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, negative_prompt: e.target.value } : null)} />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 mt-3">
+                    <button
+                      onClick={() => editingEcomTpl && saveEcomTemplate(editingEcomTpl)}
+                      disabled={isEcomTplSaving || !(editingEcomTpl?.name) || !(editingEcomTpl?.prompt_template)}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-[#d4af37] text-black hover:bg-[#e0b840] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isEcomTplSaving ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle size={12} />}
+                      {isEcomTplSaving ? '保存中...' : '保存模板'}
+                    </button>
+                    <button
+                      onClick={() => { setEditingEcomTpl(null); setShowNewEcomTpl(false); }}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${isGold ? 'text-[#888] hover:bg-[#1a1a1a]' : 'text-gray-500 hover:bg-gray-100'}`}
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

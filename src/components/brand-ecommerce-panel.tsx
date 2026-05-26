@@ -5,6 +5,7 @@ import { X, ShoppingBag, Loader2, Sparkles, Settings, GripVertical } from 'lucid
 import { BrandTemplateSelector } from './brand-ecommerce/BrandTemplateSelector';
 import { BrandSettingsForm } from './brand-ecommerce/BrandSettingsForm';
 import { BrandResultGallery, type GenerateResult } from './brand-ecommerce/BrandResultGallery';
+import { BrandAssetManager, type BrandAssetData } from './brand-ecommerce/BrandAssetManager';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -536,6 +537,25 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
     setIsAssisting(false);
   }, [selectedLlmModel, productDesc, sceneDesc, selectedTemplates, mainText, secondaryText, accentSymbol, styleExtra]);
 
+  // ─── Apply loaded brand asset ────────────────────────────────────
+
+  const handleApplyBrandAsset = useCallback((asset: BrandAssetData) => {
+    if (asset.productDesc) setProductDesc(asset.productDesc);
+    if (asset.styleExtra) setStyleExtra(asset.styleExtra);
+    if (asset.sceneDesc) setSceneDesc(asset.sceneDesc);
+    if (asset.brandColors?.length) setBrandColors(asset.brandColors);
+    if (asset.referenceImageUrl) setRefImage(asset.referenceImageUrl);
+    if (asset.productImageUrl) setProductImage(asset.productImageUrl);
+    if (asset.mainText) setMainText(asset.mainText);
+    if (asset.secondaryText) setSecondaryText(asset.secondaryText);
+    if (asset.accentSymbol) setAccentSymbol(asset.accentSymbol);
+    if (asset.selectedModel && models.some(m => m.id === asset.selectedModel)) {
+      setSelectedModel(asset.selectedModel);
+    }
+    // Switch to settings tab so user can review
+    setActiveTab('settings');
+  }, [models]);
+
   // ─── Success results count ────────────────────────────────────
 
   const successResults = results.filter(r => r.imageUrl);
@@ -583,6 +603,23 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           <span className="text-base font-semibold flex-1" style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }}>
             品牌电商
           </span>
+          <BrandAssetManager
+            currentSettings={{
+              productDesc,
+              styleExtra,
+              sceneDesc,
+              brandColors,
+              refImage,
+              productImage,
+              selectedModel,
+              mainText,
+              secondaryText,
+              accentSymbol,
+            }}
+            onApply={handleApplyBrandAsset}
+            userId="default"
+            isMonochrome={isMonochrome}
+          />
           <span className="text-xs px-1.5 py-0.5 rounded" style={{ color: isMonochrome ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.5)', background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
             模板批量生成
           </span>

@@ -432,3 +432,215 @@ export async function migrateFileDataToDb(): Promise<void> {
 
   console.log('[db-storage] Migration complete');
 }
+
+// ─── Brand Assets (品牌资产持久化) ────────────────────────────────────────────
+
+export interface DbBrandAsset {
+  id: string;
+  user_id: string;
+  name: string;
+  brand_name: string;
+  brand_colors: string[];
+  style_extra: string;
+  scene_desc: string;
+  reference_image_url: string;
+  product_image_url: string;
+  product_desc: string;
+  main_text: string;
+  secondary_text: string;
+  accent_symbol: string;
+  selected_model: string;
+  is_default: boolean;
+  created_at: number;
+  updated_at: number;
+}
+
+export async function dbGetBrandAssets(userId: string): Promise<DbBrandAsset[]> {
+  try {
+    const result = await execSql(
+      'SELECT * FROM wujie_brand_assets WHERE user_id = $1 ORDER BY is_default DESC, updated_at DESC',
+      [userId]
+    );
+    return (result.rows as unknown as DbBrandAsset[]).map(row => ({
+      ...row,
+      brand_colors: typeof row.brand_colors === 'string' ? JSON.parse(row.brand_colors as string) : (row.brand_colors || []),
+    }));
+  } catch (e) {
+    console.error('[db-storage] dbGetBrandAssets error:', e);
+    return [];
+  }
+}
+
+export async function dbGetBrandAsset(id: string): Promise<DbBrandAsset | null> {
+  try {
+    const result = await execSql('SELECT * FROM wujie_brand_assets WHERE id = $1', [id]);
+    const row = (result.rows as unknown as DbBrandAsset[])[0];
+    if (!row) return null;
+    return {
+      ...row,
+      brand_colors: typeof row.brand_colors === 'string' ? JSON.parse(row.brand_colors as string) : (row.brand_colors || []),
+    };
+  } catch (e) {
+    console.error('[db-storage] dbGetBrandAsset error:', e);
+    return null;
+  }
+}
+
+export async function dbUpsertBrandAsset(asset: DbBrandAsset): Promise<boolean> {
+  try {
+    await execSql(`
+      INSERT INTO wujie_brand_assets (id, user_id, name, brand_name, brand_colors, style_extra, scene_desc, reference_image_url, product_image_url, product_desc, main_text, secondary_text, accent_symbol, selected_model, is_default, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        brand_name = EXCLUDED.brand_name,
+        brand_colors = EXCLUDED.brand_colors,
+        style_extra = EXCLUDED.style_extra,
+        scene_desc = EXCLUDED.scene_desc,
+        reference_image_url = EXCLUDED.reference_image_url,
+        product_image_url = EXCLUDED.product_image_url,
+        product_desc = EXCLUDED.product_desc,
+        main_text = EXCLUDED.main_text,
+        secondary_text = EXCLUDED.secondary_text,
+        accent_symbol = EXCLUDED.accent_symbol,
+        selected_model = EXCLUDED.selected_model,
+        is_default = EXCLUDED.is_default,
+        updated_at = EXCLUDED.updated_at
+    `, [
+      asset.id, asset.user_id, asset.name, asset.brand_name,
+      JSON.stringify(asset.brand_colors || []),
+      asset.style_extra, asset.scene_desc,
+      asset.reference_image_url, asset.product_image_url,
+      asset.product_desc, asset.main_text, asset.secondary_text,
+      asset.accent_symbol, asset.selected_model,
+      asset.is_default, asset.created_at, asset.updated_at,
+    ]);
+    return true;
+  } catch (e) {
+    console.error('[db-storage] dbUpsertBrandAsset error:', e);
+    return false;
+  }
+}
+
+export async function dbDeleteBrandAsset(id: string): Promise<boolean> {
+  try {
+    await execSql('DELETE FROM wujie_brand_assets WHERE id = $1', [id]);
+    return true;
+  } catch (e) {
+    console.error('[db-storage] dbDeleteBrandAsset error:', e);
+    return false;
+  }
+}
+
+export async function dbSetDefaultBrandAsset(userId: string, id: string): Promise<boolean> {
+  try {
+    // Unset all defaults for this user, then set the new one
+    await execSql('UPDATE wujie_brand_assets SET is_default = FALSE, updated_at = $1 WHERE user_id = $2', [Date.now(), userId]);
+    await execSql('UPDATE wujie_brand_assets SET is_default = TRUE, updated_at = $1 WHERE id = $2 AND user_id = $3', [Date.now(), id, userId]);
+    return true;
+  } catch (e) {
+    console.error('[db-storage] dbSetDefaultBrandAsset error:', e);
+    return false;
+  }
+}
+
+// ─── E-commerce Templates (动态模板管理) ──────────────────────────────────────
+
+export interface DbEcomTemplate {
+  id: string;
+  name: string;
+  icon: string;
+  description: string;
+  prompt_template: string;
+  negative_prompt: string;
+  aspect_ratio: string;
+  category: string;
+  fidelity_anchor: string;
+  sort_order: number;
+  is_enabled: boolean;
+  is_builtin: boolean;
+  created_at: number;
+  updated_at: number;
+}
+
+export async function dbGetEcomTemplates(enabledOnly = false): Promise<DbEcomTemplate[]> {
+  try {
+    const sql = enabledOnly
+      ? 'SELECT * FROM wujie_ecom_templates WHERE is_enabled = TRUE ORDER BY sort_order ASC, created_at ASC'
+      : 'SELECT * FROM wujie_ecom_templates ORDER BY sort_order ASC, created_at ASC';
+    const result = await execSql(sql);
+    return result.rows as unknown as DbEcomTemplate[];
+  } catch (e) {
+    console.error('[db-storage] dbGetEcomTemplates error:', e);
+    return [];
+  }
+}
+
+export async function dbGetEcomTemplate(id: string): Promise<DbEcomTemplate | null> {
+  try {
+    const result = await execSql('SELECT * FROM wujie_ecom_templates WHERE id = $1', [id]);
+    return (result.rows as unknown as DbEcomTemplate[])[0] || null;
+  } catch (e) {
+    console.error('[db-storage] dbGetEcomTemplate error:', e);
+    return null;
+  }
+}
+
+export async function dbUpsertEcomTemplate(tpl: DbEcomTemplate): Promise<boolean> {
+  try {
+    await execSql(`
+      INSERT INTO wujie_ecom_templates (id, name, icon, description, prompt_template, negative_prompt, aspect_ratio, category, fidelity_anchor, sort_order, is_enabled, is_builtin, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        icon = EXCLUDED.icon,
+        description = EXCLUDED.description,
+        prompt_template = EXCLUDED.prompt_template,
+        negative_prompt = EXCLUDED.negative_prompt,
+        aspect_ratio = EXCLUDED.aspect_ratio,
+        category = EXCLUDED.category,
+        fidelity_anchor = EXCLUDED.fidelity_anchor,
+        sort_order = EXCLUDED.sort_order,
+        is_enabled = EXCLUDED.is_enabled,
+        updated_at = EXCLUDED.updated_at
+    `, [
+      tpl.id, tpl.name, tpl.icon, tpl.description,
+      tpl.prompt_template, tpl.negative_prompt,
+      tpl.aspect_ratio, tpl.category, tpl.fidelity_anchor,
+      tpl.sort_order, tpl.is_enabled, tpl.is_builtin,
+      tpl.created_at, tpl.updated_at,
+    ]);
+    return true;
+  } catch (e) {
+    console.error('[db-storage] dbUpsertEcomTemplate error:', e);
+    return false;
+  }
+}
+
+export async function dbDeleteEcomTemplate(id: string): Promise<boolean> {
+  try {
+    // Don't allow deleting built-in templates
+    const tpl = await dbGetEcomTemplate(id);
+    if (tpl?.is_builtin) {
+      console.warn('[db-storage] Cannot delete built-in template:', id);
+      return false;
+    }
+    await execSql('DELETE FROM wujie_ecom_templates WHERE id = $1', [id]);
+    return true;
+  } catch (e) {
+    console.error('[db-storage] dbDeleteEcomTemplate error:', e);
+    return false;
+  }
+}
+
+export async function dbBatchUpdateEcomTemplateOrder(orders: Array<{ id: string; sortOrder: number }>): Promise<boolean> {
+  try {
+    for (const { id, sortOrder } of orders) {
+      await execSql('UPDATE wujie_ecom_templates SET sort_order = $1, updated_at = $2 WHERE id = $3', [sortOrder, Date.now(), id]);
+    }
+    return true;
+  } catch (e) {
+    console.error('[db-storage] dbBatchUpdateEcomTemplateOrder error:', e);
+    return false;
+  }
+}
