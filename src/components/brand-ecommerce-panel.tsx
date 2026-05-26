@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { X, ShoppingBag, Upload, Sparkles, Loader2, Check, ChevronDown, Image as ImageIcon, Palette, RefreshCw, Settings, GripVertical } from 'lucide-react';
+import { X, ShoppingBag, Upload, Sparkles, Loader2, Check, ChevronDown, Image as ImageIcon, Palette, RefreshCw, Settings, GripVertical, Package } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -85,6 +85,8 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   const [colorInput, setColorInput] = useState('');
   const [refImage, setRefImage] = useState(referenceImageUrl || '');
   const [refImageFile, setRefImageFile] = useState<File | null>(null);
+  const [productImage, setProductImage] = useState('');
+  const [productImageFile, setProductImageFile] = useState<File | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isAssisting, setIsAssisting] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -98,6 +100,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   const llmDropdownRef = useRef<HTMLDivElement>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const productFileInputRef = useRef<HTMLInputElement>(null);
 
   // ─── Drag state ───
   const panelW = 680;
@@ -258,6 +261,30 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
     }
   }, []);
 
+  const handleProductImageUpload = useCallback(async (file: File) => {
+    setProductImageFile(file);
+    try {
+      const reader = new FileReader();
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const resp = await fetch('/api/save-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: dataUrl }),
+      });
+      const data = await resp.json();
+      if (data.url) {
+        setProductImage(data.url);
+      }
+    } catch {
+      const blob = URL.createObjectURL(file);
+      setProductImage(blob);
+    }
+  }, []);
+
   // ─── Toggle template ─────────────────────────────────────────
 
   const toggleTemplate = useCallback((id: string) => {
@@ -315,6 +342,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           sceneDesc: sceneDesc.trim(),
           model: selectedModel,
           referenceImageUrl: refImage,
+          productImageUrl: productImage,
           brandColors,
         }),
         signal: AbortSignal.timeout(600000), // 10 minutes timeout for sync processing
@@ -376,7 +404,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       setResults([{ templateId: 'error', templateName: '生成失败', error: msg }]);
       setIsGenerating(false);
     }
-  }, [selectedTemplates, productDesc, styleExtra, sceneDesc, selectedModel, refImage, brandColors]);
+  }, [selectedTemplates, productDesc, styleExtra, sceneDesc, selectedModel, refImage, brandColors, productImage]);
 
   // ─── Add result images to canvas ─────────────────────────────
 
@@ -901,6 +929,59 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
                   >
                     <Upload size={18} />
                     <span className="text-sm">点击上传商品参考图</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Product image upload */}
+              <div>
+                <label className={`block text-sm font-medium ${textSub} mb-1.5`}>
+                  产品图 (可选)
+                  <span className={`text-xs ${textMuted} ml-1`}>· 保持产品一致性</span>
+                </label>
+                <input
+                  ref={productFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={e => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = ev => {
+                        setProductImage(ev.target?.result as string);
+                        setProductImageFile(file);
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                    e.target.value = '';
+                  }}
+                />
+                {productImage ? (
+                  <div className="relative group">
+                    <img src={productImage} alt="产品图" className="w-full h-32 object-contain rounded-lg border border-white/[0.08]" />
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
+                      <button
+                        onClick={() => productFileInputRef.current?.click()}
+                        className={`px-3 py-1.5 rounded-md text-xs font-medium ${accent} ${accentHover} ${isMonochrome ? 'text-white' : 'text-black'} transition-colors`}
+                      >更换</button>
+                      <button
+                        onClick={() => { setProductImage(''); setProductImageFile(null); }}
+                        className="px-3 py-1.5 rounded-md text-xs font-medium bg-red-500/80 hover:bg-red-500 text-white transition-colors"
+                      >删除</button>
+                    </div>
+                    <div className={`mt-1 text-xs ${textMuted} text-center`}>产品图用于保持生成图中产品外观一致</div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => productFileInputRef.current?.click()}
+                    className={`w-full h-24 rounded-lg border-2 border-dashed flex flex-col items-center justify-center gap-1.5 transition-colors ${
+                      isMonochrome ? 'border-gray-300 hover:border-gray-400 text-gray-400' : 'border-white/[0.08] hover:border-white/[0.15] text-gray-500'
+                    }`}
+                  >
+                    <Package size={18} />
+                    <span className="text-sm">点击上传产品图</span>
+                    <span className={`text-xs ${textMuted}`}>保持生成图中产品外观一致</span>
                   </button>
                 )}
               </div>

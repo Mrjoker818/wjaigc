@@ -280,7 +280,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'generate') {
-      const { templateIds, productDesc, styleExtra, model, referenceImageUrl, brandColors } = body;
+      const { templateIds, productDesc, styleExtra, model, referenceImageUrl, productImageUrl, brandColors } = body;
       if (!templateIds?.length) {
         return NextResponse.json({ error: '请至少选择一个模板' }, { status: 400 });
       }
@@ -382,29 +382,40 @@ export async function POST(request: NextRequest) {
             };
 
             // Add reference image if provided (img2img)
-            // Resolve image URL: data URLs need to be uploaded first
-            let accessibleImageUrl = referenceImageUrl;
-            if (referenceImageUrl && referenceImageUrl.startsWith('data:')) {
-              try {
-                const saveResp = await fetch(new URL('/api/save-image', request.url).href, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ imageUrl: referenceImageUrl }),
-                });
-                if (saveResp.ok) {
-                  const saveData = await saveResp.json();
-                  if (saveData.url) accessibleImageUrl = saveData.url;
-                }
-              } catch { /* fallback to original */ }
-            }
+            // Resolve image URLs: data URLs need to be uploaded first
+            const allImageUrls: string[] = [];
 
-            if (accessibleImageUrl) {
-              reqBody.image = accessibleImageUrl;
-              reqBody.image_urls = [accessibleImageUrl];
+            // ─── Reference image (风格参考图) ───
+            if (referenceImageUrl) {
+              if (referenceImageUrl.startsWith('http')) {
+                reqBody.image = referenceImageUrl;
+                allImageUrls.push(referenceImageUrl);
+              } else {
+                // data: or relative path — use base64 data URL directly for API compatibility
+                reqBody.image = referenceImageUrl;
+                if (referenceImageUrl.startsWith('data:')) {
+                  allImageUrls.push(referenceImageUrl);
+                }
+              }
               reqBody.strength = 0.5;
             }
 
-            const { body: apiBody, endpoint: apiEndpoint } = adjustRequestForProfile(reqBody, compatProfile, { hasImage: !!accessibleImageUrl });
+            // ─── Product image (产品图，保持产品一致性) ───
+            if (productImageUrl) {
+              if (productImageUrl.startsWith('http')) {
+                allImageUrls.push(productImageUrl);
+              } else if (productImageUrl.startsWith('data:')) {
+                allImageUrls.push(productImageUrl);
+              }
+              // Add product consistency instruction to prompt
+              reqBody.prompt = `[PRODUCT CONSISTENCY: The product in the generated image must exactly match the product shown in the product reference image — same shape, color, texture, proportions, and details. Do not alter or reinterpret the product design.]\n${reqBody.prompt || prompt}`;
+            }
+
+            if (allImageUrls.length > 0) {
+              reqBody.image_urls = allImageUrls;
+            }
+
+            const { body: apiBody, endpoint: apiEndpoint } = adjustRequestForProfile(reqBody, compatProfile, { hasImage: allImageUrls.length > 0 });
             let path = apiEndpoint || '/images/generations';
 
             const headers: Record<string, string> = {
