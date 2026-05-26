@@ -73,14 +73,15 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const [activeTab, setActiveTab] = useState<'plans' | 'prompt' | 'images' | 'history'>('plans');
   const [plans, setPlans] = useState<DesignPlan[]>([]);
   const [prompts, setPrompts] = useState<{ prompt: string; shortPrompt: string; enhancedPrompt: string; blackOnWhitePrompt: string; transparentLogoPrompt: string } | null>(null);
-  const [generatedImages, setGeneratedImages] = useState<string[]>([]);
+  type GeneratedImage = { url: string; planIndex: number; variant: number; planTitle?: string };
+  const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [imageTaskId, setImageTaskId] = useState<string | null>(null);
-  const [allImageTaskIds, setAllImageTaskIds] = useState<string[]>([]);
+  const [imageTaskMap, setImageTaskMap] = useState<Record<string, { planIndex: number; variant: number; planTitle: string }>>({});
 
   const [styleCategories, setStyleCategories] = useState<StyleCategory[]>([]);
   const [scenes, setScenes] = useState<SceneOption[]>([]);
@@ -189,42 +190,16 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Poll for single image task
+  // Unified polling for image generation tasks
   useEffect(() => {
-    if (!imageTaskId || !isGeneratingImage) return;
-    pollIntervalRef.current = setInterval(async () => {
-      try {
-        const res = await fetch('/api/poll-task', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ taskId: imageTaskId, model: selectedModel }),
-        });
-        const data = await res.json();
-        if (data.status === 'completed') {
-          const urls = data.result?.directImageUrls || (data.imageUrl ? [data.imageUrl] : []);
-          setGeneratedImages(prev => [...prev, ...urls]);
-          setIsGeneratingImage(false);
-          setImageTaskId(null);
-          if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-        } else if (data.status === 'failed') {
-          setIsGeneratingImage(false);
-          setImageTaskId(null);
-          if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-        }
-      } catch { /* continue polling */ }
-    }, 3000);
-    return () => { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); };
-  }, [imageTaskId, isGeneratingImage, selectedModel]);
-
-  // Poll for multiple image tasks (batch generation for all plans)
-  useEffect(() => {
-    if (allImageTaskIds.length === 0 || !isGeneratingImage) return;
+    const taskIds = Object.keys(imageTaskMap);
+    if (taskIds.length === 0 || !isGeneratingImage) return;
     let completedCount = 0;
-    const totalTasks = allImageTaskIds.length;
+    const totalTasks = taskIds.length;
     pollIntervalRef.current = setInterval(async () => {
       try {
-        const pendingIds = allImageTaskIds.slice(completedCount);
-        for (const tid of pendingIds) {
+        for (const tid of taskIds) {
+          if (!imageTaskMap[tid]) continue; // already processed
           const res = await fetch('/api/poll-task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -233,22 +208,27 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
           const data = await res.json();
           if (data.status === 'completed') {
             const urls = data.result?.directImageUrls || (data.imageUrl ? [data.imageUrl] : []);
-            setGeneratedImages(prev => [...prev, ...urls]);
+            const firstUrl = urls[0]; // Take only 1 image per task
+            if (firstUrl) {
+              const meta = imageTaskMap[tid];
+              setGeneratedImages(prev => [...prev, { url: firstUrl, planIndex: meta.planIndex, variant: meta.variant, planTitle: meta.planTitle }]);
+            }
+            setImageTaskMap(prev => { const next = { ...prev }; delete next[tid]; return next; });
             completedCount++;
           } else if (data.status === 'failed') {
+            setImageTaskMap(prev => { const next = { ...prev }; delete next[tid]; return next; });
             completedCount++;
           }
-          // Still processing - skip to next
         }
         if (completedCount >= totalTasks) {
           setIsGeneratingImage(false);
-          setAllImageTaskIds([]);
+          setImageTaskMap({});
           if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
         }
       } catch { /* continue polling */ }
     }, 3000);
     return () => { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); };
-  }, [allImageTaskIds, isGeneratingImage, selectedModel]);
+  }, [imageTaskMap, isGeneratingImage, selectedModel]);
 
   const handleRandomExample = useCallback(() => {
     setText(RANDOM_EXAMPLES[Math.floor(Math.random() * RANDOM_EXAMPLES.length)]);
@@ -341,39 +321,17 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     } catch { showToast('生成图片失败'); setIsGeneratingImage(false); }
   }, [text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast]);
 
-  const handleGeneratePlanImage = useCallback(async (plan: DesignPlan) => {
+  /** Generate 2 variant images for a single design plan */
+  const handleGeneratePlanImage = useCallback(async (plan: DesignPlan, planIndex: number) => {
     if (!text.trim()) return;
     setIsGeneratingImage(true);
     setGeneratedImages([]);
     setActiveTab('images');
     try {
-      const res = await fetch('/api/font-design/generate-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text, scene, primaryStyleCategory, secondaryStyle,
-          ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced,
-          model: selectedModel, mode: 'full', count: 1,
-          prompt: plan.prompt,
-        }),
-      });
-      const data = await res.json();
-      if (data.error) { showToast(data.error); setIsGeneratingImage(false); return; }
-      setImageTaskId(data.taskId);
-      setHistory(prev => [{ id: `h-${Date.now()}`, text, scene, style: plan.title || secondaryStyle || primaryStyleCategory, prompt: plan.prompt || '', createdAt: new Date().toLocaleString() }, ...prev]);
-    } catch { showToast('生成图片失败'); setIsGeneratingImage(false); }
-  }, [text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast]);
-
-  /** Generate 4 images, one per design plan, each using its own prompt */
-  const handleGenerateAllPlanImages = useCallback(async () => {
-    if (plans.length === 0) { showToast('请先生成设计方案'); return; }
-    setIsGeneratingImage(true);
-    setGeneratedImages([]);
-    setActiveTab('images');
-    try {
-      // Submit all 4 plan image generation tasks
-      const newTaskIds: string[] = [];
-      for (const plan of plans) {
+      const newTaskMap: Record<string, { planIndex: number; variant: number; planTitle: string }> = {};
+      // Submit 2 tasks with slightly different prompt variants
+      for (let v = 0; v < 2; v++) {
+        const variantSuffix = v === 0 ? '' : '，另一种构图布局和细节变化';
         const res = await fetch('/api/font-design/generate-image', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -381,21 +339,82 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
             text, scene, primaryStyleCategory, secondaryStyle,
             ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced,
             model: selectedModel, mode: 'full', count: 1,
-            prompt: plan.prompt,
+            prompt: plan.prompt + variantSuffix,
           }),
         });
         const data = await res.json();
-        if (data.error) { showToast(`方案"${plan.title}"生成失败: ${data.error}`); continue; }
-        if (data.taskId) newTaskIds.push(data.taskId);
+        if (data.error) { showToast(`变体${v + 1}生成失败: ${data.error}`); continue; }
+        if (data.taskId) {
+          newTaskMap[data.taskId] = { planIndex, variant: v, planTitle: plan.title };
+        }
       }
-      if (newTaskIds.length > 0) {
-        setImageTaskId(newTaskIds[0]);
-        // Store all task IDs for sequential polling
-        setAllImageTaskIds(newTaskIds);
+      if (Object.keys(newTaskMap).length > 0) {
+        setImageTaskMap(newTaskMap);
+      } else {
+        setIsGeneratingImage(false);
+      }
+      setHistory(prev => [{ id: `h-${Date.now()}`, text, scene, style: plan.title || secondaryStyle || primaryStyleCategory, prompt: plan.prompt || '', createdAt: new Date().toLocaleString() }, ...prev]);
+    } catch { showToast('生成图片失败'); setIsGeneratingImage(false); }
+  }, [text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast]);
+
+  /** Generate 2 variant images per plan × 4 plans = 8 different images total */
+  const handleGenerateAllPlanImages = useCallback(async () => {
+    if (plans.length === 0) { showToast('请先生成设计方案'); return; }
+    setIsGeneratingImage(true);
+    setGeneratedImages([]);
+    setActiveTab('images');
+    try {
+      const newTaskMap: Record<string, { planIndex: number; variant: number; planTitle: string }> = {};
+      for (let pi = 0; pi < plans.length; pi++) {
+        const plan = plans[pi];
+        for (let v = 0; v < 2; v++) {
+          const variantSuffix = v === 0 ? '' : '，另一种构图布局和细节变化';
+          const res = await fetch('/api/font-design/generate-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text, scene, primaryStyleCategory, secondaryStyle,
+              ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced,
+              model: selectedModel, mode: 'full', count: 1,
+              prompt: plan.prompt + variantSuffix,
+            }),
+          });
+          const data = await res.json();
+          if (data.error) { showToast(`方案"${plan.title}"变体${v + 1}生成失败: ${data.error}`); continue; }
+          if (data.taskId) {
+            newTaskMap[data.taskId] = { planIndex: pi, variant: v, planTitle: plan.title };
+          }
+        }
+      }
+      if (Object.keys(newTaskMap).length > 0) {
+        setImageTaskMap(newTaskMap);
+      } else {
+        setIsGeneratingImage(false);
       }
       setHistory(prev => [...plans.map((plan, i) => ({ id: `h-${Date.now()}-${i}`, text, scene, style: plan.title || secondaryStyle || primaryStyleCategory, prompt: plan.prompt || '', createdAt: new Date().toLocaleString() })), ...prev]);
     } catch { showToast('生成图片失败'); setIsGeneratingImage(false); }
   }, [plans, text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast]);
+
+  const handleBlackOnWhiteTest = useCallback(async () => {
+    if (plans.length === 0) { showToast('请先生成字体方案'); return; }
+    setIsGeneratingImage(true);
+    try {
+      const newTaskMap: Record<string, { planIndex: number; variant: number; planTitle: string }> = {};
+      for (let i = 0; i < plans.length; i++) {
+        const plan = plans[i];
+        const planPrompt = plan.prompt || `文字内容"${text}"，${scene}场景，${secondaryStyle || primaryStyleCategory}风格`;
+        const blackOnWhitePrompt = `黑底白字测试: ${planPrompt}, pure black background, white text only, high contrast, clear letterforms, no decorative elements, no colors, stark monochrome, crisp edges`;
+        const resp = await fetch('/api/font-design/generate-image', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, prompt: blackOnWhitePrompt, model: selectedModel, ratio, count: 1, color: '白色', background: '纯黑背景' }),
+        });
+        const data = await resp.json();
+        if (data.taskId) { newTaskMap[data.taskId] = { planIndex: i, variant: 2, planTitle: plan.title || `方案${i + 1}` }; }
+        else if (data.imageUrl) { setGeneratedImages(prev => [...prev, { url: data.imageUrl, planIndex: i, variant: 2, planTitle: plan.title || `方案${i + 1}` }]); }
+      }
+      if (Object.keys(newTaskMap).length > 0) { setImageTaskMap(newTaskMap); } else { setIsGeneratingImage(false); }
+    } catch { showToast('黑底白字测试失败'); setIsGeneratingImage(false); }
+  }, [plans, text, scene, primaryStyleCategory, secondaryStyle, ratio, selectedModel, showToast]);
 
   const handleAddToCanvas = useCallback((url: string) => { onAddImages?.([url]); }, [onAddImages]);
 
@@ -830,7 +849,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                   {isGeneratingPrompt ? <Loader2 className="h-3 w-3 animate-spin inline mr-1" /> : <Wand2 className="h-3 w-3 inline mr-1" />}
                   生成即梦提示词
                 </button>
-                <button onClick={() => handleGenerateImage('black-on-white')} disabled={isGeneratingImage || !text.trim()} style={{ ...secondaryBtnStyle, flex: 1, opacity: (isGeneratingImage || !text.trim()) ? 0.5 : 1 }}>
+                <button onClick={handleBlackOnWhiteTest} disabled={isGeneratingImage || !text.trim() || plans.length === 0} style={{ ...secondaryBtnStyle, flex: 1, opacity: (isGeneratingImage || !text.trim() || plans.length === 0) ? 0.5 : 1 }} title={plans.length === 0 ? '请先生成字体方案' : '按4个方案分别生成黑底白字图片'}>
                   黑底白字测试
                 </button>
                 <button onClick={handleGenerateAllPlanImages} disabled={isGeneratingImage || !text.trim() || plans.length === 0} style={{ ...secondaryBtnStyle, flex: 1, opacity: (isGeneratingImage || !text.trim() || plans.length === 0) ? 0.5 : 1 }} title={plans.length === 0 ? '请先生成字体方案' : '按4个方案分别生成4张匹配图片'}>
@@ -926,7 +945,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                         ))}
                       </div>
                       <div className="mt-3 flex gap-2">
-                        <button onClick={() => handleGeneratePlanImage(plan)} disabled={isGeneratingImage} style={{ padding: '5px 12px', borderRadius: 4, fontSize: 11, fontWeight: 500, border: 'none', background: isMonochrome ? '#1a1a1a' : '#d4af37', color: isMonochrome ? '#fff' : '#1a1a1a', cursor: 'pointer', opacity: isGeneratingImage ? 0.5 : 1, transition: 'all 0.2s ease' }}>
+                        <button onClick={() => handleGeneratePlanImage(plan, idx)} disabled={isGeneratingImage} style={{ padding: '5px 12px', borderRadius: 4, fontSize: 11, fontWeight: 500, border: 'none', background: isMonochrome ? '#1a1a1a' : '#d4af37', color: isMonochrome ? '#fff' : '#1a1a1a', cursor: 'pointer', opacity: isGeneratingImage ? 0.5 : 1, transition: 'all 0.2s ease' }}>
                           <Wand2 size={12} className="inline mr-1" />生成图片
                         </button>
                         <button onClick={() => copyToClipboard(JSON.stringify(plan), '方案')} style={secondaryBtnStyle}>
@@ -995,7 +1014,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                         <button onClick={() => handleGenerateImage('full')} disabled={isGeneratingImage} style={{ ...goldBtnStyle, width: 'auto', opacity: isGeneratingImage ? 0.5 : 1 }}>
                           <ImageIcon size={14} className="inline mr-1" />发送到图像生成
                         </button>
-                        <button onClick={() => handleGenerateImage('black-on-white')} disabled={isGeneratingImage} style={{ ...secondaryBtnStyle, opacity: isGeneratingImage ? 0.5 : 1 }}>
+                        <button onClick={handleBlackOnWhiteTest} disabled={isGeneratingImage || plans.length === 0} style={{ ...secondaryBtnStyle, opacity: (isGeneratingImage || plans.length === 0) ? 0.5 : 1 }} title="按4个方案分别生成黑底白字图片">
                           黑底白字测试
                         </button>
                         <button onClick={() => handleGenerateImage('transparent-logo')} disabled={isGeneratingImage} style={{ ...secondaryBtnStyle, opacity: isGeneratingImage ? 0.5 : 1 }}>
@@ -1023,40 +1042,62 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                       <p className="text-xs mt-1" style={{ color: subTextColor }}>通常需要15-60秒</p>
                     </div>
                   )}
-                  <div className="grid grid-cols-2 gap-3">
-                    {generatedImages.map((url, idx) => (
-                      <div
-                        key={idx}
-                        className="rounded-lg overflow-hidden group relative"
-                        style={{ border: `1px solid ${borderColorLight}`, background: cardBgColor, transition: 'all 0.3s' }}
-                        onMouseEnter={e => { e.currentTarget.style.borderColor = accentColor; }}
-                        onMouseLeave={e => { e.currentTarget.style.borderColor = borderColorLight; }}
-                      >
-                        <img src={url} alt={`字体设计 ${idx + 1}`} className="w-full aspect-video object-cover" crossOrigin="anonymous" />
-                        <div
-                          className="absolute inset-0 flex items-center justify-center gap-2 transition-opacity opacity-0 group-hover:opacity-100"
-                          style={{ background: 'rgba(0,0,0,0.7)' }}
-                        >
-                          <button onClick={() => handleAddToCanvas(url)} className="px-3 py-1.5 rounded-lg text-xs font-medium" style={{ background: accentColor, color: isMonochrome ? '#ffffff' : '#0a0a0a' }}>
-                            <Plus size={12} className="inline mr-1" />加入画布
-                          </button>
-                          <button
-                            onClick={() => { const a = document.createElement('a'); a.href = url; a.download = `font-design-${idx + 1}.png`; a.click(); }}
-                            className="px-3 py-1.5 rounded-lg text-xs text-white"
-                            style={{ border: '1px solid rgba(255,255,255,0.3)' }}
-                          >
-                            <Download size={12} className="inline mr-1" />下载
-                          </button>
+                  {/* Group images by plan */}
+                  {(() => {
+                    const grouped = new Map<number, GeneratedImage[]>();
+                    generatedImages.forEach(img => {
+                      const key = img.planIndex ?? 0;
+                      if (!grouped.has(key)) grouped.set(key, []);
+                      grouped.get(key)!.push(img);
+                    });
+                    const sortedKeys = Array.from(grouped.keys()).sort((a, b) => a - b);
+                    return sortedKeys.map(planIdx => {
+                      const imgs = grouped.get(planIdx)!;
+                      const planTitle = plans[planIdx]?.title ?? `方案 ${planIdx + 1}`;
+                      return (
+                        <div key={planIdx} className="mb-4">
+                          <p className="text-xs font-medium mb-2 flex items-center gap-1.5" style={{ color: accentColor }}>
+                            <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: accentColor }}></span>
+                            {planTitle}
+                          </p>
+                          <div className="grid grid-cols-2 gap-3">
+                            {imgs.map((img, vIdx) => (
+                              <div
+                                key={`${planIdx}-${vIdx}`}
+                                className="rounded-lg overflow-hidden group relative"
+                                style={{ border: `1px solid ${borderColorLight}`, background: cardBgColor, transition: 'all 0.3s' }}
+                                onMouseEnter={e => { e.currentTarget.style.borderColor = accentColor; }}
+                                onMouseLeave={e => { e.currentTarget.style.borderColor = borderColorLight; }}
+                              >
+                                <img src={img.url} alt={`${planTitle} 变体${vIdx + 1}`} className="w-full aspect-video object-cover" crossOrigin="anonymous" />
+                                <div
+                                  className="absolute inset-0 flex items-center justify-center gap-2 transition-opacity opacity-0 group-hover:opacity-100"
+                                  style={{ background: 'rgba(0,0,0,0.7)' }}
+                                >
+                                  <button onClick={() => handleAddToCanvas(img.url)} className="px-3 py-1.5 rounded-lg text-xs font-medium" style={{ background: accentColor, color: isMonochrome ? '#ffffff' : '#0a0a0a' }}>
+                                    <Plus size={12} className="inline mr-1" />加入画布
+                                  </button>
+                                  <button
+                                    onClick={() => { const a = document.createElement('a'); a.href = img.url; a.download = `font-design-${planIdx + 1}-${vIdx + 1}.png`; a.click(); }}
+                                    className="px-3 py-1.5 rounded-lg text-xs text-white"
+                                    style={{ border: '1px solid rgba(255,255,255,0.3)' }}
+                                  >
+                                    <Download size={12} className="inline mr-1" />下载
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      );
+                    });
+                  })()}
                   {generatedImages.length > 0 && (
                     <div className="flex gap-2 justify-center">
                       <button onClick={() => handleGenerateImage('full')} disabled={isGeneratingImage} style={{ ...secondaryBtnStyle, opacity: isGeneratingImage ? 0.5 : 1 }}>
                         <RefreshCw size={12} className="inline mr-1" />重新生成
                       </button>
-                      <button onClick={() => onAddImages?.(generatedImages)} style={{ ...goldBtnStyle, width: 'auto' }}>
+                      <button onClick={() => onAddImages?.(generatedImages.map(g => g.url))} style={{ ...goldBtnStyle, width: 'auto' }}>
                         <Plus size={12} className="inline mr-1" />全部加入画布
                       </button>
                     </div>
