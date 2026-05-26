@@ -161,8 +161,16 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     fetch('/api/models?type=image')
       .then(r => r.json())
       .then(data => {
+        // Build providerId -> providerName mapping from providers array
+        const providerMap = new Map<string, string>();
+        if (data.providers && Array.isArray(data.providers)) {
+          for (const p of data.providers) {
+            providerMap.set(p.id, p.displayName || p.name || p.id);
+          }
+        }
         const models: ImageModel[] = (data.models || []).map((m: { id: string; name: string; providerId: string }) => ({
-          id: m.id, name: m.name, providerId: m.providerId, providerName: m.providerId,
+          id: m.id, name: m.name, providerId: m.providerId,
+          providerName: providerMap.get(m.providerId) || m.providerId,
         }));
         setImageModels(models);
         if (models.length > 0 && !selectedModel) setSelectedModel(models[0].id);
@@ -560,7 +568,12 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                     className="w-full flex items-center justify-between"
                     style={inputStyle}
                   >
-                    <span className="truncate">{imageModels.find(m => m.id === selectedModel)?.name || selectedModel || '选择模型'}</span>
+                    <div className="truncate flex items-center gap-1.5">
+                      <span>{imageModels.find(m => m.id === selectedModel)?.name || selectedModel || '选择模型'}</span>
+                      {imageModels.find(m => m.id === selectedModel)?.providerName && (
+                        <span style={{ color: `${subTextColor}99`, fontSize: '10px' }}>· {imageModels.find(m => m.id === selectedModel)?.providerName}</span>
+                      )}
+                    </div>
                     <ChevronDown size={14} className="shrink-0 ml-2" style={{ color: mutedColor, transition: 'transform 0.2s', transform: showModelDropdown ? 'rotate(180deg)' : 'none' }} />
                   </button>
                   {showModelDropdown && (
