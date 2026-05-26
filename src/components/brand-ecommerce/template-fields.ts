@@ -36,6 +36,38 @@ export interface TemplateFieldGroup {
 }
 
 /**
+ * Template ID to Chinese display name mapping.
+ * Used in UI to show readable template names instead of raw IDs.
+ */
+export const TEMPLATE_NAMES: Record<string, string> = {
+  'white-bg': '白底主图',
+  'banner-horizontal': '横版Banner图',
+  'detail-vertical': '竖版详情页',
+  'xiaohongshu-cover': '小红书封面',
+  'douyin-showcase': '抖音橱窗图',
+  'scene-lifestyle': '场景氛围图',
+  'model-display': '模特展示图',
+  'detail-closeup': '细节特写图',
+  'brand-poster': '品牌海报',
+  'creative-composite': '创意合成',
+  'packaging-display': '包装展示',
+  'multi-size': '多尺寸批量',
+};
+
+/**
+ * Get display name for a template, handling suffixed IDs.
+ * e.g. "detail-vertical" → "竖版详情页", "detail-vertical-2" → "竖版详情页 2"
+ */
+export function getTemplateDisplayName(templateId: string): string {
+  const m = templateId.match(/^(.+)-(\d+)$/);
+  if (m) {
+    const baseName = TEMPLATE_NAMES[m[1]];
+    if (baseName) return `${baseName} ${m[2]}`;
+  }
+  return TEMPLATE_NAMES[templateId] || templateId;
+}
+
+/**
  * Maps template IDs to their specific field groups.
  * Templates not listed here will use the default fields only.
  */
@@ -622,17 +654,30 @@ export const TEMPLATE_FIELD_GROUPS: Record<string, TemplateFieldGroup[]> = {
 };
 
 /**
+ * Resolve a potentially suffixed templateId (e.g. "detail-vertical-2") to its base templateId.
+ */
+export function resolveBaseTemplateId(templateId: string): string {
+  // Check if already a direct match
+  if (TEMPLATE_FIELD_GROUPS[templateId]) return templateId;
+  // Try stripping numeric suffix (e.g. "detail-vertical-2" → "detail-vertical")
+  const m = templateId.match(/^(.+)-(\d+)$/);
+  if (m && TEMPLATE_FIELD_GROUPS[m[1]]) return m[1];
+  return templateId;
+}
+
+/**
  * Get field groups for a template. Returns empty array if no specific fields defined.
+ * Supports suffixed IDs like "detail-vertical-2".
  */
 export function getTemplateFieldGroups(templateId: string): TemplateFieldGroup[] {
-  return TEMPLATE_FIELD_GROUPS[templateId] || [];
+  return TEMPLATE_FIELD_GROUPS[resolveBaseTemplateId(templateId)] || [];
 }
 
 /**
  * Get all unique field keys across all template groups for a given template.
  */
 export function getTemplateFieldKeys(templateId: string): string[] {
-  const groups = TEMPLATE_FIELD_GROUPS[templateId] || [];
+  const groups = TEMPLATE_FIELD_GROUPS[resolveBaseTemplateId(templateId)] || [];
   return groups.flatMap(g => g.fields.map(f => f.key));
 }
 

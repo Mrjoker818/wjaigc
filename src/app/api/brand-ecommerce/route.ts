@@ -497,15 +497,33 @@ export async function POST(request: NextRequest) {
       }
 
       // ★ Dynamic template resolution: DB first, then fallback to built-in
+      // Support suffixed IDs like "detail-vertical-2" → base "detail-vertical"
+      const resolveBaseTemplateId = (id: string): string => {
+        const suffixMatch = id.match(/^(.+)-(\d+)$/);
+        if (suffixMatch) {
+          const [, baseId] = suffixMatch;
+          // Check if baseId matches a known template
+          if (ECOM_TEMPLATES.some(t => t.id === baseId)) return baseId;
+        }
+        return id;
+      };
+
       let selectedTemplates: EcomTemplate[];
       try {
         const { dbGetEcomTemplate } = await import('@/lib/db-storage');
-        const dbResults = await Promise.all(templateIds.map((tid: string) => dbGetEcomTemplate(tid)));
+        const dbResults = await Promise.all(templateIds.map((tid: string) => {
+          const baseId = resolveBaseTemplateId(tid);
+          return dbGetEcomTemplate(baseId);
+        }));
         const found = dbResults.filter(Boolean);
         if (found.length > 0) {
-          selectedTemplates = found.map(t => ({
-            id: t!.id,
-            name: t!.name,
+          selectedTemplates = found.map((t, i) => {
+            const originalId = templateIds[i];
+            const suffixMatch = originalId.match(/^.+-(\d+)$/);
+            const displayName = suffixMatch ? `${t!.name} ${suffixMatch[1]}` : t!.name;
+            return {
+            id: originalId, // Keep original ID (may have suffix) for result tracking
+            name: displayName,
             icon: t!.icon,
             description: t!.description,
             promptTemplate: t!.prompt_template,
@@ -513,12 +531,23 @@ export async function POST(request: NextRequest) {
             aspectRatio: t!.aspect_ratio,
             category: t!.category,
             fidelityAnchor: t!.fidelity_anchor,
-          }));
+          }});
         } else {
-          selectedTemplates = ECOM_TEMPLATES.filter(t => templateIds.includes(t.id));
+          selectedTemplates = templateIds.map((tid: string) => {
+            const baseId = resolveBaseTemplateId(tid);
+            const tpl = ECOM_TEMPLATES.find(t => t.id === baseId);
+            return tpl ? { ...tpl, id: tid } : null;
+          }).filter(Boolean) as EcomTemplate[];
         }
       } catch {
-        selectedTemplates = ECOM_TEMPLATES.filter(t => templateIds.includes(t.id));
+        selectedTemplates = templateIds.map((tid: string) => {
+          const baseId = resolveBaseTemplateId(tid);
+          const tpl = ECOM_TEMPLATES.find(t => t.id === baseId);
+          if (!tpl) return null;
+          const suffixMatch = tid.match(/^.+-(\d+)$/);
+          const displayName = suffixMatch ? `${tpl.name} ${suffixMatch[1]}` : tpl.name;
+          return { ...tpl, id: tid, name: displayName };
+        }).filter(Boolean) as EcomTemplate[];
       }
 
       if (!selectedTemplates.length) {
@@ -909,11 +938,16 @@ export async function POST(request: NextRequest) {
       const provider = await findProviderForModel(llmModel);
       if (!provider) return NextResponse.json({ error: '未找到该模型的API提供商配置' }, { status: 400 });
 
-      // ★ Dynamic template for assist
+      // ★ Dynamic template for assist (resolve suffixed IDs like detail-vertical-2)
+      const baseTemplateId = (() => {
+        const m = templateId.match(/^(.+)-(\d+)$/);
+        if (m && ECOM_TEMPLATES.some(t => t.id === m[1])) return m[1];
+        return templateId;
+      })();
       let template: EcomTemplate | undefined;
       try {
         const { dbGetEcomTemplate } = await import('@/lib/db-storage');
-        const dbTpl = await dbGetEcomTemplate(templateId);
+        const dbTpl = await dbGetEcomTemplate(baseTemplateId);
         if (dbTpl) {
           template = {
             id: dbTpl.id, name: dbTpl.name, icon: dbTpl.icon,
@@ -924,7 +958,7 @@ export async function POST(request: NextRequest) {
         }
       } catch { /* ignore */ }
       if (!template) {
-        template = ECOM_TEMPLATES.find((t: EcomTemplate) => t.id === templateId);
+        template = ECOM_TEMPLATES.find((t: EcomTemplate) => t.id === baseTemplateId);
       }
       const templateInfo = template ? `模板名称: ${template.name}, 模板描述: ${template.description}` : '未指定模板';
 

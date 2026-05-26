@@ -575,6 +575,15 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
     }));
   }, []);
 
+  // ─── Add detail page (multiple sections for detail-vertical) ──
+  const handleAddDetailPage = useCallback(() => {
+    // Find next available detail page index
+    const existingDetailKeys = [...selectedTemplates].filter(id => id.startsWith('detail-vertical'));
+    const nextIndex = existingDetailKeys.length + 1;
+    const newId = nextIndex === 1 ? 'detail-vertical' : `detail-vertical-${nextIndex}`;
+    setSelectedTemplates(prev => new Set([...prev, newId]));
+  }, [selectedTemplates]);
+
   // ─── Success results count ────────────────────────────────────
 
   const successResults = results.filter(r => r.imageUrl);
@@ -735,6 +744,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
               selectedTemplateIds={Array.from(selectedTemplates)}
               templateFieldValues={templateFieldValues}
               onTemplateFieldChange={handleTemplateFieldChange}
+              onAddDetailPage={handleAddDetailPage}
               isMonochrome={isMonochrome}
             />
           )}

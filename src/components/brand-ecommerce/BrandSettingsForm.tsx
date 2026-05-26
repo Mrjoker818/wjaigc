@@ -1,8 +1,8 @@
 'use client';
 
 import { useRef, useCallback } from 'react';
-import { Upload, Palette, Sparkles, Loader2, ChevronDown, Package, GripVertical, ShieldCheck } from 'lucide-react';
-import { getTemplateFieldGroups, type TemplateFieldValues, type TemplateFieldDef } from './template-fields';
+import { Upload, Palette, Sparkles, Loader2, ChevronDown, Package, GripVertical, ShieldCheck, Plus } from 'lucide-react';
+import { getTemplateFieldGroups, getTemplateDisplayName, type TemplateFieldValues, type TemplateFieldDef } from './template-fields';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -80,6 +80,7 @@ interface Props {
   selectedTemplateIds: string[];
   templateFieldValues: TemplateFieldValues;
   onTemplateFieldChange: (templateId: string, fieldKey: string, value: string) => void;
+  onAddDetailPage?: () => void;
 
   isMonochrome?: boolean;
 }
@@ -165,6 +166,7 @@ export function BrandSettingsForm({
   selectedTemplateIds,
   templateFieldValues,
   onTemplateFieldChange,
+  onAddDetailPage,
 
   isMonochrome = false,
 }: Props) {
@@ -295,8 +297,23 @@ export function BrandSettingsForm({
               <div className={`flex items-center gap-2 px-3 py-2 ${isMonochrome ? 'bg-gray-50' : 'bg-[#0d0d0d]'}`}>
                 <Package size={13} className={isMonochrome ? 'text-gray-400' : 'text-gray-500'} />
                 <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-700' : 'text-gray-300'}`}>
-                  {tplId}
+                  {getTemplateDisplayName(tplId)}
                 </span>
+                {/* 添加详情页按钮 - 仅竖版详情页系列显示 */}
+                {(tplId === 'detail-vertical' || tplId.startsWith('detail-vertical-')) && (
+                  <button
+                    type="button"
+                    onClick={() => onAddDetailPage?.()}
+                    className={`ml-auto flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
+                      isMonochrome
+                        ? 'text-amber-600 hover:bg-amber-50 border border-amber-200'
+                        : 'text-[#d4af37] hover:bg-[#d4af37]/10 border border-[#d4af37]/30'
+                    }`}
+                  >
+                    <Plus size={10} />
+                    添加详情页
+                  </button>
+                )}
               </div>
 
               {/* Field groups */}
