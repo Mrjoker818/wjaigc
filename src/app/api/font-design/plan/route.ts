@@ -251,18 +251,37 @@ function buildSystemPrompt(params: {
   const graphicDesc = graphicElements.length > 0 ? graphicElements.map(g => GRAPHIC_MAP[g] || g).join('、') : '无图形融合';
   const materialDesc = MATERIAL_MAP[material] || material;
 
+  // Resolve style name to visual description from FONT_STYLE_CATEGORIES
+  let styleVisualDesc = '';
+  for (const cat of FONT_STYLE_CATEGORIES) {
+    for (const sub of cat.subStyles) {
+      if (sub.name === style || sub.id === style) {
+        styleVisualDesc = sub.prompt;
+        break;
+      }
+    }
+    if (styleVisualDesc) break;
+  }
+
+  const styleLine = styleVisualDesc
+    ? `${style}（${styleVisualDesc}）`
+    : style;
+
   return `你是一位资深的中文字体设计创意总监。请根据以下用户需求，生成4个差异化的字体设计方案。
 
 【用户需求】
 - 文字内容："${text}"
 - 使用场景：${scene}（${sceneDesc}）
-- 字体风格：${style}
+- 字体风格：${styleLine}
 - 画面比例：${ratio}
 - 颜色偏好：${color}
 - 背景要求：${background}
 - 质感材质：${materialDesc}
 - 笔画处理：${strokeDesc}
 - 图形融合：${graphicDesc}
+
+【重要：风格强制要求】
+用户选择了"${style}"风格${styleVisualDesc ? `，其核心视觉特征是"${styleVisualDesc}"` : ''}。所有方案必须严格体现这一风格的核心视觉特征，每个方案的prompt中必须明确描述该风格特征如何在笔画、结构、造型中体现。绝对不能偏离或弱化这一风格。
 
 【重要：差异化要求】
 4个方案必须在风格方向上明确区分，不能雷同，每个方案走完全不同的设计路线：
@@ -283,7 +302,7 @@ function buildSystemPrompt(params: {
       "graphicFusion": "图形融合（15-30字，描述图形元素如何与文字结合）",
       "colorMaterial": "色彩质感（15-30字，描述配色方案、材质肌理、光影效果）",
       "applicableScene": "适用场景（10-20字，说明最适合的应用场景）",
-      "prompt": "完整AI生图提示词（80-150字，必须包含：文字内容"${text}"、字体风格描述、字形结构、笔画特征、构图描述、材质描述、背景描述。严格禁止出现：英文、拼音、乱码、多余文字、水印、重复字。文字必须清晰可读）",
+      "prompt": "完整AI生图提示词（80-150字，必须包含：文字内容"${text}"、字体风格"${style}"的具体视觉特征描述、字形结构、笔画特征、构图描述、材质描述、背景描述。严格禁止出现：英文、拼音、乱码、多余文字、水印、重复字。文字必须清晰可读）",
       "keywords": ["关键词1", "关键词2", "关键词3"],
       "suitableScenes": ["适用场景1", "适用场景2"]
     }
@@ -299,7 +318,7 @@ function buildSystemPrompt(params: {
 - recommendIndex：推荐指数1-5，根据风格与用户需求的匹配度打分
 
 【风格一致性要求】
-所有方案的设计必须围绕用户选择的"${style}"风格展开，不能偏离到其他不相关的风格。`;
+所有方案的设计必须严格围绕"${style}"风格展开${styleVisualDesc ? `，核心视觉特征"${styleVisualDesc}"必须在每个方案中清晰可见` : ''}，不能偏离到其他不相关的风格。`;
 }
 
 function generateTemplatePlans(params: {
@@ -311,6 +330,19 @@ function generateTemplatePlans(params: {
   const strokeDesc = strokeOptions.length > 0 ? strokeOptions.join('、') : '标准笔画';
   const graphicDesc = graphicElements.length > 0 ? graphicElements.join('、') : '无';
 
+  // Resolve style name to visual description
+  let styleVisualDesc = '';
+  for (const cat of FONT_STYLE_CATEGORIES) {
+    for (const sub of cat.subStyles) {
+      if (sub.name === style || sub.id === style) {
+        styleVisualDesc = sub.prompt;
+        break;
+      }
+    }
+    if (styleVisualDesc) break;
+  }
+  const styleVisual = styleVisualDesc ? `（${styleVisualDesc}）` : '';
+
   return [
     {
       title: `${style}·极致风`,
@@ -321,7 +353,7 @@ function generateTemplatePlans(params: {
       graphicFusion: `${graphicDesc !== '无' ? graphicDesc + '元素与字形结构深度融合，增强视觉表现力' : '纯文字表现，以字形本身作为视觉焦点'}`,
       colorMaterial: `${color}为主色调，${material}质感，表面光滑细腻，${background}衬托`,
       applicableScene: `最适合${scene}场景，追求视觉震撼效果`,
-      prompt: `中文字体设计，文字内容"${text}"，${style}风格极致表现，字体居中，笔画${strokeDesc}，图形融合${graphicDesc}，颜色${color}，质感${material}，背景${background}，画面比例${ratio}。只保留这几个中文，不要英文不要拼音不要乱码不要重复字。`,
+      prompt: `中文字体设计，文字内容"${text}"，${style}风格极致表现${styleVisual}，字体居中，笔画${strokeDesc}，图形融合${graphicDesc}，颜色${color}，质感${material}，背景${background}，画面比例${ratio}。只保留这几个中文，不要英文不要拼音不要乱码不要重复字。`,
       keywords: [style, '极致风', strokeDesc],
       suitableScenes: [scene],
     },
@@ -334,7 +366,7 @@ function generateTemplatePlans(params: {
       graphicFusion: `${graphicDesc !== '无' ? graphicDesc + '元素创意点缀，与字形若即若离，增添层次感' : '以字形的解构重组作为创意表达'}`,
       colorMaterial: `${color}搭配对比色，${material}质感升级，光影层次丰富`,
       applicableScene: `适合${scene}及创意设计场景，追求独特个性表达`,
-      prompt: `中文字体设计，文字内容"${text}"，${style}风格创意融合，字体居中，笔画${strokeDesc}处理突破常规，${graphicDesc !== '自然' ? graphicDesc + '元素自然融入' : '字形解构创意表达'}，颜色${color}，质感${material}，背景${background}，画面比例${ratio}。只保留这几个中文，不要英文不要拼音不要乱码不要重复字。`,
+      prompt: `中文字体设计，文字内容"${text}"，${style}风格创意融合${styleVisual}，字体居中，笔画${strokeDesc}处理突破常规，${graphicDesc !== '自然' ? graphicDesc + '元素自然融入' : '字形解构创意表达'}，颜色${color}，质感${material}，背景${background}，画面比例${ratio}。只保留这几个中文，不要英文不要拼音不要乱码不要重复字。`,
       keywords: [style, '创意融合', '跨风格'],
       suitableScenes: [scene, '创意设计'],
     },
@@ -347,7 +379,7 @@ function generateTemplatePlans(params: {
       graphicFusion: `${graphicDesc !== '无' ? graphicDesc + '元素适度运用，不喧宾夺主，服务于整体阅读体验' : '以纯净字形保证信息传达效率'}`,
       colorMaterial: `${color}配色和谐，${material}质感温润，适合长时间注视`,
       applicableScene: `专为${scene}场景设计，实用性与美观性兼顾`,
-      prompt: `中文字体设计，文字内容"${text}"，为${scene}场景量身定制，${style}风格，字体居中，笔画${strokeDesc}，图形${graphicDesc}，颜色${color}，质感${material}，背景${background}，画面比例${ratio}。文字清晰可读，只保留这几个中文，不要英文不要拼音不要乱码不要重复字。`,
+      prompt: `中文字体设计，文字内容"${text}"，为${scene}场景量身定制，${style}风格${styleVisual}，字体居中，笔画${strokeDesc}，图形${graphicDesc}，颜色${color}，质感${material}，背景${background}，画面比例${ratio}。文字清晰可读，只保留这几个中文，不要英文不要拼音不要乱码不要重复字。`,
       keywords: [scene, style, '场景适配'],
       suitableScenes: [scene],
     },
@@ -360,7 +392,7 @@ function generateTemplatePlans(params: {
       graphicFusion: `${graphicDesc !== '无' ? graphicDesc + '元素以意想不到的方式介入，制造视觉冲突与张力' : '字形的极简或极繁处理，以反差创造记忆点'}`,
       colorMaterial: `${color}的非主流运用方式，${material}质感呈现实验性效果，突破审美惯性`,
       applicableScene: `适合${scene}及追求差异化的前卫场景，制造话题与记忆点`,
-      prompt: `中文字体设计，文字内容"${text}"，${style}风格大胆突破，字体居中，笔画${strokeDesc}反常规处理，${graphicDesc !== '无' ? graphicDesc + '元素制造视觉张力' : '字形极简极繁反差'}，颜色${color}非主流运用，质感${material}实验性，背景${background}，画面比例${ratio}。只保留这几个中文，不要英文不要拼音不要乱码不要重复字。`,
+      prompt: `中文字体设计，文字内容"${text}"，${style}风格大胆突破${styleVisual}，字体居中，笔画${strokeDesc}反常规处理，${graphicDesc !== '无' ? graphicDesc + '元素制造视觉张力' : '字形极简极繁反差'}，颜色${color}非主流运用，质感${material}实验性，背景${background}，画面比例${ratio}。只保留这几个中文，不要英文不要拼音不要乱码不要重复字。`,
       keywords: [style, '反向突破', '前卫实验'],
       suitableScenes: [scene, '前卫设计', '差异化表达'],
     },

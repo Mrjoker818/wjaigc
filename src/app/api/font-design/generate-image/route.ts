@@ -3,10 +3,80 @@ import { findProviderForModel } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
-import { buildJimengPrompt, buildBlackOnWhitePrompt, buildTransparentLogoPrompt } from '../plan/route';
+import { buildJimengPrompt, buildBlackOnWhitePrompt, buildTransparentLogoPrompt, FONT_STYLE_CATEGORIES, SCENE_MAP, STROKE_MAP, GRAPHIC_MAP, MATERIAL_MAP } from '../plan/route';
 
 export const maxDuration = 600;
 export const dynamic = 'force-dynamic';
+
+/**
+ * Resolve a style name (e.g. "竹节笔意") to its visual description prompt from FONT_STYLE_CATEGORIES.
+ * Also resolves category IDs (e.g. "oriental") to their category name.
+ */
+function resolveStyleVisualDesc(styleName: string): string {
+  if (!styleName || styleName === '智能推荐') return '';
+  // Search through all categories and subStyles
+  for (const cat of FONT_STYLE_CATEGORIES) {
+    // Match category ID
+    if (cat.id === styleName) return cat.name;
+    // Match subStyle name
+    for (const sub of cat.subStyles) {
+      if (sub.name === styleName) return sub.prompt;
+      if (sub.id === styleName) return sub.prompt;
+    }
+  }
+  return styleName;
+}
+
+/**
+ * Build a user-settings enforcement suffix that forces key visual parameters
+ * into the prompt even when a prompt override is provided.
+ */
+function buildUserSettingsSuffix(params: {
+  style: string; scene: string; color: string; background: string;
+  material: string; strokeOptions: string[]; graphicElements: string[];
+}): string {
+  const parts: string[] = [];
+
+  // Style: expand from name to visual description
+  const styleVisual = resolveStyleVisualDesc(params.style);
+  if (styleVisual && params.style !== '智能推荐') {
+    parts.push(`【必须严格遵循的字体风格】${params.style}：${styleVisual}，所有文字的笔画、结构和造型必须体现这一风格的核心视觉特征`);
+  }
+
+  // Scene
+  const sceneDesc = SCENE_MAP[params.scene] || '';
+  if (sceneDesc) {
+    parts.push(`【使用场景】${params.scene}：${sceneDesc}`);
+  }
+
+  // Stroke options
+  if (params.strokeOptions.length > 0) {
+    const strokeDesc = params.strokeOptions.map(s => STROKE_MAP[s] || s).join('、');
+    parts.push(`【笔画处理】${strokeDesc}`);
+  }
+
+  // Graphic elements
+  if (params.graphicElements.length > 0) {
+    const graphicDesc = params.graphicElements.map(g => GRAPHIC_MAP[g] || g).join('、');
+    parts.push(`【图形融合】${graphicDesc}，图形元素必须自然融入笔画`);
+  }
+
+  // Color & Material
+  if (params.color && params.color !== '白色') {
+    const matDesc = MATERIAL_MAP[params.material] || params.material;
+    parts.push(`【色彩材质】字体颜色${params.color}，质感${matDesc}`);
+  } else if (params.material && params.material !== '平面矢量') {
+    const matDesc = MATERIAL_MAP[params.material] || params.material;
+    parts.push(`【质感】${matDesc}`);
+  }
+
+  // Background
+  if (params.background && params.background !== '高级留白' && params.background !== '纯色背景') {
+    parts.push(`【背景】${params.background}`);
+  }
+
+  return parts.length > 0 ? '\n\n' + parts.join('\n') : '';
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -32,12 +102,21 @@ export async function POST(request: NextRequest) {
     const strokes: string[] = Array.isArray(strokeOptions) ? strokeOptions.map(String) : [];
     const graphics: string[] = Array.isArray(graphicElements) ? graphicElements.map(String) : [];
 
-    let finalPrompt = prompt ? String(prompt) : '';
-    if (!finalPrompt && textStr) {
+    // Build user-settings suffix for enforcement
+    const userSettingsSuffix = buildUserSettingsSuffix({
+      style: styleStr, scene: sceneStr, color: colorStr, background: bgStr,
+      material: matStr, strokeOptions: strokes, graphicElements: graphics,
+    });
+
+    let finalPrompt = '';
+    if (prompt) {
+      // When prompt is provided as override, still enforce user settings
+      finalPrompt = String(prompt) + userSettingsSuffix;
+    } else if (textStr) {
       if (modeStr === 'black-on-white') {
-        finalPrompt = buildBlackOnWhitePrompt(textStr);
+        finalPrompt = buildBlackOnWhitePrompt(textStr) + userSettingsSuffix;
       } else if (modeStr === 'transparent-logo') {
-        finalPrompt = buildTransparentLogoPrompt(textStr);
+        finalPrompt = buildTransparentLogoPrompt(textStr) + userSettingsSuffix;
       } else {
         finalPrompt = buildJimengPrompt({
           text: textStr, scene: sceneStr, style: styleStr,

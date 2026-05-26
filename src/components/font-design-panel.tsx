@@ -25,6 +25,7 @@ interface HistoryItem {
 interface GalleryItem {
   id: string; title: string; keywords: string; style: string;
   scene: string; imageUrl: string; prompt: string;
+  colorScheme?: string; background?: string; material?: string;
   description?: string; tags?: string[];
 }
 
@@ -304,6 +305,27 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     catch { showToast('复制失败'); }
   }, [showToast]);
 
+  /** Resolve a style name (e.g. "竹节笔意") to its visual description from styleCategories */
+  const resolveStyleVisualDesc = useCallback((styleName: string): string => {
+    if (!styleName || styleName === '智能推荐') return '';
+    for (const cat of styleCategories) {
+      for (const sub of cat.subStyles) {
+        if (sub.name === styleName) return sub.prompt;
+        if (sub.id === styleName) return sub.prompt;
+      }
+    }
+    return '';
+  }, [styleCategories]);
+
+  /** Build a style enforcement prefix string for prompt construction */
+  const buildStyleEnforcementPrefix = useCallback((): string => {
+    const styleName = secondaryStyle || primaryStyleCategory;
+    if (!styleName || styleName === 'smart-recommend' || styleName === '智能推荐') return '';
+    const visualDesc = resolveStyleVisualDesc(styleName);
+    if (!visualDesc) return `【必须严格遵循】${styleName}风格，`;
+    return `【必须严格遵循${styleName}风格：${visualDesc}】`;
+  }, [secondaryStyle, primaryStyleCategory, resolveStyleVisualDesc]);
+
   const handleGeneratePlans = useCallback(async () => {
     if (!text.trim()) return;
     setIsGeneratingPlan(true);
@@ -386,12 +408,17 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     setIsGeneratingImage(true);
     setGeneratedImages([]);
     setActiveTab('images');
+    const stylePrefix = buildStyleEnforcementPrefix();
     try {
+      // Always enforce style prefix on top of plan prompt
+      const planPrompt = plan.prompt
+        ? `${stylePrefix}${plan.prompt}`
+        : `${stylePrefix}文字内容"${text}"，${scene}场景，${secondaryStyle || primaryStyleCategory}风格`;
       // Submit 2 tasks with significantly different prompt variants for high variation
       for (let v = 0; v < 2; v++) {
         const variantPrompt = v === 0
-          ? `${plan.prompt}，极简留白构图，文字居中突出，大面积负空间，精致细节特写`
-          : `${plan.prompt}，丰富装饰构图，文字与图形元素交织，满版布局，视觉冲击力强`;
+          ? `${planPrompt}，极简留白构图，文字居中突出，大面积负空间，精致细节特写`
+          : `${planPrompt}，丰富装饰构图，文字与图形元素交织，满版布局，视觉冲击力强`;
         const res = await fetch('/api/font-design/generate-image', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -415,7 +442,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       }
       setHistory(prev => [{ id: `h-${Date.now()}`, text, scene, style: plan.title || secondaryStyle || primaryStyleCategory, prompt: plan.prompt || '', createdAt: new Date().toLocaleString() }, ...prev]);
     } catch { showToast('生成图片失败'); setIsGeneratingImage(false); }
-  }, [text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast, stopPolling, startPolling]);
+  }, [text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast, stopPolling, startPolling, buildStyleEnforcementPrefix]);
 
   /** Generate 2 varied images per plan × 4 plans = 8 different images total */
   const handleGenerateAllPlanImages = useCallback(async () => {
@@ -424,10 +451,14 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     setIsGeneratingImage(true);
     setGeneratedImages([]);
     setActiveTab('images');
+    const stylePrefix = buildStyleEnforcementPrefix();
     try {
       for (let pi = 0; pi < plans.length; pi++) {
         const plan = plans[pi];
-        const planPrompt = plan.prompt || `文字内容"${text}"，${scene}场景，${secondaryStyle || primaryStyleCategory}风格`;
+        // Always enforce style prefix on top of plan prompt to ensure user settings take effect
+        const planPrompt = plan.prompt
+          ? `${stylePrefix}${plan.prompt}`
+          : `${stylePrefix}文字内容"${text}"，${scene}场景，${secondaryStyle || primaryStyleCategory}风格`;
         // Submit 2 highly varied tasks per plan
         for (let v = 0; v < 2; v++) {
           const variantPrompt = v === 0
@@ -457,7 +488,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       }
       setHistory(prev => [...plans.map((plan, i) => ({ id: `h-${Date.now()}-${i}`, text, scene, style: plan.title || secondaryStyle || primaryStyleCategory, prompt: plan.prompt || '', createdAt: new Date().toLocaleString() })), ...prev]);
     } catch { showToast('生成图片失败'); setIsGeneratingImage(false); }
-  }, [plans, text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast, stopPolling, startPolling]);
+  }, [plans, text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast, stopPolling, startPolling, buildStyleEnforcementPrefix]);
 
   /** Black-on-white test: 2 images per plan × 4 plans = 8 different images */
   const handleBlackOnWhiteTest = useCallback(async () => {
@@ -466,10 +497,13 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     setIsGeneratingImage(true);
     setGeneratedImages([]);
     setActiveTab('images');
+    const stylePrefix = buildStyleEnforcementPrefix();
     try {
       for (let i = 0; i < plans.length; i++) {
         const plan = plans[i];
-        const planPrompt = plan.prompt || `文字内容"${text}"，${scene}场景，${secondaryStyle || primaryStyleCategory}风格`;
+        const planPrompt = plan.prompt
+          ? `${stylePrefix}${plan.prompt}`
+          : `${stylePrefix}文字内容"${text}"，${scene}场景，${secondaryStyle || primaryStyleCategory}风格`;
         // Submit 2 variants per plan with high variation
         for (let v = 0; v < 2; v++) {
           const variantDesc = v === 0
@@ -490,7 +524,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       }
       if (activeTasksRef.current.size > 0) { startPolling(); } else { setIsGeneratingImage(false); }
     } catch { showToast('黑底白字测试失败'); setIsGeneratingImage(false); }
-  }, [plans, text, scene, primaryStyleCategory, secondaryStyle, ratio, selectedModel, showToast, stopPolling, startPolling]);
+  }, [plans, text, scene, primaryStyleCategory, secondaryStyle, ratio, selectedModel, showToast, stopPolling, startPolling, buildStyleEnforcementPrefix]);
 
   const handleAddToCanvas = useCallback((url: string) => { onAddImages?.([url]); }, [onAddImages]);
 
@@ -507,7 +541,8 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       setActiveTab('prompt');
       return;
     }
-    const promptText = item.prompt;
+    const stylePrefix = buildStyleEnforcementPrefix();
+    const promptText = stylePrefix + item.prompt;
     setGeneratedImages([]);
     activeTasksRef.current.clear();
     setIsGeneratingImage(true);
@@ -519,7 +554,11 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       fetch('/api/font-design/generate-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: finalPrompt, model, ratio, mode: 'standard' }),
+        body: JSON.stringify({
+          prompt: finalPrompt, model, ratio, mode: 'standard',
+          text: item.title, scene: item.scene, primaryStyleCategory: item.style,
+          color: item.colorScheme, background: item.background, material: item.material,
+        }),
       }).then(r => r.json()).then(data => {
         if (data.taskId) {
           activeTasksRef.current.set(data.taskId, { planIndex: 0, variant: vIdx, planTitle: item.title });
@@ -530,7 +569,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
         if (vIdx === 1) setIsGeneratingImage(false);
       });
     }
-  }, [selectedModel, ratio, startPolling]);
+  }, [selectedModel, ratio, startPolling, buildStyleEnforcementPrefix]);
 
   // Gallery: generate preview images for all gallery items
   const handleGenerateGallery = useCallback(async () => {
@@ -552,6 +591,9 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
             model: selectedModel,
             mode: 'complete',
             size: '1024x1024',
+            text: item.title, scene: item.scene,
+            primaryStyleCategory: item.style,
+            color: item.colorScheme || '', background: item.background || '', material: item.material || '',
           }),
         });
         const data = await resp.json();
@@ -577,6 +619,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   }, [isGeneratingImage, selectedModel, startPolling]);
 
   const currentCategory = styleCategories.find(c => c.id === primaryStyleCategory);
+
   const accentColor = isMonochrome ? '#3b82f6' : '#d4af37';
   const bgPanel = isMonochrome ? '#ffffff' : '#0f0f0f';
   const cardBgColor = isMonochrome ? '#f9fafb' : '#141414';
