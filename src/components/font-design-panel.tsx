@@ -111,6 +111,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const [gallerySearch, setGallerySearch] = useState('');
   // Inspiration reference state (from gallery "制作同款")
   const [inspirationRef, setInspirationRef] = useState<GalleryDataItem | null>(null);
+  const [inspirationKeywords, setInspirationKeywords] = useState('');
   // Ref-based task tracking (no state, no re-renders, no useEffect polling bugs)
   const activeTasksRef = useRef<Map<string, { planIndex: number; variant: number; planTitle: string }>>(new Map());
   const pollingTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -566,17 +567,19 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
-  // Gallery: "一键制作同款" handler — fill left panel params, show reference, let user confirm
+  // Gallery: "一键制作同款" handler — switch left panel to inspiration creation mode
   const handleUseInspiration = useCallback((item: GalleryDataItem) => {
-    // Set inspiration reference for left panel preview
+    // Set inspiration reference
     setInspirationRef(item);
 
-    // Fill text field with the display text
+    // Set editable keywords from the inspiration prompt
+    setInspirationKeywords(item.prompt || '');
+
+    // Fill text field with the display text for context
     const displayText = item.displayText || '';
     if (displayText) setText(displayText);
-    setScene('文化艺术');
-    
-    // Map category to primaryStyleCategory
+
+    // Map category to primaryStyleCategory for generation context
     const catToStyle: Record<string, string> = {
       'cat-0': 'oriental', 'cat-1': 'modern', 'cat-2': 'handwriting',
       'cat-3': 'dimensional', 'cat-4': 'oriental', 'cat-5': 'cute',
@@ -584,48 +587,23 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       'cat-9': 'modern', 'cat-10': 'creative', 'cat-11': 'creative',
     };
     setPrimaryStyleCategory(catToStyle[item.category] || 'smart-recommend');
-    setSecondaryStyle('');
 
-    // Build prompt from inspiration and fill into the prompt state
-    const stylePrefix = buildStyleEnforcementPrefix();
-    const fullPrompt = stylePrefix + (item.prompt || '');
-    setPrompts({
-      prompt: fullPrompt,
-      shortPrompt: item.prompt || '',
-      enhancedPrompt: fullPrompt,
-      blackOnWhitePrompt: item.prompt || '',
-      transparentLogoPrompt: '',
-    });
-
-    // Switch to prompt tab so user can review/edit keywords
-    setActiveTab('prompt');
-
-    // Expand advanced if not already
-    setShowAdvanced(true);
-  }, [buildStyleEnforcementPrefix]);
+    // Switch to images tab to see results after generation
+    setActiveTab('images');
+  }, []);
 
   // Generate images based on inspiration reference (user confirmed after editing)
   const handleInspirationGenerate = useCallback(() => {
-    if (!text.trim() || isGeneratingImage) return;
+    if (!inspirationKeywords.trim() || isGeneratingImage) return;
     const model = selectedModelRef.current;
     if (!model) { showToast('请先选择生图模型'); return; }
 
-    // Build prompt from current settings + inspiration prompt
-    const stylePrefix = buildStyleEnforcementPrefix();
-    const inspirationPrompt = inspirationRef?.prompt || prompts?.prompt || '';
-    const finalPromptBase = stylePrefix + inspirationPrompt;
+    const finalPromptBase = inspirationKeywords.trim();
 
     setGeneratedImages([]);
     activeTasksRef.current.clear();
     setIsGeneratingImage(true);
     setActiveTab('images');
-
-    const catToStyle: Record<string, string> = {
-      'cat-0': 'oriental', 'cat-1': 'modern', 'cat-2': 'handwriting',
-      'cat-3': 'dimensional', 'cat-4': 'oriental', 'cat-5': 'cute',
-      'cat-6': 'modern', 'cat-7': 'modern', 'cat-8': 'neon',
-      'cat-9': 'modern', 'cat-10': 'creative', 'cat-11': 'creative',
-    };
 
     for (let vIdx = 0; vIdx < 2; vIdx++) {
       const variationHint = vIdx === 0 ? '，构图偏紧凑特写视角' : '，构图偏开阔全景视角';
@@ -635,8 +613,9 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: finalPrompt, model, ratio, mode: 'standard',
-          text, scene: '文化艺术',
-          primaryStyleCategory: inspirationRef ? (catToStyle[inspirationRef.category] || 'smart-recommend') : primaryStyleCategory,
+          text: text || inspirationRef?.displayText || '',
+          scene: '文化艺术',
+          primaryStyleCategory: primaryStyleCategory,
         }),
       }).then(r => r.json()).then(data => {
         if (data.taskId) {
@@ -648,7 +627,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
         if (vIdx === 1) setIsGeneratingImage(false);
       });
     }
-  }, [text, isGeneratingImage, inspirationRef, prompts, ratio, primaryStyleCategory, buildStyleEnforcementPrefix, startPolling, showToast]);
+  }, [inspirationKeywords, isGeneratingImage, inspirationRef, text, ratio, primaryStyleCategory, startPolling, showToast]);
 
   const currentCategory = styleCategories.find(c => c.id === primaryStyleCategory);
 
@@ -804,88 +783,179 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
             style={{ width: '38%', borderRight: `1px solid ${borderColor}`, overflow: 'hidden' }}
           >
             <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ scrollbarWidth: 'thin' }}>
-              {/* ★ Inspiration Reference Card (shown when user clicks "制作同款" in gallery) */}
-              {inspirationRef && (
-                <div
-                  className="relative rounded-lg overflow-hidden transition-all"
-                  style={{
-                    border: `1px solid ${accentColor}40`,
-                    background: isMonochrome ? 'rgba(59,130,246,0.06)' : 'rgba(212,175,55,0.08)',
-                  }}
-                >
-                  {/* Close button */}
-                  <button
-                    onClick={() => setInspirationRef(null)}
-                    className="absolute top-1.5 right-1.5 z-10 w-5 h-5 rounded-full flex items-center justify-center transition-colors"
-                    style={{ background: isMonochrome ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 10, cursor: 'pointer' }}
-                    title="移除灵感参考"
-                  >
-                    ×
-                  </button>
-                  <div className="flex gap-3 p-3">
-                    {/* Reference thumbnail */}
-                    <div className="w-14 h-14 rounded-md overflow-hidden shrink-0" style={{ background: isMonochrome ? '#f3f4f6' : '#111' }}>
-                      <img
-                        src={inspirationRef.localPath || `/api/font-design/gallery-image?id=${inspirationRef.id}`}
-                        alt="灵感参考"
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                    {/* Reference info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <span
-                          className="px-1.5 py-0.5 rounded text-[9px] font-medium"
-                          style={{ background: accentColor, color: isMonochrome ? '#fff' : '#000' }}
-                        >
-                          灵感参考
-                        </span>
-                        <span className="text-[9px]" style={{ color: subTextColor }}>{inspirationRef.categoryName}</span>
-                      </div>
-                      <p className="text-[11px] font-medium truncate" style={{ color: textColor }}>
-                        {inspirationRef.displayText || '字体设计灵感'}
-                      </p>
-                      <p className="text-[9px] line-clamp-2 mt-0.5" style={{ color: subTextColor }}>
-                        {inspirationRef.prompt.substring(0, 80)}...
-                      </p>
-                    </div>
-                  </div>
+              {inspirationRef ? (
+                /* ═══════════ 灵感同款创作区 (replaces normal left panel) ═══════════ */
+                <>
+                  {/* Reference Image Card */}
                   <div
-                    className="px-3 pb-2 text-[9px]"
-                    style={{ color: `${subTextColor}aa` }}
+                    className="relative rounded-xl overflow-hidden"
+                    style={{
+                      border: `1px solid ${accentColor}50`,
+                      background: isMonochrome ? 'rgba(59,130,246,0.04)' : 'rgba(212,175,55,0.06)',
+                    }}
                   >
-                    修改左侧文字和参数后，点击下方「灵感同款生成」开始创作
+                    {/* Header bar */}
+                    <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: `1px solid ${borderColorLight}` }}>
+                      <div className="flex items-center gap-1.5">
+                        <ImageIcon size={13} style={{ color: accentColor }} />
+                        <span className="text-[11px] font-semibold" style={{ color: accentColor }}>灵感参考</span>
+                        <span
+                          className="px-1.5 py-0.5 rounded text-[9px]"
+                          style={{ background: `${accentColor}20`, color: accentColor }}
+                        >
+                          {inspirationRef.categoryName}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setInspirationRef(null)}
+                        className="w-5 h-5 rounded-full flex items-center justify-center transition-colors text-[11px]"
+                        style={{ background: isMonochrome ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.08)', color: subTextColor, cursor: 'pointer' }}
+                        title="退出灵感模式"
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                    {/* Image preview */}
+                    <div className="p-3 flex justify-center" style={{ background: isMonochrome ? '#f9fafb' : '#0a0a0a' }}>
+                      <div className="rounded-lg overflow-hidden shadow-lg" style={{ maxWidth: '100%', maxHeight: 160 }}>
+                        <img
+                          src={inspirationRef.localPath || `/api/font-design/gallery-image?id=${inspirationRef.id}`}
+                          alt="灵感参考图"
+                          className="object-contain"
+                          style={{ maxWidth: '100%', maxHeight: 160, display: 'block' }}
+                        />
+                      </div>
+                    </div>
+                    {/* Display text */}
+                    {inspirationRef.displayText && (
+                      <div className="px-3 pb-2">
+                        <p className="text-[11px] truncate" style={{ color: subTextColor }}>
+                          {inspirationRef.displayText}
+                        </p>
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
 
-              {/* 1. Text Input */}
-              <div>
-                <label className="text-xs font-medium mb-2 flex items-center gap-1.5" style={{ color: subTextColor }}>
-                  <PenTool size={13} style={{ color: accentColor }} />
-                  输入要设计的中文文字
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={text}
-                    onChange={(e) => setText(e.target.value)}
-                    placeholder="请输入中文标题、活动主题、封面标题或文字Logo名称"
-                    style={inputStyle}
-                    maxLength={20}
-                    onFocus={e => { e.currentTarget.style.borderColor = accentColor; }}
-                    onBlur={e => { e.currentTarget.style.borderColor = borderColorLight; }}
-                  />
-                  <button
-                    onClick={handleRandomExample}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] px-2 py-1 rounded-md font-medium transition-all"
-                    style={{ color: accentColor, background: isMonochrome ? 'rgba(59,130,246,0.08)' : 'rgba(212,175,55,0.1)', border: `1px solid ${isMonochrome ? 'rgba(59,130,246,0.2)' : 'rgba(212,175,55,0.2)'}` }}
-                  >
-                    随机示例
-                  </button>
-                </div>
-                <p className="text-[10px] mt-1" style={{ color: `${subTextColor}99` }}>建议 2-20 个中文字符</p>
-              </div>
+                  {/* Keywords Editing Area */}
+                  <div>
+                    <label className="text-xs font-medium mb-2 flex items-center gap-1.5" style={{ color: subTextColor }}>
+                      <PenTool size={13} style={{ color: accentColor }} />
+                      关键词
+                      <span className="text-[9px] ml-1" style={{ color: `${subTextColor}99` }}>可自由调整</span>
+                    </label>
+                    <textarea
+                      value={inspirationKeywords}
+                      onChange={(e) => setInspirationKeywords(e.target.value)}
+                      placeholder="在此输入或调整关键词描述..."
+                      className="w-full resize-y"
+                      style={{
+                        ...inputStyle,
+                        minHeight: 100,
+                        maxHeight: 200,
+                        lineHeight: 1.5,
+                        fontSize: 12,
+                        fontFamily: 'inherit',
+                      }}
+                    />
+                    <p className="text-[10px] mt-1" style={{ color: `${subTextColor}99` }}>
+                      修改关键词会影响生成结果的风格和内容
+                    </p>
+                  </div>
+
+                  {/* Model Selection (compact) */}
+                  <div ref={modelDropdownRef}>
+                    <label className="text-xs font-medium mb-2 flex items-center gap-1.5" style={{ color: subTextColor }}>
+                      <Cpu size={13} style={{ color: accentColor }} />
+                      生图模型
+                    </label>
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowModelDropdown(!showModelDropdown)}
+                        className="w-full flex items-center justify-between"
+                        style={inputStyle}
+                      >
+                        <div className="truncate flex items-center gap-1.5">
+                          <span>{imageModels.find(m => m.id === selectedModel)?.name || selectedModel || '选择模型'}</span>
+                          {imageModels.find(m => m.id === selectedModel)?.providerName && (
+                            <span style={{ color: `${subTextColor}99`, fontSize: '10px' }}>· {imageModels.find(m => m.id === selectedModel)?.providerName}</span>
+                          )}
+                        </div>
+                        <ChevronDown size={14} className="shrink-0 ml-2" style={{ color: mutedColor, transition: 'transform 0.2s', transform: showModelDropdown ? 'rotate(180deg)' : 'none' }} />
+                      </button>
+                      {showModelDropdown && (
+                        <div
+                          className="absolute top-full left-0 right-0 mt-1 rounded-lg shadow-xl z-20 max-h-[180px] overflow-y-auto"
+                          style={{ background: cardBgColor, border: `1px solid ${borderColorLight}`, scrollbarWidth: 'thin' }}
+                        >
+                          {imageModels.length === 0 && <div className="px-3 py-2 text-xs" style={{ color: subTextColor }}>暂无可用模型，请在管理员后台配置</div>}
+                          {imageModels.map((m) => (
+                            <button
+                              key={m.id}
+                              onClick={() => { setSelectedModel(m.id); setShowModelDropdown(false); }}
+                              className="w-full px-3 py-2.5 text-left text-xs flex items-center gap-2 transition-colors"
+                              style={{
+                                borderLeft: selectedModel === m.id ? `2px solid ${accentColor}` : '2px solid transparent',
+                                background: selectedModel === m.id ? (isMonochrome ? 'rgba(59,130,246,0.06)' : 'rgba(212,175,55,0.08)') : 'transparent',
+                              }}
+                              onMouseEnter={e => { if (selectedModel !== m.id) e.currentTarget.style.background = isMonochrome ? 'rgba(59,130,246,0.04)' : 'rgba(212,175,55,0.05)'; }}
+                              onMouseLeave={e => { if (selectedModel !== m.id) e.currentTarget.style.background = 'transparent'; }}
+                            >
+                              <div className="flex-1 min-w-0">
+                                <div className="truncate" style={{ color: textColor }}>{m.name}</div>
+                                <div className="truncate mt-0.5" style={{ color: `${subTextColor}99` }}>{m.providerName}</div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Aspect Ratio (compact) */}
+                  <div>
+                    <label className="text-xs font-medium mb-2 flex items-center gap-1.5" style={{ color: subTextColor }}>
+                      <span style={{ color: accentColor }}>⊞</span>
+                      画面比例
+                    </label>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {RATIO_OPTIONS.map((r) => (
+                        <button key={r.id} onClick={() => setRatio(r.id)} style={chipStyle(ratio === r.id)}>
+                          <span className="mr-1">{r.icon}</span>{r.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                /* ═══════════ Normal Left Panel (original settings) ═══════════ */
+                <>
+                  {/* 1. Text Input */}
+                  <div>
+                    <label className="text-xs font-medium mb-2 flex items-center gap-1.5" style={{ color: subTextColor }}>
+                      <PenTool size={13} style={{ color: accentColor }} />
+                      输入要设计的中文文字
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={text}
+                        onChange={(e) => setText(e.target.value)}
+                        placeholder="请输入中文标题、活动主题、封面标题或文字Logo名称"
+                        style={inputStyle}
+                        maxLength={20}
+                        onFocus={e => { e.currentTarget.style.borderColor = accentColor; }}
+                        onBlur={e => { e.currentTarget.style.borderColor = borderColorLight; }}
+                      />
+                      <button
+                        onClick={handleRandomExample}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] px-2 py-1 rounded-md font-medium transition-all"
+                        style={{ color: accentColor, background: isMonochrome ? 'rgba(59,130,246,0.08)' : 'rgba(212,175,55,0.1)', border: `1px solid ${isMonochrome ? 'rgba(59,130,246,0.2)' : 'rgba(212,175,55,0.2)'}` }}
+                      >
+                        随机示例
+                      </button>
+                    </div>
+                    <p className="text-[10px] mt-1" style={{ color: `${subTextColor}99` }}>建议 2-20 个中文字符</p>
+                  </div>
 
               {/* 2. Scene Selection */}
               <div>
@@ -1118,20 +1188,21 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                   </div>
                 )}
               </div>
+                </>
+              )}
             </div>
 
             {/* Action buttons at bottom */}
             <div className="p-4 pt-0 space-y-2 shrink-0" style={{ borderTop: `1px solid ${borderColor}`, background: isMonochrome ? 'linear-gradient(0deg, #ffffff, transparent)' : 'linear-gradient(0deg, #0f0f0f, transparent)' }}>
               <div className="pt-3">
-                {/* ★ Inspiration generate button (shown when inspirationRef is set) */}
                 {inspirationRef ? (
                   <button
                     onClick={handleInspirationGenerate}
-                    disabled={isGeneratingImage || !text.trim()}
+                    disabled={isGeneratingImage || !inspirationKeywords.trim()}
                     style={{
                       ...goldBtnStyle,
-                      opacity: (isGeneratingImage || !text.trim()) ? 0.5 : 1,
-                      cursor: (isGeneratingImage || !text.trim()) ? 'not-allowed' : 'pointer',
+                      opacity: (isGeneratingImage || !inspirationKeywords.trim()) ? 0.5 : 1,
+                      cursor: (isGeneratingImage || !inspirationKeywords.trim()) ? 'not-allowed' : 'pointer',
                       background: `linear-gradient(135deg, ${accentColor}, ${isMonochrome ? '#2563eb' : '#c4941e'})`,
                       boxShadow: isMonochrome ? '0 0 16px rgba(59,130,246,0.3)' : '0 0 16px rgba(212,175,55,0.3)',
                     }}
@@ -1150,19 +1221,21 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                   </button>
                 )}
               </div>
-              <div className="flex gap-2">
-                <button onClick={handleGeneratePrompt} disabled={isGeneratingPrompt || !text.trim()} style={{ ...secondaryBtnStyle, flex: 1, opacity: (isGeneratingPrompt || !text.trim()) ? 0.5 : 1 }}>
-                  {isGeneratingPrompt ? <Loader2 className="h-3 w-3 animate-spin inline mr-1" /> : <Wand2 className="h-3 w-3 inline mr-1" />}
-                  生成即梦提示词
-                </button>
-                <button onClick={handleBlackOnWhiteTest} disabled={isGeneratingImage || !text.trim() || plans.length === 0} style={{ ...secondaryBtnStyle, flex: 1, opacity: (isGeneratingImage || !text.trim() || plans.length === 0) ? 0.5 : 1 }} title={plans.length === 0 ? '请先生成字体方案' : '按4个方案分别生成黑底白字图片'}>
-                  黑底白字测试
-                </button>
-                <button onClick={handleGenerateAllPlanImages} disabled={isGeneratingImage || !text.trim() || plans.length === 0} style={{ ...secondaryBtnStyle, flex: 1, opacity: (isGeneratingImage || !text.trim() || plans.length === 0) ? 0.5 : 1 }} title={plans.length === 0 ? '请先生成字体方案' : '按4个方案分别生成4张匹配图片'}>
-                  {isGeneratingImage ? <Loader2 className="h-3 w-3 animate-spin inline mr-1" /> : <ImageIcon className="h-3 w-3 inline mr-1" />}
-                  生成方案图片
-                </button>
-              </div>
+              {!inspirationRef && (
+                <div className="flex gap-2">
+                  <button onClick={handleGeneratePrompt} disabled={isGeneratingPrompt || !text.trim()} style={{ ...secondaryBtnStyle, flex: 1, opacity: (isGeneratingPrompt || !text.trim()) ? 0.5 : 1 }}>
+                    {isGeneratingPrompt ? <Loader2 className="h-3 w-3 animate-spin inline mr-1" /> : <Wand2 className="h-3 w-3 inline mr-1" />}
+                    生成即梦提示词
+                  </button>
+                  <button onClick={handleBlackOnWhiteTest} disabled={isGeneratingImage || !text.trim() || plans.length === 0} style={{ ...secondaryBtnStyle, flex: 1, opacity: (isGeneratingImage || !text.trim() || plans.length === 0) ? 0.5 : 1 }} title={plans.length === 0 ? '请先生成字体方案' : '按4个方案分别生成黑底白字图片'}>
+                    黑底白字测试
+                  </button>
+                  <button onClick={handleGenerateAllPlanImages} disabled={isGeneratingImage || !text.trim() || plans.length === 0} style={{ ...secondaryBtnStyle, flex: 1, opacity: (isGeneratingImage || !text.trim() || plans.length === 0) ? 0.5 : 1 }} title={plans.length === 0 ? '请先生成字体方案' : '按4个方案分别生成4张匹配图片'}>
+                    {isGeneratingImage ? <Loader2 className="h-3 w-3 animate-spin inline mr-1" /> : <ImageIcon className="h-3 w-3 inline mr-1" />}
+                    生成方案图片
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
