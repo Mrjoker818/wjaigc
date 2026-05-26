@@ -179,7 +179,7 @@ export async function POST(request: NextRequest) {
       // 对于所有远端异步任务类型，必须继续查询远端API获取真实状态
       // 只有纯本地任务（edit/agent-edit）才由后端自行更新 registry，直接返回
       // ★ refine-engine/brand-ecommerce 使用远端 API（APImart等），需要远程轮询
-      const LOCAL_TASK_TYPES = ['edit', 'agent-edit'];
+      const LOCAL_TASK_TYPES = ['edit', 'agent-edit', 'brand-ecommerce'];
       if (LOCAL_TASK_TYPES.includes(registryTask.type)) {
         // 纯本地任务：由后端自行更新 registry，直接返回当前状态
         return NextResponse.json({

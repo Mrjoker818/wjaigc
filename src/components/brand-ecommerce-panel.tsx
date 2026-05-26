@@ -348,31 +348,65 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         signal: AbortSignal.timeout(600000), // 10 minutes timeout for sync processing
       });
       clearInterval(progressInterval);
-      const data = await resp.json();
+
+      // Check HTTP status first
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => '');
+        console.error('[brand-ecommerce-panel] HTTP error:', resp.status, errText);
+        setResults([{ templateId: 'error', templateName: '生成失败', error: `HTTP ${resp.status}: ${errText.slice(0, 200)}` }]);
+        setIsGenerating(false);
+        return;
+      }
+
+      let data: Record<string, unknown>;
+      try {
+        data = await resp.json();
+      } catch (parseErr) {
+        console.error('[brand-ecommerce-panel] JSON parse error:', parseErr);
+        setResults([{ templateId: 'error', templateName: '生成失败', error: '响应解析失败' }]);
+        setIsGenerating(false);
+        return;
+      }
+
+      console.log('[brand-ecommerce-panel] API response:', JSON.stringify(data).slice(0, 300));
+
       if (data.error) {
-        setResults([{ templateId: 'error', templateName: '生成失败', error: data.error }]);
+        setResults([{ templateId: 'error', templateName: '生成失败', error: String(data.error) }]);
         setIsGenerating(false);
         return;
       }
       // ★ Sync mode: results returned directly from POST
-      if (data.results && data.results.length > 0) {
-        console.log('[brand-ecommerce-panel] Got sync results:', data.results.length);
-        setResults(data.results);
+      const results = data.results as Array<{ templateId: string; templateName: string; imageUrl?: string; error?: string }> | undefined;
+      if (results && results.length > 0) {
+        console.log('[brand-ecommerce-panel] Got sync results:', results.length, 'with images:', results.filter(r => r.imageUrl).length);
+        setResults(results);
         setIsGenerating(false);
         return;
       }
       // ★ Fallback: poll mode (if backend returns taskId without results)
-      if (data.taskId) {
-        setTaskId(data.taskId);
+      const respTaskId = data.taskId as string | undefined;
+      if (respTaskId) {
+        console.log('[brand-ecommerce-panel] No sync results, polling taskId:', respTaskId);
+        setTaskId(respTaskId);
+        let pollAttempts = 0;
+        const maxPollAttempts = 120; // 120 * 3s = 6 minutes max
         // Start polling
         const poll = async () => {
+          if (pollAttempts >= maxPollAttempts) {
+            setResults([{ templateId: 'error', templateName: '生成失败', error: '轮询超时' }]);
+            setIsGenerating(false);
+            setTaskId(null);
+            return;
+          }
+          pollAttempts++;
           try {
             const pollResp = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId: data.taskId }),
+              body: JSON.stringify({ taskId: respTaskId }),
             });
             const pollData = await pollResp.json();
+            console.log('[brand-ecommerce-panel] Poll response:', pollData.status, pollData.progress);
             if (pollData.status === 'completed' && pollData.result?.results) {
               setResults(pollData.result.results);
               setIsGenerating(false);
@@ -392,12 +426,17 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
               setProgressLabel(pollData.label);
             }
             // Continue polling
-            setTimeout(poll, 2000);
+            setTimeout(poll, 3000);
           } catch {
             setTimeout(poll, 3000);
           }
         };
-        setTimeout(poll, 2000);
+        setTimeout(poll, 3000);
+      } else {
+        // Neither results nor taskId — unexpected response
+        console.error('[brand-ecommerce-panel] Unexpected API response:', JSON.stringify(data).slice(0, 200));
+        setResults([{ templateId: 'error', templateName: '生成失败', error: 'API返回格式异常' }]);
+        setIsGenerating(false);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '网络错误';
