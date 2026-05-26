@@ -270,24 +270,35 @@ function buildSystemPrompt(params: {
 - 方案B：侧重"创意融合"——在风格基础上融入创意元素或跨风格混搭
 - 方案C：侧重"应用适配"——针对使用场景做最优化设计
 
-【输出格式】JSON，严格遵循：
+【输出格式】JSON，严格遵循以下结构，每个字段都必须填写具体内容，不能为空：
 {
   "plans": [
     {
-      "title": "方案名称（4-8字）",
-      "stylePositioning": "风格定位（10-20字）",
-      "designConcept": "设计理念（20-40字）",
-      "prompt": "完整AI生图提示词（80-150字，描述画面构图、字形结构、笔画特征、材质、背景等）",
+      "title": "方案名称（4-8字，体现风格特色）",
+      "stylePositioning": "风格定位（10-20字，概括这个方案的风格方向）",
+      "recommendIndex": 5,
+      "glyphFeatures": "字形特点（15-30字，描述字形结构、整体造型、视觉感受）",
+      "strokeAdvice": "笔画处理（15-30字，描述笔画粗细、起笔收笔、转折处理）",
+      "graphicFusion": "图形融合（15-30字，描述图形元素如何与文字结合）",
+      "colorMaterial": "色彩质感（15-30字，描述配色方案、材质肌理、光影效果）",
+      "applicableScene": "适用场景（10-20字，说明最适合的应用场景）",
+      "prompt": "完整AI生图提示词（80-150字，必须包含：文字内容"${text}"、字体风格描述、字形结构、笔画特征、构图描述、材质描述、背景描述。严格禁止出现：英文、拼音、乱码、多余文字、水印、重复字。文字必须清晰可读）",
       "keywords": ["关键词1", "关键词2", "关键词3"],
       "suitableScenes": ["适用场景1", "适用场景2"]
     }
   ]
 }
 
-【提示词要求】
-- 提示词必须包含：文字内容"${text}"、字体风格描述、构图描述、材质描述、背景描述
-- 严格禁止出现：英文、拼音、乱码、多余文字、水印、重复字
-- 文字必须清晰可读`;
+【关键字段填写指引】
+- glyphFeatures：具体描述字的外形，如"圆润饱满的膨胀造型，字形微微横向延展，视觉上软糯Q弹"
+- strokeAdvice：具体描述笔画怎么处理，如"笔画端头圆钝加粗，转角处圆弧过渡，主笔画与副笔画对比鲜明"
+- graphicFusion：具体描述图形怎么融合，如"气泡元素从字形内部自然生长，与笔画融为一体"
+- colorMaterial：具体描述颜色和质感，如"糖果色渐变，表面光泽感强烈，呈现硅胶般的柔润质感"
+- applicableScene：具体说明哪里最合适，如"休闲零食品牌包装、社交媒体美食内容封面"
+- recommendIndex：推荐指数1-5，根据风格与用户需求的匹配度打分
+
+【风格一致性要求】
+所有方案的设计必须围绕用户选择的"${style}"风格展开，不能偏离到其他不相关的风格。`;
 }
 
 function generateTemplatePlans(params: {
@@ -301,27 +312,42 @@ function generateTemplatePlans(params: {
 
   return [
     {
-      title: `${style}\u00B7\u6781\u81F4\u98CE`,
-      stylePositioning: `\u5C06${style}\u7684\u6838\u5FC3\u7279\u5F81\u53D1\u6325\u5230\u6781\u81F4`,
-      designConcept: `\u6587\u5B57"${text}"\u91C7\u7528${style}\u98CE\u683C\u7684\u7ECF\u5178\u5F62\u6001\uFF0C\u7B14\u753B\u7ECF\u8FC7${strokeDesc}\u5904\u7406\uFF0C\u8D28\u611F\u4E3A${material}\uFF0C\u914D\u5408${background}\u80CC\u666F\u3002`,
-      prompt: `\u4E2D\u6587\u5B57\u4F53\u8BBE\u8BA1\uFF0C\u6587\u5B57\u5185\u5BB9"${text}"\uFF0C${style}\u98CE\u683C\u6781\u81F4\u8868\u73B0\uFF0C\u5B57\u4F53\u5C45\u4E2D\uFF0C\u7B14\u753B${strokeDesc}\uFF0C\u56FE\u5F62\u878D\u5408${graphicDesc}\uFF0C\u989C\u8272${color}\uFF0C\u8D28\u611F${material}\uFF0C\u80CC\u666F${background}\uFF0C\u753B\u9762\u6BD4\u4F8B${ratio}\u3002\u53EA\u4FDD\u7559\u8FD9\u51E0\u4E2A\u4E2D\u6587\uFF0C\u4E0D\u8981\u82F1\u6587\u4E0D\u8981\u62FC\u97F3\u4E0D\u8981\u4E71\u7801\u4E0D\u8981\u91CD\u590D\u5B57\u3002`,
-      keywords: [style, '\u6781\u81F4\u98CE', strokeDesc],
+      title: `${style}·极致风`,
+      stylePositioning: `将${style}的核心特征发挥到极致`,
+      recommendIndex: 5,
+      glyphFeatures: `${style}经典字形，结构饱满稳定，视觉冲击力强，字形比例协调`,
+      strokeAdvice: `笔画${strokeDesc}处理，起笔收笔干脆利落，转折处棱角分明`,
+      graphicFusion: `${graphicDesc !== '无' ? graphicDesc + '元素与字形结构深度融合，增强视觉表现力' : '纯文字表现，以字形本身作为视觉焦点'}`,
+      colorMaterial: `${color}为主色调，${material}质感，表面光滑细腻，${background}衬托`,
+      applicableScene: `最适合${scene}场景，追求视觉震撼效果`,
+      prompt: `中文字体设计，文字内容"${text}"，${style}风格极致表现，字体居中，笔画${strokeDesc}，图形融合${graphicDesc}，颜色${color}，质感${material}，背景${background}，画面比例${ratio}。只保留这几个中文，不要英文不要拼音不要乱码不要重复字。`,
+      keywords: [style, '极致风', strokeDesc],
       suitableScenes: [scene],
     },
     {
-      title: `${style}\u00B7\u521B\u610F\u878D`,
-      stylePositioning: `\u5728${style}\u57FA\u7840\u4E0A\u878D\u5165\u521B\u610F\u5143\u7D20\u548C\u8DE8\u98CE\u683C\u6DF7\u642D`,
-      designConcept: `\u6587\u5B57"${text}"\u5728${style}\u6846\u67B6\u5185\u878D\u5165\u521B\u610F\u8BBE\u8BA1\uFF0C${strokeDesc}\u5904\u7406\u7A81\u7834\u5E38\u89C4\uFF0C${graphicDesc}\u56FE\u5F62\u70B9\u7F00\uFF0C${material}\u8D28\u611F\u5347\u7EA7\u3002`,
-      prompt: `\u4E2D\u6587\u5B57\u4F53\u8BBE\u8BA1\uFF0C\u6587\u5B57\u5185\u5BB9"${text}"\uFF0C${style}\u98CE\u683C\u521B\u610F\u878D\u5408\uFF0C\u5B57\u4F53\u5C45\u4E2D\uFF0C\u7B14\u753B${strokeDesc}\u5904\u7406\u7A81\u7834\u5E38\u89C4\uFF0C${graphicDesc}\u5143\u7D20\u81EA\u7136\u878D\u5165\uFF0C\u989C\u8272${color}\uFF0C\u8D28\u611F${material}\uFF0C\u80CC\u666F${background}\uFF0C\u753B\u9762\u6BD4\u4F8B${ratio}\u3002\u53EA\u4FDD\u7559\u8FD9\u51E0\u4E2A\u4E2D\u6587\uFF0C\u4E0D\u8981\u82F1\u6587\u4E0D\u8981\u62FC\u97F3\u4E0D\u8981\u4E71\u7801\u4E0D\u8981\u91CD\u590D\u5B57\u3002`,
-      keywords: [style, '\u521B\u610F\u878D\u5408', '\u8DE8\u98CE\u683C'],
-      suitableScenes: [scene, '\u521B\u610F\u8BBE\u8BA1'],
+      title: `${style}·创意融`,
+      stylePositioning: `在${style}基础上融入创意元素和跨风格混搭`,
+      recommendIndex: 4,
+      glyphFeatures: `${style}字形框架内大胆变形，结构灵动有趣，打破常规排列`,
+      strokeAdvice: `笔画${strokeDesc}突破常规处理，粗细对比强烈，笔势流动自然`,
+      graphicFusion: `${graphicDesc !== '无' ? graphicDesc + '元素创意点缀，与字形若即若离，增添层次感' : '以字形的解构重组作为创意表达'}`,
+      colorMaterial: `${color}搭配对比色，${material}质感升级，光影层次丰富`,
+      applicableScene: `适合${scene}及创意设计场景，追求独特个性表达`,
+      prompt: `中文字体设计，文字内容"${text}"，${style}风格创意融合，字体居中，笔画${strokeDesc}处理突破常规，${graphicDesc !== '自然' ? graphicDesc + '元素自然融入' : '字形解构创意表达'}，颜色${color}，质感${material}，背景${background}，画面比例${ratio}。只保留这几个中文，不要英文不要拼音不要乱码不要重复字。`,
+      keywords: [style, '创意融合', '跨风格'],
+      suitableScenes: [scene, '创意设计'],
     },
     {
-      title: `${style}\u00B7\u573A\u666F\u9002\u914D`,
-      stylePositioning: `\u9488\u5BF9${scene}\u573A\u666F\u505A\u6700\u4F18\u5316\u8BBE\u8BA1`,
-      designConcept: `\u6587\u5B57"${text}"\u4E3A${scene}\u573A\u666F\u91CF\u8EAB\u5B9A\u5236\uFF0C\u5B57\u5F62\u7ED3\u6784\u6E05\u6670\uFF0C\u7B14\u753B${strokeDesc}\uFF0C\u786E\u4FDD\u5B9E\u9645\u5E94\u7528\u6548\u679C\u6700\u4F73\u3002`,
-      prompt: `\u4E2D\u6587\u5B57\u4F53\u8BBE\u8BA1\uFF0C\u6587\u5B57\u5185\u5BB9"${text}"\uFF0C\u4E3A${scene}\u573A\u666F\u91CF\u8EAB\u5B9A\u5236\uFF0C${style}\u98CE\u683C\uFF0C\u5B57\u4F53\u5C45\u4E2D\uFF0C\u7B14\u753B${strokeDesc}\uFF0C\u56FE\u5F62${graphicDesc}\uFF0C\u989C\u8272${color}\uFF0C\u8D28\u611F${material}\uFF0C\u80CC\u666F${background}\uFF0C\u753B\u9762\u6BD4\u4F8B${ratio}\u3002\u6587\u5B57\u6E05\u6670\u53EF\u8BFB\uFF0C\u53EA\u4FDD\u7559\u8FD9\u51E0\u4E2A\u4E2D\u6587\uFF0C\u4E0D\u8981\u82F1\u6587\u4E0D\u8981\u62FC\u97F3\u4E0D\u8981\u4E71\u7801\u4E0D\u8981\u91CD\u590D\u5B57\u3002`,
-      keywords: [scene, style, '\u573A\u666F\u9002\u914D'],
+      title: `${style}·场景适配`,
+      stylePositioning: `针对${scene}场景做最优化设计`,
+      recommendIndex: 3,
+      glyphFeatures: `为${scene}量身定制的字形，结构清晰易读，视觉舒适度高`,
+      strokeAdvice: `笔画${strokeDesc}适度处理，保证辨识度的同时兼顾美观`,
+      graphicFusion: `${graphicDesc !== '无' ? graphicDesc + '元素适度运用，不喧宾夺主，服务于整体阅读体验' : '以纯净字形保证信息传达效率'}`,
+      colorMaterial: `${color}配色和谐，${material}质感温润，适合长时间注视`,
+      applicableScene: `专为${scene}场景设计，实用性与美观性兼顾`,
+      prompt: `中文字体设计，文字内容"${text}"，为${scene}场景量身定制，${style}风格，字体居中，笔画${strokeDesc}，图形${graphicDesc}，颜色${color}，质感${material}，背景${background}，画面比例${ratio}。文字清晰可读，只保留这几个中文，不要英文不要拼音不要乱码不要重复字。`,
+      keywords: [scene, style, '场景适配'],
       suitableScenes: [scene],
     },
   ];
