@@ -397,22 +397,9 @@ async function submitRefineToApi(
     if (params.imageUrl.startsWith('http')) {
       rawBody.image_urls = [params.imageUrl];
     } else if (imageAsBase64) {
-      try {
-        const saveRes = await fetch('http://localhost:5000/api/save-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageUrl: imageAsBase64.startsWith('data:') ? imageAsBase64 : `data:image/png;base64,${imageAsBase64}` }),
-        });
-        if (saveRes.ok) {
-          const saveData = await saveRes.json();
-          if (saveData.url) {
-            rawBody.image_urls = [saveData.url];
-            console.log('[refine-engine] Uploaded image for image_urls:', saveData.url);
-          }
-        }
-      } catch (saveErr) {
-        console.warn('[refine-engine] Failed to upload image for image_urls:', saveErr);
-      }
+      // Prefer base64 data URL in image_urls — most providers support it
+      // and it avoids issues with relative paths that APIs can't reach
+      rawBody.image_urls = [imageAsBase64];
     }
 
     rawBody.strength = 0.55;
