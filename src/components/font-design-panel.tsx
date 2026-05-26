@@ -52,12 +52,7 @@ const RANDOM_EXAMPLES = [
   '浮生六记', '食光食堂', '如故', '一念之间', '潮汐',
 ];
 
-const RATIO_OPTIONS = [
-  { id: '16:9', name: '横版 16:9', icon: '▬' },
-  { id: '1:1', name: '正方形 1:1', icon: '▣' },
-  { id: '9:16', name: '竖版 9:16', icon: '▮' },
-  { id: 'logo', name: '透明Logo', icon: '◇' },
-];
+import { MODEL_ASPECT_RATIOS, DEFAULT_ASPECT_RATIOS, findModelConfig, ASPECT_RATIO_TO_PIXELS } from '@/lib/canvas-generation-group';
 
 const COLOR_OPTIONS = [
   { id: '白色', color: '#ffffff', border: '#888' },
@@ -343,7 +338,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text, scene, primaryStyleCategory, secondaryStyle,
-          ratio: RATIO_OPTIONS.find(r => r.id === ratio)?.name || ratio,
+          ratio,
           color, background, strokeOptions, graphicElements, material, jimengEnhanced,
         }),
       });
@@ -365,7 +360,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text, scene, primaryStyleCategory, secondaryStyle,
-          ratio: RATIO_OPTIONS.find(r => r.id === ratio)?.name || ratio,
+          ratio,
           color, background, strokeOptions, graphicElements, material, jimengEnhanced,
         }),
       });
@@ -891,7 +886,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                           {imageModels.map((m) => (
                             <button
                               key={m.id}
-                              onClick={() => { setSelectedModel(m.id); setShowModelDropdown(false); }}
+                              onClick={() => { setSelectedModel(m.id); setShowModelDropdown(false); const supportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, m.id) || DEFAULT_ASPECT_RATIOS; if (!supportedRatios.includes(ratio) && ratio !== 'logo') setRatio(supportedRatios[0]); }}
                               className="w-full px-3 py-2.5 text-left text-xs flex items-center gap-2 transition-colors"
                               style={{
                                 borderLeft: selectedModel === m.id ? `2px solid ${accentColor}` : '2px solid transparent',
@@ -918,11 +913,14 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                       画面比例
                     </label>
                     <div className="flex gap-1.5 flex-wrap">
-                      {RATIO_OPTIONS.map((r) => (
-                        <button key={r.id} onClick={() => setRatio(r.id)} style={chipStyle(ratio === r.id)}>
-                          <span className="mr-1">{r.icon}</span>{r.name}
+                      {(findModelConfig(MODEL_ASPECT_RATIOS, selectedModel) || DEFAULT_ASPECT_RATIOS).map((r: string) => (
+                        <button key={r} onClick={() => setRatio(r)} style={chipStyle(ratio === r)}>
+                          {r}
                         </button>
                       ))}
+                      <button onClick={() => setRatio('logo')} style={chipStyle(ratio === 'logo')}>
+                        ◇ 透明Logo
+                      </button>
                     </div>
                   </div>
                 </>
@@ -1093,11 +1091,14 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                     <div>
                       <p className="text-[11px] mb-1.5" style={{ color: `${subTextColor}aa` }}>画面比例</p>
                       <div className="flex gap-1.5 flex-wrap">
-                        {RATIO_OPTIONS.map((r) => (
-                          <button key={r.id} onClick={() => setRatio(r.id)} style={chipStyle(ratio === r.id)}>
-                            <span className="mr-1">{r.icon}</span>{r.name}
+                        {(findModelConfig(MODEL_ASPECT_RATIOS, selectedModel) || DEFAULT_ASPECT_RATIOS).map((r: string) => (
+                          <button key={r} onClick={() => setRatio(r)} style={chipStyle(ratio === r)}>
+                            {r}
                           </button>
                         ))}
+                        <button onClick={() => setRatio('logo')} style={chipStyle(ratio === 'logo')}>
+                          ◇ 透明Logo
+                        </button>
                       </div>
                     </div>
                     {/* 字体颜色 */}
