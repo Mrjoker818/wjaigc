@@ -1,0 +1,346 @@
+import { NextRequest, NextResponse } from 'next/server';
+import {
+  dbListBrandProjects, dbGetBrandProject, dbUpsertBrandProject, dbDeleteBrandProject,
+  dbListBrandMaterials, dbUpsertBrandMaterial, dbDeleteBrandMaterial,
+} from '@/lib/db-storage';
+import { findProviderForFeature } from '@/lib/server-api-config';
+
+// ═══ GET: List projects ═══
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const projectId = searchParams.get('projectId');
+    const materialsOnly = searchParams.get('materials') === 'true';
+
+    if (projectId && materialsOnly) {
+      const materials = await dbListBrandMaterials(projectId);
+      return NextResponse.json({ success: true, materials });
+    }
+
+    if (projectId) {
+      const project = await dbGetBrandProject(projectId);
+      if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
+      const materials = await dbListBrandMaterials(projectId);
+      return NextResponse.json({ success: true, project, materials });
+    }
+
+    const projects = await dbListBrandProjects();
+    return NextResponse.json({ success: true, projects });
+  } catch (e) {
+    console.error('[brand-factory] GET error:', e);
+    return NextResponse.json({ error: '获取项目列表失败' }, { status: 500 });
+  }
+}
+
+// ═══ POST: Actions ═══
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { action } = body;
+
+    switch (action) {
+      case 'create-project': return await handleCreateProject(body);
+      case 'update-project': return await handleUpdateProject(body);
+      case 'delete-project': return await handleDeleteProject(body);
+      case 'archive-project': return await handleArchiveProject(body);
+      case 'analyze-dna': return await handleAnalyzeDNA(body);
+      case 'generate-directions': return await handleGenerateDirections(body);
+      case 'generate-kv': return await handleGenerateKV(body);
+      case 'batch-generate': return await handleBatchGenerate(body);
+      case 'save-material': return await handleSaveMaterial(body);
+      case 'delete-material': return await handleDeleteMaterial(body);
+      default:
+        return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
+    }
+  } catch (e) {
+    console.error('[brand-factory] POST error:', e);
+    return NextResponse.json({ error: '请求处理失败' }, { status: 500 });
+  }
+}
+
+// ═══ Project CRUD ═══
+
+async function handleCreateProject(body: Record<string, unknown>) {
+  const id = `bp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const project = await dbUpsertBrandProject({
+    id,
+    project_name: (body.projectName as string) || (body.brandName as string) || '未命名项目',
+    brand_name: (body.brandName as string) || '',
+    industry: (body.industry as string) || '',
+    project_type: (body.projectType as string) || '',
+    keywords: JSON.stringify(body.keywords || []),
+    target_audience: (body.targetAudience as string) || '',
+    tone: (body.tone as string) || '',
+    description: (body.description as string) || '',
+    logo_url: (body.logoUrl as string) || '',
+    product_url: (body.productUrl as string) || '',
+    ip_url: (body.ipUrl as string) || '',
+    reference_urls: JSON.stringify(body.referenceUrls || []),
+    brand_dna: JSON.stringify(body.brandDna || {}),
+    creative_directions: JSON.stringify(body.creativeDirections || []),
+    status: 'draft',
+    is_archived: false,
+  });
+  return NextResponse.json({ success: true, project });
+}
+
+async function handleUpdateProject(body: Record<string, unknown>) {
+  const { id, ...updates } = body;
+  if (!id) return NextResponse.json({ error: '缺少项目ID' }, { status: 400 });
+
+  // Map camelCase to snake_case
+  const mapped: Record<string, unknown> = {};
+  const fieldMap: Record<string, string> = {
+    projectName: 'project_name', brandName: 'brand_name',
+    projectType: 'project_type', targetAudience: 'target_audience',
+    logoUrl: 'logo_url', productUrl: 'product_url', ipUrl: 'ip_url',
+    referenceUrls: 'reference_urls', brandDna: 'brand_dna',
+    creativeDirections: 'creative_directions',
+  };
+  for (const [k, v] of Object.entries(updates)) {
+    if (k === 'action' || k === 'id') continue;
+    const dbKey = fieldMap[k] || k;
+    mapped[dbKey] = typeof v === 'object' && v !== null ? JSON.stringify(v) : v;
+  }
+
+  const project = await dbUpsertBrandProject({ id: id as string, ...mapped });
+  return NextResponse.json({ success: true, project });
+}
+
+async function handleDeleteProject(body: Record<string, unknown>) {
+  const { id } = body;
+  if (!id) return NextResponse.json({ error: '缺少项目ID' }, { status: 400 });
+  const ok = await dbDeleteBrandProject(id as string);
+  return ok ? NextResponse.json({ success: true }) : NextResponse.json({ error: '删除项目失败' }, { status: 500 });
+}
+
+async function handleArchiveProject(body: Record<string, unknown>) {
+  const { id, archive } = body;
+  if (!id) return NextResponse.json({ error: '缺少项目ID' }, { status: 400 });
+  const project = await dbUpsertBrandProject({ id: id as string, is_archived: !!archive, status: archive ? 'archived' : 'draft' });
+  return NextResponse.json({ success: true, project });
+}
+
+// ═══ AI Analysis ═══
+
+async function getLLM() {
+  return await findProviderForFeature('chat');
+}
+
+async function callLLM(prompt: string): Promise<string> {
+  const provider = await getLLM();
+  if (!provider) throw new Error('请先在管理后台配置LLM模型');
+
+  const baseUrl = (provider.baseUrl || '').replace(/\/+$/, '');
+  const apiKey = provider.apiKey || '';
+  const modelName = provider.selectedModels?.[0] || '';
+
+  const resp = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: modelName,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.8,
+      max_tokens: 4096,
+    }),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => '');
+    throw new Error(`LLM API 错误 (${resp.status}): ${errText.slice(0, 200)}`);
+  }
+
+  const data = await resp.json();
+  return data.choices?.[0]?.message?.content || '';
+}
+
+async function handleAnalyzeDNA(body: Record<string, unknown>) {
+  const { brandName, industry, keywords, tone, description, logoUrl, productUrl, ipUrl, llmModel } = body;
+  if (!brandName && !logoUrl && !productUrl && !ipUrl) {
+    return NextResponse.json({ error: '请提供品牌名称或上传品牌素材' }, { status: 400 });
+  }
+
+  const prompt = `你是一个专业的品牌策略分析师。请根据以下信息分析品牌DNA，输出JSON格式：
+
+品牌名称：${brandName || '未知'}
+行业：${industry || '未知'}
+关键词：${keywords ? JSON.stringify(keywords) : '无'}
+品牌调性：${tone || '未知'}
+描述：${description || '无'}
+${logoUrl ? `Logo图片：${logoUrl}` : ''}
+${productUrl ? `产品图片：${productUrl}` : ''}
+${ipUrl ? `IP形象图片：${ipUrl}` : ''}
+
+请输出以下JSON结构（不要包含markdown代码块标记）：
+{
+  "brandKeywords": ["关键词1", "关键词2", "关键词3"],
+  "mainColors": ["#色值1", "#色值2"],
+  "secondaryColors": ["#色值1", "#色值2"],
+  "fontStyle": "字体方向描述",
+  "visualTone": "视觉调性描述",
+  "logoRules": ["规则1", "规则2"],
+  "productRules": ["规则1", "规则2"],
+  "ipRules": ["规则1", "规则2"],
+  "forbiddenRules": ["禁区1", "禁区2"],
+  "recommendedMaterials": ["物料类型1", "物料类型2"],
+  "promptSummary": "品牌Prompt摘要"
+}`;
+
+  try {
+    const content = await callLLM(prompt);
+    // Try to parse JSON from response
+    let dna: Record<string, unknown>;
+    try {
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      dna = jsonMatch ? JSON.parse(jsonMatch[0]) : { promptSummary: content };
+    } catch {
+      dna = { promptSummary: content };
+    }
+    return NextResponse.json({ success: true, dna });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '品牌DNA分析失败';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+async function handleGenerateDirections(body: Record<string, unknown>) {
+  const { brandName, brandDna, count = 3, llmModel } = body;
+  if (!brandName) return NextResponse.json({ error: '请先填写品牌名称' }, { status: 400 });
+
+  const dnaStr = typeof brandDna === 'string' ? brandDna : JSON.stringify(brandDna || {});
+
+  const prompt = `你是一个创意总监。请根据以下品牌信息生成${count}套品牌创意方向，输出JSON数组格式：
+
+品牌名称：${brandName}
+品牌DNA：${dnaStr}
+
+请输出以下JSON结构（不要包含markdown代码块标记）：
+[{
+  "name": "方向名称",
+  "concept": "核心概念描述",
+  "slogan": "一句话传播语",
+  "visualKeywords": ["视觉关键词1", "关键词2"],
+  "colorPlan": ["#色值1", "#色值2"],
+  "fontPlan": "字体方案描述",
+  "compositionStyle": "构图方式",
+  "prompt": "该方向的图像生成Prompt",
+  "recommendedMaterials": ["推荐物料类型1", "类型2"]
+}]`;
+
+  try {
+    const content = await callLLM(prompt);
+    let directions: unknown[];
+    try {
+      const jsonMatch = content.match(/\[[\s\S]*\]/);
+      directions = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
+    } catch {
+      directions = [];
+    }
+    if (!Array.isArray(directions) || directions.length === 0) {
+      directions = [{ name: '方向1', concept: content, prompt: content }];
+    }
+    return NextResponse.json({ success: true, directions });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '创意方向生成失败';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+async function handleGenerateKV(body: Record<string, unknown>) {
+  const { brandName, direction, prompt: userPrompt, llmModel } = body;
+  if (!brandName) return NextResponse.json({ error: '请先填写品牌名称' }, { status: 400 });
+
+  const directionStr = typeof direction === 'string' ? direction : JSON.stringify(direction || {});
+
+  const prompt = `你是一个品牌视觉设计专家。请根据以下品牌信息和创意方向，生成主KV的图像生成Prompt：
+
+品牌名称：${brandName}
+创意方向：${directionStr}
+用户要求：${userPrompt || '无特殊要求'}
+
+请直接输出一段详细的图像生成Prompt，包含：
+1. 画面主体和构图
+2. 色彩方案
+3. 字体和文字排版规则
+4. 品牌元素应用方式
+5. 画面氛围和质感
+6. 禁止事项
+
+输出格式为纯文本Prompt，不要包含任何前缀或说明文字。`;
+
+  try {
+    const content = await callLLM(prompt);
+    return NextResponse.json({ success: true, prompt: content.trim() });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'KV生成失败';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+async function handleBatchGenerate(body: Record<string, unknown>) {
+  const { brandName, brandDna, materialTypes, llmModel } = body;
+  if (!brandName) return NextResponse.json({ error: '请先填写品牌名称' }, { status: 400 });
+  if (!materialTypes || !Array.isArray(materialTypes) || materialTypes.length === 0) {
+    return NextResponse.json({ error: '请选择物料类型' }, { status: 400 });
+  }
+
+  const dnaStr = typeof brandDna === 'string' ? brandDna : JSON.stringify(brandDna || {});
+
+  const prompt = `你是一个品牌物料批量生成专家。请根据品牌信息为以下物料类型分别生成图像Prompt：
+
+品牌名称：${brandName}
+品牌DNA：${dnaStr}
+物料类型：${(materialTypes as string[]).join('、')}
+
+请输出JSON数组（不要包含markdown代码块标记）：
+[{
+  "materialType": "物料类型",
+  "title": "物料名称",
+  "ratio": "推荐比例(如16:9)",
+  "prompt": "图像生成Prompt",
+  "notes": "设计要点"
+}]`;
+
+  try {
+    const content = await callLLM(prompt);
+    let materials: unknown[];
+    try {
+      const jsonMatch = content.match(/\[[\s\S]*\]/);
+      materials = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
+    } catch {
+      materials = [];
+    }
+    return NextResponse.json({ success: true, materials });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '批量生成失败';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+async function handleSaveMaterial(body: Record<string, unknown>) {
+  const { id, projectId, directionId, materialType, title, ratio, imageUrl, prompt, score, status } = body;
+  if (!projectId) return NextResponse.json({ error: '缺少项目ID' }, { status: 400 });
+
+  const materialId = (id as string) || `mat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const material = await dbUpsertBrandMaterial({
+    id: materialId,
+    project_id: projectId as string,
+    direction_id: (directionId as string) || '',
+    material_type: (materialType as string) || 'kv',
+    title: (title as string) || '',
+    ratio: (ratio as string) || '1:1',
+    image_url: (imageUrl as string) || '',
+    prompt: (prompt as string) || '',
+    score: (score as number) || 0,
+    status: (status as string) || 'draft',
+  });
+  return NextResponse.json({ success: true, material });
+}
+
+async function handleDeleteMaterial(body: Record<string, unknown>) {
+  const { id } = body;
+  if (!id) return NextResponse.json({ error: '缺少物料ID' }, { status: 400 });
+  const ok = await dbDeleteBrandMaterial(id as string);
+  return ok ? NextResponse.json({ success: true }) : NextResponse.json({ error: '删除物料失败' }, { status: 500 });
+}

@@ -25,7 +25,7 @@ import {
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
-  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical
+  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2
 } from 'lucide-react';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
 import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
@@ -43,6 +43,7 @@ const AgentEditor = lazy(() => import('@/components/agent-editor').then(m => ({ 
 const BrandEcommercePanel = lazy(() => import('@/components/brand-ecommerce-panel').then(m => ({ default: m.BrandEcommercePanel })));
 const RefineEnginePanel = lazy(() => import('@/components/refine-engine-panel'));
 const FontDesignPanel = lazy(() => import('@/components/font-design-panel'));
+const BrandFactoryPanel = lazy(() => import('@/components/brand-factory-panel').then(m => ({ default: m.BrandFactoryPanel })));
 
 /* ====== Multi-Angle Sphere Preview (Canvas 2D) ====== */
 function MultiAngleSpherePreview({
@@ -434,6 +435,7 @@ export function InfiniteCanvas({
 
   // Font design state
   const [showFontDesign, setShowFontDesign] = useState(false);
+  const [showBrandFactory, setShowBrandFactory] = useState(false);
 
   // View state
   const [viewOffset, setViewOffset] = useState({ x: initialViewState?.offsetX ?? 0, y: initialViewState?.offsetY ?? 0 });
@@ -9220,6 +9222,18 @@ export function InfiniteCanvas({
           </Suspense>
         )}
 
+        {/* ====== BRAND FACTORY PANEL ====== */}
+        {showBrandFactory && (
+          <Suspense fallback={null}>
+            <BrandFactoryPanel
+              isMonochrome={isMonochrome}
+              onClose={() => setShowBrandFactory(false)}
+              onAddImages={(urls: string[]) => {
+                onAddImages?.(urls);
+              }}
+            />
+          </Suspense>
+        )}
 
         {/* ====== PSD LAYER EDITOR MODAL ====== */}
         {showPsdEditor && psdEditorImageUrl && (
@@ -10581,6 +10595,20 @@ export function InfiniteCanvas({
         >
           <span className="text-sm font-bold leading-none">字</span>
           <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-black/90 text-white'}`}>字境大师</span>
+        </button>
+
+        {/* Brand Factory - 品牌工厂 */}
+        <button
+          onClick={() => setShowBrandFactory(true)}
+          className={`tool-btn p-2 rounded-xl transition-all relative group ${
+            isMonochrome
+              ? 'text-amber-600 hover:text-amber-700 hover:bg-amber-50'
+              : 'text-[#888] hover:text-white hover:bg-white/10'
+          }`}
+          title="品牌工厂"
+        >
+          <Building2 className="h-4 w-4" />
+          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-black/90 text-white'}`}>品牌工厂</span>
         </button>
 
         <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`} />

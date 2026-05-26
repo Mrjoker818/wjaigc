@@ -739,3 +739,165 @@ export async function dbBatchUpdateEcomTemplateOrder(orders: Array<{ id: string;
     return false;
   }
 }
+
+// ═══ Brand Factory (品牌工厂) ═══
+
+export interface DbBrandProject {
+  id: string;
+  project_name: string;
+  brand_name: string;
+  industry: string;
+  project_type: string;
+  keywords: string;    // JSON array
+  target_audience: string;
+  tone: string;
+  description: string;
+  logo_url: string;
+  product_url: string;
+  ip_url: string;
+  reference_urls: string;  // JSON array
+  brand_dna: string;       // JSON object
+  creative_directions: string; // JSON array
+  status: string;
+  is_archived: boolean;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface DbBrandMaterial {
+  id: string;
+  project_id: string;
+  direction_id: string;
+  material_type: string;
+  title: string;
+  ratio: string;
+  image_url: string;
+  prompt: string;
+  score: number;
+  status: string;
+  created_at: number;
+}
+
+export async function dbListBrandProjects(): Promise<DbBrandProject[]> {
+  try {
+    const { rows } = await execSql('SELECT * FROM wujie_brand_projects WHERE is_archived = false ORDER BY updated_at DESC');
+    return rows as unknown as DbBrandProject[];
+  } catch (e) {
+    console.error('[db-storage] dbListBrandProjects error:', e);
+    return [];
+  }
+}
+
+export async function dbGetBrandProject(id: string): Promise<DbBrandProject | null> {
+  try {
+    const { rows } = await execSql('SELECT * FROM wujie_brand_projects WHERE id = $1', [id]);
+    return rows.length > 0 ? rows[0] as unknown as DbBrandProject : null;
+  } catch (e) {
+    console.error('[db-storage] dbGetBrandProject error:', e);
+    return null;
+  }
+}
+
+export async function dbUpsertBrandProject(project: Partial<DbBrandProject> & { id: string }): Promise<DbBrandProject | null> {
+  try {
+    const now = Date.now();
+    const existing = await dbGetBrandProject(project.id);
+    if (existing) {
+      const fields: string[] = [];
+      const values: unknown[] = [];
+      let idx = 1;
+      for (const [k, v] of Object.entries(project)) {
+        if (k === 'id') continue;
+        fields.push(`${k} = $${idx}`);
+        values.push(v);
+        idx++;
+      }
+      fields.push(`updated_at = $${idx}`);
+      values.push(now);
+      values.push(project.id);
+      await execSql(`UPDATE wujie_brand_projects SET ${fields.join(', ')} WHERE id = $${idx + 1}`, values);
+    } else {
+      const cols = ['id', 'created_at', 'updated_at'];
+      const vals: unknown[] = [project.id, now, now];
+      let pi = 1;
+      for (const [k, v] of Object.entries(project)) {
+        if (k === 'id') continue;
+        pi++;
+        cols.push(k);
+        vals.push(v);
+    }
+      const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
+      await execSql(`INSERT INTO wujie_brand_projects (${cols.join(', ')}) VALUES (${placeholders})`, vals);
+    }
+    return await dbGetBrandProject(project.id);
+  } catch (e) {
+    console.error('[db-storage] dbUpsertBrandProject error:', e);
+    return null;
+  }
+}
+
+export async function dbDeleteBrandProject(id: string): Promise<boolean> {
+  try {
+    await execSql('DELETE FROM wujie_brand_materials WHERE project_id = $1', [id]);
+    await execSql('DELETE FROM wujie_brand_projects WHERE id = $1', [id]);
+    return true;
+  } catch (e) {
+    console.error('[db-storage] dbDeleteBrandProject error:', e);
+    return false;
+  }
+}
+
+export async function dbListBrandMaterials(projectId: string): Promise<DbBrandMaterial[]> {
+  try {
+    const { rows } = await execSql('SELECT * FROM wujie_brand_materials WHERE project_id = $1 ORDER BY created_at DESC', [projectId]);
+    return rows as unknown as DbBrandMaterial[];
+  } catch (e) {
+    console.error('[db-storage] dbListBrandMaterials error:', e);
+    return [];
+  }
+}
+
+export async function dbUpsertBrandMaterial(material: Partial<DbBrandMaterial> & { id: string; project_id: string }): Promise<DbBrandMaterial | null> {
+  try {
+    const now = Date.now();
+    const existing = await execSql('SELECT id FROM wujie_brand_materials WHERE id = $1', [material.id]);
+    if (existing.rowCount && existing.rowCount > 0) {
+      const fields: string[] = [];
+      const values: unknown[] = [];
+      let idx = 1;
+      for (const [k, v] of Object.entries(material)) {
+        if (k === 'id') continue;
+        fields.push(`${k} = $${idx}`);
+        values.push(v);
+        idx++;
+      }
+      values.push(material.id);
+      await execSql(`UPDATE wujie_brand_materials SET ${fields.join(', ')} WHERE id = $${idx}`, values);
+    } else {
+      const cols = ['id', 'created_at'];
+      const vals: unknown[] = [material.id, now];
+      for (const [k, v] of Object.entries(material)) {
+        if (k === 'id') continue;
+        cols.push(k);
+        vals.push(v);
+      }
+      const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
+      await execSql(`INSERT INTO wujie_brand_materials (${cols.join(', ')}) VALUES (${placeholders})`, vals);
+    }
+    const { rows } = await execSql('SELECT * FROM wujie_brand_materials WHERE id = $1', [material.id]);
+    return rows.length > 0 ? rows[0] as unknown as DbBrandMaterial : null;
+  } catch (e) {
+    console.error('[db-storage] dbUpsertBrandMaterial error:', e);
+    return null;
+  }
+}
+
+export async function dbDeleteBrandMaterial(id: string): Promise<boolean> {
+  try {
+    await execSql('DELETE FROM wujie_brand_materials WHERE id = $1', [id]);
+    return true;
+  } catch (e) {
+    console.error('[db-storage] dbDeleteBrandMaterial error:', e);
+    return false;
+  }
+}
