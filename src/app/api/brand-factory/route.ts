@@ -70,6 +70,7 @@ export async function POST(req: NextRequest) {
       case 'delete-material': return await handleDeleteMaterial(body);
       case 'consistency-check': return await handleConsistencyCheck(body);
       case 'save-version': return await handleSaveVersion(body);
+      case 'generate-chinese-title': return await handleGenerateChineseTitle(body);
       default:
         return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
     }
@@ -391,7 +392,7 @@ async function handleConsistencyCheck(body: Record<string, unknown>) {
     type: m.materialType, title: m.title, prompt: (m.prompt as string || '').slice(0, 200),
   })) || []);
 
-  const prompt = `你是一个品牌一致性检测专家。请根据品牌DNA和已生成的物料Prompt，对5个维度进行一致性评分（0-100分），输出JSON格式：
+  const prompt = `你是一个品牌一致性检测专家。请根据品牌DNA和已生成的物料Prompt，对14个维度进行一致性评分（0-100分），输出JSON格式：
 
 品牌名称：${brandName}
 品牌DNA：${dnaStr}
@@ -399,11 +400,20 @@ async function handleConsistencyCheck(body: Record<string, unknown>) {
 
 请输出以下JSON结构（不要包含markdown代码块标记）：
 {
-  "logo": 分数(0-100, Logo是否在物料中正确使用),
-  "product": 分数(0-100, 产品图是否保真一致),
-  "ip": 分数(0-100, IP形象是否一致),
-  "brandColor": 分数(0-100, 品牌色是否统一),
-  "chinese": 分数(0-100, 中文标题是否清晰可读无变形),
+  "logoAccuracy": 分数(0-100, Logo准确度),
+  "logoDeform": 分数(0-100, Logo是否变形，100=无变形),
+  "logoOcclusion": 分数(0-100, Logo是否被遮挡，100=无遮挡),
+  "brandColor": 分数(0-100, 品牌主色匹配度),
+  "fontConsistency": 分数(0-100, 字体风格一致性),
+  "chineseAccuracy": 分数(0-100, 中文文字准确度),
+  "productFidelity": 分数(0-100, 产品外观保真度),
+  "ipFidelity": 分数(0-100, IP形象保真度),
+  "styleConsistency": 分数(0-100, 画面风格统一度),
+  "commercialQuality": 分数(0-100, 商业完成度),
+  "terminalRealism": 分数(0-100, 终端适配度),
+  "sizeAccuracy": 分数(0-100, 物料尺寸准确度),
+  "extraText": 分数(0-100, 是否存在多余文字，100=无多余文字),
+  "forbiddenRule": 分数(0-100, 是否符合品牌禁区规则，100=完全合规),
   "issues": ["问题1描述", "问题2描述"],
   "suggestions": ["修复建议1", "修复建议2"]
 }`;
@@ -417,9 +427,14 @@ async function handleConsistencyCheck(body: Record<string, unknown>) {
     } catch {
       scores = {};
     }
-    // Extract numeric scores
+    // Extract numeric scores for all 14 dimensions
     const result: Record<string, number> = {};
-    for (const key of ['logo', 'product', 'ip', 'brandColor', 'chinese']) {
+    for (const key of [
+      'logoAccuracy', 'logoDeform', 'logoOcclusion', 'brandColor',
+      'fontConsistency', 'chineseAccuracy', 'productFidelity', 'ipFidelity',
+      'styleConsistency', 'commercialQuality', 'terminalRealism', 'sizeAccuracy',
+      'extraText', 'forbiddenRule'
+    ]) {
       const val = scores[key];
       result[key] = typeof val === 'number' ? Math.min(100, Math.max(0, Math.round(val))) : 50;
     }
@@ -455,4 +470,39 @@ async function handleSaveVersion(body: Record<string, unknown>) {
     status: 'version',
   });
   return NextResponse.json({ success: true, version });
+}
+
+// ═══ Chinese Title Generation ═══
+
+async function handleGenerateChineseTitle(body: Record<string, unknown>) {
+  const { brandName, brandDna, scene, style, text } = body;
+  if (!text) return NextResponse.json({ error: '请输入标题文字' }, { status: 400 });
+
+  const dnaStr = typeof brandDna === 'string' ? brandDna : JSON.stringify(brandDna || {});
+
+  const prompt = `你是一个中文字体设计专家和品牌标题字设计师。请根据以下信息生成品牌标题字设计方案：
+
+品牌名称：${brandName || '未指定'}
+品牌DNA：${dnaStr}
+应用场景：${scene || '品牌主标题'}
+字体风格：${style || '高级黑体'}
+标题文字：${text}
+
+请输出设计方案，包含以下内容：
+1. 字体设计方向：描述字体应该呈现的风格特征
+2. 排版建议：字间距、行间距、对齐方式
+3. 色彩方案：基于品牌DNA的主色和辅助色
+4. 装饰元素：建议添加的装饰效果（如描边、阴影、光效等）
+5. 中文文字保护规则：确保不乱码、不多字、不错字、不擅自改品牌名
+6. 完整Prompt：可用于图像生成的完整Prompt，确保标题文字"${text}"在画面中完整清晰呈现
+
+请以结构化文本格式输出。`;
+
+  try {
+    const content = await callLLM(prompt);
+    return NextResponse.json({ success: true, result: content.trim() });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '标题字生成失败';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }

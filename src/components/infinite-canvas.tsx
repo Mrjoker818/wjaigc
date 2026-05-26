@@ -43,7 +43,7 @@ const AgentEditor = lazy(() => import('@/components/agent-editor').then(m => ({ 
 const BrandEcommercePanel = lazy(() => import('@/components/brand-ecommerce-panel').then(m => ({ default: m.BrandEcommercePanel })));
 const RefineEnginePanel = lazy(() => import('@/components/refine-engine-panel'));
 const FontDesignPanel = lazy(() => import('@/components/font-design-panel'));
-const BrandFactoryPanel = lazy(() => import('@/components/brand-factory-panel').then(m => ({ default: m.BrandFactoryPanel })));
+const BrandFactoryPanel = lazy(() => import('@/components/brand-factory-panel'));
 
 /* ====== Multi-Angle Sphere Preview (Canvas 2D) ====== */
 function MultiAngleSpherePreview({
@@ -9226,7 +9226,6 @@ export function InfiniteCanvas({
         {showBrandFactory && (
           <Suspense fallback={null}>
             <BrandFactoryPanel
-              isMonochrome={isMonochrome}
               onClose={() => setShowBrandFactory(false)}
               onAddImages={(urls: string[]) => {
                 onAddImages?.(urls);
