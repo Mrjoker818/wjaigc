@@ -80,7 +80,6 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
-  const [imageTaskId, setImageTaskId] = useState<string | null>(null);
   const [imageTaskMap, setImageTaskMap] = useState<Record<string, { planIndex: number; variant: number; planTitle: string }>>({});
 
   const [styleCategories, setStyleCategories] = useState<StyleCategory[]>([]);
@@ -110,6 +109,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
 
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const processedTaskIdsRef = useRef<Set<string>>(new Set()); // prevent duplicate image additions
 
   // ─── Drag handlers ───
   const handlePanelDragStart = (e: React.MouseEvent) => {
@@ -191,15 +191,24 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   }, []);
 
   // Unified polling for image generation tasks
+  // Uses functional state updates + processedTaskIdsRef to prevent stale closures and duplicates
   useEffect(() => {
     const taskIds = Object.keys(imageTaskMap);
     if (taskIds.length === 0 || !isGeneratingImage) return;
-    let completedCount = 0;
-    const totalTasks = taskIds.length;
-    pollIntervalRef.current = setInterval(async () => {
-      try {
-        for (const tid of taskIds) {
-          if (!imageTaskMap[tid]) continue; // already processed
+    // Reset processed set for new tasks that haven't been seen yet
+    for (const tid of taskIds) {
+      if (!processedTaskIdsRef.current.has(tid)) {
+        // New task, will be processed
+      }
+    }
+    let cancelled = false;
+    const pollOnce = async () => {
+      if (cancelled) return;
+      let remainingCount = 0;
+      for (const tid of taskIds) {
+        // Skip if already processed (prevents duplicates from re-renders or stale closures)
+        if (processedTaskIdsRef.current.has(tid)) continue;
+        try {
           const res = await fetch('/api/poll-task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -207,27 +216,42 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
           });
           const data = await res.json();
           if (data.status === 'completed') {
-            const urls = data.result?.directImageUrls || (data.imageUrl ? [data.imageUrl] : []);
-            const firstUrl = urls[0]; // Take only 1 image per task
+            // Mark as processed IMMEDIATELY to prevent any duplicate
+            processedTaskIdsRef.current.add(tid);
+            // Take ONLY 1 image from the result
+            const urls: string[] = data.result?.directImageUrls || (data.imageUrl ? [data.imageUrl] : []);
+            const firstUrl = urls[0];
             if (firstUrl) {
               const meta = imageTaskMap[tid];
-              setGeneratedImages(prev => [...prev, { url: firstUrl, planIndex: meta.planIndex, variant: meta.variant, planTitle: meta.planTitle }]);
+              if (meta) {
+                setGeneratedImages(prev => [...prev, { url: firstUrl, planIndex: meta.planIndex, variant: meta.variant, planTitle: meta.planTitle }]);
+              }
             }
+            // Remove from task map
             setImageTaskMap(prev => { const next = { ...prev }; delete next[tid]; return next; });
-            completedCount++;
           } else if (data.status === 'failed') {
+            processedTaskIdsRef.current.add(tid);
             setImageTaskMap(prev => { const next = { ...prev }; delete next[tid]; return next; });
-            completedCount++;
+          } else {
+            remainingCount++;
           }
+        } catch {
+          remainingCount++;
         }
-        if (completedCount >= totalTasks) {
-          setIsGeneratingImage(false);
-          setImageTaskMap({});
-          if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-        }
-      } catch { /* continue polling */ }
-    }, 3000);
-    return () => { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); };
+      }
+      // If no remaining tasks, stop generating
+      if (remainingCount === 0 && !cancelled) {
+        setIsGeneratingImage(false);
+        if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; }
+      }
+    };
+    // Poll immediately, then every 3 seconds
+    pollOnce();
+    pollIntervalRef.current = setInterval(pollOnce, 3000);
+    return () => {
+      cancelled = true;
+      if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; }
+    };
   }, [imageTaskMap, isGeneratingImage, selectedModel]);
 
   const handleRandomExample = useCallback(() => {
@@ -299,6 +323,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     if (!text.trim()) return;
     setIsGeneratingImage(true);
     setGeneratedImages([]);
+    processedTaskIdsRef.current.clear(); // Reset processed set for new generation
     setActiveTab('images');
     try {
       const res = await fetch('/api/font-design/generate-image', {
@@ -313,7 +338,12 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       });
       const data = await res.json();
       if (data.error) { showToast(data.error); setIsGeneratingImage(false); return; }
-      setImageTaskId(data.taskId);
+      // Use imageTaskMap for polling (same as plan-based generation)
+      if (data.taskId) {
+        setImageTaskMap({ [data.taskId]: { planIndex: 0, variant: 0, planTitle: mode === 'black-on-white' ? '黑底白字' : mode === 'transparent-logo' ? '透明Logo' : '完整版' } });
+      } else {
+        setIsGeneratingImage(false);
+      }
       if (data.prompt) {
         setPrompts(prev => prev ? { ...prev, prompt: data.prompt } : { prompt: data.prompt, shortPrompt: '', enhancedPrompt: '', blackOnWhitePrompt: '', transparentLogoPrompt: '' });
       }
@@ -326,6 +356,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     if (!text.trim()) return;
     setIsGeneratingImage(true);
     setGeneratedImages([]);
+    processedTaskIdsRef.current.clear(); // Reset processed set for new generation
     setActiveTab('images');
     try {
       const newTaskMap: Record<string, { planIndex: number; variant: number; planTitle: string }> = {};
@@ -362,6 +393,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     if (plans.length === 0) { showToast('请先生成设计方案'); return; }
     setIsGeneratingImage(true);
     setGeneratedImages([]);
+    processedTaskIdsRef.current.clear(); // Reset processed set for new generation
     setActiveTab('images');
     try {
       const newTaskMap: Record<string, { planIndex: number; variant: number; planTitle: string }> = {};
@@ -398,6 +430,8 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const handleBlackOnWhiteTest = useCallback(async () => {
     if (plans.length === 0) { showToast('请先生成字体方案'); return; }
     setIsGeneratingImage(true);
+    setGeneratedImages([]);
+    processedTaskIdsRef.current.clear(); // Reset processed set for new generation
     try {
       const newTaskMap: Record<string, { planIndex: number; variant: number; planTitle: string }> = {};
       for (let i = 0; i < plans.length; i++) {
@@ -1093,7 +1127,8 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                     });
                   })()}
                   {generatedImages.length > 0 && (
-                    <div className="flex gap-2 justify-center">
+                    <div className="flex gap-2 justify-center items-center">
+                      <span className="text-xs" style={{ color: subTextColor }}>{generatedImages.length} 张图片</span>
                       <button onClick={() => handleGenerateImage('full')} disabled={isGeneratingImage} style={{ ...secondaryBtnStyle, opacity: isGeneratingImage ? 0.5 : 1 }}>
                         <RefreshCw size={12} className="inline mr-1" />重新生成
                       </button>
