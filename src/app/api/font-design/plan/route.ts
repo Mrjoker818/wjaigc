@@ -251,7 +251,7 @@ function buildSystemPrompt(params: {
   const graphicDesc = graphicElements.length > 0 ? graphicElements.map(g => GRAPHIC_MAP[g] || g).join('、') : '无图形融合';
   const materialDesc = MATERIAL_MAP[material] || material;
 
-  return `你是一位资深的中文字体设计创意总监。请根据以下用户需求，生成3个差异化的字体设计方案。
+  return `你是一位资深的中文字体设计创意总监。请根据以下用户需求，生成4个差异化的字体设计方案。
 
 【用户需求】
 - 文字内容："${text}"
@@ -265,10 +265,11 @@ function buildSystemPrompt(params: {
 - 图形融合：${graphicDesc}
 
 【重要：差异化要求】
-3个方案必须在以下维度上明确区分，不能雷同：
+4个方案必须在风格方向上明确区分，不能雷同，每个方案走完全不同的设计路线：
 - 方案A：侧重"风格强化"——将该风格的核心特征发挥到极致
 - 方案B：侧重"创意融合"——在风格基础上融入创意元素或跨风格混搭
 - 方案C：侧重"应用适配"——针对使用场景做最优化设计
+- 方案D：侧重"反向突破"——在风格框架内做大胆创新，尝试出人意料的表现手法
 
 【输出格式】JSON，严格遵循以下结构，每个字段都必须填写具体内容，不能为空：
 {
@@ -350,6 +351,19 @@ function generateTemplatePlans(params: {
       keywords: [scene, style, '场景适配'],
       suitableScenes: [scene],
     },
+    {
+      title: `${style}·反向突破`,
+      stylePositioning: `在${style}框架内做大胆创新，出人意料的表现手法`,
+      recommendIndex: 4,
+      glyphFeatures: `${style}字形结构的颠覆性演绎，打破常规比例和排列，制造视觉惊喜`,
+      strokeAdvice: `笔画${strokeDesc}处理反其道而行，粗细极反差或极统一，笔势出其不意`,
+      graphicFusion: `${graphicDesc !== '无' ? graphicDesc + '元素以意想不到的方式介入，制造视觉冲突与张力' : '字形的极简或极繁处理，以反差创造记忆点'}`,
+      colorMaterial: `${color}的非主流运用方式，${material}质感呈现实验性效果，突破审美惯性`,
+      applicableScene: `适合${scene}及追求差异化的前卫场景，制造话题与记忆点`,
+      prompt: `中文字体设计，文字内容"${text}"，${style}风格大胆突破，字体居中，笔画${strokeDesc}反常规处理，${graphicDesc !== '无' ? graphicDesc + '元素制造视觉张力' : '字形极简极繁反差'}，颜色${color}非主流运用，质感${material}实验性，背景${background}，画面比例${ratio}。只保留这几个中文，不要英文不要拼音不要乱码不要重复字。`,
+      keywords: [style, '反向突破', '前卫实验'],
+      suitableScenes: [scene, '前卫设计', '差异化表达'],
+    },
   ];
 }
 
@@ -385,7 +399,7 @@ export async function POST(request: NextRequest) {
     if (provider?.apiKey) {
       try {
         const systemPrompt = buildSystemPrompt(planParams);
-        const userPrompt = `请为文字"${text}"生成3个差异化的字体设计方案，场景：${scene}，风格：${styleName}`;
+        const userPrompt = `请为文字"${text}"生成4个差异化的字体设计方案，场景：${scene}，风格：${styleName}`;
 
         const llmBody = {
           model: (provider.selectedModels as string[])?.[0] || 'gpt-4o',

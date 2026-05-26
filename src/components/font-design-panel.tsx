@@ -13,7 +13,7 @@ interface SceneOption { id: string; name: string; description: string; }
 interface DesignPlan {
   title: string; stylePositioning: string; glyphFeatures: string;
   strokeAdvice: string; graphicFusion: string; colorMaterial: string;
-  applicableScene: string; recommendIndex: number;
+  applicableScene: string; recommendIndex: number; prompt: string;
 }
 interface ImageModel { id: string; name: string; providerId: string; providerName: string; }
 interface HistoryItem {
@@ -80,6 +80,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [imageTaskId, setImageTaskId] = useState<string | null>(null);
+  const [allImageTaskIds, setAllImageTaskIds] = useState<string[]>([]);
 
   const [styleCategories, setStyleCategories] = useState<StyleCategory[]>([]);
   const [scenes, setScenes] = useState<SceneOption[]>([]);
@@ -188,6 +189,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  // Poll for single image task
   useEffect(() => {
     if (!imageTaskId || !isGeneratingImage) return;
     pollIntervalRef.current = setInterval(async () => {
@@ -213,6 +215,40 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     }, 3000);
     return () => { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); };
   }, [imageTaskId, isGeneratingImage, selectedModel]);
+
+  // Poll for multiple image tasks (batch generation for all plans)
+  useEffect(() => {
+    if (allImageTaskIds.length === 0 || !isGeneratingImage) return;
+    let completedCount = 0;
+    const totalTasks = allImageTaskIds.length;
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        const pendingIds = allImageTaskIds.slice(completedCount);
+        for (const tid of pendingIds) {
+          const res = await fetch('/api/poll-task', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ taskId: tid, model: selectedModel }),
+          });
+          const data = await res.json();
+          if (data.status === 'completed') {
+            const urls = data.result?.directImageUrls || (data.imageUrl ? [data.imageUrl] : []);
+            setGeneratedImages(prev => [...prev, ...urls]);
+            completedCount++;
+          } else if (data.status === 'failed') {
+            completedCount++;
+          }
+          // Still processing - skip to next
+        }
+        if (completedCount >= totalTasks) {
+          setIsGeneratingImage(false);
+          setAllImageTaskIds([]);
+          if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+        }
+      } catch { /* continue polling */ }
+    }, 3000);
+    return () => { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); };
+  }, [allImageTaskIds, isGeneratingImage, selectedModel]);
 
   const handleRandomExample = useCallback(() => {
     setText(RANDOM_EXAMPLES[Math.floor(Math.random() * RANDOM_EXAMPLES.length)]);
@@ -304,6 +340,62 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       setHistory(prev => [{ id: `h-${Date.now()}`, text, scene, style: secondaryStyle || primaryStyleCategory, prompt: data.prompt || '', createdAt: new Date().toLocaleString() }, ...prev]);
     } catch { showToast('生成图片失败'); setIsGeneratingImage(false); }
   }, [text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast]);
+
+  const handleGeneratePlanImage = useCallback(async (plan: DesignPlan) => {
+    if (!text.trim()) return;
+    setIsGeneratingImage(true);
+    setGeneratedImages([]);
+    setActiveTab('images');
+    try {
+      const res = await fetch('/api/font-design/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text, scene, primaryStyleCategory, secondaryStyle,
+          ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced,
+          model: selectedModel, mode: 'full', count: 1,
+          prompt: plan.prompt,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) { showToast(data.error); setIsGeneratingImage(false); return; }
+      setImageTaskId(data.taskId);
+      setHistory(prev => [{ id: `h-${Date.now()}`, text, scene, style: plan.title || secondaryStyle || primaryStyleCategory, prompt: plan.prompt || '', createdAt: new Date().toLocaleString() }, ...prev]);
+    } catch { showToast('生成图片失败'); setIsGeneratingImage(false); }
+  }, [text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast]);
+
+  /** Generate 4 images, one per design plan, each using its own prompt */
+  const handleGenerateAllPlanImages = useCallback(async () => {
+    if (plans.length === 0) { showToast('请先生成设计方案'); return; }
+    setIsGeneratingImage(true);
+    setGeneratedImages([]);
+    setActiveTab('images');
+    try {
+      // Submit all 4 plan image generation tasks
+      const newTaskIds: string[] = [];
+      for (const plan of plans) {
+        const res = await fetch('/api/font-design/generate-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text, scene, primaryStyleCategory, secondaryStyle,
+            ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced,
+            model: selectedModel, mode: 'full', count: 1,
+            prompt: plan.prompt,
+          }),
+        });
+        const data = await res.json();
+        if (data.error) { showToast(`方案"${plan.title}"生成失败: ${data.error}`); continue; }
+        if (data.taskId) newTaskIds.push(data.taskId);
+      }
+      if (newTaskIds.length > 0) {
+        setImageTaskId(newTaskIds[0]);
+        // Store all task IDs for sequential polling
+        setAllImageTaskIds(newTaskIds);
+      }
+      setHistory(prev => [...plans.map((plan, i) => ({ id: `h-${Date.now()}-${i}`, text, scene, style: plan.title || secondaryStyle || primaryStyleCategory, prompt: plan.prompt || '', createdAt: new Date().toLocaleString() })), ...prev]);
+    } catch { showToast('生成图片失败'); setIsGeneratingImage(false); }
+  }, [plans, text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast]);
 
   const handleAddToCanvas = useCallback((url: string) => { onAddImages?.([url]); }, [onAddImages]);
 
@@ -741,9 +833,9 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                 <button onClick={() => handleGenerateImage('black-on-white')} disabled={isGeneratingImage || !text.trim()} style={{ ...secondaryBtnStyle, flex: 1, opacity: (isGeneratingImage || !text.trim()) ? 0.5 : 1 }}>
                   黑底白字测试
                 </button>
-                <button onClick={() => handleGenerateImage('full')} disabled={isGeneratingImage || !text.trim()} style={{ ...secondaryBtnStyle, flex: 1, opacity: (isGeneratingImage || !text.trim()) ? 0.5 : 1 }}>
+                <button onClick={handleGenerateAllPlanImages} disabled={isGeneratingImage || !text.trim() || plans.length === 0} style={{ ...secondaryBtnStyle, flex: 1, opacity: (isGeneratingImage || !text.trim() || plans.length === 0) ? 0.5 : 1 }} title={plans.length === 0 ? '请先生成字体方案' : '按4个方案分别生成4张匹配图片'}>
                   {isGeneratingImage ? <Loader2 className="h-3 w-3 animate-spin inline mr-1" /> : <ImageIcon className="h-3 w-3 inline mr-1" />}
-                  直接生成图片
+                  生成方案图片
                 </button>
               </div>
             </div>
@@ -834,6 +926,9 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                         ))}
                       </div>
                       <div className="mt-3 flex gap-2">
+                        <button onClick={() => handleGeneratePlanImage(plan)} disabled={isGeneratingImage} style={{ padding: '5px 12px', borderRadius: 4, fontSize: 11, fontWeight: 500, border: 'none', background: isMonochrome ? '#1a1a1a' : '#d4af37', color: isMonochrome ? '#fff' : '#1a1a1a', cursor: 'pointer', opacity: isGeneratingImage ? 0.5 : 1, transition: 'all 0.2s ease' }}>
+                          <Wand2 size={12} className="inline mr-1" />生成图片
+                        </button>
                         <button onClick={() => copyToClipboard(JSON.stringify(plan), '方案')} style={secondaryBtnStyle}>
                           <Copy size={12} className="inline mr-1" />复制
                         </button>
