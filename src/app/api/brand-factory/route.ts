@@ -3,7 +3,7 @@ import {
   dbListBrandProjects, dbGetBrandProject, dbUpsertBrandProject, dbDeleteBrandProject,
   dbListBrandMaterials, dbUpsertBrandMaterial, dbDeleteBrandMaterial,
 } from '@/lib/db-storage';
-import { findProviderForFeature } from '@/lib/server-api-config';
+import { findProviderForFeature, findProviderForModel } from '@/lib/server-api-config';
 
 // ═══ GET: List projects ═══
 export async function GET(req: NextRequest) {
@@ -145,17 +145,32 @@ async function handleArchiveProject(body: Record<string, unknown>) {
 
 // ═══ AI Analysis ═══
 
-async function getLLM() {
-  return await findProviderForFeature('chat');
+async function getLLM(modelOverride?: string) {
+  const provider = await findProviderForFeature('chat');
+  if (!provider) return null;
+  const modelName = modelOverride || provider.selectedModels?.[0] || '';
+  return { provider, modelName };
 }
 
-async function callLLM(prompt: string): Promise<string> {
-  const provider = await getLLM();
-  if (!provider) throw new Error('请先在管理后台配置LLM模型');
+async function getImageProvider(modelOverride?: string) {
+  if (modelOverride) {
+    const provider = await findProviderForModel(modelOverride, 'image');
+    if (provider) return { provider, modelName: modelOverride };
+  }
+  // Fallback: find any image provider
+  const provider = await findProviderForModel('', 'image');
+  if (!provider) return null;
+  const modelName = modelOverride || provider.selectedModels?.[0] || '';
+  return { provider, modelName };
+}
 
+async function callLLM(prompt: string, modelOverride?: string): Promise<string> {
+  const llm = await getLLM(modelOverride);
+  if (!llm) throw new Error('请先在管理后台配置LLM模型');
+
+  const { provider, modelName } = llm;
   const baseUrl = (provider.baseUrl || '').replace(/\/+$/, '');
   const apiKey = provider.apiKey || '';
-  const modelName = provider.selectedModels?.[0] || '';
 
   const resp = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
@@ -210,7 +225,7 @@ ${ipUrl ? `IP形象图片：${ipUrl}` : ''}
 }`;
 
   try {
-    const content = await callLLM(prompt);
+    const content = await callLLM(prompt, llmModel as string | undefined);
     // Try to parse JSON from response
     let dna: Record<string, unknown>;
     try {
@@ -251,7 +266,7 @@ async function handleGenerateDirections(body: Record<string, unknown>) {
 }]`;
 
   try {
-    const content = await callLLM(prompt);
+    const content = await callLLM(prompt, llmModel as string | undefined);
     let directions: unknown[];
     try {
       const jsonMatch = content.match(/\[[\s\S]*\]/);
@@ -296,7 +311,7 @@ ${slogan ? `传播语/标语：${slogan}` : ''}
 输出格式为纯文本Prompt，不要包含任何前缀或说明文字。`;
 
   try {
-    const content = await callLLM(prompt);
+    const content = await callLLM(prompt, llmModel as string | undefined);
     const kvPrompt = content.trim();
     // Return as materials array for compatibility
     return NextResponse.json({
@@ -339,7 +354,7 @@ async function handleBatchGenerate(body: Record<string, unknown>) {
 }]`;
 
   try {
-    const content = await callLLM(prompt);
+    const content = await callLLM(prompt, llmModel as string | undefined);
     let materials: unknown[];
     try {
       const jsonMatch = content.match(/\[[\s\S]*\]/);
@@ -419,7 +434,7 @@ async function handleConsistencyCheck(body: Record<string, unknown>) {
 }`;
 
   try {
-    const content = await callLLM(prompt);
+    const content = await callLLM(prompt, llmModel as string | undefined);
     let scores: Record<string, unknown>;
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/);
@@ -475,7 +490,7 @@ async function handleSaveVersion(body: Record<string, unknown>) {
 // ═══ Chinese Title Generation ═══
 
 async function handleGenerateChineseTitle(body: Record<string, unknown>) {
-  const { brandName, brandDna, scene, style, text } = body;
+  const { brandName, brandDna, scene, style, text, llmModel } = body;
   if (!text) return NextResponse.json({ error: '请输入标题文字' }, { status: 400 });
 
   const dnaStr = typeof brandDna === 'string' ? brandDna : JSON.stringify(brandDna || {});
@@ -499,7 +514,7 @@ async function handleGenerateChineseTitle(body: Record<string, unknown>) {
 请以结构化文本格式输出。`;
 
   try {
-    const content = await callLLM(prompt);
+    const content = await callLLM(prompt, llmModel as string | undefined);
     return NextResponse.json({ success: true, result: content.trim() });
   } catch (e) {
     const msg = e instanceof Error ? e.message : '标题字生成失败';

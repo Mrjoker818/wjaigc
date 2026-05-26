@@ -6,7 +6,8 @@ import {
   Upload, Image as ImageIcon, Palette, Sparkles, Layout, FileText,
   CheckCircle, AlertTriangle, Clock, Download, Copy, RotateCcw,
   ChevronRight, ChevronDown, Eye, Star, MessageSquare, Send,
-  Zap, RefreshCw, Save, BookOpen, Users, PenTool, Type
+  Zap, RefreshCw, Save, BookOpen, Users, PenTool, Type,
+  Cpu, MessageCircle
 } from 'lucide-react';
 
 /* ========== TYPES ========== */
@@ -105,6 +106,13 @@ interface CommentRecord {
   type: string;
   content: string;
   createdAt: string;
+}
+
+interface ImageModel {
+  id: string;
+  name: string;
+  providerId: string;
+  providerName: string;
 }
 
 /* ========== CONSTANTS ========== */
@@ -410,7 +418,7 @@ interface BrandFactoryPanelProps {
   onAddImages?: (urls: string[]) => void;
 }
 
-export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactoryPanelProps) {
+export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }: BrandFactoryPanelProps) {
   // === Panel drag state ===
   const [panelPos, setPanelPos] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -424,6 +432,13 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // === Model selection ===
+  const [imageModels, setImageModels] = useState<ImageModel[]>([]);
+  const [llmModels, setLlmModels] = useState<ImageModel[]>([]);
+  const [selectedImageModel, setSelectedImageModel] = useState('');
+  const [selectedLlmModel, setSelectedLlmModel] = useState('');
+  const [showModelPanel, setShowModelPanel] = useState(false);
+
   // === Project create state ===
   const [newProject, setNewProject] = useState({
     brandName: '', industry: '', projectType: '', tone: '',
@@ -431,7 +446,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
   });
 
   // === DNA state ===
-  const [dnaStep, setDnaStep] = useState(0); // 0=upload, 1=analyzing, 2=result, 3=confirmed
+  const [dnaStep, setDnaStep] = useState(0);
   const [dnaResult, setDnaResult] = useState<BrandDNA | null>(null);
 
   // === Direction state ===
@@ -473,6 +488,9 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
   const [exportFormat, setExportFormat] = useState('PDF');
   const [exportSections, setExportSections] = useState<Set<string>>(new Set(PROPOSAL_SECTIONS));
 
+  const PANEL_W = 900;
+  const PANEL_H = 680;
+
   // Drag handlers
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     if (!panelRef.current) return;
@@ -494,15 +512,61 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
 
   // Center panel on mount
   useEffect(() => {
-    if (panelRef.current) {
-      const w = panelRef.current.offsetWidth;
-      const h = panelRef.current.offsetHeight;
-      setPanelPos({ x: (window.innerWidth - w) / 2, y: (window.innerHeight - h) / 2 });
-    }
+    setPanelPos({
+      x: Math.max(0, (window.innerWidth - PANEL_W) / 2),
+      y: Math.max(0, (window.innerHeight - PANEL_H) / 2),
+    });
   }, []);
 
   // Load projects
   useEffect(() => { loadProjects(); }, []);
+
+  // Load models from admin system
+  useEffect(() => {
+    fetch('/api/models?type=image')
+      .then(r => r.json())
+      .then(data => {
+        const providers: { id: string; name: string; [k: string]: unknown }[] = data.providers || [];
+        const providerMap = new Map(providers.map(p => [p.id, p]));
+        const modelList: { id: string; name: string; providerId?: string }[] = data.models || [];
+        if (modelList.length) {
+          const mapped = modelList.map(m => {
+            const prov = providerMap.get(m.providerId || '');
+            return { id: m.id, name: m.name, providerId: m.providerId || '', providerName: prov?.name || '' };
+          });
+          setImageModels(mapped);
+          const saved = localStorage.getItem('wujie_bf_image_model');
+          if (saved && mapped.some(m => m.id === saved)) {
+            setSelectedImageModel(saved);
+          } else if (mapped.length) {
+            setSelectedImageModel(mapped[0].id);
+          }
+        }
+      })
+      .catch(() => {});
+
+    fetch('/api/models?type=chat')
+      .then(r => r.json())
+      .then(data => {
+        const providers: { id: string; name: string; [k: string]: unknown }[] = data.providers || [];
+        const providerMap = new Map(providers.map(p => [p.id, p]));
+        const modelList: { id: string; name: string; providerId?: string }[] = data.models || [];
+        if (modelList.length) {
+          const mapped = modelList.map(m => {
+            const prov = providerMap.get(m.providerId || '');
+            return { id: m.id, name: m.name, providerId: m.providerId || '', providerName: prov?.name || '' };
+          });
+          setLlmModels(mapped);
+          const saved = localStorage.getItem('wujie_bf_llm_model');
+          if (saved && mapped.some(m => m.id === saved)) {
+            setSelectedLlmModel(saved);
+          } else if (mapped.length) {
+            setSelectedLlmModel(mapped[0].id);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const loadProjects = async () => {
     try {
@@ -542,7 +606,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
     try { return JSON.parse(str); } catch { return fallback; }
   }
 
-  // === API calls ===
+  // === API calls (pass model info) ===
   const apiCall = async (action: string, body: Record<string, unknown> = {}) => {
     setLoading(true);
     setError('');
@@ -550,7 +614,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
       const res = await fetch('/api/brand-factory', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, ...body }),
+        body: JSON.stringify({ action, ...body, imageModel: selectedImageModel, llmModel: selectedLlmModel }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || '操作失败');
@@ -700,7 +764,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
   // Theme variables
   const th = {
     panel: 'bg-[#1a1a1a] border border-white/[0.08] rounded-2xl shadow-2xl',
-    header: 'bg-gradient-to-r from-[#1a1a1a] to-[#141414] border-b border-white/[0.08] rounded-t-2xl px-4 py-3',
+    header: 'bg-gradient-to-r from-[#1a1a1a] to-[#141414] border-b border-white/[0.08] rounded-t-2xl px-4 py-2.5',
     title: 'text-gray-100 font-semibold',
     text: 'text-gray-100',
     textSec: 'text-gray-400',
@@ -712,6 +776,10 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
     btnGhost: 'text-gray-400 hover:text-gray-100 hover:bg-white/[0.06] rounded-lg px-3 py-1.5 transition-colors',
     card: 'bg-[#111] border border-white/[0.06] rounded-lg',
     select: 'bg-[#111] border border-white/[0.08] rounded-lg px-3 py-2 text-gray-100 text-sm focus:outline-none focus:border-[#d4af37]/50 appearance-none cursor-pointer',
+    sidebar: 'bg-[#141414] border-r border-white/[0.06]',
+    sidebarItem: 'flex items-center gap-2 px-3 py-2 text-[11px] rounded-lg cursor-pointer transition-colors',
+    sidebarItemActive: 'bg-[#d4af37]/15 text-[#d4af37] font-medium',
+    sidebarItemInactive: 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.04]',
   };
 
   const noProject = !currentProject;
@@ -735,10 +803,9 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
     }
   };
 
-  // ========== 6.1 PROJECT CENTER ==========
+  // ========== PROJECT CENTER ==========
   const renderProjects = () => (
     <div className="space-y-4">
-      {/* New project form */}
       <div className={`${th.card} p-4 space-y-3`}>
         <h3 className={th.title + ' text-sm'}>新建品牌项目</h3>
         <input className={`${th.input} w-full`} placeholder="品牌名称 *" value={newProject.brandName}
@@ -760,10 +827,12 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
           <option value="">品牌调性</option>
           {TONES.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
-        <input className={`${th.input} w-full`} placeholder="关键词（逗号分隔）" value={newProject.keywords}
-          onChange={e => setNewProject(p => ({ ...p, keywords: e.target.value }))} />
-        <input className={`${th.input} w-full`} placeholder="目标用户" value={newProject.targetAudience}
-          onChange={e => setNewProject(p => ({ ...p, targetAudience: e.target.value }))} />
+        <div className="grid grid-cols-2 gap-3">
+          <input className={`${th.input} w-full`} placeholder="关键词（逗号分隔）" value={newProject.keywords}
+            onChange={e => setNewProject(p => ({ ...p, keywords: e.target.value }))} />
+          <input className={`${th.input} w-full`} placeholder="目标用户" value={newProject.targetAudience}
+            onChange={e => setNewProject(p => ({ ...p, targetAudience: e.target.value }))} />
+        </div>
         <textarea className={`${th.input} w-full resize-none`} rows={2} placeholder="项目描述" value={newProject.description}
           onChange={e => setNewProject(p => ({ ...p, description: e.target.value }))} />
         <button className={`${th.btn} w-full`} onClick={handleCreateProject} disabled={loading || !newProject.brandName}>
@@ -771,7 +840,6 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
         </button>
       </div>
 
-      {/* Project list */}
       <div className="space-y-2">
         <h3 className={`${th.textSec} text-xs font-medium`}>已有项目（{projects.length}）</h3>
         {projects.filter(p => !p.isArchived).map(p => (
@@ -792,12 +860,12 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
     </div>
   );
 
-  // ========== 6.2 BRAND ASSETS ==========
+  // ========== BRAND ASSETS ==========
   const renderAssets = () => (
     <div className="space-y-4">
       {noProject && <div className={`${th.textMuted} text-sm text-center py-8`}>请先选择或创建项目</div>}
       {currentProject && (
-        <>
+        <div className="grid grid-cols-2 gap-4">
           {(['logoUrl', 'productUrl', 'ipUrl'] as const).map(field => {
             const labels: Record<string, string> = { logoUrl: '品牌Logo', productUrl: '产品图片', ipUrl: 'IP形象' };
             const icons: Record<string, React.ReactNode> = { logoUrl: <Star className="w-4 h-4" />, productUrl: <ImageIcon className="w-4 h-4" />, ipUrl: <Users className="w-4 h-4" /> };
@@ -809,12 +877,12 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
                 </div>
                 {currentProject[field] ? (
                   <div className="relative group">
-                    <img src={currentProject[field]} alt={labels[field]} className="w-full h-24 object-contain rounded bg-black/30" />
+                    <img src={currentProject[field]} alt={labels[field]} className="w-full h-32 object-contain rounded bg-black/30" />
                     <button className="absolute top-1 right-1 bg-red-500/80 text-white rounded p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
                       onClick={() => setCurrentProject(p => p ? { ...p, [field]: '' } : p)}><X className="w-3 h-3" /></button>
                   </div>
                 ) : (
-                  <label className={`flex flex-col items-center justify-center h-24 border-2 border-dashed ${th.borderLight} rounded-lg cursor-pointer hover:border-[#d4af37]/30 transition-colors`}>
+                  <label className={`flex flex-col items-center justify-center h-32 border-2 border-dashed ${th.borderLight} rounded-lg cursor-pointer hover:border-[#d4af37]/30 transition-colors`}>
                     <Upload className="w-5 h-5 text-gray-500 mb-1" />
                     <span className="text-xs text-gray-500">点击上传</span>
                     <input type="file" className="hidden" accept="image/*" onChange={async e => {
@@ -833,20 +901,20 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
           })}
 
           {/* Reference images */}
-          <div className={`${th.card} p-4`}>
+          <div className={`${th.card} p-4 col-span-2`}>
             <div className="flex items-center gap-2 mb-2">
               <ImageIcon className="w-4 h-4" />
               <span className={`${th.text} text-sm font-medium`}>参考图</span>
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-4 gap-2">
               {currentProject.referenceUrls.map((url, i) => (
                 <div key={i} className="relative group">
-                  <img src={url} alt="" className="w-full h-16 object-cover rounded" />
+                  <img src={url} alt="" className="w-full h-20 object-cover rounded" />
                   <button className="absolute top-0.5 right-0.5 bg-red-500/80 text-white rounded p-0.5 opacity-0 group-hover:opacity-100"
                     onClick={() => setCurrentProject(p => p ? { ...p, referenceUrls: p.referenceUrls.filter((_, j) => j !== i) } : p)}><X className="w-2.5 h-2.5" /></button>
                 </div>
               ))}
-              <label className={`flex items-center justify-center h-16 border-2 border-dashed ${th.borderLight} rounded cursor-pointer hover:border-[#d4af37]/30`}>
+              <label className={`flex items-center justify-center h-20 border-2 border-dashed ${th.borderLight} rounded cursor-pointer hover:border-[#d4af37]/30`}>
                 <Plus className="w-4 h-4 text-gray-500" />
                 <input type="file" className="hidden" accept="image/*" onChange={async e => {
                   const file = e.target.files?.[0];
@@ -862,7 +930,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
           </div>
 
           {/* Brand manual */}
-          <div className={`${th.card} p-4`}>
+          <div className={`${th.card} p-4 col-span-2`}>
             <div className="flex items-center gap-2 mb-2">
               <BookOpen className="w-4 h-4" />
               <span className={`${th.text} text-sm font-medium`}>品牌手册</span>
@@ -873,18 +941,17 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
               <input type="file" className="hidden" accept="image/*,.pdf" onChange={() => {}} />
             </label>
           </div>
-        </>
+        </div>
       )}
     </div>
   );
 
-  // ========== 6.3 BRAND DNA ==========
+  // ========== BRAND DNA ==========
   const renderDNA = () => (
     <div className="space-y-4">
       {noProject && <div className={`${th.textMuted} text-sm text-center py-8`}>请先选择项目</div>}
       {currentProject && (
         <>
-          {/* Steps indicator */}
           <div className="flex items-center gap-2 text-xs">
             {['上传资料', 'AI分析', '提取DNA', '确认完成'].map((s, i) => (
               <React.Fragment key={s}>
@@ -898,7 +965,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
           </div>
 
           {dnaStep === 0 && (
-            <div className={`${th.card} p-4 text-center`}>
+            <div className={`${th.card} p-6 text-center`}>
               <p className={`${th.textSec} text-sm mb-3`}>请先在「品牌资产」Tab上传Logo、产品图、IP形象等资料</p>
               <button className={th.btn} onClick={handleAnalyzeDNA} disabled={loading}>
                 <Zap className="w-4 h-4 inline mr-1" />开始AI分析
@@ -915,12 +982,16 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
           )}
 
           {(dnaStep === 2 || dnaStep === 3) && dnaResult && (
-            <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
               <div className={`${th.card} p-3`}>
                 <div className={`${th.textSec} text-xs mb-1`}>品牌关键词</div>
                 <div className="flex flex-wrap gap-1">{dnaResult.brandKeywords.map((k, i) => (
                   <span key={i} className="bg-[#d4af37]/20 text-[#d4af37] text-xs px-2 py-0.5 rounded">{k}</span>
                 ))}</div>
+              </div>
+              <div className={`${th.card} p-3`}>
+                <div className={`${th.textSec} text-xs mb-1`}>视觉调性</div>
+                <p className={`${th.text} text-sm`}>{dnaResult.visualTone}</p>
               </div>
               <div className={`${th.card} p-3`}>
                 <div className={`${th.textSec} text-xs mb-1`}>主色</div>
@@ -939,38 +1010,34 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
                 <p className={`${th.text} text-sm`}>{dnaResult.fontStyle}</p>
               </div>
               <div className={`${th.card} p-3`}>
-                <div className={`${th.textSec} text-xs mb-1`}>视觉调性</div>
-                <p className={`${th.text} text-sm`}>{dnaResult.visualTone}</p>
-              </div>
-              <div className={`${th.card} p-3`}>
-                <div className={`${th.textSec} text-xs mb-1`}>Logo使用规则</div>
-                <ul className="text-xs text-gray-300 list-disc ml-4">{dnaResult.logoRules.map((r, i) => <li key={i}>{r}</li>)}</ul>
-              </div>
-              <div className={`${th.card} p-3`}>
-                <div className={`${th.textSec} text-xs mb-1`}>产品展示规则</div>
-                <ul className="text-xs text-gray-300 list-disc ml-4">{dnaResult.productRules.map((r, i) => <li key={i}>{r}</li>)}</ul>
-              </div>
-              <div className={`${th.card} p-3`}>
-                <div className={`${th.textSec} text-xs mb-1`}>IP使用规则</div>
-                <ul className="text-xs text-gray-300 list-disc ml-4">{dnaResult.ipRules.map((r, i) => <li key={i}>{r}</li>)}</ul>
-              </div>
-              <div className={`${th.card} p-3`}>
                 <div className={`${th.textSec} text-xs mb-1`}>禁区规则</div>
                 <ul className="text-xs text-red-400 list-disc ml-4">{dnaResult.forbiddenRules.map((r, i) => <li key={i}>{r}</li>)}</ul>
               </div>
-              <div className={`${th.card} p-3`}>
+              <div className={`${th.card} p-3 col-span-2`}>
+                <div className={`${th.textSec} text-xs mb-1`}>Logo使用规则</div>
+                <ul className="text-xs text-gray-300 list-disc ml-4">{dnaResult.logoRules.map((r, i) => <li key={i}>{r}</li>)}</ul>
+              </div>
+              <div className={`${th.card} p-3 col-span-2`}>
+                <div className={`${th.textSec} text-xs mb-1`}>产品展示规则</div>
+                <ul className="text-xs text-gray-300 list-disc ml-4">{dnaResult.productRules.map((r, i) => <li key={i}>{r}</li>)}</ul>
+              </div>
+              <div className={`${th.card} p-3 col-span-2`}>
+                <div className={`${th.textSec} text-xs mb-1`}>IP使用规则</div>
+                <ul className="text-xs text-gray-300 list-disc ml-4">{dnaResult.ipRules.map((r, i) => <li key={i}>{r}</li>)}</ul>
+              </div>
+              <div className={`${th.card} p-3 col-span-2`}>
                 <div className={`${th.textSec} text-xs mb-1`}>推荐物料</div>
                 <div className="flex flex-wrap gap-1">{dnaResult.recommendedMaterials.map((m, i) => (
                   <span key={i} className="bg-white/[0.06] text-gray-300 text-xs px-2 py-0.5 rounded">{m}</span>
                 ))}</div>
               </div>
               {dnaStep === 2 && (
-                <div className="flex gap-2">
+                <div className="col-span-2 flex gap-2">
                   <button className={`${th.btn} flex-1`} onClick={() => setDnaStep(3)}><CheckCircle className="w-4 h-4 inline mr-1" />确认DNA</button>
                   <button className={`${th.btnGhost} flex-1 border ${th.border}`} onClick={handleAnalyzeDNA}><RefreshCw className="w-4 h-4 inline mr-1" />重新分析</button>
                 </div>
               )}
-              {dnaStep === 3 && <div className="text-center text-[#d4af37] text-xs font-medium"><CheckCircle className="w-4 h-4 inline mr-1" />品牌DNA已确认</div>}
+              {dnaStep === 3 && <div className="col-span-2 text-center text-[#d4af37] text-xs font-medium"><CheckCircle className="w-4 h-4 inline mr-1" />品牌DNA已确认</div>}
             </div>
           )}
         </>
@@ -978,7 +1045,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
     </div>
   );
 
-  // ========== 6.4 CREATIVE DIRECTIONS ==========
+  // ========== CREATIVE DIRECTIONS ==========
   const renderDirections = () => (
     <div className="space-y-4">
       {noProject && <div className={`${th.textMuted} text-sm text-center py-8`}>请先选择项目</div>}
@@ -997,33 +1064,35 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
             </button>
           </div>
 
-          {currentProject.creativeDirections.map((dir, i) => (
-            <div key={dir.id || i} className={`${th.card} p-4`}>
-              <div className="flex items-center justify-between mb-2">
-                <h4 className={`${th.text} font-medium text-sm`}>{dir.name || `方向 ${String.fromCharCode(65 + i)}`}</h4>
-                <span className="text-xs text-[#d4af37]">{dir.colorPlan?.length || 0} 色</span>
+          <div className="grid grid-cols-2 gap-3">
+            {currentProject.creativeDirections.map((dir, i) => (
+              <div key={dir.id || i} className={`${th.card} p-4`}>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className={`${th.text} font-medium text-sm`}>{dir.name || `方向 ${String.fromCharCode(65 + i)}`}</h4>
+                  <span className="text-xs text-[#d4af37]">{dir.colorPlan?.length || 0} 色</span>
+                </div>
+                {dir.concept && <p className={`${th.textSec} text-xs mb-2`}>{dir.concept}</p>}
+                {dir.slogan && <p className={`${th.text} text-sm italic mb-2`}>「{dir.slogan}」</p>}
+                {dir.visualKeywords?.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mb-2">{dir.visualKeywords.map((k, j) => (
+                    <span key={j} className="bg-white/[0.06] text-gray-300 text-[10px] px-1.5 py-0.5 rounded">{k}</span>
+                  ))}</div>
+                )}
+                {dir.colorPlan?.length > 0 && (
+                  <div className="flex gap-1 mb-2">{dir.colorPlan.map((c, j) => (
+                    <div key={j} className="w-6 h-6 rounded" style={{ background: c }} title={c} />
+                  ))}</div>
+                )}
+                {dir.fontPlan && <p className={`${th.textMuted} text-[10px]`}>字体：{dir.fontPlan}</p>}
+                {dir.prompt && (
+                  <details className="mt-2">
+                    <summary className={`${th.textMuted} text-[10px] cursor-pointer hover:text-gray-300`}>查看Prompt</summary>
+                    <pre className="text-[10px] text-gray-400 mt-1 whitespace-pre-wrap bg-black/30 p-2 rounded">{dir.prompt}</pre>
+                  </details>
+                )}
               </div>
-              {dir.concept && <p className={`${th.textSec} text-xs mb-2`}>{dir.concept}</p>}
-              {dir.slogan && <p className={`${th.text} text-sm italic mb-2`}>「{dir.slogan}」</p>}
-              {dir.visualKeywords?.length > 0 && (
-                <div className="flex flex-wrap gap-1 mb-2">{dir.visualKeywords.map((k, j) => (
-                  <span key={j} className="bg-white/[0.06] text-gray-300 text-[10px] px-1.5 py-0.5 rounded">{k}</span>
-                ))}</div>
-              )}
-              {dir.colorPlan?.length > 0 && (
-                <div className="flex gap-1 mb-2">{dir.colorPlan.map((c, j) => (
-                  <div key={j} className="w-6 h-6 rounded" style={{ background: c }} title={c} />
-                ))}</div>
-              )}
-              {dir.fontPlan && <p className={`${th.textMuted} text-[10px]`}>字体：{dir.fontPlan}</p>}
-              {dir.prompt && (
-                <details className="mt-2">
-                  <summary className={`${th.textMuted} text-[10px] cursor-pointer hover:text-gray-300`}>查看Prompt</summary>
-                  <pre className="text-[10px] text-gray-400 mt-1 whitespace-pre-wrap bg-black/30 p-2 rounded">{dir.prompt}</pre>
-                </details>
-              )}
-            </div>
-          ))}
+            ))}
+          </div>
 
           {currentProject.creativeDirections.length === 0 && !generatingDirs && (
             <div className={`${th.textMuted} text-sm text-center py-4`}>点击上方按钮生成创意方向</div>
@@ -1033,12 +1102,12 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
     </div>
   );
 
-  // ========== 6.5 MAIN KV ==========
+  // ========== MAIN KV ==========
   const renderKV = () => (
     <div className="space-y-4">
       {noProject && <div className={`${th.textMuted} text-sm text-center py-8`}>请先选择项目</div>}
       {currentProject && (
-        <>
+        <div className="grid grid-cols-2 gap-4">
           <div className={`${th.card} p-4 space-y-3`}>
             <h3 className={th.title + ' text-sm'}>主KV生成</h3>
             <input className={`${th.input} w-full`} placeholder="主题文案" value={kvForm.theme}
@@ -1061,7 +1130,6 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
             </button>
           </div>
 
-          {/* Quick fixes */}
           <div className={`${th.card} p-4`}>
             <h4 className={`${th.textSec} text-xs font-medium mb-2`}>快捷优化</h4>
             <div className="flex flex-wrap gap-1.5">
@@ -1071,21 +1139,20 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
               ))}
             </div>
           </div>
-        </>
+        </div>
       )}
     </div>
   );
 
-  // ========== 6.6 MATERIALS CENTER ==========
+  // ========== MATERIALS CENTER ==========
   const renderMaterials = () => (
     <div className="space-y-4">
       {noProject && <div className={`${th.textMuted} text-sm text-center py-8`}>请先选择项目</div>}
       {currentProject && (
         <>
-          {/* Package selector */}
           <div className={`${th.card} p-3`}>
             <h4 className={`${th.textSec} text-xs font-medium mb-2`}>物料包</h4>
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-4 gap-1.5">
               {Object.entries(MATERIAL_PACKAGES).map(([key, pkg]) => (
                 <button key={key} className={`px-2 py-1.5 rounded text-[11px] text-center transition-colors ${selectedPkg === key ? 'bg-[#d4af37] text-black font-semibold' : `${th.btnGhost} border ${th.borderLight}`}`}
                   onClick={() => { setSelectedPkg(key); setSelectedMats(new Set()); }}>
@@ -1095,18 +1162,15 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
             </div>
           </div>
 
-          {/* Material items */}
           <div className={`${th.card} p-3`}>
             <div className="flex items-center justify-between mb-2">
               <h4 className={`${th.textSec} text-xs font-medium`}>{MATERIAL_PACKAGES[selectedPkg]?.label} ({MATERIAL_PACKAGES[selectedPkg]?.items.length})</h4>
-              <div className="flex gap-1">
-                <button className={`${th.btnGhost} text-[10px]`} onClick={() => {
-                  const all = MATERIAL_PACKAGES[selectedPkg]?.items.map(i => i.name) || [];
-                  setSelectedMats(new Set(selectedMats.size === all.length ? [] : all));
-                }}>{selectedMats.size === (MATERIAL_PACKAGES[selectedPkg]?.items.length || 0) ? '取消全选' : '全选'}</button>
-              </div>
+              <button className={`${th.btnGhost} text-[10px]`} onClick={() => {
+                const all = MATERIAL_PACKAGES[selectedPkg]?.items.map(i => i.name) || [];
+                setSelectedMats(new Set(selectedMats.size === all.length ? [] : all));
+              }}>{selectedMats.size === (MATERIAL_PACKAGES[selectedPkg]?.items.length || 0) ? '取消全选' : '全选'}</button>
             </div>
-            <div className="grid grid-cols-2 gap-1.5 max-h-64 overflow-y-auto">
+            <div className="grid grid-cols-3 gap-1.5 max-h-48 overflow-y-auto">
               {MATERIAL_PACKAGES[selectedPkg]?.items.map(item => (
                 <label key={item.name} className={`flex items-center gap-1.5 p-1.5 rounded cursor-pointer transition-colors ${selectedMats.has(item.name) ? 'bg-[#d4af37]/10 border border-[#d4af37]/30' : `hover:bg-white/[0.03] border border-transparent`}`}>
                   <input type="checkbox" className="accent-[#d4af37] w-3 h-3" checked={selectedMats.has(item.name)}
@@ -1124,7 +1188,6 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
             </div>
           </div>
 
-          {/* Action buttons */}
           <div className="grid grid-cols-3 gap-2">
             <button className={`${th.btn} text-xs py-2`} onClick={handleBatchGenerate} disabled={batchGenerating || selectedMats.size === 0}>
               {batchGenerating ? <RefreshCw className="w-3 h-3 inline mr-1 animate-spin" /> : <Zap className="w-3 h-3 inline mr-1" />}批量生成
@@ -1142,7 +1205,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
     </div>
   );
 
-  // ========== 6.7 CONSISTENCY CHECK ==========
+  // ========== CONSISTENCY CHECK ==========
   const renderConsistency = () => (
     <div className="space-y-4">
       {noProject && <div className={`${th.textMuted} text-sm text-center py-8`}>请先选择项目</div>}
@@ -1153,15 +1216,15 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
           </button>
 
           {consistencyResult && (
-            <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-2">
               {CONSISTENCY_DIMENSIONS.map(dim => {
                 const score = consistencyResult[dim.key] || 0;
                 const color = score >= 90 ? 'text-green-400' : score >= 70 ? 'text-yellow-400' : 'text-red-400';
                 return (
-                  <div key={dim.key} className={`${th.card} p-3`}>
+                  <div key={dim.key} className={`${th.card} p-2.5`}>
                     <div className="flex items-center justify-between mb-1">
-                      <span className={`${th.textSec} text-xs`}>{dim.label}</span>
-                      <span className={`${color} text-sm font-semibold`}>{score}/100</span>
+                      <span className={`${th.textSec} text-[11px]`}>{dim.label}</span>
+                      <span className={`${color} text-xs font-semibold`}>{score}/100</span>
                     </div>
                     <div className="w-full h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
                       <div className={`h-full rounded-full ${score >= 90 ? 'bg-green-400' : score >= 70 ? 'bg-yellow-400' : 'bg-red-400'}`}
@@ -1173,7 +1236,6 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
             </div>
           )}
 
-          {/* Fix buttons */}
           <div className={`${th.card} p-4`}>
             <h4 className={`${th.textSec} text-xs font-medium mb-2`}>一键修复</h4>
             <div className="grid grid-cols-2 gap-1.5">
@@ -1187,7 +1249,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
     </div>
   );
 
-  // ========== 6.8 VERSION MANAGEMENT ==========
+  // ========== VERSION MANAGEMENT ==========
   const renderVersions = () => (
     <div className="space-y-4">
       {noProject && <div className={`${th.textMuted} text-sm text-center py-8`}>请先选择项目</div>}
@@ -1203,7 +1265,6 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
             <button className={`${th.btn} w-full`} onClick={handleSaveVersion}><Save className="w-4 h-4 inline mr-1" />保存当前版本</button>
           </div>
 
-          {/* Version timeline */}
           <div className="space-y-2">
             <h4 className={`${th.textSec} text-xs font-medium`}>版本历史</h4>
             {versions.length === 0 && <div className={`${th.textMuted} text-xs text-center py-4`}>暂无版本记录</div>}
@@ -1242,12 +1303,12 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
     </div>
   );
 
-  // ========== 8. CHINESE TITLE DESIGN ==========
+  // ========== CHINESE TITLE DESIGN ==========
   const renderChineseTitle = () => (
     <div className="space-y-4">
       {noProject && <div className={`${th.textMuted} text-sm text-center py-8`}>请先选择项目</div>}
       {currentProject && (
-        <>
+        <div className="grid grid-cols-2 gap-4">
           <div className={`${th.card} p-4 space-y-3`}>
             <h3 className={th.title + ' text-sm'}>中文标题字设计</h3>
             <div>
@@ -1269,36 +1330,37 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
             </button>
           </div>
 
-          {titleResult && (
-            <div className={`${th.card} p-4`}>
-              <h4 className={`${th.textSec} text-xs mb-2`}>生成结果</h4>
-              <pre className={`${th.text} text-sm whitespace-pre-wrap bg-black/30 p-3 rounded`}>{titleResult}</pre>
-            </div>
-          )}
+          <div className="space-y-4">
+            {titleResult && (
+              <div className={`${th.card} p-4`}>
+                <h4 className={`${th.textSec} text-xs mb-2`}>生成结果</h4>
+                <pre className={`${th.text} text-sm whitespace-pre-wrap bg-black/30 p-3 rounded`}>{titleResult}</pre>
+              </div>
+            )}
 
-          {/* Chinese text protection rules */}
-          <div className={`${th.card} p-4`}>
-            <h4 className={`${th.textSec} text-xs font-medium mb-2`}>中文文字保护规则</h4>
-            <div className="grid grid-cols-2 gap-1.5">
-              {CHINESE_TEXT_RULES.map(rule => (
-                <div key={rule} className="flex items-center gap-1.5 text-[11px]">
-                  <CheckCircle className="w-3 h-3 text-[#d4af37] flex-shrink-0" />
-                  <span className="text-gray-300">{rule}</span>
-                </div>
-              ))}
+            <div className={`${th.card} p-4`}>
+              <h4 className={`${th.textSec} text-xs font-medium mb-2`}>中文文字保护规则</h4>
+              <div className="grid grid-cols-2 gap-1.5">
+                {CHINESE_TEXT_RULES.map(rule => (
+                  <div key={rule} className="flex items-center gap-1.5 text-[11px]">
+                    <CheckCircle className="w-3 h-3 text-[#d4af37] flex-shrink-0" />
+                    <span className="text-gray-300">{rule}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        </>
+        </div>
       )}
     </div>
   );
 
-  // ========== 6.9 TEMPLATE CENTER ==========
+  // ========== TEMPLATE CENTER ==========
   const renderTemplates = () => (
     <div className="space-y-4">
       <div className={`${th.card} p-4`}>
         <h3 className={th.title + ' text-sm mb-3'}>模板中心</h3>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           {TEMPLATE_CATEGORIES.map(cat => (
             <button key={cat} className={`${th.btnGhost} text-xs border ${th.borderLight} py-2 text-left hover:border-[#d4af37]/30`}>
               <BookOpen className="w-3 h-3 inline mr-1" />{cat}
@@ -1307,91 +1369,90 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
         </div>
       </div>
 
-      {/* Template content preview */}
-      <div className={`${th.card} p-4 space-y-3`}>
-        <h4 className={`${th.textSec} text-xs font-medium`}>模板包含内容</h4>
-        <div className="grid grid-cols-2 gap-1.5">
-          {['推荐物料', '推荐比例', '推荐构图', '推荐文案结构', '推荐风格', '推荐色彩', '推荐Mockup', '推荐导出格式', '默认Prompt', '禁用规则'].map(item => (
-            <div key={item} className="flex items-center gap-1.5 text-[11px] text-gray-400">
-              <ChevronRight className="w-3 h-3 text-[#d4af37]" />{item}
-            </div>
-          ))}
+      <div className="grid grid-cols-2 gap-4">
+        <div className={`${th.card} p-4 space-y-3`}>
+          <h4 className={`${th.textSec} text-xs font-medium`}>模板包含内容</h4>
+          <div className="grid grid-cols-2 gap-1.5">
+            {['推荐物料', '推荐比例', '推荐构图', '推荐文案结构', '推荐风格', '推荐色彩', '推荐Mockup', '推荐导出格式', '默认Prompt', '禁用规则'].map(item => (
+              <div key={item} className="flex items-center gap-1.5 text-[11px] text-gray-400">
+                <ChevronRight className="w-3 h-3 text-[#d4af37]" />{item}
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
 
-      {/* Template actions */}
-      <div className="grid grid-cols-2 gap-2">
-        <button className={`${th.btn} text-xs`}><BookOpen className="w-3 h-3 inline mr-1" />套用模板</button>
-        <button className={`${th.btnGhost} text-xs border ${th.borderLight}`}><Save className="w-3 h-3 inline mr-1" />保存为模板</button>
-        <button className={`${th.btnGhost} text-xs border ${th.borderLight}`}><Copy className="w-3 h-3 inline mr-1" />复制模板</button>
-        <button className={`${th.btnGhost} text-xs border ${th.borderLight}`}><PenTool className="w-3 h-3 inline mr-1" />编辑模板</button>
+        <div className="space-y-2">
+          <button className={`${th.btn} w-full text-xs`}><BookOpen className="w-3 h-3 inline mr-1" />套用模板</button>
+          <button className={`${th.btnGhost} w-full text-xs border ${th.borderLight}`}><Save className="w-3 h-3 inline mr-1" />保存为模板</button>
+          <button className={`${th.btnGhost} w-full text-xs border ${th.borderLight}`}><Copy className="w-3 h-3 inline mr-1" />复制模板</button>
+          <button className={`${th.btnGhost} w-full text-xs border ${th.borderLight}`}><PenTool className="w-3 h-3 inline mr-1" />编辑模板</button>
+        </div>
       </div>
     </div>
   );
 
-  // ========== 6.10 CLIENT COMMENTS ==========
+  // ========== CLIENT COMMENTS ==========
   const renderComments = () => (
     <div className="space-y-4">
       {noProject && <div className={`${th.textMuted} text-sm text-center py-8`}>请先选择项目</div>}
       {currentProject && (
-        <>
-          {/* Client can do */}
-          <div className={`${th.card} p-4`}>
-            <h3 className={th.title + ' text-sm mb-2'}>客户可操作</h3>
-            <div className="flex flex-wrap gap-1.5">
-              {CLIENT_ACTIONS.map(action => (
-                <span key={action} className="bg-white/[0.06] text-gray-300 text-[10px] px-2 py-0.5 rounded">{action}</span>
-              ))}
-            </div>
-          </div>
-
-          {/* Comment types */}
-          <div className={`${th.card} p-4`}>
-            <h4 className={`${th.textSec} text-xs font-medium mb-2`}>批注类型</h4>
-            <div className="flex flex-wrap gap-1.5">
-              {COMMENT_TYPES.map(type => (
-                <button key={type} className={`text-[10px] px-2 py-0.5 rounded ${commentType === type ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-white/[0.06] text-gray-400'}`}
-                  onClick={() => setCommentType(type)}>{type}</button>
-              ))}
-            </div>
-          </div>
-
-          {/* Add comment */}
-          <div className={`${th.card} p-4 space-y-2`}>
-            <textarea className={`${th.input} w-full resize-none`} rows={2} placeholder="添加批注..."
-              value={newComment} onChange={e => setNewComment(e.target.value)} />
-            <button className={`${th.btn} w-full text-xs`} onClick={() => {
-              if (!newComment) return;
-              setComments(prev => [...prev, {
-                id: genId('cmt'), targetType: 'project', targetId: currentProject.id,
-                author: 'user', type: commentType, content: newComment, createdAt: new Date().toISOString()
-              }]);
-              setNewComment('');
-            }}><MessageSquare className="w-3 h-3 inline mr-1" />添加批注</button>
-          </div>
-
-          {/* Comment list */}
-          {comments.map(c => (
-            <div key={c.id} className={`${th.card} p-3`}>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-[10px] bg-[#d4af37]/20 text-[#d4af37] px-1.5 py-0.5 rounded">{c.type}</span>
-                <span className="text-[10px] text-gray-600">{new Date(c.createdAt).toLocaleString()}</span>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-4">
+            <div className={`${th.card} p-4`}>
+              <h3 className={th.title + ' text-sm mb-2'}>客户可操作</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {CLIENT_ACTIONS.map(action => (
+                  <span key={action} className="bg-white/[0.06] text-gray-300 text-[10px] px-2 py-0.5 rounded">{action}</span>
+                ))}
               </div>
-              <p className={`${th.text} text-xs`}>{c.content}</p>
             </div>
-          ))}
-        </>
+
+            <div className={`${th.card} p-4`}>
+              <h4 className={`${th.textSec} text-xs font-medium mb-2`}>批注类型</h4>
+              <div className="flex flex-wrap gap-1.5">
+                {COMMENT_TYPES.map(type => (
+                  <button key={type} className={`text-[10px] px-2 py-0.5 rounded ${commentType === type ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-white/[0.06] text-gray-400'}`}
+                    onClick={() => setCommentType(type)}>{type}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className={`${th.card} p-4 space-y-2`}>
+              <textarea className={`${th.input} w-full resize-none`} rows={3} placeholder="添加批注..."
+                value={newComment} onChange={e => setNewComment(e.target.value)} />
+              <button className={`${th.btn} w-full text-xs`} onClick={() => {
+                if (!newComment) return;
+                setComments(prev => [...prev, {
+                  id: genId('cmt'), targetType: 'project', targetId: currentProject.id,
+                  author: 'user', type: commentType, content: newComment, createdAt: new Date().toISOString()
+                }]);
+                setNewComment('');
+              }}><MessageSquare className="w-3 h-3 inline mr-1" />添加批注</button>
+            </div>
+
+            {comments.map(c => (
+              <div key={c.id} className={`${th.card} p-3`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[10px] bg-[#d4af37]/20 text-[#d4af37] px-1.5 py-0.5 rounded">{c.type}</span>
+                  <span className="text-[10px] text-gray-600">{new Date(c.createdAt).toLocaleString()}</span>
+                </div>
+                <p className={`${th.text} text-xs`}>{c.content}</p>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );
 
-  // ========== 6.11 PROPOSAL EXPORT ==========
+  // ========== PROPOSAL EXPORT ==========
   const renderExport = () => (
     <div className="space-y-4">
       {noProject && <div className={`${th.textMuted} text-sm text-center py-8`}>请先选择项目</div>}
       {currentProject && (
-        <>
-          {/* Proposal sections */}
+        <div className="grid grid-cols-2 gap-4">
           <div className={`${th.card} p-4`}>
             <div className="flex items-center justify-between mb-2">
               <h3 className={th.title + ' text-sm'}>提案结构</h3>
@@ -1400,7 +1461,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
                 {exportSections.size === PROPOSAL_SECTIONS.length ? '取消全选' : '全选'}
               </button>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1 max-h-72 overflow-y-auto">
               {PROPOSAL_SECTIONS.map(section => (
                 <label key={section} className="flex items-center gap-2 p-1.5 rounded cursor-pointer hover:bg-white/[0.03]">
                   <input type="checkbox" className="accent-[#d4af37] w-3 h-3"
@@ -1418,42 +1479,76 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
             </div>
           </div>
 
-          {/* Export format */}
-          <div className={`${th.card} p-4`}>
-            <h4 className={`${th.textSec} text-xs font-medium mb-2`}>导出格式</h4>
-            <div className="grid grid-cols-2 gap-1.5">
-              {EXPORT_FORMATS.map(fmt => (
-                <button key={fmt} className={`px-2 py-1.5 rounded text-[11px] transition-colors ${exportFormat === fmt ? 'bg-[#d4af37] text-black font-semibold' : `${th.btnGhost} border ${th.borderLight}`}`}
-                  onClick={() => setExportFormat(fmt)}>{fmt}</button>
-              ))}
+          <div className="space-y-4">
+            <div className={`${th.card} p-4`}>
+              <h4 className={`${th.textSec} text-xs font-medium mb-2`}>导出格式</h4>
+              <div className="grid grid-cols-2 gap-1.5">
+                {EXPORT_FORMATS.map(fmt => (
+                  <button key={fmt} className={`px-2 py-1.5 rounded text-[11px] transition-colors ${exportFormat === fmt ? 'bg-[#d4af37] text-black font-semibold' : `${th.btnGhost} border ${th.borderLight}`}`}
+                    onClick={() => setExportFormat(fmt)}>{fmt}</button>
+                ))}
+              </div>
             </div>
-          </div>
 
-          {/* Brand Prompt system preview */}
-          <div className={`${th.card} p-4`}>
-            <h4 className={`${th.textSec} text-xs font-medium mb-2`}>品牌Prompt预览</h4>
-            <pre className="text-[10px] text-gray-400 whitespace-pre-wrap bg-black/30 p-2 rounded max-h-40 overflow-y-auto">
-              {currentProject.brandDna ? PROMPT_TEMPLATE
-                .replace('{brandName}', currentProject.brandName)
-                .replace('{industry}', currentProject.industry)
-                .replace('{keywords}', currentProject.keywords.join('、'))
-                .replace('{tone}', currentProject.tone)
-                .replace('{mainColors}', currentProject.brandDna.mainColors.join('、'))
-                .replace('{secondaryColors}', currentProject.brandDna.secondaryColors.join('、'))
-                .replace('{logoRules}', currentProject.brandDna.logoRules.join('；'))
-                .replace('{productRules}', currentProject.brandDna.productRules.join('；'))
-                .replace('{ipRules}', currentProject.brandDna.ipRules.join('；'))
-                .replace('{fontStyle}', currentProject.brandDna.fontStyle)
-                .replace('{forbiddenRules}', currentProject.brandDna.forbiddenRules.join('；'))
-                : '请先完成品牌DNA分析'}
-            </pre>
-          </div>
+            <div className={`${th.card} p-4`}>
+              <h4 className={`${th.textSec} text-xs font-medium mb-2`}>品牌Prompt预览</h4>
+              <pre className="text-[10px] text-gray-400 whitespace-pre-wrap bg-black/30 p-2 rounded max-h-48 overflow-y-auto">
+                {currentProject.brandDna ? PROMPT_TEMPLATE
+                  .replace('{brandName}', currentProject.brandName)
+                  .replace('{industry}', currentProject.industry)
+                  .replace('{keywords}', currentProject.keywords.join('、'))
+                  .replace('{tone}', currentProject.tone)
+                  .replace('{mainColors}', currentProject.brandDna.mainColors.join('、'))
+                  .replace('{secondaryColors}', currentProject.brandDna.secondaryColors.join('、'))
+                  .replace('{logoRules}', currentProject.brandDna.logoRules.join('；'))
+                  .replace('{productRules}', currentProject.brandDna.productRules.join('；'))
+                  .replace('{ipRules}', currentProject.brandDna.ipRules.join('；'))
+                  .replace('{fontStyle}', currentProject.brandDna.fontStyle)
+                  .replace('{forbiddenRules}', currentProject.brandDna.forbiddenRules.join('；'))
+                  : '请先完成品牌DNA分析'}
+              </pre>
+            </div>
 
-          <button className={`${th.btn} w-full`} disabled={loading}>
-            <Download className="w-4 h-4 inline mr-1" />导出提案
-          </button>
-        </>
+            <button className={`${th.btn} w-full`} disabled={loading}>
+              <Download className="w-4 h-4 inline mr-1" />导出提案
+            </button>
+          </div>
+        </div>
       )}
+    </div>
+  );
+
+  // ========== MODEL SELECTION PANEL ==========
+  const renderModelPanel = () => (
+    <div className={`absolute top-full left-0 right-0 ${th.card} border-t-0 rounded-b-xl p-4 z-10 ${showModelPanel ? '' : 'hidden'}`}>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <Cpu className="w-3.5 h-3.5 text-[#d4af37]" />
+            <span className={`${th.textSec} text-xs font-medium`}>图像生成模型</span>
+          </div>
+          <select className={`${th.select} w-full text-xs`} value={selectedImageModel}
+            onChange={e => { setSelectedImageModel(e.target.value); localStorage.setItem('wujie_bf_image_model', e.target.value); }}>
+            {imageModels.map(m => (
+              <option key={m.id} value={m.id}>{m.name}{m.providerName ? ` (${m.providerName})` : ''}</option>
+            ))}
+          </select>
+          {imageModels.length === 0 && <p className={`${th.textMuted} text-[10px] mt-1`}>请在管理员系统配置图像模型</p>}
+        </div>
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <MessageCircle className="w-3.5 h-3.5 text-[#d4af37]" />
+            <span className={`${th.textSec} text-xs font-medium`}>LLM分析模型</span>
+          </div>
+          <select className={`${th.select} w-full text-xs`} value={selectedLlmModel}
+            onChange={e => { setSelectedLlmModel(e.target.value); localStorage.setItem('wujie_bf_llm_model', e.target.value); }}>
+            {llmModels.map(m => (
+              <option key={m.id} value={m.id}>{m.name}{m.providerName ? ` (${m.providerName})` : ''}</option>
+            ))}
+          </select>
+          {llmModels.length === 0 && <p className={`${th.textMuted} text-[10px] mt-1`}>请在管理员系统配置LLM模型</p>}
+        </div>
+      </div>
     </div>
   );
 
@@ -1461,44 +1556,60 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
   return (
     <div
       ref={panelRef}
-      className={`fixed z-[90] ${th.panel} ${isDragging ? 'cursor-grabbing ring-2 ring-[#d4af37]/30 shadow-[0_0_30px_rgba(212,175,55,0.15)]' : ''}`}
-      style={{
-        left: panelPos.x || '50%',
-        top: panelPos.y || '50%',
-        width: 520,
-        maxHeight: '80vh',
-        ...(panelPos.x === 0 && panelPos.y === 0 ? { transform: 'translate(-50%, -50%)' } : {}),
-      }}
+      className={`fixed z-[90] ${isDragging ? 'cursor-grabbing' : ''}`}
+      style={{ left: panelPos.x, top: panelPos.y, width: PANEL_W }}
       onMouseDown={e => e.stopPropagation()}
+      onPointerDown={e => e.stopPropagation()}
+      onWheel={e => e.stopPropagation()}
     >
-      {/* Header with drag handle */}
-      <div className={th.header + ' flex items-center gap-2 cursor-grab active:cursor-grabbing select-none'}
-        onMouseDown={handleDragStart}>
-        <GripVertical className="w-4 h-4 text-gray-500" />
-        <Building2 className="w-4 h-4 text-[#d4af37]" />
-        <span className={th.title + ' text-sm flex-1'}>品牌工厂</span>
-        {currentProject && <span className="text-[10px] text-[#d4af37] bg-[#d4af37]/10 px-2 py-0.5 rounded">{currentProject.brandName}</span>}
-        <button className={`${th.btnGhost} p-1`} onClick={onClose}><X className="w-4 h-4" /></button>
-      </div>
+      <div
+        data-floating-panel="true"
+        className={`${th.panel} flex flex-col ${isDragging ? 'ring-2 ring-[#d4af37]/30 shadow-[0_0_30px_rgba(212,175,55,0.15)]' : ''}`}
+        style={{ maxHeight: '85vh' }}
+      >
+        {/* Header with drag handle */}
+        <div className={th.header + ' flex items-center gap-2 cursor-grab active:cursor-grabbing select-none relative'}
+          onMouseDown={handleDragStart}>
+          <GripVertical className="w-4 h-4 text-gray-500" />
+          <Building2 className="w-4 h-4 text-[#d4af37]" />
+          <span className={th.title + ' text-sm flex-1'}>品牌工厂</span>
+          {currentProject && <span className="text-[10px] text-[#d4af37] bg-[#d4af37]/10 px-2 py-0.5 rounded">{currentProject.brandName}</span>}
+          {/* Model toggle button */}
+          <button className={`${th.btnGhost} flex items-center gap-1 text-[10px] ${showModelPanel ? 'text-[#d4af37]' : ''}`}
+            onClick={e => { e.stopPropagation(); setShowModelPanel(!showModelPanel); }}>
+            <Cpu className="w-3 h-3" />
+            <span>模型</span>
+            <ChevronDown className={`w-3 h-3 transition-transform ${showModelPanel ? 'rotate-180' : ''}`} />
+          </button>
+          <button className={`${th.btnGhost} p-1`} onClick={onClose}><X className="w-4 h-4" /></button>
+        </div>
 
-      {/* Tab bar - horizontal scrollable */}
-      <div className="flex overflow-x-auto border-b border-white/[0.06] px-2 scrollbar-thin" style={{ scrollbarWidth: 'none' }}>
-        {TABS.map(tab => {
-          const Icon = tab.icon;
-          return (
-            <button key={tab.key}
-              className={`flex items-center gap-1 px-2.5 py-2 text-[11px] whitespace-nowrap border-b-2 transition-colors ${activeTab === tab.key ? 'border-[#d4af37] text-[#d4af37]' : `border-transparent ${th.textMuted} hover:text-gray-300`}`}
-              onClick={() => setActiveTab(tab.key)}>
-              <Icon className="w-3 h-3" />{tab.label}
-            </button>
-          );
-        })}
-      </div>
+        {/* Model selection dropdown */}
+        {renderModelPanel()}
 
-      {/* Tab content */}
-      <div className="overflow-y-auto p-4" style={{ maxHeight: 'calc(80vh - 100px)' }}>
-        {error && <div className="bg-red-500/10 text-red-400 text-xs p-2 rounded mb-3">{error}</div>}
-        {renderTabContent()}
+        {/* Body: Left sidebar + Right content */}
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          {/* Left sidebar tabs */}
+          <div className={`${th.sidebar} w-[120px] shrink-0 overflow-y-auto py-2 px-1.5 space-y-0.5`} style={{ scrollbarWidth: 'none' }}>
+            {TABS.map(tab => {
+              const Icon = tab.icon;
+              return (
+                <button key={tab.key}
+                  className={`${th.sidebarItem} ${activeTab === tab.key ? th.sidebarItemActive : th.sidebarItemInactive}`}
+                  onClick={() => setActiveTab(tab.key)}>
+                  <Icon className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Right content area */}
+          <div className="flex-1 min-w-0 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin' }}>
+            {error && <div className="bg-red-500/10 text-red-400 text-xs p-2 rounded mb-3">{error}</div>}
+            {renderTabContent()}
+          </div>
+        </div>
       </div>
     </div>
   );
