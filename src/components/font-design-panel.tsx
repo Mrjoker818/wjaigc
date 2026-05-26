@@ -91,6 +91,18 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
+  // 将比例字符串(如"3:4")转为CSS aspect-ratio值
+  const getAspectRatioStyle = (ratioStr: string): React.CSSProperties => {
+    if (!ratioStr || ratioStr === '透明Logo') return { aspectRatio: '1/1' };
+    const parts = ratioStr.split(':');
+    if (parts.length === 2) {
+      const w = parseFloat(parts[0]);
+      const h = parseFloat(parts[1]);
+      if (w > 0 && h > 0) return { aspectRatio: `${w}/${h}` };
+    }
+    return { aspectRatio: '1/1' };
+  };
+
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
@@ -1440,7 +1452,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                             <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: accentColor }}></span>
                             {planTitle}
                           </p>
-                          <div className="grid grid-cols-2 gap-3">
+                          <div className={`grid gap-3 ${(() => { const parts = ratio.split(':'); const w = parseFloat(parts[0]) || 1; const h = parseFloat(parts[1]) || 1; return h > w ? 'grid-cols-1' : 'grid-cols-2'; })()}`}>
                             {imgs.map((img, vIdx) => (
                               <div
                                 key={`${planIdx}-${vIdx}`}
@@ -1449,7 +1461,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                                 onMouseEnter={e => { e.currentTarget.style.borderColor = accentColor; }}
                                 onMouseLeave={e => { e.currentTarget.style.borderColor = borderColorLight; }}
                               >
-                                <img src={img.url} alt={`${planTitle} 变体${vIdx + 1}`} className="w-full aspect-video object-cover" crossOrigin="anonymous" />
+                                <img src={img.url} alt={`${planTitle} 变体${vIdx + 1}`} className="w-full object-cover" style={getAspectRatioStyle(ratio)} crossOrigin="anonymous" />
                                 <div
                                   className="absolute inset-0 flex items-center justify-center gap-2 transition-opacity opacity-0 group-hover:opacity-100"
                                   style={{ background: 'rgba(0,0,0,0.7)' }}
