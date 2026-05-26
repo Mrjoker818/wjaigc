@@ -931,7 +931,8 @@ export async function POST(request: NextRequest) {
 
     if (action === 'assist') {
       // LLM-assisted design: generate optimized prompts and style suggestions
-      const { productDesc, style, templateId, assistType, llmModel } = body;
+      const { productDesc, style, sceneDesc, templateId, assistType, llmModel } = body;
+      const effectiveStyle = style || sceneDesc || '';
       if (!productDesc) return NextResponse.json({ error: '请提供商品描述' }, { status: 400 });
       if (!llmModel) return NextResponse.json({ error: '请选择LLM模型' }, { status: 400 });
 
@@ -940,6 +941,7 @@ export async function POST(request: NextRequest) {
 
       // ★ Dynamic template for assist (resolve suffixed IDs like detail-vertical-2)
       const baseTemplateId = (() => {
+        if (!templateId) return templateId || '';
         const m = templateId.match(/^(.+)-(\d+)$/);
         if (m && ECOM_TEMPLATES.some(t => t.id === m[1])) return m[1];
         return templateId;
@@ -966,7 +968,7 @@ export async function POST(request: NextRequest) {
         'optimize-prompt': `你是一位专业的电商视觉设计师和AI提示词工程师。请根据以下商品信息，优化生成电商配图的提示词。
 
 商品描述: ${productDesc}
-${style ? `风格修饰: ${style}` : ''}
+${effectiveStyle ? `风格修饰: ${effectiveStyle}` : ''}
 目标模板: ${templateInfo}
 
 请输出优化后的提示词，要求：

@@ -680,7 +680,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       {/* Panel */}
       <div
         data-floating-panel="true"
-        className="rounded-2xl overflow-hidden flex flex-col"
+        className="rounded-2xl flex flex-col"
         style={{
           backgroundColor: isMonochrome ? '#fff' : '#1c1c1c',
           border: isDraggingState ? `2px solid ${accentColor}` : `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)'}`,
@@ -693,7 +693,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       >
         {/* ── Header ── */}
         <div
-          className="flex items-center gap-2 px-3 py-2 select-none shrink-0 cursor-grab active:cursor-grabbing"
+          className="flex items-center gap-2 px-3 py-2 select-none shrink-0 cursor-grab active:cursor-grabbing rounded-t-2xl"
           style={{ borderBottom: `1px solid ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)'}` }}
           onMouseDown={handlePanelDragStart}
         >
@@ -754,7 +754,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         </div>
 
         {/* ── Content ── */}
-        <div className={`flex-1 overflow-y-auto px-5 py-4 ${bgDeep}`}>
+        <div className={`flex-1 overflow-y-auto px-5 py-4 rounded-b-2xl ${bgDeep}`}>
 
           {/* Tab: Template Selection */}
           {activeTab === 'template' && (
