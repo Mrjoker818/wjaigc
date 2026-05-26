@@ -15,20 +15,13 @@ let idCounter = 0;
 
 function flushCategory() {
   if (currentCategory && currentItems.length > 0) {
-    const seen = new Set();
-    const uniqueItems = currentItems.filter(item => {
-      const key = item.prompt.substring(0, 80);
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
     categories.push({
       id: currentCategory.id,
       name: currentCategory.name,
-      count: uniqueItems.length,
-      items: uniqueItems
+      count: currentItems.length,
+      items: currentItems
     });
-    console.log(`  Flushed: ${currentCategory.name} -> ${uniqueItems.length} items`);
+    console.log(`  Flushed: ${currentCategory.name} -> ${currentItems.length} items`);
   }
   currentItems = [];
 }
@@ -59,12 +52,11 @@ for (let i = 0; i < lines.length; i++) {
       const sourceUrl = sourceMatch ? sourceMatch[1] : '';
       
       // Extract display text - the main Chinese text content in quotes
-      const textMatches = keyword.match(/["""]([^"""]{1,20})["""]|《([^》]{1,20})》|"([^"]{1,20})"/g);
+      const textMatches = keyword.match(/["""]([^"""]{1,30})["""]|《([^》]{1,30})》|"([^"]{1,30})"/g);
       let displayText = '';
       if (textMatches) {
         displayText = textMatches.map(m => {
-          const inner = m.replace(/^["""《》""]+/, '').replace(/["""《》""]+$/, '');
-          return inner;
+          return m.replace(/^["""《》""]+/, '').replace(/["""《》""]+$/, '');
         }).join(' ');
       }
 
@@ -83,10 +75,9 @@ for (let i = 0; i < lines.length; i++) {
 }
 flushCategory();
 
-// Create output directory and category subdirs
+// Create output directory
 fs.mkdirSync(outDir, { recursive: true });
 
-// Output compact JSON (no indentation for large file)
 const output = {
   version: '1.0',
   source: '即梦 AI字体设计灵感图库',
