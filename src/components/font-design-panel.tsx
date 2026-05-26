@@ -109,6 +109,8 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const [galleryTotalPages, setGalleryTotalPages] = useState(1);
   const [galleryTotalCount, setGalleryTotalCount] = useState(0);
   const [gallerySearch, setGallerySearch] = useState('');
+  // Inspiration reference state (from gallery "制作同款")
+  const [inspirationRef, setInspirationRef] = useState<GalleryDataItem | null>(null);
   // Ref-based task tracking (no state, no re-renders, no useEffect polling bugs)
   const activeTasksRef = useRef<Map<string, { planIndex: number; variant: number; planTitle: string }>>(new Map());
   const pollingTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -564,14 +566,14 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
-  // Gallery: "一键制作同款" handler for API-sourced items
+  // Gallery: "一键制作同款" handler — fill left panel params, show reference, let user confirm
   const handleUseInspiration = useCallback((item: GalleryDataItem) => {
-    // Extract key text and keywords from the prompt
-    const promptText = item.prompt || '';
-    const displayText = item.displayText || '';
-    
+    // Set inspiration reference for left panel preview
+    setInspirationRef(item);
+
     // Fill text field with the display text
-    setText(displayText || '字体设计');
+    const displayText = item.displayText || '';
+    if (displayText) setText(displayText);
     setScene('文化艺术');
     
     // Map category to primaryStyleCategory
@@ -583,19 +585,47 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     };
     setPrimaryStyleCategory(catToStyle[item.category] || 'smart-recommend');
     setSecondaryStyle('');
-    
-    // Auto-generate 2 variant images with this item's prompt
-    const model = selectedModel;
-    if (!model) {
-      setActiveTab('prompt');
-      return;
-    }
+
+    // Build prompt from inspiration and fill into the prompt state
     const stylePrefix = buildStyleEnforcementPrefix();
-    const finalPromptBase = stylePrefix + promptText;
+    const fullPrompt = stylePrefix + (item.prompt || '');
+    setPrompts({
+      prompt: fullPrompt,
+      shortPrompt: item.prompt || '',
+      enhancedPrompt: fullPrompt,
+      blackOnWhitePrompt: item.prompt || '',
+      transparentLogoPrompt: '',
+    });
+
+    // Switch to prompt tab so user can review/edit keywords
+    setActiveTab('prompt');
+
+    // Expand advanced if not already
+    setShowAdvanced(true);
+  }, [buildStyleEnforcementPrefix]);
+
+  // Generate images based on inspiration reference (user confirmed after editing)
+  const handleInspirationGenerate = useCallback(() => {
+    if (!text.trim() || isGeneratingImage) return;
+    const model = selectedModelRef.current;
+    if (!model) { showToast('请先选择生图模型'); return; }
+
+    // Build prompt from current settings + inspiration prompt
+    const stylePrefix = buildStyleEnforcementPrefix();
+    const inspirationPrompt = inspirationRef?.prompt || prompts?.prompt || '';
+    const finalPromptBase = stylePrefix + inspirationPrompt;
+
     setGeneratedImages([]);
     activeTasksRef.current.clear();
     setIsGeneratingImage(true);
     setActiveTab('images');
+
+    const catToStyle: Record<string, string> = {
+      'cat-0': 'oriental', 'cat-1': 'modern', 'cat-2': 'handwriting',
+      'cat-3': 'dimensional', 'cat-4': 'oriental', 'cat-5': 'cute',
+      'cat-6': 'modern', 'cat-7': 'modern', 'cat-8': 'neon',
+      'cat-9': 'modern', 'cat-10': 'creative', 'cat-11': 'creative',
+    };
 
     for (let vIdx = 0; vIdx < 2; vIdx++) {
       const variationHint = vIdx === 0 ? '，构图偏紧凑特写视角' : '，构图偏开阔全景视角';
@@ -605,21 +635,20 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: finalPrompt, model, ratio, mode: 'standard',
-          text: displayText, scene: '文化艺术', primaryStyleCategory: catToStyle[item.category] || 'smart-recommend',
+          text, scene: '文化艺术',
+          primaryStyleCategory: inspirationRef ? (catToStyle[inspirationRef.category] || 'smart-recommend') : primaryStyleCategory,
         }),
       }).then(r => r.json()).then(data => {
         if (data.taskId) {
-          activeTasksRef.current.set(data.taskId, { planIndex: 0, variant: vIdx, planTitle: item.categoryName + '灵感' });
+          activeTasksRef.current.set(data.taskId, { planIndex: 0, variant: vIdx, planTitle: (inspirationRef?.categoryName || '灵感') + '同款' });
           if (vIdx === 1) startPolling();
         }
       }).catch(err => {
-        console.error('灵感图生成失败:', err);
+        console.error('灵感同款生成失败:', err);
         if (vIdx === 1) setIsGeneratingImage(false);
       });
     }
-  }, [selectedModel, ratio, startPolling, buildStyleEnforcementPrefix]);
-
-
+  }, [text, isGeneratingImage, inspirationRef, prompts, ratio, primaryStyleCategory, buildStyleEnforcementPrefix, startPolling, showToast]);
 
   const currentCategory = styleCategories.find(c => c.id === primaryStyleCategory);
 
@@ -775,6 +804,61 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
             style={{ width: '38%', borderRight: `1px solid ${borderColor}`, overflow: 'hidden' }}
           >
             <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ scrollbarWidth: 'thin' }}>
+              {/* ★ Inspiration Reference Card (shown when user clicks "制作同款" in gallery) */}
+              {inspirationRef && (
+                <div
+                  className="relative rounded-lg overflow-hidden transition-all"
+                  style={{
+                    border: `1px solid ${accentColor}40`,
+                    background: isMonochrome ? 'rgba(59,130,246,0.06)' : 'rgba(212,175,55,0.08)',
+                  }}
+                >
+                  {/* Close button */}
+                  <button
+                    onClick={() => setInspirationRef(null)}
+                    className="absolute top-1.5 right-1.5 z-10 w-5 h-5 rounded-full flex items-center justify-center transition-colors"
+                    style={{ background: isMonochrome ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 10, cursor: 'pointer' }}
+                    title="移除灵感参考"
+                  >
+                    ×
+                  </button>
+                  <div className="flex gap-3 p-3">
+                    {/* Reference thumbnail */}
+                    <div className="w-14 h-14 rounded-md overflow-hidden shrink-0" style={{ background: isMonochrome ? '#f3f4f6' : '#111' }}>
+                      <img
+                        src={inspirationRef.localPath || `/api/font-design/gallery-image?id=${inspirationRef.id}`}
+                        alt="灵感参考"
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                    {/* Reference info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span
+                          className="px-1.5 py-0.5 rounded text-[9px] font-medium"
+                          style={{ background: accentColor, color: isMonochrome ? '#fff' : '#000' }}
+                        >
+                          灵感参考
+                        </span>
+                        <span className="text-[9px]" style={{ color: subTextColor }}>{inspirationRef.categoryName}</span>
+                      </div>
+                      <p className="text-[11px] font-medium truncate" style={{ color: textColor }}>
+                        {inspirationRef.displayText || '字体设计灵感'}
+                      </p>
+                      <p className="text-[9px] line-clamp-2 mt-0.5" style={{ color: subTextColor }}>
+                        {inspirationRef.prompt.substring(0, 80)}...
+                      </p>
+                    </div>
+                  </div>
+                  <div
+                    className="px-3 pb-2 text-[9px]"
+                    style={{ color: `${subTextColor}aa` }}
+                  >
+                    修改左侧文字和参数后，点击下方「灵感同款生成」开始创作
+                  </div>
+                </div>
+              )}
+
               {/* 1. Text Input */}
               <div>
                 <label className="text-xs font-medium mb-2 flex items-center gap-1.5" style={{ color: subTextColor }}>
@@ -1039,14 +1123,32 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
             {/* Action buttons at bottom */}
             <div className="p-4 pt-0 space-y-2 shrink-0" style={{ borderTop: `1px solid ${borderColor}`, background: isMonochrome ? 'linear-gradient(0deg, #ffffff, transparent)' : 'linear-gradient(0deg, #0f0f0f, transparent)' }}>
               <div className="pt-3">
-                <button
-                  onClick={handleGeneratePlans}
-                  disabled={isGeneratingPlan || !text.trim()}
-                  style={{ ...goldBtnStyle, opacity: (isGeneratingPlan || !text.trim()) ? 0.5 : 1, cursor: (isGeneratingPlan || !text.trim()) ? 'not-allowed' : 'pointer' }}
-                >
-                  {isGeneratingPlan ? <Loader2 className="h-4 w-4 animate-spin inline mr-1" /> : <Sparkles className="h-4 w-4 inline mr-1" />}
-                  生成字体方案
-                </button>
+                {/* ★ Inspiration generate button (shown when inspirationRef is set) */}
+                {inspirationRef ? (
+                  <button
+                    onClick={handleInspirationGenerate}
+                    disabled={isGeneratingImage || !text.trim()}
+                    style={{
+                      ...goldBtnStyle,
+                      opacity: (isGeneratingImage || !text.trim()) ? 0.5 : 1,
+                      cursor: (isGeneratingImage || !text.trim()) ? 'not-allowed' : 'pointer',
+                      background: `linear-gradient(135deg, ${accentColor}, ${isMonochrome ? '#2563eb' : '#c4941e'})`,
+                      boxShadow: isMonochrome ? '0 0 16px rgba(59,130,246,0.3)' : '0 0 16px rgba(212,175,55,0.3)',
+                    }}
+                  >
+                    {isGeneratingImage ? <Loader2 className="h-4 w-4 animate-spin inline mr-1" /> : <ImageIcon className="h-4 w-4 inline mr-1" />}
+                    灵感同款生成
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleGeneratePlans}
+                    disabled={isGeneratingPlan || !text.trim()}
+                    style={{ ...goldBtnStyle, opacity: (isGeneratingPlan || !text.trim()) ? 0.5 : 1, cursor: (isGeneratingPlan || !text.trim()) ? 'not-allowed' : 'pointer' }}
+                  >
+                    {isGeneratingPlan ? <Loader2 className="h-4 w-4 animate-spin inline mr-1" /> : <Sparkles className="h-4 w-4 inline mr-1" />}
+                    生成字体方案
+                  </button>
+                )}
               </div>
               <div className="flex gap-2">
                 <button onClick={handleGeneratePrompt} disabled={isGeneratingPrompt || !text.trim()} style={{ ...secondaryBtnStyle, flex: 1, opacity: (isGeneratingPrompt || !text.trim()) ? 0.5 : 1 }}>
@@ -1164,7 +1266,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
               {/* ========== Tab 2: 即梦提示词 ========== */}
               {activeTab === 'prompt' && (
                 <div className="space-y-4">
-                  {!prompts && !isGeneratingPrompt && (
+                  {!prompts && !isGeneratingPrompt && !inspirationRef && (
                     <div className="text-center py-12" style={{ color: subTextColor }}>
                       <Wand2 className="h-8 w-8 mx-auto mb-2 opacity-30" />
                       <p className="text-sm">输入文字并点击&ldquo;即梦提示词&rdquo;生成</p>
