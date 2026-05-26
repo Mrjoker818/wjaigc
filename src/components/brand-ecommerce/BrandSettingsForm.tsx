@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useCallback } from 'react';
-import { Upload, Palette, Sparkles, Loader2, ChevronDown, Package, GripVertical, ShieldCheck, Plus } from 'lucide-react';
+import { Upload, Palette, Sparkles, Loader2, ChevronDown, Package, GripVertical, ShieldCheck, Plus, AlertCircle } from 'lucide-react';
 import { getTemplateFieldGroups, getTemplateDisplayName, type TemplateFieldValues, type TemplateFieldDef } from './template-fields';
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -37,6 +37,7 @@ interface Props {
   onToggleLlmDropdown: () => void;
   llmDropdownRef: React.RefObject<HTMLDivElement | null>;
   isAssisting: boolean;
+  assistError?: string;
   onAiAssist: () => void;
 
   // Form fields
@@ -129,6 +130,7 @@ export function BrandSettingsForm({
   onToggleLlmDropdown,
   llmDropdownRef,
   isAssisting,
+  assistError,
   onAiAssist,
 
   productDesc,
@@ -464,7 +466,20 @@ export function BrandSettingsForm({
             {isAssisting ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
             {isAssisting ? 'AI 优化中...' : 'AI 辅助优化设计'}
           </button>
-          <p className={`text-xs mt-1 ${textMuted}`}>LLM将优化商品描述、补充场景和风格关键词</p>
+          {!productDesc.trim() && (
+            <p className={`text-xs mt-1 ${isMonochrome ? 'text-amber-600' : 'text-amber-400'}`}>
+              请先填写商品描述后再使用AI辅助
+            </p>
+          )}
+          {productDesc.trim() && (
+            <p className={`text-xs mt-1 ${textMuted}`}>LLM将优化商品描述、补充场景和风格关键词</p>
+          )}
+          {assistError && (
+            <p className="text-xs mt-1 text-red-400 flex items-center gap-1">
+              <AlertCircle size={12} />
+              {assistError}
+            </p>
+          )}
         </div>
       )}
 

@@ -88,6 +88,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   const [templateFieldValues, setTemplateFieldValues] = useState<Record<string, Record<string, string>>>({});
   const [isGenerating, setIsGenerating] = useState(false);
   const [isAssisting, setIsAssisting] = useState(false);
+  const [assistError, setAssistError] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
@@ -513,33 +514,103 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   const handleAiAssist = useCallback(async () => {
     if (!selectedLlmModel || !productDesc.trim()) return;
     setIsAssisting(true);
+    setAssistError('');
     try {
-      const resp = await fetch('/api/brand-ecommerce', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'assist',
-          productDesc: productDesc.trim(),
-          sceneDesc: sceneDesc.trim(),
-          templateIds: Array.from(selectedTemplates),
-          model: selectedLlmModel,
-        }),
-      });
-      const data = await resp.json();
-      if (data.error) {
-        console.error('AI assist error:', data.error);
-      } else if (data.suggestions) {
-        const s = data.suggestions;
-        if (s.mainText && !mainText) setMainText(s.mainText);
-        if (s.secondaryText && !secondaryText) setSecondaryText(s.secondaryText);
-        if (s.accentSymbol && !accentSymbol) setAccentSymbol(s.accentSymbol);
-        if (s.styleExtra && !styleExtra.trim()) setStyleExtra(s.styleExtra);
-        if (s.sceneDesc && !sceneDesc.trim()) setSceneDesc(s.sceneDesc);
-        if (s.subjectAction) setProductDesc(prev => prev.includes(s.subjectAction) ? prev : `${prev}，${s.subjectAction}`);
-        if (s.backgroundElements) setSceneDesc(prev => prev ? `${prev}，${s.backgroundElements}` : s.backgroundElements);
+      // Run all 3 assist types in parallel
+      const assistTypes = ['optimize-prompt', 'suggest-style', 'suggest-text'] as const;
+      const results = await Promise.allSettled(
+        assistTypes.map(type =>
+          fetch('/api/brand-ecommerce', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'assist',
+              productDesc: productDesc.trim(),
+              sceneDesc: sceneDesc.trim(),
+              templateId: Array.from(selectedTemplates)[0] || 'white-bg',
+              assistType: type,
+              llmModel: selectedLlmModel,
+            }),
+          }).then(r => r.json())
+        )
+      );
+
+      // Process optimize-prompt result
+      const optResult = results[0];
+      if (optResult.status === 'fulfilled' && optResult.value?.success && optResult.value.content) {
+        const optimized = optResult.value.content.trim();
+        if (optimized && optimized !== productDesc.trim()) {
+          setProductDesc(optimized);
+        }
+      }
+
+      // Process suggest-style result
+      const styleResult = results[1];
+      if (styleResult.status === 'fulfilled' && styleResult.value?.success && styleResult.value.content) {
+        const styleText = styleResult.value.content.trim();
+        if (styleText) {
+          // Try to parse JSON array from LLM response
+          try {
+            const jsonStr = styleText.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+            const styles = JSON.parse(jsonStr);
+            if (Array.isArray(styles) && styles.length > 0) {
+              const firstStyle = styles[0];
+              const parts: string[] = [];
+              if (firstStyle.name) parts.push(`风格: ${firstStyle.name}`);
+              if (firstStyle.description) parts.push(firstStyle.description);
+              if (firstStyle.colors) {
+                const colorParts: string[] = [];
+                if (firstStyle.colors.primary) colorParts.push(`主色${firstStyle.colors.primary}`);
+                if (firstStyle.colors.secondary) colorParts.push(`辅色${firstStyle.colors.secondary}`);
+                if (firstStyle.colors.accent) colorParts.push(`强调色${firstStyle.colors.accent}`);
+                if (colorParts.length) parts.push(colorParts.join(' '));
+                // Apply primary color to brand colors if empty
+                if (firstStyle.colors.primary && brandColors.length === 0) {
+                  setBrandColors([firstStyle.colors.primary, firstStyle.colors.secondary, firstStyle.colors.accent].filter(Boolean));
+                }
+              }
+              const styleStr = parts.join('，');
+              if (!styleExtra.trim()) setStyleExtra(styleStr);
+              else setStyleExtra(prev => `${prev}，${styleStr}`);
+            }
+          } catch {
+            // Fallback: use raw text
+            if (!styleExtra.trim()) setStyleExtra(styleText);
+            else setStyleExtra(prev => `${prev}，${styleText}`);
+          }
+        }
+      }
+
+      // Process suggest-text result
+      const textResult = results[2];
+      if (textResult.status === 'fulfilled' && textResult.value?.success && textResult.value.content) {
+        const textContent = textResult.value.content.trim();
+        if (textContent) {
+          // Try to parse JSON array from LLM response
+          try {
+            const jsonStr = textContent.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+            const texts = JSON.parse(jsonStr);
+            if (Array.isArray(texts) && texts.length > 0) {
+              const first = texts[0];
+              if (first.mainTitle && !mainText) setMainText(first.mainTitle);
+              if (first.subtitle && !secondaryText) setSecondaryText(first.subtitle);
+              if (first.cta && !accentSymbol) setAccentSymbol(first.cta);
+            }
+          } catch {
+            // Fallback: try regex parse
+            const mainMatch = textContent.match(/主[标标题语][：:]\s*(.+)/);
+            const subMatch = textContent.match(/副[标标题语][：:]\s*(.+)/);
+            const accentMatch = textContent.match(/[装点饰强调]符号[：:]\s*(.+)/);
+            if (mainMatch?.[1] && !mainText) setMainText(mainMatch[1].trim());
+            if (subMatch?.[1] && !secondaryText) setSecondaryText(subMatch[1].trim());
+            if (accentMatch?.[1] && !accentSymbol) setAccentSymbol(accentMatch[1].trim());
+            if (!mainText && !mainMatch) setMainText(textContent.slice(0, 30));
+          }
+        }
       }
     } catch (err) {
       console.error('AI assist failed:', err);
+      setAssistError(err instanceof Error ? err.message : 'AI辅助优化失败，请稍后重试');
     }
     setIsAssisting(false);
   }, [selectedLlmModel, productDesc, sceneDesc, selectedTemplates, mainText, secondaryText, accentSymbol, styleExtra]);
@@ -713,6 +784,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
               onToggleLlmDropdown={() => setShowLlmDropdown(v => !v)}
               llmDropdownRef={llmDropdownRef}
               isAssisting={isAssisting}
+              assistError={assistError}
               onAiAssist={handleAiAssist}
               productDesc={productDesc}
               onProductDescChange={setProductDesc}
