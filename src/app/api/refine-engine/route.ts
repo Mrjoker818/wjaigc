@@ -165,27 +165,86 @@ const MODE_LABELS: Record<string, string> = {
 };
 
 // ─── Angle to description converter ───
+// Converts azimuth/elevation into natural photography language that AI image models understand
 function angleToViewDescription(azimuth: number, elevation: number): string {
-  // Horizontal direction
-  const horizParts: string[] = [];
-  if (azimuth >= 337.5 || azimuth < 22.5) horizParts.push('front-facing');
-  else if (azimuth >= 22.5 && azimuth < 67.5) horizParts.push('front-right three-quarter');
-  else if (azimuth >= 67.5 && azimuth < 112.5) horizParts.push('right profile');
-  else if (azimuth >= 112.5 && azimuth < 157.5) horizParts.push('back-right three-quarter');
-  else if (azimuth >= 157.5 && azimuth < 202.5) horizParts.push('back-facing');
-  else if (azimuth >= 202.5 && azimuth < 247.5) horizParts.push('back-left three-quarter');
-  else if (azimuth >= 247.5 && azimuth < 292.5) horizParts.push('left profile');
-  else horizParts.push('front-left three-quarter');
+  // ── Horizontal direction (azimuth 0°=front, 90°=right, 180°=back, 270°=left) ──
+  let horizDesc = '';
+  let horizWeight = ''; // how far from the cardinal direction
+  // Determine sector
+  const a = ((azimuth % 360) + 360) % 360;
+  if (a < 15 || a >= 345) { horizDesc = 'front'; horizWeight = ''; }
+  else if (a >= 15 && a < 35) { horizDesc = 'front'; horizWeight = 'slightly turned to the right, '; }
+  else if (a >= 35 && a < 55) { horizDesc = 'front-right'; horizWeight = ''; }
+  else if (a >= 55 && a < 75) { horizDesc = 'right'; horizWeight = 'approaching from the front, '; }
+  else if (a >= 75 && a < 105) { horizDesc = 'right side'; horizWeight = ''; }
+  else if (a >= 105 && a < 125) { horizDesc = 'right'; horizWeight = 'moving towards the back, '; }
+  else if (a >= 125 && a < 145) { horizDesc = 'back-right'; horizWeight = ''; }
+  else if (a >= 145 && a < 165) { horizDesc = 'back'; horizWeight = 'slightly from the right, '; }
+  else if (a >= 165 && a < 195) { horizDesc = 'back'; horizWeight = ''; }
+  else if (a >= 195 && a < 215) { horizDesc = 'back'; horizWeight = 'slightly from the left, '; }
+  else if (a >= 215 && a < 235) { horizDesc = 'back-left'; horizWeight = ''; }
+  else if (a >= 235 && a < 255) { horizDesc = 'left'; horizWeight = 'moving towards the back, '; }
+  else if (a >= 255 && a < 285) { horizDesc = 'left side'; horizWeight = ''; }
+  else if (a >= 285 && a < 305) { horizDesc = 'left'; horizWeight = 'approaching from the front, '; }
+  else if (a >= 305 && a < 325) { horizDesc = 'front-left'; horizWeight = ''; }
+  else { horizDesc = 'front'; horizWeight = 'slightly turned to the left, '; }
 
-  // Vertical direction
-  const vertParts: string[] = [];
-  if (elevation <= 5) vertParts.push('eye-level');
-  else if (elevation <= 20) vertParts.push('slightly elevated');
-  else if (elevation <= 40) vertParts.push('moderately elevated');
-  else if (elevation <= 65) vertParts.push('steeply elevated');
-  else vertParts.push('near-overhead bird-eye');
+  // ── Vertical direction (elevation 0°=eye-level, 90°=overhead) ──
+  let vertDesc = '';
+  let cameraPosition = '';
+  if (elevation <= 5) {
+    vertDesc = 'eye-level, straight-on';
+    cameraPosition = 'camera at subject height';
+  } else if (elevation <= 15) {
+    vertDesc = 'slightly above eye-level';
+    cameraPosition = 'camera slightly higher than subject, looking down at a gentle angle';
+  } else if (elevation <= 30) {
+    vertDesc = 'moderate high angle';
+    cameraPosition = 'camera positioned above subject looking downward at approximately 25 degrees';
+  } else if (elevation <= 45) {
+    vertDesc = 'high angle view';
+    cameraPosition = 'camera well above subject, looking down at roughly 40 degrees';
+  } else if (elevation <= 60) {
+    vertDesc = 'steep high angle';
+    cameraPosition = 'camera significantly above subject, looking down steeply';
+  } else if (elevation <= 75) {
+    vertDesc = 'near overhead, almost bird-eye';
+    cameraPosition = 'camera nearly directly above subject, looking almost straight down';
+  } else {
+    vertDesc = 'overhead bird-eye view, looking straight down';
+    cameraPosition = 'camera directly overhead, top-down bird-eye perspective';
+  }
 
-  return `Custom ${horizParts.join(' ')} view at ${azimuth}° horizontal azimuth and ${elevation}° vertical elevation, ${vertParts.join(' ')} perspective, precise angle composition`;
+  // ── Compose natural description ──
+  // Build a vivid, photography-oriented description
+  const parts: string[] = [];
+
+  // Primary angle description
+  if (horizWeight) {
+    parts.push(`${horizWeight}${vertDesc} ${horizDesc} view`);
+  } else {
+    parts.push(`${vertDesc} ${horizDesc} view`);
+  }
+
+  // Camera position instruction (most important for AI models)
+  parts.push(cameraPosition);
+
+  // Composition guidance based on angle
+  if (elevation > 30 && (a < 45 || a >= 315)) {
+    parts.push('product centered with top surface clearly visible');
+  } else if (elevation > 30) {
+    parts.push('three-dimensional form emphasized by the elevated perspective');
+  }
+  if (a >= 45 && a < 135) {
+    parts.push('showing the right side and depth of the product');
+  } else if (a >= 225 && a < 315) {
+    parts.push('showing the left side and depth of the product');
+  }
+  if (a >= 135 && a < 225) {
+    parts.push('showing the back of the product');
+  }
+
+  return parts.join('. ') + '.';
 }
 
 // ─── Product Refinement Prompt Generator ───
