@@ -18,6 +18,11 @@ export async function register() {
         const { ensureImageSourceMapTable } = await import('@/lib/image-source-map');
         await ensureImageSourceMapTable();
         console.log('[instrumentation] Image source map table ready');
+
+        // 确保 AI PSD 生成器表存在
+        const { ensureAiPsdTables } = await import('@/lib/ai-psd/storage');
+        await ensureAiPsdTables();
+        console.log('[instrumentation] AI PSD tables ready');
       } catch (e) {
         console.warn('[instrumentation] DB migration failed (non-fatal):', e);
       }
