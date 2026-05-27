@@ -297,8 +297,8 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         materialType: customMaterial,
         reflectIndex,
         lightingPreset: selectedLighting,
-        viewAngle: selectedViewAngle,
-        ...(selectedViewAngle === 'dynamic' ? { customAzimuth, customElevation } : {}),
+        viewAngle: selectedViewAngle === 'custom' ? 'dynamic' : selectedViewAngle,
+        ...(selectedViewAngle === 'custom' ? { customAzimuth, customElevation } : {}),
         customInstructions,
         aspectRatio,
         quality,
@@ -705,7 +705,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                 <Camera size={14} /> 视角
               </label>
               <div className="grid grid-cols-3 gap-2">
-                {viewAngles.filter(va => va.id !== 'dynamic').map(va => (
+                {viewAngles.map(va => (
                   <button
                     key={va.id}
                     onClick={() => { setSelectedViewAngle(va.id); setShowAnglePicker(false); }}
@@ -719,9 +719,9 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                     {va.name}
                   </button>
                 ))}
-                {/* Custom angle button - replaces dynamic */}
+                {/* Custom angle button */}
                 <button
-                  onClick={() => { setSelectedViewAngle('dynamic'); setShowAnglePicker(true); }}
+                  onClick={() => { setSelectedViewAngle('custom'); setShowAnglePicker(true); }}
                   className="px-2 py-2 rounded-md text-xs font-medium transition-all text-center relative"
                   style={{
                     background: showAnglePicker ? accentBg : isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)',
@@ -736,12 +736,100 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
               {/* Custom angle picker - shown when "自定义视角" is selected */}
               {showAnglePicker && (
                 <div className="mt-3 p-3 rounded-lg space-y-3" style={{ background: isMonochrome ? 'rgba(0,0,0,0.02)' : 'rgba(255,255,255,0.02)', border: `1px solid ${borderColorLight}` }}>
-                  {/* Visual direction selector */}
-                  <div className="flex items-center justify-center">
+                  {/* 3D Cube + Circle direction selector side by side */}
+                  <div className="flex items-center justify-center gap-4">
+                    {/* 3D Cube preview */}
                     <div
-                      className="relative rounded-full cursor-crosshair"
+                      className="relative flex-shrink-0"
+                      style={{ width: 120, height: 120, perspective: 400 }}
+                    >
+                      <div
+                        style={{
+                          width: 64, height: 64,
+                          position: 'absolute',
+                          left: '50%', top: '50%',
+                          transformStyle: 'preserve-3d',
+                          transform: `translate(-50%, -50%) rotateX(${customElevation}deg) rotateY(${-customAzimuth}deg)`,
+                          transition: 'transform 0.15s ease-out',
+                        }}
+                      >
+                        {/* Front face */}
+                        <div style={{
+                          position: 'absolute', width: 64, height: 64,
+                          background: accentColor + '25',
+                          border: `1.5px solid ${accentColor}60`,
+                          transform: 'translateZ(32px)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 10, color: accentColor, fontWeight: 600,
+                        }}>前</div>
+                        {/* Back face */}
+                        <div style={{
+                          position: 'absolute', width: 64, height: 64,
+                          background: isMonochrome ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)',
+                          border: `1.5px solid ${borderColor}`,
+                          transform: 'rotateY(180deg) translateZ(32px)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 10, color: textMutedColor,
+                        }}>后</div>
+                        {/* Left face */}
+                        <div style={{
+                          position: 'absolute', width: 64, height: 64,
+                          background: isMonochrome ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.04)',
+                          border: `1.5px solid ${borderColorLight}`,
+                          transform: 'rotateY(-90deg) translateZ(32px)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 10, color: textMutedColor,
+                        }}>左</div>
+                        {/* Right face */}
+                        <div style={{
+                          position: 'absolute', width: 64, height: 64,
+                          background: isMonochrome ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.04)',
+                          border: `1.5px solid ${borderColorLight}`,
+                          transform: 'rotateY(90deg) translateZ(32px)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 10, color: textMutedColor,
+                        }}>右</div>
+                        {/* Top face */}
+                        <div style={{
+                          position: 'absolute', width: 64, height: 64,
+                          background: accentColor + '15',
+                          border: `1.5px solid ${accentColor}40`,
+                          transform: 'rotateX(90deg) translateZ(32px)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 10, color: accentColor + '80',
+                        }}>顶</div>
+                        {/* Bottom face */}
+                        <div style={{
+                          position: 'absolute', width: 64, height: 64,
+                          background: isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)',
+                          border: `1.5px solid ${borderColorLight}`,
+                          transform: 'rotateX(-90deg) translateZ(32px)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 10, color: textMutedColor,
+                        }}>底</div>
+                      </div>
+                      {/* Camera position indicator */}
+                      <div
+                        className="absolute w-2 h-2 rounded-full pointer-events-none"
+                        style={{
+                          background: accentColor,
+                          boxShadow: `0 0 6px ${accentColor}`,
+                          left: `${50 + 40 * Math.sin(customAzimuth * Math.PI / 180) * Math.cos(customElevation * Math.PI / 180)}%`,
+                          top: `${50 - 40 * Math.sin(customElevation * Math.PI / 180)}%`,
+                          transition: 'left 0.15s, top 0.15s',
+                        }}
+                      />
+                      {/* Angle info overlay */}
+                      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 text-[9px] font-mono whitespace-nowrap" style={{ color: textMutedColor }}>
+                        {customAzimuth}°·{customElevation}°
+                      </div>
+                    </div>
+
+                    {/* Circle drag selector */}
+                    <div
+                      className="relative rounded-full cursor-crosshair flex-shrink-0"
                       style={{
-                        width: 140, height: 140,
+                        width: 120, height: 120,
                         background: isMonochrome
                           ? 'radial-gradient(circle, #f3f4f6 0%, #e5e7eb 70%, #d1d5db 100%)'
                           : 'radial-gradient(circle, #1a1a1a 0%, #141414 70%, #0d0d0d 100%)',
