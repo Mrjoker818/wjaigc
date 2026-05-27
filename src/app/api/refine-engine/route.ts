@@ -200,41 +200,57 @@ function angleToViewDescription(azimuth: number, elevation: number): string {
   }
 
   // ── Vertical: determine camera height ──
+  // Use both English and Chinese for maximum AI model comprehension
   let vertName = '';
   let vertDetail = '';
+  let vertCn = ''; // Chinese description for models that understand Chinese better
   if (elevation <= 5) {
     vertName = 'eye-level';
-    vertDetail = 'camera at subject height, straight-on view';
+    vertDetail = 'camera at subject height, straight-on view, no tilt';
+    vertCn = '平视角度，镜头与产品同高';
   } else if (elevation <= 20) {
     vertName = 'slightly elevated';
-    vertDetail = 'camera slightly above subject, gentle downward angle';
+    vertDetail = 'camera slightly above the product, shooting downward at a gentle angle, can see a bit of the top surface';
+    vertCn = '略俯视，镜头略高于产品，微微向下拍摄，可见少许顶面';
   } else if (elevation <= 40) {
     vertName = 'high angle';
-    vertDetail = 'camera above subject, looking down at the product';
+    vertDetail = 'camera clearly above the product, shooting downward, top surface of the product is visible';
+    vertCn = '俯视角度，镜头高于产品向下拍摄，产品顶面可见';
   } else if (elevation <= 60) {
     vertName = 'steep overhead';
-    vertDetail = 'camera well above subject, steep downward angle showing top surface clearly';
+    vertDetail = 'camera well above the product, steep downward angle, top surface is the dominant visible face';
+    vertCn = '大俯视角度，镜头在产品上方大幅向下拍摄，顶面为主要可见面';
   } else if (elevation <= 80) {
     vertName = 'near top-down';
-    vertDetail = 'camera nearly directly above, almost top-down view';
+    vertDetail = 'camera nearly directly above the product, almost top-down view, mainly seeing the top surface';
+    vertCn = '接近正俯视，镜头几乎在产品正上方，主要看到顶面';
   } else {
     vertName = 'bird-eye top-down';
-    vertDetail = 'camera directly overhead, fully top-down bird-eye view';
+    vertDetail = 'camera directly overhead, fully top-down bird-eye view, only top surface visible';
+    vertCn = '正俯视鸟瞰，镜头在正上方，只看到顶面';
   }
 
   // ── Compose: concise authoritative statement ──
-  // Match the style of VIEW_ANGLES: "正交前视图，居中且对称" -> "orthographic front view, centered and symmetrical"
+  // Build result with both English and Chinese for maximum AI comprehension
   let result = `${vertName} ${horizName} view, ${horizDetail}, ${vertDetail}`;
 
+  // Add Chinese description — many image models understand Chinese photography terms better
+  result += `. ${vertCn}`;
+
   // Add composition emphasis for specific angle ranges
-  if (elevation > 30 && horizName.includes('front')) {
-    result += ', top surface and front face both visible';
+  if (elevation > 15 && horizName.includes('front')) {
+    result += ', top surface and front face both visible / 可同时看到顶面和正面';
   }
   if (horizName.includes('right') && !horizName.includes('back')) {
-    result += ', right side depth clearly shown';
+    result += ', right side depth clearly shown / 右侧面深度清晰可见';
   }
   if (horizName.includes('left') && !horizName.includes('back')) {
-    result += ', left side depth clearly shown';
+    result += ', left side depth clearly shown / 左侧面深度清晰可见';
+  }
+
+  // Add a very explicit camera direction instruction that AI models cannot misinterpret
+  if (elevation > 5) {
+    result += '. IMPORTANT: The camera is ABOVE the product looking DOWN, do NOT generate a low-angle looking-up shot / 重要：镜头在产品上方向下拍摄，不要生成仰视角度';
   }
 
   return result;
