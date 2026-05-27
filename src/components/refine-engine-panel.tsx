@@ -797,7 +797,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                             position: 'absolute',
                             left: -36, top: -36,
                             transformStyle: 'preserve-3d',
-                            transform: `rotateX(${customElevation}deg) rotateY(${-customAzimuth}deg)`,
+                            transform: `rotateX(${-customElevation}deg) rotateY(${-customAzimuth}deg)`,
                             transition: 'transform 0.15s ease-out',
                           }}
                         >
