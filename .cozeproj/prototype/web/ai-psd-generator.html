@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI PSD 生成器 — 原型</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.cn/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Noto Sans SC', sans-serif; background: #0a0a0a; color: #f3f4f6; overflow: hidden; height: 100vh; }
+
+  /* 模拟画布背景 */
+  .canvas-bg {
+    position: fixed; inset: 0;
+    background: radial-gradient(ellipse at center, #1a1a2e 0%, #0a0a0a 70%);
+  }
+
+  /* 浮动面板 */
+  .floating-panel {
+    position: fixed; z-index: 90;
+    background: rgba(20,20,20,0.97);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    backdrop-filter: blur(24px);
+    width: 960px;
+    max-height: 85vh;
+    display: flex; flex-direction: column;
+  }
+  .floating-panel.dragging {
+    ring: 2px solid rgba(212,175,55,0.3);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 30px rgba(212,175,55,0.15);
+  }
+
+  /* Header */
+  .panel-header {
+    background: linear-gradient(to right, #1a1a1a, #141414);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px 16px 0 0;
+    padding: 10px 16px;
+    display: flex; align-items: center; gap: 8px;
+    cursor: grab; user-select: none;
+  }
+  .panel-header:active { cursor: grabbing; }
+
+  /* 主题变量 */
+  :root {
+    --bg-panel: rgba(20,20,20,0.97);
+    --bg-deep: #111111;
+    --bg-input: #0d0d0d;
+    --bg-sidebar: #141414;
+    --border: rgba(255,255,255,0.08);
+    --border-light: rgba(255,255,255,0.04);
+    --accent: #d4af37;
+    --accent-hover: #e0b840;
+    --accent-bg: rgba(212,175,55,0.1);
+    --accent-bg-hover: rgba(212,175,55,0.18);
+    --accent-border: rgba(212,175,55,0.35);
+    --text: #f3f4f6;
+    --text-sub: #9ca3af;
+    --text-muted: #6b7280;
+  }
+
+  /* 输入框 */
+  .psd-input {
+    background: #0d0d0d;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 7px 12px;
+    color: #f3f4f6;
+    font-size: 13px;
+    width: 100%;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .psd-input:focus { border-color: rgba(212,175,55,0.5); }
+  .psd-input::placeholder { color: #6b7280; }
+
+  .psd-select {
+    background: #0d0d0d;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 7px 12px;
+    color: #f3f4f6;
+    font-size: 13px;
+    width: 100%;
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+    transition: border-color 0.2s;
+  }
+  .psd-select:focus { border-color: rgba(212,175,55,0.5); }
+
+  .psd-textarea {
+    background: #0d0d0d;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 7px 12px;
+    color: #f3f4f6;
+    font-size: 13px;
+    width: 100%;
+    outline: none;
+    resize: vertical;
+    min-height: 56px;
+    transition: border-color 0.2s;
+  }
+  .psd-textarea:focus { border-color: rgba(212,175,55,0.5); }
+
+  /* 按钮 */
+  .btn-gold {
+    background: #d4af37;
+    color: #000;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .btn-gold:hover { background: #e0b840; }
+  .btn-gold:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .btn-ghost {
+    background: transparent;
+    color: #9ca3af;
+    border: none;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-ghost:hover { color: #f3f4f6; background: rgba(255,255,255,0.06); }
+
+  .btn-outline {
+    background: transparent;
+    color: #9ca3af;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-outline:hover { color: #f3f4f6; border-color: rgba(255,255,255,0.15); }
+
+  /* 标签按钮 */
+  .tag-btn {
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+    border: 1px solid rgba(255,255,255,0.06);
+    background: transparent;
+    color: #6b7280;
+  }
+  .tag-btn.active {
+    background: rgba(212,175,55,0.15);
+    color: #d4af37;
+    border-color: rgba(212,175,55,0.35);
+  }
+  .tag-btn:hover:not(.active) {
+    color: #9ca3af;
+    background: rgba(255,255,255,0.04);
+  }
+
+  /* 上传区域 */
+  .upload-zone {
+    border: 1px dashed rgba(255,255,255,0.12);
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    min-height: 60px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .upload-zone:hover {
+    border-color: rgba(212,175,55,0.4);
+    background: rgba(212,175,55,0.04);
+  }
+
+  /* 三栏布局 */
+  .three-col {
+    display: flex; flex: 1; min-height: 0; overflow: hidden;
+  }
+
+  /* 左侧参数区 */
+  .left-panel {
+    width: 260px; flex-shrink: 0;
+    border-right: 1px solid rgba(255,255,255,0.06);
+    overflow-y: auto; padding: 12px;
+    background: #141414;
+  }
+  .left-panel::-webkit-scrollbar { width: 3px; }
+  .left-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+  /* 中间预览区 */
+  .center-panel {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* 右侧图层树 */
+  .right-panel {
+    width: 220px; flex-shrink: 0;
+    border-left: 1px solid rgba(255,255,255,0.06);
+    overflow-y: auto; padding: 12px;
+    background: #141414;
+  }
+  .right-panel::-webkit-scrollbar { width: 3px; }
+  .right-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+  /* 分组标签 */
+  .group-label {
+    font-size: 10px;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+    margin-top: 12px;
+    padding-left: 2px;
+  }
+  .group-label:first-child { margin-top: 0; }
+
+  /* 图层项 */
+  .layer-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-size: 11px;
+  }
+  .layer-item:hover { background: rgba(255,255,255,0.04); }
+  .layer-item.active { background: rgba(212,175,55,0.1); }
+
+  .layer-icon {
+    width: 24px; height: 24px;
+    border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px;
+    flex-shrink: 0;
+  }
+
+  /* 预览区空态 */
+  .preview-empty {
+    flex: 1;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    color: #4b5563;
+    gap: 12px;
+    padding: 40px;
+  }
+
+  /* 进度条 */
+  .progress-bar {
+    height: 3px;
+    background: #1a1a1a;
+    border-radius: 2px;
+    overflow: hidden;
+    width: 100%;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #d4af37, #e0b840);
+    border-radius: 2px;
+    transition: width 0.3s;
+  }
+
+  /* 底部状态栏 */
+  .bottom-bar {
+    border-top: 1px solid rgba(255,255,255,0.06);
+    padding: 10px 16px;
+    display: flex; align-items: center; gap: 12px;
+    background: #141414;
+    border-radius: 0 0 16px 16px;
+  }
+
+  /* 模型选择下拉 */
+  .model-dropdown {
+    position: absolute; top: 100%; right: 0;
+    background: #1a1a1a;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 10px;
+    min-width: 280px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    z-index: 10;
+  }
+
+  /* 颜色选择器 */
+  .color-dot {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .color-dot:hover { transform: scale(1.15); }
+  .color-dot.active { border-color: #d4af37; box-shadow: 0 0 0 2px rgba(212,175,55,0.3); }
+
+  /* 图层组折叠 */
+  .layer-group-header {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 500;
+    color: #9ca3af;
+    padding: 4px 0;
+    cursor: pointer;
+  }
+  .layer-group-header:hover { color: #f3f4f6; }
+
+  /* 缩略图 */
+  .thumb-img {
+    width: 100%; aspect-ratio: 16/9;
+    border-radius: 6px;
+    background: #0d0d0d;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  /* 下载按钮组 */
+  .download-group {
+    display: flex; gap: 6px;
+  }
+
+  /* Tab 切换 */
+  .mode-tab {
+    padding: 5px 12px;
+    font-size: 11px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+    color: #6b7280;
+    background: transparent;
+    border: none;
+  }
+  .mode-tab.active {
+    background: rgba(212,175,55,0.15);
+    color: #d4af37;
+  }
+  .mode-tab:hover:not(.active) {
+    color: #9ca3af;
+    background: rgba(255,255,255,0.04);
+  }
+
+  /* 旋转加载 */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .animate-spin { animation: spin 1s linear infinite; }
+
+  /* 模拟画布底部工具栏 */
+  .canvas-toolbar {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    z-index: 50;
+    background: rgba(20,20,20,0.95);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 6px 10px;
+    display: flex; align-items: center; gap: 4px;
+    backdrop-filter: blur(16px);
+  }
+  .toolbar-btn {
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    color: #9ca3af;
+    cursor: pointer;
+    transition: all 0.15s;
+    border: none; background: transparent;
+  }
+  .toolbar-btn:hover { background: rgba(255,255,255,0.08); color: #f3f4f6; }
+  .toolbar-btn.active { background: rgba(212,175,55,0.15); color: #d4af37; }
+  .toolbar-divider { width: 1px; height: 24px; background: rgba(255,255,255,0.06); margin: 0 2px; }
+</style>
+</head>
+<body>
+
+<!-- 模拟画布背景 -->
+<div class="canvas-bg"></div>
+
+<!-- 模拟画布底部工具栏 -->
+<div class="canvas-toolbar">
+  <button class="toolbar-btn" title="选择工具">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg>
+  </button>
+  <button class="toolbar-btn" title="平移工具">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/></svg>
+  </button>
+  <div class="toolbar-divider"></div>
+  <button class="toolbar-btn" title="上传图片">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+  </button>
+  <div class="toolbar-divider"></div>
+  <button class="toolbar-btn" title="品牌电商">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+  </button>
+  <button class="toolbar-btn" title="精修引擎">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+  </button>
+  <button class="toolbar-btn" title="品牌工厂">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-4h6v4"/></svg>
+  </button>
+  <!-- AI PSD 按钮 — 高亮激活态 -->
+  <button class="toolbar-btn active" title="AI PSD 生成器">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+  </button>
+  <div class="toolbar-divider"></div>
+  <button class="toolbar-btn" title="语言修图">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+  </button>
+  <button class="toolbar-btn" title="Agent编排">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+  </button>
+</div>
+
+<!-- ═══ AI PSD 浮动面板 ═══ -->
+<div class="floating-panel" id="psdPanel" style="left: 120px; top: 40px;">
+
+  <!-- ── Header ── -->
+  <div class="panel-header">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d4af37" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+    <span style="color:#f3f4f6; font-weight:600; font-size:13px; flex:1;">AI PSD 生成器</span>
+
+    <!-- 模型选择按钮 -->
+    <button class="btn-ghost" style="display:flex; align-items:center; gap:4px; font-size:10px;" id="modelToggle">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>
+      <span>模型</span>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+
+    <button class="btn-ghost" style="padding:4px;" id="closeBtn">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+
+  <!-- ── 模型选择下拉（隐藏） ── -->
+  <div class="model-dropdown" id="modelDropdown" style="display:none; position:absolute; top:42px; right:50px; z-index:20;">
+    <div style="margin-bottom:8px;">
+      <div style="font-size:10px; color:#6b7280; margin-bottom:4px;">图像模型</div>
+      <select class="psd-select" style="font-size:12px;">
+        <option>ChatGPT 4o Image</option>
+        <option>Gemini Flash Image</option>
+        <option>DALL-E 3</option>
+      </select>
+    </div>
+    <div>
+      <div style="font-size:10px; color:#6b7280; margin-bottom:4px;">LLM 模型</div>
+      <select class="psd-select" style="font-size:12px;">
+        <option>Gemini 2.5 Flash</option>
+        <option>GPT-4o</option>
+        <option>Claude Sonnet</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- ── 生成模式 Tab ── -->
+  <div style="display:flex; gap:2px; padding:8px 12px 0; background:#141414; border-bottom:1px solid rgba(255,255,255,0.06);">
+    <button class="mode-tab active" data-mode="text_to_psd">文本生成</button>
+    <button class="mode-tab" data-mode="reference_to_psd">参考图生成</button>
+    <button class="mode-tab" data-mode="brand_psd">品牌物料</button>
+  </div>
+
+  <!-- ── 三栏主体 ── -->
+  <div class="three-col">
+
+    <!-- ═══ 左侧：参数区 ═══ -->
+    <div class="left-panel">
+
+      <!-- 创意描述 -->
+      <div class="group-label">创意描述</div>
+      <textarea class="psd-textarea" rows="3" placeholder="描述你想要的海报/视觉图效果...&#10;例：中国劲酒品牌KV，黑金质感，产品居中，传统祥云纹饰"></textarea>
+
+      <!-- 文案内容 -->
+      <div class="group-label">文案内容</div>
+      <input class="psd-input" placeholder="标题文字" style="margin-bottom:4px;"/>
+      <input class="psd-input" placeholder="副标题" style="margin-bottom:4px;"/>
+      <textarea class="psd-textarea" rows="2" placeholder="正文/说明文字（可选）" style="min-height:40px;"></textarea>
+
+      <!-- 画幅比例 -->
+      <div class="group-label">画幅比例</div>
+      <div style="display:flex; gap:4px; flex-wrap:wrap;">
+        <button class="tag-btn active">16:9</button>
+        <button class="tag-btn">9:16</button>
+        <button class="tag-btn">1:1</button>
+        <button class="tag-btn">4:5</button>
+        <button class="tag-btn">2.35:1</button>
+        <button class="tag-btn">自定义</button>
+      </div>
+
+      <!-- 用途类型 -->
+      <div class="group-label">用途类型</div>
+      <select class="psd-select">
+        <option>品牌 KV</option>
+        <option>商业海报</option>
+        <option>电商主图</option>
+        <option>小红书封面</option>
+        <option>公众号封面</option>
+        <option>UI 视觉图</option>
+        <option>快闪活动物料</option>
+        <option>自定义</option>
+      </select>
+
+      <!-- 风格方向 -->
+      <div class="group-label">风格方向</div>
+      <div style="display:flex; gap:4px; flex-wrap:wrap;">
+        <button class="tag-btn">商业广告</button>
+        <button class="tag-btn active">黑金质感</button>
+        <button class="tag-btn">极简高级</button>
+        <button class="tag-btn">东方奢感</button>
+        <button class="tag-btn">潮流插画</button>
+        <button class="tag-btn">科技感</button>
+        <button class="tag-btn">治愈轻松</button>
+        <button class="tag-btn">红金高级</button>
+        <button class="tag-btn">年轻活力</button>
+        <button class="tag-btn">电影级</button>
+      </div>
+
+      <!-- 色彩倾向 -->
+      <div class="group-label">色彩倾向</div>
+      <select class="psd-select">
+        <option>自动匹配</option>
+        <option>红金</option>
+        <option selected>黑金</option>
+        <option>蓝白</option>
+        <option>暖橙</option>
+        <option>绿色自然</option>
+        <option>高级灰</option>
+        <option>自定义色</option>
+      </select>
+
+      <!-- 自定义色 -->
+      <div style="display:flex; gap:6px; margin-top:6px;">
+        <div style="flex:1;">
+          <div style="font-size:10px; color:#6b7280; margin-bottom:2px;">主色</div>
+          <div style="display:flex; gap:4px; align-items:center;">
+            <input type="color" value="#d4af37" style="width:24px;height:24px;border:none;background:none;cursor:pointer;padding:0;"/>
+            <input class="psd-input" value="#d4af37" style="font-size:11px; padding:4px 8px;"/>
+          </div>
+        </div>
+        <div style="flex:1;">
+          <div style="font-size:10px; color:#6b7280; margin-bottom:2px;">辅色</div>
+          <div style="display:flex; gap:4px; align-items:center;">
+            <input type="color" value="#1a1a1a" style="width:24px;height:24px;border:none;background:none;cursor:pointer;padding:0;"/>
+            <input class="psd-input" value="#1a1a1a" style="font-size:11px; padding:4px 8px;"/>
+          </div>
+        </div>
+        <div style="flex:1;">
+          <div style="font-size:10px; color:#6b7280; margin-bottom:2px;">强调色</div>
+          <div style="display:flex; gap:4px; align-items:center;">
+            <input type="color" value="#ffffff" style="width:24px;height:24px;border:none;background:none;cursor:pointer;padding:0;"/>
+            <input class="psd-input" value="#ffffff" style="font-size:11px; padding:4px 8px;"/>
+          </div>
+        </div>
+      </div>
+
+      <!-- 图层复杂度 -->
+      <div class="group-label">图层复杂度</div>
+      <div style="display:flex; gap:4px;">
+        <button class="tag-btn">简洁 (5-7层)</button>
+        <button class="tag-btn active">标准 (8-12层)</button>
+        <button class="tag-btn">丰富 (12-18层)</button>
+      </div>
+
+      <!-- 输出质量 -->
+      <div class="group-label">输出质量</div>
+      <div style="display:flex; gap:4px;">
+        <button class="tag-btn active">标准 (1600px)</button>
+        <button class="tag-btn">高清 (2048px)</button>
+      </div>
+
+      <!-- 文字方式 -->
+      <div class="group-label">文字生成方式</div>
+      <div style="display:flex; gap:4px;">
+        <button class="tag-btn active">PSD可编辑文字</button>
+        <button class="tag-btn">图片艺术字</button>
+        <button class="tag-btn">双层保留</button>
+      </div>
+
+      <!-- 素材上传 -->
+      <div class="group-label">上传素材</div>
+
+      <div style="font-size:10px; color:#6b7280; margin-bottom:3px;">参考图</div>
+      <div class="upload-zone" style="margin-bottom:8px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+        <span style="font-size:11px; color:#6b7280;">拖拽或点击上传参考图</span>
+      </div>
+
+      <div style="font-size:10px; color:#6b7280; margin-bottom:3px;">产品图（不会被重绘）</div>
+      <div class="upload-zone" style="margin-bottom:8px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d4af37" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        <span style="font-size:11px; color:#d4af37;">上传产品图（原图保留）</span>
+      </div>
+
+      <div style="font-size:10px; color:#6b7280; margin-bottom:3px;">Logo（不会被重绘）</div>
+      <div class="upload-zone">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d4af37" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        <span style="font-size:11px; color:#d4af37;">上传Logo（原图保留）</span>
+      </div>
+
+    </div><!-- /left-panel -->
+
+    <!-- ═══ 中间：预览区 ═══ -->
+    <div class="center-panel">
+
+      <!-- 预览状态：空态 -->
+      <div class="preview-empty" id="previewEmpty">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#4b5563" stroke-width="1.5">
+          <rect x="3" y="3" width="18" height="18" rx="2"/>
+          <circle cx="8.5" cy="8.5" r="1.5"/>
+          <polyline points="21 15 16 10 5 21"/>
+        </svg>
+        <div style="text-align:center;">
+          <div style="font-size:14px; color:#6b7280; margin-bottom:4px;">填写参数后点击「生成 PSD」</div>
+          <div style="font-size:11px; color:#4b5563;">AI 将自动规划图层 → 逐层生成 → 合成可编辑 PSD</div>
+        </div>
+      </div>
+
+      <!-- 预览状态：生成中（隐藏） -->
+      <div style="display:none; flex:1; flex-direction:column; padding:16px;" id="previewGenerating">
+        <!-- 进度信息 -->
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d4af37" stroke-width="2" class="animate-spin"><path d="M21 12a9 9 0 11-6.22-8.56"/></svg>
+          <span style="font-size:12px; color:#d4af37;">正在规划PSD图层...</span>
+          <span style="font-size:11px; color:#6b7280; margin-left:auto;">15%</span>
+        </div>
+        <div class="progress-bar" style="margin-bottom:16px;">
+          <div class="progress-fill" style="width:15%;"></div>
+        </div>
+        <!-- 预览图占位 -->
+        <div style="flex:1; background:#0d0d0d; border-radius:10px; border:1px solid rgba(255,255,255,0.06); display:flex; align-items:center; justify-content:center; min-height:280px;">
+          <div style="text-align:center; color:#4b5563;">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#4b5563" stroke-width="1.5" class="animate-spin" style="margin:0 auto 8px;"><path d="M21 12a9 9 0 11-6.22-8.56"/></svg>
+            <div style="font-size:12px;">生成中，预计3-8分钟...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 预览状态：完成（隐藏） -->
+      <div style="display:none; flex:1; flex-direction:column; padding:16px;" id="previewComplete">
+        <!-- 完成信息 -->
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          <span style="font-size:12px; color:#22c55e;">PSD 生成完成</span>
+          <span style="font-size:11px; color:#6b7280; margin-left:auto;">10层 + 3个文字层</span>
+        </div>
+        <div class="progress-bar" style="margin-bottom:16px;">
+          <div class="progress-fill" style="width:100%;"></div>
+        </div>
+        <!-- 预览图 -->
+        <div style="flex:1; background:#0d0d0d; border-radius:10px; border:1px solid rgba(255,255,255,0.06); display:flex; align-items:center; justify-content:center; min-height:280px; position:relative;">
+          <div style="width:80%; aspect-ratio:16/9; background:linear-gradient(135deg, #1a1a1a 0%, #0d0d0d 50%, #1a1a1a 100%); border-radius:8px; display:flex; align-items:center; justify-content:center; border:1px solid rgba(212,175,55,0.15);">
+            <div style="text-align:center;">
+              <div style="color:#d4af37; font-size:18px; font-weight:700; margin-bottom:4px;">中国劲酒</div>
+              <div style="color:#9ca3af; font-size:11px;">劲牌有限公司</div>
+              <div style="margin-top:12px; color:#6b7280; font-size:10px;">整图预览</div>
+            </div>
+          </div>
+          <!-- 预览工具栏 -->
+          <div style="position:absolute; top:8px; right:8px; display:flex; gap:4px;">
+            <button class="btn-ghost" style="padding:4px; font-size:10px;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            </button>
+            <button class="btn-ghost" style="padding:4px; font-size:10px;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /center-panel -->
+
+    <!-- ═══ 右侧：图层树 ═══ -->
+    <div class="right-panel">
+
+      <div style="display:flex; align-items:center; gap:4px; margin-bottom:8px;">
+        <span style="font-size:12px; font-weight:600; color:#f3f4f6;">图层结构</span>
+        <span style="font-size:10px; color:#6b7280; margin-left:auto;">10 层</span>
+      </div>
+
+      <!-- 空态提示 -->
+      <div id="layerTreeEmpty" style="text-align:center; padding:30px 10px; color:#4b5563;">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#4b5563" stroke-width="1.5" style="margin:0 auto 8px;"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        <div style="font-size:11px;">生成后将显示图层树</div>
+      </div>
+
+      <!-- 图层树（完成态，隐藏） -->
+      <div id="layerTreeContent" style="display:none;">
+
+        <!-- 背景组 -->
+        <div class="layer-group-header">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          背景
+        </div>
+        <div class="layer-item active">
+          <div class="layer-icon" style="background:#1a1a1a; border:1px solid rgba(255,255,255,0.1);">BG</div>
+          <div style="flex:1;min-width:0;">
+            <div style="color:#f3f4f6; font-weight:500;">深色渐变背景</div>
+            <div style="color:#6b7280; font-size:9px;">background</div>
+          </div>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+
+        <!-- 光效组 -->
+        <div class="layer-group-header" style="margin-top:8px;">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          光效
+        </div>
+        <div class="layer-item">
+          <div class="layer-icon" style="background:linear-gradient(135deg,#d4af37 0%,#8b6914 100%); color:#000; font-size:8px; font-weight:600;">L</div>
+          <div style="flex:1;min-width:0;">
+            <div style="color:#9ca3af;">金色主光源</div>
+            <div style="color:#6b7280; font-size:9px;">light · 70%</div>
+          </div>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+        <div class="layer-item">
+          <div class="layer-icon" style="background:rgba(212,175,55,0.3); color:#d4af37; font-size:8px; font-weight:600;">L</div>
+          <div style="flex:1;min-width:0;">
+            <div style="color:#9ca3af;">辅助光晕</div>
+            <div style="color:#6b7280; font-size:9px;">light · 40%</div>
+          </div>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+
+        <!-- 主体组 -->
+        <div class="layer-group-header" style="margin-top:8px;">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          主体
+        </div>
+        <div class="layer-item">
+          <div class="layer-icon" style="background:rgba(34,197,94,0.15); color:#22c55e; font-size:8px; font-weight:600;">S</div>
+          <div style="flex:1;min-width:0;">
+            <div style="color:#9ca3af;">产品阴影</div>
+            <div style="color:#6b7280; font-size:9px;">shadow · 50%</div>
+          </div>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+        <div class="layer-item">
+          <div class="layer-icon" style="background:rgba(212,175,55,0.15); border:1px solid rgba(212,175,55,0.3); color:#d4af37; font-size:8px; font-weight:600;">P</div>
+          <div style="flex:1;min-width:0;">
+            <div style="color:#9ca3af;">产品图（用户上传）</div>
+            <div style="color:#d4af37; font-size:9px;">product · 原图保留</div>
+          </div>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+
+        <!-- 装饰组 -->
+        <div class="layer-group-header" style="margin-top:8px;">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          装饰
+        </div>
+        <div class="layer-item">
+          <div class="layer-icon" style="background:rgba(139,92,246,0.15); color:#8b5cf6; font-size:8px; font-weight:600;">D</div>
+          <div style="flex:1;min-width:0;">
+            <div style="color:#9ca3af;">祥云纹饰</div>
+            <div style="color:#6b7280; font-size:9px;">decoration · 60%</div>
+          </div>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+        <div class="layer-item">
+          <div class="layer-icon" style="background:rgba(139,92,246,0.15); color:#8b5cf6; font-size:8px; font-weight:600;">D</div>
+          <div style="flex:1;min-width:0;">
+            <div style="color:#9ca3af;">金色边框装饰</div>
+            <div style="color:#6b7280; font-size:9px;">decoration · 80%</div>
+          </div>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+
+        <!-- Logo组 -->
+        <div class="layer-group-header" style="margin-top:8px;">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          标识
+        </div>
+        <div class="layer-item">
+          <div class="layer-icon" style="background:rgba(212,175,55,0.15); border:1px solid rgba(212,175,55,0.3); color:#d4af37; font-size:8px; font-weight:600;">L</div>
+          <div style="flex:1;min-width:0;">
+            <div style="color:#9ca3af;">品牌Logo</div>
+            <div style="color:#d4af37; font-size:9px;">logo · 原图保留</div>
+          </div>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+
+        <!-- 氛围组 -->
+        <div class="layer-group-header" style="margin-top:8px;">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          氛围
+        </div>
+        <div class="layer-item">
+          <div class="layer-icon" style="background:rgba(59,130,246,0.15); color:#3b82f6; font-size:8px; font-weight:600;">A</div>
+          <div style="flex:1;min-width:0;">
+            <div style="color:#9ca3af;">光斑粒子</div>
+            <div style="color:#6b7280; font-size:9px;">atmosphere · 30%</div>
+          </div>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+        <div class="layer-item">
+          <div class="layer-icon" style="background:rgba(59,130,246,0.15); color:#3b82f6; font-size:8px; font-weight:600;">A</div>
+          <div style="flex:1;min-width:0;">
+            <div style="color:#9ca3af;">纹理叠加</div>
+            <div style="color:#6b7280; font-size:9px;">texture · 15%</div>
+          </div>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+
+        <!-- 文字组 -->
+        <div class="layer-group-header" style="margin-top:8px;">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          文字层（可编辑）
+        </div>
+        <div class="layer-item">
+          <div class="layer-icon" style="background:rgba(236,72,153,0.15); color:#ec4899; font-size:8px; font-weight:600;">T</div>
+          <div style="flex:1;min-width:0;">
+            <div style="color:#9ca3af;">标题 "中国劲酒"</div>
+            <div style="color:#6b7280; font-size:9px;">72px · #FFFFFF</div>
+          </div>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+        <div class="layer-item">
+          <div class="layer-icon" style="background:rgba(236,72,153,0.15); color:#ec4899; font-size:8px; font-weight:600;">T</div>
+          <div style="flex:1;min-width:0;">
+            <div style="color:#9ca3af;">副标题 "劲牌有限公司"</div>
+            <div style="color:#6b7280; font-size:9px;">24px · #d4af37</div>
+          </div>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+        <div class="layer-item">
+          <div class="layer-icon" style="background:rgba(236,72,153,0.15); color:#ec4899; font-size:8px; font-weight:600;">T</div>
+          <div style="flex:1;min-width:0;">
+            <div style="color:#9ca3af;">Slogan "中国劲酒 劲牌出品"</div>
+            <div style="color:#6b7280; font-size:9px;">18px · #9ca3af</div>
+          </div>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+
+      </div><!-- /layerTreeContent -->
+
+    </div><!-- /right-panel -->
+
+  </div><!-- /three-col -->
+
+  <!-- ── 底部操作栏 ── -->
+  <div class="bottom-bar">
+    <!-- 进度指示（生成中显示） -->
+    <div style="display:none; flex:1; align-items:center; gap:8px;" id="bottomProgress">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d4af37" stroke-width="2" class="animate-spin"><path d="M21 12a9 9 0 11-6.22-8.56"/></svg>
+      <span style="font-size:11px; color:#d4af37;">正在生成...</span>
+      <div class="progress-bar" style="flex:1; max-width:200px;">
+        <div class="progress-fill" style="width:15%;"></div>
+      </div>
+      <button class="btn-ghost" style="font-size:10px; color:#ef4444;">取消</button>
+    </div>
+
+    <!-- 空态：生成按钮 -->
+    <div style="flex:1; display:flex; align-items:center; gap:8px;" id="bottomIdle">
+      <button class="btn-gold" style="flex:1;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        生成 PSD
+      </button>
+      <span style="font-size:10px; color:#6b7280;">预计 3-8 分钟</span>
+    </div>
+
+    <!-- 完成态：下载按钮 -->
+    <div style="display:none; flex:1; align-items:center; gap:8px;" id="bottomComplete">
+      <div class="download-group" style="flex:1;">
+        <button class="btn-gold" style="flex:1;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          下载 PSD
+        </button>
+        <button class="btn-outline">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          ZIP
+        </button>
+        <button class="btn-outline">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          JSON
+        </button>
+        <button class="btn-outline">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          报告
+        </button>
+      </div>
+      <button class="btn-ghost" style="font-size:10px;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+        添加到画布
+      </button>
+    </div>
+  </div>
+
+</div><!-- /floating-panel -->
+
+<script>
+  // 模型下拉切换
+  const modelToggle = document.getElementById('modelToggle');
+  const modelDropdown = document.getElementById('modelDropdown');
+  modelToggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    modelDropdown.style.display = modelDropdown.style.display === 'none' ? 'block' : 'none';
+  });
+  document.addEventListener('click', () => { modelDropdown.style.display = 'none'; });
+
+  // Tab 切换
+  document.querySelectorAll('.mode-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+    });
+  });
+
+  // 标签按钮切换
+  document.querySelectorAll('.tag-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      // 同组内互斥（简单实现：相邻同级元素）
+      const parent = btn.parentElement;
+      const siblings = Array.from(parent.children).filter(c => c.classList.contains('tag-btn'));
+      // 对于多选组（如风格方向），toggle 当前
+      // 对于单选组（如比例、复杂度），互斥
+      const groupLabel = parent.previousElementSibling;
+      const isMultiSelect = groupLabel && (groupLabel.textContent.includes('风格') || groupLabel.textContent.includes('色彩'));
+      if (isMultiSelect) {
+        btn.classList.toggle('active');
+      } else {
+        siblings.forEach(s => s.classList.remove('active'));
+        btn.classList.add('active');
+      }
+    });
+  });
+
+  // 生成按钮点击：切换状态展示
+  const generateBtn = document.querySelector('.btn-gold');
+  const previewEmpty = document.getElementById('previewEmpty');
+  const previewGenerating = document.getElementById('previewGenerating');
+  const previewComplete = document.getElementById('previewComplete');
+  const layerTreeEmpty = document.getElementById('layerTreeEmpty');
+  const layerTreeContent = document.getElementById('layerTreeContent');
+  const bottomIdle = document.getElementById('bottomIdle');
+  const bottomProgress = document.getElementById('bottomProgress');
+  const bottomComplete = document.getElementById('bottomComplete');
+
+  if (generateBtn) {
+    generateBtn.addEventListener('click', () => {
+      // 切换到生成中
+      previewEmpty.style.display = 'none';
+      previewGenerating.style.display = 'flex';
+      bottomIdle.style.display = 'none';
+      bottomProgress.style.display = 'flex';
+
+      // 3秒后模拟完成
+      setTimeout(() => {
+        previewGenerating.style.display = 'none';
+        previewComplete.style.display = 'flex';
+        layerTreeEmpty.style.display = 'none';
+        layerTreeContent.style.display = 'block';
+        bottomProgress.style.display = 'none';
+        bottomComplete.style.display = 'flex';
+      }, 3000);
+    });
+  }
+
+  // 面板拖拽
+  const panel = document.getElementById('psdPanel');
+  const header = panel.querySelector('.panel-header');
+  let isDragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+
+  header.addEventListener('mousedown', (e) => {
+    if (e.target.closest('button')) return;
+    isDragging = true;
+    startX = e.clientX; startY = e.clientY;
+    startLeft = panel.offsetLeft; startTop = panel.offsetTop;
+    panel.classList.add('dragging');
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    panel.style.left = (startLeft + e.clientX - startX) + 'px';
+    panel.style.top = (startTop + e.clientY - startY) + 'px';
+  });
+  document.addEventListener('mouseup', () => {
+    isDragging = false;
+    panel.classList.remove('dragging');
+  });
+
+  // 关闭按钮
+  document.getElementById('closeBtn').addEventListener('click', () => {
+    panel.style.display = 'none';
+  });
+</script>
+
+</body>
+</html>
