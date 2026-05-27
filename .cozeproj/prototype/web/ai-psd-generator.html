@@ -612,6 +612,21 @@ tailwind.config = {
           </button>
           <button class="tag-btn" data-ratio="custom">自定义</button>
         </div>
+        <!-- 自定义尺寸输入（点击自定义后展开） -->
+        <div id="customSizeInputs" style="display:none; margin-top:6px;">
+          <div style="display:flex; gap:6px; align-items:center;">
+            <div style="flex:1;">
+              <div style="font-size:10px; color:#6b7280; margin-bottom:2px;">宽度 (px)</div>
+              <input class="psd-input" type="number" placeholder="1600" value="1600" min="512" max="4096" style="font-size:12px;"/>
+            </div>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" style="margin-top:14px;flex-shrink:0;"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+            <div style="flex:1;">
+              <div style="font-size:10px; color:#6b7280; margin-bottom:2px;">高度 (px)</div>
+              <input class="psd-input" type="number" placeholder="900" value="900" min="512" max="4096" style="font-size:12px;"/>
+            </div>
+          </div>
+          <div style="font-size:9px; color:#4b5563; margin-top:3px;">范围 512–4096px，建议不超过 2048px 以保证生成速度</div>
+        </div>
 
         <!-- 用途类型 -->
         <div class="group-label">用途类型</div>
@@ -1188,12 +1203,22 @@ tailwind.config = {
   });
 
   // ── 标签按钮切换 ──
+  const customSizeInputs = document.getElementById('customSizeInputs');
   document.querySelectorAll('.tag-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const parent = btn.parentElement;
       const siblings = Array.from(parent.children).filter(c => c.classList.contains('tag-btn'));
       const groupLabel = parent.previousElementSibling;
       const isMultiSelect = groupLabel && (groupLabel.textContent.includes('风格'));
+
+      // 画幅比例单选逻辑 + 自定义尺寸展开
+      if (btn.dataset.ratio !== undefined) {
+        siblings.forEach(s => s.classList.remove('active'));
+        btn.classList.add('active');
+        customSizeInputs.style.display = btn.dataset.ratio === 'custom' ? 'block' : 'none';
+        return;
+      }
+
       if (isMultiSelect) {
         btn.classList.toggle('active');
       } else {
