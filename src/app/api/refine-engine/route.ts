@@ -270,7 +270,7 @@ function getViewAngleName(key: string): string {
     three_quarter: '3/4视角',
     top_down: '俯视',
     side: '侧视',
-    dynamic: '自定义角度',
+    dynamic: '动态视角',
   };
   return names[key] || key;
 }

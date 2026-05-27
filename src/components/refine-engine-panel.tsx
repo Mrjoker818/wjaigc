@@ -719,7 +719,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                     {va.name}
                   </button>
                 ))}
-                {/* Custom angle button */}
+                {/* 3D angle button */}
                 <button
                   onClick={() => { setSelectedViewAngle('custom'); setShowAnglePicker(true); }}
                   className="px-2 py-2 rounded-md text-xs font-medium transition-all text-center relative"
@@ -729,110 +729,22 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                     color: showAnglePicker ? accentColor : textSubColor,
                   }}
                 >
-                  自定义视角
+                  三维视角
                 </button>
               </div>
 
-              {/* Custom angle picker - shown when "自定义视角" is selected */}
+              {/* 3D angle picker - shown when "三维视角" is selected */}
               {showAnglePicker && (
                 <div className="mt-3 p-3 rounded-lg space-y-3" style={{ background: isMonochrome ? 'rgba(0,0,0,0.02)' : 'rgba(255,255,255,0.02)', border: `1px solid ${borderColorLight}` }}>
-                  {/* 3D Cube + Circle direction selector side by side */}
-                  <div className="flex items-center justify-center gap-4">
-                    {/* 3D Cube preview */}
+                  {/* Combined 3D Cube + Circle direction selector */}
+                  <div className="flex items-center justify-center">
                     <div
-                      className="relative flex-shrink-0"
-                      style={{ width: 120, height: 120, perspective: 400 }}
-                    >
-                      <div
-                        style={{
-                          width: 64, height: 64,
-                          position: 'absolute',
-                          left: '50%', top: '50%',
-                          transformStyle: 'preserve-3d',
-                          transform: `translate(-50%, -50%) rotateX(${customElevation}deg) rotateY(${-customAzimuth}deg)`,
-                          transition: 'transform 0.15s ease-out',
-                        }}
-                      >
-                        {/* Front face */}
-                        <div style={{
-                          position: 'absolute', width: 64, height: 64,
-                          background: accentColor + '25',
-                          border: `1.5px solid ${accentColor}60`,
-                          transform: 'translateZ(32px)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 10, color: accentColor, fontWeight: 600,
-                        }}>前</div>
-                        {/* Back face */}
-                        <div style={{
-                          position: 'absolute', width: 64, height: 64,
-                          background: isMonochrome ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)',
-                          border: `1.5px solid ${borderColor}`,
-                          transform: 'rotateY(180deg) translateZ(32px)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 10, color: textMutedColor,
-                        }}>后</div>
-                        {/* Left face */}
-                        <div style={{
-                          position: 'absolute', width: 64, height: 64,
-                          background: isMonochrome ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.04)',
-                          border: `1.5px solid ${borderColorLight}`,
-                          transform: 'rotateY(-90deg) translateZ(32px)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 10, color: textMutedColor,
-                        }}>左</div>
-                        {/* Right face */}
-                        <div style={{
-                          position: 'absolute', width: 64, height: 64,
-                          background: isMonochrome ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.04)',
-                          border: `1.5px solid ${borderColorLight}`,
-                          transform: 'rotateY(90deg) translateZ(32px)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 10, color: textMutedColor,
-                        }}>右</div>
-                        {/* Top face */}
-                        <div style={{
-                          position: 'absolute', width: 64, height: 64,
-                          background: accentColor + '15',
-                          border: `1.5px solid ${accentColor}40`,
-                          transform: 'rotateX(90deg) translateZ(32px)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 10, color: accentColor + '80',
-                        }}>顶</div>
-                        {/* Bottom face */}
-                        <div style={{
-                          position: 'absolute', width: 64, height: 64,
-                          background: isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)',
-                          border: `1.5px solid ${borderColorLight}`,
-                          transform: 'rotateX(-90deg) translateZ(32px)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 10, color: textMutedColor,
-                        }}>底</div>
-                      </div>
-                      {/* Camera position indicator */}
-                      <div
-                        className="absolute w-2 h-2 rounded-full pointer-events-none"
-                        style={{
-                          background: accentColor,
-                          boxShadow: `0 0 6px ${accentColor}`,
-                          left: `${50 + 40 * Math.sin(customAzimuth * Math.PI / 180) * Math.cos(customElevation * Math.PI / 180)}%`,
-                          top: `${50 - 40 * Math.sin(customElevation * Math.PI / 180)}%`,
-                          transition: 'left 0.15s, top 0.15s',
-                        }}
-                      />
-                      {/* Angle info overlay */}
-                      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 text-[9px] font-mono whitespace-nowrap" style={{ color: textMutedColor }}>
-                        {customAzimuth}°·{customElevation}°
-                      </div>
-                    </div>
-
-                    {/* Circle drag selector */}
-                    <div
-                      className="relative rounded-full cursor-crosshair flex-shrink-0"
+                      className="relative rounded-full cursor-crosshair"
                       style={{
-                        width: 120, height: 120,
+                        width: 160, height: 160,
                         background: isMonochrome
-                          ? 'radial-gradient(circle, #f3f4f6 0%, #e5e7eb 70%, #d1d5db 100%)'
-                          : 'radial-gradient(circle, #1a1a1a 0%, #141414 70%, #0d0d0d 100%)',
+                          ? 'radial-gradient(circle, #f3f4f6 0%, #e5e7eb 60%, #d1d5db 100%)'
+                          : 'radial-gradient(circle, #1a1a1a 0%, #141414 60%, #0d0d0d 100%)',
                         border: `1.5px solid ${borderColor}`,
                       }}
                       onMouseDown={(e) => {
@@ -864,24 +776,113 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                         <div style={{ height: 1, width: '100%', background: borderColorLight }} />
                       </div>
+                      {/* Concentric circle guides */}
+                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full pointer-events-none" style={{ width: '66%', height: '66%', border: `1px dashed ${borderColorLight}` }} />
+                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full pointer-events-none" style={{ width: '33%', height: '33%', border: `1px dashed ${borderColorLight}` }} />
                       {/* Center dot */}
                       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full pointer-events-none" style={{ background: textMutedColor }} />
-                      {/* Direction indicator dot */}
+
+                      {/* 3D Cube preview - centered inside the circle */}
                       <div
-                        className="absolute w-3 h-3 rounded-full pointer-events-none -translate-x-1/2 -translate-y-1/2"
+                        className="absolute top-1/2 left-1/2 pointer-events-none"
+                        style={{
+                          width: 0, height: 0,
+                          perspective: 300,
+                          transformStyle: 'preserve-3d',
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: 72, height: 72,
+                            position: 'absolute',
+                            left: -36, top: -36,
+                            transformStyle: 'preserve-3d',
+                            transform: `rotateX(${customElevation}deg) rotateY(${-customAzimuth}deg)`,
+                            transition: 'transform 0.15s ease-out',
+                          }}
+                        >
+                          {/* Front face */}
+                          <div style={{
+                            position: 'absolute', width: 72, height: 72,
+                            background: accentColor + '20',
+                            border: `1.5px solid ${accentColor}50`,
+                            transform: 'translateZ(36px)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: 11, color: accentColor, fontWeight: 600,
+                          }}>前</div>
+                          {/* Back face */}
+                          <div style={{
+                            position: 'absolute', width: 72, height: 72,
+                            background: isMonochrome ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)',
+                            border: `1.5px solid ${borderColor}`,
+                            transform: 'rotateY(180deg) translateZ(36px)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: 11, color: textMutedColor,
+                          }}>后</div>
+                          {/* Left face */}
+                          <div style={{
+                            position: 'absolute', width: 72, height: 72,
+                            background: isMonochrome ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.04)',
+                            border: `1.5px solid ${borderColorLight}`,
+                            transform: 'rotateY(-90deg) translateZ(36px)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: 11, color: textMutedColor,
+                          }}>左</div>
+                          {/* Right face */}
+                          <div style={{
+                            position: 'absolute', width: 72, height: 72,
+                            background: isMonochrome ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.04)',
+                            border: `1.5px solid ${borderColorLight}`,
+                            transform: 'rotateY(90deg) translateZ(36px)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: 11, color: textMutedColor,
+                          }}>右</div>
+                          {/* Top face */}
+                          <div style={{
+                            position: 'absolute', width: 72, height: 72,
+                            background: accentColor + '10',
+                            border: `1.5px solid ${accentColor}30`,
+                            transform: 'rotateX(90deg) translateZ(36px)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: 11, color: accentColor + '70',
+                          }}>顶</div>
+                          {/* Bottom face */}
+                          <div style={{
+                            position: 'absolute', width: 72, height: 72,
+                            background: isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)',
+                            border: `1.5px solid ${borderColorLight}`,
+                            transform: 'rotateX(-90deg) translateZ(36px)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: 11, color: textMutedColor,
+                          }}>底</div>
+                        </div>
+                      </div>
+
+                      {/* Direction indicator dot (camera position) */}
+                      <div
+                        className="absolute w-3.5 h-3.5 rounded-full pointer-events-none -translate-x-1/2 -translate-y-1/2"
                         style={{
                           background: accentColor,
                           boxShadow: `0 0 8px ${accentColor}80`,
-                          left: `${50 + 50 * (customElevation / 90) * Math.sin(customAzimuth * Math.PI / 180)}%`,
-                          top: `${50 - 50 * (customElevation / 90) * Math.cos(customAzimuth * Math.PI / 180)}%`,
+                          left: `${50 + 45 * (customElevation / 90) * Math.sin(customAzimuth * Math.PI / 180)}%`,
+                          top: `${50 - 45 * (customElevation / 90) * Math.cos(customAzimuth * Math.PI / 180)}%`,
                           transition: 'left 0.1s, top 0.1s',
+                          zIndex: 10,
                         }}
                       />
                       {/* Direction labels */}
-                      <span className="absolute top-1 left-1/2 -translate-x-1/2 text-[9px] pointer-events-none" style={{ color: textMutedColor }}>前</span>
-                      <span className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[9px] pointer-events-none" style={{ color: textMutedColor }}>后</span>
-                      <span className="absolute left-1 top-1/2 -translate-y-1/2 text-[9px] pointer-events-none" style={{ color: textMutedColor }}>左</span>
-                      <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[9px] pointer-events-none" style={{ color: textMutedColor }}>右</span>
+                      <span className="absolute top-1.5 left-1/2 -translate-x-1/2 text-[9px] pointer-events-none" style={{ color: textMutedColor }}>前</span>
+                      <span className="absolute bottom-1.5 left-1/2 -translate-x-1/2 text-[9px] pointer-events-none" style={{ color: textMutedColor }}>后</span>
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[9px] pointer-events-none" style={{ color: textMutedColor }}>左</span>
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] pointer-events-none" style={{ color: textMutedColor }}>右</span>
+                      {/* Angle display */}
+                      <div className="absolute bottom-2 right-2 text-[9px] font-mono pointer-events-none" style={{ color: accentColor + '80' }}>
+                        {customAzimuth}°·{customElevation}°
+                      </div>
+                      {/* Drag hint */}
+                      <div className="absolute top-1.5 right-2 text-[8px] pointer-events-none" style={{ color: textMutedColor + '60' }}>
+                        拖拽调角
+                      </div>
                     </div>
                   </div>
 
