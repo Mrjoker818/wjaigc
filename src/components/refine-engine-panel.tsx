@@ -112,6 +112,9 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   const [selectedCategory, setSelectedCategory] = useState('default');
   const [selectedLighting, setSelectedLighting] = useState('soft_studio');
   const [selectedViewAngle, setSelectedViewAngle] = useState('front');
+  const [customAzimuth, setCustomAzimuth] = useState(30);   // 水平方位角 0-360°
+  const [customElevation, setCustomElevation] = useState(15); // 垂直仰角 -90° ~ +90°
+  const [showAnglePicker, setShowAnglePicker] = useState(false);
   const [productName, setProductName] = useState('');
   const [customMaterial, setCustomMaterial] = useState('');
   const [customInstructions, setCustomInstructions] = useState('');
@@ -295,6 +298,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         reflectIndex,
         lightingPreset: selectedLighting,
         viewAngle: selectedViewAngle,
+        ...(selectedViewAngle === 'dynamic' ? { customAzimuth, customElevation } : {}),
         customInstructions,
         aspectRatio,
         quality,
@@ -701,21 +705,162 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                 <Camera size={14} /> 视角
               </label>
               <div className="grid grid-cols-3 gap-2">
-                {viewAngles.map(va => (
+                {viewAngles.filter(va => va.id !== 'dynamic').map(va => (
                   <button
                     key={va.id}
-                    onClick={() => setSelectedViewAngle(va.id)}
+                    onClick={() => { setSelectedViewAngle(va.id); setShowAnglePicker(false); }}
                     className="px-2 py-2 rounded-md text-xs font-medium transition-all text-center"
                     style={{
-                      background: selectedViewAngle === va.id ? accentBg : isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)',
-                      border: `1px solid ${selectedViewAngle === va.id ? accentBorder : borderColorLight}`,
-                      color: selectedViewAngle === va.id ? accentColor : textSubColor,
+                      background: selectedViewAngle === va.id && !showAnglePicker ? accentBg : isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${selectedViewAngle === va.id && !showAnglePicker ? accentBorder : borderColorLight}`,
+                      color: selectedViewAngle === va.id && !showAnglePicker ? accentColor : textSubColor,
                     }}
                   >
                     {va.name}
                   </button>
                 ))}
+                {/* Custom angle button - replaces dynamic */}
+                <button
+                  onClick={() => { setSelectedViewAngle('dynamic'); setShowAnglePicker(true); }}
+                  className="px-2 py-2 rounded-md text-xs font-medium transition-all text-center relative"
+                  style={{
+                    background: showAnglePicker ? accentBg : isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${showAnglePicker ? accentBorder : borderColorLight}`,
+                    color: showAnglePicker ? accentColor : textSubColor,
+                  }}
+                >
+                  自定义视角
+                </button>
               </div>
+
+              {/* Custom angle picker - shown when "自定义视角" is selected */}
+              {showAnglePicker && (
+                <div className="mt-3 p-3 rounded-lg space-y-3" style={{ background: isMonochrome ? 'rgba(0,0,0,0.02)' : 'rgba(255,255,255,0.02)', border: `1px solid ${borderColorLight}` }}>
+                  {/* Visual direction selector */}
+                  <div className="flex items-center justify-center">
+                    <div
+                      className="relative rounded-full cursor-crosshair"
+                      style={{
+                        width: 140, height: 140,
+                        background: isMonochrome
+                          ? 'radial-gradient(circle, #f3f4f6 0%, #e5e7eb 70%, #d1d5db 100%)'
+                          : 'radial-gradient(circle, #1a1a1a 0%, #141414 70%, #0d0d0d 100%)',
+                        border: `1.5px solid ${borderColor}`,
+                      }}
+                      onMouseDown={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const cx = rect.left + rect.width / 2;
+                        const cy = rect.top + rect.height / 2;
+                        const updateAngle = (clientX: number, clientY: number) => {
+                          const dx = clientX - cx;
+                          const dy = clientY - cy;
+                          const r = rect.width / 2;
+                          let az = Math.atan2(dx, -dy) * 180 / Math.PI;
+                          if (az < 0) az += 360;
+                          let el = Math.sqrt(dx * dx + dy * dy) / r * 90;
+                          if (el > 90) el = 90;
+                          setCustomAzimuth(Math.round(az));
+                          setCustomElevation(Math.round(el));
+                        };
+                        updateAngle(e.clientX, e.clientY);
+                        const onMove = (ev: MouseEvent) => { updateAngle(ev.clientX, ev.clientY); };
+                        const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+                        window.addEventListener('mousemove', onMove);
+                        window.addEventListener('mouseup', onUp);
+                      }}
+                    >
+                      {/* Grid lines */}
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div style={{ width: 1, height: '100%', background: borderColorLight }} />
+                      </div>
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div style={{ height: 1, width: '100%', background: borderColorLight }} />
+                      </div>
+                      {/* Center dot */}
+                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full pointer-events-none" style={{ background: textMutedColor }} />
+                      {/* Direction indicator dot */}
+                      <div
+                        className="absolute w-3 h-3 rounded-full pointer-events-none -translate-x-1/2 -translate-y-1/2"
+                        style={{
+                          background: accentColor,
+                          boxShadow: `0 0 8px ${accentColor}80`,
+                          left: `${50 + 50 * (customElevation / 90) * Math.sin(customAzimuth * Math.PI / 180)}%`,
+                          top: `${50 - 50 * (customElevation / 90) * Math.cos(customAzimuth * Math.PI / 180)}%`,
+                          transition: 'left 0.1s, top 0.1s',
+                        }}
+                      />
+                      {/* Direction labels */}
+                      <span className="absolute top-1 left-1/2 -translate-x-1/2 text-[9px] pointer-events-none" style={{ color: textMutedColor }}>前</span>
+                      <span className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[9px] pointer-events-none" style={{ color: textMutedColor }}>后</span>
+                      <span className="absolute left-1 top-1/2 -translate-y-1/2 text-[9px] pointer-events-none" style={{ color: textMutedColor }}>左</span>
+                      <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[9px] pointer-events-none" style={{ color: textMutedColor }}>右</span>
+                    </div>
+                  </div>
+
+                  {/* Azimuth slider */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium" style={{ color: textSubColor }}>水平方位</span>
+                      <span className="text-xs font-mono" style={{ color: accentColor }}>{customAzimuth}°</span>
+                    </div>
+                    <input
+                      type="range" min={0} max={360} step={5}
+                      value={customAzimuth}
+                      onChange={e => setCustomAzimuth(Number(e.target.value))}
+                      className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+                      style={{ background: `linear-gradient(to right, ${accentColor}30, ${accentColor} ${customAzimuth / 360 * 100}%, ${borderColorLight} ${customAzimuth / 360 * 100}%, ${borderColorLight})` }}
+                    />
+                    <div className="flex justify-between text-[9px]" style={{ color: textMutedColor }}>
+                      <span>0° 前</span><span>90° 右</span><span>180° 后</span><span>270° 左</span><span>360°</span>
+                    </div>
+                  </div>
+
+                  {/* Elevation slider */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium" style={{ color: textSubColor }}>垂直仰角</span>
+                      <span className="text-xs font-mono" style={{ color: accentColor }}>{customElevation}°</span>
+                    </div>
+                    <input
+                      type="range" min={0} max={90} step={5}
+                      value={customElevation}
+                      onChange={e => setCustomElevation(Number(e.target.value))}
+                      className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+                      style={{ background: `linear-gradient(to right, ${accentColor}30, ${accentColor} ${customElevation / 90 * 100}%, ${borderColorLight} ${customElevation / 90 * 100}%, ${borderColorLight})` }}
+                    />
+                    <div className="flex justify-between text-[9px]" style={{ color: textMutedColor }}>
+                      <span>0° 平视</span><span>45° 半俯</span><span>90° 正俯</span>
+                    </div>
+                  </div>
+
+                  {/* Quick angle presets */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      { label: '正面微仰', az: 0, el: 15 },
+                      { label: '左侧45°', az: 270, el: 10 },
+                      { label: '右侧45°', az: 90, el: 10 },
+                      { label: '3/4视角', az: 35, el: 20 },
+                      { label: '俯视30°', az: 0, el: 30 },
+                      { label: '俯视60°', az: 0, el: 60 },
+                      { label: '斜后45°', az: 210, el: 15 },
+                      { label: '全俯视', az: 0, el: 90 },
+                    ].map(preset => (
+                      <button
+                        key={preset.label}
+                        onClick={() => { setCustomAzimuth(preset.az); setCustomElevation(preset.el); }}
+                        className="px-2 py-1 rounded text-[10px] font-medium transition-all"
+                        style={{
+                          background: customAzimuth === preset.az && customElevation === preset.el ? accentBg : isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)',
+                          border: `1px solid ${customAzimuth === preset.az && customElevation === preset.el ? accentBorder : borderColorLight}`,
+                          color: customAzimuth === preset.az && customElevation === preset.el ? accentColor : textMutedColor,
+                        }}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Expert-only: Material & Reflect & Custom */}

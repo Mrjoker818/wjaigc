@@ -164,6 +164,30 @@ const MODE_LABELS: Record<string, string> = {
   expert: '专家精修',
 };
 
+// ─── Angle to description converter ───
+function angleToViewDescription(azimuth: number, elevation: number): string {
+  // Horizontal direction
+  const horizParts: string[] = [];
+  if (azimuth >= 337.5 || azimuth < 22.5) horizParts.push('front-facing');
+  else if (azimuth >= 22.5 && azimuth < 67.5) horizParts.push('front-right three-quarter');
+  else if (azimuth >= 67.5 && azimuth < 112.5) horizParts.push('right profile');
+  else if (azimuth >= 112.5 && azimuth < 157.5) horizParts.push('back-right three-quarter');
+  else if (azimuth >= 157.5 && azimuth < 202.5) horizParts.push('back-facing');
+  else if (azimuth >= 202.5 && azimuth < 247.5) horizParts.push('back-left three-quarter');
+  else if (azimuth >= 247.5 && azimuth < 292.5) horizParts.push('left profile');
+  else horizParts.push('front-left three-quarter');
+
+  // Vertical direction
+  const vertParts: string[] = [];
+  if (elevation <= 5) vertParts.push('eye-level');
+  else if (elevation <= 20) vertParts.push('slightly elevated');
+  else if (elevation <= 40) vertParts.push('moderately elevated');
+  else if (elevation <= 65) vertParts.push('steeply elevated');
+  else vertParts.push('near-overhead bird-eye');
+
+  return `Custom ${horizParts.join(' ')} view at ${azimuth}° horizontal azimuth and ${elevation}° vertical elevation, ${vertParts.join(' ')} perspective, precise angle composition`;
+}
+
 // ─── Product Refinement Prompt Generator ───
 function generateRefinePrompt(params: {
   productCategory: string;
@@ -172,13 +196,18 @@ function generateRefinePrompt(params: {
   reflectIndex: number | undefined;
   lightingPreset: string;
   viewAngle: string;
+  customAzimuth?: number;
+  customElevation?: number;
   customInstructions: string;
   mode: string;
 }): string {
   const categoryKey = params.productCategory || 'default';
   const matInfo = MATERIAL_LIBRARY[categoryKey] || MATERIAL_LIBRARY.default;
   const light = LIGHT_LIBRARY[params.lightingPreset] || LIGHT_LIBRARY.soft_studio;
-  const view = VIEW_ANGLES[params.viewAngle] || VIEW_ANGLES.front;
+  // Use custom angle description when dynamic + azimuth/elevation provided
+  const view = (params.viewAngle === 'dynamic' && params.customAzimuth !== undefined && params.customElevation !== undefined)
+    ? angleToViewDescription(params.customAzimuth, params.customElevation)
+    : (VIEW_ANGLES[params.viewAngle] || VIEW_ANGLES.front);
   const material = params.materialType || matInfo.material;
   const reflectIdx = params.reflectIndex ?? matInfo.reflectIndex;
 
@@ -241,7 +270,7 @@ function getViewAngleName(key: string): string {
     three_quarter: '3/4视角',
     top_down: '俯视',
     side: '侧视',
-    dynamic: '动态角度',
+    dynamic: '自定义角度',
   };
   return names[key] || key;
 }
@@ -558,6 +587,8 @@ export async function POST(request: NextRequest) {
         reflectIndex,
         lightingPreset,
         viewAngle,
+        customAzimuth,
+        customElevation,
         customInstructions,
         mode,
         model,
@@ -587,6 +618,8 @@ export async function POST(request: NextRequest) {
         reflectIndex: reflectIndex ?? undefined,
         lightingPreset: lightingPreset || 'soft_studio',
         viewAngle: viewAngle || 'front',
+        customAzimuth: typeof customAzimuth === 'number' ? customAzimuth : undefined,
+        customElevation: typeof customElevation === 'number' ? customElevation : undefined,
         customInstructions: customInstructions || '',
         mode: refineMode,
       });
