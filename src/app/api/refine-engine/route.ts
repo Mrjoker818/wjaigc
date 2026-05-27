@@ -165,86 +165,79 @@ const MODE_LABELS: Record<string, string> = {
 };
 
 // ─── Angle to description converter ───
-// Converts azimuth/elevation into natural photography language that AI image models understand
+// Converts azimuth/elevation into concise photography language matching VIEW_ANGLES style
+// AI image models respond best to authoritative, concise camera direction statements
 function angleToViewDescription(azimuth: number, elevation: number): string {
-  // ── Horizontal direction (azimuth 0°=front, 90°=right, 180°=back, 270°=left) ──
-  let horizDesc = '';
-  let horizWeight = ''; // how far from the cardinal direction
-  // Determine sector
   const a = ((azimuth % 360) + 360) % 360;
-  if (a < 15 || a >= 345) { horizDesc = 'front'; horizWeight = ''; }
-  else if (a >= 15 && a < 35) { horizDesc = 'front'; horizWeight = 'slightly turned to the right, '; }
-  else if (a >= 35 && a < 55) { horizDesc = 'front-right'; horizWeight = ''; }
-  else if (a >= 55 && a < 75) { horizDesc = 'right'; horizWeight = 'approaching from the front, '; }
-  else if (a >= 75 && a < 105) { horizDesc = 'right side'; horizWeight = ''; }
-  else if (a >= 105 && a < 125) { horizDesc = 'right'; horizWeight = 'moving towards the back, '; }
-  else if (a >= 125 && a < 145) { horizDesc = 'back-right'; horizWeight = ''; }
-  else if (a >= 145 && a < 165) { horizDesc = 'back'; horizWeight = 'slightly from the right, '; }
-  else if (a >= 165 && a < 195) { horizDesc = 'back'; horizWeight = ''; }
-  else if (a >= 195 && a < 215) { horizDesc = 'back'; horizWeight = 'slightly from the left, '; }
-  else if (a >= 215 && a < 235) { horizDesc = 'back-left'; horizWeight = ''; }
-  else if (a >= 235 && a < 255) { horizDesc = 'left'; horizWeight = 'moving towards the back, '; }
-  else if (a >= 255 && a < 285) { horizDesc = 'left side'; horizWeight = ''; }
-  else if (a >= 285 && a < 305) { horizDesc = 'left'; horizWeight = 'approaching from the front, '; }
-  else if (a >= 305 && a < 325) { horizDesc = 'front-left'; horizWeight = ''; }
-  else { horizDesc = 'front'; horizWeight = 'slightly turned to the left, '; }
 
-  // ── Vertical direction (elevation 0°=eye-level, 90°=overhead) ──
-  let vertDesc = '';
-  let cameraPosition = '';
+  // ── Horizontal: determine 8 cardinal + intercardinal directions ──
+  let horizName = '';
+  let horizDetail = '';
+  if (a < 22.5 || a >= 337.5) {
+    horizName = 'front';
+    horizDetail = 'facing the viewer directly';
+  } else if (a < 67.5) {
+    horizName = 'front-right';
+    horizDetail = 'facing the viewer, angled slightly to the right, revealing the right side';
+  } else if (a < 112.5) {
+    horizName = 'right side';
+    horizDetail = 'turned to the right, showing the right profile and side depth';
+  } else if (a < 157.5) {
+    horizName = 'back-right';
+    horizDetail = 'turned away, angled slightly to the right, showing the back and right side';
+  } else if (a < 202.5) {
+    horizName = 'back';
+    horizDetail = 'turned away from the viewer, showing the back';
+  } else if (a < 247.5) {
+    horizName = 'back-left';
+    horizDetail = 'turned away, angled slightly to the left, showing the back and left side';
+  } else if (a < 292.5) {
+    horizName = 'left side';
+    horizDetail = 'turned to the left, showing the left profile and side depth';
+  } else {
+    horizName = 'front-left';
+    horizDetail = 'facing the viewer, angled slightly to the left, revealing the left side';
+  }
+
+  // ── Vertical: determine camera height ──
+  let vertName = '';
+  let vertDetail = '';
   if (elevation <= 5) {
-    vertDesc = 'eye-level, straight-on';
-    cameraPosition = 'camera at subject height';
-  } else if (elevation <= 15) {
-    vertDesc = 'slightly above eye-level';
-    cameraPosition = 'camera slightly higher than subject, looking down at a gentle angle';
-  } else if (elevation <= 30) {
-    vertDesc = 'moderate high angle';
-    cameraPosition = 'camera positioned above subject looking downward at approximately 25 degrees';
-  } else if (elevation <= 45) {
-    vertDesc = 'high angle view';
-    cameraPosition = 'camera well above subject, looking down at roughly 40 degrees';
+    vertName = 'eye-level';
+    vertDetail = 'camera at subject height, straight-on view';
+  } else if (elevation <= 20) {
+    vertName = 'slightly elevated';
+    vertDetail = 'camera slightly above subject, gentle downward angle';
+  } else if (elevation <= 40) {
+    vertName = 'high angle';
+    vertDetail = 'camera above subject, looking down at the product';
   } else if (elevation <= 60) {
-    vertDesc = 'steep high angle';
-    cameraPosition = 'camera significantly above subject, looking down steeply';
-  } else if (elevation <= 75) {
-    vertDesc = 'near overhead, almost bird-eye';
-    cameraPosition = 'camera nearly directly above subject, looking almost straight down';
+    vertName = 'steep overhead';
+    vertDetail = 'camera well above subject, steep downward angle showing top surface clearly';
+  } else if (elevation <= 80) {
+    vertName = 'near top-down';
+    vertDetail = 'camera nearly directly above, almost top-down view';
   } else {
-    vertDesc = 'overhead bird-eye view, looking straight down';
-    cameraPosition = 'camera directly overhead, top-down bird-eye perspective';
+    vertName = 'bird-eye top-down';
+    vertDetail = 'camera directly overhead, fully top-down bird-eye view';
   }
 
-  // ── Compose natural description ──
-  // Build a vivid, photography-oriented description
-  const parts: string[] = [];
+  // ── Compose: concise authoritative statement ──
+  // Match the style of VIEW_ANGLES: "正交前视图，居中且对称" -> "orthographic front view, centered and symmetrical"
+  let result = `${vertName} ${horizName} view, ${horizDetail}, ${vertDetail}`;
 
-  // Primary angle description
-  if (horizWeight) {
-    parts.push(`${horizWeight}${vertDesc} ${horizDesc} view`);
-  } else {
-    parts.push(`${vertDesc} ${horizDesc} view`);
+  // Add composition emphasis for specific angle ranges
+  if (elevation > 30 && horizName.includes('front')) {
+    result += ', top surface and front face both visible';
+  }
+  if (horizName.includes('right') && !horizName.includes('back')) {
+    result += ', right side depth clearly shown';
+  }
+  if (horizName.includes('left') && !horizName.includes('back')) {
+    result += ', left side depth clearly shown';
   }
 
-  // Camera position instruction (most important for AI models)
-  parts.push(cameraPosition);
-
-  // Composition guidance based on angle
-  if (elevation > 30 && (a < 45 || a >= 315)) {
-    parts.push('product centered with top surface clearly visible');
-  } else if (elevation > 30) {
-    parts.push('three-dimensional form emphasized by the elevated perspective');
-  }
-  if (a >= 45 && a < 135) {
-    parts.push('showing the right side and depth of the product');
-  } else if (a >= 225 && a < 315) {
-    parts.push('showing the left side and depth of the product');
-  }
-  if (a >= 135 && a < 225) {
-    parts.push('showing the back of the product');
-  }
-
-  return parts.join('. ') + '.';
+  return result;
 }
 
 // ─── Product Refinement Prompt Generator ───
@@ -272,19 +265,25 @@ function generateRefinePrompt(params: {
 
   let prompt = '';
 
+  // For custom 3D angle views, add strong emphasis on camera angle
+  const isCustomAngle = params.viewAngle === 'dynamic' && params.customAzimuth !== undefined && params.customElevation !== undefined;
+  const viewEmphasis = isCustomAngle
+    ? `IMPORTANT: The camera MUST be positioned at this exact angle - do NOT default to a front view. ${view}`
+    : view;
+
   if (params.mode === 'expert') {
     prompt = `Commercial-grade product refinement: ${params.productName || 'Product'}.
 ${BASE_CONSTRAINTS}
 
 Material Analysis: ${material} (Reflectance: ${reflectIdx}).
 Lighting Design: ${light}.
-Camera Angle: ${view}.
+Camera Angle: ${viewEmphasis}.
 Render Priorities: ${matInfo.renderFocus}.
 ${params.customInstructions ? `Custom Directives: ${params.customInstructions}.` : ''}
 
 Output: Pixel-perfect, publication-ready product image with absolute commercial fidelity.`;
   } else {
-    prompt = `${params.productName || 'Product'} commercial product photography on pure white background. ${BASE_CONSTRAINTS} Material: ${material}. Reflectance index: ${reflectIdx}. Lighting: ${light}. View: ${view}. ${matInfo.renderFocus}. Absolute sharp details.`;
+    prompt = `${params.productName || 'Product'} commercial product photography on pure white background. ${BASE_CONSTRAINTS} Material: ${material}. Reflectance index: ${reflectIdx}. Lighting: ${light}. View: ${viewEmphasis}. ${matInfo.renderFocus}. Absolute sharp details.`;
   }
 
   return prompt;
