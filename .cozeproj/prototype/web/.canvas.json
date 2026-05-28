@@ -15,6 +15,14 @@
       },
       "title": "节点模式",
       "size": "web"
+    },
+    {
+      "type": "html",
+      "options": {
+        "path": ".cozeproj/prototype/web/workflow-hub.html"
+      },
+      "title": "工作流社区",
+      "size": "web"
     }
   ]
 }
