@@ -5,15 +5,15 @@
       "options": {
         "path": ".cozeproj/prototype/web/home.html"
       },
-      "title": "双模式画布",
+      "title": "画布模式",
       "size": "web"
     },
     {
       "type": "html",
       "options": {
-        "path": ".cozeproj/prototype/web/workflow-hub.html"
+        "path": ".cozeproj/prototype/web/node-mode.html"
       },
-      "title": "收藏与分享",
+      "title": "节点模式",
       "size": "web"
     }
   ]
