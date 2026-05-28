@@ -53,6 +53,10 @@ export async function ensureAiPsdTables(): Promise<void> {
         reference_image_urls TEXT[] DEFAULT '{}',
         product_image_urls TEXT[] DEFAULT '{}',
         logo_image_urls TEXT[] DEFAULT '{}',
+        brand_name TEXT DEFAULT '',
+        brand_slogan TEXT DEFAULT '',
+        brand_colors TEXT DEFAULT '',
+        material_type TEXT DEFAULT '',
         image_model TEXT DEFAULT '',
         llm_model TEXT DEFAULT '',
         created_at BIGINT NOT NULL DEFAULT 0,
@@ -82,6 +86,19 @@ export async function ensureAiPsdTables(): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_ai_psd_tasks_user ON ai_psd_tasks(user_id)
     `);
 
+    // 迁移：添加新列（brand_psd 模式所需）
+    const newCols = [
+      ['brand_name', 'TEXT DEFAULT \'\''],
+      ['brand_slogan', 'TEXT DEFAULT \'\''],
+      ['brand_colors', 'TEXT DEFAULT \'\''],
+      ['material_type', 'TEXT DEFAULT \'\''],
+    ] as const;
+    for (const [col, type] of newCols) {
+      try {
+        await execSql(`ALTER TABLE ai_psd_tasks ADD COLUMN ${col} ${type}`);
+      } catch { /* column already exists, ignore */ }
+    }
+
     tableEnsured = true;
     console.log('[ai-psd-storage] Tables ensured');
   } catch (e) {
@@ -102,12 +119,13 @@ export async function dbCreateTask(task: AiPsdTask): Promise<boolean> {
         output_quality, text_render_mode, status, progress, current_step,
         current_layer_name, preview_url, psd_url, zip_url, json_url,
         report_url, error_message, layer_plan, reference_image_urls,
-        product_image_urls, logo_image_urls, image_model, llm_model,
+        product_image_urls, logo_image_urls, brand_name, brand_slogan,
+        brand_colors, material_type, image_model, llm_model,
         created_at, updated_at
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
         $18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,
-        $33,$34,$35,$36,$37
+        $33,$34,$35,$36,$37,$38,$39,$40,$41
       )
     `, [
       task.id, task.userId || null, task.generationMode, task.prompt,
@@ -122,7 +140,10 @@ export async function dbCreateTask(task: AiPsdTask): Promise<boolean> {
       task.reportUrl || '', task.errorMessage || '',
       task.layerPlan ? JSON.stringify(task.layerPlan) : null,
       task.referenceImageUrls || [], task.productImageUrls || [],
-      task.logoImageUrls || [], task.imageModel || '', task.llmModel || '',
+      task.logoImageUrls || [], task.brandName || '', task.brandSlogan || '',
+      Array.isArray(task.brandColors) ? JSON.stringify(task.brandColors) : (task.brandColors || ''),
+      task.materialType || '',
+      task.imageModel || '', task.llmModel || '',
       task.createdAt, task.updatedAt,
     ]);
     return true;
@@ -285,6 +306,12 @@ function rowToTask(row: Record<string, unknown>): AiPsdTask {
       : undefined,
     imageModel: (row.image_model as string) || undefined,
     llmModel: (row.llm_model as string) || undefined,
+    brandName: (row.brand_name as string) || undefined,
+    brandSlogan: (row.brand_slogan as string) || undefined,
+    brandColors: Array.isArray(row.brand_colors) ? row.brand_colors as string[]
+      : typeof row.brand_colors === 'string' && row.brand_colors ? JSON.parse(row.brand_colors as string) as string[]
+      : undefined,
+    materialType: (row.material_type as string) || undefined,
     createdAt: (row.created_at as number) || 0,
     updatedAt: (row.updated_at as number) || 0,
   };

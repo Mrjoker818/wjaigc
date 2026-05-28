@@ -1,523 +1,765 @@
+/**
+ * 品牌工厂 API
+ * POST /api/brand-factory  — 操作(action)
+ * GET  /api/brand-factory  — 获取项目列表
+ *
+ * 支持的 action:
+ *   create-project, delete-project, archive-project,
+ *   analyze-dna, generate-directions, generate-kv,
+ *   batch-generate, consistency-check, save-version,
+ *   generate-chinese-title
+ */
+
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  dbListBrandProjects, dbGetBrandProject, dbUpsertBrandProject, dbDeleteBrandProject,
-  dbListBrandMaterials, dbUpsertBrandMaterial, dbDeleteBrandMaterial,
-} from '@/lib/db-storage';
-import { findProviderForFeature, findProviderForModel } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderForFeature } from '@/lib/server-api-config';
+import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { resolveCompatProfile, adjustRequestForProfile, buildPollUrl, extractImageUrl } from '@/lib/api-compatibility';
+import type { ApiProvider } from '@/lib/universal-api-types';
+import { dbGetUserData, dbSetUserData } from '@/lib/db-storage';
 
-// ═══ GET: List projects ═══
-export async function GET(req: NextRequest) {
+// ─── 内存项目存储 ────────────────────────────────────────────────────
+const BRAND_PROJECTS_KEY = 'brand_factory_projects';
+const projectsStore = new Map<string, Record<string, unknown>>();
+
+/** 获取所有项目（内存 → 数据库） */
+async function loadProjects(): Promise<Record<string, unknown>[]> {
+  if (projectsStore.size > 0) {
+    return Array.from(projectsStore.values());
+  }
   try {
-    const { searchParams } = new URL(req.url);
-    const projectId = searchParams.get('projectId');
-    const materialsOnly = searchParams.get('materials') === 'true';
-    const versionsOnly = searchParams.get('versions') === 'true';
-
-    if (projectId && versionsOnly) {
-      const allMaterials = await dbListBrandMaterials(projectId);
-      const versions = allMaterials.filter(m => m.material_type === 'version' || m.status === 'version');
-      const parsedVersions = versions.map(v => {
-        let snapshot: Record<string, unknown> = {};
-        let note = '';
-        let targetType = 'full';
-        try {
-          const parsed = JSON.parse(v.prompt || '{}');
-          snapshot = parsed.snapshot || {};
-          note = parsed.note || '';
-          targetType = parsed.targetType || 'full';
-        } catch { /* ignore */ }
-        return { ...v, snapshot, note, targetType, id: v.id, versionName: v.title, createdAt: v.created_at };
-      });
-      return NextResponse.json({ success: true, versions: parsedVersions });
+    const data = await dbGetUserData('__system__', BRAND_PROJECTS_KEY);
+    if (data && typeof data === 'object') {
+      const arr = (data as { projects?: Record<string, unknown>[] }).projects || [];
+      for (const p of arr) {
+        const id = (p.id as string) || '';
+        if (id) projectsStore.set(id, p);
+      }
     }
+  } catch { /* ignore */ }
+  return Array.from(projectsStore.values());
+}
 
-    if (projectId && materialsOnly) {
-      const materials = await dbListBrandMaterials(projectId);
-      return NextResponse.json({ success: true, materials });
-    }
-
-    if (projectId) {
-      const project = await dbGetBrandProject(projectId);
-      if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
-      const materials = await dbListBrandMaterials(projectId);
-      return NextResponse.json({ success: true, project, materials });
-    }
-
-    const projects = await dbListBrandProjects();
-    return NextResponse.json({ success: true, projects });
+/** 持久化所有项目到数据库 */
+async function persistProjects(): Promise<void> {
+  try {
+    const projects = Array.from(projectsStore.values());
+    await dbSetUserData('__system__', BRAND_PROJECTS_KEY, { projects });
   } catch (e) {
-    console.error('[brand-factory] GET error:', e);
-    return NextResponse.json({ error: '获取项目列表失败' }, { status: 500 });
+    console.error('[brand-factory] persist error:', e);
   }
 }
 
-// ═══ POST: Actions ═══
-export async function POST(req: NextRequest) {
+function genId(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// ─── 模型调用辅助 ────────────────────────────────────────────────────
+
+async function getImageProvider(imageModel?: string): Promise<ApiProvider | null> {
+  if (imageModel) {
+    const provider = await findProviderForModel(imageModel, 'image');
+    if (provider) return provider;
+  }
+  return findProviderForFeature('imageEdit');
+}
+
+async function getLLMProvider(llmModel?: string): Promise<ApiProvider | null> {
+  if (llmModel) {
+    const provider = await findProviderForModel(llmModel, 'chat');
+    if (provider) return provider;
+  }
+  return findProviderForFeature('chat');
+}
+
+async function callLLM(
+  prompt: string,
+  systemPrompt: string,
+  llmModel?: string,
+  options?: { maxTokens?: number; temperature?: number }
+): Promise<{ success: boolean; content?: string; error?: string }> {
+  const provider = await getLLMProvider(llmModel);
+  if (!provider) {
+    return { success: false, error: '未找到可用的LLM模型提供商，请在管理员后台配置' };
+  }
+
+  const model = llmModel || provider.selectedModels?.[0] || 'gpt-4o';
+  const baseUrl = provider.baseUrl.replace(/\/+$/, '');
+
   try {
-    const body = await req.json();
-    const { action } = body;
+    const response = await fetchWithV1Retry(baseUrl, '/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${provider.apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: prompt },
+        ],
+        max_tokens: options?.maxTokens ?? 4096,
+        temperature: options?.temperature ?? 0.7,
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      return { success: false, error: `LLM调用失败(${response.status}): ${errText.slice(0, 200)}` };
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    let content = '';
+
+    if (contentType.includes('text/event-stream')) {
+      const readController = new AbortController();
+      const readTimeout = setTimeout(() => readController.abort(), 120_000);
+      let text = '';
+      try {
+        const reader = response.body?.getReader();
+        if (reader) {
+          const decoder = new TextDecoder();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            text += decoder.decode(value, { stream: true });
+            if (text.includes('[DONE]')) break;
+          }
+        } else {
+          text = await response.text();
+        }
+      } catch { /* timeout */ } finally {
+        clearTimeout(readTimeout);
+      }
+      const lines = text.split('\n');
+      let accumulated = '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === '[DONE]') break;
+          try {
+            const chunk = JSON.parse(jsonStr);
+            const delta = chunk.choices?.[0]?.delta?.content;
+            if (delta) accumulated += delta;
+          } catch { /* skip */ }
+        }
+      }
+      content = accumulated;
+    } else {
+      const data = await response.json();
+      content = data.choices?.[0]?.message?.content || '';
+    }
+
+    return { success: true, content };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, error: `LLM调用异常: ${message}` };
+  }
+}
+
+async function generateImage(
+  prompt: string,
+  imageModel?: string,
+  options?: { size?: string; quality?: string; n?: number }
+): Promise<{ success: boolean; imageUrl?: string; imageUrls?: string[]; taskId?: string; error?: string }> {
+  const provider = await getImageProvider(imageModel);
+  if (!provider) {
+    return { success: false, error: '未找到可用的图像模型提供商，请在管理员后台配置' };
+  }
+
+  const model = imageModel || provider.selectedModels?.[0] || 'dall-e-3';
+  const baseUrl = provider.baseUrl.replace(/\/+$/, '');
+  const profile = resolveCompatProfile(provider);
+
+  try {
+    const rawBody: Record<string, unknown> = {
+      model,
+      prompt,
+      n: options?.n ?? 1,
+      size: options?.size ?? '1024x1024',
+    };
+    if (options?.quality) rawBody.quality = options.quality;
+
+    const { body, endpoint } = adjustRequestForProfile(rawBody, profile, {});
+
+    const response = await fetchWithV1Retry(baseUrl, endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${provider.apiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      return { success: false, error: `图像生成失败(${response.status}): ${errText.slice(0, 200)}` };
+    }
+
+    const data = await response.json();
+
+    if (data.data && Array.isArray(data.data)) {
+      const firstItem = data.data[0] as Record<string, unknown> | undefined;
+      if (firstItem?.task_id) {
+        return { success: true, taskId: firstItem.task_id as string };
+      }
+      const urls = data.data
+        .map((item: Record<string, unknown>) => item.url || item.b64_json)
+        .filter(Boolean) as string[];
+      if (urls.length > 0) {
+        return { success: true, imageUrl: urls[0], imageUrls: urls };
+      }
+    }
+
+    if (data.task_id || data.id) {
+      return { success: true, taskId: (data.task_id || data.id) as string };
+    }
+
+    if (data.images && Array.isArray(data.images)) {
+      const urls = data.images.map((img: Record<string, unknown>) => img.url || img).filter(Boolean) as string[];
+      if (urls.length > 0) {
+        return { success: true, imageUrl: urls[0], imageUrls: urls };
+      }
+    }
+
+    return { success: false, error: '图像生成返回格式异常' };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, error: `图像生成异常: ${message}` };
+  }
+}
+
+// ─── Prompt 构建 ─────────────────────────────────────────────────────
+
+function buildAnalyzeDNAPrompt(body: Record<string, unknown>): { system: string; user: string } {
+  const brandName = body.brandName as string || '';
+  const industry = body.industry as string || '';
+  const tone = body.tone as string || '';
+  const keywords = body.keywords as string[] || [];
+  const hasLogo = !!(body.logoUrl as string);
+  const hasProduct = !!(body.productUrl as string);
+  const hasIP = !!(body.ipUrl as string);
+
+  return {
+    system: `You are a senior brand strategy consultant. Analyze the brand information and output a BrandDNA JSON object. Output ONLY valid JSON, no markdown, no explanation.`,
+    user: `Analyze this brand and generate a BrandDNA:
+Brand: ${brandName}
+Industry: ${industry}
+Tone: ${tone}
+Keywords: ${keywords.join(', ')}
+Has Logo: ${hasLogo}, Has Product: ${hasProduct}, Has IP: ${hasIP}
+
+Output JSON schema:
+{
+  "brandKeywords": ["keyword1", "keyword2", ...], (5-8 brand-defining keywords)
+  "mainColors": ["#hex1", "#hex2"], (2-3 primary brand colors)
+  "secondaryColors": ["#hex3", "#hex4"], (2-3 secondary/auxiliary colors)
+  "fontStyle": "description of typography style",
+  "visualTone": "description of overall visual direction",
+  "logoRules": ["rule1", "rule2"], (3-5 logo usage guidelines)
+  "productRules": ["rule1", "rule2"], (3-5 product photography/display rules)
+  "ipRules": ["rule1", "rule2"], (3-5 IP character usage rules, if applicable)
+  "forbiddenRules": ["rule1", "rule2"], (3-5 things to avoid)
+  "recommendedMaterials": ["material1", "material2"] (5-8 recommended material types)
+}`,
+  };
+}
+
+function buildGenerateDirectionsPrompt(brandDna: Record<string, unknown>, count: number): { system: string; user: string } {
+  return {
+    system: `You are a creative director specializing in brand campaigns. Based on the BrandDNA, generate creative directions. Output ONLY valid JSON array, no markdown, no explanation.`,
+    user: `Based on this BrandDNA, generate ${count} creative directions:
+${JSON.stringify(brandDna, null, 2)}
+
+Output JSON array schema:
+[
+  {
+    "id": "dir_1",
+    "name": "方向名称",
+    "concept": "核心理念描述(50字以内)",
+    "slogan": "广告语/口号",
+    "visualKeywords": ["关键词1", "关键词2", "关键词3"],
+    "colorPlan": ["#hex1", "#hex2", "#hex3"],
+    "fontPlan": "字体方案描述",
+    "prompt": "A detailed English image generation prompt for this creative direction, suitable for AI image generation",
+    "previewImages": []
+  }
+]`,
+  };
+}
+
+function buildKVImagePrompt(
+  brandDna: Record<string, unknown> | null,
+  body: Record<string, unknown>
+): string {
+  const theme = body.theme as string || '';
+  const slogan = body.slogan as string || '';
+  const ratio = body.ratio as string || '16:9';
+  const direction = body.direction as string || '';
+
+  const dnaContext = brandDna
+    ? `Brand DNA: keywords=${(brandDna.brandKeywords as string[] || []).join(',')}, colors=${(brandDna.mainColors as string[] || []).join(',')}, tone=${brandDna.visualTone || ''}`
+    : '';
+
+  return `Professional brand Key Visual (KV) design, ${dnaContext}, theme: ${theme}, slogan: "${slogan}", creative direction: ${direction}, ratio: ${ratio}, high-end commercial quality, clean composition, premium visual impact`;
+}
+
+function buildBatchMaterialPrompt(
+  brandDna: Record<string, unknown> | null,
+  materialType: string,
+  item: string
+): string {
+  const dnaContext = brandDna
+    ? `Brand colors: ${(brandDna.mainColors as string[] || []).join(',')}, style: ${brandDna.visualTone || ''}`
+    : '';
+  return `Professional ${materialType} material design: ${item}, ${dnaContext}, high-quality commercial design, clean and professional`;
+}
+
+function buildConsistencyCheckPrompt(
+  brandName: string,
+  brandDna: Record<string, unknown>,
+  materials: unknown[]
+): { system: string; user: string } {
+  return {
+    system: `You are a brand consistency auditor. Evaluate how well the generated materials match the brand DNA. Output ONLY valid JSON, no markdown.`,
+    user: `Brand: ${brandName}
+BrandDNA: ${JSON.stringify(brandDna, null, 2)}
+Materials to evaluate (${materials.length} items): ${JSON.stringify(materials).slice(0, 2000)}
+
+Evaluate consistency and output:
+{
+  "overallScore": 0-100,
+  "colorConsistency": 0-100,
+  "styleConsistency": 0-100,
+  "toneConsistency": 0-100,
+  "suggestions": ["improvement suggestion 1", "suggestion 2"]
+}`,
+  };
+}
+
+function buildChineseTitlePrompt(
+  text: string,
+  scene: string,
+  style: string,
+  brandDna: Record<string, unknown> | null
+): string {
+  const dnaContext = brandDna
+    ? `Brand style: ${brandDna.visualTone || ''}, colors: ${(brandDna.mainColors as string[] || []).join(',')}`
+    : '';
+  return `Chinese typography design, text "${text}", scene: ${scene}, style: ${style}, ${dnaContext}, artistic Chinese character rendering, professional commercial design quality`;
+}
+
+// ─── GET: 获取项目列表 ────────────────────────────────────────────────
+
+export async function GET() {
+  try {
+    const projects = await loadProjects();
+    return NextResponse.json({ success: true, projects });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[brand-factory] GET error:', message);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+// ─── POST: 操作 ──────────────────────────────────────────────────────
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const action = body.action as string;
+    const imageModel = body.imageModel as string | undefined;
+    const llmModel = body.llmModel as string | undefined;
 
     switch (action) {
-      case 'create-project': return await handleCreateProject(body);
-      case 'update-project': return await handleUpdateProject(body);
-      case 'delete-project': return await handleDeleteProject(body);
-      case 'archive-project': return await handleArchiveProject(body);
-      case 'analyze-dna': return await handleAnalyzeDNA(body);
-      case 'generate-directions': return await handleGenerateDirections(body);
-      case 'generate-kv': return await handleGenerateKV(body);
-      case 'batch-generate': return await handleBatchGenerate(body);
-      case 'save-material': return await handleSaveMaterial(body);
-      case 'delete-material': return await handleDeleteMaterial(body);
-      case 'consistency-check': return await handleConsistencyCheck(body);
-      case 'save-version': return await handleSaveVersion(body);
-      case 'generate-chinese-title': return await handleGenerateChineseTitle(body);
+      // ─── 项目管理 ─────────────────────────────────────
+      case 'create-project': {
+        const id = genId('bf');
+        const now = new Date().toISOString();
+        const project: Record<string, unknown> = {
+          id,
+          project_name: body.projectName || body.brandName || '',
+          brand_name: body.brandName || '',
+          industry: body.industry || '',
+          project_type: body.projectType || '',
+          tone: body.tone || '',
+          keywords: JSON.stringify(body.keywords || []),
+          target_audience: body.targetAudience || '',
+          description: body.description || '',
+          logo_url: '',
+          product_url: '',
+          ip_url: '',
+          reference_urls: JSON.stringify([]),
+          brand_dna: null,
+          creative_directions: null,
+          status: 'draft',
+          is_archived: false,
+          created_at: now,
+          updated_at: now,
+        };
+        projectsStore.set(id, project);
+        await persistProjects();
+        return NextResponse.json({ success: true, project });
+      }
+
+      case 'update-project': {
+        const id = body.id as string;
+        if (!id) return NextResponse.json({ error: '缺少项目ID' }, { status: 400 });
+        const proj = projectsStore.get(id);
+        if (!proj) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
+        // camelCase → snake_case 字段映射（前端发送camelCase，存储用snake_case）
+        const fieldMap: Record<string, string> = {
+          brandName: 'brand_name',
+          projectName: 'project_name',
+          projectType: 'project_type',
+          targetAudience: 'target_audience',
+          logoUrl: 'logo_url',
+          productUrl: 'product_url',
+          ipUrl: 'ip_url',
+          referenceUrls: 'reference_urls',
+          brandDna: 'brand_dna',
+          creativeDirections: 'creative_directions',
+          generatedMaterials: 'generated_materials',
+          isArchived: 'is_archived',
+        };
+        const updatableFields = [
+          'brand_name', 'industry', 'project_type', 'tone', 'keywords',
+          'target_audience', 'description', 'logo_url', 'product_url',
+          'ip_url', 'reference_urls', 'brand_dna', 'creative_directions',
+          'status', 'generated_materials', 'versions', 'project_name', 'is_archived',
+        ];
+        for (const field of updatableFields) {
+          // 支持前端发送的 camelCase 和存储用的 snake_case
+          const camelKey = Object.entries(fieldMap).find(([, v]) => v === field)?.[0];
+          const value = body[field] ?? (camelKey ? body[camelKey] : undefined);
+          if (value !== undefined) {
+            (proj as Record<string, unknown>)[field] = typeof value === 'object' ? JSON.stringify(value) : value;
+          }
+        }
+        proj.updated_at = new Date().toISOString();
+        projectsStore.set(id, proj);
+        await persistProjects();
+        return NextResponse.json({ success: true, project: proj });
+      }
+
+      case 'delete-project': {
+        const id = body.id as string;
+        if (!id) return NextResponse.json({ error: '缺少项目ID' }, { status: 400 });
+        projectsStore.delete(id);
+        await persistProjects();
+        return NextResponse.json({ success: true });
+      }
+
+      case 'archive-project': {
+        const id = body.id as string;
+        if (!id) return NextResponse.json({ error: '缺少项目ID' }, { status: 400 });
+        const proj = projectsStore.get(id);
+        if (proj) {
+          proj.is_archived = true;
+          proj.updated_at = new Date().toISOString();
+          projectsStore.set(id, proj);
+          await persistProjects();
+        }
+        return NextResponse.json({ success: true });
+      }
+
+      // ─── 品牌DNA分析 ───────────────────────────────────
+      case 'analyze-dna': {
+        const projectId = body.projectId as string;
+        if (!projectId) return NextResponse.json({ error: '缺少项目ID' }, { status: 400 });
+
+        const { system, user } = buildAnalyzeDNAPrompt(body);
+        const result = await callLLM(user, system, llmModel, { maxTokens: 4096, temperature: 0.7 });
+
+        if (!result.success || !result.content) {
+          return NextResponse.json({ error: result.error || '品牌DNA分析失败' }, { status: 500 });
+        }
+
+        // 解析LLM返回的JSON
+        let brandDna: Record<string, unknown> | null = null;
+        try {
+          // 尝试从返回内容中提取JSON
+          const content = result.content;
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            brandDna = JSON.parse(jsonMatch[0]);
+          }
+        } catch {
+          // JSON解析失败，返回原始内容作为参考
+          brandDna = {
+            brandKeywords: [],
+            mainColors: [],
+            secondaryColors: [],
+            fontStyle: '',
+            visualTone: result.content.slice(0, 200),
+            logoRules: [],
+            productRules: [],
+            ipRules: [],
+            forbiddenRules: [],
+            recommendedMaterials: [],
+            _rawContent: result.content,
+          };
+        }
+
+        // 更新项目
+        const proj = projectsStore.get(projectId);
+        if (proj) {
+          proj.brand_dna = JSON.stringify(brandDna);
+          proj.status = 'active';
+          proj.updated_at = new Date().toISOString();
+          projectsStore.set(projectId, proj);
+          await persistProjects();
+        }
+
+        return NextResponse.json({ success: true, brandDna });
+      }
+
+      // ─── 生成创意方向 ───────────────────────────────────
+      case 'generate-directions': {
+        const projectId = body.projectId as string;
+        const brandDnaRaw = body.brandDna as Record<string, unknown> | undefined;
+        const count = (body.count as number) || 3;
+
+        if (!projectId || !brandDnaRaw) {
+          return NextResponse.json({ error: '缺少项目ID或品牌DNA' }, { status: 400 });
+        }
+
+        const { system, user } = buildGenerateDirectionsPrompt(brandDnaRaw, count);
+        const result = await callLLM(user, system, llmModel, { maxTokens: 4096, temperature: 0.8 });
+
+        if (!result.success || !result.content) {
+          return NextResponse.json({ error: result.error || '创意方向生成失败' }, { status: 500 });
+        }
+
+        let directions: Record<string, unknown>[] = [];
+        try {
+          const content = result.content;
+          const jsonMatch = content.match(/\[[\s\S]*\]/);
+          if (jsonMatch) {
+            directions = JSON.parse(jsonMatch[0]);
+            // 确保每个方向都有id
+            directions = directions.map((d, i) => ({
+              id: d.id || `dir_${i + 1}`,
+              previewImages: [],
+              ...d,
+            }));
+          }
+        } catch {
+          directions = [{
+            id: 'dir_1',
+            name: '创意方向',
+            concept: result.content.slice(0, 50),
+            slogan: '',
+            visualKeywords: [],
+            colorPlan: [],
+            fontPlan: '',
+            prompt: result.content,
+            previewImages: [],
+          }];
+        }
+
+        // 更新项目
+        const proj = projectsStore.get(projectId);
+        if (proj) {
+          proj.creative_directions = JSON.stringify(directions);
+          proj.updated_at = new Date().toISOString();
+          projectsStore.set(projectId, proj);
+          await persistProjects();
+        }
+
+        return NextResponse.json({ success: true, directions });
+      }
+
+      // ─── 生成KV图 ──────────────────────────────────────
+      case 'generate-kv': {
+        const brandDna = body.brandDna as Record<string, unknown> | null;
+        const prompt = buildKVImagePrompt(brandDna, body);
+
+        const result = await generateImage(prompt, imageModel, {
+          size: body.ratio === '9:16' ? '1024x1536' : body.ratio === '1:1' ? '1024x1024' : '1536x1024',
+        });
+
+        if (!result.success) {
+          return NextResponse.json({ error: result.error || 'KV图生成失败' }, { status: 500 });
+        }
+
+        // 如果返回了taskId（异步任务），返回等待信息
+        if (result.taskId) {
+          return NextResponse.json({
+            success: true,
+            message: 'KV图生成已提交，请稍后查看结果',
+            taskId: result.taskId,
+            imageUrl: result.imageUrl,
+          });
+        }
+
+        return NextResponse.json({
+          success: true,
+          imageUrl: result.imageUrl,
+          imageUrls: result.imageUrls,
+        });
+      }
+
+      // ─── 批量生成素材 ──────────────────────────────────
+      case 'batch-generate': {
+        const projectId = body.projectId as string;
+        const materialType = body.materialType as string || '通用';
+        const items = body.items as string[] || [];
+        const brandDna = body.brandDna as Record<string, unknown> | null;
+
+        if (!items.length) {
+          return NextResponse.json({ error: '请选择至少一个素材类型' }, { status: 400 });
+        }
+
+        // 逐个生成（简化版，实际可并行）
+        const results: { item: string; imageUrl?: string; error?: string }[] = [];
+        for (const item of items) {
+          const prompt = buildBatchMaterialPrompt(brandDna, materialType, item);
+          const result = await generateImage(prompt, imageModel, { size: '1024x1024' });
+          results.push({
+            item,
+            imageUrl: result.imageUrl || result.taskId,
+            error: result.success ? undefined : result.error,
+          });
+        }
+
+        // 保存到项目
+        const proj = projectsStore.get(projectId);
+        if (proj) {
+          const existingMaterials = (proj.generated_materials as string) || '[]';
+          let materials: Record<string, unknown>[] = [];
+          try { materials = JSON.parse(existingMaterials); } catch { /* ignore */ }
+          for (const r of results) {
+            if (r.imageUrl) {
+              materials.push({
+                id: genId('mat'),
+                projectId,
+                directionId: '',
+                type: materialType,
+                title: r.item,
+                ratio: '1:1',
+                imageUrl: r.imageUrl,
+                prompt: buildBatchMaterialPrompt(brandDna, materialType, r.item),
+                score: 0,
+                status: 'draft',
+                createdAt: new Date().toISOString(),
+              });
+            }
+          }
+          proj.generated_materials = JSON.stringify(materials);
+          proj.updated_at = new Date().toISOString();
+          projectsStore.set(projectId, proj);
+          await persistProjects();
+        }
+
+        return NextResponse.json({
+          success: true,
+          results,
+          materials: results.filter(r => r.imageUrl).map(r => ({
+            id: genId('mat'),
+            projectId,
+            type: materialType,
+            title: r.item,
+            imageUrl: r.imageUrl,
+          })),
+        });
+      }
+
+      // ─── 一致性检查 ────────────────────────────────────
+      case 'consistency-check': {
+        const brandName = body.brandName as string || '';
+        const brandDna = body.brandDna as Record<string, unknown>;
+        const materials = body.materials as unknown[] || [];
+
+        if (!brandDna) {
+          return NextResponse.json({ error: '请先分析品牌DNA' }, { status: 400 });
+        }
+
+        const { system, user } = buildConsistencyCheckPrompt(brandName, brandDna, materials);
+        const result = await callLLM(user, system, llmModel, { maxTokens: 2048, temperature: 0.3 });
+
+        if (!result.success || !result.content) {
+          return NextResponse.json({ error: result.error || '一致性检查失败' }, { status: 500 });
+        }
+
+        let scores: Record<string, unknown> = {};
+        try {
+          const content = result.content;
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            scores = JSON.parse(jsonMatch[0]);
+          }
+        } catch {
+          scores = { overallScore: 0, error: '解析失败', rawContent: result.content };
+        }
+
+        return NextResponse.json({ success: true, scores });
+      }
+
+      // ─── 保存版本 ──────────────────────────────────────
+      case 'save-version': {
+        const projectId = body.projectId as string;
+        if (!projectId) return NextResponse.json({ error: '缺少项目ID' }, { status: 400 });
+
+        // 版本记录保存到项目数据中
+        const proj = projectsStore.get(projectId);
+        if (proj) {
+          const existingVersions = (proj.versions as string) || '[]';
+          let versions: Record<string, unknown>[] = [];
+          try { versions = JSON.parse(existingVersions); } catch { /* ignore */ }
+          versions.push({
+            id: genId('ver'),
+            projectId,
+            targetType: body.targetType || 'proposal',
+            targetId: body.targetId || projectId,
+            versionName: body.versionName || 'V1',
+            note: body.note || '',
+            snapshot: body.snapshot || {},
+            createdBy: 'user',
+            createdAt: new Date().toISOString(),
+          });
+          proj.versions = JSON.stringify(versions);
+          proj.updated_at = new Date().toISOString();
+          projectsStore.set(projectId, proj);
+          await persistProjects();
+        }
+
+        return NextResponse.json({ success: true });
+      }
+
+      // ─── 生成中文标题 ──────────────────────────────────
+      case 'generate-chinese-title': {
+        const text = body.text as string;
+        const scene = body.scene as string || '海报';
+        const style = body.style as string || '现代';
+        const brandDna = body.brandDna as Record<string, unknown> | null;
+
+        if (!text) return NextResponse.json({ error: '请输入标题文字' }, { status: 400 });
+
+        const prompt = buildChineseTitlePrompt(text, scene, style, brandDna);
+        const result = await generateImage(prompt, imageModel, { size: '1536x1024' });
+
+        if (!result.success) {
+          return NextResponse.json({ error: result.error || '标题图生成失败' }, { status: 500 });
+        }
+
+        return NextResponse.json({
+          success: true,
+          result: {
+            imageUrl: result.imageUrl,
+            text,
+            scene,
+            style,
+          },
+        });
+      }
+
       default:
-        return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
+        return NextResponse.json({ error: `未知操作: ${action}` }, { status: 400 });
     }
-  } catch (e) {
-    console.error('[brand-factory] POST error:', e);
-    return NextResponse.json({ error: '请求处理失败' }, { status: 500 });
-  }
-}
-
-// ═══ Project CRUD ═══
-
-async function handleCreateProject(body: Record<string, unknown>) {
-  const id = `bp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const project = await dbUpsertBrandProject({
-    id,
-    project_name: (body.projectName as string) || (body.brandName as string) || '未命名项目',
-    brand_name: (body.brandName as string) || '',
-    industry: (body.industry as string) || '',
-    project_type: (body.projectType as string) || '',
-    keywords: JSON.stringify(body.keywords || []),
-    target_audience: (body.targetAudience as string) || '',
-    tone: (body.tone as string) || '',
-    description: (body.description as string) || '',
-    logo_url: (body.logoUrl as string) || '',
-    product_url: (body.productUrl as string) || '',
-    ip_url: (body.ipUrl as string) || '',
-    reference_urls: JSON.stringify(body.referenceUrls || []),
-    brand_dna: JSON.stringify(body.brandDna || {}),
-    creative_directions: JSON.stringify(body.creativeDirections || []),
-    status: 'draft',
-    is_archived: false,
-  });
-  return NextResponse.json({ success: true, project });
-}
-
-async function handleUpdateProject(body: Record<string, unknown>) {
-  const { id, ...updates } = body;
-  if (!id) return NextResponse.json({ error: '缺少项目ID' }, { status: 400 });
-
-  // Map camelCase to snake_case
-  const mapped: Record<string, unknown> = {};
-  const fieldMap: Record<string, string> = {
-    projectName: 'project_name', brandName: 'brand_name',
-    projectType: 'project_type', targetAudience: 'target_audience',
-    logoUrl: 'logo_url', productUrl: 'product_url', ipUrl: 'ip_url',
-    referenceUrls: 'reference_urls', brandDna: 'brand_dna',
-    creativeDirections: 'creative_directions',
-  };
-  for (const [k, v] of Object.entries(updates)) {
-    if (k === 'action' || k === 'id') continue;
-    const dbKey = fieldMap[k] || k;
-    mapped[dbKey] = typeof v === 'object' && v !== null ? JSON.stringify(v) : v;
-  }
-
-  const project = await dbUpsertBrandProject({ id: id as string, ...mapped });
-  return NextResponse.json({ success: true, project });
-}
-
-async function handleDeleteProject(body: Record<string, unknown>) {
-  const { id } = body;
-  if (!id) return NextResponse.json({ error: '缺少项目ID' }, { status: 400 });
-  const ok = await dbDeleteBrandProject(id as string);
-  return ok ? NextResponse.json({ success: true }) : NextResponse.json({ error: '删除项目失败' }, { status: 500 });
-}
-
-async function handleArchiveProject(body: Record<string, unknown>) {
-  const { id, archive } = body;
-  if (!id) return NextResponse.json({ error: '缺少项目ID' }, { status: 400 });
-  const project = await dbUpsertBrandProject({ id: id as string, is_archived: !!archive, status: archive ? 'archived' : 'draft' });
-  return NextResponse.json({ success: true, project });
-}
-
-// ═══ AI Analysis ═══
-
-async function getLLM(modelOverride?: string) {
-  const provider = await findProviderForFeature('chat');
-  if (!provider) return null;
-  const modelName = modelOverride || provider.selectedModels?.[0] || '';
-  return { provider, modelName };
-}
-
-async function getImageProvider(modelOverride?: string) {
-  if (modelOverride) {
-    const provider = await findProviderForModel(modelOverride, 'image');
-    if (provider) return { provider, modelName: modelOverride };
-  }
-  // Fallback: find any image provider
-  const provider = await findProviderForModel('', 'image');
-  if (!provider) return null;
-  const modelName = modelOverride || provider.selectedModels?.[0] || '';
-  return { provider, modelName };
-}
-
-async function callLLM(prompt: string, modelOverride?: string): Promise<string> {
-  const llm = await getLLM(modelOverride);
-  if (!llm) throw new Error('请先在管理后台配置LLM模型');
-
-  const { provider, modelName } = llm;
-  const baseUrl = (provider.baseUrl || '').replace(/\/+$/, '');
-  const apiKey = provider.apiKey || '';
-
-  const resp = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: modelName,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.8,
-      max_tokens: 4096,
-    }),
-  });
-
-  if (!resp.ok) {
-    const errText = await resp.text().catch(() => '');
-    throw new Error(`LLM API 错误 (${resp.status}): ${errText.slice(0, 200)}`);
-  }
-
-  const data = await resp.json();
-  return data.choices?.[0]?.message?.content || '';
-}
-
-async function handleAnalyzeDNA(body: Record<string, unknown>) {
-  const { brandName, industry, keywords, tone, description, logoUrl, productUrl, ipUrl, llmModel } = body;
-  if (!brandName && !logoUrl && !productUrl && !ipUrl) {
-    return NextResponse.json({ error: '请提供品牌名称或上传品牌素材' }, { status: 400 });
-  }
-
-  const prompt = `你是一个专业的品牌策略分析师。请根据以下信息分析品牌DNA，输出JSON格式：
-
-品牌名称：${brandName || '未知'}
-行业：${industry || '未知'}
-关键词：${keywords ? JSON.stringify(keywords) : '无'}
-品牌调性：${tone || '未知'}
-描述：${description || '无'}
-${logoUrl ? `Logo图片：${logoUrl}` : ''}
-${productUrl ? `产品图片：${productUrl}` : ''}
-${ipUrl ? `IP形象图片：${ipUrl}` : ''}
-
-请输出以下JSON结构（不要包含markdown代码块标记）：
-{
-  "brandKeywords": ["关键词1", "关键词2", "关键词3"],
-  "mainColors": ["#色值1", "#色值2"],
-  "secondaryColors": ["#色值1", "#色值2"],
-  "fontStyle": "字体方向描述",
-  "visualTone": "视觉调性描述",
-  "logoRules": ["规则1", "规则2"],
-  "productRules": ["规则1", "规则2"],
-  "ipRules": ["规则1", "规则2"],
-  "forbiddenRules": ["禁区1", "禁区2"],
-  "recommendedMaterials": ["物料类型1", "物料类型2"],
-  "promptSummary": "品牌Prompt摘要"
-}`;
-
-  try {
-    const content = await callLLM(prompt, llmModel as string | undefined);
-    // Try to parse JSON from response
-    let dna: Record<string, unknown>;
-    try {
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      dna = jsonMatch ? JSON.parse(jsonMatch[0]) : { promptSummary: content };
-    } catch {
-      dna = { promptSummary: content };
-    }
-    return NextResponse.json({ success: true, dna });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : '品牌DNA分析失败';
-    return NextResponse.json({ error: msg }, { status: 500 });
-  }
-}
-
-async function handleGenerateDirections(body: Record<string, unknown>) {
-  const { brandName, brandDna, count = 3, llmModel } = body;
-  if (!brandName) return NextResponse.json({ error: '请先填写品牌名称' }, { status: 400 });
-
-  const dnaStr = typeof brandDna === 'string' ? brandDna : JSON.stringify(brandDna || {});
-
-  const prompt = `你是一个创意总监。请根据以下品牌信息生成${count}套品牌创意方向，输出JSON数组格式：
-
-品牌名称：${brandName}
-品牌DNA：${dnaStr}
-
-请输出以下JSON结构（不要包含markdown代码块标记）：
-[{
-  "name": "方向名称",
-  "concept": "核心概念描述",
-  "slogan": "一句话传播语",
-  "visualKeywords": ["视觉关键词1", "关键词2"],
-  "colorPlan": ["#色值1", "#色值2"],
-  "fontPlan": "字体方案描述",
-  "compositionStyle": "构图方式",
-  "prompt": "该方向的图像生成Prompt",
-  "recommendedMaterials": ["推荐物料类型1", "类型2"]
-}]`;
-
-  try {
-    const content = await callLLM(prompt, llmModel as string | undefined);
-    let directions: unknown[];
-    try {
-      const jsonMatch = content.match(/\[[\s\S]*\]/);
-      directions = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
-    } catch {
-      directions = [];
-    }
-    if (!Array.isArray(directions) || directions.length === 0) {
-      directions = [{ name: '方向1', concept: content, prompt: content }];
-    }
-    return NextResponse.json({ success: true, directions });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : '创意方向生成失败';
-    return NextResponse.json({ error: msg }, { status: 500 });
-  }
-}
-
-async function handleGenerateKV(body: Record<string, unknown>) {
-  const { brandName, brandDna, directionId, directionPrompt, theme, slogan, ratio, llmModel } = body;
-  if (!brandName) return NextResponse.json({ error: '请先填写品牌名称' }, { status: 400 });
-
-  const dnaStr = typeof brandDna === 'string' ? brandDna : JSON.stringify(brandDna || {});
-  const kvRatio = (ratio as string) || '16:9';
-
-  const prompt = `你是一个品牌视觉设计专家。请根据以下品牌信息生成主KV（Key Visual）的图像生成Prompt：
-
-品牌名称：${brandName}
-品牌DNA：${dnaStr}
-${directionPrompt ? `创意方向Prompt：${directionPrompt}` : ''}
-${theme ? `主题文案：${theme}` : ''}
-${slogan ? `传播语/标语：${slogan}` : ''}
-画面比例：${kvRatio}
-
-请直接输出一段详细的图像生成Prompt，必须包含：
-1. 画面主体和构图
-2. 色彩方案（基于品牌DNA的主色和辅助色）
-3. 字体和文字排版规则（中文标题保护：所有中文文字必须完整呈现，不得变形模糊）
-4. Logo/品牌元素应用方式
-5. 画面氛围和质感
-6. 禁止事项（如禁止模糊变形、禁止水印）
-
-输出格式为纯文本Prompt，不要包含任何前缀或说明文字。`;
-
-  try {
-    const content = await callLLM(prompt, llmModel as string | undefined);
-    const kvPrompt = content.trim();
-    // Return as materials array for compatibility
-    return NextResponse.json({
-      success: true,
-      materials: [{
-        materialType: 'kv-main',
-        title: `主KV${theme ? ' - ' + theme : ''}`,
-        ratio: kvRatio,
-        prompt: kvPrompt,
-      }],
-    });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'KV生成失败';
-    return NextResponse.json({ error: msg }, { status: 500 });
-  }
-}
-
-async function handleBatchGenerate(body: Record<string, unknown>) {
-  const { brandName, brandDna, materialTypes, llmModel } = body;
-  if (!brandName) return NextResponse.json({ error: '请先填写品牌名称' }, { status: 400 });
-  if (!materialTypes || !Array.isArray(materialTypes) || materialTypes.length === 0) {
-    return NextResponse.json({ error: '请选择物料类型' }, { status: 400 });
-  }
-
-  const dnaStr = typeof brandDna === 'string' ? brandDna : JSON.stringify(brandDna || {});
-
-  const prompt = `你是一个品牌物料批量生成专家。请根据品牌信息为以下物料类型分别生成图像Prompt：
-
-品牌名称：${brandName}
-品牌DNA：${dnaStr}
-物料类型：${(materialTypes as string[]).join('、')}
-
-请输出JSON数组（不要包含markdown代码块标记）：
-[{
-  "materialType": "物料类型",
-  "title": "物料名称",
-  "ratio": "推荐比例(如16:9)",
-  "prompt": "图像生成Prompt",
-  "notes": "设计要点"
-}]`;
-
-  try {
-    const content = await callLLM(prompt, llmModel as string | undefined);
-    let materials: unknown[];
-    try {
-      const jsonMatch = content.match(/\[[\s\S]*\]/);
-      materials = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
-    } catch {
-      materials = [];
-    }
-    return NextResponse.json({ success: true, materials });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : '批量生成失败';
-    return NextResponse.json({ error: msg }, { status: 500 });
-  }
-}
-
-async function handleSaveMaterial(body: Record<string, unknown>) {
-  const { id, projectId, directionId, materialType, title, ratio, imageUrl, prompt, score, status } = body;
-  if (!projectId) return NextResponse.json({ error: '缺少项目ID' }, { status: 400 });
-
-  const materialId = (id as string) || `mat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const material = await dbUpsertBrandMaterial({
-    id: materialId,
-    project_id: projectId as string,
-    direction_id: (directionId as string) || '',
-    material_type: (materialType as string) || 'kv',
-    title: (title as string) || '',
-    ratio: (ratio as string) || '1:1',
-    image_url: (imageUrl as string) || '',
-    prompt: (prompt as string) || '',
-    score: (score as number) || 0,
-    status: (status as string) || 'draft',
-  });
-  return NextResponse.json({ success: true, material });
-}
-
-async function handleDeleteMaterial(body: Record<string, unknown>) {
-  const { id } = body;
-  if (!id) return NextResponse.json({ error: '缺少物料ID' }, { status: 400 });
-  const ok = await dbDeleteBrandMaterial(id as string);
-  return ok ? NextResponse.json({ success: true }) : NextResponse.json({ error: '删除物料失败' }, { status: 500 });
-}
-
-// ═══ Consistency Check ═══
-
-async function handleConsistencyCheck(body: Record<string, unknown>) {
-  const { brandName, brandDna, materials, llmModel } = body;
-  if (!brandName) return NextResponse.json({ error: '请先填写品牌名称' }, { status: 400 });
-
-  const dnaStr = typeof brandDna === 'string' ? brandDna : JSON.stringify(brandDna || {});
-  const materialsStr = JSON.stringify((materials as Record<string, unknown>[])?.map(m => ({
-    type: m.materialType, title: m.title, prompt: (m.prompt as string || '').slice(0, 200),
-  })) || []);
-
-  const prompt = `你是一个品牌一致性检测专家。请根据品牌DNA和已生成的物料Prompt，对14个维度进行一致性评分（0-100分），输出JSON格式：
-
-品牌名称：${brandName}
-品牌DNA：${dnaStr}
-物料列表：${materialsStr}
-
-请输出以下JSON结构（不要包含markdown代码块标记）：
-{
-  "logoAccuracy": 分数(0-100, Logo准确度),
-  "logoDeform": 分数(0-100, Logo是否变形，100=无变形),
-  "logoOcclusion": 分数(0-100, Logo是否被遮挡，100=无遮挡),
-  "brandColor": 分数(0-100, 品牌主色匹配度),
-  "fontConsistency": 分数(0-100, 字体风格一致性),
-  "chineseAccuracy": 分数(0-100, 中文文字准确度),
-  "productFidelity": 分数(0-100, 产品外观保真度),
-  "ipFidelity": 分数(0-100, IP形象保真度),
-  "styleConsistency": 分数(0-100, 画面风格统一度),
-  "commercialQuality": 分数(0-100, 商业完成度),
-  "terminalRealism": 分数(0-100, 终端适配度),
-  "sizeAccuracy": 分数(0-100, 物料尺寸准确度),
-  "extraText": 分数(0-100, 是否存在多余文字，100=无多余文字),
-  "forbiddenRule": 分数(0-100, 是否符合品牌禁区规则，100=完全合规),
-  "issues": ["问题1描述", "问题2描述"],
-  "suggestions": ["修复建议1", "修复建议2"]
-}`;
-
-  try {
-    const content = await callLLM(prompt, llmModel as string | undefined);
-    let scores: Record<string, unknown>;
-    try {
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      scores = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
-    } catch {
-      scores = {};
-    }
-    // Extract numeric scores for all 14 dimensions
-    const result: Record<string, number> = {};
-    for (const key of [
-      'logoAccuracy', 'logoDeform', 'logoOcclusion', 'brandColor',
-      'fontConsistency', 'chineseAccuracy', 'productFidelity', 'ipFidelity',
-      'styleConsistency', 'commercialQuality', 'terminalRealism', 'sizeAccuracy',
-      'extraText', 'forbiddenRule'
-    ]) {
-      const val = scores[key];
-      result[key] = typeof val === 'number' ? Math.min(100, Math.max(0, Math.round(val))) : 50;
-    }
-    return NextResponse.json({ success: true, scores: result, issues: scores.issues, suggestions: scores.suggestions });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : '一致性检测失败';
-    return NextResponse.json({ error: msg }, { status: 500 });
-  }
-}
-
-// ═══ Version Management ═══
-
-async function handleSaveVersion(body: Record<string, unknown>) {
-  const { projectId, targetType, versionName, note, snapshot } = body;
-  if (!projectId) return NextResponse.json({ error: '缺少项目ID' }, { status: 400 });
-
-  // Store version as a material with type 'version' for simplicity
-  const id = `ver-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const version = await dbUpsertBrandMaterial({
-    id,
-    project_id: projectId as string,
-    direction_id: (targetType as string) || 'full',
-    material_type: 'version',
-    title: (versionName as string) || 'V1',
-    ratio: '',
-    image_url: '',
-    prompt: JSON.stringify({
-      note: note || '',
-      snapshot: snapshot || {},
-      targetType: targetType || 'full',
-    }),
-    score: 0,
-    status: 'version',
-  });
-  return NextResponse.json({ success: true, version });
-}
-
-// ═══ Chinese Title Generation ═══
-
-async function handleGenerateChineseTitle(body: Record<string, unknown>) {
-  const { brandName, brandDna, scene, style, text, llmModel } = body;
-  if (!text) return NextResponse.json({ error: '请输入标题文字' }, { status: 400 });
-
-  const dnaStr = typeof brandDna === 'string' ? brandDna : JSON.stringify(brandDna || {});
-
-  const prompt = `你是一个中文字体设计专家和品牌标题字设计师。请根据以下信息生成品牌标题字设计方案：
-
-品牌名称：${brandName || '未指定'}
-品牌DNA：${dnaStr}
-应用场景：${scene || '品牌主标题'}
-字体风格：${style || '高级黑体'}
-标题文字：${text}
-
-请输出设计方案，包含以下内容：
-1. 字体设计方向：描述字体应该呈现的风格特征
-2. 排版建议：字间距、行间距、对齐方式
-3. 色彩方案：基于品牌DNA的主色和辅助色
-4. 装饰元素：建议添加的装饰效果（如描边、阴影、光效等）
-5. 中文文字保护规则：确保不乱码、不多字、不错字、不擅自改品牌名
-6. 完整Prompt：可用于图像生成的完整Prompt，确保标题文字"${text}"在画面中完整清晰呈现
-
-请以结构化文本格式输出。`;
-
-  try {
-    const content = await callLLM(prompt, llmModel as string | undefined);
-    return NextResponse.json({ success: true, result: content.trim() });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : '标题字生成失败';
-    return NextResponse.json({ error: msg }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[brand-factory] POST error:', message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

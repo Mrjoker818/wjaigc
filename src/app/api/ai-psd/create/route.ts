@@ -38,6 +38,10 @@ export async function POST(request: NextRequest) {
       referenceImageUrls = [],
       productImageUrls = [],
       logoImageUrls = [],
+      brandName,
+      brandSlogan,
+      brandColors,
+      materialType,
     } = body;
 
     if (!prompt && generationMode === 'text_to_psd') {
@@ -74,6 +78,10 @@ export async function POST(request: NextRequest) {
       logoImageUrls,
       imageModel: imageModel || undefined,
       llmModel: llmModel || undefined,
+      brandName: brandName || undefined,
+      brandSlogan: brandSlogan || undefined,
+      brandColors: brandColors || undefined,
+      materialType: materialType || undefined,
       createdAt: now,
       updatedAt: now,
     };

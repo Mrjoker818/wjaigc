@@ -177,6 +177,10 @@ export async function runAiPsdTask(taskId: string): Promise<void> {
       hasReferenceImages: (t.referenceImageUrls?.length ?? 0) > 0,
       hasProductImages: (t.productImageUrls?.length ?? 0) > 0,
       hasLogoImages: (t.logoImageUrls?.length ?? 0) > 0,
+      brandName: t.brandName,
+      brandSlogan: t.brandSlogan,
+      brandColors: t.brandColors,
+      materialType: t.materialType,
     });
 
     // 构建 User Prompt

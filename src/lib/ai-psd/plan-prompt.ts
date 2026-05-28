@@ -141,6 +141,10 @@ export function buildPlanSystemPrompt(params: {
   hasReferenceImages: boolean;
   hasProductImages: boolean;
   hasLogoImages: boolean;
+  brandName?: string;
+  brandSlogan?: string;
+  brandColors?: string[];
+  materialType?: string;
 }): string {
   const {
     generationMode, sceneType, styles, colorTone,
@@ -149,6 +153,7 @@ export function buildPlanSystemPrompt(params: {
     canvasWidth, canvasHeight,
     title, subtitle, bodyText,
     hasReferenceImages, hasProductImages, hasLogoImages,
+    brandName, brandSlogan, brandColors, materialType,
   } = params;
 
   const styleDescs = styles.map(s => STYLE_DESCRIPTIONS[s]).join('. ');
@@ -216,6 +221,13 @@ ${textLayerGuidance}
 ${assetGuidance}
 
 ${textInfo ? `TEXT CONTENT:\n${textInfo}` : ''}
+
+${brandName || brandSlogan || (brandColors && brandColors.length > 0) || materialType ? `BRAND INFORMATION:
+${brandName ? `Brand Name: "${brandName}"` : ''}
+${brandSlogan ? `Brand Slogan: "${brandSlogan}"` : ''}
+${brandColors && brandColors.length > 0 ? `Brand Colors: ${brandColors.join(', ')}` : ''}
+${materialType ? `Material Type: ${materialType}` : ''}
+Use this brand information to inform the design style, color choices, and text content. The brand name and slogan should appear as text layers. Brand colors should influence the color palette.` : ''}
 
 OUTPUT FORMAT:
 You MUST output ONLY valid JSON matching this schema (no markdown, no code fences, no explanation):

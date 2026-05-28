@@ -898,7 +898,15 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
                       fd.append('file', file);
                       const res = await fetch('/api/save-image', { method: 'POST', body: fd });
                       const data = await res.json();
-                      if (data.url) setCurrentProject(p => p ? { ...p, [field]: data.url } : p);
+                      if (data.url) {
+                        setCurrentProject(p => p ? { ...p, [field]: data.url } : p);
+                        // 同步到后端
+                        fetch('/api/brand-factory', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ action: 'update-project', id: currentProject?.id, [field]: data.url }),
+                        }).catch(() => {});
+                      }
                     }} />
                   </label>
                 )}
@@ -917,7 +925,16 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
                 <div key={i} className="relative group">
                   <img src={url} alt="" className="w-full h-20 object-cover rounded" />
                   <button className="absolute top-0.5 right-0.5 bg-red-500/80 text-white rounded p-0.5 opacity-0 group-hover:opacity-100"
-                    onClick={() => setCurrentProject(p => p ? { ...p, referenceUrls: p.referenceUrls.filter((_, j) => j !== i) } : p)}><X className="w-2.5 h-2.5" /></button>
+                    onClick={() => {
+                      setCurrentProject(p => p ? { ...p, referenceUrls: p.referenceUrls.filter((_, j) => j !== i) } : p);
+                      // 同步到后端
+                      const updatedRefs = currentProject?.referenceUrls.filter((_, j) => j !== i) || [];
+                      fetch('/api/brand-factory', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'update-project', id: currentProject?.id, reference_urls: JSON.stringify(updatedRefs) }),
+                      }).catch(() => {});
+                    }}><X className="w-2.5 h-2.5" /></button>
                 </div>
               ))}
               <label className={`flex items-center justify-center h-20 border-2 border-dashed ${th.borderLight} rounded cursor-pointer hover:border-[#d4af37]/30`}>
@@ -929,7 +946,15 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
                   fd.append('file', file);
                   const res = await fetch('/api/save-image', { method: 'POST', body: fd });
                   const data = await res.json();
-                  if (data.url) setCurrentProject(p => p ? { ...p, referenceUrls: [...p.referenceUrls, data.url] } : p);
+                  if (data.url) {
+                    setCurrentProject(p => p ? { ...p, referenceUrls: [...p.referenceUrls, data.url] } : p);
+                    // 同步到后端
+                    fetch('/api/brand-factory', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'update-project', id: currentProject?.id, reference_urls: JSON.stringify([...(currentProject?.referenceUrls || []), data.url]) }),
+                    }).catch(() => {});
+                  }
                 }} />
               </label>
             </div>

@@ -447,7 +447,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          generationMode: generateMode === 'text' ? 'text_to_psd' : generateMode === 'reference' ? 'image_to_psd' : 'brand_material',
+          generationMode: generateMode === 'text' ? 'text_to_psd' : generateMode === 'reference' ? 'reference_to_psd' : 'brand_psd',
           prompt,
           title,
           subtitle,
