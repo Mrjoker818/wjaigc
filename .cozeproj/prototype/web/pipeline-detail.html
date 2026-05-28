@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <link href="https://lf-code-agent.coze.cn/obj/x-ai-cn/fonts/google/google-all-fonts.css" rel="stylesheet"/>
+
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/jquery/jquery-3.7.1.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/lucide/lucide-1.11.0.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/tailwindcss/tailwindcss-browser-4.2.4.min.js"></script>
+
+  <style type="text/tailwindcss">
+    @theme {
+      /* === 品牌色（黑金体系） === */
+      --color-primary:              #d4af37;
+      --color-primary-container:    #3d3218;
+      --color-on-primary:           #0e1117;
+      /* === 背景 / 表面（深色层级） === */
+      --color-background:                 #0e1117;
+      --color-surface-container-lowest:   #131820;
+      --color-surface:                    #161b22;
+      --color-surface-container:          #1c2333;
+      --color-surface-container-high:     #242d3d;
+      --color-surface-container-highest:  #2d3748;
+      /* === 文字 === */
+      --color-on-surface:           #e6edf3;
+      --color-on-surface-variant:   #7d8590;
+      /* === 功能色 === */
+      --color-success:  #2ea043;
+      --color-error:    #f85149;
+      --color-warning:  #d29922;
+      /* === 边框 === */
+      --color-outline:          #30363d;
+      --color-outline-variant:  #21262d;
+      /* === 圆角 === */
+      --radius-sm:   0.25rem;
+      --radius-md:   0.375rem;
+      --radius-lg:   0.5rem;
+      --radius-xl:   0.75rem;
+      --radius-2xl:  1rem;
+      --radius-full: 9999px;
+      /* === 阴影 === */
+      --shadow-card:   0 2px 8px rgba(0,0,0,0.4);
+      --shadow-float:  0 10px 25px rgba(0,0,0,0.5);
+      --shadow-dialog: 0 25px 50px rgba(0,0,0,0.6);
+      /* === 字体 === */
+      --font-sans: "Inter", "Noto Sans SC", system-ui, sans-serif;
+    }
+  </style>
+
+  <!-- 图片兜底 -->
+  <script>
+    document.addEventListener('error', function (e) {
+      const img = e.target;
+      if (img.tagName !== 'IMG' || img.dataset.fallback) return;
+      img.dataset.fallback = '1';
+      const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const cat = img.getAttribute('data-category') || '其他';
+      const alt = img.getAttribute('alt') || '';
+      const label = esc(alt.length > 8 ? alt.slice(0, 8) + '…' : alt);
+      const icons = { '人物': '👤', '自然风景': '🏞', '动物': '🐾', '建筑城市': '🏙', '运动体育': '⚽', '交通工具': '🚗', '食物': '🍽', '服饰时尚': '👗', '商业科技': '💼', '游戏娱乐': '🎮', '艺术': '🎨', '其他': '🖼' };
+      const icon = icons[cat] || '🖼';
+      const w = img.width || 400, h = img.height || 300;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="%23f3f4f6"/><text x="50%" y="45%" text-anchor="middle" font-size="${Math.min(w, h) * 0.18}" dominant-baseline="central">${icon}</text><text x="50%" y="68%" text-anchor="middle" font-size="${Math.min(w, h) * 0.07}" fill="%239ca3af" font-family="system-ui,sans-serif" dominant-baseline="central">${label}</text></svg>`;
+      img.src = 'data:image/svg+xml,' + svg;
+    }, true);
+  </script>
+
+  <style>
+    /* 自定义滚动条 */
+    .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+
+    /* 时间线连接线 */
+    .timeline-line {
+      position: absolute;
+      left: 23px;
+      top: 48px;
+      bottom: 0;
+      width: 2px;
+      background: var(--color-outline);
+    }
+
+    /* 对比分割线 */
+    .compare-divider {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: var(--color-primary);
+      cursor: col-resize;
+      z-index: 10;
+    }
+    .compare-divider::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 28px;
+      height: 28px;
+      background: var(--color-primary);
+      border-radius: 50%;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    }
+    .compare-divider::before {
+      content: '⟨ ⟩';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: var(--color-on-primary);
+      font-size: 10px;
+      font-weight: bold;
+      z-index: 1;
+      letter-spacing: 2px;
+    }
+
+    /* 操作选择卡片 */
+    .op-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 12px 8px;
+      border-radius: 8px;
+      background: var(--color-surface-container);
+      border: 1px solid var(--color-outline-variant);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .op-card:hover {
+      border-color: rgba(212,175,55,0.4);
+      background: rgba(212,175,55,0.06);
+    }
+
+    /* 图片名称编辑态 */
+    .img-name-input {
+      background: transparent;
+      border: none;
+      color: var(--color-on-surface);
+      font-size: 13px;
+      font-weight: 500;
+      outline: none;
+      border-bottom: 1px solid rgba(212,175,55,0.5);
+      padding: 0 2px 1px;
+    }
+
+    /* 参数下拉框 */
+    .param-select {
+      width: 100%;
+      padding: 6px 28px 6px 10px;
+      background: var(--color-surface-container);
+      border: none;
+      border-radius: 6px;
+      color: var(--color-on-surface);
+      font-size: 13px;
+      outline: none;
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237d8590' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+    }
+    .param-select:focus {
+      box-shadow: 0 0 0 2px rgba(212,175,55,0.25);
+    }
+  </style>
+</head>
+
+<body class="bg-background text-on-surface font-sans">
+
+  <!-- @nav:start -->
+  <header class="bg-surface sticky top-0 z-40 h-12 flex items-center justify-between px-4 border-b border-outline-variant/20">
+    <div class="flex items-center gap-2">
+      <i data-lucide="infinity" class="text-primary w-5 h-5"></i>
+      <span class="font-bold text-sm text-on-surface">无界AI</span>
+      <span class="text-xs text-on-surface-variant ml-1">Pipeline</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors">
+        <i data-lucide="undo" class="w-4 h-4"></i>
+      </button>
+      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors">
+        <i data-lucide="redo" class="w-4 h-4"></i>
+      </button>
+      <div class="w-px h-5 bg-outline-variant mx-1"></div>
+      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors">
+        <i data-lucide="settings" class="w-4 h-4"></i>
+      </button>
+      <div class="w-7 h-7 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-medium">初</div>
+    </div>
+  </header>
+  <!-- @nav:end -->
+
+  <div class="flex" style="height: calc(100vh - 3rem);">
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- 左侧：大图预览区 -->
+    <!-- ═══════════════════════════════════════════ -->
+    <div id="preview-area" class="relative flex-1 flex flex-col items-center justify-center bg-background min-w-0">
+
+      <!-- 对比原图容器（默认隐藏） -->
+      <div id="compare-original" class="absolute inset-0 flex items-center justify-center overflow-hidden" style="display: none;">
+        <img id="compare-original-img"
+             src="https://images.unsplash.com/photo-1486325212027-8081e485255e?w=800&h=600&fit=crop"
+             alt="原始城市建筑照片"
+             data-category="建筑城市"
+             class="max-w-full max-h-full object-contain" />
+      </div>
+
+      <!-- 当前步骤预览图 -->
+      <div id="preview-img-container" class="relative flex items-center justify-center" style="max-width: 90%; max-height: 80%;">
+        <img id="preview-img"
+             src="https://images.unsplash.com/photo-1486325212027-8081e485255e?w=640&h=480&fit=crop"
+             alt="城市建筑放大结果"
+             data-category="建筑城市"
+             class="max-w-full max-h-full object-contain rounded-sm" />
+      </div>
+
+      <!-- 对比分割线（默认隐藏） -->
+      <div id="compare-divider" class="compare-divider" style="display: none; left: 50%;"></div>
+
+      <!-- 图片信息 -->
+      <div class="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3">
+        <span id="step-name-label" class="text-sm font-medium text-on-surface">放大2x</span>
+        <span class="text-xs text-on-surface-variant">·</span>
+        <span id="img-size-label" class="text-xs text-on-surface-variant">2048×2048</span>
+        <span class="text-xs text-on-surface-variant">·</span>
+        <span id="img-size-bytes" class="text-xs text-on-surface-variant">3.2MB</span>
+      </div>
+
+      <!-- 对比模式切换按钮 -->
+      <button id="btn-compare" class="absolute bottom-6 left-6 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-surface-container/80 text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors border border-outline-variant/20">
+        <i data-lucide="columns-2" class="w-3.5 h-3.5"></i>
+        <span id="compare-btn-text">对比原图</span>
+      </button>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- 右侧：Pipeline操作链详情面板 -->
+    <!-- ═══════════════════════════════════════════ -->
+    <div class="w-[400px] shrink-0 bg-surface border-l border-outline-variant/20 flex flex-col overflow-hidden">
+
+      <!-- 面板头部：返回画布 + 图片名称 -->
+      <div class="shrink-0 flex items-center gap-3 px-4 py-3 border-b border-outline-variant/20 bg-surface-container-lowest">
+        <a id="btn-back-canvas" href="home.html" class="inline-flex items-center gap-1.5 text-xs font-medium text-on-surface-variant hover:text-primary transition-colors">
+          <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>
+          返回画布
+        </a>
+        <div class="w-px h-4 bg-outline-variant/30"></div>
+        <!-- 图片名称（可点击编辑） -->
+        <span id="img-name-display" class="text-sm font-medium text-on-surface cursor-pointer hover:text-primary transition-colors truncate">城市建筑_01.png</span>
+        <!-- 图片名称编辑输入框（默认隐藏） -->
+        <input id="img-name-input" type="text" value="城市建筑_01.png" class="img-name-input hidden" style="width: 180px;" />
+      </div>
+
+      <!-- 可滚动区域 -->
+      <div class="flex-1 overflow-y-auto custom-scrollbar">
+
+        <!-- ────── 1. 操作链时间线 ────── -->
+        <div class="px-4 pt-4 pb-2">
+          <h3 class="text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-4">操作链</h3>
+
+          <div id="timeline-list" class="relative">
+
+            <!-- 时间线竖线 -->
+            <div class="timeline-line" id="timeline-line"></div>
+
+            <!-- 列表-步骤1：原图 -->
+            <div class="step-item relative flex items-start gap-3 pb-4 cursor-pointer group" data-step="1" id="step-1">
+              <!-- 状态圆点 -->
+              <div class="relative z-10 w-[12px] h-[12px] rounded-full bg-success shrink-0 mt-2.5 flex items-center justify-center">
+                <div class="w-1.5 h-1.5 rounded-full bg-white"></div>
+              </div>
+              <!-- 内容区 -->
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <!-- 缩略图 -->
+                  <div class="w-12 h-12 rounded-md overflow-hidden shrink-0 bg-surface-container border border-outline-variant/20">
+                    <img src="https://images.unsplash.com/photo-1486325212027-8081e485255e?w=96&h=96&fit=crop" alt="原图缩略图" data-category="建筑城市" class="w-full h-full object-cover" />
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="text-sm font-medium text-on-surface truncate">原图</div>
+                    <div class="text-xs text-on-surface-variant mt-0.5">1024×1024 · 1.8MB</div>
+                  </div>
+                  <span class="text-xs text-on-surface-variant shrink-0">14:32</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 列表-步骤2：移除背景 -->
+            <div class="step-item relative flex items-start gap-3 pb-4 cursor-pointer group" data-step="2" id="step-2">
+              <!-- 状态圆点 -->
+              <div class="relative z-10 w-[12px] h-[12px] rounded-full bg-success shrink-0 mt-2.5 flex items-center justify-center">
+                <div class="w-1.5 h-1.5 rounded-full bg-white"></div>
+              </div>
+              <!-- 内容区 -->
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <!-- 缩略图 -->
+                  <div class="w-12 h-12 rounded-md overflow-hidden shrink-0 bg-surface-container border border-outline-variant/20">
+                    <img src="https://images.unsplash.com/photo-1486325212027-8081e485255e?w=96&h=96&fit=crop" alt="移除背景缩略图" data-category="建筑城市" class="w-full h-full object-cover" />
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="text-sm font-medium text-on-surface truncate">移除背景</div>
+                    <div class="text-xs text-on-surface-variant mt-0.5">自动检测</div>
+                  </div>
+                  <div class="flex flex-col items-end gap-1 shrink-0">
+                    <span class="text-xs text-on-surface-variant">14:33</span>
+                    <button class="text-xs text-primary hover:underline opacity-0 group-hover:opacity-100 transition-opacity" id="btn-rerun-step2">重新执行</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 列表-步骤3：放大2x（当前选中） -->
+            <div class="step-item relative flex items-start gap-3 pb-3 cursor-pointer" data-step="3" id="step-3">
+              <!-- 状态圆点 -->
+              <div class="relative z-10 w-[12px] h-[12px] rounded-full bg-success shrink-0 mt-2.5 flex items-center justify-center">
+                <div class="w-1.5 h-1.5 rounded-full bg-white"></div>
+              </div>
+              <!-- 内容区 - 金色边框 -->
+              <div class="flex-1 min-w-0 rounded-lg border-2 border-primary/50 bg-primary/5 p-3">
+                <div class="flex items-center gap-2">
+                  <!-- 缩略图 -->
+                  <div class="w-12 h-12 rounded-md overflow-hidden shrink-0 bg-surface-container border border-outline-variant/20">
+                    <img src="https://images.unsplash.com/photo-1486325212027-8081e485255e?w=96&h=96&fit=crop" alt="放大2x缩略图" data-category="建筑城市" class="w-full h-full object-cover" />
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="text-sm font-semibold text-primary truncate">放大2x</div>
+                    <div class="text-xs text-on-surface-variant mt-0.5">upscayl · 2x · PNG</div>
+                  </div>
+                  <span class="text-xs text-on-surface-variant shrink-0">14:35</span>
+                </div>
+                <!-- 操作按钮 -->
+                <div class="flex items-center gap-2 mt-2 pt-2 border-t border-outline-variant/15">
+                  <button id="btn-rerun-step3" class="text-xs text-primary hover:underline font-medium">重新执行</button>
+                  <span class="text-xs text-on-surface-variant">·</span>
+                  <button id="btn-delete-step3" class="text-xs text-error hover:underline font-medium">删除此步骤</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 列表-步骤4：添加操作 -->
+            <div class="step-item relative flex items-start gap-3 pb-2" data-step="4" id="step-4">
+              <!-- 虚线圆点 -->
+              <div class="relative z-10 w-[12px] h-[12px] rounded-full border-2 border-dashed border-on-surface-variant/40 shrink-0 mt-2.5"></div>
+              <!-- 内容区 -->
+              <div class="flex-1 min-w-0">
+                <!-- 添加操作按钮 -->
+                <button id="btn-add-operation" class="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border-2 border-dashed border-on-surface-variant/30 text-on-surface-variant hover:border-primary/40 hover:text-primary hover:bg-primary/5 transition-all text-sm font-medium">
+                  <i data-lucide="plus" class="w-4 h-4"></i>
+                  添加操作
+                </button>
+
+                <!-- 操作选择网格（默认隐藏） -->
+                <div id="operation-grid" class="hidden mt-3">
+                  <div class="grid grid-cols-3 gap-2">
+                    <!-- 操作卡片-擦除 -->
+                    <div class="op-card" data-op="eraser">
+                      <i data-lucide="eraser" class="w-5 h-5 text-on-surface-variant"></i>
+                      <span class="text-xs text-on-surface-variant">擦除</span>
+                    </div>
+                    <!-- 操作卡片-蒙版修图 -->
+                    <div class="op-card" data-op="paintbrush">
+                      <i data-lucide="paintbrush" class="w-5 h-5 text-on-surface-variant"></i>
+                      <span class="text-xs text-on-surface-variant">蒙版修图</span>
+                    </div>
+                    <!-- 操作卡片-放大 -->
+                    <div class="op-card" data-op="maximize">
+                      <i data-lucide="maximize" class="w-5 h-5 text-on-surface-variant"></i>
+                      <span class="text-xs text-on-surface-variant">放大</span>
+                    </div>
+                    <!-- 操作卡片-扩展画面 -->
+                    <div class="op-card" data-op="expand">
+                      <i data-lucide="expand" class="w-5 h-5 text-on-surface-variant"></i>
+                      <span class="text-xs text-on-surface-variant">扩展画面</span>
+                    </div>
+                    <!-- 操作卡片-图生图 -->
+                    <div class="op-card" data-op="image-plus">
+                      <i data-lucide="image-plus" class="w-5 h-5 text-on-surface-variant"></i>
+                      <span class="text-xs text-on-surface-variant">图生图</span>
+                    </div>
+                    <!-- 操作卡片-语言修图 -->
+                    <div class="op-card" data-op="message-square">
+                      <i data-lucide="message-square" class="w-5 h-5 text-on-surface-variant"></i>
+                      <span class="text-xs text-on-surface-variant">语言修图</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ────── 2. 参数编辑区 ────── -->
+        <div id="param-editor" class="px-4 py-4 border-t border-outline-variant/20">
+          <h3 class="text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-3">参数设置</h3>
+
+          <!-- 放大倍率 -->
+          <div class="mb-3">
+            <label class="block text-xs text-on-surface-variant mb-1.5">放大倍率</label>
+            <select id="param-scale" class="param-select">
+              <option value="1">1x</option>
+              <option value="2" selected>2x</option>
+              <option value="4">4x</option>
+            </select>
+          </div>
+
+          <!-- 模型选择 -->
+          <div class="mb-3">
+            <label class="block text-xs text-on-surface-variant mb-1.5">模型</label>
+            <select id="param-model" class="param-select">
+              <option value="upscayl" selected>upscayl</option>
+              <option value="real-esrgan">real-esrgan</option>
+            </select>
+          </div>
+
+          <!-- 输出格式 -->
+          <div class="mb-4">
+            <label class="block text-xs text-on-surface-variant mb-1.5">输出格式</label>
+            <select id="param-format" class="param-select">
+              <option value="png" selected>PNG</option>
+              <option value="jpg">JPG</option>
+              <option value="webp">WEBP</option>
+            </select>
+          </div>
+
+          <!-- 应用并重算按钮 -->
+          <button id="btn-apply-recompute" class="w-full bg-primary text-on-primary px-4 py-2 rounded-md text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center justify-center gap-2 opacity-50 cursor-not-allowed" disabled>
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+            应用并重算
+          </button>
+
+          <!-- 提示文字 -->
+          <p class="text-xs text-on-surface-variant/60 mt-2 text-center">修改参数将从当前步骤开始重新执行下游所有操作</p>
+        </div>
+
+        <!-- ────── 3. 底部操作栏 ────── -->
+        <div class="px-4 py-4 border-t border-outline-variant/20 mt-auto">
+          <div class="flex items-center gap-3">
+            <button id="btn-delete-step" class="text-sm text-error hover:text-error/80 font-medium transition-colors">
+              删除此步骤
+            </button>
+            <div class="flex-1"></div>
+            <button id="btn-export" class="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium border border-outline-variant/30 text-on-surface-variant hover:text-on-surface hover:border-outline-variant/50 transition-all bg-transparent">
+              <i data-lucide="download" class="w-3.5 h-3.5"></i>
+              导出当前结果
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <script>lucide.createIcons();</script>
+
+  <script>
+  $(function() {
+
+    // ─── 状态管理 ───
+    let currentStep = 3;       // 当前选中步骤
+    let compareMode = false;   // 是否对比模式
+    let paramsChanged = false; // 参数是否已修改
+
+    // ─── Mock数据：各步骤的图片和信息 ───
+    const stepData = {
+      1: {
+        name: '原图',
+        img: 'https://images.unsplash.com/photo-1486325212027-8081e485255e?w=640&h=480&fit=crop',
+        originalImg: 'https://images.unsplash.com/photo-1486325212027-8081e485255e?w=640&h=480&fit=crop',
+        size: '1024×1024',
+        fileSize: '1.8MB'
+      },
+      2: {
+        name: '移除背景',
+        img: 'https://images.unsplash.com/photo-1486325212027-8081e485255e?w=640&h=480&fit=crop',
+        originalImg: 'https://images.unsplash.com/photo-1486325212027-8081e485255e?w=640&h=480&fit=crop',
+        size: '1024×1024',
+        fileSize: '2.1MB'
+      },
+      3: {
+        name: '放大2x',
+        img: 'https://images.unsplash.com/photo-1486325212027-8081e485255e?w=640&h=480&fit=crop',
+        originalImg: 'https://images.unsplash.com/photo-1486325212027-8081e485255e?w=640&h=480&fit=crop',
+        size: '2048×2048',
+        fileSize: '3.2MB'
+      }
+    };
+
+    // ─── 点击步骤切换预览 ───
+    $('#timeline-list').on('click', '.step-item', function(e) {
+      // 排除点击按钮和操作卡片的冒泡
+      if ($(e.target).closest('button, .op-card').length) return;
+
+      const step = parseInt($(this).data('step'));
+      if (step > 3 || step === currentStep) return;
+
+      currentStep = step;
+
+      // 更新预览图
+      const data = stepData[step];
+      $('#preview-img').attr('src', data.img);
+      $('#step-name-label').text(data.name);
+      $('#img-size-label').text(data.size);
+      $('#img-size-bytes').text(data.fileSize);
+
+      // 更新步骤高亮
+      updateStepHighlight();
+
+      // 更新参数编辑区显示
+      updateParamEditor();
+    });
+
+    // ─── 更新步骤高亮状态 ───
+    function updateStepHighlight() {
+      // 移除所有步骤的选中态
+      $('#timeline-list .step-item').each(function() {
+        const step = parseInt($(this).data('step'));
+        const contentDiv = $(this).find('.flex-1 > .rounded-lg');
+
+        if (step === currentStep && step <= 3) {
+          // 添加选中态金色边框
+          if (contentDiv.length) {
+            contentDiv.removeClass('border-outline-variant/20').addClass('border-primary/50 bg-primary/5');
+            contentDiv.find('.text-sm').first().removeClass('text-on-surface').addClass('text-primary font-semibold');
+          } else {
+            // 非当前步骤的卡片结构
+            const innerDiv = $(this).find('.flex-1 > div').first();
+            innerDiv.wrap('<div class="rounded-lg border-2 border-primary/50 bg-primary/5 p-3"></div>');
+          }
+        } else {
+          // 恢复非选中态
+          if (contentDiv.length && step !== 3) {
+            contentDiv.removeClass('border-primary/50 bg-primary/5').addClass('border-outline-variant/20');
+          }
+        }
+      });
+    }
+
+    // ─── 更新参数编辑区 ───
+    function updateParamEditor() {
+      if (currentStep === 3) {
+        $('#param-editor').slideDown(200);
+      } else {
+        $('#param-editor').slideUp(200);
+      }
+    }
+
+    // ─── 对比模式切换 ───
+    $('#btn-compare').on('click', function() {
+      compareMode = !compareMode;
+
+      if (compareMode) {
+        $('#compare-original').show();
+        $('#compare-divider').show();
+        $('#compare-btn-text').text('取消对比');
+        $(this).addClass('bg-primary/20 text-primary border-primary/30').removeClass('bg-surface-container/80 text-on-surface-variant border-outline-variant/20');
+
+        // 设置原图
+        const data = stepData[currentStep];
+        $('#compare-original-img').attr('src', data.originalImg);
+
+        // 设置分割线位置
+        const container = $('#preview-area');
+        const dividerLeft = container.width() / 2;
+        $('#compare-divider').css('left', dividerLeft + 'px');
+        updateCompareClip(dividerLeft, container.width());
+      } else {
+        $('#compare-original').hide();
+        $('#compare-divider').hide();
+        $('#compare-btn-text').text('对比原图');
+        $(this).removeClass('bg-primary/20 text-primary border-primary/30').addClass('bg-surface-container/80 text-on-surface-variant border-outline-variant/20');
+      }
+    });
+
+    // ─── 更新对比裁剪区域 ───
+    function updateCompareClip(dividerLeft, containerWidth) {
+      const clipPercent = (dividerLeft / containerWidth * 100).toFixed(1);
+      $('#compare-original-img').css('clip-path', 'inset(0 ' + (100 - clipPercent) + '% 0 0)');
+    }
+
+    // ─── 对比分割线拖动 ───
+    // 复杂交互：对比分割线拖动
+    // 完整行为步骤：
+    // 1. 鼠标按下分割线时，记录起始位置，设置拖动状态
+    // 2. 鼠标移动时，实时更新分割线位置，同时裁剪左侧原图显示区域
+    // 3. 分割线限制在预览区左右各10%范围内
+    // 4. 鼠标释放时结束拖动
+    // 5. 触摸事件同理
+    let isDragging = false;
+    $('#compare-divider').on('mousedown touchstart', function(e) {
+      e.preventDefault();
+      isDragging = true;
+      $('body').css('cursor', 'col-resize');
+    });
+    $(document).on('mousemove touchmove', function(e) {
+      if (!isDragging) return;
+      const container = $('#preview-area');
+      const containerOffset = container.offset().left;
+      const containerWidth = container.width();
+      let clientX = e.type.includes('touch') ? e.originalEvent.touches[0].clientX : e.clientX;
+      let left = clientX - containerOffset;
+      left = Math.max(containerWidth * 0.1, Math.min(containerWidth * 0.9, left));
+      $('#compare-divider').css('left', left + 'px');
+      updateCompareClip(left, containerWidth);
+    });
+    $(document).on('mouseup touchend', function() {
+      if (isDragging) {
+        isDragging = false;
+        $('body').css('cursor', '');
+      }
+    });
+
+    // ─── 添加操作展开/收起 ───
+    $('#btn-add-operation').on('click', function() {
+      const grid = $('#operation-grid');
+      if (grid.hasClass('hidden')) {
+        grid.removeClass('hidden');
+        $(this).find('span').text('收起');
+        $(this).find('[data-lucide="plus"]').css('transform', 'rotate(45deg)');
+      } else {
+        grid.addClass('hidden');
+        $(this).find('span').text('添加操作');
+        $(this).find('[data-lucide="plus"]').css('transform', '');
+      }
+    });
+
+    // ─── 操作卡片点击 ───
+    $('#operation-grid').on('click', '.op-card', function() {
+      const op = $(this).data('op');
+      const opNames = {
+        'eraser': '擦除',
+        'paintbrush': '蒙版修图',
+        'maximize': '放大',
+        'expand': '扩展画面',
+        'image-plus': '图生图',
+        'message-square': '语言修图'
+      };
+      console.log('添加操作:', opNames[op] || op, '- 需要在Pipeline中插入新的操作步骤并执行');
+    });
+
+    // ─── 参数修改监听 ───
+    $('#param-scale, #param-model, #param-format').on('change', function() {
+      paramsChanged = true;
+      $('#btn-apply-recompute').prop('disabled', false).removeClass('opacity-50 cursor-not-allowed');
+    });
+
+    // ─── 应用并重算 ───
+    $('#btn-apply-recompute').on('click', function() {
+      if (!paramsChanged) return;
+      console.log('应用并重算 - 从当前步骤开始重新执行下游所有操作，参数:', {
+        scale: $('#param-scale').val(),
+        model: $('#param-model').val(),
+        format: $('#param-format').val()
+      });
+      // 重置状态
+      paramsChanged = false;
+      $(this).prop('disabled', true).addClass('opacity-50 cursor-not-allowed');
+    });
+
+    // ─── 重新执行按钮 ───
+    $('#btn-rerun-step2').on('click', function(e) {
+      e.stopPropagation();
+      console.log('重新执行步骤2: 移除背景 - 应重新执行该步骤及下游所有操作');
+    });
+    $('#btn-rerun-step3').on('click', function(e) {
+      e.stopPropagation();
+      console.log('重新执行步骤3: 放大2x - 应重新执行该步骤及下游所有操作');
+    });
+
+    // ─── 删除此步骤 ───
+    $('#btn-delete-step3').on('click', function(e) {
+      e.stopPropagation();
+      console.log('删除步骤3: 放大2x - 应从Pipeline中移除此步骤，并重新计算下游');
+    });
+    $('#btn-delete-step').on('click', function() {
+      console.log('删除当前步骤 - 应从Pipeline中移除当前选中的步骤，并重新计算下游');
+    });
+
+    // ─── 导出当前结果 ───
+    $('#btn-export').on('click', function() {
+      console.log('导出当前结果 - 应将当前步骤的输出图片下载到本地');
+    });
+
+    // ─── 图片名称编辑 ───
+    // 复杂交互：图片名称内联编辑
+    // 完整行为步骤：
+    // 1. 点击图片名称时，隐藏显示文字，显示输入框
+    // 2. 输入框自动聚焦并全选文字
+    // 3. 按 Enter 保存修改，更新显示文字
+    // 4. 按 ESC 取消编辑，恢复原始文字
+    // 5. 点击输入框外部区域也触发保存
+    // 6. 保存时如果为空则恢复原始名称
+    $('#img-name-display').on('click', function() {
+      const currentName = $(this).text();
+      $(this).addClass('hidden');
+      $('#img-name-input').removeClass('hidden').val(currentName).focus().select();
+    });
+
+    $('#img-name-input').on('keydown', function(e) {
+      if (e.key === 'Enter') {
+        finishNameEdit();
+      } else if (e.key === 'Escape') {
+        // 取消编辑
+        $(this).addClass('hidden');
+        $('#img-name-display').removeClass('hidden');
+      }
+    }).on('blur', function() {
+      finishNameEdit();
+    });
+
+    function finishNameEdit() {
+      const input = $('#img-name-input');
+      const newName = input.val().trim();
+      const displayName = $('#img-name-display');
+
+      if (newName) {
+        displayName.text(newName);
+      }
+      input.addClass('hidden');
+      displayName.removeClass('hidden');
+    }
+
+  });
+  </script>
+
+</body>
+
+</html>

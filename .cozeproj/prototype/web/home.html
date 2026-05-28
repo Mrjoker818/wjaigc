@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <link href="https://lf-code-agent.coze.cn/obj/x-ai-cn/fonts/google/google-all-fonts.css" rel="stylesheet"/>
+
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/jquery/jquery-3.7.1.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/lucide/lucide-1.11.0.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/tailwindcss/tailwindcss-browser-4.2.4.min.js"></script>
+
+  <style type="text/tailwindcss">
+    @theme {
+      /* === 品牌色（黑金体系） === */
+      --color-primary:              #d4af37;
+      --color-primary-container:    #3d3218;
+      --color-on-primary:           #0e1117;
+      /* === 背景 / 表面（深色层级） === */
+      --color-background:                 #0e1117;
+      --color-surface-container-lowest:   #131820;
+      --color-surface:                    #161b22;
+      --color-surface-container:          #1c2333;
+      --color-surface-container-high:     #242d3d;
+      --color-surface-container-highest:  #2d3748;
+      /* === 文字 === */
+      --color-on-surface:           #e6edf3;
+      --color-on-surface-variant:   #7d8590;
+      /* === 功能色 === */
+      --color-success:  #2ea043;
+      --color-error:    #f85149;
+      --color-warning:  #d29922;
+      /* === 边框 === */
+      --color-outline:          #30363d;
+      --color-outline-variant:  #21262d;
+      /* === 圆角 === */
+      --radius-sm:   0.25rem;
+      --radius-md:   0.375rem;
+      --radius-lg:   0.5rem;
+      --radius-xl:   0.75rem;
+      --radius-2xl:  1rem;
+      --radius-full: 9999px;
+      /* === 阴影 === */
+      --shadow-card:   0 2px 8px rgba(0,0,0,0.4);
+      --shadow-float:  0 10px 25px rgba(0,0,0,0.5);
+      --shadow-dialog: 0 25px 50px rgba(0,0,0,0.6);
+      /* === 字体 === */
+      --font-sans: "Inter", "Noto Sans SC", system-ui, sans-serif;
+    }
+  </style>
+
+  <!-- 图片兜底 -->
+  <script>
+    document.addEventListener('error', function (e) {
+      const img = e.target;
+      if (img.tagName !== 'IMG' || img.dataset.fallback) return;
+      img.dataset.fallback = '1';
+      const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const cat = img.getAttribute('data-category') || '其他';
+      const alt = img.getAttribute('alt') || '';
+      const label = esc(alt.length > 8 ? alt.slice(0, 8) + '…' : alt);
+      const icons = { '人物': '👤', '自然风景': '🏞', '动物': '🐾', '建筑城市': '🏙', '运动体育': '⚽', '交通工具': '🚗', '食物': '🍽', '服饰时尚': '👗', '商业科技': '💼', '游戏娱乐': '🎮', '艺术': '🎨', '其他': '🖼' };
+      const icon = icons[cat] || '🖼';
+      const w = img.width || 400, h = img.height || 300;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="%23f3f4f6"/><text x="50%" y="45%" text-anchor="middle" font-size="${Math.min(w, h) * 0.18}" dominant-baseline="central">${icon}</text><text x="50%" y="68%" text-anchor="middle" font-size="${Math.min(w, h) * 0.07}" fill="%239ca3af" font-family="system-ui,sans-serif" dominant-baseline="central">${label}</text></svg>`;
+      img.src = 'data:image/svg+xml,' + svg;
+    }, true);
+  </script>
+
+  <style>
+    /* 画布网格点阵背景 */
+    #canvas-area {
+      background-color: #0e1117;
+      background-image:
+        radial-gradient(circle, #30363d 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+
+    /* 图片卡片拖拽手柄 */
+    .canvas-card.selected .drag-handle {
+      display: block;
+    }
+    .drag-handle {
+      display: none;
+      width: 8px;
+      height: 8px;
+      background: #3b82f6;
+      border: 2px solid #fff;
+      border-radius: 2px;
+      position: absolute;
+      z-index: 10;
+    }
+    .drag-handle.tl { top: -4px; left: -4px; }
+    .drag-handle.tr { top: -4px; right: -4px; }
+    .drag-handle.bl { bottom: -4px; left: -4px; }
+    .drag-handle.br { bottom: -4px; right: -4px; }
+
+    /* Pipeline 竖向连线 */
+    .pipeline-line {
+      width: 2px;
+      background: #30363d;
+      margin-left: 11px;
+      min-height: 16px;
+    }
+
+    /* 右键菜单隐藏 */
+    #context-menu {
+      display: none;
+    }
+
+    /* 操作选择菜单隐藏 */
+    #add-op-menu {
+      display: none;
+    }
+
+    /* Pipeline侧栏过渡 */
+    #pipeline-panel {
+      transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    #pipeline-panel.collapsed {
+      transform: translateX(100%);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* 画布卡片hover效果 */
+    .canvas-card:not(.selected) {
+      transition: box-shadow 0.15s ease;
+    }
+    .canvas-card:not(.selected):hover {
+      box-shadow: 0 0 0 2px rgba(125, 133, 144, 0.4);
+    }
+
+    /* 操作菜单项hover */
+    .op-menu-item:hover {
+      background: rgba(212, 175, 55, 0.1);
+    }
+  </style>
+</head>
+
+<body class="bg-background text-on-surface font-sans overflow-hidden">
+
+  <!-- @nav:start -->
+  <header class="bg-surface sticky top-0 z-40 h-12 flex items-center justify-between px-4 border-b border-outline-variant/20">
+    <div class="flex items-center gap-2">
+      <i data-lucide="infinity" class="text-primary w-5 h-5"></i>
+      <span class="font-bold text-sm text-on-surface">无界AI</span>
+      <span class="text-xs text-on-surface-variant ml-1">Pipeline</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <button id="btn-undo" class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors">
+        <i data-lucide="undo" class="w-4 h-4"></i>
+      </button>
+      <button id="btn-redo" class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors">
+        <i data-lucide="redo" class="w-4 h-4"></i>
+      </button>
+      <div class="w-px h-5 bg-outline-variant mx-1"></div>
+      <button id="btn-settings" class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors">
+        <i data-lucide="settings" class="w-4 h-4"></i>
+      </button>
+      <div class="w-7 h-7 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-medium">初</div>
+    </div>
+  </header>
+  <!-- @nav:end -->
+
+  <!-- 主画布区域 -->
+  <div class="flex" style="height: calc(100vh - 3rem);">
+
+    <!-- @main-content:start -->
+    <!-- 无限画布 -->
+    <main id="canvas-area" class="flex-1 relative overflow-hidden cursor-crosshair">
+
+      <!-- 图片A：城市建筑，选中状态 -->
+      <div id="card-image-a" class="canvas-card selected absolute" style="left: 120px; top: 80px;">
+        <div class="relative rounded-lg overflow-hidden shadow-float" style="border: 2px solid #3b82f6;">
+          <!-- 四角拖拽手柄 -->
+          <div class="drag-handle tl"></div>
+          <div class="drag-handle tr"></div>
+          <div class="drag-handle bl"></div>
+          <div class="drag-handle br"></div>
+          <img src="https://images.unsplash.com/photo-1486325212027-8081e485255e?w=400&h=260&fit=crop"
+               alt="现代城市建筑群" data-category="建筑城市"
+               class="block" style="width: 280px; height: 180px; object-fit: cover;">
+        </div>
+        <!-- 图片A下方Pipeline链 -->
+        <div class="mt-2 ml-2">
+          <!-- 节点1：原图 -->
+          <div class="flex items-center gap-2">
+            <div class="w-6 h-6 rounded bg-surface-container-high flex items-center justify-center shrink-0" style="border: 1px solid #30363d;">
+              <i data-lucide="image" class="w-3 h-3 text-on-surface-variant"></i>
+            </div>
+            <span class="text-xs text-on-surface-variant">原图</span>
+          </div>
+          <!-- 连线 -->
+          <div class="pipeline-line"></div>
+          <!-- 节点2：移除背景 -->
+          <div class="flex items-center gap-2">
+            <div class="w-6 h-6 rounded bg-surface-container-high flex items-center justify-center shrink-0" style="border: 1px solid #30363d;">
+              <i data-lucide="eraser" class="w-3 h-3 text-on-surface-variant"></i>
+            </div>
+            <span class="text-xs text-on-surface-variant">移除背景</span>
+            <i data-lucide="check" class="w-3 h-3 text-success"></i>
+          </div>
+          <!-- 连线 -->
+          <div class="pipeline-line"></div>
+          <!-- 节点3：放大2x（当前激活态，金色边框） -->
+          <div class="flex items-center gap-2">
+            <div class="w-6 h-6 rounded flex items-center justify-center shrink-0" style="border: 2px solid #d4af37; background: rgba(212,175,55,0.1);">
+              <i data-lucide="maximize" class="w-3 h-3 text-primary"></i>
+            </div>
+            <span class="text-xs text-primary font-medium">放大2x</span>
+            <i data-lucide="check" class="w-3 h-3 text-success"></i>
+          </div>
+        </div>
+      </div>
+
+      <!-- 图片B：山水风景，无选中状态 -->
+      <div id="card-image-b" class="canvas-card absolute" style="left: 560px; top: 60px;">
+        <div class="relative rounded-lg overflow-hidden shadow-float" style="border: 2px solid transparent;">
+          <img src="https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=360&h=240&fit=crop"
+               alt="雪山湖泊风景" data-category="自然风景"
+               class="block" style="width: 260px; height: 170px; object-fit: cover;">
+        </div>
+      </div>
+
+      <!-- 图片C：人物照片，下方有简短Pipeline -->
+      <div id="card-image-c" class="canvas-card absolute" style="left: 520px; top: 380px;">
+        <div class="relative rounded-lg overflow-hidden shadow-float" style="border: 2px solid transparent;">
+          <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=320&h=320&fit=crop"
+               alt="微笑的年轻女性" data-category="人物"
+               class="block" style="width: 180px; height: 180px; object-fit: cover;">
+        </div>
+        <!-- 图片C下方简短Pipeline（仅1个节点：原图） -->
+        <div class="mt-2 ml-2">
+          <div class="flex items-center gap-2">
+            <div class="w-6 h-6 rounded bg-surface-container-high flex items-center justify-center shrink-0" style="border: 1px solid #30363d;">
+              <i data-lucide="image" class="w-3 h-3 text-on-surface-variant"></i>
+            </div>
+            <span class="text-xs text-on-surface-variant">原图</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右键上下文菜单 -->
+      <div id="context-menu" class="fixed z-50 bg-surface rounded-lg shadow-dialog py-1.5 min-w-[180px]" style="border: 1px solid rgba(48,54,61,0.6);">
+        <!-- 菜单项-粘贴 -->
+        <div class="flex items-center gap-3 px-3 py-2 text-sm text-on-surface hover:bg-surface-container-high cursor-pointer transition-colors">
+          <i data-lucide="clipboard" class="w-4 h-4 text-on-surface-variant"></i>
+          <span>粘贴</span>
+          <span class="ml-auto text-xs text-on-surface-variant/60">Ctrl+V</span>
+        </div>
+        <!-- 菜单项-上传图片 -->
+        <div class="flex items-center gap-3 px-3 py-2 text-sm text-on-surface hover:bg-surface-container-high cursor-pointer transition-colors">
+          <i data-lucide="upload" class="w-4 h-4 text-on-surface-variant"></i>
+          <span>上传图片</span>
+        </div>
+        <div class="mx-2 my-1 h-px bg-outline-variant/30"></div>
+        <!-- 菜单项-全选 -->
+        <div class="flex items-center gap-3 px-3 py-2 text-sm text-on-surface hover:bg-surface-container-high cursor-pointer transition-colors">
+          <i data-lucide="box-select" class="w-4 h-4 text-on-surface-variant"></i>
+          <span>全选</span>
+          <span class="ml-auto text-xs text-on-surface-variant/60">Ctrl+A</span>
+        </div>
+        <!-- 菜单项-重置视图 -->
+        <div class="flex items-center gap-3 px-3 py-2 text-sm text-on-surface hover:bg-surface-container-high cursor-pointer transition-colors">
+          <i data-lucide="focus" class="w-4 h-4 text-on-surface-variant"></i>
+          <span>重置视图</span>
+        </div>
+      </div>
+
+    </main>
+    <!-- @main-content:end -->
+
+    <!-- 右侧Pipeline侧栏面板 -->
+    <aside id="pipeline-panel" class="w-[280px] shrink-0 bg-surface border-l border-outline-variant/20 flex flex-col overflow-y-auto">
+
+      <!-- 面板标题 -->
+      <div class="flex items-center justify-between px-4 py-3 border-b border-outline-variant/20">
+        <h2 class="text-sm font-semibold text-on-surface">操作链</h2>
+        <button id="btn-collapse-panel" class="p-1 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors">
+          <i data-lucide="panel-right-close" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <!-- Pipeline步骤列表（竖向时间线样式） -->
+      <div class="flex-1 px-4 py-4 space-y-0">
+
+        <!-- 步骤1：原图 -->
+        <div class="flex gap-3">
+          <!-- 时间线竖条 -->
+          <div class="flex flex-col items-center">
+            <div class="w-2.5 h-2.5 rounded-full bg-on-surface-variant/50 shrink-0 mt-1"></div>
+            <div class="w-0.5 flex-1 bg-outline-variant/30 min-h-[16px]"></div>
+          </div>
+          <!-- 内容 -->
+          <div class="flex-1 pb-4">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-xs font-medium text-on-surface">原图</span>
+              <span class="text-xs text-on-surface-variant/60">14:32</span>
+            </div>
+            <div class="rounded-md overflow-hidden bg-surface-container" style="border: 1px solid rgba(48,54,61,0.3);">
+              <img src="https://images.unsplash.com/photo-1486325212027-8081e485255e?w=260&h=160&fit=crop"
+                   alt="城市建筑缩略图" data-category="建筑城市"
+                   class="block w-full" style="height: 80px; object-fit: cover;">
+            </div>
+          </div>
+        </div>
+
+        <!-- 步骤2：移除背景 -->
+        <div class="flex gap-3">
+          <div class="flex flex-col items-center">
+            <div class="w-2.5 h-2.5 rounded-full bg-success shrink-0 mt-1"></div>
+            <div class="w-0.5 flex-1 bg-outline-variant/30 min-h-[16px]"></div>
+          </div>
+          <div class="flex-1 pb-4">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-xs font-medium text-on-surface">移除背景</span>
+              <span class="inline-flex items-center gap-1">
+                <i data-lucide="check" class="w-3 h-3 text-success"></i>
+              </span>
+            </div>
+            <div class="flex items-center gap-1.5 mb-2">
+              <span class="text-xs px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant">自动检测</span>
+            </div>
+            <div class="rounded-md overflow-hidden bg-surface-container relative" style="border: 1px solid rgba(48,54,61,0.3);">
+              <img src="https://images.unsplash.com/photo-1486325212027-8081e485255e?w=260&h=160&fit=crop"
+                   alt="移除背景缩略图" data-category="建筑城市"
+                   class="block w-full" style="height: 80px; object-fit: cover;">
+              <button id="btn-view-step2" class="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded text-xs font-medium bg-surface/90 text-on-surface-variant hover:text-on-surface transition-colors backdrop-blur-sm" style="border: 1px solid rgba(48,54,61,0.4);">
+                查看
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 步骤3：放大2x（当前激活态，金色） -->
+        <div class="flex gap-3">
+          <div class="flex flex-col items-center">
+            <div class="w-2.5 h-2.5 rounded-full bg-primary shrink-0 mt-1" style="box-shadow: 0 0 6px rgba(212,175,55,0.5);"></div>
+            <div class="w-0.5 flex-1 bg-outline-variant/30 min-h-[16px]"></div>
+          </div>
+          <div class="flex-1 pb-4">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-xs font-semibold text-primary">放大2x</span>
+              <span class="inline-flex items-center gap-1">
+                <i data-lucide="check" class="w-3 h-3 text-success"></i>
+              </span>
+            </div>
+            <div class="flex items-center gap-1.5 mb-2">
+              <span class="text-xs px-1.5 py-0.5 rounded bg-primary/15 text-primary">2x · upscayl</span>
+            </div>
+            <div class="rounded-md overflow-hidden bg-surface-container relative" style="border: 2px solid #d4af37;">
+              <img src="https://images.unsplash.com/photo-1486325212027-8081e485255e?w=260&h=160&fit=crop"
+                   alt="放大2x缩略图" data-category="建筑城市"
+                   class="block w-full" style="height: 80px; object-fit: cover;">
+              <button id="btn-view-step3" class="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded text-xs font-medium bg-surface/90 text-primary hover:text-on-surface transition-colors backdrop-blur-sm" style="border: 1px solid rgba(212,175,55,0.4);">
+                查看
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 步骤4：添加操作 -->
+        <div class="flex gap-3">
+          <div class="flex flex-col items-center">
+            <div class="w-2.5 h-2.5 rounded-full border-2 border-dashed border-on-surface-variant/40 shrink-0 mt-1"></div>
+          </div>
+          <div class="flex-1">
+            <button id="btn-add-operation" class="w-full py-2.5 rounded-lg text-sm text-on-surface-variant hover:text-on-surface transition-colors flex items-center justify-center gap-1.5" style="border: 2px dashed rgba(125,133,144,0.3);">
+              <i data-lucide="plus" class="w-4 h-4"></i>
+              <span>添加操作</span>
+            </button>
+
+            <!-- 操作选择菜单 -->
+            <div id="add-op-menu" class="mt-2 rounded-lg bg-surface-container py-1.5 shadow-float" style="border: 1px solid rgba(48,54,61,0.5);">
+              <!-- 操作-擦除 -->
+              <div class="op-menu-item flex items-center gap-3 px-3 py-2 text-sm text-on-surface cursor-pointer transition-colors rounded-md mx-1">
+                <i data-lucide="eraser" class="w-4 h-4 text-on-surface-variant"></i>
+                <span>擦除</span>
+              </div>
+              <!-- 操作-蒙版修图 -->
+              <div class="op-menu-item flex items-center gap-3 px-3 py-2 text-sm text-on-surface cursor-pointer transition-colors rounded-md mx-1">
+                <i data-lucide="paintbrush" class="w-4 h-4 text-on-surface-variant"></i>
+                <span>蒙版修图</span>
+              </div>
+              <!-- 操作-放大 -->
+              <div class="op-menu-item flex items-center gap-3 px-3 py-2 text-sm text-on-surface cursor-pointer transition-colors rounded-md mx-1">
+                <i data-lucide="maximize" class="w-4 h-4 text-on-surface-variant"></i>
+                <span>放大</span>
+              </div>
+              <!-- 操作-扩展画面 -->
+              <div class="op-menu-item flex items-center gap-3 px-3 py-2 text-sm text-on-surface cursor-pointer transition-colors rounded-md mx-1">
+                <i data-lucide="expand" class="w-4 h-4 text-on-surface-variant"></i>
+                <span>扩展画面</span>
+              </div>
+              <!-- 操作-图生图 -->
+              <div class="op-menu-item flex items-center gap-3 px-3 py-2 text-sm text-on-surface cursor-pointer transition-colors rounded-md mx-1">
+                <i data-lucide="image-plus" class="w-4 h-4 text-on-surface-variant"></i>
+                <span>图生图</span>
+              </div>
+              <!-- 操作-语言修图 -->
+              <div class="op-menu-item flex items-center gap-3 px-3 py-2 text-sm text-on-surface cursor-pointer transition-colors rounded-md mx-1">
+                <i data-lucide="message-square" class="w-4 h-4 text-on-surface-variant"></i>
+                <span>语言修图</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 面板底部：原图对比按钮 -->
+      <div class="px-4 py-3 border-t border-outline-variant/20">
+        <button id="btn-compare" class="w-full py-2 rounded-lg text-sm font-medium bg-primary/15 text-primary hover:bg-primary/25 transition-colors flex items-center justify-center gap-2">
+          <i data-lucide="columns-2" class="w-4 h-4"></i>
+          原图对比
+        </button>
+      </div>
+
+    </aside>
+
+  </div>
+
+  <!-- 底部浮动工具栏 -->
+  <div id="bottom-toolbar" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1 px-2 py-1.5 rounded-full shadow-float" style="background: linear-gradient(135deg, #1c2333 0%, #242d3d 100%); border: 1px solid rgba(212,175,55,0.25);">
+    <!-- 选择工具 -->
+    <button id="tool-select" class="p-2 rounded-full text-primary bg-primary/15 transition-colors" title="选择工具">
+      <i data-lucide="mouse-pointer" class="w-4 h-4"></i>
+    </button>
+    <!-- 平移工具 -->
+    <button id="tool-pan" class="p-2 rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="平移工具">
+      <i data-lucide="hand" class="w-4 h-4"></i>
+    </button>
+    <div class="w-px h-5 bg-outline-variant/40 mx-1"></div>
+    <!-- 上传图片 -->
+    <button id="tool-upload" class="p-2 rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="上传图片">
+      <i data-lucide="upload" class="w-4 h-4"></i>
+    </button>
+    <div class="w-px h-5 bg-outline-variant/40 mx-1"></div>
+    <!-- 缩放控制 -->
+    <button id="tool-zoom-out" class="p-2 rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors text-sm font-medium" title="缩小">
+      <i data-lucide="minus" class="w-4 h-4"></i>
+    </button>
+    <span id="zoom-level" class="px-2 text-xs font-medium text-on-surface min-w-[42px] text-center select-none">100%</span>
+    <button id="tool-zoom-in" class="p-2 rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="放大">
+      <i data-lucide="plus" class="w-4 h-4"></i>
+    </button>
+    <div class="w-px h-5 bg-outline-variant/40 mx-1"></div>
+    <!-- 重置视图 -->
+    <button id="tool-reset-view" class="p-2 rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="重置视图">
+      <i data-lucide="focus" class="w-4 h-4"></i>
+    </button>
+  </div>
+
+  <script>
+    $(function() {
+
+      // === 右键菜单 ===
+      $('#canvas-area').on('contextmenu', function(e) {
+        e.preventDefault();
+        // 仅在空白区域显示（非图片卡片上）
+        if ($(e.target).closest('.canvas-card').length) return;
+        var $menu = $('#context-menu');
+        $menu.css({
+          display: 'block',
+          left: e.clientX + 'px',
+          top: e.clientY + 'px'
+        });
+      });
+
+      // 点击画布其他区域关闭右键菜单
+      $(document).on('click', function() {
+        $('#context-menu').hide();
+      });
+
+      // === 图片选中交互 ===
+      // 点击图片A → 选中，展开Pipeline面板
+      $('#card-image-a').on('click', function(e) {
+        e.stopPropagation();
+        // 取消其他卡片选中
+        $('.canvas-card').removeClass('selected');
+        $('.canvas-card .drag-handle').hide();
+        $(this).addClass('selected');
+        $(this).find('.drag-handle').show();
+        // 图片边框切换
+        $('#card-image-a > div').first().css('border-color', '#3b82f6');
+        $('#card-image-b > div').first().css('border-color', 'transparent');
+        $('#card-image-c > div').first().css('border-color', 'transparent');
+        // 展开Pipeline面板
+        $('#pipeline-panel').removeClass('collapsed');
+      });
+
+      // 点击图片B → 选中，折叠Pipeline面板
+      $('#card-image-b').on('click', function(e) {
+        e.stopPropagation();
+        $('.canvas-card').removeClass('selected');
+        $('.canvas-card .drag-handle').hide();
+        $(this).addClass('selected');
+        $(this).find('.drag-handle').show();
+        $('#card-image-a > div').first().css('border-color', 'transparent');
+        $('#card-image-b > div').first().css('border-color', '#3b82f6');
+        $('#card-image-c > div').first().css('border-color', 'transparent');
+        // 折叠Pipeline面板（图片B无Pipeline数据）
+        $('#pipeline-panel').addClass('collapsed');
+      });
+
+      // 点击图片C → 选中，折叠Pipeline面板
+      $('#card-image-c').on('click', function(e) {
+        e.stopPropagation();
+        $('.canvas-card').removeClass('selected');
+        $('.canvas-card .drag-handle').hide();
+        $(this).addClass('selected');
+        $(this).find('.drag-handle').show();
+        $('#card-image-a > div').first().css('border-color', 'transparent');
+        $('#card-image-b > div').first().css('border-color', 'transparent');
+        $('#card-image-c > div').first().css('border-color', '#3b82f6');
+        // 折叠Pipeline面板（图片C的Pipeline太简单）
+        $('#pipeline-panel').addClass('collapsed');
+      });
+
+      // 点击画布空白区域 → 取消选中
+      $('#canvas-area').on('click', function(e) {
+        if ($(e.target).closest('.canvas-card').length) return;
+        $('.canvas-card').removeClass('selected');
+        $('.canvas-card .drag-handle').hide();
+        $('.canvas-card > div').first().css('border-color', 'transparent');
+      });
+
+      // === Pipeline面板折叠 ===
+      $('#btn-collapse-panel').on('click', function() {
+        $('#pipeline-panel').addClass('collapsed');
+      });
+
+      // === 添加操作菜单 ===
+      var addOpMenuOpen = false;
+      $('#btn-add-operation').on('click', function() {
+        addOpMenuOpen = !addOpMenuOpen;
+        if (addOpMenuOpen) {
+          $('#add-op-menu').slideDown(150);
+          $(this).find('span').text('收起');
+        } else {
+          $('#add-op-menu').slideUp(150);
+          $(this).find('span').text('添加操作');
+        }
+      });
+
+      // 操作菜单项点击 — 后续应实现：
+      // 1. 根据选择的操作类型，在Pipeline链中添加对应节点
+      // 2. 节点添加后自动设为"处理中"状态（显示加载动画）
+      // 3. 模拟处理完成后切换为"完成"状态（绿色勾号）
+      // 4. 更新画布上的预览图显示处理结果
+      $('.op-menu-item').on('click', function() {
+        var opName = $(this).find('span').text();
+        console.log('添加操作:', opName, '— 后续应在Pipeline链中新增对应节点并启动处理');
+      });
+
+      // === 查看按钮 — 跳转到Pipeline详情页 ===
+      $('#btn-view-step2').on('click', function() {
+        window.location.href = 'pipeline-detail.html?step=remove-bg';
+      });
+      $('#btn-view-step3').on('click', function() {
+        window.location.href = 'pipeline-detail.html?step=upscale-2x';
+      });
+
+      // === 原图对比按钮 — 后续应实现：
+      // 1. 画布上出现分屏对比视图，左侧显示原图，右侧显示当前处理结果
+      // 2. 可拖拽分割线调整对比区域
+      // 3. 再次点击关闭对比视图
+      $('#btn-compare').on('click', function() {
+        console.log('原图对比 — 后续应实现分屏对比视图：左侧原图、右侧当前结果，可拖拽分割线');
+      });
+
+      // === 底部工具栏交互 ===
+      var currentTool = 'select';
+      var zoomLevel = 100;
+
+      // 工具切换
+      $('#tool-select, #tool-pan, #tool-upload').on('click', function() {
+        var toolId = $(this).attr('id');
+        // 移除所有工具激活态
+        $('#tool-select, #tool-pan, #tool-upload').removeClass('text-primary bg-primary/15').addClass('text-on-surface-variant');
+        // 设置当前工具激活态
+        $(this).removeClass('text-on-surface-variant').addClass('text-primary bg-primary/15');
+
+        if (toolId === 'tool-select') {
+          currentTool = 'select';
+          $('#canvas-area').css('cursor', 'crosshair');
+        } else if (toolId === 'tool-pan') {
+          currentTool = 'pan';
+          $('#canvas-area').css('cursor', 'grab');
+        } else if (toolId === 'tool-upload') {
+          console.log('上传图片 — 后续应实现文件选择对话框，选择图片后添加到画布');
+        }
+      });
+
+      // 缩放控制
+      $('#tool-zoom-in').on('click', function() {
+        zoomLevel = Math.min(zoomLevel + 25, 400);
+        $('#zoom-level').text(zoomLevel + '%');
+        console.log('画布缩放至:', zoomLevel + '%', '— 后续应实现画布transform: scale()变换');
+      });
+
+      $('#tool-zoom-out').on('click', function() {
+        zoomLevel = Math.max(zoomLevel - 25, 25);
+        $('#zoom-level').text(zoomLevel + '%');
+        console.log('画布缩放至:', zoomLevel + '%', '— 后续应实现画布transform: scale()变换');
+      });
+
+      // 重置视图
+      $('#tool-reset-view').on('click', function() {
+        zoomLevel = 100;
+        $('#zoom-level').text('100%');
+        console.log('重置视图 — 后续应将画布平移和缩放重置到初始状态');
+      });
+
+      // === 撤销/重做 ===
+      $('#btn-undo').on('click', function() {
+        console.log('撤销 — 后续应实现操作历史回退');
+      });
+      $('#btn-redo').on('click', function() {
+        console.log('重做 — 后续应实现操作历史前进');
+      });
+      $('#btn-settings').on('click', function() {
+        console.log('设置 — 后续应打开设置面板');
+      });
+
+    });
+  </script>
+
+  <script>lucide.createIcons();</script>
+</body>
+
+</html>

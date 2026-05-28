@@ -1,0 +1,20 @@
+{
+  "elements": [
+    {
+      "type": "html",
+      "options": {
+        "path": ".cozeproj/prototype/web/home.html"
+      },
+      "title": "无限画布主界面",
+      "size": "web"
+    },
+    {
+      "type": "html",
+      "options": {
+        "path": ".cozeproj/prototype/web/pipeline-detail.html"
+      },
+      "title": "Pipeline操作链详情",
+      "size": "web"
+    }
+  ]
+}
