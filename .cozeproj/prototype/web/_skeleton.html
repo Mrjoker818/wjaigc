@@ -39,9 +39,17 @@
       --color-node-process:  #8b5cf6;
       --color-node-output:   #2ea043;
       --color-node-ai:       #d4af37;
+      --color-node-logic:    #f59e0b;
+      --color-node-subgraph: #06b6d4;
+      /* === 端口专用色 === */
       --color-port-image:    #3b82f6;
       --color-port-mask:     #f472b6;
       --color-port-prompt:   #a78bfa;
+      --color-port-condition: #f59e0b;
+      --color-port-any:      #7d8590;
+      /* === 智能指令栏 === */
+      --color-smart-bar:     #1a2332;
+      --color-smart-bar-border: #d4af37/30;
       /* === 圆角 === */
       --radius-sm:   0.25rem;
       --radius-md:   0.375rem;
@@ -53,6 +61,7 @@
       --shadow-card:   0 2px 8px rgba(0,0,0,0.4);
       --shadow-float:  0 10px 25px rgba(0,0,0,0.5);
       --shadow-dialog: 0 25px 50px rgba(0,0,0,0.6);
+      --shadow-glow-primary: 0 0 20px rgba(212,175,55,0.3);
       /* === 字体 === */
       --font-sans: "Inter", "Noto Sans SC", system-ui, sans-serif;
     }
@@ -85,6 +94,8 @@
       <i data-lucide="infinity" class="text-primary w-4 h-4"></i>
       <span class="font-bold text-sm text-on-surface">无界AI</span>
       <span class="text-xs text-on-surface-variant ml-0.5">Studio</span>
+      <div class="w-px h-4 bg-outline-variant/30 mx-2"></div>
+      <span class="text-xs text-on-surface-variant">电商白底图处理 v2</span>
     </div>
     <div class="flex items-center gap-1">
       <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="撤销">
@@ -96,9 +107,16 @@
       <div class="w-px h-4 bg-outline-variant/30 mx-1"></div>
       <button class="flex items-center gap-1 px-2.5 py-1 rounded-md bg-primary text-on-primary text-xs font-medium hover:opacity-90 transition-opacity">
         <i data-lucide="play" class="w-3 h-3"></i>
-        执行工作流
+        执行
+      </button>
+      <button class="flex items-center gap-1 px-2.5 py-1 rounded-md border border-primary/30 text-primary text-xs font-medium hover:bg-primary/10 transition-colors">
+        <i data-lucide="sparkles" class="w-3 h-3"></i>
+        AI优化
       </button>
       <div class="w-px h-4 bg-outline-variant/30 mx-1"></div>
+      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="版本历史">
+        <i data-lucide="git-branch" class="w-3.5 h-3.5"></i>
+      </button>
       <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="设置">
         <i data-lucide="settings" class="w-3.5 h-3.5"></i>
       </button>
