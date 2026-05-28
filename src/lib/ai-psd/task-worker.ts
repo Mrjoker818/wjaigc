@@ -21,6 +21,7 @@ import {
   dbUpdateTaskStatus,
   dbAddFile,
 } from './storage';
+import { isTaskCancelled, updateTaskProgress } from '../task-registry';
 import {
   buildPlanSystemPrompt,
   buildPlanUserPrompt,
@@ -72,6 +73,12 @@ import {
 
 // ──────────── 工具 ────────────
 
+function checkCancel(taskId: string): void {
+  if (isTaskCancelled(taskId)) {
+    throw new Error('TASK_CANCELLED');
+  }
+}
+
 function makeV4Name(layer: LayerPlanLayer): string {
   const group = layer.group ?? 'deco';
   const idx = 1;
@@ -86,6 +93,22 @@ function makeV4Name(layer: LayerPlanLayer): string {
     case 'text': return `text/${idx}/${label}`;
     default: return `deco/${idx}/${label}`;
   }
+}
+
+/** 同时更新数据库和 task-registry 的进度 */
+async function advanceTask(
+  taskId: string,
+  status: AiPsdTaskStatus,
+  progress: number,
+  extra?: Partial<Pick<AiPsdTask, 'currentStep' | 'currentLayerName' | 'previewUrl' | 'psdUrl' | 'zipUrl' | 'jsonUrl' | 'reportUrl' | 'errorMessage' | 'layerPlan'>>,
+) {
+  await dbUpdateTaskStatus(taskId, status, progress, extra);
+  // 同步推送到 SSE (task-registry)
+  updateTaskProgress(taskId, {
+    status: status === 'success' ? 'completed' : status as any,
+    progress,
+    label: extra?.currentStep || '',
+  });
 }
 
 /** 将 ExportResult 保存到文件表并返回可访问路径 */
@@ -149,9 +172,7 @@ export async function runAiPsdTask(taskId: string): Promise<void> {
     // ═══════════════════════════════════════════
     // Phase 1: 图层规划 (planning)
     // ═══════════════════════════════════════════
-    await dbUpdateTaskStatus(taskId, 'planning', 5, {
-      currentStep: '正在规划图层结构',
-    });
+    await advanceTask(taskId, 'planning', 5, { currentStep: '正在规划图层结构' });
     t = (await dbGetTask(taskId))!;
 
     // 获取画布尺寸
@@ -209,18 +230,14 @@ export async function runAiPsdTask(taskId: string): Promise<void> {
     }
 
     const layerPlan: LayerPlan = validation.fixed ?? rawPlan;
-    await dbUpdateTaskStatus(taskId, 'planning', 15, {
-      currentStep: '图层规划完成',
-      layerPlan,
-    });
+    await advanceTask(taskId, 'planning', 15, { currentStep: '图层规划完成', layerPlan });
+    checkCancel(taskId);
     t = (await dbGetTask(taskId))!;
 
     // ═══════════════════════════════════════════
     // Phase 2: 整图预览 (preview_generating)
     // ═══════════════════════════════════════════
-    await dbUpdateTaskStatus(taskId, 'preview_generating', 20, {
-      currentStep: '正在生成整图预览',
-    });
+    await advanceTask(taskId, 'preview_generating', 20, { currentStep: '正在生成整图预览' });
     t = (await dbGetTask(taskId))!;
 
     const previewPrompt = generatePreviewPrompt(t);
@@ -241,20 +258,16 @@ export async function runAiPsdTask(taskId: string): Promise<void> {
         }
       }
       if (previewUrl) {
-        await dbUpdateTaskStatus(taskId, 'preview_generating', 35, {
-          currentStep: '整图预览完成',
-          previewUrl,
-        });
+        await advanceTask(taskId, 'preview_generating', 35, { currentStep: '整图预览完成', previewUrl });
       }
     }
+    checkCancel(taskId);
     t = (await dbGetTask(taskId))!;
 
     // ═══════════════════════════════════════════
     // Phase 3: 逐层生成 (layer_generating)
     // ═══════════════════════════════════════════
-    await dbUpdateTaskStatus(taskId, 'layer_generating', 40, {
-      currentStep: '正在逐层生成',
-    });
+    await advanceTask(taskId, 'layer_generating', 40, { currentStep: '正在逐层生成' });
     t = (await dbGetTask(taskId))!;
 
     const layers = layerPlan.layers;
@@ -265,10 +278,7 @@ export async function runAiPsdTask(taskId: string): Promise<void> {
       const layer = layers[i];
       const progress = 40 + Math.round((i / totalLayers) * 30);
 
-      await dbUpdateTaskStatus(taskId, 'layer_generating', progress, {
-        currentStep: `生成图层: ${layer.name}`,
-        currentLayerName: layer.name,
-      });
+      await advanceTask(taskId, 'layer_generating', progress, { currentStep: `生成图层: ${layer.name}` });
       t = (await dbGetTask(taskId))!;
 
       try {
@@ -355,14 +365,15 @@ export async function runAiPsdTask(taskId: string): Promise<void> {
       } catch (layerErr) {
         console.warn(`[ai-psd-worker] Layer "${layer.name}" failed, skipping:`, layerErr);
       }
+      // 每生成一个图层后检查取消
+      checkCancel(taskId);
     }
 
     // ═══════════════════════════════════════════
     // Phase 4: 文字层构建 (text_building)
     // ═══════════════════════════════════════════
-    await dbUpdateTaskStatus(taskId, 'text_building', 70, {
-      currentStep: '正在生成可编辑文字层',
-    });
+    checkCancel(taskId);
+    await advanceTask(taskId, 'text_building', 70, { currentStep: '正在生成可编辑文字层' });
     t = (await dbGetTask(taskId))!;
 
     const textLayers: TextLayerDef[] = buildTextLayers(t, layerPlan);
@@ -386,9 +397,7 @@ export async function runAiPsdTask(taskId: string): Promise<void> {
     // ═══════════════════════════════════════════
     // Phase 5: 合成PSD (psd_exporting)
     // ═══════════════════════════════════════════
-    await dbUpdateTaskStatus(taskId, 'psd_exporting', 82, {
-      currentStep: '正在合成PSD',
-    });
+    await advanceTask(taskId, 'psd_exporting', 82, { currentStep: '正在合成PSD' });
     t = (await dbGetTask(taskId))!;
 
     const psdInput: PsdBuildInput = {
@@ -406,9 +415,7 @@ export async function runAiPsdTask(taskId: string): Promise<void> {
     // ═══════════════════════════════════════════
     // Phase 6: 打包导出 (packaging)
     // ═══════════════════════════════════════════
-    await dbUpdateTaskStatus(taskId, 'packaging', 90, {
-      currentStep: '正在打包导出文件',
-    });
+    await advanceTask(taskId, 'packaging', 90, { currentStep: '正在打包导出文件' });
     t = (await dbGetTask(taskId))!;
 
     const durationMs = Date.now() - startTime;
@@ -432,21 +439,13 @@ export async function runAiPsdTask(taskId: string): Promise<void> {
     // ═══════════════════════════════════════════
     // Phase 7: 完成
     // ═══════════════════════════════════════════
-    await dbUpdateTaskStatus(taskId, 'success', 100, {
-      currentStep: '生成完成',
-      psdUrl,
-      zipUrl,
-      jsonUrl,
-      reportUrl,
-    });
+    await advanceTask(taskId, 'success', 100, { currentStep: '生成完成', psdUrl, zipUrl, jsonUrl, reportUrl });
 
     console.info(`[ai-psd-worker] Task ${taskId} completed successfully in ${(durationMs / 1000).toFixed(1)}s`);
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
+    const isCancel = errMsg.includes('已取消');
     console.error(`[ai-psd-worker] Task ${taskId} failed:`, errMsg);
-    await dbUpdateTaskStatus(taskId, 'failed', 0, {
-      currentStep: `生成失败: ${errMsg}`,
-      errorMessage: errMsg,
-    });
+    await advanceTask(taskId, 'failed', 0, { currentStep: `生成失败: ${errMsg}`, errorMessage: errMsg });
   }
 }

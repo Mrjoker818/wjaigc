@@ -28,6 +28,9 @@ interface BrandProject {
   referenceUrls: string[];
   brandDna: BrandDNA | null;
   creativeDirections: CreativeDirection[];
+  kvImageUrl: string;
+  batchResults: { item: string; imageUrl: string }[];
+  consistencyScores: { overall: number; details: Record<string, number> } | null;
   status: 'draft' | 'active' | 'completed' | 'archived';
   isArchived: boolean;
   createdAt: string;
@@ -419,7 +422,7 @@ interface BrandFactoryPanelProps {
   onAddImages?: (urls: string[]) => void;
 }
 
-export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }: BrandFactoryPanelProps) {
+export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactoryPanelProps) {
   // === Panel drag state ===
   const [panelPos, setPanelPos] = useState({ x: typeof window !== 'undefined' ? (window.innerWidth - 960) / 2 : 0, y: typeof window !== 'undefined' ? Math.max(20, (window.innerHeight - Math.min(window.innerHeight * 0.85, 700)) / 2) : 20 });
   const [isDragging, setIsDragging] = useState(false);
@@ -458,6 +461,8 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
 
   // === KV state ===
   const [kvForm, setKvForm] = useState({ theme: '', slogan: '', ratio: '16:9', direction: '' });
+  const [kvImageUrl, setKvImageUrl] = useState('');
+  const [kvGenerating, setKvGenerating] = useState(false);
 
   // === Materials state ===
   const [selectedPkg, setSelectedPkg] = useState<string>('brand-basics');
@@ -477,7 +482,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
   const [titleScene, setTitleScene] = useState('品牌主标题');
   const [titleStyle, setTitleStyle] = useState('高级黑体');
   const [titleText, setTitleText] = useState('');
-  const [titleResult, setTitleResult] = useState('');
+  const [titleResult, setTitleResult] = useState<{ imageUrl?: string; text?: string; scene?: string; style?: string } | null>(null);
 
   // === Template state ===
   const [templateList, setTemplateList] = useState<BrandTemplate[]>([]);
@@ -599,6 +604,9 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
     referenceUrls: safeParseJSON<string[]>(p.reference_urls as string || p.referenceUrls as string, []),
     brandDna: safeParseJSON<BrandDNA | null>(p.brand_dna as string || p.brandDna as string, null),
     creativeDirections: safeParseJSON<CreativeDirection[]>(p.creative_directions as string || p.creativeDirections as string, []),
+    kvImageUrl: (p.kv_image_url as string) || (p.kvImageUrl as string) || '',
+    batchResults: safeParseJSON<Array<{item: string; imageUrl: string}>>(p.batch_results as string || p.batchResults as string, []),
+    consistencyScores: safeParseJSON<{overall: number; details: Record<string, number>} | null>(p.consistency_scores as string || p.consistencyScores as string, null),
     status: (p.status as string) === 'active' ? 'active' : (p.status as string) === 'completed' ? 'completed' : 'draft',
     isArchived: Boolean(p.is_archived ?? p.isArchived ?? false),
     createdAt: (p.created_at as string) || (p.createdAt as string) || '',
@@ -703,27 +711,69 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
 
   const handleGenerateKV = async () => {
     if (!currentProject) return;
-    await apiCall('generate-kv', {
-      projectId: currentProject.id,
-      theme: kvForm.theme,
-      slogan: kvForm.slogan,
-      ratio: kvForm.ratio,
-      direction: kvForm.direction,
-      brandDna: currentProject.brandDna,
-    });
+    setKvGenerating(true);
+    setKvImageUrl('');
+    try {
+      const data = await apiCall('generate-kv', {
+        projectId: currentProject.id,
+        theme: kvForm.theme,
+        slogan: kvForm.slogan,
+        ratio: kvForm.ratio,
+        direction: kvForm.direction,
+        brandDna: currentProject.brandDna,
+      });
+      if (data?.imageUrl) {
+        setKvImageUrl(data.imageUrl);
+      } else if (data?.taskId) {
+        // 异步任务 - 轮询结果
+        const maxPolls = 60;
+        for (let i = 0; i < maxPolls; i++) {
+          await new Promise(r => setTimeout(r, 3000));
+          try {
+            const pollRes = await fetch(`/api/poll-task`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId: data.taskId, model: selectedImageModel }),
+            });
+            const pollData = await pollRes.json();
+            if (pollData.status === 'success' || pollData.status === 'completed') {
+              const url = pollData.result?.imageUrl || pollData.result?.url || pollData.imageUrl;
+              if (url) { setKvImageUrl(url); break; }
+            } else if (pollData.status === 'failed') {
+              break;
+            }
+          } catch { /* continue polling */ }
+        }
+      }
+    } finally {
+      setKvGenerating(false);
+    }
   };
 
   const handleBatchGenerate = async () => {
     if (!currentProject || selectedMats.size === 0) return;
     setBatchGenerating(true);
     const items = Array.from(selectedMats);
-    await apiCall('batch-generate', {
-      projectId: currentProject.id,
-      materialType: selectedPkg,
-      items,
-      brandDna: currentProject.brandDna,
-    });
-    setBatchGenerating(false);
+    try {
+      const data = await apiCall('batch-generate', {
+        projectId: currentProject.id,
+        materialType: selectedPkg,
+        items,
+        brandDna: currentProject.brandDna,
+      });
+      if (data?.results && Array.isArray(data.results)) {
+        const newMats: GeneratedMaterial[] = data.results
+          .filter((r: { imageUrl?: string }) => r.imageUrl)
+          .map((r: { item: string; imageUrl: string }) => ({
+            type: r.item,
+            imageUrl: r.imageUrl,
+            createdAt: new Date().toISOString(),
+          }));
+        setGeneratedMats(prev => [...prev, ...newMats]);
+      }
+    } finally {
+      setBatchGenerating(false);
+    }
   };
 
   const handleConsistencyCheck = async () => {
@@ -1161,6 +1211,17 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
               <Layout className="w-4 h-4 inline mr-1" />生成主KV
               {loading && apiElapsed > 0 && <span className="ml-2 text-xs opacity-70">({formatApiTime(apiElapsed)})</span>}
             </button>
+            {kvImageUrl && (
+              <div className="mt-2 rounded-lg overflow-hidden border border-white/[0.06]">
+                <img src={kvImageUrl} alt="KV主视觉" className="w-full h-auto" crossOrigin="anonymous" />
+                <div className="flex gap-1.5 p-1.5">
+                  <button className={`${th.btnGhost} text-[10px] px-2 py-1 border ${th.borderLight}`}
+                    onClick={() => { if (onAddImages) onAddImages([kvImageUrl]); }}>添加到画布</button>
+                  <button className={`${th.btnGhost} text-[10px] px-2 py-1 border ${th.borderLight}`}
+                    onClick={() => setKvImageUrl('')}>清除</button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className={`${th.card} p-4`}>
@@ -1234,6 +1295,25 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
             <button className={`${th.btnGhost} text-xs border ${th.borderLight} py-2`}><Save className="w-3 h-3 inline mr-1" />保存到资产库</button>
             <button className={`${th.btnGhost} text-xs border ${th.borderLight} py-2`}><Download className="w-3 h-3 inline mr-1" />导出选中物料</button>
           </div>
+          {currentProject?.batchResults && currentProject.batchResults.length > 0 && (
+            <div className="space-y-2">
+              <h4 className={`${th.textSec} text-xs font-medium`}>生成结果</h4>
+              <div className="grid grid-cols-2 gap-2">
+                {currentProject.batchResults.map((r: {item: string; imageUrl: string}, i: number) => (
+                  <div key={i} className="rounded-lg overflow-hidden border border-white/[0.06]">
+                    <img src={r.imageUrl} alt={r.item} className="w-full h-auto" crossOrigin="anonymous" />
+                    <div className="flex items-center justify-between p-1">
+                      <span className="text-[10px] text-white/60">{r.item}</span>
+                      <button className={`${th.btnGhost} text-[10px] px-1 py-0.5`}
+                        onClick={() => { if (onAddImages) onAddImages([r.imageUrl]); }}>+</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <button className={`${th.btnGhost} text-xs border ${th.borderLight} w-full py-1.5`}
+                onClick={() => { if (onAddImages) onAddImages(currentProject.batchResults.map((r: {item: string; imageUrl: string}) => r.imageUrl)); }}>全部添加到画布</button>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -1372,7 +1452,15 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
                   <h4 className={`${th.textSec} text-xs`}>生成结果</h4>
                   {apiTotalTime !== null && apiTotalTime > 0 && <span className={`${th.textMuted} text-[11px]`}>总耗时 {formatApiTime(apiTotalTime)}</span>}
                 </div>
-                <pre className={`${th.text} text-sm whitespace-pre-wrap bg-black/30 p-3 rounded`}>{titleResult}</pre>
+                {titleResult.imageUrl && (
+                  <img src={titleResult.imageUrl} alt="中文标题" className="w-full rounded mb-2" />
+                )}
+                {titleResult.text && (
+                  <pre className={`${th.text} text-sm whitespace-pre-wrap bg-black/30 p-3 rounded`}>{titleResult.text}</pre>
+                )}
+                {!titleResult.imageUrl && !titleResult.text && (
+                  <pre className={`${th.text} text-sm whitespace-pre-wrap bg-black/30 p-3 rounded`}>{JSON.stringify(titleResult, null, 2)}</pre>
+                )}
               </div>
             )}
 

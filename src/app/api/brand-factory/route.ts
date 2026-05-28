@@ -13,7 +13,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderForFeature } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
-import { resolveCompatProfile, adjustRequestForProfile, buildPollUrl, extractImageUrl } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl } from '@/lib/api-compatibility';
+import type { ApiCompatProfile } from '@/lib/api-compatibility';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { dbGetUserData, dbSetUserData } from '@/lib/db-storage';
 
@@ -157,6 +158,32 @@ async function callLLM(
   }
 }
 
+/** 从原始API响应中提取图片URL（兜底） */
+function extractImageUrlsFromRaw(data: Record<string, unknown>): string[] {
+  const urls: string[] = [];
+  // 检查 data.images[].url
+  const images = data.images || (data.data as Record<string, unknown>)?.images;
+  if (Array.isArray(images)) {
+    for (const img of images) {
+      if (typeof img === 'object' && img !== null) {
+        const url = (img as Record<string, unknown>).url || (img as Record<string, unknown>).b64_json;
+        if (typeof url === 'string') urls.push(url);
+      } else if (typeof img === 'string') {
+        urls.push(img);
+      }
+    }
+  }
+  // 检查 data.output.image_urls[]
+  const output = data.output || (data.data as Record<string, unknown>)?.output;
+  if (typeof output === 'object' && output !== null) {
+    const imageUrls = (output as Record<string, unknown>).image_urls;
+    if (Array.isArray(imageUrls)) {
+      for (const u of imageUrls) { if (typeof u === 'string') urls.push(u); }
+    }
+  }
+  return urls;
+}
+
 async function generateImage(
   prompt: string,
   imageModel?: string,
@@ -227,6 +254,70 @@ async function generateImage(
     const message = err instanceof Error ? err.message : String(err);
     return { success: false, error: `图像生成异常: ${message}` };
   }
+}
+
+/** 轮询异步任务结果（最多60秒） */
+async function pollTaskResult(
+  taskId: string,
+  providerInfo: { baseUrl: string; apiKey: string; profile: ApiCompatProfile },
+  maxMs = 60000
+): Promise<{ success: boolean; imageUrl?: string; imageUrls?: string[]; error?: string }> {
+  const pollUrl = buildPollUrl(providerInfo.baseUrl, taskId, providerInfo.profile);
+  const start = Date.now();
+  while (Date.now() - start < maxMs) {
+    await new Promise(r => setTimeout(r, 3000));
+    try {
+      const resp = await fetch(pollUrl, {
+        headers: { 'Authorization': `Bearer ${providerInfo.apiKey}` },
+      });
+      if (!resp.ok) continue;
+      const pollData = await resp.json() as Record<string, unknown>;
+      // 检查任务状态
+      const taskStatus = (pollData.status || pollData.data && typeof pollData.data === 'object' && (pollData.data as Record<string, unknown>).status) as string;
+      if (taskStatus === 'completed' || taskStatus === 'success') {
+        // 使用 parseResponseForProfile 提取图片URL
+        const parsed = parseResponseForProfile(pollData, providerInfo.profile);
+        const urls = parsed.directImageUrls;
+        if (urls && urls.length > 0) {
+          return { success: true, imageUrl: urls[0], imageUrls: urls };
+        }
+        // 尝试从原始数据中手动提取URL
+        const rawUrls = extractImageUrlsFromRaw(pollData);
+        if (rawUrls.length > 0) {
+          return { success: true, imageUrl: rawUrls[0], imageUrls: rawUrls };
+        }
+        return { success: false, error: '任务完成但未返回图片URL' };
+      }
+      if (taskStatus === 'failed') {
+        return { success: false, error: '异步任务失败' };
+      }
+    } catch { /* continue polling */ }
+  }
+  return { success: false, error: '轮询超时，请稍后查看结果' };
+}
+
+/** 生成图片（自动轮询异步任务） */
+async function generateImageWithPoll(
+  prompt: string,
+  imageModel?: string,
+  options?: { size?: string; quality?: string; n?: number }
+): Promise<{ success: boolean; imageUrl?: string; imageUrls?: string[]; error?: string }> {
+  const result = await generateImage(prompt, imageModel, options);
+  if (!result.success) return result;
+  // 如果同步返回了图片URL，直接返回
+  if (result.imageUrl || result.imageUrls) return result;
+  // 异步任务，需要轮询
+  if (result.taskId) {
+    const provider = await getImageProvider(imageModel);
+    if (!provider) return { success: false, error: '未找到提供商' };
+    const profile = resolveCompatProfile(provider);
+    return pollTaskResult(result.taskId, {
+      baseUrl: provider.baseUrl.replace(/\/+$/, ''),
+      apiKey: provider.apiKey,
+      profile,
+    });
+  }
+  return result;
 }
 
 // ─── Prompt 构建 ─────────────────────────────────────────────────────
@@ -392,6 +483,9 @@ export async function POST(request: NextRequest) {
           reference_urls: JSON.stringify([]),
           brand_dna: null,
           creative_directions: null,
+          kv_image_url: '',
+          batch_results: null,
+          consistency_scores: null,
           status: 'draft',
           is_archived: false,
           created_at: now,
@@ -421,12 +515,16 @@ export async function POST(request: NextRequest) {
           creativeDirections: 'creative_directions',
           generatedMaterials: 'generated_materials',
           isArchived: 'is_archived',
+          kvImageUrl: 'kv_image_url',
+          batchResults: 'batch_results',
+          consistencyScores: 'consistency_scores',
         };
         const updatableFields = [
           'brand_name', 'industry', 'project_type', 'tone', 'keywords',
           'target_audience', 'description', 'logo_url', 'product_url',
           'ip_url', 'reference_urls', 'brand_dna', 'creative_directions',
           'status', 'generated_materials', 'versions', 'project_name', 'is_archived',
+          'kv_image_url', 'batch_results', 'consistency_scores',
         ];
         for (const field of updatableFields) {
           // 支持前端发送的 camelCase 和存储用的 snake_case
@@ -572,10 +670,11 @@ export async function POST(request: NextRequest) {
 
       // ─── 生成KV图 ──────────────────────────────────────
       case 'generate-kv': {
+        const kvProjectId = body.projectId as string | undefined;
         const brandDna = body.brandDna as Record<string, unknown> | null;
         const prompt = buildKVImagePrompt(brandDna, body);
 
-        const result = await generateImage(prompt, imageModel, {
+        const result = await generateImageWithPoll(prompt, imageModel, {
           size: body.ratio === '9:16' ? '1024x1536' : body.ratio === '1:1' ? '1024x1024' : '1536x1024',
         });
 
@@ -583,14 +682,14 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: result.error || 'KV图生成失败' }, { status: 500 });
         }
 
-        // 如果返回了taskId（异步任务），返回等待信息
-        if (result.taskId) {
-          return NextResponse.json({
-            success: true,
-            message: 'KV图生成已提交，请稍后查看结果',
-            taskId: result.taskId,
-            imageUrl: result.imageUrl,
-          });
+        // 保存KV图URL到项目
+        if (kvProjectId && result.imageUrl) {
+          const proj = projectsStore.get(kvProjectId);
+          if (proj) {
+            proj.kv_image_url = result.imageUrl;
+            proj.updated_at = new Date().toISOString();
+            await persistProjects();
+          }
         }
 
         return NextResponse.json({
@@ -615,11 +714,11 @@ export async function POST(request: NextRequest) {
         const results: { item: string; imageUrl?: string; error?: string }[] = [];
         for (const item of items) {
           const prompt = buildBatchMaterialPrompt(brandDna, materialType, item);
-          const result = await generateImage(prompt, imageModel, { size: '1024x1024' });
+          const result = await generateImageWithPoll(prompt, imageModel, { size: '1024x1024' });
           results.push({
             item,
-            imageUrl: result.imageUrl || result.taskId,
-            error: result.success ? undefined : result.error,
+            imageUrl: result.imageUrl,
+            error: result.success ? undefined : (result.error || '生成失败'),
           });
         }
 
@@ -646,7 +745,10 @@ export async function POST(request: NextRequest) {
               });
             }
           }
-          proj.generated_materials = JSON.stringify(materials);
+          proj.batch_results = JSON.stringify(results.filter(r => r.imageUrl).map(r => ({
+            item: r.item,
+            imageUrl: r.imageUrl,
+          })));
           proj.updated_at = new Date().toISOString();
           projectsStore.set(projectId, proj);
           await persistProjects();
@@ -737,7 +839,7 @@ export async function POST(request: NextRequest) {
         if (!text) return NextResponse.json({ error: '请输入标题文字' }, { status: 400 });
 
         const prompt = buildChineseTitlePrompt(text, scene, style, brandDna);
-        const result = await generateImage(prompt, imageModel, { size: '1536x1024' });
+        const result = await generateImageWithPoll(prompt, imageModel, { size: '1536x1024' });
 
         if (!result.success) {
           return NextResponse.json({ error: result.error || '标题图生成失败' }, { status: 500 });
