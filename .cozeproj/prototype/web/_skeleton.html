@@ -34,6 +34,14 @@
       /* === 边框 === */
       --color-outline:          #30363d;
       --color-outline-variant:  #21262d;
+      /* === 节点专用色 === */
+      --color-node-input:    #3b82f6;
+      --color-node-process:  #8b5cf6;
+      --color-node-output:   #2ea043;
+      --color-node-ai:       #d4af37;
+      --color-port-image:    #3b82f6;
+      --color-port-mask:     #f472b6;
+      --color-port-prompt:   #a78bfa;
       /* === 圆角 === */
       --radius-sm:   0.25rem;
       --radius-md:   0.375rem;
@@ -71,36 +79,34 @@
 
 <body class="bg-background text-on-surface font-sans">
 
-  <!-- @nav:start 导航组件，不需要的页面则不要复制此段 -->
-  <header class="bg-surface sticky top-0 z-40 h-12 flex items-center justify-between px-4 border-b border-outline-variant/20">
+  <!-- @nav:start 导航组件 -->
+  <header class="bg-surface sticky top-0 z-40 h-11 flex items-center justify-between px-3 border-b border-outline-variant/20">
     <div class="flex items-center gap-2">
-      <i data-lucide="infinity" class="text-primary w-5 h-5"></i>
+      <i data-lucide="infinity" class="text-primary w-4 h-4"></i>
       <span class="font-bold text-sm text-on-surface">无界AI</span>
-      <span class="text-xs text-on-surface-variant ml-1">Pipeline</span>
+      <span class="text-xs text-on-surface-variant ml-0.5">Studio</span>
     </div>
-    <div class="flex items-center gap-2">
-      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors">
-        <i data-lucide="undo" class="w-4 h-4"></i>
+    <div class="flex items-center gap-1">
+      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="撤销">
+        <i data-lucide="undo" class="w-3.5 h-3.5"></i>
       </button>
-      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors">
-        <i data-lucide="redo" class="w-4 h-4"></i>
+      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="重做">
+        <i data-lucide="redo" class="w-3.5 h-3.5"></i>
       </button>
-      <div class="w-px h-5 bg-outline-variant mx-1"></div>
-      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors">
-        <i data-lucide="settings" class="w-4 h-4"></i>
+      <div class="w-px h-4 bg-outline-variant/30 mx-1"></div>
+      <button class="flex items-center gap-1 px-2.5 py-1 rounded-md bg-primary text-on-primary text-xs font-medium hover:opacity-90 transition-opacity">
+        <i data-lucide="play" class="w-3 h-3"></i>
+        执行工作流
       </button>
-      <div class="w-7 h-7 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-medium">初</div>
+      <div class="w-px h-4 bg-outline-variant/30 mx-1"></div>
+      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="设置">
+        <i data-lucide="settings" class="w-3.5 h-3.5"></i>
+      </button>
+      <div class="w-6 h-6 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[10px] font-medium">初</div>
     </div>
   </header>
-  <!-- @nav:end 导航组件，不需要的页面则不要复制此段 -->
+  <!-- @nav:end 导航组件 -->
 
-  <!--
-    ⚠️ <main> 的 class 由主 Agent 根据步骤 4.5 的布局决策与实际设计需要填写，约束如下：
-      - 有侧边栏布局：必须用 flex-1（可加 min-w-0 / overflow-y-auto 等），禁止使用 max-w
-      - 无侧边栏布局：必须用 max-w-4xl ~ max-w-7xl 之一 + mx-auto
-      - 其他样式按实际设计需要自由组合
-    如无特殊需求，禁止使用  小于 max-w-4xl 的设置（过窄，桌面端会大量留白）。
-  -->
   <main class="flex-1">
     <!-- @main-content:start -->
     <!-- @main-content:end -->

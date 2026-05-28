@@ -5,15 +5,15 @@
       "options": {
         "path": ".cozeproj/prototype/web/home.html"
       },
-      "title": "无限画布主界面",
+      "title": "节点图编辑器",
       "size": "web"
     },
     {
       "type": "html",
       "options": {
-        "path": ".cozeproj/prototype/web/pipeline-detail.html"
+        "path": ".cozeproj/prototype/web/run-monitor.html"
       },
-      "title": "Pipeline操作链详情",
+      "title": "工作流执行监控",
       "size": "web"
     }
   ]
