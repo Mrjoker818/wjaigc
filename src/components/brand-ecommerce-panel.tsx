@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { X, ShoppingBag, Loader2, Sparkles, Settings, GripVertical } from 'lucide-react';
+import { X, Minus, ShoppingBag, Loader2, Sparkles, Settings, GripVertical } from 'lucide-react';
 import { BrandTemplateSelector } from './brand-ecommerce/BrandTemplateSelector';
 import { type TemplateFieldValues } from './brand-ecommerce/template-fields';
 import { BrandSettingsForm } from './brand-ecommerce/BrandSettingsForm';
@@ -88,6 +88,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   const [productConsistencyStrength, setProductConsistencyStrength] = useState(60);
   const [templateFieldValues, setTemplateFieldValues] = useState<Record<string, Record<string, string>>>({});
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
   const { elapsed, totalTime, startTimer, stopTimer, resetTimer, formatTime } = useProgressTimer();
   const [isAssisting, setIsAssisting] = useState(false);
   const [assistError, setAssistError] = useState('');
@@ -770,7 +771,8 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         </div>
 
         {/* ── Content ── */}
-        <div className={`flex-1 overflow-y-auto px-5 py-4 rounded-b-2xl ${bgDeep}`}>
+        {!isMinimized && (<>
+          <div className={`flex-1 overflow-y-auto px-5 py-4 rounded-b-2xl ${bgDeep}`}>
 
           {/* Tab: Template Selection */}
           {activeTab === 'template' && (
@@ -876,6 +878,13 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setIsMinimized(!isMinimized)}
+              className={`p-1.5 rounded-md transition-colors cursor-pointer ${isMonochrome ? 'text-gray-500 hover:bg-gray-100' : 'text-gray-400 hover:bg-[#2a2a2a]'}`}
+              title={isMinimized ? '展开' : '最小化'}
+            >
+              <Minus size={14} />
+            </button>
+            <button
               onClick={onClose}
               className={`px-4 py-2 rounded-lg text-sm font-medium ${isMonochrome ? 'text-gray-600 hover:bg-gray-100' : 'text-gray-400 hover:bg-[#2a2a2a]'} transition-colors cursor-pointer`}
             >
@@ -900,6 +909,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
             </button>
           </div>
         </div>
+        </>)}
       </div>
     </div>
   );

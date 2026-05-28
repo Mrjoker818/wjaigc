@@ -72,6 +72,7 @@ function getModelHint(modelId: string): string {
 export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectionStart, initialAspectRatio, initialQuality, initialCount, onParamsChange, themeStyle = 'gold' }: ImageEditorProps) {
   // ★ 主题变量系统
   const isMonochrome = themeStyle === 'monochrome';
+  const [isMinimized, setIsMinimized] = useState(false);
 
   // 面板容器
   const thPanel = isMonochrome
@@ -432,7 +433,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [position, setPosition] = useState(() => {
     if (typeof window !== 'undefined') {
-      return { x: Math.max(0, (window.innerWidth - 440) / 2 - 100), y: Math.max(0, (window.innerHeight - 560) / 2) };
+      return { x: Math.max(0, (window.innerWidth - 440) / 2), y: Math.max(0, (window.innerHeight - 560) / 2) };
     }
     return { x: 100, y: 100 };
   });
@@ -1456,6 +1457,15 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             </span>
           )}
           <button
+            onClick={() => setIsMinimized(!isMinimized)}
+            className="p-1 rounded-md transition-colors"
+            style={{ color: isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)' }}
+            onMouseEnter={e => (e.currentTarget.style.color = isMonochrome ? '#000' : '#fff')}
+            onMouseLeave={e => (e.currentTarget.style.color = isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)')}
+          >
+            <Minus size={14} />
+          </button>
+          <button
             onClick={() => { setEditContextHistory([]); setAutoMaskPreview(null); setPendingAutoRegions([]); onClose(); }}
             className="p-1 rounded-md transition-colors"
             style={{ color: isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)' }}
@@ -1467,6 +1477,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         </div>
 
         {/* Content */}
+        {!isMinimized && (
         <div className={`p-4 space-y-3.5 max-h-[calc(85vh-50px)] overflow-y-auto`}>
           {/* 图片预览区域 - 无图时显示大+号 */}
           {!currentImageUrl ? (
@@ -2057,6 +2068,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* 结果框 - 右侧，SVG线连接 */}

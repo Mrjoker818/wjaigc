@@ -7,7 +7,7 @@ import {
   CheckCircle, AlertTriangle, Clock, Download, Copy, RotateCcw,
   ChevronRight, ChevronDown, Eye, Star, MessageSquare, Send,
   Zap, RefreshCw, Save, BookOpen, Users, PenTool, Type,
-  Cpu, MessageCircle
+  Cpu, MessageCircle, Minus
 } from 'lucide-react';
 import { useProgressTimer } from '@/hooks/useProgressTimer';
 
@@ -421,7 +421,7 @@ interface BrandFactoryPanelProps {
 
 export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }: BrandFactoryPanelProps) {
   // === Panel drag state ===
-  const [panelPos, setPanelPos] = useState({ x: 0, y: 0 });
+  const [panelPos, setPanelPos] = useState({ x: typeof window !== 'undefined' ? (window.innerWidth - 960) / 2 : 0, y: typeof window !== 'undefined' ? Math.max(20, (window.innerHeight - 700) / 2) : 20 });
   const [isDragging, setIsDragging] = useState(false);
   const dragOffset = useRef({ x: 0, y: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
@@ -432,6 +432,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
   const [currentProject, setCurrentProject] = useState<BrandProject | null>(null);
   const [loading, setLoading] = useState(false);
   const { elapsed: apiElapsed, totalTime: apiTotalTime, startTimer: startApiTimer, stopTimer: stopApiTimer, resetTimer: resetApiTimer, formatTime: formatApiTime } = useProgressTimer();
+  const [isMinimized, setIsMinimized] = useState(false);
   const [error, setError] = useState('');
 
   // === Model selection ===
@@ -1592,6 +1593,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
             <span>模型</span>
             <ChevronDown className={`w-3 h-3 transition-transform ${showModelPanel ? 'rotate-180' : ''}`} />
           </button>
+          <button className={`${th.btnGhost} p-1`} onClick={() => setIsMinimized(!isMinimized)}><Minus className="w-4 h-4" /></button>
           <button className={`${th.btnGhost} p-1`} onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
 
@@ -1599,6 +1601,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
         {renderModelPanel()}
 
         {/* Body: Left sidebar + Right content */}
+        {!isMinimized && (
         <div className="flex flex-1 min-h-0 overflow-hidden">
           {/* Left sidebar tabs */}
           <div className={`${th.sidebar} w-[120px] shrink-0 overflow-y-auto py-2 px-1.5 space-y-0.5`} style={{ scrollbarWidth: 'none' }}>
@@ -1614,13 +1617,13 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
               );
             })}
           </div>
-
           {/* Right content area */}
           <div className="flex-1 min-w-0 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin' }}>
             {error && <div className="bg-red-500/10 text-red-400 text-xs p-2 rounded mb-3">{error}</div>}
             {renderTabContent()}
           </div>
         </div>
+        )}
       </div>
     </div>
   );

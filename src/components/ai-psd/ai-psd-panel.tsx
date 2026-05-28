@@ -207,7 +207,14 @@ const th = {
 
 export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
   // === Panel drag state ===
-  const [panelPos, setPanelPos] = useState({ x: 0, y: 0 });
+  const [panelPos, setPanelPos] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const pw = 880;
+      const ph = 680;
+      return { x: Math.max(0, (window.innerWidth - pw) / 2), y: Math.max(0, (window.innerHeight - ph) / 2) };
+    }
+    return { x: 0, y: 0 };
+  });
   const [isDragging, setIsDragging] = useState(false);
   const dragOffset = useRef({ x: 0, y: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
@@ -255,6 +262,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
   const [taskId, setTaskId] = useState('');
   const [taskData, setTaskData] = useState<TaskData | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
   const [currentStep, setCurrentStep] = useState(0); // 0-3: planning/preview/layers/export
   const [layerProgress, setLayerProgress] = useState({ done: 0, total: 0 });
 
@@ -1370,9 +1378,11 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
             <span>模型</span>
             <ChevronDown className={`w-3 h-3 transition-transform ${showModelPanel ? 'rotate-180' : ''}`} />
           </button>
+          <button className={`${th.btnGhost} p-1`} onClick={() => setIsMinimized(v => !v)}><Minus className="w-4 h-4" /></button>
           <button className={`${th.btnGhost} p-1`} onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
 
+        {!isMinimized && (<>
         {/* Model selection dropdown */}
         {renderModelPanel()}
 
@@ -1391,12 +1401,14 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
           {/* Center: Preview */}
           {renderPreviewArea()}
 
+
           {/* Right: Layer tree / Report */}
           {renderRightPanel()}
         </div>
 
         {/* Bottom action bar */}
         {renderBottomBar()}
+        </>)}
       </div>
     </div>
   );
