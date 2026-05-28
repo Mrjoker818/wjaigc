@@ -58,7 +58,6 @@
       --color-smart-bar-border: #d4af37/30;
       /* === Agent专属 === */
       --color-agent-glow:    rgba(244,114,182,0.3);
-      --color-collab-cursor: #22d3ee;
       --color-debug-breakpoint: #ef4444;
       /* === 圆角 === */
       --radius-sm:   0.25rem;
@@ -113,22 +112,6 @@
     .node-memory-pulse {
       animation: memoryPulse 3s ease-in-out infinite;
     }
-
-    /* 协作光标移动 */
-    @keyframes cursorFloat1 {
-      0%, 100% { transform: translate(0, 0); }
-      25% { transform: translate(6px, -4px); }
-      50% { transform: translate(3px, 5px); }
-      75% { transform: translate(-4px, 2px); }
-    }
-    @keyframes cursorFloat2 {
-      0%, 100% { transform: translate(0, 0); }
-      25% { transform: translate(-5px, 3px); }
-      50% { transform: translate(4px, -3px); }
-      75% { transform: translate(2px, 6px); }
-    }
-    .collab-cursor-1 { animation: cursorFloat1 4s ease-in-out infinite; }
-    .collab-cursor-2 { animation: cursorFloat2 5s ease-in-out infinite; }
 
     /* 循环边流动 */
     @keyframes dashFlow {
@@ -766,21 +749,7 @@
             </div>
           </div>
 
-          <!-- 多人协作光标1：设计师小李 -->
-          <div class="collab-cursor-1 absolute pointer-events-none z-20" style="left:1180px; top:80px;">
-            <svg width="12" height="16" viewBox="0 0 12 16" fill="none">
-              <path d="M0 0L12 8L5 9L3 16L0 0Z" fill="#22d3ee"/>
-            </svg>
-            <span class="text-[9px] bg-[#22d3ee]/20 text-[#22d3ee] px-1.5 py-0.5 rounded-sm ml-2 whitespace-nowrap">设计师小李</span>
-          </div>
 
-          <!-- 多人协作光标2：运营小张 -->
-          <div class="collab-cursor-2 absolute pointer-events-none z-20" style="left:1180px; top:300px;">
-            <svg width="12" height="16" viewBox="0 0 12 16" fill="none">
-              <path d="M0 0L12 8L5 9L3 16L0 0Z" fill="#22c55e"/>
-            </svg>
-            <span class="text-[9px] bg-[#22c55e]/20 text-[#22c55e] px-1.5 py-0.5 rounded-sm ml-2 whitespace-nowrap">运营小张</span>
-          </div>
 
           <!-- 右键菜单 -->
           <div id="context-menu" class="ctx-menu absolute z-50 bg-surface-container border border-outline-variant/20 rounded-lg shadow-float py-1 min-w-[180px]" style="left:600px; top:300px;">
@@ -1160,8 +1129,6 @@
       <span>循环 <strong class="text-on-surface">1</strong></span>
     </div>
     <div class="flex items-center gap-3">
-      <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-[#22d3ee]"></span>协作用户 3</span>
-      <span class="text-outline-variant">|</span>
       <span>缓存命中 2/10</span>
       <span class="text-outline-variant">|</span>
       <span>版本 v4.0</span>
