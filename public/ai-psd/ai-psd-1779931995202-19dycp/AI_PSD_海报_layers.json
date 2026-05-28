@@ -1,0 +1,136 @@
+{
+  "version": "4.0",
+  "taskId": "ai-psd-1779931995202-19dycp",
+  "createdAt": "2026-05-28T01:40:02.729Z",
+  "canvas": {
+    "width": 1152,
+    "height": 1536
+  },
+  "generation": {
+    "mode": "text_to_psd",
+    "prompt": "test poster",
+    "sceneType": "海报",
+    "styleTags": [],
+    "colorTone": "auto",
+    "complexity": "standard",
+    "quality": "standard"
+  },
+  "layers": [
+    {
+      "name": "背景层",
+      "type": "background",
+      "v4Name": "背景层",
+      "visible": true,
+      "opacity": 1,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Solid clean light gray background color #f4f4f4, flat design, high quality minimalist studio backdrop",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "纹理层",
+      "type": "texture",
+      "v4Name": "纹理层",
+      "visible": true,
+      "opacity": 0.1,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Subtle paper grain texture overlay, light noise, white dust particles, very low opacity",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "装饰元素",
+      "type": "decoration",
+      "v4Name": "装饰元素",
+      "visible": true,
+      "opacity": 0.8,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Abstract geometric shapes, thin elegant lines in gold and charcoal gray, arranged symmetrically in the corners",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "阴影层",
+      "type": "shadow",
+      "v4Name": "阴影层",
+      "visible": true,
+      "opacity": 0.3,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Soft diffuse drop shadow for a central rectangular element, realistic contact shadow, transparent background",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "主体占位",
+      "type": "product",
+      "v4Name": "主体占位",
+      "visible": true,
+      "opacity": 1,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Placeholder frame for user product image, centered, high resolution clean cutout style",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "环境光效",
+      "type": "light",
+      "v4Name": "环境光效",
+      "visible": true,
+      "opacity": 0.4,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Soft radial glow light from top center, creating a gentle highlight on the subject area, smooth gradient, transparent background",
+      "isUserAsset": false,
+      "editable": false
+    }
+  ],
+  "layerManifest": [
+    {
+      "name": "背景层",
+      "type": "background",
+      "visible": true,
+      "opacity": 1,
+      "editable": false
+    },
+    {
+      "name": "纹理层",
+      "type": "texture",
+      "visible": true,
+      "opacity": 0.1,
+      "editable": false
+    },
+    {
+      "name": "装饰元素",
+      "type": "decoration",
+      "visible": true,
+      "opacity": 0.8,
+      "editable": false
+    },
+    {
+      "name": "阴影层",
+      "type": "shadow",
+      "visible": true,
+      "opacity": 0.3,
+      "editable": false
+    },
+    {
+      "name": "主体占位",
+      "type": "product",
+      "visible": true,
+      "opacity": 1,
+      "editable": false
+    },
+    {
+      "name": "环境光效",
+      "type": "light",
+      "visible": true,
+      "opacity": 0.4,
+      "editable": false
+    }
+  ]
+}
