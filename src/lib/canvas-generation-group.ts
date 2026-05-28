@@ -121,36 +121,88 @@ export interface ConnectionLine {
 
 /** 各模型支持的画面比例（按官方API文档配置） */
 export const MODEL_ASPECT_RATIOS: Record<string, string[]> = {
+    // Gemini 系列 — 支持多种比例
     'gemini-2.5-flash-image-preview': ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
+    'gemini-2.5-pro-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
     'gemini-3-pro-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    'gemini-3-flash-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
     'gemini-3.1-flash-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    // Imagen 系列
+    'imagen-4-ultra': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    'imagen-4': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    'imagen-3': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    // 豆包/Seedream/Seedance 系列
     'doubao-seedance-4-5': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', '9:21'],
+    'seedream-4': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', '9:21'],
+    'seedream-3': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    'seedance': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', '9:21'],
     // GPT Image 2 — 官方支持的尺寸比例
     'gpt-image-2-official': ['1:1', '3:2', '2:3', '16:9', '9:16'],
     'gpt-image-2': ['1:1', '3:2', '2:3', '16:9', '9:16'],
+    'gpt-image-1': ['1:1', '3:2', '2:3', '16:9', '9:16'],
     // DALL-E 3
     'dall-e-3': ['1:1', '16:9', '9:16'],
     // Stable Diffusion 系列 - 支持多种比例
     'stable-diffusion': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
     'sd-xl': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
     'sd-3': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    'sdxl': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
     // Flux 系列
     'flux': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    'flux-pro': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    'flux-dev': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    'flux-schnell': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    // Midjourney 系列
+    'midjourney': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
+    // 可灵 Kling
+    'kling': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    // Ideogram
+    'ideogram': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    // HiDream
+    'hidream': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
 };
 
 /** 各模型支持的质量/分辨率档位（按官方API文档配置） */
 export const MODEL_QUALITIES: Record<string, string[]> = {
     // Gemini 系列 - resolution类型
     'gemini-2.5-flash-image-preview': ['1K'],
+    'gemini-2.5-pro-image-preview': ['1K', '2K'],
     'gemini-3-pro-image-preview': ['1K', '2K'],
+    'gemini-3-flash-image-preview': ['1K'],
     'gemini-3.1-flash-image-preview': ['1K', '2K', '4K'],
-    // Seedream 系列 - resolution类型
+    // Imagen 系列
+    'imagen-4-ultra': ['1K', '2K'],
+    'imagen-4': ['1K', '2K'],
+    'imagen-3': ['1K'],
+    // Seedream/Seedance 系列 - resolution类型
     'doubao-seedance-4-5': ['2K', '4K'],
+    'seedream-4': ['2K', '4K'],
+    'seedream-3': ['1K', '2K'],
+    'seedance': ['2K', '4K'],
     // GPT-Image 系列 - quality类型
     'gpt-image-2-official': ['auto', 'low', 'medium', 'high'],
     'gpt-image-2': ['auto', 'low', 'medium', 'high'],
+    'gpt-image-1': ['auto', 'low', 'medium', 'high'],
     // DALL-E 3 - quality类型
     'dall-e-3': ['standard', 'hd'],
+    // Stable Diffusion 系列
+    'stable-diffusion': ['standard', 'hd'],
+    'sd-xl': ['standard', 'hd'],
+    'sd-3': ['standard', 'hd'],
+    'sdxl': ['standard', 'hd'],
+    // Flux 系列
+    'flux': ['standard', 'hd'],
+    'flux-pro': ['standard', 'hd'],
+    'flux-dev': ['standard', 'hd'],
+    'flux-schnell': ['standard'],
+    // Midjourney 系列
+    'midjourney': ['standard', 'hd'],
+    // 可灵 Kling
+    'kling': ['standard', 'hd'],
+    // Ideogram
+    'ideogram': ['standard', 'hd'],
+    // HiDream
+    'hidream': ['standard', 'hd'],
 };
 
 /** 质量档位到显示名称的映射 */
@@ -178,10 +230,19 @@ export const QUALITY_TO_SIZE: Record<string, Record<string, string>> = {
         'standard': '1024',
         '1K': '1024'
     },
+    'gemini-2.5-pro-image-preview': {
+        'standard': '1024',
+        '1K': '1024',
+        '2K': '2048'
+    },
     'gemini-3-pro-image-preview': {
         'standard': '1024',
         '1K': '1024',
         '2K': '2048'
+    },
+    'gemini-3-flash-image-preview': {
+        'standard': '1024',
+        '1K': '1024'
     },
     'gemini-3.1-flash-image-preview': {
         'standard': '1024',
@@ -189,8 +250,38 @@ export const QUALITY_TO_SIZE: Record<string, Record<string, string>> = {
         '2K': '2048',
         '4K': '4096'
     },
-    // Seedream 系列
+    // Imagen 系列
+    'imagen-4-ultra': {
+        'standard': '1024',
+        '1K': '1024',
+        '2K': '2048'
+    },
+    'imagen-4': {
+        'standard': '1024',
+        '1K': '1024',
+        '2K': '2048'
+    },
+    'imagen-3': {
+        'standard': '1024',
+        '1K': '1024'
+    },
+    // Seedream/Seedance 系列
     'doubao-seedance-4-5': {
+        'standard': '2K',
+        '2K': '2048',
+        '4K': '4096'
+    },
+    'seedream-4': {
+        'standard': '2K',
+        '2K': '2048',
+        '4K': '4096'
+    },
+    'seedream-3': {
+        'standard': '1K',
+        '1K': '1024',
+        '2K': '2048'
+    },
+    'seedance': {
         'standard': '2K',
         '2K': '2048',
         '4K': '4096'
@@ -207,6 +298,65 @@ export const QUALITY_TO_SIZE: Record<string, Record<string, string>> = {
         'low': '1024',
         'medium': '1536',
         'high': '2048'
+    },
+    'gpt-image-1': {
+        'auto': 'auto',
+        'low': '1024',
+        'medium': '1536',
+        'high': '2048'
+    },
+    // Stable Diffusion 系列
+    'stable-diffusion': {
+        'standard': '1024',
+        'hd': '1024 细节增强'
+    },
+    'sd-xl': {
+        'standard': '1024',
+        'hd': '1024 细节增强'
+    },
+    'sdxl': {
+        'standard': '1024',
+        'hd': '1024 细节增强'
+    },
+    'sd-3': {
+        'standard': '1024',
+        'hd': '1024 细节增强'
+    },
+    // Flux 系列
+    'flux': {
+        'standard': '1024',
+        'hd': '1024 细节增强'
+    },
+    'flux-pro': {
+        'standard': '1024',
+        'hd': '1024 细节增强'
+    },
+    'flux-dev': {
+        'standard': '1024',
+        'hd': '1024 细节增强'
+    },
+    'flux-schnell': {
+        'standard': '1024'
+    },
+    // Midjourney
+    'midjourney': {
+        'standard': '1024',
+        'hd': '1024 细节增强'
+    },
+    // 可灵 Kling
+    'kling': {
+        'standard': '1024',
+        'hd': '1024 细节增强'
+    },
+    // Ideogram
+    'ideogram': {
+        'standard': '1024',
+        'hd': '1024 细节增强'
+    },
+    // HiDream
+    'hidream': {
+        'standard': '1024',
+        'hd': '1024 细节增强'
     },
 };
 

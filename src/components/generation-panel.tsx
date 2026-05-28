@@ -404,12 +404,12 @@ export function GenerationPanel(
     // 获取当前模型支持的比例
     const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
     const getSupportedAspectRatios = useCallback(() => {
-        return findModelConfig(MODEL_ASPECT_RATIOS, pureModelId) || ['1:1', '4:3', '3:4'];
+        return findModelConfig(MODEL_ASPECT_RATIOS, pureModelId) || SHARED_DEFAULT_ASPECT_RATIOS;
     }, [pureModelId]);
 
     // 获取当前模型支持的质量
     const getSupportedQualities = useCallback(() => {
-        return findModelConfig(MODEL_QUALITIES, pureModelId) || ['standard'];
+        return findModelConfig(MODEL_QUALITIES, pureModelId) || SHARED_DEFAULT_QUALITIES;
     }, [pureModelId]);
 
     // 尺寸映射 — 使用 calculateActualPixels 综合考虑模型+比例+质量
@@ -943,10 +943,10 @@ export function GenerationPanel(
                             } catch {}
                             // Extract pure modelId for ratio/quality lookup
                             const newPureModelId = compositeKey.includes('::') ? compositeKey.split('::').pop()! : compositeKey;
-                            const supportedRatios = sharedFindModelConfig(SHARED_MODEL_ASPECT_RATIOS, newPureModelId) || ['1:1'];
+                            const supportedRatios = sharedFindModelConfig(SHARED_MODEL_ASPECT_RATIOS, newPureModelId) || SHARED_DEFAULT_ASPECT_RATIOS;
                             // 始终重置到新模型的第一个比例
                             setAspectRatio(supportedRatios[0]);
-                            const supportedQualities = sharedFindModelConfig(SHARED_MODEL_QUALITIES, newPureModelId) || ['standard'];
+                            const supportedQualities = sharedFindModelConfig(SHARED_MODEL_QUALITIES, newPureModelId) || SHARED_DEFAULT_QUALITIES;
                             // 始终重置到新模型的第一个质量
                             setQuality(supportedQualities[0]);
                         }}
