@@ -77,57 +77,58 @@
   </style>
 
   <style>
-    /* 画布点阵网格背景 */
+    /* 画布点阵背景 */
     .canvas-grid-bg {
       background-color: #0e1117;
-      background-image: radial-gradient(circle, #30363d 1px, transparent 1px);
+      background-image: radial-gradient(circle, #2a2f3a 1px, transparent 1px);
       background-size: 24px 24px;
     }
-    /* 画布空态脉冲动画 */
-    @keyframes pulse-gold {
-      0%, 100% { opacity: 0.6; }
-      50% { opacity: 1; }
+    /* 金色脉冲动画 */
+    @keyframes gold-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(212,175,55,0.6); }
+      50% { box-shadow: 0 0 0 6px rgba(212,175,55,0); }
     }
-    .pulse-gold-anim {
-      animation: pulse-gold 2s ease-in-out infinite;
+    .pipeline-pulse { animation: gold-pulse 1.5s infinite; }
+    /* 进度条动画 */
+    @keyframes progress-anim {
+      0% { width: 30%; }
+      50% { width: 70%; }
+      100% { width: 45%; }
     }
-    /* Pipeline脉冲动画 */
-    @keyframes pipeline-pulse {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(212,175,55,0.5); }
-      50% { box-shadow: 0 0 0 4px rgba(212,175,55,0.15); }
-    }
-    .pipeline-dot-active {
-      animation: pipeline-pulse 1.5s ease-in-out infinite;
-    }
-    /* 工具提示 */
-    .tooltip-wrap { position: relative; }
-    .tooltip-wrap .tooltip-text {
-      display: none;
-      position: absolute;
-      left: calc(100% + 8px);
-      top: 50%;
-      transform: translateY(-50%);
-      background: #242d3d;
-      color: #e6edf3;
-      font-size: 12px;
-      padding: 4px 8px;
-      border-radius: 4px;
-      white-space: nowrap;
-      z-index: 100;
-      pointer-events: none;
-    }
-    .tooltip-wrap:hover .tooltip-text { display: block; }
+    .progress-bar-anim { animation: progress-anim 2s ease-in-out infinite; }
+    /* 浮动工具栏显隐 */
+    .img-float-toolbar { opacity: 0; pointer-events: none; transition: opacity 0.15s; }
+    .canvas-img-card.selected .img-float-toolbar { opacity: 1; pointer-events: auto; }
+    /* 选中金色ring */
+    .canvas-img-card .img-ring { outline: 2px solid transparent; outline-offset: 3px; transition: outline-color 0.15s; }
+    .canvas-img-card.selected .img-ring { outline-color: #d4af37; }
+    /* 角拖拽手柄 */
+    .canvas-img-card .corner-handle { opacity: 0; transition: opacity 0.15s; }
+    .canvas-img-card.selected .corner-handle { opacity: 1; }
+    /* tooltip */
+    .pipeline-dot .dot-tooltip { display:none; position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%); white-space:nowrap; background:#1c2333; color:#e6edf3; font-size:11px; padding:3px 8px; border-radius:4px; border:1px solid #30363d; z-index:50; pointer-events:none; }
+    .pipeline-dot:hover .dot-tooltip { display:block; }
+    /* 节点库折叠 */
+    .node-cat-items { max-height:0; overflow:hidden; transition:max-height 0.25s ease; }
+    .node-cat-items.open { max-height:500px; }
+    .node-cat-hdr .chev { transition:transform 0.2s; }
+    .node-cat-hdr.open .chev { transform:rotate(90deg); }
     /* 右侧面板滚动条 */
-    .panel-scroll::-webkit-scrollbar { width: 4px; }
-    .panel-scroll::-webkit-scrollbar-track { background: transparent; }
-    .panel-scroll::-webkit-scrollbar-thumb { background: #30363d; border-radius: 2px; }
-    /* 智能指令栏自动补全 */
-    .autocomplete-item:hover { background: rgba(212,175,55,0.1); }
+    .rpanel-scroll::-webkit-scrollbar { width:4px; }
+    .rpanel-scroll::-webkit-scrollbar-track { background:transparent; }
+    .rpanel-scroll::-webkit-scrollbar-thumb { background:#30363d; border-radius:2px; }
+    /* Pipeline详情面板滑入 */
+    .pipe-detail { transform:translateX(-100%); transition:transform 0.25s ease; }
+    .pipe-detail.open { transform:translateX(0); }
+    /* SVG连线端口hover */
+    .port-dot { transition: r 0.15s; }
+    .port-dot:hover { r: 6; }
+    /* 节点库收起 */
+    .node-lib { transition:width 0.25s ease; overflow:hidden; }
+    .node-lib.collapsed { width:56px !important; }
+    .node-lib.collapsed .nl-content { opacity:0; pointer-events:none; }
     /* 比例矩形预览 */
-    .ratio-preview { border: 1px solid #30363d; border-radius: 2px; }
-    /* 右键菜单 */
-    .context-menu { display: none; }
-    .context-menu.show { display: block; }
+    .ratio-rect { border:1.5px solid currentColor; border-radius:2px; }
   </style>
 
   <!-- 图片兜底 -->
@@ -149,956 +150,799 @@
   </script>
 </head>
 
-<body class="bg-background text-on-surface font-sans overflow-hidden h-screen w-screen">
+<body class="bg-background text-on-surface font-sans overflow-hidden">
 
-  <!-- @main-content:start -->
-  <main class="flex-1 flex h-screen w-screen relative">
+  <!-- 全屏画布布局 -->
+  <div id="app-root" class="relative w-screen h-screen flex">
 
-    <!-- ========== 左侧工具栏 (56px) ========== -->
-    <aside id="left-toolbar" class="w-14 shrink-0 bg-surface flex flex-col items-center py-2 z-30 border-r border-outline-variant/20">
-      <!-- 模式切换 -->
-      <div class="flex flex-col items-center gap-0.5 mb-3">
-        <button id="mode-canvas" class="w-10 h-8 rounded-md bg-primary/20 text-primary flex items-center justify-center text-xs font-bold transition-colors" title="画布模式">
-          画布
-        </button>
-        <button id="mode-node" class="w-10 h-8 rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface flex items-center justify-center text-xs font-bold transition-colors" title="节点模式">
-          节点
+    <!-- ========== 左侧节点库面板 (200px，可收起到56px) ========== -->
+    <aside id="node-lib" class="node-lib shrink-0 bg-surface border-r border-outline-variant/20 flex flex-col z-30" style="width:200px;">
+      <!-- 头部 -->
+      <div class="flex items-center justify-between px-3 py-2.5 border-b border-outline-variant/20">
+        <span class="nl-content text-xs font-semibold text-on-surface">节点库</span>
+        <button id="btn-collapse-nl" class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="收起节点库">
+          <i data-lucide="panel-left-close" class="w-4 h-4"></i>
         </button>
       </div>
-
-      <div class="w-8 h-px bg-outline-variant/30 mb-2"></div>
-
-      <!-- 工具按钮列表 -->
-      <div class="flex flex-col items-center gap-1 flex-1">
-        <!-- 工具-选择 -->
-        <div class="tooltip-wrap">
-          <button id="tool-select" class="w-9 h-9 rounded-md flex items-center justify-center text-primary bg-primary/15 hover:bg-primary/25 transition-colors">
-            <i data-lucide="mouse-pointer-2" class="w-4 h-4"></i>
-          </button>
-          <span class="tooltip-text">选择</span>
-        </div>
-        <!-- 工具-平移 -->
-        <div class="tooltip-wrap">
-          <button id="tool-pan" class="w-9 h-9 rounded-md flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors">
-            <i data-lucide="move" class="w-4 h-4"></i>
-          </button>
-          <span class="tooltip-text">平移</span>
-        </div>
-        <!-- 工具-上传 -->
-        <div class="tooltip-wrap">
-          <button id="tool-upload" class="w-9 h-9 rounded-md flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors">
-            <i data-lucide="upload" class="w-4 h-4"></i>
-          </button>
-          <span class="tooltip-text">上传</span>
-        </div>
-        <!-- 工具-AI生成 -->
-        <div class="tooltip-wrap">
-          <button id="tool-ai-gen" class="w-9 h-9 rounded-md flex items-center justify-center text-primary hover:bg-primary/15 transition-colors">
-            <i data-lucide="sparkles" class="w-4 h-4"></i>
-          </button>
-          <span class="tooltip-text">AI生成</span>
-        </div>
-        <!-- 工具-修图 -->
-        <div class="tooltip-wrap">
-          <button id="tool-retouch" class="w-9 h-9 rounded-md flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors">
-            <i data-lucide="pencil" class="w-4 h-4"></i>
-          </button>
-          <span class="tooltip-text">修图</span>
-        </div>
-        <!-- 工具-框选 -->
-        <div class="tooltip-wrap">
-          <button id="tool-box-select" class="w-9 h-9 rounded-md flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors">
-            <i data-lucide="box-select" class="w-4 h-4"></i>
-          </button>
-          <span class="tooltip-text">框选</span>
-        </div>
-
-        <div class="w-6 h-px bg-outline-variant/30 my-1"></div>
-
-        <!-- 工具-条件分支 -->
-        <div class="tooltip-wrap">
-          <button id="tool-condition" class="w-9 h-9 rounded-md flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors">
-            <i data-lucide="git-branch" class="w-4 h-4"></i>
-          </button>
-          <span class="tooltip-text">条件分支</span>
-        </div>
-        <!-- 工具-循环节点 -->
-        <div class="tooltip-wrap">
-          <button id="tool-loop" class="w-9 h-9 rounded-md flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors">
-            <i data-lucide="repeat" class="w-4 h-4"></i>
-          </button>
-          <span class="tooltip-text">循环节点</span>
-        </div>
-        <!-- 工具-子图 -->
-        <div class="tooltip-wrap">
-          <button id="tool-subgraph" class="w-9 h-9 rounded-md flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors">
-            <i data-lucide="workflow" class="w-4 h-4"></i>
-          </button>
-          <span class="tooltip-text">子图</span>
-        </div>
-        <!-- 工具-Agent -->
-        <div class="tooltip-wrap">
-          <button id="tool-agent" class="w-9 h-9 rounded-md flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors">
-            <i data-lucide="bot" class="w-4 h-4"></i>
-          </button>
-          <span class="tooltip-text">Agent</span>
+      <!-- 搜索框 -->
+      <div class="px-3 py-2 nl-content">
+        <div class="relative">
+          <i data-lucide="search" class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-on-surface-variant/60"></i>
+          <input id="node-search" type="text" placeholder="搜索节点..." class="w-full bg-surface-container border-none rounded-md pl-8 pr-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
         </div>
       </div>
-
-      <!-- 底部设置 -->
-      <div class="tooltip-wrap">
-        <button id="tool-settings" class="w-9 h-9 rounded-md flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors">
-          <i data-lucide="settings" class="w-4 h-4"></i>
+      <!-- 分类列表 -->
+      <div id="node-cat-list" class="flex-1 overflow-y-auto nl-content px-2 pb-3 space-y-0.5" style="scrollbar-width:thin;">
+        <!-- 分类: 输入 (3项) -->
+        <div class="node-cat" data-cat="input">
+          <div class="node-cat-hdr open flex items-center gap-1.5 px-2 py-1.5 rounded cursor-pointer hover:bg-surface-container transition-colors">
+            <i data-lucide="chevron-right" class="chev w-3 h-3 text-on-surface-variant/60"></i>
+            <span class="w-2 h-2 rounded-full bg-node-input shrink-0"></span>
+            <span class="text-xs font-medium text-on-surface flex-1">输入</span>
+            <span class="text-[10px] text-on-surface-variant/60">3</span>
+          </div>
+          <div class="node-cat-items open space-y-0.5 pl-2">
+            <!-- 节点-加载图片 -->
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="image" class="w-3.5 h-3.5 text-node-input shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">加载图片</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+            <!-- 节点-加载URL -->
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="link" class="w-3.5 h-3.5 text-node-input shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">加载URL</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+            <!-- 节点-文本输入 -->
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="type" class="w-3.5 h-3.5 text-node-input shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">文本输入</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+          </div>
+        </div>
+        <!-- 分类: 处理 (6项) -->
+        <div class="node-cat" data-cat="process">
+          <div class="node-cat-hdr open flex items-center gap-1.5 px-2 py-1.5 rounded cursor-pointer hover:bg-surface-container transition-colors">
+            <i data-lucide="chevron-right" class="chev w-3 h-3 text-on-surface-variant/60"></i>
+            <span class="w-2 h-2 rounded-full bg-node-process shrink-0"></span>
+            <span class="text-xs font-medium text-on-surface flex-1">处理</span>
+            <span class="text-[10px] text-on-surface-variant/60">6</span>
+          </div>
+          <div class="node-cat-items open space-y-0.5 pl-2">
+            <!-- 节点-移除背景 -->
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="scissors" class="w-3.5 h-3.5 text-node-process shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">移除背景</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+            <!-- 节点-无损放大 -->
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="maximize-2" class="w-3.5 h-3.5 text-node-process shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">无损放大</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+            <!-- 节点-图生图 -->
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="repeat" class="w-3.5 h-3.5 text-node-process shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">图生图</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+            <!-- 节点-调色 -->
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="palette" class="w-3.5 h-3.5 text-node-process shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">调色</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+            <!-- 节点-白底合成 -->
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="square" class="w-3.5 h-3.5 text-node-process shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">白底合成</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+            <!-- 节点-擦除修复 -->
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="eraser" class="w-3.5 h-3.5 text-node-process shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">擦除修复</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+          </div>
+        </div>
+        <!-- 分类: Agent (4项) -->
+        <div class="node-cat" data-cat="agent">
+          <div class="node-cat-hdr open flex items-center gap-1.5 px-2 py-1.5 rounded cursor-pointer hover:bg-surface-container transition-colors">
+            <i data-lucide="chevron-right" class="chev w-3 h-3 text-on-surface-variant/60"></i>
+            <span class="w-2 h-2 rounded-full bg-node-agent shrink-0"></span>
+            <span class="text-xs font-medium text-on-surface flex-1">Agent</span>
+            <span class="text-[10px] text-on-surface-variant/60">4</span>
+          </div>
+          <div class="node-cat-items open space-y-0.5 pl-2">
+            <!-- 节点-AI质检 -->
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="shield-check" class="w-3.5 h-3.5 text-node-agent shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">AI质检</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+            <!-- 节点-AI优化 -->
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="sparkles" class="w-3.5 h-3.5 text-node-agent shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">AI优化</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+            <!-- 节点-AI修图 -->
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="wand-2" class="w-3.5 h-3.5 text-node-agent shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">AI修图</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+            <!-- 节点-图片分析 -->
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="scan-eye" class="w-3.5 h-3.5 text-node-agent shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">图片分析</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+          </div>
+        </div>
+        <!-- 分类: 逻辑 (5项) -->
+        <div class="node-cat" data-cat="logic">
+          <div class="node-cat-hdr flex items-center gap-1.5 px-2 py-1.5 rounded cursor-pointer hover:bg-surface-container transition-colors">
+            <i data-lucide="chevron-right" class="chev w-3 h-3 text-on-surface-variant/60"></i>
+            <span class="w-2 h-2 rounded-full bg-node-logic shrink-0"></span>
+            <span class="text-xs font-medium text-on-surface flex-1">逻辑</span>
+            <span class="text-[10px] text-on-surface-variant/60">5</span>
+          </div>
+          <div class="node-cat-items space-y-0.5 pl-2">
+            <!-- 节点-条件分支If -->
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="git-branch" class="w-3.5 h-3.5 text-node-logic shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">条件分支If</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+            <!-- 节点-Else -->
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="git-merge" class="w-3.5 h-3.5 text-node-logic shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">Else</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+            <!-- 节点-循环Loop -->
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="repeat-2" class="w-3.5 h-3.5 text-node-logic shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">循环Loop</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+            <!-- 节点-并行执行 -->
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="layers" class="w-3.5 h-3.5 text-node-logic shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">并行执行</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+            <!-- 节点-开关Switch -->
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="toggle-right" class="w-3.5 h-3.5 text-node-logic shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">开关Switch</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+          </div>
+        </div>
+        <!-- 分类: 子图 -->
+        <div class="node-cat" data-cat="subgraph">
+          <div class="node-cat-hdr flex items-center gap-1.5 px-2 py-1.5 rounded cursor-pointer hover:bg-surface-container transition-colors">
+            <i data-lucide="chevron-right" class="chev w-3 h-3 text-on-surface-variant/60"></i>
+            <span class="w-2 h-2 rounded-full bg-node-subgraph shrink-0"></span>
+            <span class="text-xs font-medium text-on-surface flex-1">子图</span>
+          </div>
+          <div class="node-cat-items space-y-0.5 pl-2">
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="box" class="w-3.5 h-3.5 text-node-subgraph shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">子图</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+          </div>
+        </div>
+        <!-- 分类: 输出 -->
+        <div class="node-cat" data-cat="output">
+          <div class="node-cat-hdr flex items-center gap-1.5 px-2 py-1.5 rounded cursor-pointer hover:bg-surface-container transition-colors">
+            <i data-lucide="chevron-right" class="chev w-3 h-3 text-on-surface-variant/60"></i>
+            <span class="w-2 h-2 rounded-full bg-node-output shrink-0"></span>
+            <span class="text-xs font-medium text-on-surface flex-1">输出</span>
+          </div>
+          <div class="node-cat-items space-y-0.5 pl-2">
+            <div class="node-item flex items-center gap-2 px-2 py-1.5 rounded cursor-grab hover:bg-surface-container transition-colors" draggable="true">
+              <i data-lucide="download" class="w-3.5 h-3.5 text-node-output shrink-0"></i>
+              <span class="text-xs text-on-surface flex-1">保存输出</span>
+              <span class="text-on-surface-variant/40 text-xs cursor-grab">⠿</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- 收起时的图标列 -->
+      <div id="nl-collapsed-icons" class="hidden flex-col items-center gap-2 py-3">
+        <button id="btn-expand-nl" class="p-2 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="展开节点库">
+          <i data-lucide="panel-left-open" class="w-4 h-4"></i>
         </button>
-        <span class="tooltip-text">设置</span>
+        <div class="w-7 h-7 rounded bg-surface-container flex items-center justify-center" title="输入节点"><i data-lucide="image" class="w-3.5 h-3.5 text-node-input"></i></div>
+        <div class="w-7 h-7 rounded bg-surface-container flex items-center justify-center" title="处理节点"><i data-lucide="scissors" class="w-3.5 h-3.5 text-node-process"></i></div>
+        <div class="w-7 h-7 rounded bg-surface-container flex items-center justify-center" title="Agent节点"><i data-lucide="sparkles" class="w-3.5 h-3.5 text-node-agent"></i></div>
+        <div class="w-7 h-7 rounded bg-surface-container flex items-center justify-center" title="逻辑节点"><i data-lucide="git-branch" class="w-3.5 h-3.5 text-node-logic"></i></div>
       </div>
     </aside>
 
-    <!-- ========== 画布区域 ========== -->
-    <div id="canvas-area" class="flex-1 relative overflow-hidden">
+    <!-- ========== 画布主区域 ========== -->
+    <main id="canvas-area" class="flex-1 relative canvas-grid-bg overflow-hidden">
+      <!-- 左上角Logo -->
+      <div class="absolute top-4 left-4 z-20 flex items-center gap-2 select-none pointer-events-none">
+        <div class="w-7 h-7 rounded bg-primary/20 flex items-center justify-center"><i data-lucide="infinity" class="w-4 h-4 text-primary"></i></div>
+        <span class="text-sm font-bold text-on-surface/25">无界</span>
+      </div>
 
-      <!-- 画布左上角 logo -->
-      <div class="absolute top-3 left-3 z-20 flex items-center gap-1.5 opacity-60">
-        <div class="w-6 h-6 rounded bg-primary/20 flex items-center justify-center">
-          <i data-lucide="infinity" class="w-4 h-4 text-primary"></i>
+      <!-- SVG连线层 -->
+      <svg id="pipeline-svg" class="absolute inset-0 w-full h-full pointer-events-none z-10">
+        <defs>
+          <marker id="arr-blue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="none" stroke="#3b82f6" stroke-width="1.5"/></marker>
+          <marker id="arr-green" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="none" stroke="#2ea043" stroke-width="1.5"/></marker>
+        </defs>
+        <!-- 连线A→B (蓝色=图片数据) -->
+        <path d="M 430,240 C 510,240 530,220 610,220" stroke="#3b82f6" stroke-width="2" fill="none" opacity="0.7"/>
+        <circle cx="430" cy="240" r="4" fill="#3b82f6" class="port-dot" style="pointer-events:auto;"/>
+        <circle cx="610" cy="220" r="4" fill="#3b82f6" class="port-dot" style="pointer-events:auto;"/>
+        <text x="515" y="215" fill="#3b82f6" font-size="9" text-anchor="middle" opacity="0.6">图片数据</text>
+        <!-- 连线A→C (粉色虚线=蒙版数据) -->
+        <path d="M 430,280 C 530,280 560,420 610,420" stroke="#f472b6" stroke-width="2" fill="none" stroke-dasharray="6,3" opacity="0.7"/>
+        <circle cx="430" cy="280" r="4" fill="#f472b6" class="port-dot" style="pointer-events:auto;"/>
+        <circle cx="610" cy="420" r="4" fill="#f472b6" class="port-dot" style="pointer-events:auto;"/>
+        <text x="535" y="365" fill="#f472b6" font-size="9" text-anchor="middle" opacity="0.6">蒙版数据</text>
+        <!-- 连线B→D (绿色=通过) -->
+        <path d="M 820,220 C 910,220 920,320 970,320" stroke="#2ea043" stroke-width="2" fill="none" opacity="0.7"/>
+        <circle cx="820" cy="220" r="4" fill="#2ea043" class="port-dot" style="pointer-events:auto;"/>
+        <circle cx="970" cy="320" r="4" fill="#2ea043" class="port-dot" style="pointer-events:auto;"/>
+        <text x="895" y="258" fill="#2ea043" font-size="9" text-anchor="middle" opacity="0.6">通过</text>
+      </svg>
+
+      <!-- ========== 画布图片卡片 ========== -->
+      <div id="canvas-images" class="absolute inset-0 z-20">
+
+        <!-- 图片A - 赛博朋克城市 (默认选中) -->
+        <div class="canvas-img-card selected absolute" id="img-card-a" style="left:120px;top:130px;">
+          <!-- 浮动工具栏 -->
+          <div class="img-float-toolbar absolute -top-10 left-1/2 -translate-x-1/2 flex items-center gap-0.5 bg-surface rounded-lg shadow-float px-1.5 py-1 border border-outline-variant/30 z-30">
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="放大"><i data-lucide="zoom-in" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="移除背景"><i data-lucide="scissors" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="擦除"><i data-lucide="eraser" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="蒙版"><i data-lucide="mask" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="扩展"><i data-lucide="expand" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="图生图"><i data-lucide="repeat" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="裁切"><i data-lucide="crop" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="下载"><i data-lucide="download" class="w-3.5 h-3.5"></i></button>
+          </div>
+          <!-- 图片主体 -->
+          <div class="img-ring rounded-lg overflow-hidden shadow-float relative" style="width:280px;height:200px;">
+            <img src="https://images.unsplash.com/photo-1558618666-fcd25c85f82e?w=560&h=400&fit=crop" alt="赛博朋克城市夜景" data-category="建筑城市" class="w-full h-full object-cover rounded-lg" />
+            <div class="corner-handle absolute top-0 left-0 w-3 h-3 bg-primary rounded-br-sm cursor-nw-resize"></div>
+            <div class="corner-handle absolute top-0 right-0 w-3 h-3 bg-primary rounded-bl-sm cursor-ne-resize"></div>
+            <div class="corner-handle absolute bottom-0 left-0 w-3 h-3 bg-primary rounded-tr-sm cursor-sw-resize"></div>
+            <div class="corner-handle absolute bottom-0 right-0 w-3 h-3 bg-primary rounded-tl-sm cursor-se-resize"></div>
+          </div>
+          <!-- Pipeline迷你指示器 -->
+          <div class="flex items-center gap-0 mt-1.5 px-1">
+            <!-- 步骤1: 已完成(绿色) -->
+            <div class="pipeline-dot relative flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-success inline-block"></span><span class="dot-tooltip">加载图片</span></div>
+            <span class="w-3 h-px bg-success/60 inline-block"></span>
+            <!-- 步骤2: 已完成(绿色) -->
+            <div class="pipeline-dot relative flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-success inline-block"></span><span class="dot-tooltip">移除背景</span></div>
+            <span class="w-3 h-px bg-success/60 inline-block"></span>
+            <!-- 步骤3: 执行中(金色脉冲) -->
+            <div class="pipeline-dot relative flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-primary inline-block pipeline-pulse"></span><span class="dot-tooltip">图生图</span></div>
+            <span class="w-3 h-px bg-outline inline-block"></span>
+            <!-- 步骤4: 条件分支(黄色) -->
+            <div class="pipeline-dot relative flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-node-logic inline-block"></span><span class="dot-tooltip">条件分支</span></div>
+            <span class="w-3 h-px bg-outline inline-block"></span>
+            <!-- 步骤5: 待执行(灰色) -->
+            <div class="pipeline-dot relative flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-outline inline-block"></span><span class="dot-tooltip">白底合成</span></div>
+            <span class="w-3 h-px bg-outline inline-block"></span>
+            <!-- 步骤6: 循环中(黄色数字) -->
+            <div class="pipeline-dot relative flex items-center justify-center"><span class="w-3.5 h-3.5 rounded-full bg-warning/20 border border-warning/60 inline-flex items-center justify-center text-[8px] font-bold text-warning">2</span><span class="dot-tooltip">循环优化 x2</span></div>
+          </div>
+          <div class="text-[10px] text-on-surface-variant/60 mt-0.5 px-1 truncate" style="width:280px;">赛博朋克城市.png</div>
         </div>
-        <span class="text-xs font-bold text-on-surface-variant">无界</span>
-      </div>
 
-      <!-- 画布右上角模式标识 -->
-      <div id="mode-badge" class="absolute top-3 right-3 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface/80 backdrop-blur-sm border border-outline-variant/20">
-        <i data-lucide="pen-tool" class="w-3 h-3 text-primary"></i>
-        <span class="text-xs text-on-surface-variant">画布模式</span>
-      </div>
-
-      <!-- 智能指令栏（画布顶部居中浮动） -->
-      <div id="smart-command-bar" class="absolute top-4 left-1/2 -translate-x-1/2 z-30 w-[480px]">
-        <div class="flex items-center bg-smart-bar rounded-xl border border-primary/30 px-3 py-2 shadow-float">
-          <i data-lucide="zap" class="w-4 h-4 text-primary shrink-0"></i>
-          <input id="smart-command-input" type="text" placeholder="输入指令... (如：将选中图片转为水彩风格)" class="flex-1 bg-transparent border-none text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none mx-2" />
-          <button id="smart-command-send" class="w-7 h-7 rounded-lg bg-primary/20 flex items-center justify-center text-primary hover:bg-primary/30 transition-colors shrink-0">
-            <i data-lucide="send" class="w-3.5 h-3.5"></i>
-          </button>
+        <!-- 图片B - 图生图结果 -->
+        <div class="canvas-img-card absolute" id="img-card-b" style="left:610px;top:100px;">
+          <div class="img-float-toolbar absolute -top-10 left-1/2 -translate-x-1/2 flex items-center gap-0.5 bg-surface rounded-lg shadow-float px-1.5 py-1 border border-outline-variant/30 z-30">
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="放大"><i data-lucide="zoom-in" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="移除背景"><i data-lucide="scissors" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="擦除"><i data-lucide="eraser" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="蒙版"><i data-lucide="mask" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="扩展"><i data-lucide="expand" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="图生图"><i data-lucide="repeat" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="裁切"><i data-lucide="crop" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="下载"><i data-lucide="download" class="w-3.5 h-3.5"></i></button>
+          </div>
+          <div class="img-ring rounded-lg overflow-hidden shadow-card relative" style="width:200px;height:200px;">
+            <img src="https://images.unsplash.com/photo-1519608487953-e999c86e7455?w=400&h=400&fit=crop" alt="梦幻城市夜景" data-category="建筑城市" class="w-full h-full object-cover rounded-lg" />
+            <div class="corner-handle absolute top-0 left-0 w-3 h-3 bg-primary rounded-br-sm cursor-nw-resize"></div>
+            <div class="corner-handle absolute top-0 right-0 w-3 h-3 bg-primary rounded-bl-sm cursor-ne-resize"></div>
+            <div class="corner-handle absolute bottom-0 left-0 w-3 h-3 bg-primary rounded-tr-sm cursor-sw-resize"></div>
+            <div class="corner-handle absolute bottom-0 right-0 w-3 h-3 bg-primary rounded-tl-sm cursor-se-resize"></div>
+          </div>
+          <div class="flex items-center gap-0 mt-1.5 px-1">
+            <div class="pipeline-dot relative flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-success inline-block"></span><span class="dot-tooltip">图生图</span></div>
+            <span class="w-3 h-px bg-success/60 inline-block"></span>
+            <div class="pipeline-dot relative flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-success inline-block"></span><span class="dot-tooltip">调色</span></div>
+            <span class="w-3 h-px bg-primary/60 inline-block"></span>
+            <div class="pipeline-dot relative flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-primary inline-block pipeline-pulse"></span><span class="dot-tooltip">AI优化</span></div>
+          </div>
+          <div class="text-[10px] text-on-surface-variant/60 mt-0.5 px-1 truncate" style="width:200px;">梦幻城市_i2i.png</div>
         </div>
-        <!-- 自动补全下拉 -->
-        <div id="smart-autocomplete" class="hidden mt-1 bg-surface rounded-lg border border-outline-variant/20 shadow-float overflow-hidden">
-          <!-- 补全项1 -->
-          <div class="autocomplete-item flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors">
-            <i data-lucide="git-branch" class="w-3.5 h-3.5 text-node-logic shrink-0"></i>
-            <span class="text-sm text-on-surface">添加条件分支节点</span>
-            <span class="text-xs text-on-surface-variant ml-auto">条件</span>
+
+        <!-- 图片C - 蒙版生成结果 -->
+        <div class="canvas-img-card absolute" id="img-card-c" style="left:610px;top:340px;">
+          <div class="img-float-toolbar absolute -top-10 left-1/2 -translate-x-1/2 flex items-center gap-0.5 bg-surface rounded-lg shadow-float px-1.5 py-1 border border-outline-variant/30 z-30">
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="放大"><i data-lucide="zoom-in" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="移除背景"><i data-lucide="scissors" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="擦除"><i data-lucide="eraser" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="蒙版"><i data-lucide="mask" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="扩展"><i data-lucide="expand" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="图生图"><i data-lucide="repeat" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="裁切"><i data-lucide="crop" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="下载"><i data-lucide="download" class="w-3.5 h-3.5"></i></button>
           </div>
-          <!-- 补全项2 -->
-          <div class="autocomplete-item flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors">
-            <i data-lucide="repeat" class="w-3.5 h-3.5 text-node-subgraph shrink-0"></i>
-            <span class="text-sm text-on-surface">添加循环节点</span>
-            <span class="text-xs text-on-surface-variant ml-auto">循环</span>
+          <div class="img-ring rounded-lg overflow-hidden shadow-card relative" style="width:180px;height:180px;">
+            <img src="https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=360&h=360&fit=crop" alt="山脉蒙版图层" data-category="自然风景" class="w-full h-full object-cover rounded-lg" />
+            <div class="corner-handle absolute top-0 left-0 w-3 h-3 bg-primary rounded-br-sm cursor-nw-resize"></div>
+            <div class="corner-handle absolute top-0 right-0 w-3 h-3 bg-primary rounded-bl-sm cursor-ne-resize"></div>
+            <div class="corner-handle absolute bottom-0 left-0 w-3 h-3 bg-primary rounded-tr-sm cursor-sw-resize"></div>
+            <div class="corner-handle absolute bottom-0 right-0 w-3 h-3 bg-primary rounded-tl-sm cursor-se-resize"></div>
           </div>
-          <!-- 补全项3 -->
-          <div class="autocomplete-item flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors">
-            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-node-ai shrink-0"></i>
-            <span class="text-sm text-on-surface">AI分析选中图片</span>
-            <span class="text-xs text-on-surface-variant ml-auto">AI分析</span>
+          <div class="flex items-center gap-0 mt-1.5 px-1">
+            <div class="pipeline-dot relative flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-success inline-block"></span><span class="dot-tooltip">蒙版提取</span></div>
+            <span class="w-3 h-px bg-success/60 inline-block"></span>
+            <div class="pipeline-dot relative flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-outline inline-block"></span><span class="dot-tooltip">擦除修复</span></div>
           </div>
-          <!-- 补全项4 -->
-          <div class="autocomplete-item flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors">
-            <i data-lucide="bot" class="w-3.5 h-3.5 text-node-agent shrink-0"></i>
-            <span class="text-sm text-on-surface">调用Agent执行任务</span>
-            <span class="text-xs text-on-surface-variant ml-auto">Agent</span>
+          <div class="text-[10px] text-on-surface-variant/60 mt-0.5 px-1 truncate" style="width:180px;">山脉蒙版_mask.png</div>
+        </div>
+
+        <!-- 图片D - 最终输出 -->
+        <div class="canvas-img-card absolute" id="img-card-d" style="left:970px;top:230px;">
+          <div class="img-float-toolbar absolute -top-10 left-1/2 -translate-x-1/2 flex items-center gap-0.5 bg-surface rounded-lg shadow-float px-1.5 py-1 border border-outline-variant/30 z-30">
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="放大"><i data-lucide="zoom-in" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="移除背景"><i data-lucide="scissors" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="擦除"><i data-lucide="eraser" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="蒙版"><i data-lucide="mask" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="扩展"><i data-lucide="expand" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="图生图"><i data-lucide="repeat" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="裁切"><i data-lucide="crop" class="w-3.5 h-3.5"></i></button>
+            <button class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="下载"><i data-lucide="download" class="w-3.5 h-3.5"></i></button>
           </div>
+          <div class="img-ring rounded-lg overflow-hidden shadow-card relative" style="width:240px;height:180px;">
+            <img src="https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?w=480&h=360&fit=crop" alt="最终优化输出图" data-category="艺术" class="w-full h-full object-cover rounded-lg" />
+            <div class="corner-handle absolute top-0 left-0 w-3 h-3 bg-primary rounded-br-sm cursor-nw-resize"></div>
+            <div class="corner-handle absolute top-0 right-0 w-3 h-3 bg-primary rounded-bl-sm cursor-ne-resize"></div>
+            <div class="corner-handle absolute bottom-0 left-0 w-3 h-3 bg-primary rounded-tr-sm cursor-sw-resize"></div>
+            <div class="corner-handle absolute bottom-0 right-0 w-3 h-3 bg-primary rounded-tl-sm cursor-se-resize"></div>
+            <div class="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-success/20 border border-success/40 text-[9px] text-success font-medium">输出</div>
+          </div>
+          <div class="flex items-center gap-0 mt-1.5 px-1">
+            <div class="pipeline-dot relative flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-success inline-block"></span><span class="dot-tooltip">AI优化</span></div>
+            <span class="w-3 h-px bg-success/60 inline-block"></span>
+            <div class="pipeline-dot relative flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-success inline-block"></span><span class="dot-tooltip">白底合成</span></div>
+            <span class="w-3 h-px bg-success/60 inline-block"></span>
+            <div class="pipeline-dot relative flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-success inline-block"></span><span class="dot-tooltip">保存</span></div>
+          </div>
+          <div class="text-[10px] text-on-surface-variant/60 mt-0.5 px-1 truncate" style="width:240px;">最终输出_final.png</div>
         </div>
       </div>
 
-      <!-- 画布内容（点阵网格背景 + 空态提示） -->
-      <div id="canvas-content" class="w-full h-full canvas-grid-bg flex items-center justify-center">
-        <!-- 画布空态 -->
-        <div id="canvas-empty-state" class="text-center select-none">
-          <h1 class="text-2xl font-bold text-on-surface mb-2">无限画布</h1>
-          <p class="text-sm text-on-surface-variant mb-1">拖入图片 / 上传图片 / AI 生成图片到画布</p>
-          <p class="text-xs text-on-surface-variant/70 mb-1">左键选择 · 滚轮缩放 · 空格+拖动平移 · 右键菜单</p>
-          <p class="text-xs text-on-surface-variant/70 mb-4">底部工具栏：图像生成 · 修图 · Agent编排 · 字境大师 · 精修引擎 · 品牌电商</p>
-          <div class="flex items-center justify-center gap-3">
-            <button id="btn-guide" class="px-4 py-1.5 rounded-md bg-surface-container text-on-surface-variant text-xs font-medium hover:bg-surface-container-high hover:text-on-surface transition-colors border border-outline-variant/20">
-              操作说明
-            </button>
-            <button id="btn-changelog" class="px-4 py-1.5 rounded-md bg-surface-container text-on-surface-variant text-xs font-medium hover:bg-surface-container-high hover:text-on-surface transition-colors border border-outline-variant/20">
-              更新内容
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- 画布右键菜单 -->
-      <div id="canvas-context-menu" class="context-menu absolute z-40 bg-surface rounded-lg border border-outline-variant/20 shadow-float py-1 min-w-[180px]">
-        <button class="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-on-surface hover:bg-surface-container transition-colors">
-          <i data-lucide="copy" class="w-3.5 h-3.5 text-on-surface-variant"></i>复制
-        </button>
-        <button class="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-on-surface hover:bg-surface-container transition-colors">
-          <i data-lucide="scissors" class="w-3.5 h-3.5 text-on-surface-variant"></i>剪切
-        </button>
-        <button class="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-on-surface hover:bg-surface-container transition-colors">
-          <i data-lucide="clipboard" class="w-3.5 h-3.5 text-on-surface-variant"></i>粘贴
-        </button>
-        <div class="h-px bg-outline-variant/20 my-1"></div>
-        <button class="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-on-surface hover:bg-surface-container transition-colors">
-          <i data-lucide="trash-2" class="w-3.5 h-3.5 text-error"></i><span class="text-error">删除</span>
-        </button>
-        <div class="h-px bg-outline-variant/20 my-1"></div>
-        <button class="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-on-surface hover:bg-surface-container transition-colors">
-          <i data-lucide="image" class="w-3.5 h-3.5 text-on-surface-variant"></i>AI生成图片
-        </button>
-        <button class="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-on-surface hover:bg-surface-container transition-colors">
-          <i data-lucide="pencil" class="w-3.5 h-3.5 text-on-surface-variant"></i>修图
-        </button>
-        <button class="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-on-surface hover:bg-surface-container transition-colors">
-          <i data-lucide="maximize-2" class="w-3.5 h-3.5 text-on-surface-variant"></i>适配画布
-        </button>
-      </div>
-
-      <!-- Pipeline 圆点指示器（画布底部居中浮动，在底部工具栏上方） -->
-      <div id="pipeline-indicator" class="absolute bottom-16 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-2 rounded-full bg-surface/70 backdrop-blur-sm border border-outline-variant/20">
-        <!-- 步骤1 -->
-        <div class="w-2.5 h-2.5 rounded-full bg-primary pipeline-dot-active cursor-pointer" title="步骤1: 图像生成"></div>
-        <!-- 步骤2 -->
-        <div class="w-2.5 h-2.5 rounded-full bg-surface-container-high cursor-pointer" title="步骤2: 风格转换"></div>
-        <!-- 步骤3 -->
-        <div class="w-2.5 h-2.5 rounded-full bg-surface-container-high cursor-pointer" title="步骤3: 图片精修"></div>
-        <!-- 步骤4 -->
-        <div class="w-2.5 h-2.5 rounded-full bg-surface-container-high cursor-pointer" title="步骤4: 背景移除"></div>
-        <!-- 步骤5 -->
-        <div class="w-2.5 h-2.5 rounded-full bg-surface-container-high cursor-pointer" title="步骤5: 导出输出"></div>
-      </div>
-
-      <!-- 底部浮动工具栏（17个功能项） -->
-      <div id="bottom-toolbar" class="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-0.5 px-2 py-1.5 rounded-xl bg-surface/80 backdrop-blur-sm border border-outline-variant/20 shadow-float">
-        <!-- 选择 -->
-        <button id="btool-select" class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" title="选择">
-          <i data-lucide="mouse-pointer-2" class="w-4 h-4"></i>
-        </button>
-        <!-- 平移 -->
-        <button id="btool-pan" class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" title="平移">
-          <i data-lucide="move" class="w-4 h-4"></i>
-        </button>
-        <!-- 上传 -->
-        <button id="btool-upload" class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" title="上传">
-          <i data-lucide="upload" class="w-4 h-4"></i>
-        </button>
-        <!-- AI生成 (金色高亮) -->
-        <button id="btool-ai-gen" class="w-8 h-8 rounded-lg flex items-center justify-center text-primary bg-primary/15 hover:bg-primary/25 transition-colors" title="AI生成">
-          <i data-lucide="sparkles" class="w-4 h-4"></i>
-        </button>
-        <!-- 修图 -->
-        <button id="btool-retouch" class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" title="修图">
-          <i data-lucide="pencil" class="w-4 h-4"></i>
-        </button>
-        <!-- 框选 -->
-        <button id="btool-box-select" class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" title="框选">
-          <i data-lucide="box-select" class="w-4 h-4"></i>
-        </button>
-        <!-- 保存 -->
-        <button id="btool-save" class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" title="保存">
-          <i data-lucide="save" class="w-4 h-4"></i>
-        </button>
-        <!-- 适配 -->
-        <button id="btool-fit" class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" title="适配">
-          <i data-lucide="maximize-2" class="w-4 h-4"></i>
-        </button>
-
+      <!-- ========== 底部浮动工具栏 (17项) ========== -->
+      <div id="bottom-toolbar" class="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-0.5 bg-surface/95 backdrop-blur-sm rounded-xl shadow-float px-2 py-1.5 border border-outline-variant/20">
+        <button id="btool-select" class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface text-xs transition-colors" title="选择"><i data-lucide="mouse-pointer-2" class="w-3.5 h-3.5"></i><span class="hidden sm:inline">选择</span></button>
+        <button id="btool-pan" class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface text-xs transition-colors" title="平移"><i data-lucide="hand" class="w-3.5 h-3.5"></i><span class="hidden sm:inline">平移</span></button>
+        <button id="btool-upload" class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface text-xs transition-colors" title="上传"><i data-lucide="upload" class="w-3.5 h-3.5"></i><span class="hidden sm:inline">上传</span></button>
         <div class="w-px h-5 bg-outline-variant/30 mx-0.5"></div>
-
-        <!-- 字境大师 -->
-        <button id="btool-type" class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors text-xs font-bold" title="字境大师">
-          字
-        </button>
-        <!-- 图层 -->
-        <button id="btool-layers" class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" title="图层">
-          <i data-lucide="layers" class="w-4 h-4"></i>
-        </button>
-        <!-- 素材库 -->
-        <button id="btool-assets" class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" title="素材库">
-          <i data-lucide="folder-open" class="w-4 h-4"></i>
-        </button>
-        <!-- Agent -->
-        <button id="btool-agent" class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" title="Agent">
-          <i data-lucide="bot" class="w-4 h-4"></i>
-        </button>
-        <!-- 搜索 -->
-        <button id="btool-search" class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" title="搜索">
-          <i data-lucide="search" class="w-4 h-4"></i>
-        </button>
-
+        <button id="btool-ai-gen" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-primary/15 text-primary hover:bg-primary/25 text-xs font-medium transition-colors" title="AI生成"><i data-lucide="sparkles" class="w-3.5 h-3.5"></i><span>AI生成</span></button>
+        <button id="btool-retouch" class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface text-xs transition-colors" title="修图"><i data-lucide="pencil" class="w-3.5 h-3.5"></i><span class="hidden sm:inline">修图</span></button>
+        <button id="btool-box-select" class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface text-xs transition-colors" title="框选"><i data-lucide="box-select" class="w-3.5 h-3.5"></i><span class="hidden sm:inline">框选</span></button>
         <div class="w-px h-5 bg-outline-variant/30 mx-0.5"></div>
-
-        <!-- 缩放35% -->
-        <span id="btool-zoom-level" class="text-xs text-on-surface-variant w-10 text-center select-none">35%</span>
-        <!-- 缩小 -->
-        <button id="btool-zoom-out" class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" title="缩小">
-          <i data-lucide="minus" class="w-4 h-4"></i>
-        </button>
-        <!-- 放大 -->
-        <button id="btool-zoom-in" class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" title="放大">
-          <i data-lucide="plus" class="w-4 h-4"></i>
-        </button>
-        <!-- 全屏 -->
-        <button id="btool-fullscreen" class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" title="全屏">
-          <i data-lucide="maximize" class="w-4 h-4"></i>
-        </button>
+        <button id="btool-save" class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface text-xs transition-colors" title="保存"><i data-lucide="save" class="w-3.5 h-3.5"></i><span class="hidden sm:inline">保存</span></button>
+        <button id="btool-fit" class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface text-xs transition-colors" title="适配"><i data-lucide="maximize" class="w-3.5 h-3.5"></i><span class="hidden sm:inline">适配</span></button>
+        <button id="btool-font-master" class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface text-xs transition-colors" title="字境大师"><span class="w-4 h-4 rounded bg-primary/20 text-primary flex items-center justify-center text-[10px] font-bold">字</span><span class="hidden sm:inline">字境大师</span></button>
+        <button id="btool-layers" class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface text-xs transition-colors" title="图层"><i data-lucide="layers" class="w-3.5 h-3.5"></i><span class="hidden sm:inline">图层</span></button>
+        <button id="btool-assets" class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface text-xs transition-colors" title="素材库"><i data-lucide="package" class="w-3.5 h-3.5"></i><span class="hidden sm:inline">素材库</span></button>
+        <button id="btool-agent" class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface text-xs transition-colors" title="Agent"><i data-lucide="bot" class="w-3.5 h-3.5"></i><span class="hidden sm:inline">Agent</span></button>
+        <button id="btool-search" class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface text-xs transition-colors" title="搜索"><i data-lucide="search" class="w-3.5 h-3.5"></i></button>
+        <div class="w-px h-5 bg-outline-variant/30 mx-0.5"></div>
+        <span id="zoom-level" class="text-xs text-on-surface-variant w-10 text-center select-none">35%</span>
+        <button id="btool-zoom-out" class="p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" title="缩小"><i data-lucide="minus" class="w-3.5 h-3.5"></i></button>
+        <button id="btool-zoom-in" class="p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" title="放大"><i data-lucide="plus" class="w-3.5 h-3.5"></i></button>
+        <button id="btool-fullscreen" class="p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" title="全屏"><i data-lucide="fullscreen" class="w-3.5 h-3.5"></i></button>
       </div>
 
-      <!-- 迷你执行面板（右下角浮动） -->
-      <div id="mini-exec-panel" class="absolute bottom-16 right-[352px] z-20 w-56 rounded-lg bg-surface/80 backdrop-blur-sm border border-outline-variant/20 shadow-float p-3">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-xs font-medium text-on-surface">执行进度</span>
-          <span class="text-xs text-primary font-medium">1/5</span>
+    </main>
+
+    <!-- ========== 右侧Pipeline详情面板 (280px，选中图片时弹出) ========== -->
+    <div id="pipe-detail" class="pipe-detail shrink-0 bg-surface border-l border-outline-variant/20 flex flex-col z-25" style="width:280px;position:absolute;right:340px;top:0;bottom:0;">
+      <!-- 标题 -->
+      <div class="flex items-center justify-between px-4 py-3 border-b border-outline-variant/20">
+        <div class="flex items-center gap-2">
+          <i data-lucide="git-branch" class="w-4 h-4 text-primary"></i>
+          <span class="text-sm font-semibold text-on-surface">操作链 · 赛博朋克城市</span>
         </div>
-        <!-- 进度条 -->
-        <div class="w-full h-1.5 bg-surface-container rounded-full overflow-hidden mb-2">
-          <div class="h-full bg-primary rounded-full" style="width: 20%;"></div>
+        <button id="btn-close-pd" class="p-1 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="关闭"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
+      </div>
+      <!-- 步骤列表 -->
+      <div class="flex-1 overflow-y-auto rpanel-scroll px-4 py-3 space-y-2">
+        <!-- 步骤1: 已完成 -->
+        <div class="bg-surface-container rounded-lg p-3 border-l-2 border-success">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="w-5 h-5 rounded-full bg-success/20 text-success flex items-center justify-center text-[10px] font-bold">1</span>
+            <i data-lucide="image" class="w-3.5 h-3.5 text-node-input"></i>
+            <span class="text-xs font-medium text-on-surface flex-1">加载图片</span>
+            <span class="text-success text-xs">&#10003;</span>
+          </div>
+          <div class="ml-7 text-[10px] text-on-surface-variant">来源: 上传 · 280×200px · PNG</div>
         </div>
-        <div class="flex items-center justify-between">
-          <span class="text-xs text-on-surface-variant">图像生成中...</span>
-          <div class="flex items-center gap-1">
-            <button id="exec-pause" class="w-6 h-6 rounded flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors" title="暂停">
-              <i data-lucide="pause" class="w-3 h-3"></i>
-            </button>
-            <button id="exec-cancel" class="w-6 h-6 rounded flex items-center justify-center text-on-surface-variant hover:text-error hover:bg-error/10 transition-colors" title="取消">
-              <i data-lucide="x" class="w-3 h-3"></i>
-            </button>
+        <!-- 步骤2: 已完成 -->
+        <div class="bg-surface-container rounded-lg p-3 border-l-2 border-success">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="w-5 h-5 rounded-full bg-success/20 text-success flex items-center justify-center text-[10px] font-bold">2</span>
+            <i data-lucide="scissors" class="w-3.5 h-3.5 text-node-process"></i>
+            <span class="text-xs font-medium text-on-surface flex-1">移除背景</span>
+            <span class="text-success text-xs">&#10003;</span>
+          </div>
+          <div class="ml-7 text-[10px] text-on-surface-variant">模式: 自动检测 · 耗时 2.3s</div>
+          <div class="ml-7 mt-1.5 w-16 h-12 rounded bg-surface-container-high overflow-hidden">
+            <img src="https://images.unsplash.com/photo-1558618666-fcd25c85f82e?w=64&h=48&fit=crop" alt="移除背景缩略图" data-category="建筑城市" class="w-full h-full object-cover" />
           </div>
         </div>
+        <!-- 步骤3: 执行中 -->
+        <div class="bg-surface-container rounded-lg p-3 border-l-2 border-primary ring-1 ring-primary/30 pipeline-pulse">
+          <div class="flex items-center gap-2 mb-1.5">
+            <span class="w-5 h-5 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[10px] font-bold">3</span>
+            <i data-lucide="repeat" class="w-3.5 h-3.5 text-node-process"></i>
+            <span class="text-xs font-medium text-on-surface flex-1">图生图</span>
+            <span class="text-primary text-[10px]">执行中...</span>
+          </div>
+          <div class="ml-7">
+            <div class="text-[10px] text-on-surface-variant mb-1.5">提示词: 赛博朋克风格, 霓虹灯光</div>
+            <div class="w-full h-1.5 bg-surface-container-high rounded-full overflow-hidden"><div class="h-full bg-primary rounded-full progress-bar-anim" style="width:45%;"></div></div>
+          </div>
+        </div>
+        <!-- 步骤4: 条件分支 -->
+        <div class="bg-surface-container rounded-lg p-3 border-l-2 border-node-logic">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="w-5 h-5 rounded-full bg-node-logic/20 text-node-logic flex items-center justify-center text-[10px] font-bold">4</span>
+            <i data-lucide="git-branch" class="w-3.5 h-3.5 text-node-logic"></i>
+            <span class="text-xs font-medium text-on-surface flex-1">条件分支</span>
+            <span class="text-on-surface-variant text-[10px]">等待</span>
+          </div>
+          <div class="ml-7 flex gap-2 mt-1">
+            <span class="px-1.5 py-0.5 rounded text-[9px] bg-success/15 text-success border border-success/20">True → 白底合成</span>
+            <span class="px-1.5 py-0.5 rounded text-[9px] bg-error/15 text-error border border-error/20">False → 循环优化</span>
+          </div>
+        </div>
+        <!-- 步骤5: 待执行 -->
+        <div class="bg-surface-container/50 rounded-lg p-3 border-l-2 border-outline">
+          <div class="flex items-center gap-2">
+            <span class="w-5 h-5 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center text-[10px] font-bold">5</span>
+            <i data-lucide="square" class="w-3.5 h-3.5 text-on-surface-variant"></i>
+            <span class="text-xs font-medium text-on-surface-variant flex-1">白底合成</span>
+          </div>
+        </div>
+        <!-- 步骤6: 循环 -->
+        <div class="bg-surface-container/50 rounded-lg p-3 border-l-2 border-warning/50">
+          <div class="flex items-center gap-2">
+            <span class="w-5 h-5 rounded-full bg-warning/15 text-warning flex items-center justify-center text-[10px] font-bold">6</span>
+            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-node-agent"></i>
+            <span class="text-xs font-medium text-on-surface-variant flex-1">循环: AI优化</span>
+            <span class="px-1.5 py-0.5 rounded text-[9px] bg-warning/15 text-warning border border-warning/30">x2</span>
+          </div>
+        </div>
+        <!-- 添加操作 -->
+        <button id="btn-add-op" class="w-full py-2 rounded-lg border border-dashed border-outline-variant/40 text-on-surface-variant text-xs hover:border-primary/40 hover:text-primary transition-colors flex items-center justify-center gap-1.5"><i data-lucide="plus" class="w-3.5 h-3.5"></i>添加操作</button>
+        <div class="flex flex-wrap gap-1.5">
+          <span class="px-2 py-0.5 rounded-full text-[10px] bg-node-process/15 text-node-process border border-node-process/20 cursor-pointer hover:bg-node-process/25 transition-colors">🎨 处理</span>
+          <span class="px-2 py-0.5 rounded-full text-[10px] bg-node-logic/15 text-node-logic border border-node-logic/20 cursor-pointer hover:bg-node-logic/25 transition-colors">🔀 条件</span>
+          <span class="px-2 py-0.5 rounded-full text-[10px] bg-warning/15 text-warning border border-warning/20 cursor-pointer hover:bg-warning/25 transition-colors">🔄 循环</span>
+          <span class="px-2 py-0.5 rounded-full text-[10px] bg-node-subgraph/15 text-node-subgraph border border-node-subgraph/20 cursor-pointer hover:bg-node-subgraph/25 transition-colors">📦 子图</span>
+        </div>
       </div>
-
+      <!-- 底部执行控制 -->
+      <div class="px-4 py-3 border-t border-outline-variant/20 space-y-2">
+        <div class="flex gap-2">
+          <div class="flex-1 rounded bg-surface-container overflow-hidden" style="height:48px;"><img src="https://images.unsplash.com/photo-1558618666-fcd25c85f82e?w=120&h=48&fit=crop" alt="原图" data-category="建筑城市" class="w-full h-full object-cover" /></div>
+          <div class="flex-1 rounded bg-surface-container overflow-hidden" style="height:48px;"><img src="https://images.unsplash.com/photo-1519608487953-e999c86e7455?w=120&h=48&fit=crop" alt="当前" data-category="建筑城市" class="w-full h-full object-cover" /></div>
+        </div>
+        <div class="flex items-center justify-between text-[9px] text-on-surface-variant"><span>原图</span><span>当前</span></div>
+        <div class="flex gap-2">
+          <button id="btn-pipe-run" class="flex-1 py-1.5 rounded-md bg-primary text-on-primary text-xs font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-1"><i data-lucide="play" class="w-3 h-3"></i>执行</button>
+          <button id="btn-pipe-step" class="flex-1 py-1.5 rounded-md bg-surface-container text-on-surface text-xs font-medium hover:bg-surface-container-high transition-colors flex items-center justify-center gap-1"><i data-lucide="step-forward" class="w-3 h-3"></i>逐步</button>
+          <button id="btn-pipe-reset" class="py-1.5 px-3 rounded-md bg-surface-container text-on-surface-variant text-xs hover:bg-surface-container-high transition-colors flex items-center justify-center gap-1"><i data-lucide="rotate-ccw" class="w-3 h-3"></i>重置</button>
+        </div>
+      </div>
     </div>
 
     <!-- ========== 右侧面板 (340px) ========== -->
-    <aside id="right-panel" class="w-[340px] shrink-0 bg-surface flex flex-col z-30 border-l border-outline-variant/20 h-screen">
-      <!-- 右侧面板 Header -->
-      <div class="px-3 py-2 border-b border-outline-variant/20">
-        <div class="flex items-center gap-2 mb-1.5">
-          <i data-lucide="infinity" class="w-4 h-4 text-primary"></i>
+    <aside id="right-panel" class="shrink-0 bg-surface border-l border-outline-variant/20 flex flex-col z-30" style="width:340px;">
+      <!-- Header -->
+      <div class="px-4 py-3 border-b border-outline-variant/20">
+        <div class="flex items-center gap-2 mb-2">
           <span class="font-bold text-sm text-on-surface">无界AI</span>
-          <div class="w-1.5 h-1.5 rounded-full bg-primary"></div>
+          <span class="w-1.5 h-1.5 rounded-full bg-primary inline-block"></span>
           <span class="text-[10px] text-on-surface-variant">版本号: 2.10.0 Beta | Developer: Mr.joker</span>
         </div>
-        <button id="btn-test-project" class="px-2 py-0.5 rounded text-xs font-medium bg-primary/20 text-primary hover:bg-primary/30 transition-colors">
-          测试项目
-        </button>
+        <button id="btn-test-project" class="px-2.5 py-1 rounded-md bg-primary/15 text-primary text-xs font-medium hover:bg-primary/25 transition-colors border border-primary/20">测试项目</button>
       </div>
 
-      <!-- Tab 切换 -->
-      <div class="flex border-b border-outline-variant/20">
-        <!-- Tab-图像生成 -->
-        <button id="tab-image-gen" class="flex-1 py-2 text-xs font-medium text-primary border-b-2 border-primary transition-colors">
-          图像生成
-        </button>
-        <!-- Tab-智能对话 -->
-        <button id="tab-smart-chat" class="flex-1 py-2 text-xs font-medium text-on-surface-variant border-b-2 border-transparent hover:text-on-surface transition-colors">
-          智能对话
-        </button>
-        <!-- Tab-操作链 -->
-        <button id="tab-operation-chain" class="flex-1 py-2 text-xs font-medium text-on-surface-variant border-b-2 border-transparent hover:text-on-surface transition-colors">
-          操作链
-        </button>
+      <!-- Tab切换 -->
+      <div class="flex px-4 pt-3 gap-1">
+        <button id="tab-image-gen" class="flex-1 py-2 text-xs font-medium text-primary bg-primary/10 rounded-md transition-colors" aria-current="page">图像生成</button>
+        <button id="tab-smart-chat" class="flex-1 py-2 text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container rounded-md transition-colors">智能对话</button>
       </div>
 
-      <!-- Tab内容区域 -->
-      <div class="flex-1 overflow-y-auto panel-scroll">
-
-        <!-- ===== 图像生成 Tab 内容 ===== -->
-        <div id="panel-image-gen" class="p-3 space-y-3">
-
-          <!-- 1. 模型选择下拉框 -->
-          <div>
-            <label class="text-xs text-on-surface-variant mb-1 block">模型</label>
-            <select id="select-model" class="w-full bg-surface-container border-none rounded-md px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 appearance-none cursor-pointer">
-              <option value="seedream-3.0" selected>seedream-3.0</option>
-              <option value="flux-pro">flux-pro</option>
-              <option value="sdxl-turbo">sdxl-turbo</option>
-              <option value="midjourney-v6">midjourney-v6</option>
-            </select>
-          </div>
-
-          <!-- 2. 提示词方程式按钮 -->
-          <button id="btn-prompt-equation" class="w-full flex items-center gap-2 px-3 py-2 rounded-md bg-surface-container hover:bg-surface-container-high transition-colors">
-            <i data-lucide="zap" class="w-3.5 h-3.5 text-primary"></i>
-            <span class="text-xs text-on-surface">提示词方程式</span>
-          </button>
-
-          <!-- 3. 快速风格 (16个标签) -->
-          <div>
-            <label class="text-xs text-on-surface-variant mb-1.5 block">快速风格</label>
-            <div class="flex flex-wrap gap-1.5">
-              <!-- 风格标签1-4K高清(选中态) -->
-              <button class="style-tag px-2 py-1 rounded text-xs font-medium bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors" data-style="4k">4K高清</button>
-              <!-- 风格标签2-高质量(选中态) -->
-              <button class="style-tag px-2 py-1 rounded text-xs font-medium bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors" data-style="hq">高质量</button>
-              <!-- 风格标签3 -->
-              <button class="style-tag px-2 py-1 rounded text-xs font-medium bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors" data-style="exquisite">精美</button>
-              <!-- 风格标签4 -->
-              <button class="style-tag px-2 py-1 rounded text-xs font-medium bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors" data-style="cinematic">电影级光线</button>
-              <!-- 风格标签5 -->
-              <button class="style-tag px-2 py-1 rounded text-xs font-medium bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors" data-style="vivid">鲜艳色彩</button>
-              <!-- 风格标签6 -->
-              <button class="style-tag px-2 py-1 rounded text-xs font-medium bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors" data-style="natural">自然</button>
-              <!-- 风格标签7 -->
-              <button class="style-tag px-2 py-1 rounded text-xs font-medium bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors" data-style="portrait">人像</button>
-              <!-- 风格标签8 -->
-              <button class="style-tag px-2 py-1 rounded text-xs font-medium bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors" data-style="landscape">风景</button>
-              <!-- 风格标签9 -->
-              <button class="style-tag px-2 py-1 rounded text-xs font-medium bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors" data-style="abstract">抽象</button>
-              <!-- 风格标签10 -->
-              <button class="style-tag px-2 py-1 rounded text-xs font-medium bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors" data-style="minimal">极简</button>
-              <!-- 风格标签11 -->
-              <button class="style-tag px-2 py-1 rounded text-xs font-medium bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors" data-style="retro">复古</button>
-              <!-- 风格标签12 -->
-              <button class="style-tag px-2 py-1 rounded text-xs font-medium bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors" data-style="neon">霓虹</button>
-              <!-- 风格标签13 -->
-              <button class="style-tag px-2 py-1 rounded text-xs font-medium bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors" data-style="cyberpunk">赛博朋克</button>
-              <!-- 风格标签14 -->
-              <button class="style-tag px-2 py-1 rounded text-xs font-medium bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors" data-style="anime">动漫风格</button>
-              <!-- 风格标签15 -->
-              <button class="style-tag px-2 py-1 rounded text-xs font-medium bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors" data-style="watercolor">水彩</button>
-              <!-- 风格标签16 -->
-              <button class="style-tag px-2 py-1 rounded text-xs font-medium bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors" data-style="oil-painting">油画</button>
-            </div>
-          </div>
-
-          <!-- 4. 产品品类 -->
-          <div>
-            <label class="text-xs text-on-surface-variant mb-1 block">产品品类</label>
-            <select id="select-product-category" class="w-full bg-surface-container border-none rounded-md px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 appearance-none cursor-pointer">
-              <option value="general" selected>通用</option>
-              <option value="clothing">服装</option>
-              <option value="electronics">电子数码</option>
-              <option value="food">食品饮料</option>
-              <option value="beauty">美妆个护</option>
-            </select>
-          </div>
-
-          <!-- 5. 设计类型 -->
-          <div>
-            <label class="text-xs text-on-surface-variant mb-1 block">设计类型</label>
-            <select id="select-design-type" class="w-full bg-surface-container border-none rounded-md px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 appearance-none cursor-pointer">
-              <option value="general" selected>通用</option>
-              <option value="poster">海报</option>
-              <option value="banner">Banner</option>
-              <option value="social">社媒图</option>
-              <option value="product">产品图</option>
-            </select>
-          </div>
-
-          <!-- 6. 风格预设 -->
-          <div>
-            <label class="text-xs text-on-surface-variant mb-1 block">风格预设</label>
-            <select id="select-style-preset" class="w-full bg-surface-container border-none rounded-md px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 appearance-none cursor-pointer">
-              <option value="auto" selected>自动</option>
-              <option value="photorealistic">写实摄影</option>
-              <option value="illustration">插画</option>
-              <option value="3d-render">3D渲染</option>
-              <option value="sketch">素描</option>
-            </select>
-          </div>
-
-          <!-- 7. 参考图片 -->
-          <div>
-            <div class="flex items-center justify-between mb-1.5">
-              <label class="text-xs text-on-surface-variant">参考图片</label>
-              <span class="text-xs text-on-surface-variant">0/10</span>
-            </div>
-            <button id="btn-add-ref-image" class="w-full flex items-center justify-center gap-1.5 py-2 rounded-md border border-dashed border-outline-variant/40 text-on-surface-variant hover:border-primary/40 hover:text-primary transition-colors">
-              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
-              <span class="text-xs">新增参考图</span>
-            </button>
-          </div>
-
-          <!-- 8. 画面比例 (9个选项带像素尺寸和比例矩形图形) -->
-          <div>
-            <label class="text-xs text-on-surface-variant mb-1.5 block">画面比例</label>
-            <div class="grid grid-cols-3 gap-1.5">
-              <!-- 比例-1:1 -->
-              <button class="ratio-btn flex flex-col items-center gap-1 p-1.5 rounded-md bg-primary/15 border border-primary/30 text-primary transition-colors" data-ratio="1:1">
-                <div class="ratio-preview w-6 h-6 border-primary/50" style="aspect-ratio:1/1;"></div>
-                <span class="text-[10px] font-medium">1:1</span>
-                <span class="text-[9px] opacity-70">1024x1024</span>
-              </button>
-              <!-- 比例-4:3 -->
-              <button class="ratio-btn flex flex-col items-center gap-1 p-1.5 rounded-md bg-surface-container border border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-high transition-colors" data-ratio="4:3">
-                <div class="ratio-preview w-6 h-[18px]" style="aspect-ratio:4/3;"></div>
-                <span class="text-[10px] font-medium">4:3</span>
-                <span class="text-[9px] opacity-70">1152x864</span>
-              </button>
-              <!-- 比例-3:4 -->
-              <button class="ratio-btn flex flex-col items-center gap-1 p-1.5 rounded-md bg-surface-container border border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-high transition-colors" data-ratio="3:4">
-                <div class="ratio-preview w-[18px] h-6" style="aspect-ratio:3/4;"></div>
-                <span class="text-[10px] font-medium">3:4</span>
-                <span class="text-[9px] opacity-70">864x1152</span>
-              </button>
-              <!-- 比例-16:9 -->
-              <button class="ratio-btn flex flex-col items-center gap-1 p-1.5 rounded-md bg-surface-container border border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-high transition-colors" data-ratio="16:9">
-                <div class="ratio-preview w-7 h-[14px]" style="aspect-ratio:16/9;"></div>
-                <span class="text-[10px] font-medium">16:9</span>
-                <span class="text-[9px] opacity-70">1280x720</span>
-              </button>
-              <!-- 比例-9:16 -->
-              <button class="ratio-btn flex flex-col items-center gap-1 p-1.5 rounded-md bg-surface-container border border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-high transition-colors" data-ratio="9:16">
-                <div class="ratio-preview w-[14px] h-7" style="aspect-ratio:9/16;"></div>
-                <span class="text-[10px] font-medium">9:16</span>
-                <span class="text-[9px] opacity-70">720x1280</span>
-              </button>
-              <!-- 比例-3:2 -->
-              <button class="ratio-btn flex flex-col items-center gap-1 p-1.5 rounded-md bg-surface-container border border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-high transition-colors" data-ratio="3:2">
-                <div class="ratio-preview w-6 h-4" style="aspect-ratio:3/2;"></div>
-                <span class="text-[10px] font-medium">3:2</span>
-                <span class="text-[9px] opacity-70">1248x832</span>
-              </button>
-              <!-- 比例-2:3 -->
-              <button class="ratio-btn flex flex-col items-center gap-1 p-1.5 rounded-md bg-surface-container border border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-high transition-colors" data-ratio="2:3">
-                <div class="ratio-preview w-4 h-6" style="aspect-ratio:2/3;"></div>
-                <span class="text-[10px] font-medium">2:3</span>
-                <span class="text-[9px] opacity-70">832x1248</span>
-              </button>
-              <!-- 比例-21:9 -->
-              <button class="ratio-btn flex flex-col items-center gap-1 p-1.5 rounded-md bg-surface-container border border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-high transition-colors" data-ratio="21:9">
-                <div class="ratio-preview w-7 h-3" style="aspect-ratio:21/9;"></div>
-                <span class="text-[10px] font-medium">21:9</span>
-                <span class="text-[9px] opacity-70">1512x648</span>
-              </button>
-              <!-- 比例-2:1 -->
-              <button class="ratio-btn flex flex-col items-center gap-1 p-1.5 rounded-md bg-surface-container border border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-high transition-colors" data-ratio="2:1">
-                <div class="ratio-preview w-6 h-3" style="aspect-ratio:2/1;"></div>
-                <span class="text-[10px] font-medium">2:1</span>
-                <span class="text-[9px] opacity-70">1536x768</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- 9. 图片质量 -->
-          <div>
-            <label class="text-xs text-on-surface-variant mb-1.5 block">图片质量</label>
-            <div class="grid grid-cols-4 gap-1.5">
-              <!-- 质量-1K(选中) -->
-              <button class="quality-btn flex flex-col items-center p-1.5 rounded-md bg-primary/15 border border-primary/30 text-primary transition-colors" data-quality="1k">
-                <span class="text-xs font-bold">1K</span>
-                <span class="text-[9px] opacity-70">1024x1024</span>
-              </button>
-              <!-- 质量-2K -->
-              <button class="quality-btn flex flex-col items-center p-1.5 rounded-md bg-surface-container border border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-high transition-colors" data-quality="2k">
-                <span class="text-xs font-bold">2K</span>
-                <span class="text-[9px] opacity-70">2048x2048</span>
-              </button>
-              <!-- 质量-3K -->
-              <button class="quality-btn flex flex-col items-center p-1.5 rounded-md bg-surface-container border border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-high transition-colors" data-quality="3k">
-                <span class="text-xs font-bold">3K</span>
-                <span class="text-[9px] opacity-70">3072x3072</span>
-              </button>
-              <!-- 质量-4K -->
-              <button class="quality-btn flex flex-col items-center p-1.5 rounded-md bg-surface-container border border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-high transition-colors" data-quality="4k">
-                <span class="text-xs font-bold">4K</span>
-                <span class="text-[9px] opacity-70">4096x4096</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- 10. 生图数量 -->
-          <div>
-            <label class="text-xs text-on-surface-variant mb-1.5 block">生图数量</label>
-            <div class="grid grid-cols-4 gap-1.5">
-              <!-- 数量-x1(选中) -->
-              <button class="count-btn px-2 py-1.5 rounded-md bg-primary/15 border border-primary/30 text-primary text-xs font-bold transition-colors" data-count="1">x1</button>
-              <!-- 数量-x2 -->
-              <button class="count-btn px-2 py-1.5 rounded-md bg-surface-container border border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-high text-xs font-bold transition-colors" data-count="2">x2</button>
-              <!-- 数量-x3 -->
-              <button class="count-btn px-2 py-1.5 rounded-md bg-surface-container border border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-high text-xs font-bold transition-colors" data-count="3">x3</button>
-              <!-- 数量-x4 -->
-              <button class="count-btn px-2 py-1.5 rounded-md bg-surface-container border border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-high text-xs font-bold transition-colors" data-count="4">x4</button>
-            </div>
-          </div>
-
-          <!-- 11. 第三方模型 -->
-          <button id="btn-third-party-model" class="w-full flex items-center gap-2 px-3 py-2 rounded-md bg-surface-container border border-outline-variant/20 hover:bg-surface-container-high transition-colors">
-            <i data-lucide="cpu" class="w-3.5 h-3.5 text-on-surface-variant"></i>
-            <span class="text-xs text-on-surface flex-1 text-left">第三方模型</span>
-            <i data-lucide="plus" class="w-3.5 h-3.5 text-on-surface-variant"></i>
-          </button>
-
-          <!-- 12. 创意描述输入框 -->
-          <div>
-            <label class="text-xs text-on-surface-variant mb-1 block">创意描述</label>
-            <textarea id="input-creative-desc" rows="4" placeholder="描述你想生成的图像..." class="w-full bg-surface-container border-none rounded-md px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"></textarea>
-          </div>
-
-          <!-- 13. 开始生成按钮 -->
-          <button id="btn-generate" class="w-full py-2.5 rounded-md text-sm font-bold bg-primary text-on-primary transition-opacity hover:opacity-90 active:scale-[0.98]">
-            开始生成
-          </button>
-
+      <!-- 图像生成Tab内容 -->
+      <div id="panel-image-gen" class="flex-1 overflow-y-auto rpanel-scroll px-4 py-3 space-y-3">
+        <!-- 1. 模型选择 -->
+        <div>
+          <label class="text-[10px] text-on-surface-variant font-medium mb-1 block">模型选择</label>
+          <select id="select-model" class="w-full bg-surface-container border-none rounded-md px-3 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
+            <option value="seedream-3.0" selected>seedream-3.0</option>
+            <option value="flux-pro">flux-pro</option>
+            <option value="sdxl-turbo">sdxl-turbo</option>
+          </select>
         </div>
-
-        <!-- ===== 智能对话 Tab 内容 ===== -->
-        <div id="panel-smart-chat" class="p-3 hidden">
-          <div class="flex flex-col gap-3">
-            <!-- 对话消息1-AI -->
-            <div class="flex gap-2">
-              <div class="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
-                <i data-lucide="bot" class="w-3.5 h-3.5 text-primary"></i>
-              </div>
-              <div class="bg-surface-container rounded-lg px-3 py-2 max-w-[260px]">
-                <p class="text-xs text-on-surface">你好！我是无界AI助手，可以帮你生成图片、修图和优化创意。请告诉我你想要什么？</p>
-              </div>
-            </div>
-            <!-- 对话消息2-用户 -->
-            <div class="flex gap-2 justify-end">
-              <div class="bg-primary/15 rounded-lg px-3 py-2 max-w-[260px]">
-                <p class="text-xs text-on-surface">帮我生成一张赛博朋克风格的城市夜景</p>
-              </div>
-            </div>
-            <!-- 对话消息3-AI -->
-            <div class="flex gap-2">
-              <div class="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
-                <i data-lucide="bot" class="w-3.5 h-3.5 text-primary"></i>
-              </div>
-              <div class="bg-surface-container rounded-lg px-3 py-2 max-w-[260px]">
-                <p class="text-xs text-on-surface">好的！我已为你设置赛博朋克风格，正在生成城市夜景图片。你可以在右侧面板调整参数。</p>
-              </div>
-            </div>
-          </div>
-          <!-- 对话输入框 -->
-          <div class="mt-4 flex items-center gap-2">
-            <input id="chat-input" type="text" placeholder="输入消息..." class="flex-1 bg-surface-container border-none rounded-md px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/30" />
-            <button id="chat-send" class="w-8 h-8 rounded-md bg-primary/20 flex items-center justify-center text-primary hover:bg-primary/30 transition-colors">
-              <i data-lucide="send" class="w-3.5 h-3.5"></i>
-            </button>
+        <!-- 2. 提示词方程式 -->
+        <button id="btn-prompt-eq" class="w-full flex items-center gap-2 px-3 py-2 rounded-md bg-surface-container hover:bg-surface-container-high text-xs text-on-surface transition-colors">
+          <i data-lucide="zap" class="w-3.5 h-3.5 text-primary"></i><span>提示词方程式</span>
+        </button>
+        <!-- 3. 快速风格 (16个标签) -->
+        <div>
+          <label class="text-[10px] text-on-surface-variant font-medium mb-1.5 block">快速风格</label>
+          <div class="flex flex-wrap gap-1">
+            <button class="style-tag px-2 py-0.5 rounded text-[10px] bg-primary/15 text-primary border border-primary/20">4K高清</button>
+            <button class="style-tag px-2 py-0.5 rounded text-[10px] bg-primary/15 text-primary border border-primary/20">高质量</button>
+            <button class="style-tag px-2 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface border border-outline-variant/20 transition-colors">精美</button>
+            <button class="style-tag px-2 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface border border-outline-variant/20 transition-colors">电影级光线</button>
+            <button class="style-tag px-2 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface border border-outline-variant/20 transition-colors">鲜艳色彩</button>
+            <button class="style-tag px-2 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface border border-outline-variant/20 transition-colors">自然</button>
+            <button class="style-tag px-2 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface border border-outline-variant/20 transition-colors">人像</button>
+            <button class="style-tag px-2 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface border border-outline-variant/20 transition-colors">风景</button>
+            <button class="style-tag px-2 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface border border-outline-variant/20 transition-colors">抽象</button>
+            <button class="style-tag px-2 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface border border-outline-variant/20 transition-colors">极简</button>
+            <button class="style-tag px-2 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface border border-outline-variant/20 transition-colors">复古</button>
+            <button class="style-tag px-2 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface border border-outline-variant/20 transition-colors">霓虹</button>
+            <button class="style-tag px-2 py-0.5 rounded text-[10px] bg-primary/15 text-primary border border-primary/20">赛博朋克</button>
+            <button class="style-tag px-2 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface border border-outline-variant/20 transition-colors">动漫风格</button>
+            <button class="style-tag px-2 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface border border-outline-variant/20 transition-colors">水彩</button>
+            <button class="style-tag px-2 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface border border-outline-variant/20 transition-colors">油画</button>
           </div>
         </div>
-
-        <!-- ===== 操作链 Tab 内容 ===== -->
-        <div id="panel-operation-chain" class="p-3 hidden">
-          <div class="space-y-2">
-            <!-- 操作链-操作1 -->
-            <div class="flex items-center gap-2 px-2 py-2 rounded-md bg-surface-container">
-              <div class="w-6 h-6 rounded flex items-center justify-center bg-node-ai/20">
-                <i data-lucide="sparkles" class="w-3.5 h-3.5 text-node-ai"></i>
-              </div>
-              <div class="flex-1 min-w-0">
-                <p class="text-xs font-medium text-on-surface truncate">图像生成</p>
-                <p class="text-[10px] text-on-surface-variant">seedream-3.0</p>
-              </div>
-              <span class="text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary font-medium">进行中</span>
-            </div>
-            <!-- 操作链-操作2 -->
-            <div class="flex items-center gap-2 px-2 py-2 rounded-md bg-surface-container">
-              <div class="w-6 h-6 rounded flex items-center justify-center bg-node-process/20">
-                <i data-lucide="palette" class="w-3.5 h-3.5 text-node-process"></i>
-              </div>
-              <div class="flex-1 min-w-0">
-                <p class="text-xs font-medium text-on-surface truncate">风格转换</p>
-                <p class="text-[10px] text-on-surface-variant">赛博朋克风格</p>
-              </div>
-              <span class="text-[10px] px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant font-medium">等待中</span>
-            </div>
-            <!-- 操作链-操作3 -->
-            <div class="flex items-center gap-2 px-2 py-2 rounded-md bg-surface-container">
-              <div class="w-6 h-6 rounded flex items-center justify-center bg-node-output/20">
-                <i data-lucide="wand-2" class="w-3.5 h-3.5 text-node-output"></i>
-              </div>
-              <div class="flex-1 min-w-0">
-                <p class="text-xs font-medium text-on-surface truncate">图片精修</p>
-                <p class="text-[10px] text-on-surface-variant">4K超清增强</p>
-              </div>
-              <span class="text-[10px] px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant font-medium">等待中</span>
-            </div>
-            <!-- 操作链-操作4 -->
-            <div class="flex items-center gap-2 px-2 py-2 rounded-md bg-surface-container">
-              <div class="w-6 h-6 rounded flex items-center justify-center bg-node-input/20">
-                <i data-lucide="scissors" class="w-3.5 h-3.5 text-node-input"></i>
-              </div>
-              <div class="flex-1 min-w-0">
-                <p class="text-xs font-medium text-on-surface truncate">背景移除</p>
-                <p class="text-[10px] text-on-surface-variant">智能抠图</p>
-              </div>
-              <span class="text-[10px] px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant font-medium">等待中</span>
-            </div>
-            <!-- 操作链-操作5 -->
-            <div class="flex items-center gap-2 px-2 py-2 rounded-md bg-surface-container">
-              <div class="w-6 h-6 rounded flex items-center justify-center bg-node-subgraph/20">
-                <i data-lucide="download" class="w-3.5 h-3.5 text-node-subgraph"></i>
-              </div>
-              <div class="flex-1 min-w-0">
-                <p class="text-xs font-medium text-on-surface truncate">导出输出</p>
-                <p class="text-[10px] text-on-surface-variant">PNG格式</p>
-              </div>
-              <span class="text-[10px] px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant font-medium">等待中</span>
-            </div>
+        <!-- 4. 产品品类 -->
+        <div>
+          <label class="text-[10px] text-on-surface-variant font-medium mb-1 block">产品品类</label>
+          <select id="select-category" class="w-full bg-surface-container border-none rounded-md px-3 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer"><option selected>通用</option><option>服装</option><option>电子数码</option></select>
+        </div>
+        <!-- 5. 设计类型 -->
+        <div>
+          <label class="text-[10px] text-on-surface-variant font-medium mb-1 block">设计类型</label>
+          <select id="select-design-type" class="w-full bg-surface-container border-none rounded-md px-3 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer"><option selected>通用</option><option>海报</option><option>Banner</option></select>
+        </div>
+        <!-- 6. 风格预设 -->
+        <div>
+          <label class="text-[10px] text-on-surface-variant font-medium mb-1 block">风格预设</label>
+          <select id="select-style-preset" class="w-full bg-surface-container border-none rounded-md px-3 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer"><option selected>自动</option><option>写实</option><option>动漫</option></select>
+        </div>
+        <!-- 7. 参考图片 0/10 -->
+        <div>
+          <div class="flex items-center justify-between mb-1"><label class="text-[10px] text-on-surface-variant font-medium">参考图片</label><span class="text-[10px] text-on-surface-variant">0/10</span></div>
+          <button id="btn-add-ref" class="w-full flex items-center justify-center gap-1 py-2 rounded-md border border-dashed border-outline-variant/40 text-on-surface-variant text-xs hover:border-primary/40 hover:text-primary transition-colors"><i data-lucide="plus" class="w-3.5 h-3.5"></i>新增参考图</button>
+        </div>
+        <!-- 8. 画面比例 (9选项) -->
+        <div>
+          <label class="text-[10px] text-on-surface-variant font-medium mb-1.5 block">画面比例</label>
+          <div class="grid grid-cols-3 gap-1">
+            <button class="ratio-btn flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-md bg-primary/10 border border-primary/20 text-primary transition-colors"><div class="ratio-rect w-4 h-4"></div><span class="text-[9px] font-medium">1:1</span><span class="text-[8px] opacity-60">1024x1024</span></button>
+            <button class="ratio-btn flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-md bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors"><div class="ratio-rect w-5 h-3.5"></div><span class="text-[9px] font-medium">4:3</span><span class="text-[8px] opacity-60">1152x864</span></button>
+            <button class="ratio-btn flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-md bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors"><div class="ratio-rect w-3.5 h-5"></div><span class="text-[9px] font-medium">3:4</span><span class="text-[8px] opacity-60">864x1152</span></button>
+            <button class="ratio-btn flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-md bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors"><div class="ratio-rect w-6 h-3"></div><span class="text-[9px] font-medium">16:9</span><span class="text-[8px] opacity-60">1280x720</span></button>
+            <button class="ratio-btn flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-md bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors"><div class="ratio-rect w-3 h-6"></div><span class="text-[9px] font-medium">9:16</span><span class="text-[8px] opacity-60">720x1280</span></button>
+            <button class="ratio-btn flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-md bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors"><div class="ratio-rect w-5 h-3"></div><span class="text-[9px] font-medium">3:2</span><span class="text-[8px] opacity-60">1248x832</span></button>
+            <button class="ratio-btn flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-md bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors"><div class="ratio-rect w-3 h-5"></div><span class="text-[9px] font-medium">2:3</span><span class="text-[8px] opacity-60">832x1248</span></button>
+            <button class="ratio-btn flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-md bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors"><div class="ratio-rect w-7 h-2.5"></div><span class="text-[9px] font-medium">21:9</span><span class="text-[8px] opacity-60">1512x648</span></button>
+            <button class="ratio-btn flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-md bg-surface-container text-on-surface-variant border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors"><div class="ratio-rect w-6 h-2.5"></div><span class="text-[9px] font-medium">2:1</span><span class="text-[8px] opacity-60">1536x768</span></button>
           </div>
         </div>
+        <!-- 9. 图片质量 -->
+        <div>
+          <label class="text-[10px] text-on-surface-variant font-medium mb-1.5 block">图片质量</label>
+          <div class="flex gap-1">
+            <button class="quality-btn flex-1 py-1.5 rounded-md bg-primary/10 border border-primary/20 text-primary text-[10px] font-medium transition-colors">1K<br/><span class="opacity-60 font-normal">1024x1024</span></button>
+            <button class="quality-btn flex-1 py-1.5 rounded-md bg-surface-container text-on-surface-variant border border-outline-variant/20 text-[10px] hover:bg-surface-container-high hover:text-on-surface transition-colors">2K<br/><span class="opacity-60 font-normal">2048x2048</span></button>
+            <button class="quality-btn flex-1 py-1.5 rounded-md bg-surface-container text-on-surface-variant border border-outline-variant/20 text-[10px] hover:bg-surface-container-high hover:text-on-surface transition-colors">3K<br/><span class="opacity-60 font-normal">3072x3072</span></button>
+            <button class="quality-btn flex-1 py-1.5 rounded-md bg-surface-container text-on-surface-variant border border-outline-variant/20 text-[10px] hover:bg-surface-container-high hover:text-on-surface transition-colors">4K<br/><span class="opacity-60 font-normal">4096x4096</span></button>
+          </div>
+        </div>
+        <!-- 10. 生图数量 -->
+        <div>
+          <label class="text-[10px] text-on-surface-variant font-medium mb-1.5 block">生图数量</label>
+          <div class="flex gap-1">
+            <button class="count-btn flex-1 py-1.5 rounded-md bg-primary/10 border border-primary/20 text-primary text-xs font-medium transition-colors">x1</button>
+            <button class="count-btn flex-1 py-1.5 rounded-md bg-surface-container text-on-surface-variant border border-outline-variant/20 text-xs hover:bg-surface-container-high hover:text-on-surface transition-colors">x2</button>
+            <button class="count-btn flex-1 py-1.5 rounded-md bg-surface-container text-on-surface-variant border border-outline-variant/20 text-xs hover:bg-surface-container-high hover:text-on-surface transition-colors">x3</button>
+            <button class="count-btn flex-1 py-1.5 rounded-md bg-surface-container text-on-surface-variant border border-outline-variant/20 text-xs hover:bg-surface-container-high hover:text-on-surface transition-colors">x4</button>
+          </div>
+        </div>
+        <!-- 11. 第三方模型 -->
+        <button id="btn-third-party" class="w-full flex items-center gap-2 px-3 py-2 rounded-md bg-surface-container hover:bg-surface-container-high text-xs text-on-surface transition-colors">
+          <i data-lucide="cpu" class="w-3.5 h-3.5 text-on-surface-variant"></i><span class="flex-1 text-left">第三方模型</span><i data-lucide="plus" class="w-3.5 h-3.5 text-on-surface-variant"></i>
+        </button>
+        <!-- 12. 创意描述 -->
+        <div>
+          <label class="text-[10px] text-on-surface-variant font-medium mb-1 block">创意描述</label>
+          <textarea id="input-desc" class="w-full bg-surface-container border-none rounded-md px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors resize-none" rows="3" placeholder="描述你想生成的图像..."></textarea>
+        </div>
+        <!-- 13. 开始生成 -->
+        <button id="btn-generate" class="w-full py-2.5 rounded-md text-sm font-semibold bg-primary text-on-primary hover:opacity-90 active:scale-[0.98] transition-all">开始生成</button>
+      </div>
 
+      <!-- 智能对话Tab (隐藏) -->
+      <div id="panel-smart-chat" class="flex-1 overflow-y-auto rpanel-scroll px-4 py-3 hidden">
+        <div class="flex flex-col items-center justify-center h-48 text-on-surface-variant/40"><i data-lucide="message-circle" class="w-8 h-8 mb-2 opacity-30"></i><p class="text-xs">智能对话功能</p></div>
+      </div>
+
+      <!-- 底部模式切换 -->
+      <div class="px-4 py-2 border-t border-outline-variant/20">
+        <div class="flex gap-1">
+          <button id="btn-canvas-mode" class="flex-1 py-1.5 rounded-md text-[10px] font-medium text-primary bg-primary/10 border border-primary/20 transition-colors" aria-current="page">画布模式</button>
+          <a href="node-mode.html" id="btn-node-mode" class="flex-1 py-1.5 rounded-md text-[10px] font-medium text-on-surface-variant bg-surface-container border border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface transition-colors text-center no-underline block">节点模式</a>
+        </div>
       </div>
     </aside>
 
-  </main>
-  <!-- @main-content:end -->
+  </div>
 
   <script>
   $(function() {
 
-    // ===== Tab 切换逻辑 =====
+    // === 图片选中/取消选中 ===
+    $('#canvas-images').on('click', '.canvas-img-card', function(e) {
+      e.stopPropagation();
+      var $card = $(this);
+      if ($card.hasClass('selected')) {
+        $card.removeClass('selected');
+        $('#pipe-detail').removeClass('open');
+      } else {
+        $('.canvas-img-card').removeClass('selected');
+        $card.addClass('selected');
+        $('#pipe-detail').addClass('open');
+      }
+    });
+
+    // 点击画布空白取消选中
+    $('#canvas-area').on('click', function(e) {
+      if ($(e.target).closest('.canvas-img-card, #bottom-toolbar').length === 0) {
+        $('.canvas-img-card').removeClass('selected');
+        $('#pipe-detail').removeClass('open');
+      }
+    });
+
+    // Pipeline详情面板关闭
+    $('#btn-close-pd').on('click', function() {
+      $('#pipe-detail').removeClass('open');
+      $('.canvas-img-card').removeClass('selected');
+    });
+
+    // === 节点库折叠/展开 ===
+    $('#node-cat-list').on('click', '.node-cat-hdr', function() {
+      $(this).toggleClass('open');
+      $(this).next('.node-cat-items').toggleClass('open');
+    });
+
+    // === 节点库搜索 ===
+    $('#node-search').on('input', function() {
+      var q = $(this).val().toLowerCase().trim();
+      $('#node-cat-list .node-item').each(function() {
+        $(this).toggle(q === '' || $(this).text().toLowerCase().indexOf(q) >= 0);
+      });
+      if (q !== '') {
+        $('#node-cat-list .node-cat-items').addClass('open');
+        $('#node-cat-list .node-cat-hdr').addClass('open');
+      }
+    });
+
+    // === 节点库收起/展开 ===
+    $('#btn-collapse-nl').on('click', function() {
+      $('#node-lib').addClass('collapsed');
+      $('#nl-collapsed-icons').removeClass('hidden').addClass('flex');
+    });
+    $('#btn-expand-nl').on('click', function() {
+      $('#node-lib').removeClass('collapsed');
+      $('#nl-collapsed-icons').addClass('hidden').removeClass('flex');
+    });
+
+    // === Tab切换 ===
     $('#tab-image-gen').on('click', function() {
-      $(this).addClass('text-primary border-primary').removeClass('text-on-surface-variant border-transparent');
-      $('#tab-smart-chat, #tab-operation-chain').removeClass('text-primary border-primary').addClass('text-on-surface-variant border-transparent');
+      $(this).addClass('text-primary bg-primary/10').attr('aria-current', 'page');
+      $('#tab-smart-chat').removeClass('text-primary bg-primary/10').addClass('text-on-surface-variant').removeAttr('aria-current');
       $('#panel-image-gen').removeClass('hidden');
-      $('#panel-smart-chat, #panel-operation-chain').addClass('hidden');
+      $('#panel-smart-chat').addClass('hidden');
     });
-
     $('#tab-smart-chat').on('click', function() {
-      $(this).addClass('text-primary border-primary').removeClass('text-on-surface-variant border-transparent');
-      $('#tab-image-gen, #tab-operation-chain').removeClass('text-primary border-primary').addClass('text-on-surface-variant border-transparent');
+      $(this).addClass('text-primary bg-primary/10').attr('aria-current', 'page');
+      $('#tab-image-gen').removeClass('text-primary bg-primary/10').addClass('text-on-surface-variant').removeAttr('aria-current');
       $('#panel-smart-chat').removeClass('hidden');
-      $('#panel-image-gen, #panel-operation-chain').addClass('hidden');
+      $('#panel-image-gen').addClass('hidden');
     });
 
-    $('#tab-operation-chain').on('click', function() {
-      $(this).addClass('text-primary border-primary').removeClass('text-on-surface-variant border-transparent');
-      $('#tab-image-gen, #tab-smart-chat').removeClass('text-primary border-primary').addClass('text-on-surface-variant border-transparent');
-      $('#panel-operation-chain').removeClass('hidden');
-      $('#panel-image-gen, #panel-smart-chat').addClass('hidden');
-    });
-
-    // ===== 快速风格标签切换 =====
-    $('.style-tag').on('click', function() {
-      if ($(this).hasClass('bg-primary/20')) {
-        // 取消选中
-        $(this).removeClass('bg-primary/20 text-primary border-primary/30').addClass('bg-surface-container text-on-surface-variant border-outline-variant/20');
+    // === 快速风格标签切换 ===
+    $('#panel-image-gen').on('click', '.style-tag', function() {
+      if ($(this).hasClass('text-primary')) {
+        $(this).removeClass('bg-primary/15 text-primary border-primary/20').addClass('bg-surface-container text-on-surface-variant border-outline-variant/20');
       } else {
-        // 选中
-        $(this).removeClass('bg-surface-container text-on-surface-variant border-outline-variant/20').addClass('bg-primary/20 text-primary border-primary/30');
+        $(this).removeClass('bg-surface-container text-on-surface-variant border-outline-variant/20').addClass('bg-primary/15 text-primary border-primary/20');
       }
     });
 
-    // ===== 画面比例切换 =====
-    $('.ratio-btn').on('click', function() {
-      $('.ratio-btn').removeClass('bg-primary/15 border-primary/30 text-primary').addClass('bg-surface-container border-outline-variant/20 text-on-surface-variant');
-      $(this).removeClass('bg-surface-container border-outline-variant/20 text-on-surface-variant').addClass('bg-primary/15 border-primary/30 text-primary');
+    // === 画面比例切换 ===
+    $('#panel-image-gen').on('click', '.ratio-btn', function() {
+      $('.ratio-btn').removeClass('bg-primary/10 border-primary/20 text-primary').addClass('bg-surface-container text-on-surface-variant border-outline-variant/20');
+      $(this).removeClass('bg-surface-container text-on-surface-variant border-outline-variant/20').addClass('bg-primary/10 border-primary/20 text-primary');
     });
 
-    // ===== 图片质量切换 =====
-    $('.quality-btn').on('click', function() {
-      $('.quality-btn').removeClass('bg-primary/15 border-primary/30 text-primary').addClass('bg-surface-container border-outline-variant/20 text-on-surface-variant');
-      $(this).removeClass('bg-surface-container border-outline-variant/20 text-on-surface-variant').addClass('bg-primary/15 border-primary/30 text-primary');
+    // === 图片质量切换 ===
+    $('#panel-image-gen').on('click', '.quality-btn', function() {
+      $('.quality-btn').removeClass('bg-primary/10 border-primary/20 text-primary').addClass('bg-surface-container text-on-surface-variant border-outline-variant/20');
+      $(this).removeClass('bg-surface-container text-on-surface-variant border-outline-variant/20').addClass('bg-primary/10 border-primary/20 text-primary');
     });
 
-    // ===== 生图数量切换 =====
-    $('.count-btn').on('click', function() {
-      $('.count-btn').removeClass('bg-primary/15 border-primary/30 text-primary').addClass('bg-surface-container border-outline-variant/20 text-on-surface-variant');
-      $(this).removeClass('bg-surface-container border-outline-variant/20 text-on-surface-variant').addClass('bg-primary/15 border-primary/30 text-primary');
+    // === 生图数量切换 ===
+    $('#panel-image-gen').on('click', '.count-btn', function() {
+      $('.count-btn').removeClass('bg-primary/10 border-primary/20 text-primary').addClass('bg-surface-container text-on-surface-variant border-outline-variant/20');
+      $(this).removeClass('bg-surface-container text-on-surface-variant border-outline-variant/20').addClass('bg-primary/10 border-primary/20 text-primary');
     });
 
-    // ===== 智能指令栏 - 自动补全显示/隐藏 =====
-    $('#smart-command-input').on('focus', function() {
-      if ($(this).val().length === 0) {
-        $('#smart-autocomplete').removeClass('hidden');
-      }
+    // === 缩放 ===
+    var zoom = 35;
+    $('#btool-zoom-in').on('click', function() { zoom = Math.min(200, zoom + 10); $('#zoom-level').text(zoom + '%'); });
+    $('#btool-zoom-out').on('click', function() { zoom = Math.max(10, zoom - 10); $('#zoom-level').text(zoom + '%'); });
+
+    // === 全屏 ===
+    $('#btool-fullscreen').on('click', function() { console.log('全屏切换：应调用 Fullscreen API'); });
+
+    // === 拖拽节点 (复杂交互，仅绑定入口) ===
+    // 拖拽节点到画布：
+    // 1. dragstart记录节点类型
+    // 2. 拖拽中显示半透明预览
+    // 3. 释放在画布区域时创建节点卡片（图标+名称+端口）
+    // 4. 自动连接到选中图片
+    $('.node-item').on('dragstart', function(e) { console.log('拖拽节点:', $(this).text().trim()); });
+
+    // === 画布图片拖动 (复杂交互，仅绑定入口) ===
+    // mousedown记录起始位置 → mousemove更新left/top+SVG连线 → mouseup结束
+    $('.canvas-img-card').on('mousedown', function(e) {
+      if ($(e.target).closest('.img-float-toolbar, .corner-handle').length) return;
+      // 复杂交互，仅入口
     });
 
-    $('#smart-command-input').on('input', function() {
-      if ($(this).val().length > 0) {
-        $('#smart-autocomplete').addClass('hidden');
-      } else {
-        $('#smart-autocomplete').removeClass('hidden');
-      }
+    // === 角拖拽手柄 (复杂交互，仅绑定入口) ===
+    // mousedown → mousemove计算新尺寸(最小100x100) → mouseup结束
+    $('.corner-handle').on('mousedown', function(e) {
+      e.stopPropagation();
+      console.log('角拖拽手柄：应实现图片缩放');
     });
 
-    $('#smart-command-input').on('blur', function() {
-      // 延迟隐藏，避免点击补全项时立即隐藏
-      setTimeout(function() {
-        $('#smart-autocomplete').addClass('hidden');
-      }, 200);
-    });
+    // === Pipeline执行按钮 ===
+    $('#btn-pipe-run').on('click', function() { console.log('执行Pipeline：按顺序执行所有步骤'); });
+    $('#btn-pipe-step').on('click', function() { console.log('逐步执行：仅执行下一步'); });
+    $('#btn-pipe-reset').on('click', function() { console.log('重置Pipeline：所有步骤重置为待执行'); });
+    $('#btn-add-op').on('click', function() { console.log('添加操作：应弹出节点选择弹窗'); });
 
-    // 点击自动补全项 - 将文本填入输入框
-    $('#smart-autocomplete').on('click', '.autocomplete-item', function() {
-      var text = $(this).find('.text-sm').text();
-      $('#smart-command-input').val(text);
-      $('#smart-autocomplete').addClass('hidden');
-    });
-
-    // ===== 画布右键菜单 =====
-    $('#canvas-content').on('contextmenu', function(e) {
-      e.preventDefault();
-      var menu = $('#canvas-context-menu');
-      menu.css({
-        left: e.clientX + 'px',
-        top: e.clientY + 'px',
-        display: 'block'
-      }).addClass('show');
-    });
-
-    // 点击其他区域关闭右键菜单
-    $(document).on('click', function() {
-      $('#canvas-context-menu').removeClass('show').css('display', 'none');
-    });
-
-    // ===== 左侧工具栏 - 工具选中切换 =====
-    $('#left-toolbar button[id^="tool-"]').on('click', function() {
-      // 排除模式切换按钮和设置按钮
-      if ($(this).attr('id') === 'mode-canvas' || $(this).attr('id') === 'mode-node' || $(this).attr('id') === 'tool-settings') return;
-
-      $('#left-toolbar button[id^="tool-"]').not('#mode-canvas, #mode-node, #tool-settings').removeClass('text-primary bg-primary/15 hover:bg-primary/25').addClass('text-on-surface-variant hover:bg-surface-container hover:text-on-surface');
-      $(this).removeClass('text-on-surface-variant hover:bg-surface-container hover:text-on-surface').addClass('text-primary bg-primary/15 hover:bg-primary/25');
-    });
-
-    // ===== 模式切换 - 画布/节点 =====
-    $('#mode-canvas').on('click', function() {
-      $(this).addClass('bg-primary/20 text-primary').removeClass('text-on-surface-variant hover:bg-surface-container hover:text-on-surface');
-      $('#mode-node').removeClass('bg-primary/20 text-primary').addClass('text-on-surface-variant hover:bg-surface-container hover:text-on-surface');
-      // 画布模式下当前页面
-      $('#mode-badge span').text('画布模式');
-      $('#mode-badge i').attr('data-lucide', 'pen-tool');
-      lucide.createIcons();
-    });
-
-    $('#mode-node').on('click', function() {
-      // 跳转到节点模式页面
-      window.location.href = 'node-mode.html';
-    });
-
-    // ===== 底部工具栏 - 缩放控制 =====
-    var zoomLevel = 35;
-
-    $('#btool-zoom-in').on('click', function() {
-      zoomLevel = Math.min(200, zoomLevel + 10);
-      $('#btool-zoom-level').text(zoomLevel + '%');
-    });
-
-    $('#btool-zoom-out').on('click', function() {
-      zoomLevel = Math.max(10, zoomLevel - 10);
-      $('#btool-zoom-level').text(zoomLevel + '%');
-    });
-
-    // ===== 全屏切换 =====
-    // 全屏切换 - 点击后应实现：
-    // 1. 调用 document.documentElement.requestFullscreen() 进入全屏
-    // 2. 已全屏时调用 document.exitFullscreen() 退出全屏
-    // 3. 监听 fullscreenchange 事件更新按钮图标
-    $('#btool-fullscreen').on('click', function() {
-      console.log('全屏切换');
-    });
-
-    // ===== 开始生成按钮 =====
-    // 点击开始生成后应实现：
-    // 1. 显示生成进度（可在迷你执行面板中展示）
-    // 2. 禁用按钮防止重复点击，按钮文字变为"生成中..."
-    // 3. 生成完成后恢复按钮，并在画布区域添加生成的图片元素
-    // 4. 自动切换到操作链Tab展示进度
-    $('#btn-generate').on('click', function() {
-      console.log('开始生成图片');
-    });
-
-    // ===== 迷你执行面板 - 暂停/取消 =====
-    // 暂停按钮 - 点击后应实现：
-    // 1. 切换暂停/继续状态
-    // 2. 暂停时图标变为播放图标，面板文字更新为"已暂停"
-    // 3. 继续时恢复执行，图标恢复为暂停
-    $('#exec-pause').on('click', function() {
-      console.log('暂停/继续执行');
-    });
-
-    // 取消按钮 - 点击后应实现：
-    // 1. 弹出确认提示"确定取消当前执行？"
-    // 2. 确认后停止执行，重置进度条和状态
-    // 3. 隐藏迷你执行面板或重置为初始状态
-    $('#exec-cancel').on('click', function() {
-      console.log('取消执行');
-    });
-
-    // ===== 参考图片新增 =====
-    // 点击新增参考图后应实现：
-    // 1. 弹出文件选择对话框（支持图片格式过滤）
-    // 2. 选择后在参考图区域显示缩略图预览
-    // 3. 更新计数 "1/10" 等
-    // 4. 支持拖拽上传
-    $('#btn-add-ref-image').on('click', function() {
-      console.log('新增参考图');
-    });
-
-    // ===== 上传工具 =====
-    // 点击上传后应实现：
-    // 1. 弹出文件选择对话框
-    // 2. 支持多选图片
-    // 3. 上传后将图片添加到画布中央
-    $('#btool-upload, #tool-upload').on('click', function() {
-      console.log('上传图片到画布');
-    });
-
-    // ===== 保存按钮 =====
-    // 点击保存后应实现：
-    // 1. 将画布状态序列化保存
-    // 2. 显示保存成功提示
-    $('#btool-save').on('click', function() {
-      console.log('保存画布');
-    });
-
-    // ===== 搜索按钮 =====
-    // 点击搜索后应实现：
-    // 1. 弹出搜索面板或聚焦智能指令栏
-    // 2. 支持搜索画布元素、历史操作等
-    $('#btool-search').on('click', function() {
-      $('#smart-command-input').focus();
-    });
-
-    // ===== 操作说明按钮 =====
-    // 点击操作说明后应实现：
-    // 1. 弹出模态框显示完整的操作说明文档
-    // 2. 包含快捷键列表、手势操作等
-    $('#btn-guide').on('click', function() {
-      console.log('打开操作说明');
-    });
-
-    // ===== 更新内容按钮 =====
-    // 点击更新内容后应实现：
-    // 1. 弹出模态框显示版本更新日志
-    // 2. 展示新功能介绍和修复记录
-    $('#btn-changelog').on('click', function() {
-      console.log('打开更新内容');
-    });
-
-    // ===== 聊天发送 =====
-    $('#chat-send').on('click', function() {
-      var msg = $('#chat-input').val().trim();
-      if (msg) {
-        console.log('发送聊天消息:', msg);
-        $('#chat-input').val('');
-      }
-    });
-
-    $('#chat-input').on('keypress', function(e) {
-      if (e.which === 13) {
-        $('#chat-send').click();
-      }
-    });
-
-    // ===== 智能指令发送 =====
-    $('#smart-command-send').on('click', function() {
-      var cmd = $('#smart-command-input').val().trim();
-      if (cmd) {
-        console.log('执行智能指令:', cmd);
-        $('#smart-command-input').val('');
-      }
-    });
-
-    $('#smart-command-input').on('keypress', function(e) {
-      if (e.which === 13) {
-        $('#smart-command-send').click();
-      }
-    });
-
-    // ===== Pipeline 圆点点击 =====
-    // 点击Pipeline圆点后应实现：
-    // 1. 跳转到对应步骤
-    // 2. 高亮当前步骤圆点，取消其他圆点的活跃状态
-    // 3. 如果右侧面板在操作链Tab，滚动到对应操作项
-    $('#pipeline-indicator').on('click', 'div', function() {
-      console.log('切换到Pipeline步骤');
-    });
+    // === 底部工具栏 ===
+    $('#btool-ai-gen').on('click', function() { console.log('AI生成：使用右侧面板参数生成'); });
+    $('#btool-upload').on('click', function() { console.log('上传：应调用文件选择器'); });
+    $('#btool-save').on('click', function() { console.log('保存：保存画布状态'); });
+    $('#btool-search').on('click', function() { console.log('搜索'); });
+    $('#btn-generate').on('click', function() { console.log('开始生成图片'); });
+    $('#btn-add-ref').on('click', function() { console.log('新增参考图：应调用文件选择器'); });
 
   });
   </script>
