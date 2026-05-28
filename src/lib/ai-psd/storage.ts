@@ -9,7 +9,7 @@
  */
 
 import { execSql } from '../db-client';
-import type { AiPsdTask, AiPsdTaskStatus } from './types';
+import type { AiPsdTask, AiPsdTaskStatus, StyleTag } from './types';
 
 // ─── 建表 ────────────────────────────────────────────────────────────
 
@@ -249,7 +249,6 @@ function rowToTask(row: Record<string, unknown>): AiPsdTask {
     customWidth: (row.custom_width as number) || undefined,
     customHeight: (row.custom_height as number) || undefined,
     sceneType: (row.scene_type as AiPsdTask['sceneType']) || 'poster',
-    style: (row.style as AiPsdTask['style']) || [],
     colorTone: (row.color_tone as AiPsdTask['colorTone']) || 'auto',
     primaryColor: (row.primary_color as string) || undefined,
     secondaryColor: (row.secondary_color as string) || undefined,
@@ -267,10 +266,23 @@ function rowToTask(row: Record<string, unknown>): AiPsdTask {
     jsonUrl: (row.json_url as string) || undefined,
     reportUrl: (row.report_url as string) || undefined,
     errorMessage: (row.error_message as string) || undefined,
-    layerPlan: row.layer_plan ? (JSON.parse(row.layer_plan as string) as AiPsdTask['layerPlan']) : undefined,
-    referenceImageUrls: (row.reference_image_urls as string[]) || undefined,
-    productImageUrls: (row.product_image_urls as string[]) || undefined,
-    logoImageUrls: (row.logo_image_urls as string[]) || undefined,
+    layerPlan: row.layer_plan
+      ? (typeof row.layer_plan === 'string'
+          ? JSON.parse(row.layer_plan)
+          : row.layer_plan) as AiPsdTask['layerPlan']
+      : undefined,
+    style: Array.isArray(row.style) ? row.style as StyleTag[]
+      : typeof row.style === 'string' ? JSON.parse(row.style as string) as StyleTag[]
+      : [],
+    referenceImageUrls: Array.isArray(row.reference_image_urls) ? row.reference_image_urls as string[]
+      : typeof row.reference_image_urls === 'string' ? JSON.parse(row.reference_image_urls as string) as string[]
+      : undefined,
+    productImageUrls: Array.isArray(row.product_image_urls) ? row.product_image_urls as string[]
+      : typeof row.product_image_urls === 'string' ? JSON.parse(row.product_image_urls as string) as string[]
+      : undefined,
+    logoImageUrls: Array.isArray(row.logo_image_urls) ? row.logo_image_urls as string[]
+      : typeof row.logo_image_urls === 'string' ? JSON.parse(row.logo_image_urls as string) as string[]
+      : undefined,
     imageModel: (row.image_model as string) || undefined,
     llmModel: (row.llm_model as string) || undefined,
     createdAt: (row.created_at as number) || 0,

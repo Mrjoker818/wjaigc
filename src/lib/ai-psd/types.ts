@@ -92,7 +92,7 @@ export const LAYER_COMPLEXITY_OPTIONS: { label: string; value: LayerComplexity; 
 
 // ─── 输出质量 ────────────────────────────────────────────────────────
 
-export type OutputQuality = 'standard' | 'hd';
+export type OutputQuality = 'standard' | 'high' | 'hd';
 
 export const OUTPUT_QUALITY_OPTIONS: { label: string; value: OutputQuality; desc: string }[] = [
   { label: '标准', value: 'standard', desc: '最大边 1600px' },
@@ -157,7 +157,7 @@ export const TASK_STATUS_LABEL: Record<AiPsdTaskStatus, string> = {
 
 // ─── 图层类型 ────────────────────────────────────────────────────────
 
-export type LayerType = 'background' | 'light' | 'subject' | 'decoration' | 'texture' | 'atmosphere' | 'product' | 'logo' | 'text_preview' | 'shadow';
+export type LayerType = 'background' | 'light' | 'subject' | 'decoration' | 'texture' | 'atmosphere' | 'product' | 'logo' | 'text' | 'text_preview' | 'shadow';
 
 // ─── Layer Plan JSON 结构（LLM输出）──────────────────────────────────
 
@@ -177,6 +177,11 @@ export interface LayerPlanLayer {
   transparent: boolean;
   editable: boolean;
   prompt: string;
+  description?: string;
+  blendMode?: string;
+  role?: 'main' | 'accent' | 'fill' | 'overlay' | 'shadow' | 'product_ref' | 'logo_ref' | 'product' | 'logo';
+  keepOriginal?: boolean;
+  text?: string;
   x?: number;
   y?: number;
   width?: number;
@@ -221,6 +226,7 @@ export interface AiPsdTask {
   title?: string;
   subtitle?: string;
   bodyText?: string;
+  slogan?: string;
   ratio: string;
   customWidth?: number;
   customHeight?: number;
@@ -248,11 +254,54 @@ export interface AiPsdTask {
   referenceImageUrls?: string[];
   productImageUrls?: string[];
   logoImageUrls?: string[];
+  // 品牌物料模式字段
+  brandName?: string;
+  brandSlogan?: string;
+  brandColors?: string[];
+  materialType?: string;
   // 模型选择
   imageModel?: string;
   llmModel?: string;
   createdAt: number;
   updatedAt: number;
+}
+
+// ─── 图层定义（psd-builder / export-packager 使用） ──────────────
+
+export interface TextLayerDef {
+  type: 'text';
+  text: string;
+  fontFamily: string;
+  fontSize: number;
+  color: string;
+  x: number;
+  y: number;
+  bold?: boolean;
+  italic?: boolean;
+  opacity?: number;
+}
+
+/** 可编辑文本层配置 — 在 TextLayerDef 基础上增加编辑器所需字段 */
+export interface TextLayerEditableConfig extends TextLayerDef {
+  /** 在画布中的层级索引 */
+  layerIndex: number;
+  /** V4 规范图层名 */
+  v4Name: string;
+}
+
+export interface LayerDef {
+  type: LayerType;
+  name: string;
+  v4Name: string;
+  transparent: boolean;
+  editable: boolean;
+  blendMode?: string;
+  opacity?: number;
+  imageUrl?: string;
+  imageBuffer?: Buffer;
+  textConfig?: TextLayerDef;
+  keepOriginal?: boolean;
+  visible?: boolean;
 }
 
 // ─── 前端表单数据 ────────────────────────────────────────────────────
