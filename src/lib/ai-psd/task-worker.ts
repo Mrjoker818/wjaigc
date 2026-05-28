@@ -5,6 +5,8 @@
  *       文字层构建(text_building) → 合成PSD(psd_exporting) → 打包(packaging) → 完成(success)
  */
 
+import path from 'path';
+import fs from 'fs';
 import type {
   AiPsdTask,
   AiPsdTaskStatus,
@@ -95,6 +97,38 @@ async function saveExportResult(
 ): Promise<string> {
   const fileId = `f_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const fileUrl = `/ai-psd/${taskId}/${result.filename}`;
+
+  // 将 buffer 写入磁盘（public 目录，可通过 HTTP 访问）
+  if (result.buffer) {
+    try {
+      const outputDir = path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'public', 'ai-psd', taskId);
+      fs.mkdirSync(outputDir, { recursive: true });
+      const filePath = path.join(outputDir, result.filename);
+      fs.writeFileSync(filePath, result.buffer);
+      console.info(`[ai-psd-worker] File saved: ${filePath} (${result.size} bytes)`);
+    } catch (writeErr) {
+      console.error(`[ai-psd-worker] Failed to write file ${result.filename}:`, writeErr);
+    }
+  }
+
+  const resultAny = result as unknown as Record<string, unknown>;
+  // ZIP 包含多个子文件
+  if ('files' in result && Array.isArray(resultAny.files)) {
+    const files = resultAny.files as Array<{ filename: string; buffer: Buffer }>;
+    for (const f of files) {
+      if (f.buffer) {
+        try {
+          const outputDir = path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'public', 'ai-psd', taskId);
+          fs.mkdirSync(outputDir, { recursive: true });
+          const filePath = path.join(outputDir, f.filename);
+          fs.writeFileSync(filePath, f.buffer);
+        } catch (writeErr) {
+          console.error(`[ai-psd-worker] Failed to write sub-file ${f.filename}:`, writeErr);
+        }
+      }
+    }
+  }
+
   await dbAddFile(fileId, taskId, layerId, format, result.filename, fileUrl, result.size);
   return fileUrl;
 }

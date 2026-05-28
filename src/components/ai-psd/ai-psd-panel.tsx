@@ -10,11 +10,11 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  X, GripVertical, Layers, Image, Sparkles, FileImage,
+  X, GripVertical, Layers, Image as ImageIcon, Sparkles, FileImage,
   Upload, RotateCcw, Eye, EyeOff, ChevronDown, ChevronRight,
   Download, ZoomIn, Maximize2, Loader2, Check, Clock,
   Type, Palette, Box, Trash2, FileText, Archive, Info,
-  Plus, Minus, RefreshCw
+  Plus, Minus, RefreshCw, Settings
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────
@@ -27,18 +27,27 @@ interface ImageModel {
 }
 
 interface LayerItem {
-  layerId: string;
-  name: string;
-  v4Name: string;
-  type: string;
+  id: string;
+  name: string; // V4 name like "bg/main"
+  type: string; // "image" | "text" | "adjustment"
   group: string;
-  status: 'pending' | 'generating' | 'completed' | 'failed' | 'skipped';
-  progress: number;
-  imageUrl: string;
-  opacity: number;
-  visible: boolean;
-  isUserAsset: boolean;
-  blendMode: string;
+  blendMode?: string;
+  opacity?: number;
+  visible?: boolean;
+  description?: string;
+  role?: string;
+  keepOriginal?: boolean;
+  text?: {
+    type: 'text';
+    text: string;
+    fontFamily: string;
+    fontSize: number;
+    color: string;
+    x: number;
+    y: number;
+    bold?: boolean;
+    italic?: boolean;
+  };
 }
 
 interface QualityReport {
@@ -48,18 +57,27 @@ interface QualityReport {
 }
 
 interface TaskData {
-  taskId: string;
+  id: string;
   status: string;
   progress: number;
-  label: string;
-  layerPlan: Record<string, unknown> | null;
-  previewImageUrl: string;
-  layers: LayerItem[];
-  psdFileUrl: string;
-  zipFileUrl: string;
-  reportMarkdown: string;
-  qualityReport: QualityReport | null;
-  error?: string;
+  label?: string;
+  currentStep?: string;
+  currentLayerName?: string;
+  layerPlan?: { layers: LayerItem[] } | null;
+  previewUrl?: string;
+  psdUrl?: string;
+  zipUrl?: string;
+  jsonUrl?: string;
+  reportUrl?: string;
+  qualityReport?: { overall: number; consistency: number; editability: number };
+  errorMessage?: string;
+  generationMode?: string;
+  sceneType?: string;
+  prompt?: string;
+  style?: string[];
+  colorTone?: string;
+  ratio?: string;
+  createdAt?: string;
 }
 
 interface HistoryItem {
@@ -131,9 +149,9 @@ const TEXT_LAYER_MODES = [
   { label: '可编辑层', value: 'editable', desc: '保留文字配置JSON' },
 ];
 
-const GENERATE_MODES = [
+const GENERATE_MODES: { key: string; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: 'text', label: '文本生成', icon: Type },
-  { key: 'reference', label: '参考图生成', icon: Image },
+  { key: 'reference', label: '参考图生成', icon: ImageIcon },
   { key: 'brand', label: '品牌物料', icon: Palette },
 ];
 
@@ -141,10 +159,10 @@ const MATERIAL_TYPES = ['海报', 'Banner', '电商主图', '社媒封面', '广
 
 // ─── Layer group definitions (V4 naming) ──────────────────────
 
-const LAYER_GROUPS = [
+const LAYER_GROUPS: { key: string; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: 'bg', label: '背景层', icon: Box },
   { key: 'fx', label: '光效层', icon: Sparkles },
-  { key: 'subject', label: '主体层', icon: Image },
+  { key: 'subject', label: '主体层', icon: ImageIcon },
   { key: 'deco', label: '装饰层', icon: Layers },
   { key: 'fx-atmosphere', label: '氛围层', icon: Sparkles },
   { key: 'text', label: '文字层', icon: Type },
@@ -336,7 +354,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
         if (data.success && data.task) {
           setTaskData(data.task);
           // Update step based on status
-          if (data.task.status === 'completed') {
+          if (data.task.status === 'success' || data.task.status === 'completed') {
             setIsGenerating(false);
             setCurrentStep(3);
           } else if (data.task.status === 'failed') {
@@ -349,9 +367,11 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
             else if (p <= 25) setCurrentStep(1);
             else if (p <= 90) setCurrentStep(2);
             // Count layer progress
-            const layers = data.task.layers || [];
-            const done = layers.filter((l: LayerItem) => l.status === 'completed').length;
-            setLayerProgress({ done, total: layers.length });
+            const layers = data.task.layerPlan?.layers || data.task.layers || [];
+            // Estimate layer progress from overall progress (planning=~10%, each layer~=80%/total, export=~10%)
+            const layerGenProgress = Math.max(0, p - 10); // subtract planning phase
+            const estimatedDone = Math.min(layers.length, Math.floor(layerGenProgress / (80 / layers.length)));
+            setLayerProgress({ done: estimatedDone, total: layers.length });
           }
         }
       } catch { /* ignore polling errors */ }
@@ -411,30 +431,31 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          mode: generateMode,
+          generationMode: generateMode === 'text' ? 'text_to_psd' : generateMode === 'reference' ? 'image_to_psd' : 'brand_material',
           prompt,
           title,
           subtitle,
-          slogan,
-          aspectRatio,
+          bodyText: slogan,
+          ratio: aspectRatio === 'custom' ? 'custom' : aspectRatio,
           customWidth,
           customHeight,
-          usageType,
-          styleDirections,
-          colorTendency,
-          customColors,
+          sceneType: usageType,
+          style: styleDirections,
+          colorTone: colorTendency,
+          primaryColor: customColors?.[0],
+          secondaryColor: customColors?.[1],
+          accentColor: customColors?.[2],
           layerComplexity,
           outputQuality,
-          textLayerMode,
+          textRenderMode: textLayerMode,
           imageModel: selectedImageModel,
           llmModel: selectedLlmModel,
-          referenceImages: referenceImages.map(r => r.url),
-          productImage: productImage?.url || '',
-          logoImage: logoImage?.url || '',
+          referenceImageUrls: referenceImages.map(r => r.url),
+          productImageUrls: productImage ? [productImage.url] : [],
+          logoImageUrls: logoImage ? [logoImage.url] : [],
           brandName,
           brandSlogan,
           brandColors,
-          brandFont,
           materialType,
         }),
       });
@@ -483,9 +504,12 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
   const handleDownload = useCallback(async (format: 'psd' | 'zip' | 'json' | 'report') => {
     if (!taskData) return;
     const urlMap: Record<string, string> = {
-      psd: taskData.psdFileUrl,
-      zip: taskData.zipFileUrl,
+      psd: taskData.psdUrl || '',
+      zip: taskData.zipUrl || '',
+      report: taskData.reportUrl || '',
     };
+    const url = urlMap[format];
+    if (!url) return;
     if (format === 'json') {
       const blob = new Blob([JSON.stringify(taskData.layerPlan, null, 2)], { type: 'application/json' });
       const blobUrl = URL.createObjectURL(blob);
@@ -496,26 +520,33 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
       URL.revokeObjectURL(blobUrl);
       return;
     }
-    if (format === 'report') {
-      const blob = new Blob([taskData.reportMarkdown || ''], { type: 'text/markdown' });
-      const blobUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = `ai-psd-report-${taskId}.md`;
-      link.click();
-      URL.revokeObjectURL(blobUrl);
+    if (format === 'report' && taskData.reportUrl) {
+      // Download report via fetch to handle cross-origin
+      try {
+        const resp = await fetch(taskData.reportUrl);
+        const text = await resp.text();
+        const blob = new Blob([text], { type: 'text/markdown' });
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = `ai-psd-report-${taskId}.md`;
+        link.click();
+        URL.revokeObjectURL(blobUrl);
+      } catch {
+        window.open(taskData.reportUrl, '_blank');
+      }
       return;
     }
-    const url = urlMap[format];
-    if (url) {
-      const response = await fetch(url);
+    const fileUrl = urlMap[format];
+    if (fileUrl) {
+      const response = await fetch(fileUrl);
       const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
+      const bUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = blobUrl;
+      link.href = bUrl;
       link.download = `ai-psd-${taskId}.${format === 'psd' ? 'psd' : 'zip'}`;
       link.click();
-      URL.revokeObjectURL(blobUrl);
+      URL.revokeObjectURL(bUrl);
     }
   }, [taskData, taskId]);
 
@@ -538,12 +569,15 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
   // ─── Toggle layer visibility ───────────────────────────────
   const toggleLayerVisibility = useCallback((layerId: string) => {
     setTaskData(prev => {
-      if (!prev) return prev;
+      if (!prev || !prev.layerPlan?.layers) return prev;
       return {
         ...prev,
-        layers: prev.layers.map(l =>
-          l.layerId === layerId ? { ...l, visible: !l.visible } : l
-        ),
+        layerPlan: {
+          ...prev.layerPlan,
+          layers: prev.layerPlan.layers.map((l: LayerItem) =>
+            l.id === layerId ? { ...l, visible: !l.visible } : l
+          ),
+        },
       };
     });
   }, []);
@@ -562,12 +596,12 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
   }, []);
 
   // ─── Derive view state ─────────────────────────────────────
-  const isCompleted = taskData?.status === 'completed';
+  const isCompleted = taskData?.status === 'success' || taskData?.status === 'completed';
   const isIdle = !isGenerating && !isCompleted;
-  const layers = taskData?.layers || [];
+  const layers: LayerItem[] = (taskData?.layerPlan?.layers as LayerItem[] | undefined) || [];
   const groupedLayers = LAYER_GROUPS.map(g => ({
     ...g,
-    layers: layers.filter(l => {
+    layers: layers.filter((l: LayerItem) => {
       if (g.key === 'fx-atmosphere') return l.group === 'fx' && l.type === 'atmosphere';
       if (g.key === 'fx') return l.group === 'fx' && l.type !== 'atmosphere';
       return l.group === g.key;
@@ -993,9 +1027,9 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
           )}
 
           {/* Preview image if available */}
-          {taskData?.previewImageUrl ? (
+          {taskData?.previewUrl ? (
             <div className="flex-1 flex items-center justify-center bg-black/20 rounded-lg overflow-hidden">
-              <img src={taskData.previewImageUrl} alt="预览"
+              <img src={taskData.previewUrl} alt="预览"
                 className="max-w-full max-h-full object-contain rounded" />
             </div>
           ) : (
@@ -1018,9 +1052,9 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
             <Check className="w-4 h-4 text-green-400" />
             <span className="text-xs text-green-400">生成完成</span>
           </div>
-          {taskData?.previewImageUrl ? (
+          {taskData?.previewUrl ? (
             <div className="flex-1 flex items-center justify-center bg-black/20 rounded-lg overflow-hidden relative">
-              <img src={taskData.previewImageUrl} alt="预览"
+              <img src={taskData.previewUrl} alt="预览"
                 className="max-w-full max-h-full object-contain rounded"
                 style={{ transform: `scale(${previewScale})` }} />
               {/* Zoom controls */}
@@ -1109,22 +1143,21 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
                 <span className="text-[10px] text-gray-600">{group.layers.length}</span>
               </button>
               {!isCollapsed && group.layers.map(layer => (
-                <div key={layer.layerId}
+                <div key={layer.id}
                   className="flex items-center gap-1.5 pl-7 pr-2 py-1.5 text-[11px] hover:bg-white/[0.04] rounded group transition-colors">
                   {/* Visibility toggle */}
                   <button className="text-gray-500 hover:text-gray-300"
-                    onClick={() => toggleLayerVisibility(layer.layerId)}>
-                    {layer.visible ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                    onClick={() => toggleLayerVisibility(layer.id)}>
+                    {(layer.visible ?? true) ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
                   </button>
-                  {/* Layer status icon */}
-                  {layer.status === 'completed' && <Check className="w-3 h-3 text-green-400" />}
-                  {layer.status === 'generating' && <Loader2 className="w-3 h-3 text-[#d4af37] animate-spin" />}
-                  {layer.status === 'pending' && <Clock className="w-3 h-3 text-gray-600" />}
-                  {layer.status === 'failed' && <X className="w-3 h-3 text-red-400" />}
+                  {/* Layer type icon */}
+                  {layer.type === 'text' && <Type className="w-3 h-3 text-blue-400" />}
+                  {layer.type === 'image' && <ImageIcon className="w-3 h-3 text-green-400" />}
+                  {layer.type === 'adjustment' && <Settings className="w-3 h-3 text-yellow-400" />}
                   {/* V4 name */}
-                  <span className="flex-1 truncate text-gray-400" title={layer.name}>{layer.v4Name || layer.name}</span>
-                  {/* Regenerate button (not for user assets) */}
-                  {!layer.isUserAsset && isCompleted && (
+                  <span className="flex-1 truncate text-gray-400" title={layer.description || layer.name}>{layer.name}</span>
+                  {/* Regenerate button (not for keepOriginal assets) */}
+                  {!layer.keepOriginal && isCompleted && (
                     <button className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-[#d4af37] transition-all"
                       title="重新生成此层">
                       <RefreshCw className="w-3 h-3" />
@@ -1258,9 +1291,9 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
             <FileText className="w-3 h-3" />
             JSON
           </button>
-          {taskData?.previewImageUrl && (
+          {taskData?.previewUrl && (
             <button className={th.btnSm}
-              onClick={() => onAddImages([taskData.previewImageUrl])}>
+              onClick={() => onAddImages([taskData.previewUrl!])}>
               添加到画布
             </button>
           )}

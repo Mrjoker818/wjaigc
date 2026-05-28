@@ -1,0 +1,157 @@
+{
+  "version": "4.0",
+  "taskId": "ai-psd-1779929455088-bbwybv",
+  "createdAt": "2026-05-28T00:57:39.320Z",
+  "canvas": {
+    "width": 1024,
+    "height": 1024
+  },
+  "generation": {
+    "mode": "text_to_psd",
+    "prompt": "A luxury watch ad",
+    "sceneType": "poster",
+    "styleTags": [
+      "commercial"
+    ],
+    "colorTone": "auto",
+    "complexity": "standard",
+    "quality": "standard"
+  },
+  "layers": [
+    {
+      "name": "背景层",
+      "type": "background",
+      "v4Name": "背景层",
+      "visible": true,
+      "opacity": 1,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Deep charcoal grey radial gradient background, minimalist luxury studio wall texture, dark elegant aesthetic",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "大气光晕",
+      "type": "atmosphere",
+      "v4Name": "大气光晕",
+      "visible": true,
+      "opacity": 0.4,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Subtle golden rim light glow surrounding the center area, soft ambient dust particles floating in the air, cinematic lighting",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "产品阴影",
+      "type": "shadow",
+      "v4Name": "产品阴影",
+      "visible": true,
+      "opacity": 0.6,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Soft diffuse elliptical shadow cast on the ground, realistic contact shadow for a luxury watch, dark semi-transparent black",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "产品层",
+      "type": "product",
+      "v4Name": "产品层",
+      "visible": true,
+      "opacity": 1,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Placeholder for user luxury watch product image, isolated on transparent background, centered",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "侧缘高光",
+      "type": "light",
+      "v4Name": "侧缘高光",
+      "visible": true,
+      "opacity": 0.8,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Sharp white and gold specular highlight rays, lens flare effect, cinematic rim lighting on transparent background",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "装饰纹理",
+      "type": "decoration",
+      "v4Name": "装饰纹理",
+      "visible": true,
+      "opacity": 0.3,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Minimalist thin gold geometric lines framing the border of the canvas, luxury engraving style",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "质感噪点",
+      "type": "texture",
+      "v4Name": "质感噪点",
+      "visible": true,
+      "opacity": 0.15,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Fine film grain and subtle noise texture overlay to add professional photographic quality",
+      "isUserAsset": false,
+      "editable": false
+    }
+  ],
+  "layerManifest": [
+    {
+      "name": "背景层",
+      "type": "background",
+      "visible": true,
+      "opacity": 1,
+      "editable": false
+    },
+    {
+      "name": "大气光晕",
+      "type": "atmosphere",
+      "visible": true,
+      "opacity": 0.4,
+      "editable": false
+    },
+    {
+      "name": "产品阴影",
+      "type": "shadow",
+      "visible": true,
+      "opacity": 0.6,
+      "editable": false
+    },
+    {
+      "name": "产品层",
+      "type": "product",
+      "visible": true,
+      "opacity": 1,
+      "editable": false
+    },
+    {
+      "name": "侧缘高光",
+      "type": "light",
+      "visible": true,
+      "opacity": 0.8,
+      "editable": false
+    },
+    {
+      "name": "装饰纹理",
+      "type": "decoration",
+      "visible": true,
+      "opacity": 0.3,
+      "editable": false
+    },
+    {
+      "name": "质感噪点",
+      "type": "texture",
+      "visible": true,
+      "opacity": 0.15,
+      "editable": false
+    }
+  ]
+}
