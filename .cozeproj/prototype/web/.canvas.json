@@ -5,15 +5,7 @@
       "options": {
         "path": ".cozeproj/prototype/web/home.html"
       },
-      "title": "多Agent工作流编辑器",
-      "size": "web"
-    },
-    {
-      "type": "html",
-      "options": {
-        "path": ".cozeproj/prototype/web/run-monitor.html"
-      },
-      "title": "可视化调试器",
+      "title": "双模式画布",
       "size": "web"
     },
     {
@@ -21,7 +13,7 @@
       "options": {
         "path": ".cozeproj/prototype/web/workflow-hub.html"
       },
-      "title": "Agent生态市场",
+      "title": "收藏与分享",
       "size": "web"
     }
   ]
