@@ -311,6 +311,7 @@ export interface CanvasImage {
   modelName?: string;
   apiProvider?: string;
   apiBaseUrl?: string;
+  pipelineParentId?: string; // 父图片ID，用于Pipeline连线（图生图/修图/扩展等操作的来源）
 }
 
 interface InfiniteCanvasProps {
@@ -366,6 +367,8 @@ interface InfiniteCanvasProps {
   onAddToFavorites?: (image: CanvasImage) => void;
   /** Callback to open favorites panel */
   onToggleFavorites?: () => void;
+  /** Pipeline chains data for operation chain display */
+  pipelineChains?: Record<string, import('@/lib/pipeline-chain').PipelineChain>;
 }
 
 type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'upscale' | 'svg-trace';
@@ -419,6 +422,7 @@ export function InfiniteCanvas({
   initialViewState,
   onAddToFavorites,
   onToggleFavorites,
+  pipelineChains = {},
 }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
@@ -6463,7 +6467,51 @@ export function InfiniteCanvas({
                     {image.originalWidth || image.width} × {image.originalHeight || image.height}
                   </span>
                 </div>
-                {/* Edit mode stroke overlay - moved to floating window */}
+                {/* Pipeline mini dot indicator (bottom-center) */}
+	                {pipelineChains[image.id] && pipelineChains[image.id].steps.length > 0 && !image.isProcessingPlaceholder && (() => {
+	                  const chain = pipelineChains[image.id];
+	                  const stepCount = chain.steps.length;
+	                  const dotSize = Math.max(5, 6 / zoom);
+	                  const lineLen = Math.max(6, 8 / zoom);
+	                  const totalWidth = stepCount * (dotSize + lineLen) - lineLen + dotSize;
+	                  return (
+	                    <div className="absolute bottom-1 left-1/2 -translate-x-1/2 z-20 flex items-center pointer-events-auto"
+	                      style={{ fontSize: `${Math.max(8, 9 / zoom)}px` }}
+	                      title={`操作链: ${stepCount}步`}>
+	                      <div className="flex items-center px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(0,0,0,0.65)' }}>
+	                        <svg width={totalWidth} height={dotSize + 4} className="overflow-visible">
+	                          {chain.steps.map((step, idx) => {
+	                            const x = idx * (dotSize + lineLen) + dotSize / 2;
+	                            const color = step.status === 'completed' ? '#2ea043'
+	                              : step.status === 'running' ? '#d4af37'
+	                              : step.status === 'failed' ? '#f85149'
+	                              : '#4b5563';
+	                            return (
+	                              <g key={step.id}>
+	                                {idx < stepCount - 1 && (
+	                                  <line
+	                                    x1={x + dotSize / 2} y1={(dotSize + 4) / 2}
+	                                    x2={x + dotSize / 2 + lineLen} y2={(dotSize + 4) / 2}
+	                                    stroke={chain.steps.slice(0, idx + 1).every(s => s.status === 'completed') ? '#2ea043' : '#30363d'}
+	                                    strokeWidth={Math.max(1, 1.5 / zoom)}
+	                                  />
+	                                )}
+	                                <circle
+	                                  cx={x} cy={(dotSize + 4) / 2}
+	                                  r={dotSize / 2}
+	                                  fill={color}
+	                                  className={step.status === 'running' ? 'animate-pulse' : ''}
+	                                />
+	                                <title>{step.label}</title>
+	                              </g>
+	                            );
+	                          })}
+	                        </svg>
+	                      </div>
+	                    </div>
+	                  );
+	                })()}
+	                {/* Edit mode stroke overlay - moved to floating window */}
               </div>
             );
           })}
@@ -7170,6 +7218,48 @@ export function InfiniteCanvas({
               </div>
             );
           })}
+
+          {/* Pipeline Connection Lines - SVG连线显示图片间的操作关系 */}
+          <svg
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: '1px',
+              height: '1px',
+              overflow: 'visible',
+              pointerEvents: 'none',
+              zIndex: 20,
+            }}
+          >
+            {images.filter(img => img.pipelineParentId && !img.isProcessingPlaceholder).map(childImg => {
+              const parentImg = images.find(p => p.id === childImg.pipelineParentId);
+              if (!parentImg) return null;
+              // Source: right edge center of parent
+              const srcX = parentImg.x + parentImg.width;
+              const srcY = parentImg.y + parentImg.height / 2;
+              // Target: left edge center of child
+              const tgtX = childImg.x;
+              const tgtY = childImg.y + childImg.height / 2;
+              const midX = (srcX + tgtX) / 2;
+              return (
+                <g key={`pipeline-line-${childImg.id}`}>
+                  <path
+                    d={`M ${srcX} ${srcY} C ${midX} ${srcY}, ${midX} ${tgtY}, ${tgtX} ${tgtY}`}
+                    fill="none"
+                    stroke="#3b82f6"
+                    strokeWidth={2 / zoom}
+                    strokeDasharray={`${6 / zoom} ${4 / zoom}`}
+                    opacity={0.5}
+                  />
+                  {/* Source port */}
+                  <circle cx={srcX} cy={srcY} r={3 / zoom} fill="#3b82f6" opacity={0.7} />
+                  {/* Target port */}
+                  <circle cx={tgtX} cy={tgtY} r={3 / zoom} fill="#3b82f6" opacity={0.7} />
+                </g>
+              );
+            })}
+          </svg>
         </div>
 
 

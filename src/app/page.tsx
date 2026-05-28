@@ -9,7 +9,21 @@ import { PromptEquation } from '@/components/prompt-equation';
 
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
-import { Image as ImageIcon, MessageSquare, Sparkles } from 'lucide-react';
+import { Image as ImageIcon, MessageSquare, Sparkles, GitBranch } from 'lucide-react';
+import { OperationChainPanel } from '@/components/operation-chain-panel';
+import { NodeLibraryPanel } from '@/components/node-library-panel';
+
+/** Node label mapping for pipeline step display */
+const NODE_LABELS: Record<string, string> = {
+  'load-image': '加载图片', 'load-url': '加载URL', 'text-input': '文本输入',
+  'remove-bg': '移除背景', 'upscale': '无损放大', 'img2img': '图生图',
+  'adjust-color': '调色', 'white-bg': '白底合成', 'erase': '擦除修复',
+  'ai-check': 'AI质检', 'ai-optimize': 'AI优化', 'ai-edit': 'AI修图', 'image-analyze': '图片分析',
+  'condition': '条件分支', 'else': '否则', 'loop': '循环', 'parallel': '并行执行', 'switch': '开关',
+  'subgraph': '子图', 'batch': '批量组合',
+  'save-image': '保存图片', 'export-psd': '导出PSD', 'export-svg': '导出SVG',
+};
+import { PipelineChain, createPipelineChain, generateStepId, PipelineStepType, addStepToChain } from '@/lib/pipeline-chain';
 import { ImageEditor } from '@/components/image-editor';
 import { UserManager } from '@/components/user-manager';
 import { ProjectDataPanel } from '@/components/project-data-panel';
@@ -43,7 +57,7 @@ import { toStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 
 type ThemeStyle = 'gold' | 'monochrome';
-type ActivePanel = 'generate' | 'chat';
+type ActivePanel = 'generate' | 'chat' | 'pipeline';
 
 
 function recordUserData(input: {
@@ -157,6 +171,9 @@ function CanvasApp() {
   const [altRefMarkers, setAltRefMarkers] = useState<Array<{id: string; url: string; number: number}>>([]);
   const [showPromptEquation, setShowPromptEquation] = useState(false);
 
+  // Pipeline chain state - 操作链
+  const [pipelineChains, setPipelineChains] = useState<Record<string, PipelineChain>>({});
+
   // Language-based image editing state
   const [showImageEditor, setShowImageEditor] = useState(false);
   const [editingImage, setEditingImage] = useState<CanvasImage | null>(null);
@@ -170,6 +187,19 @@ function CanvasApp() {
   const [visionPromptEnabled, setVisionPromptEnabled] = useState(false);
   const [isVisionAnalyzing, setIsVisionAnalyzing] = useState(false);
   const [visionResult, setVisionResult] = useState<import('@/components/oh-my-prompt').VisionApiResultData | null>(null);
+
+  // Node library panel state
+  const [nodeLibraryCollapsed, setNodeLibraryCollapsed] = useState(true);
+
+  // Auto-create pipeline chain when an image is selected
+  useEffect(() => {
+    if (selectedImage && !pipelineChains[selectedImage.id]) {
+      setPipelineChains(prev => ({
+        ...prev,
+        [selectedImage.id]: createPipelineChain(selectedImage.id, selectedImage.url),
+      }));
+    }
+  }, [selectedImage, pipelineChains]);
 
   // Initialize current user and admin UI state
   useEffect(() => {
@@ -1836,6 +1866,112 @@ function CanvasApp() {
     setActivePanel('generate');
   }, []);
 
+  // === Pipeline Chain Handlers ===
+  /** Get or create pipeline chain for a given image */
+  const getOrCreateChain = useCallback((imageId: string, imageUrl?: string): PipelineChain => {
+    const existing = pipelineChains[imageId];
+    if (existing) return existing;
+    const newChain = createPipelineChain(imageId, imageUrl);
+    setPipelineChains(prev => ({ ...prev, [imageId]: newChain }));
+    return newChain;
+  }, [pipelineChains]);
+
+  /** Add a step to the selected image's pipeline chain */
+  const handleAddPipelineStep = useCallback((stepType: PipelineStepType, label: string) => {
+    if (!selectedImage) return;
+    setPipelineChains(prev => {
+      const chain = prev[selectedImage.id] || createPipelineChain(selectedImage.id, selectedImage.url);
+      return {
+        ...prev,
+        [selectedImage.id]: {
+          ...chain,
+          steps: [...chain.steps, {
+            id: generateStepId(),
+            type: stepType,
+            status: 'pending',
+            label,
+            createdAt: Date.now(),
+          }],
+          updatedAt: Date.now(),
+        },
+      };
+    });
+  }, [selectedImage]);
+
+  /** Run the entire pipeline chain */
+  const handleRunChain = useCallback(() => {
+    // Placeholder: mark all pending steps as running in sequence
+    if (!selectedImage) return;
+    setPipelineChains(prev => {
+      const chain = prev[selectedImage.id];
+      if (!chain) return prev;
+      const firstPendingIdx = chain.steps.findIndex(s => s.status === 'pending');
+      if (firstPendingIdx === -1) return prev;
+      return {
+        ...prev,
+        [selectedImage.id]: {
+          ...chain,
+          steps: chain.steps.map((s, i) =>
+            i === firstPendingIdx ? { ...s, status: 'running' as const, progress: 0 } : s
+          ),
+          updatedAt: Date.now(),
+        },
+      };
+    });
+  }, [selectedImage]);
+
+  /** Step through the pipeline chain (one step at a time) */
+  const handleStepChain = useCallback(() => {
+    if (!selectedImage) return;
+    setPipelineChains(prev => {
+      const chain = prev[selectedImage.id];
+      if (!chain) return prev;
+      const runningIdx = chain.steps.findIndex(s => s.status === 'running');
+      const firstPendingIdx = chain.steps.findIndex(s => s.status === 'pending');
+      return {
+        ...prev,
+        [selectedImage.id]: {
+          ...chain,
+          steps: chain.steps.map((s, i) => {
+            if (runningIdx >= 0 && i === runningIdx) {
+              return { ...s, status: 'completed' as const, progress: 100 };
+            }
+            if (runningIdx < 0 && i === firstPendingIdx) {
+              return { ...s, status: 'running' as const, progress: 0 };
+            }
+            return s;
+          }),
+          updatedAt: Date.now(),
+        },
+      };
+    });
+  }, [selectedImage]);
+
+  /** Reset the pipeline chain */
+  const handleResetChain = useCallback(() => {
+    if (!selectedImage) return;
+    setPipelineChains(prev => {
+      const chain = prev[selectedImage.id];
+      if (!chain) return prev;
+      return {
+        ...prev,
+        [selectedImage.id]: {
+          ...chain,
+          steps: chain.steps.map(s => ({
+            ...s,
+            status: s.type === 'load' ? 'completed' as const : 'pending' as const,
+            progress: undefined,
+            duration: undefined,
+          })),
+          updatedAt: Date.now(),
+        },
+      };
+    });
+  }, [selectedImage]);
+
+  /** Get pipeline chain for selected image */
+  const selectedChain = selectedImage ? (pipelineChains[selectedImage.id] || null) : null;
+
   const handleExternalPromptConsumed = useCallback(() => {
     setExternalPrompt(undefined);
   }, []);
@@ -2043,6 +2179,7 @@ function CanvasApp() {
           onToggleHelp={() => setShowHelpGuide(true)}
           onAddToFavorites={handleAddToFavorites}
           onToggleFavorites={() => setShowFavorites(true)}
+          pipelineChains={pipelineChains}
           initialViewState={viewStateRef.current || undefined}
           isPanelCollapsed={panelCollapsed}
           navigateToImageId={navigateToImageId}
@@ -2127,6 +2264,35 @@ function CanvasApp() {
           }}
         />
       )}
+
+      {/* Node Library Panel - Left side floating */}
+      <div className={`absolute top-3 left-3 bottom-3 z-30 transition-all duration-300 flex ${
+        nodeLibraryCollapsed ? '' : ''
+      }`}>
+        <NodeLibraryPanel
+          isMonochrome={themeStyle === 'monochrome'}
+          collapsed={nodeLibraryCollapsed}
+          onToggleCollapse={() => setNodeLibraryCollapsed(prev => !prev)}
+          onAddNode={(nodeType, nodeId) => {
+            // When a node is added from library, add it to the selected image's pipeline chain
+            if (selectedImage) {
+              setPipelineChains(prev => {
+                const chain = prev[selectedImage.id] || createPipelineChain(selectedImage.id, selectedImage.url);
+                return {
+                  ...prev,
+                  [selectedImage.id]: addStepToChain(chain, {
+                    type: nodeType as import('@/lib/pipeline-chain').PipelineStepType,
+                    label: NODE_LABELS[nodeId] || nodeId,
+                    description: '',
+                  }),
+                };
+              });
+              // Switch to operation chain tab to show the new step
+              setActivePanel('pipeline');
+            }
+          }}
+        />
+      </div>
 
       {/* Floating Panel */}
       {!panelCollapsed && (
@@ -2213,6 +2379,24 @@ function CanvasApp() {
                 <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-gradient-to-r from-blue-500 to-cyan-400' : 'bg-[#d4af37] shadow-[0_0_6px_rgba(212,175,55,0.5)]'}`} />
               )}
             </button>
+            <button
+              onClick={() => setActivePanel('pipeline')}
+              className={`flex-1 py-2 px-3 flex items-center justify-center gap-1.5 transition-all text-sm relative ${
+                activePanel === 'pipeline'
+                  ? themeStyle === 'monochrome'
+                    ? 'text-blue-600 font-semibold'
+                    : 'text-[#d4af37] font-semibold'
+                  : themeStyle === 'monochrome'
+                    ? 'text-gray-500 hover:text-blue-600 hover:bg-blue-50/50'
+                    : 'text-[#888] hover:text-white hover:bg-[#1a1a1a]/70'
+              }`}
+            >
+              <GitBranch size={15} className={themeStyle === 'monochrome' && activePanel === 'pipeline' ? 'text-blue-500' : ''} />
+              <span className="text-sm">操作链</span>
+              {activePanel === 'pipeline' && (
+                <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-gradient-to-r from-blue-500 to-cyan-400' : 'bg-[#d4af37] shadow-[0_0_6px_rgba(212,175,55,0.5)]'}`} />
+              )}
+            </button>
           </div>
           <div className="panel-divider" />
 
@@ -2254,6 +2438,19 @@ function CanvasApp() {
               </div>
               <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
                 <ChatPanel themeStyle={themeStyle} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} canvasImages={images} onChatModelChange={setCurrentChatModelInfo} />
+              </div>
+
+              {/* 操作链面板 */}
+              <div className={activePanel === 'pipeline' ? 'flex-1 overflow-hidden flex flex-col' : 'hidden'}>
+                <OperationChainPanel
+                  chain={selectedChain}
+                  imageName={selectedImage?.prompt?.slice(0, 30) || undefined}
+                  themeStyle={themeStyle}
+                  onAddStep={handleAddPipelineStep}
+                  onRunChain={handleRunChain}
+                  onStepChain={handleStepChain}
+                  onResetChain={handleResetChain}
+                />
               </div>
 
             {/* 固定在底部的开始生成按钮 */}
