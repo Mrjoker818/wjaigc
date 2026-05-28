@@ -927,7 +927,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
 
       {/* Product image + Logo (all modes) */}
       <div>
-        <label className={th.sectionLabel}>产品图 <span className="text-[#d4af37] normal-case">(原图保留)</span></label>
+        <div className={th.sectionLabel}>产品图 <span className="text-[#d4af37] normal-case">(原图保留)</span></div>
         {productImage ? (
           <div className={`${th.card} p-2 flex items-center gap-2`}>
             <img src={productImage.url} alt={productImage.name} className="w-10 h-10 rounded object-cover" />
@@ -947,7 +947,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
       </div>
 
       <div>
-        <label className={th.sectionLabel}>Logo <span className="text-[#d4af37] normal-case">(原图保留)</span></label>
+        <div className={th.sectionLabel}>Logo <span className="text-[#d4af37] normal-case">(原图保留)</span></div>
         {logoImage ? (
           <div className={`${th.card} p-2 flex items-center gap-2`}>
             <img src={logoImage.url} alt={logoImage.name} className="w-10 h-10 rounded object-cover" />

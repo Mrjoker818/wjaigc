@@ -18,6 +18,72 @@ import sharp from 'sharp';
  */
 export async function POST(request: NextRequest) {
   try {
+    const contentType = request.headers.get('content-type') || '';
+
+    // 支持 multipart/form-data 文件上传
+    if (contentType.includes('multipart/form-data')) {
+      const formData = await request.formData();
+      const file = formData.get('file') as File | null;
+      const imageUrl = formData.get('imageUrl') as string | null;
+
+      if (file) {
+        // 文件上传模式
+        const isProd = process.env.COZE_PROJECT_ENV === 'PROD';
+        const timestamp = Date.now();
+        const random = Math.random().toString(36).substring(2, 8);
+        const uploadDir = isProd
+          ? path.join(getServerDataRoot(), 'uploads')
+          : path.join(process.cwd(), 'public', 'uploads');
+        const webPath = isProd ? '/api/serve-upload' : '/uploads';
+
+        if (!existsSync(uploadDir)) {
+          await mkdir(uploadDir, { recursive: true });
+        }
+
+        const arrayBuffer = await file.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+
+        if (buffer.length > 20 * 1024 * 1024) {
+          return NextResponse.json({ error: 'Image too large (max 20MB)' }, { status: 400 });
+        }
+
+        const originalName = file.name || 'upload.png';
+        const ext = originalName.split('.').pop()?.toLowerCase() || 'png';
+        const filename = `upload-${timestamp}-${random}.${ext}`;
+        const filePath = path.join(uploadDir, filename);
+        await writeFile(filePath, buffer);
+
+        if (isProd) {
+          const publicDir = path.join(process.cwd(), 'public', 'uploads');
+          if (!existsSync(publicDir)) await mkdir(publicDir, { recursive: true });
+          try { await copyFile(filePath, path.join(publicDir, filename)); } catch { /* ignore */ }
+        }
+
+        // S3 backup
+        let s3Key: string | null = null;
+        if (isS3Available()) {
+          const fileContentType = file.type || 'image/png';
+          s3Key = await uploadImageToS3(buffer, filename, fileContentType);
+          if (s3Key) console.log(`[save-image] S3 backup: ${s3Key}`);
+        }
+
+        return NextResponse.json({
+          success: true,
+          url: `${webPath}/${filename}`,
+          filename,
+          size: buffer.length,
+          s3Key,
+        });
+      }
+
+      // formData 中没有文件但有 imageUrl
+      if (imageUrl) {
+        // 走下面的 JSON 逻辑
+      } else {
+        return NextResponse.json({ error: 'No file or imageUrl provided' }, { status: 400 });
+      }
+    }
+
     const { imageUrl, userId, compress } = await request.json();
 
     if (!imageUrl || typeof imageUrl !== 'string') {
