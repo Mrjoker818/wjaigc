@@ -396,7 +396,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [position, setPosition] = useState(() => {
     if (typeof window !== 'undefined') {
-      return { x: Math.max(0, (window.innerWidth - 360) / 2), y: Math.max(0, (window.innerHeight - 560) / 2) };
+      return { x: Math.max(0, (window.innerWidth - 440) / 2 - 100), y: Math.max(0, (window.innerHeight - 560) / 2) };
     }
     return { x: 100, y: 100 };
   });
@@ -2005,8 +2005,8 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       {(isResultLoading || resultImages.length > 0) && (
         <div
           ref={resultContainerRef}
-          className={`fixed z-[200] ${isMonochrome ? "bg-white border border-gray-200" : "bg-[#1a1a1a] border border-white/[0.08]"} rounded-xl shadow-2xl overflow-hidden`}
-          style={{ left: position.x + 360 + 40, top: position.y, maxHeight: '85vh', width: resultImages.length > 1 ? '440px' : '380px' }}
+          className={`fixed z-[201] ${isMonochrome ? "bg-white border border-gray-200" : "bg-[#1a1a1a] border border-white/[0.08]"} rounded-xl shadow-2xl overflow-hidden`}
+          style={{ left: position.x + 460, top: position.y, maxHeight: '85vh', width: resultImages.length > 1 ? '440px' : '380px' }}
           onMouseDown={e => e.stopPropagation()}
           onPointerDown={e => e.stopPropagation()}
           data-popup
