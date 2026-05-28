@@ -421,7 +421,7 @@ interface BrandFactoryPanelProps {
 
 export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }: BrandFactoryPanelProps) {
   // === Panel drag state ===
-  const [panelPos, setPanelPos] = useState({ x: typeof window !== 'undefined' ? (window.innerWidth - 960) / 2 : 0, y: typeof window !== 'undefined' ? Math.max(20, (window.innerHeight - 700) / 2) : 20 });
+  const [panelPos, setPanelPos] = useState({ x: typeof window !== 'undefined' ? (window.innerWidth - 960) / 2 : 0, y: typeof window !== 'undefined' ? Math.max(20, (window.innerHeight - Math.min(window.innerHeight * 0.85, 700)) / 2) : 20 });
   const [isDragging, setIsDragging] = useState(false);
   const dragOffset = useRef({ x: 0, y: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
@@ -515,9 +515,10 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
 
   // Center panel on mount
   useEffect(() => {
+    const maxH = Math.min(window.innerHeight * 0.85, PANEL_H);
     setPanelPos({
       x: Math.max(0, (window.innerWidth - PANEL_W) / 2),
-      y: Math.max(0, (window.innerHeight - PANEL_H) / 2),
+      y: Math.max(0, (window.innerHeight - maxH) / 2),
     });
   }, []);
 
@@ -1576,11 +1577,11 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
     >
       <div
         data-floating-panel="true"
-        className={`${th.panel} flex flex-col ${isDragging ? 'ring-2 ring-[#d4af37]/30 shadow-[0_0_30px_rgba(212,175,55,0.15)]' : ''}`}
-        style={{ maxHeight: '85vh' }}
+        className={`${th.panel} flex flex-col overflow-hidden ${isDragging ? 'ring-2 ring-[#d4af37]/30 shadow-[0_0_30px_rgba(212,175,55,0.15)]' : ''}`}
+        style={{ maxHeight: isMinimized ? undefined : '85vh' }}
       >
         {/* Header with drag handle */}
-        <div className={th.header + ' flex items-center gap-2 cursor-grab active:cursor-grabbing select-none relative'}
+        <div className={`${th.header} flex items-center gap-2 cursor-grab active:cursor-grabbing select-none relative ${isMinimized ? 'rounded-2xl border-b-0' : ''}`}
           onMouseDown={handleDragStart}>
           <GripVertical className="w-4 h-4 text-gray-500" />
           <Building2 className="w-4 h-4 text-[#d4af37]" />

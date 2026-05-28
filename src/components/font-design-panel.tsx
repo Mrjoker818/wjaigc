@@ -749,7 +749,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       {/* ─── Header (draggable) ─── */}
       <div
         className="flex items-center gap-2 px-5 py-3 cursor-move select-none shrink-0"
-        style={{ borderBottom: `1px solid ${borderColor}`, background: isMonochrome ? '#f9fafb' : 'linear-gradient(180deg, #161616, #0f0f0f)' }}
+        style={{ borderBottom: isMinimized ? 'none' : `1px solid ${borderColor}`, background: isMonochrome ? '#f9fafb' : 'linear-gradient(180deg, #161616, #0f0f0f)' }}
         onMouseDown={handlePanelDragStart}
       >
         <GripVertical size={16} style={{ color: mutedColor }} />

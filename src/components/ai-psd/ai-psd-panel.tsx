@@ -210,7 +210,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
   const [panelPos, setPanelPos] = useState(() => {
     if (typeof window !== 'undefined') {
       const pw = 880;
-      const ph = 680;
+      const ph = Math.min(window.innerHeight * 0.85, 680);
       return { x: Math.max(0, (window.innerWidth - pw) / 2), y: Math.max(0, (window.innerHeight - ph) / 2) };
     }
     return { x: 0, y: 0 };
@@ -303,9 +303,10 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
 
   // Center panel on mount
   useEffect(() => {
+    const maxH = Math.min(window.innerHeight * 0.85, PANEL_H);
     setPanelPos({
       x: Math.max(0, (window.innerWidth - PANEL_W) / 2),
-      y: Math.max(0, (window.innerHeight - PANEL_H) / 2),
+      y: Math.max(0, (window.innerHeight - maxH) / 2),
     });
   }, []);
 
@@ -1355,11 +1356,11 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
     >
       <div
         data-floating-panel="true"
-        className={`${th.panel} flex flex-col ${isDragging ? 'ring-2 ring-[#d4af37]/30 shadow-[0_0_30px_rgba(212,175,55,0.15)]' : ''}`}
-        style={{ maxHeight: '85vh' }}
+        className={`${th.panel} flex flex-col overflow-hidden ${isDragging ? 'ring-2 ring-[#d4af37]/30 shadow-[0_0_30px_rgba(212,175,55,0.15)]' : ''}`}
+        style={{ maxHeight: isMinimized ? undefined : '85vh' }}
       >
         {/* Header with drag handle */}
-        <div className={`${th.header} flex items-center gap-2 cursor-grab active:cursor-grabbing select-none`}
+        <div className={`${th.header} flex items-center gap-2 cursor-grab active:cursor-grabbing select-none ${isMinimized ? 'rounded-2xl border-b-0' : ''}`}
           onMouseDown={handleDragStart}>
           <GripVertical className="w-4 h-4 text-gray-500" />
           <Layers className="w-4 h-4 text-[#d4af37]" />

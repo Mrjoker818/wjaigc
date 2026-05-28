@@ -433,7 +433,8 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [position, setPosition] = useState(() => {
     if (typeof window !== 'undefined') {
-      return { x: Math.max(0, (window.innerWidth - 440) / 2), y: Math.max(0, (window.innerHeight - 560) / 2) };
+      const maxH = Math.min(window.innerHeight * 0.85, 680);
+      return { x: Math.max(0, (window.innerWidth - 440) / 2), y: Math.max(0, (window.innerHeight - maxH) / 2) };
     }
     return { x: 100, y: 100 };
   });
@@ -1426,7 +1427,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         style={{
           left: position.x,
           top: position.y,
-          maxHeight: '85vh',
+          maxHeight: isMinimized ? undefined : '85vh',
           backgroundColor: isMonochrome ? '#fff' : '#1a1a1a',
           border: isDragging
             ? `2px solid ${isMonochrome ? '#2563eb' : '#d4af37'}`
@@ -1442,8 +1443,8 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         {/* Header - 可拖拽 */}
         <div
           data-panel-header
-          className="flex items-center gap-2 px-3 py-2 cursor-move select-none shrink-0"
-          style={{ borderBottom: `1px solid ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)'}` }}
+          className={`flex items-center gap-2 px-3 py-2 cursor-move select-none shrink-0 ${isMinimized ? 'rounded-xl' : ''}`}
+          style={{ borderBottom: isMinimized ? 'none' : `1px solid ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)'}` }}
           onMouseDown={handleDragStart}
         >
           <GripVertical size={14} style={{ color: isMonochrome ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.3)' }} />

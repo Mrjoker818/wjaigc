@@ -104,10 +104,10 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
 
   // ─── Drag state ───────────────────────────────────────────────
   const panelW = 680;
-  const panelH = 600;
   const [position, setPosition] = useState(() => {
     if (typeof window !== 'undefined') {
-      return { x: Math.max(0, (window.innerWidth - panelW) / 2), y: Math.max(0, (window.innerHeight - panelH) / 2) };
+      const maxH = Math.min(window.innerHeight * 0.85, 700);
+      return { x: Math.max(0, (window.innerWidth - panelW) / 2), y: Math.max(0, (window.innerHeight - maxH) / 2) };
     }
     return { x: 0, y: 0 };
   });
@@ -697,21 +697,21 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       {/* Panel */}
       <div
         data-floating-panel="true"
-        className="rounded-2xl flex flex-col"
+        className="rounded-2xl flex flex-col overflow-hidden"
         style={{
           backgroundColor: isMonochrome ? '#fff' : '#1c1c1c',
           border: isDraggingState ? `2px solid ${accentColor}` : `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)'}`,
           boxShadow: isDraggingState
             ? (isMonochrome ? '0 0 24px rgba(37,99,235,0.25), 0 25px 50px -12px rgba(0,0,0,0.25)' : '0 0 24px rgba(212,175,55,0.3), 0 25px 50px -12px rgba(0,0,0,0.5)')
             : (isMonochrome ? '0 25px 50px -12px rgba(0,0,0,0.15)' : '0 25px 50px -12px rgba(0,0,0,0.5)'),
-          maxHeight: '85vh',
+          maxHeight: isMinimized ? undefined : '85vh',
         }}
         onClick={e => e.stopPropagation()}
       >
         {/* ── Header ── */}
         <div
-          className="flex items-center gap-2 px-3 py-2 select-none shrink-0 cursor-grab active:cursor-grabbing rounded-t-2xl"
-          style={{ borderBottom: `1px solid ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)'}` }}
+          className={`flex items-center gap-2 px-3 py-2 select-none shrink-0 cursor-grab active:cursor-grabbing ${isMinimized ? 'rounded-2xl' : 'rounded-t-2xl'}`}
+          style={{ borderBottom: isMinimized ? 'none' : `1px solid ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)'}` }}
           onMouseDown={handlePanelDragStart}
         >
           <GripVertical size={14} style={{ color: isMonochrome ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.3)' }} />
@@ -739,6 +739,16 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           <span className="text-xs px-1.5 py-0.5 rounded" style={{ color: isMonochrome ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.5)', background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
             模板批量生成
           </span>
+          <button
+            onClick={() => setIsMinimized(!isMinimized)}
+            className="p-1 rounded-md transition-colors cursor-pointer"
+            style={{ color: isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)' }}
+            onMouseEnter={e => (e.currentTarget.style.color = isMonochrome ? '#000' : '#fff')}
+            onMouseLeave={e => (e.currentTarget.style.color = isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)')}
+            title={isMinimized ? '展开' : '最小化'}
+          >
+            <Minus size={14} />
+          </button>
           <button
             onClick={onClose}
             className="p-1 rounded-md transition-colors cursor-pointer"
@@ -877,19 +887,6 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
             )}
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsMinimized(!isMinimized)}
-              className={`p-1.5 rounded-md transition-colors cursor-pointer ${isMonochrome ? 'text-gray-500 hover:bg-gray-100' : 'text-gray-400 hover:bg-[#2a2a2a]'}`}
-              title={isMinimized ? '展开' : '最小化'}
-            >
-              <Minus size={14} />
-            </button>
-            <button
-              onClick={onClose}
-              className={`px-4 py-2 rounded-lg text-sm font-medium ${isMonochrome ? 'text-gray-600 hover:bg-gray-100' : 'text-gray-400 hover:bg-[#2a2a2a]'} transition-colors cursor-pointer`}
-            >
-              关闭
-            </button>
             <button
               onClick={handleGenerate}
               disabled={isGenerating || !selectedTemplates.size || !productDesc.trim() || !selectedModel}
