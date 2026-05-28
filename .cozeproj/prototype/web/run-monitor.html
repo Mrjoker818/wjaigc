@@ -41,15 +41,25 @@
       --color-node-ai:       #d4af37;
       --color-node-logic:    #f59e0b;
       --color-node-subgraph: #06b6d4;
+      --color-node-agent:    #f472b6;
+      --color-node-plugin:   #a3e635;
+      --color-node-memory:   #c084fc;
       /* === 端口专用色 === */
       --color-port-image:    #3b82f6;
       --color-port-mask:     #f472b6;
       --color-port-prompt:   #a78bfa;
       --color-port-condition: #f59e0b;
       --color-port-any:      #7d8590;
+      --color-port-video:    #ef4444;
+      --color-port-audio:    #f97316;
+      --color-port-data:     #22d3ee;
       /* === 智能指令栏 === */
       --color-smart-bar:     #1a2332;
       --color-smart-bar-border: #d4af37/30;
+      /* === Agent专属 === */
+      --color-agent-glow:    rgba(244,114,182,0.3);
+      --color-collab-cursor: #22d3ee;
+      --color-debug-breakpoint: #ef4444;
       /* === 圆角 === */
       --radius-sm:   0.25rem;
       --radius-md:   0.375rem;
@@ -68,145 +78,117 @@
   </style>
 
   <style>
-    /* 深色网格背景 */
-    .grid-bg {
-      background-image:
-        linear-gradient(rgba(48,54,61,0.3) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(48,54,61,0.3) 1px, transparent 1px);
-      background-size: 24px 24px;
+    /* 画布网格背景 */
+    #canvas-area {
+      background-image: radial-gradient(circle, #21262d 1px, transparent 1px);
+      background-size: 20px 20px;
     }
 
-    /* 脉冲动画 - 智能调度标签 */
-    @keyframes pulse-gold {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.6; }
+    /* 断点命中节点的金粉叠加呼吸光晕 */
+    @keyframes breakpoint-glow {
+      0%, 100% { box-shadow: 0 0 12px rgba(212,175,55,0.3), 0 0 24px rgba(244,114,182,0.15); }
+      50% { box-shadow: 0 0 24px rgba(212,175,55,0.55), 0 0 48px rgba(244,114,182,0.3); }
     }
-    .animate-pulse-gold {
-      animation: pulse-gold 2s ease-in-out infinite;
-    }
-
-    /* 绿色脉冲波 - 从端口扩散 */
-    @keyframes green-pulse-wave {
-      0% { r: 4; opacity: 0.8; }
-      100% { r: 18; opacity: 0; }
-    }
-    .green-pulse-wave {
-      animation: green-pulse-wave 1.5s ease-out infinite;
+    .node-breakpoint-hit {
+      animation: breakpoint-glow 1.8s ease-in-out infinite;
+      border-color: var(--color-primary) !important;
     }
 
-    /* 金色脉冲边框 - 执行中 */
-    @keyframes gold-pulse-border {
-      0%, 100% { box-shadow: 0 0 8px rgba(212,175,55,0.4), inset 0 0 4px rgba(212,175,55,0.1); }
-      50% { box-shadow: 0 0 20px rgba(212,175,55,0.7), inset 0 0 8px rgba(212,175,55,0.2); }
+    /* 执行指针箭头脉冲动画 */
+    @keyframes pointer-pulse {
+      0%, 100% { opacity: 1; transform: translateX(0); }
+      50% { opacity: 0.6; transform: translateX(-3px); }
     }
-    .animate-gold-pulse {
-      animation: gold-pulse-border 2s ease-in-out infinite;
-    }
-
-    /* 绿色光晕 - 完成 */
-    @keyframes green-glow {
-      0%, 100% { box-shadow: 0 0 6px rgba(46,160,67,0.3); }
-      50% { box-shadow: 0 0 14px rgba(46,160,67,0.5); }
-    }
-    .animate-green-glow {
-      animation: green-glow 3s ease-in-out infinite;
+    .exec-pointer {
+      animation: pointer-pulse 1s ease-in-out infinite;
     }
 
-    /* 缓存命中标签闪烁 */
-    @keyframes cache-flash {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
+    /* Agent决策气泡入场动画 */
+    @keyframes bubble-slide-in {
+      from { transform: translateY(10px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
     }
-    .animate-cache-flash {
-      animation: cache-flash 1.5s ease-in-out infinite;
-    }
-
-    /* 智能调度信息条入场 */
-    @keyframes slide-in-down {
-      from { opacity: 0; transform: translateY(-12px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    .animate-slide-in {
-      animation: slide-in-down 0.4s ease-out;
+    .agent-bubble {
+      animation: bubble-slide-in 0.4s ease-out forwards;
     }
 
-    /* 绿色脉冲流动 - 连线 */
-    @keyframes flow-green {
-      0% { stroke-dashoffset: 20; }
-      100% { stroke-dashoffset: 0; }
+    /* JSON值闪烁效果 */
+    @keyframes json-flash {
+      0%, 100% { background: transparent; }
+      50% { background: rgba(212,175,55,0.2); }
     }
-    .animate-flow-green {
-      stroke-dasharray: 6 4;
-      animation: flow-green 0.8s linear infinite;
-    }
-
-    /* 子节点级联亮起 */
-    @keyframes cascade-bright {
-      from { opacity: 0.3; }
-      to { opacity: 1; }
-    }
-    .animate-cascade {
-      animation: cascade-bright 0.5s ease-out forwards;
+    .json-flash {
+      animation: json-flash 1s ease-in-out;
     }
 
-    /* 手风琴展开 */
-    @keyframes accordion-open {
-      from { max-height: 0; opacity: 0; }
-      to { max-height: 500px; opacity: 1; }
-    }
-    .animate-accordion {
-      animation: accordion-open 0.3s ease-out forwards;
-      overflow: hidden;
-    }
-
-    /* SVG连线动画 - 虚线流动 */
-    @keyframes dash-flow {
+    /* 已执行路径绿色流动效果 */
+    @keyframes green-flow {
       to { stroke-dashoffset: -20; }
     }
-    .dash-flowing {
-      animation: dash-flow 1s linear infinite;
+    .executed-edge {
+      animation: green-flow 1s linear infinite;
     }
 
-    /* 进度条动画 */
-    @keyframes progress-shimmer {
-      0% { background-position: -200% 0; }
-      100% { background-position: 200% 0; }
+    /* 自演化日志手风琴动画 */
+    .evolution-detail {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease-out;
     }
-    .progress-shimmer {
-      background: linear-gradient(90deg, #d4af37 0%, #f0d060 50%, #d4af37 100%);
-      background-size: 200% 100%;
-      animation: progress-shimmer 2s linear infinite;
-    }
-
-    /* 计时器闪烁 */
-    @keyframes timer-blink {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
-    .timer-colon {
-      animation: timer-blink 1s step-end infinite;
+    .evolution-detail.expanded {
+      max-height: 500px;
     }
 
-    /* 自定义滚动条 */
-    .custom-scroll::-webkit-scrollbar { width: 5px; }
-    .custom-scroll::-webkit-scrollbar-track { background: transparent; }
-    .custom-scroll::-webkit-scrollbar-thumb { background: rgba(125,133,144,0.3); border-radius: 3px; }
-    .custom-scroll::-webkit-scrollbar-thumb:hover { background: rgba(125,133,144,0.5); }
+    /* 滚动条 */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--color-outline); border-radius: 3px; }
 
-    /* Toggle开关样式 */
-    .toggle-switch {
-      width: 36px; height: 20px; border-radius: 10px;
-      position: relative; cursor: pointer; transition: background 0.2s;
+    /* 断点指示器 */
+    .bp-indicator {
+      width: 12px; height: 12px; border-radius: 50%; position: absolute; left: -18px; top: 50%;
+      transform: translateY(-50%); cursor: pointer; z-index: 5; transition: all 0.15s ease;
     }
-    .toggle-switch .toggle-knob {
-      width: 16px; height: 16px; border-radius: 50%; background: white;
-      position: absolute; top: 2px; transition: left 0.2s;
+    .bp-indicator:hover { transform: translateY(-50%) scale(1.3); }
+    .bp-none { border: 2px solid #4a5568; background: transparent; }
+    .bp-set { border: 2px solid var(--color-debug-breakpoint); background: transparent; }
+    .bp-hit { border: 2px solid var(--color-debug-breakpoint); background: var(--color-debug-breakpoint); }
+
+    /* 端口圆点 */
+    .port-dot {
+      width: 10px; height: 10px; border-radius: 50%; border: 2px solid; position: absolute; cursor: crosshair;
     }
-    .toggle-switch.active { background: #d4af37; }
-    .toggle-switch.active .toggle-knob { left: 18px; }
-    .toggle-switch.inactive { background: #30363d; }
-    .toggle-switch.inactive .toggle-knob { left: 2px; }
-    .toggle-switch-green.active { background: #2ea043; }
+    .port-image { border-color: var(--color-port-image) !important; }
+    .port-prompt { border-color: var(--color-port-prompt) !important; }
+    .port-data { border-color: var(--color-port-data) !important; }
+    .port-output { border-color: var(--color-node-output) !important; }
+    .port-error { border-color: var(--color-error) !important; }
+    .port-warning { border-color: var(--color-warning) !important; }
+    .text-port-image { color: var(--color-port-image); }
+    .text-port-data { color: var(--color-port-data); }
+    .text-port-error { color: var(--color-error); }
+    .text-port-warning { color: var(--color-warning); }
+    .text-port-output { color: var(--color-node-output); }
+
+    /* JSON语法高亮 */
+    .json-key { color: #79c0ff; }
+    .json-string { color: #a5d6ff; }
+    .json-number { color: #d29922; }
+    .json-bool { color: #ff7b72; }
+    .json-null { color: #7d8590; }
+
+    /* 日志条目暂停高亮 */
+    .log-paused {
+      background: rgba(212,175,55,0.08);
+      border-left: 3px solid var(--color-primary);
+    }
+
+    /* 已执行节点 */
+    .node-executed { opacity: 1; }
+    .node-pending { opacity: 0.45; }
+
+    /* 断点管理弹窗 */
+    #breakpoint-modal { display: none; }
   </style>
 
   <!-- 图片兜底 -->
@@ -222,709 +204,776 @@
       const icons = { '人物': '👤', '自然风景': '🏞', '动物': '🐾', '建筑城市': '🏙', '运动体育': '⚽', '交通工具': '🚗', '食物': '🍽', '服饰时尚': '👗', '商业科技': '💼', '游戏娱乐': '🎮', '艺术': '🎨', '其他': '🖼' };
       const icon = icons[cat] || '🖼';
       const w = img.width || 400, h = img.height || 300;
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="%23f3f4f6"/><text x="50%" y="45%" text-anchor="middle" font-size="${Math.min(w, h) * 0.18}" dominant-baseline="central">${icon}</text><text x="50%" y="68%" text-anchor="middle" font-size="${Math.min(w, h) * 0.07}" fill="%239ca3af" font-family="system-ui,sans-serif" dominant-bbaseline="central">${label}</text></svg>`;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="%23f3f4f6"/><text x="50%" y="45%" text-anchor="middle" font-size="${Math.min(w, h) * 0.18}" dominant-baseline="central">${icon}</text><text x="50%" y="68%" text-anchor="middle" font-size="${Math.min(w, h) * 0.07}" fill="%239ca3af" font-family="system-ui,sans-serif" dominant-baseline="central">${label}</text></svg>`;
       img.src = 'data:image/svg+xml,' + svg;
     }, true);
   </script>
 </head>
 
-<body class="bg-background text-on-surface font-sans min-h-screen flex flex-col">
+<body class="bg-background text-on-surface font-sans h-screen flex flex-col overflow-hidden">
 
-  <!-- @nav:start 导航组件 -->
+  <!-- @nav:start 调试模式顶部工具栏 -->
   <header class="bg-surface sticky top-0 z-40 h-11 flex items-center justify-between px-3 border-b border-outline-variant/20">
     <div class="flex items-center gap-2">
+      <!-- 红色调试中标签 -->
+      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-[10px] font-bold bg-error/15 text-error">
+        <span class="w-1.5 h-1.5 rounded-full bg-error animate-pulse"></span>
+        调试中
+      </span>
       <i data-lucide="infinity" class="text-primary w-4 h-4"></i>
       <span class="font-bold text-sm text-on-surface">无界AI</span>
       <span class="text-xs text-on-surface-variant ml-0.5">Studio</span>
       <div class="w-px h-4 bg-outline-variant/30 mx-2"></div>
-      <span class="text-xs text-on-surface-variant">电商白底图处理 v2</span>
+      <a href="home.html" class="text-xs text-on-surface-variant hover:text-error transition-colors">退出调试</a>
     </div>
-    <div class="flex items-center gap-1">
-      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="撤销">
-        <i data-lucide="undo" class="w-3.5 h-3.5"></i>
+
+    <!-- 执行控制按钮组 -->
+    <div class="flex items-center gap-0.5">
+      <button id="btn-restart" class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="重新开始">
+        <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
       </button>
-      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="重做">
-        <i data-lucide="redo" class="w-3.5 h-3.5"></i>
+      <button id="btn-continue" class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="继续执行">
+        <i data-lucide="play" class="w-3.5 h-3.5"></i>
       </button>
-      <div class="w-px h-4 bg-outline-variant/30 mx-1"></div>
-      <button class="flex items-center gap-1 px-2.5 py-1 rounded-md bg-primary text-on-primary text-xs font-medium hover:opacity-90 transition-opacity">
-        <i data-lucide="play" class="w-3 h-3"></i>
-        执行
+      <button id="btn-step-over" class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="步过">
+        <i data-lucide="step-forward" class="w-3.5 h-3.5"></i>
       </button>
-      <button class="flex items-center gap-1 px-2.5 py-1 rounded-md border border-primary/30 text-primary text-xs font-medium hover:bg-primary/10 transition-colors">
-        <i data-lucide="sparkles" class="w-3 h-3"></i>
-        AI优化
+      <button id="btn-step-into" class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="步入">
+        <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
       </button>
-      <div class="w-px h-4 bg-outline-variant/30 mx-1"></div>
-      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="版本历史">
-        <i data-lucide="git-branch" class="w-3.5 h-3.5"></i>
+      <button id="btn-step-out" class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="步出">
+        <i data-lucide="chevron-up" class="w-3.5 h-3.5"></i>
       </button>
-      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="设置">
-        <i data-lucide="settings" class="w-3.5 h-3.5"></i>
+      <button id="btn-stop" class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-error transition-colors" title="停止">
+        <i data-lucide="square" class="w-3.5 h-3.5"></i>
       </button>
-      <div class="w-6 h-6 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[10px] font-medium">初</div>
+    </div>
+
+    <!-- 步骤和计时 -->
+    <div class="flex items-center gap-3">
+      <span id="step-indicator" class="text-xs text-on-surface-variant">步骤 <span class="text-primary font-semibold">4</span>/12</span>
+      <span id="timer" class="text-xs text-on-surface-variant font-mono">12.8s</span>
     </div>
   </header>
-  <!-- @nav:end 导航组件 -->
+  <!-- @nav:end 调试模式顶部工具栏 -->
 
   <!-- @main-content:start -->
+  <main class="flex-1 flex min-h-0">
 
-  <!-- 顶部执行工具栏 -->
-  <div id="exec-toolbar" class="bg-surface-container-lowest border-b border-outline-variant/15 px-4 py-2 flex items-center gap-3">
-    <!-- 停止执行按钮 -->
-    <button id="btn-stop-exec" class="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-error/15 text-error text-xs font-medium hover:bg-error/25 transition-colors">
-      <i data-lucide="square" class="w-3 h-3"></i>
-      停止执行
-    </button>
+    <!-- 左区 — 节点图状态视图（55%） -->
+    <div class="flex-1 relative overflow-hidden" style="flex: 55;">
+      <div id="canvas-area" class="w-full h-full relative" style="transform: scale(0.72); transform-origin: top left;">
 
-    <div class="w-px h-5 bg-outline-variant/20"></div>
+        <!-- SVG连线层 -->
+        <svg id="edges-svg" class="absolute inset-0 w-full h-full" style="pointer-events: none; overflow: visible;">
+          <defs>
+            <marker id="arrow-blue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="var(--color-node-input)" />
+            </marker>
+            <marker id="arrow-green" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="var(--color-success)" />
+            </marker>
+            <marker id="arrow-red" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="var(--color-error)" />
+            </marker>
+            <marker id="arrow-purple" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="var(--color-port-prompt)" />
+            </marker>
+            <marker id="arrow-gray" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="var(--color-on-surface-variant)" />
+            </marker>
+            <marker id="arrow-exec-green" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="var(--color-success)" />
+            </marker>
+          </defs>
 
-    <!-- 进度 -->
-    <div class="flex items-center gap-2">
-      <div class="w-32 h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
-        <div id="exec-progress-bar" class="h-full progress-shimmer rounded-full" style="width: 62%"></div>
+          <!-- 已执行连线1→2：绿色流动效果 -->
+          <path d="M 230 135 C 275 135, 275 135, 320 135" stroke="var(--color-success)" stroke-width="2.5" fill="none" marker-end="url(#arrow-exec-green)" opacity="1" class="executed-edge" stroke-dasharray="6 3"/>
+
+          <!-- 已执行连线2→3：绿色流动效果 -->
+          <path d="M 510 100 C 555 80, 555 65, 600 65" stroke="var(--color-success)" stroke-width="2.5" fill="none" marker-end="url(#arrow-exec-green)" opacity="1" class="executed-edge" stroke-dasharray="6 3"/>
+
+          <!-- 连线2→4：未执行 -->
+          <path d="M 510 170 C 555 200, 555 225, 600 245" stroke="var(--color-on-surface-variant)" stroke-width="1.5" fill="none" marker-end="url(#arrow-gray)" opacity="0.25"/>
+
+          <!-- 连线3→6：未执行 -->
+          <path d="M 770 65 C 825 65, 825 65, 880 65" stroke="var(--color-on-surface-variant)" stroke-width="1.5" fill="none" marker-end="url(#arrow-gray)" opacity="0.25"/>
+
+          <!-- 连线4→5：未执行 -->
+          <path d="M 770 245 C 825 245, 825 245, 880 245" stroke="var(--color-on-surface-variant)" stroke-width="1.5" fill="none" marker-end="url(#arrow-gray)" opacity="0.25"/>
+
+          <!-- 连线5→2：循环边，未执行 -->
+          <path d="M 970 210 C 970 20, 420 0, 420 100" stroke="var(--color-on-surface-variant)" stroke-width="1.5" fill="none" stroke-dasharray="4 4" opacity="0.15"/>
+          <circle cx="700" cy="12" r="10" fill="var(--color-surface-container)" stroke="var(--color-on-surface-variant)" stroke-width="1" opacity="0.25"/>
+          <text x="700" y="16" fill="var(--color-on-surface-variant)" font-size="11" text-anchor="middle" font-family="system-ui" opacity="0.3">⟲</text>
+
+          <!-- 连线6→7：未执行 -->
+          <path d="M 1100 65 C 1130 65, 1130 65, 1160 65" stroke="var(--color-on-surface-variant)" stroke-width="1.5" fill="none" marker-end="url(#arrow-gray)" opacity="0.25"/>
+
+          <!-- 连线6→8：未执行 -->
+          <path d="M 1100 90 C 1130 120, 1140 140, 1160 170" stroke="var(--color-on-surface-variant)" stroke-width="1.5" fill="none" stroke-dasharray="4 4" marker-end="url(#arrow-gray)" opacity="0.15"/>
+
+          <!-- 连线3→9：质检→视频Agent -->
+          <path d="M 680 25 C 680 -20, 680 -20, 680 -20 C 730 -40, 800 -10, 850 20" stroke="var(--color-on-surface-variant)" stroke-width="1.5" fill="none" marker-end="url(#arrow-gray)" opacity="0.2"/>
+        </svg>
+
+        <!-- Agent决策气泡（节点2上方） -->
+        <div id="agent-bubble" class="agent-bubble absolute z-20" style="left:250px; top:20px; width:260px;">
+          <div class="bg-surface rounded-lg shadow-float border-l-[3px] border-node-agent p-3">
+            <div class="flex items-center justify-between mb-1.5">
+              <div class="flex items-center gap-1.5">
+                <i data-lucide="bot" class="w-3.5 h-3.5 text-node-agent"></i>
+                <span class="text-xs font-semibold text-node-agent">生图Agent 决策记录</span>
+              </div>
+              <button id="btn-close-bubble" class="text-on-surface-variant hover:text-on-surface transition-colors">
+                <i data-lucide="x" class="w-3 h-3"></i>
+              </button>
+            </div>
+            <div class="text-[10px] text-on-surface-variant leading-relaxed space-y-1">
+              <div>选择了 <span class="text-on-surface font-medium">seedream-5</span> 模型</div>
+              <div>理由：产品图需要高细节，seedream-5在产品类得分最高</div>
+              <div>备选：<span class="text-on-surface">dall-e-3</span>（细节稍逊但创意更强）</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 执行指针箭头（节点3左侧） -->
+        <div class="exec-pointer absolute z-10 flex items-center" style="left:25px; top:48px;">
+          <i data-lucide="chevron-right" class="w-4 h-4 text-warning"></i>
+        </div>
+        <!-- 断点命中浮动提示（节点3上方） -->
+        <div class="absolute z-10" style="left:95px; top:22px;">
+          <span class="text-[10px] bg-warning/15 text-warning px-2 py-0.5 rounded-sm font-medium">⏸ 断点命中 — 等待操作</span>
+        </div>
+
+        <!-- 节点1：产品描述（已执行） -->
+        <div id="node-1" class="wf-node absolute bg-surface rounded-lg shadow-card border border-success/40 overflow-hidden node-executed" style="left:60px; top:110px; width:170px;">
+          <div class="h-1 bg-node-input"></div>
+          <div class="p-2.5">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <i data-lucide="file-text" class="w-3.5 h-3.5 text-node-input"></i>
+              <span class="text-xs font-semibold text-on-surface">产品描述</span>
+              <span class="ml-auto text-[9px] text-success bg-success/15 px-1.5 py-0.5 rounded">✅</span>
+            </div>
+            <div class="text-[10px] text-on-surface-variant space-y-0.5">
+              <div>内容: <span class="text-on-surface">赛博朋克城市...</span></div>
+            </div>
+            <!-- 端口 -->
+            <div class="relative h-3 mt-1">
+              <div class="port-dot output bg-background port-image" style="right:-5px; top:50%; transform:translateY(-50%);"></div>
+            </div>
+            <div class="text-[9px] text-port-image text-right pr-2">prompt_out</div>
+          </div>
+          <!-- 无断点 -->
+          <div class="bp-indicator bp-none" data-node="1"></div>
+        </div>
+
+        <!-- 节点2：生图Agent（已执行） -->
+        <div id="node-2" class="wf-node absolute bg-surface rounded-lg shadow-card border border-success/40 overflow-hidden node-executed" style="left:320px; top:100px; width:190px;">
+          <div class="h-1 bg-node-agent"></div>
+          <div class="bg-node-agent/10 px-2.5 py-1 flex items-center justify-between">
+            <div class="flex items-center gap-1.5">
+              <i data-lucide="bot" class="w-3.5 h-3.5 text-node-agent"></i>
+              <span class="text-xs font-semibold text-on-surface">生图Agent</span>
+            </div>
+            <span class="text-[9px] text-success bg-success/15 px-1.5 py-0.5 rounded">✅</span>
+          </div>
+          <div class="p-2.5">
+            <div class="text-[10px] text-on-surface-variant space-y-0.5 mb-2">
+              <div>模型: <span class="text-on-surface">seedream-5</span></div>
+              <div>比例: <span class="text-on-surface">3:2</span></div>
+            </div>
+            <!-- 缩略图 -->
+            <div class="rounded overflow-hidden mb-2">
+              <img src="https://images.unsplash.com/photo-1558618666-fcd25c85f82e?w=128&h=96&fit=crop" alt="赛博朋克城市建筑" data-category="建筑城市" class="w-[64px] h-[48px] object-cover" width="64" height="48" />
+            </div>
+            <!-- 输入端口 -->
+            <div class="relative h-3">
+              <div class="port-dot input bg-background port-prompt" style="left:-5px; top:50%; transform:translateY(-50%);"></div>
+            </div>
+            <div class="text-[9px] text-port-prompt mb-0.5 pl-2">prompt_in</div>
+            <!-- 输出端口 -->
+            <div class="relative h-3">
+              <div class="port-dot output bg-background port-image" style="right:-5px; top:50%; transform:translateY(-50%);"></div>
+            </div>
+            <div class="text-[9px] text-port-image text-right pr-2">image_out</div>
+          </div>
+          <!-- 无断点 -->
+          <div class="bp-indicator bp-none" data-node="2"></div>
+        </div>
+
+        <!-- 节点3：质检Agent（断点命中！当前暂停位置） -->
+        <div id="node-3" class="wf-node absolute bg-surface rounded-lg shadow-card border-2 border-primary overflow-hidden node-breakpoint-hit node-executed" style="left:600px; top:30px; width:170px;">
+          <div class="h-1 bg-node-agent"></div>
+          <div class="bg-node-agent/10 px-2.5 py-1 flex items-center justify-between">
+            <div class="flex items-center gap-1.5">
+              <i data-lucide="scan-eye" class="w-3.5 h-3.5 text-node-agent"></i>
+              <span class="text-xs font-semibold text-on-surface">质检Agent</span>
+            </div>
+            <span class="text-[9px] text-warning bg-warning/15 px-1.5 py-0.5 rounded font-medium">⏸ 断点</span>
+          </div>
+          <div class="p-2.5">
+            <div class="text-[10px] text-on-surface-variant space-y-0.5 mb-2">
+              <div>阈值: <span class="text-on-surface">0.7</span></div>
+              <div>维度: <span class="text-on-surface">构图,清晰度,色彩</span></div>
+            </div>
+            <!-- 输入端口 -->
+            <div class="relative h-3">
+              <div class="port-dot input bg-background port-image" style="left:-5px; top:50%; transform:translateY(-50%);"></div>
+            </div>
+            <div class="text-[9px] text-port-image pl-2 mb-0.5">image_in</div>
+            <!-- 输出端口 -->
+            <div class="space-y-0.5">
+              <div class="relative h-3">
+                <div class="port-dot output bg-background port-output" style="right:-5px; top:50%; transform:translateY(-50%);"></div>
+              </div>
+              <div class="text-[9px] text-port-output text-right pr-2">pass_out</div>
+              <div class="text-[9px] text-port-error text-right pr-2">fail_out</div>
+              <div class="text-[9px] text-port-data text-right pr-2">report_out</div>
+            </div>
+          </div>
+          <!-- 已命中断点 -->
+          <div class="bp-indicator bp-hit" data-node="3"></div>
+        </div>
+
+        <!-- 节点4：提示词优化（未执行） -->
+        <div id="node-4" class="wf-node absolute bg-surface rounded-lg shadow-card border border-outline-variant/20 overflow-hidden node-pending" style="left:600px; top:220px; width:170px;">
+          <div class="h-1 bg-node-ai"></div>
+          <div class="p-2.5">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <i data-lucide="wand-sparkles" class="w-3.5 h-3.5 text-node-ai"></i>
+              <span class="text-xs font-semibold text-on-surface">提示词优化</span>
+            </div>
+            <div class="text-[10px] text-on-surface-variant">
+              优化策略: <span class="text-on-surface">增强细节</span>
+            </div>
+            <div class="relative h-3 mt-1">
+              <div class="port-dot input bg-background port-image" style="left:-5px; top:50%; transform:translateY(-50%);"></div>
+            </div>
+            <div class="text-[9px] text-port-image pl-2 mb-0.5">image_in</div>
+            <div class="relative h-3">
+              <div class="port-dot input bg-background port-warning" style="left:-5px; top:50%; transform:translateY(-50%);"></div>
+            </div>
+            <div class="text-[9px] text-port-warning pl-2 mb-0.5">score_in</div>
+            <div class="relative h-3">
+              <div class="port-dot output bg-background port-prompt" style="right:-5px; top:50%; transform:translateY(-50%);"></div>
+            </div>
+            <div class="text-[9px] text-port-prompt text-right pr-2">prompt_out</div>
+          </div>
+          <!-- 无断点 -->
+          <div class="bp-indicator bp-none" data-node="4"></div>
+        </div>
+
+        <!-- 节点5：修图Agent（未执行） -->
+        <div id="node-5" class="wf-node absolute bg-surface rounded-lg shadow-card border border-outline-variant/20 overflow-hidden node-pending" style="left:880px; top:220px; width:170px;">
+          <div class="h-1 bg-node-agent"></div>
+          <div class="p-2.5">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <i data-lucide="bot" class="w-3.5 h-3.5 text-node-agent"></i>
+              <span class="text-xs font-semibold text-on-surface">修图Agent</span>
+            </div>
+            <div class="text-[10px] text-on-surface-variant">
+              策略: <span class="text-on-surface">构图居中</span>
+            </div>
+            <div class="relative h-3 mt-1">
+              <div class="port-dot input bg-background port-image" style="left:-5px; top:50%; transform:translateY(-50%);"></div>
+            </div>
+            <div class="text-[9px] text-port-image pl-2 mb-0.5">image_in</div>
+            <div class="relative h-3">
+              <div class="port-dot input bg-background port-prompt" style="left:-5px; top:50%; transform:translateY(-50%);"></div>
+            </div>
+            <div class="text-[9px] text-port-prompt pl-2 mb-0.5">prompt_in</div>
+            <div class="relative h-3">
+              <div class="port-dot output bg-background port-image" style="right:-5px; top:50%; transform:translateY(-50%);"></div>
+            </div>
+            <div class="text-[9px] text-port-image text-right pr-2">image_out</div>
+          </div>
+          <!-- 无断点 -->
+          <div class="bp-indicator bp-none" data-node="5"></div>
+        </div>
+
+        <!-- 节点6：无损放大（未执行，已设断点） -->
+        <div id="node-6" class="wf-node absolute bg-surface rounded-lg shadow-card border border-outline-variant/20 overflow-hidden node-pending" style="left:880px; top:30px; width:170px;">
+          <div class="h-1 bg-node-process"></div>
+          <div class="p-2.5">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <i data-lucide="maximize" class="w-3.5 h-3.5 text-node-process"></i>
+              <span class="text-xs font-semibold text-on-surface">无损放大</span>
+            </div>
+            <div class="text-[10px] text-on-surface-variant space-y-0.5">
+              <div>倍率: <span class="text-on-surface">4x</span></div>
+              <div>模型: <span class="text-on-surface">upscayl</span></div>
+            </div>
+            <div class="relative h-3 mt-1">
+              <div class="port-dot input bg-background port-image" style="left:-5px; top:50%; transform:translateY(-50%);"></div>
+            </div>
+            <div class="text-[9px] text-port-image pl-2 mb-0.5">image_in</div>
+            <div class="relative h-3">
+              <div class="port-dot output bg-background port-image" style="right:-5px; top:50%; transform:translateY(-50%);"></div>
+            </div>
+            <div class="text-[9px] text-port-image text-right pr-2">image_out</div>
+          </div>
+          <!-- 已设断点（红色空心圆） -->
+          <div class="bp-indicator bp-set" data-node="6"></div>
+        </div>
+
+        <!-- 节点7：视频Agent（未执行，已设断点） -->
+        <div id="node-7" class="wf-node absolute bg-surface rounded-lg shadow-card border border-outline-variant/20 overflow-hidden node-pending" style="left:880px; top:320px; width:170px;">
+          <div class="h-1 bg-port-video"></div>
+          <div class="p-2.5">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <i data-lucide="video" class="w-3.5 h-3.5 text-port-video"></i>
+              <span class="text-xs font-semibold text-on-surface">视频Agent</span>
+            </div>
+            <div class="text-[10px] text-on-surface-variant">
+              模式: <span class="text-on-surface">图生视频</span>
+            </div>
+            <div class="relative h-3 mt-1">
+              <div class="port-dot input bg-background port-image" style="left:-5px; top:50%; transform:translateY(-50%);"></div>
+            </div>
+            <div class="text-[9px] text-port-image pl-2">image_in</div>
+          </div>
+          <!-- 已设断点（红色空心圆） -->
+          <div class="bp-indicator bp-set" data-node="7"></div>
+        </div>
+
+        <!-- 节点8：电商白底图（未执行） -->
+        <div id="node-8" class="wf-node absolute bg-surface rounded-lg shadow-card border border-outline-variant/20 overflow-hidden node-pending" style="left:1160px; top:30px; width:190px;">
+          <div class="h-1 bg-node-subgraph"></div>
+          <div class="bg-node-subgraph/10 px-2.5 py-1 flex items-center gap-1.5">
+            <i data-lucide="package" class="w-3.5 h-3.5 text-node-subgraph"></i>
+            <span class="text-xs font-semibold text-on-surface">电商白底图</span>
+          </div>
+          <div class="p-2.5">
+            <div class="text-[10px] text-on-surface-variant">子图: 移除背景→白底合成→放大</div>
+            <div class="relative h-3 mt-1">
+              <div class="port-dot input bg-background port-image" style="left:-5px; top:50%; transform:translateY(-50%);"></div>
+            </div>
+            <div class="text-[9px] text-port-image pl-2">image_in</div>
+            <div class="relative h-3">
+              <div class="port-dot output bg-background port-image" style="right:-5px; top:50%; transform:translateY(-50%);"></div>
+            </div>
+            <div class="text-[9px] text-port-image text-right pr-2">image_out</div>
+          </div>
+          <!-- 无断点 -->
+          <div class="bp-indicator bp-none" data-node="8"></div>
+        </div>
+
+        <!-- 节点9：保存导出（未执行） -->
+        <div id="node-9" class="wf-node absolute bg-surface rounded-lg shadow-card border border-outline-variant/20 overflow-hidden node-pending" style="left:1160px; top:150px; width:170px;">
+          <div class="h-1 bg-node-output"></div>
+          <div class="p-2.5">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <i data-lucide="save" class="w-3.5 h-3.5 text-node-output"></i>
+              <span class="text-xs font-semibold text-on-surface">保存导出</span>
+            </div>
+            <div class="text-[10px] text-on-surface-variant">
+              格式: <span class="text-on-surface">PNG</span>
+            </div>
+            <div class="relative h-3 mt-1">
+              <div class="port-dot input bg-background port-image" style="left:-5px; top:50%; transform:translateY(-50%);"></div>
+            </div>
+            <div class="text-[9px] text-port-image pl-2">image_in</div>
+          </div>
+          <!-- 无断点 -->
+          <div class="bp-indicator bp-none" data-node="9"></div>
+        </div>
+
+        <!-- 节点10：品牌一致性检测（未执行） -->
+        <div id="node-10" class="wf-node absolute bg-surface rounded-lg shadow-card border border-outline-variant/20 overflow-hidden node-pending" style="left:1160px; top:270px; width:170px;">
+          <div class="h-1 bg-node-ai"></div>
+          <div class="p-2.5">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <i data-lucide="scan-eye" class="w-3.5 h-3.5 text-node-ai"></i>
+              <span class="text-xs font-semibold text-on-surface">品牌一致性</span>
+            </div>
+            <div class="text-[10px] text-on-surface-variant">
+              参考色: <span class="text-on-surface">品牌规范</span>
+            </div>
+            <div class="relative h-3 mt-1">
+              <div class="port-dot input bg-background port-image" style="left:-5px; top:50%; transform:translateY(-50%);"></div>
+            </div>
+            <div class="text-[9px] text-port-image pl-2">image_in</div>
+            <div class="relative h-3">
+              <div class="port-dot output bg-background port-data" style="right:-5px; top:50%; transform:translateY(-50%);"></div>
+            </div>
+            <div class="text-[9px] text-port-data text-right pr-2">score_out</div>
+          </div>
+          <!-- 无断点 -->
+          <div class="bp-indicator bp-none" data-node="10"></div>
+        </div>
+
       </div>
-      <span id="exec-progress-text" class="text-xs text-on-surface-variant">5/8 子任务</span>
     </div>
 
-    <div class="w-px h-5 bg-outline-variant/20"></div>
+    <!-- 右区 — 调试面板（45%） -->
+    <div id="debug-panel" class="shrink-0 bg-surface border-l border-outline-variant/20 flex flex-col overflow-hidden" style="flex: 45;">
 
-    <!-- 计时器 -->
-    <div class="flex items-center gap-1 text-xs text-on-surface-variant">
-      <i data-lucide="clock" class="w-3 h-3"></i>
-      <span id="exec-timer">00:08<span class="timer-colon">:</span>24</span>
-    </div>
+      <!-- 1. Agent决策日志（顶部，约40%） -->
+      <div id="agent-log-section" class="flex flex-col border-b border-outline-variant/20" style="flex: 40;">
+        <!-- 标题栏 -->
+        <div class="flex items-center justify-between px-3 py-2 bg-surface-container border-b border-outline-variant/20 shrink-0">
+          <div class="flex items-center gap-1.5">
+            <i data-lucide="scroll-text" class="w-3.5 h-3.5 text-node-agent"></i>
+            <span class="text-xs font-semibold text-on-surface">Agent决策日志</span>
+          </div>
+          <select id="log-filter" class="bg-surface-container-high border-none rounded px-2 py-0.5 text-[10px] text-on-surface focus:ring-2 focus:ring-primary/30">
+            <option value="all">全部</option>
+            <option value="agent">仅Agent</option>
+            <option value="key">仅关键决策</option>
+          </select>
+        </div>
+        <!-- 日志列表 -->
+        <div class="flex-1 overflow-y-auto p-2 space-y-2">
 
-    <div class="w-px h-5 bg-outline-variant/20"></div>
+          <!-- 列表-日志条目1 -->
+          <div id="log-1" class="rounded-md border border-outline-variant/10 p-2.5 hover:bg-surface-container/30 transition-colors cursor-pointer">
+            <div class="flex items-start gap-2">
+              <div class="shrink-0 text-[10px] text-on-surface-variant font-mono mt-0.5">14:32:05</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-1.5 mb-1">
+                  <i data-lucide="bot" class="w-3 h-3 text-node-agent shrink-0"></i>
+                  <span class="text-xs font-semibold text-on-surface">生图Agent — 模型选择</span>
+                  <span class="ml-auto text-[9px] text-success bg-success/15 px-1.5 py-0.5 rounded shrink-0">✅ 已执行</span>
+                </div>
+                <div class="text-[10px] text-on-surface-variant space-y-0.5 leading-relaxed">
+                  <div>决策：选择 <span class="text-on-surface font-medium">seedream-5</span></div>
+                  <div>理由：产品图需要高细节，seedream-5在产品类得分最高</div>
+                  <div>备选：dall-e-3 / flux-pro</div>
+                  <div>置信度：<span class="text-primary font-medium">92%</span></div>
+                </div>
+                <div class="flex items-center gap-2 mt-1.5">
+                  <button class="text-[9px] text-primary hover:underline">查看输入参数</button>
+                  <button class="text-[9px] text-primary hover:underline">查看输出结果</button>
+                </div>
+              </div>
+            </div>
+          </div>
 
-    <!-- AI调度状态 - 智能调度中 -->
-    <div id="ai-scheduling-badge" class="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary/15 border border-primary/20 animate-pulse-gold">
-      <i data-lucide="sparkles" class="w-3 h-3 text-primary"></i>
-      <span class="text-xs font-medium text-primary">智能调度中</span>
-    </div>
+          <!-- 列表-日志条目2 -->
+          <div id="log-2" class="rounded-md border border-outline-variant/10 p-2.5 hover:bg-surface-container/30 transition-colors cursor-pointer">
+            <div class="flex items-start gap-2">
+              <div class="shrink-0 text-[10px] text-on-surface-variant font-mono mt-0.5">14:32:08</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-1.5 mb-1">
+                  <i data-lucide="bot" class="w-3 h-3 text-node-agent shrink-0"></i>
+                  <span class="text-xs font-semibold text-on-surface">生图Agent — 质量自检</span>
+                  <span class="ml-auto text-[9px] text-success bg-success/15 px-1.5 py-0.5 rounded shrink-0">✅ 通过</span>
+                </div>
+                <div class="text-[10px] text-on-surface-variant space-y-0.5 leading-relaxed">
+                  <div>决策：图片质量达标，无需重试</div>
+                  <div>理由：清晰度0.91 &gt; 阈值0.7，构图0.85 &gt; 阈值0.7</div>
+                </div>
+              </div>
+            </div>
+          </div>
 
-    <!-- 并行度 -->
-    <div class="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-surface-container text-xs text-on-surface-variant">
-      <i data-lucide="git-merge" class="w-3 h-3"></i>
-      3个节点并行执行
-    </div>
+          <!-- 列表-日志条目3（当前暂停，金色高亮） -->
+          <div id="log-3" class="log-paused rounded-md border border-primary/20 p-2.5 cursor-pointer">
+            <div class="flex items-start gap-2">
+              <div class="shrink-0 text-[10px] text-on-surface-variant font-mono mt-0.5">14:32:09</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-1.5 mb-1">
+                  <i data-lucide="bot" class="w-3 h-3 text-node-agent shrink-0"></i>
+                  <span class="text-xs font-semibold text-on-surface">质检Agent — 开始检测</span>
+                  <span class="ml-auto text-[9px] text-warning bg-warning/15 px-1.5 py-0.5 rounded shrink-0">⏸ 暂停在断点</span>
+                </div>
+                <div class="text-[10px] text-on-surface-variant space-y-0.5 leading-relaxed">
+                  <div>检测维度：构图, 清晰度, 色彩, 品牌一致性</div>
+                </div>
+              </div>
+            </div>
+          </div>
 
-    <!-- 缓存命中 -->
-    <div class="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-success/10 text-xs text-success font-medium">
-      <i data-lucide="database" class="w-3 h-3"></i>
-      2/8 缓存命中
-    </div>
+          <!-- 列表-日志条目4（当前暂停的详细结果） -->
+          <div id="log-4" class="log-paused rounded-md border border-primary/20 p-2.5 cursor-pointer">
+            <div class="flex items-start gap-2">
+              <div class="shrink-0 text-[10px] text-on-surface-variant font-mono mt-0.5">14:32:09</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-1.5 mb-1">
+                  <i data-lucide="bot" class="w-3 h-3 text-node-agent shrink-0"></i>
+                  <span class="text-xs font-semibold text-on-surface">质检Agent — 构图分析</span>
+                  <span class="ml-auto text-[9px] text-warning bg-warning/15 px-1.5 py-0.5 rounded shrink-0">⏸ 等待确认</span>
+                </div>
+                <div class="text-[10px] text-on-surface-variant space-y-0.5 leading-relaxed">
+                  <div>决策：构图得分<span class="text-error font-medium">0.52</span>，低于阈值0.7</div>
+                  <div>理由：产品偏左，右侧空白过多</div>
+                  <div>建议：触发<span class="text-node-agent font-medium">修图Agent</span>调整居中</div>
+                </div>
+              </div>
+            </div>
+          </div>
 
-    <!-- 弹性填充 -->
-    <div class="flex-1"></div>
-
-    <!-- 右侧链接 -->
-    <a href="home.html" class="text-xs text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1">
-      <i data-lucide="arrow-left" class="w-3 h-3"></i>
-      返回编辑
-    </a>
-  </div>
-
-  <!-- 主体：左半区 + 右半区 -->
-  <div class="flex flex-1" style="height: calc(100vh - 44px - 44px)">
-
-    <!-- ========== 左半区：节点图状态视图 ========== -->
-    <div class="w-[60%] relative grid-bg bg-surface-container-lowest overflow-hidden">
-
-      <!-- 智能调度信息条 -->
-      <div id="schedule-info-bar" class="absolute top-3 left-3 right-3 z-10 animate-slide-in">
-        <div class="bg-primary/10 border border-primary/20 rounded-lg px-4 py-2.5 flex items-center gap-3">
-          <i data-lucide="brain" class="w-4 h-4 text-primary shrink-0"></i>
-          <p class="text-xs text-primary/90 flex-1">
-            <span class="font-medium">智能调度：</span>检测到条件分支"通过"，跳过"不通过"分支（节省约5.2s） | 缓存命中"无损放大"（节省2.1s）
-          </p>
-          <button id="btn-close-schedule-bar" class="text-primary/50 hover:text-primary transition-colors shrink-0">
-            <i data-lucide="x" class="w-3.5 h-3.5"></i>
-          </button>
         </div>
       </div>
 
-      <!-- 节点图 SVG 画布 -->
-      <svg id="node-graph" class="w-full h-full" viewBox="0 0 720 560">
-        <!-- 连线 -->
-        <!-- 1→2：蓝色实线 ✅ -->
-        <line x1="175" y1="95" x2="310" y2="95" stroke="#3b82f6" stroke-width="2" opacity="0.8"/>
-
-        <!-- 2→3（通过分支）：绿色实线 + 绿色脉冲流动动画 -->
-        <line x1="410" y1="80" x2="520" y2="80" stroke="#2ea043" stroke-width="2.5" class="animate-flow-green" opacity="0.9"/>
-        <text x="465" y="72" fill="#2ea043" font-size="9" text-anchor="middle" font-weight="500">通过 ✓</text>
-
-        <!-- 2→4（不通过分支）：红色虚线 + 半透明 + 未激活标记 -->
-        <line x1="360" y1="120" x2="360" y2="185" stroke="#f85149" stroke-width="1.5" stroke-dasharray="5 4" opacity="0.35" class="dash-flowing"/>
-        <text x="375" y="158" fill="#7d8590" font-size="8" opacity="0.5">未激活</text>
-
-        <!-- 3→6：蓝色实线 ✅ -->
-        <path d="M 580 120 L 580 160 Q 580 175 565 175 L 400 175 Q 385 175 385 190 L 385 250" stroke="#3b82f6" stroke-width="2" fill="none" opacity="0.8"/>
-
-        <!-- 4→5：灰色虚线 + 半透明 + 未激活 -->
-        <line x1="360" y1="235" x2="360" y2="280" stroke="#30363d" stroke-width="1.5" stroke-dasharray="5 4" opacity="0.35"/>
-
-        <!-- 5→2：灰色虚线 + 半透明 + 未激活 (回路) -->
-        <path d="M 310 310 L 240 310 Q 220 310 220 290 L 220 120 Q 220 105 240 105 L 310 105" stroke="#30363d" stroke-width="1.5" stroke-dasharray="5 4" fill="none" opacity="0.35"/>
-        <text x="225" y="210" fill="#7d8590" font-size="8" opacity="0.5">未激活</text>
-
-        <!-- 6→7：灰色虚线（等待） -->
-        <path d="M 385 380 L 385 420 Q 385 435 370 435 L 210 435 Q 195 435 195 450 L 195 465" stroke="#30363d" stroke-width="1.5" stroke-dasharray="5 4" opacity="0.5" class="dash-flowing"/>
-
-        <!-- 6→8：灰色虚线（等待） -->
-        <path d="M 440 380 L 440 420 Q 440 435 455 435 L 510 435 Q 525 435 525 450 L 525 465" stroke="#30363d" stroke-width="1.5" stroke-dasharray="5 4" opacity="0.5" class="dash-flowing"/>
-
-        <!-- ===== 节点 ===== -->
-
-        <!-- 节点1：AI生图 — ✅ 完成（绿色边框+光晕） -->
-        <g id="node-1" class="cursor-pointer">
-          <rect x="75" y="60" width="100" height="70" rx="8" fill="#1c2333" stroke="#2ea043" stroke-width="2" class="animate-green-glow"/>
-          <rect x="75" y="60" width="100" height="22" rx="8" fill="#2ea043/15"/>
-          <text x="125" y="76" fill="#2ea043" font-size="9" text-anchor="middle" font-weight="600">AI生图</text>
-          <text x="125" y="98" fill="#e6edf3" font-size="8" text-anchor="middle">SDXL Turbo</text>
-          <!-- 完成标记 -->
-          <circle cx="165" cy="68" r="6" fill="#2ea043"/>
-          <text x="165" y="71" fill="#0e1117" font-size="8" text-anchor="middle" font-weight="bold">✓</text>
-          <!-- 耗时标签 -->
-          <rect x="140" y="55" width="32" height="14" rx="3" fill="#2ea043/20"/>
-          <text x="156" y="64" fill="#2ea043" font-size="8" text-anchor="middle">3.2s</text>
-          <!-- 输入端口 -->
-          <circle cx="75" cy="95" r="4" fill="#3b82f6" stroke="#1c2333" stroke-width="1.5"/>
-          <!-- 输出端口 -->
-          <circle cx="175" cy="95" r="4" fill="#3b82f6" stroke="#1c2333" stroke-width="1.5"/>
-        </g>
-
-        <!-- 节点2：质量检测 — ✅ 完成（绿色边框） -->
-        <g id="node-2" class="cursor-pointer">
-          <rect x="310" y="60" width="100" height="70" rx="8" fill="#1c2333" stroke="#2ea043" stroke-width="2"/>
-          <rect x="310" y="60" width="100" height="22" rx="8" fill="#2ea043/15"/>
-          <text x="360" y="76" fill="#2ea043" font-size="9" text-anchor="middle" font-weight="600">质量检测</text>
-          <!-- 分数 -->
-          <text x="360" y="98" fill="#2ea043" font-size="12" text-anchor="middle" font-weight="700">0.85</text>
-          <text x="360" y="110" fill="#2ea043/70" font-size="7" text-anchor="middle">通过</text>
-          <!-- 完成标记 -->
-          <circle cx="400" cy="68" r="6" fill="#2ea043"/>
-          <text x="400" y="71" fill="#0e1117" font-size="8" text-anchor="middle" font-weight="bold">✓</text>
-          <!-- 输入端口 -->
-          <circle cx="310" cy="95" r="4" fill="#3b82f6" stroke="#1c2333" stroke-width="1.5"/>
-          <!-- pass_out端口 + 绿色脉冲波 -->
-          <circle cx="410" cy="80" r="4" fill="#2ea043" stroke="#1c2333" stroke-width="1.5"/>
-          <circle cx="410" cy="80" fill="none" stroke="#2ea043" stroke-width="1" class="green-pulse-wave"/>
-          <circle cx="410" cy="80" fill="none" stroke="#2ea043" stroke-width="0.5" class="green-pulse-wave" style="animation-delay: 0.5s"/>
-          <!-- fail_out端口 -->
-          <circle cx="410" cy="110" r="4" fill="#f85149" stroke="#1c2333" stroke-width="1.5" opacity="0.4"/>
-        </g>
-
-        <!-- 节点3：无损放大 — ✅ 缓存命中！（新增状态） -->
-        <g id="node-3" class="cursor-pointer">
-          <rect x="520" y="50" width="120" height="70" rx="8" fill="#1c2333" stroke="#2ea043" stroke-width="2"/>
-          <rect x="520" y="50" width="120" height="22" rx="8" fill="#2ea043/15"/>
-          <text x="580" y="66" fill="#2ea043" font-size="9" text-anchor="middle" font-weight="600">无损放大</text>
-          <text x="580" y="88" fill="#7d8590" font-size="8" text-anchor="middle">Real-ESRGAN 4x</text>
-          <!-- 缓存命中标签 -->
-          <rect x="568" y="95" width="30" height="13" rx="3" fill="#2ea043/20" class="animate-cache-flash"/>
-          <text x="583" y="104" fill="#2ea043" font-size="7" text-anchor="middle" font-weight="600">缓存</text>
-          <!-- 跳过执行标注 -->
-          <text x="580" y="114" fill="#2ea043/60" font-size="7" text-anchor="middle">跳过执行，复用缓存结果</text>
-          <!-- 输入端口 -->
-          <circle cx="520" cy="80" r="4" fill="#3b82f6" stroke="#1c2333" stroke-width="1.5"/>
-          <!-- 输出端口 -->
-          <circle cx="640" cy="80" r="4" fill="#3b82f6" stroke="#1c2333" stroke-width="1.5"/>
-        </g>
-
-        <!-- 节点4：提示词优化 — 灰色半透明（未激活） -->
-        <g id="node-4" opacity="0.4">
-          <rect x="310" y="185" width="100" height="50" rx="8" fill="#1c2333" stroke="#30363d" stroke-width="1.5" stroke-dasharray="4 3"/>
-          <text x="360" y="207" fill="#7d8590" font-size="9" text-anchor="middle" font-weight="500" text-decoration="line-through">提示词优化</text>
-          <text x="360" y="222" fill="#7d8590" font-size="7" text-anchor="middle">未激活</text>
-          <!-- 未激活标签 -->
-          <rect x="388" y="180" width="36" height="13" rx="3" fill="#30363d/50"/>
-          <text x="406" y="189" fill="#7d8590" font-size="7" text-anchor="middle">未激活</text>
-          <circle cx="310" cy="210" r="4" fill="#7d8590" stroke="#1c2333" stroke-width="1.5" opacity="0.4"/>
-          <circle cx="410" cy="210" r="4" fill="#7d8590" stroke="#1c2333" stroke-width="1.5" opacity="0.4"/>
-        </g>
-
-        <!-- 节点5：重新生成 — 灰色半透明 + 未激活 -->
-        <g id="node-5" opacity="0.4">
-          <rect x="310" y="280" width="100" height="50" rx="8" fill="#1c2333" stroke="#30363d" stroke-width="1.5" stroke-dasharray="4 3"/>
-          <text x="360" y="302" fill="#7d8590" font-size="9" text-anchor="middle" font-weight="500" text-decoration="line-through">重新生成</text>
-          <text x="360" y="317" fill="#7d8590" font-size="7" text-anchor="middle">未激活</text>
-          <rect x="388" y="275" width="36" height="13" rx="3" fill="#30363d/50"/>
-          <text x="406" y="284" fill="#7d8590" font-size="7" text-anchor="middle">未激活</text>
-          <circle cx="310" cy="305" r="4" fill="#7d8590" stroke="#1c2333" stroke-width="1.5" opacity="0.4"/>
-          <circle cx="410" cy="305" r="4" fill="#7d8590" stroke="#1c2333" stroke-width="1.5" opacity="0.4"/>
-        </g>
-
-        <!-- 节点6：电商白底图（子图） — ⏳ 执行中 -->
-        <g id="node-6" class="cursor-pointer">
-          <!-- 子图主体 - 金色脉冲 -->
-          <rect x="310" y="250" width="150" height="130" rx="10" fill="#1c2333" stroke="#d4af37" stroke-width="2" class="animate-gold-pulse"/>
-          <rect x="310" y="250" width="150" height="24" rx="10" fill="#d4af37/10"/>
-          <text x="385" y="266" fill="#d4af37" font-size="9" text-anchor="middle" font-weight="600">电商白底图（子图）</text>
-
-          <!-- 子节点列表 -->
-          <!-- 子节点1：移除背景 ✅ -->
-          <rect x="322" y="280" width="126" height="16" rx="4" fill="#2ea043/10"/>
-          <text x="330" y="291" fill="#2ea043" font-size="7">✓</text>
-          <text x="340" y="291" fill="#e6edf3" font-size="7.5">移除背景</text>
-          <text x="440" y="291" fill="#7d8590" font-size="7" text-anchor="end">2.1s</text>
-
-          <!-- 子节点2：蒙版优化 ✅ -->
-          <rect x="322" y="300" width="126" height="16" rx="4" fill="#2ea043/10"/>
-          <text x="330" y="311" fill="#2ea043" font-size="7">✓</text>
-          <text x="340" y="311" fill="#e6edf3" font-size="7.5">蒙版优化</text>
-          <text x="440" y="311" fill="#7d8590" font-size="7" text-anchor="end">1.8s</text>
-
-          <!-- 子节点3：居中构图 ⏳ 42% -->
-          <rect x="322" y="320" width="126" height="16" rx="4" fill="#d4af37/10"/>
-          <text x="330" y="331" fill="#d4af37" font-size="7">⏳</text>
-          <text x="340" y="331" fill="#e6edf3" font-size="7.5">居中构图</text>
-          <text x="440" y="331" fill="#d4af37" font-size="7" text-anchor="end" font-weight="600">42%</text>
-          <!-- 进度条 -->
-          <rect x="322" y="338" width="126" height="2" rx="1" fill="#30363d"/>
-          <rect x="322" y="338" width="53" height="2" rx="1" fill="#d4af37"/>
-
-          <!-- 子节点4：白底合成 ⏸ -->
-          <rect x="322" y="344" width="126" height="16" rx="4" fill="#1c2333"/>
-          <text x="330" y="355" fill="#7d8590" font-size="7">⏸</text>
-          <text x="340" y="355" fill="#7d8590" font-size="7.5">白底合成</text>
-
-          <!-- 子节点5：放大2x ⏸ -->
-          <rect x="322" y="362" width="126" height="16" rx="4" fill="#1c2333"/>
-          <text x="330" y="373" fill="#7d8590" font-size="7">⏸</text>
-          <text x="340" y="373" fill="#7d8590" font-size="7.5">放大2x</text>
-
-          <!-- 输入端口 -->
-          <circle cx="310" cy="300" r="4" fill="#06b6d4" stroke="#1c2333" stroke-width="1.5"/>
-          <!-- 输出端口 -->
-          <circle cx="460" cy="340" r="4" fill="#06b6d4" stroke="#1c2333" stroke-width="1.5"/>
-          <circle cx="460" cy="360" r="4" fill="#06b6d4" stroke="#1c2333" stroke-width="1.5"/>
-        </g>
-
-        <!-- 节点7：保存导出 — ⏸ 等待中 -->
-        <g id="node-7" class="cursor-pointer">
-          <rect x="140" y="465" width="110" height="55" rx="8" fill="#1c2333" stroke="#30363d" stroke-width="1.5" stroke-dasharray="4 3"/>
-          <rect x="140" y="465" width="110" height="22" rx="8" fill="#30363d/20"/>
-          <text x="195" y="481" fill="#7d8590" font-size="9" text-anchor="middle" font-weight="500">保存导出</text>
-          <text x="195" y="503" fill="#7d8590" font-size="8" text-anchor="middle">⏸ 等待中</text>
-          <circle cx="195" cy="465" r="4" fill="#2ea043" stroke="#1c2333" stroke-width="1.5" opacity="0.4"/>
-        </g>
-
-        <!-- 节点8：版本标记 — ⏸ 等待中 -->
-        <g id="node-8" class="cursor-pointer">
-          <rect x="475" y="465" width="110" height="55" rx="8" fill="#1c2333" stroke="#30363d" stroke-width="1.5" stroke-dasharray="4 3"/>
-          <rect x="475" y="465" width="110" height="22" rx="8" fill="#30363d/20"/>
-          <text x="530" y="481" fill="#7d8590" font-size="9" text-anchor="middle" font-weight="500">版本标记</text>
-          <text x="530" y="503" fill="#7d8590" font-size="8" text-anchor="middle">⏸ 等待中</text>
-          <circle cx="530" cy="465" r="4" fill="#2ea043" stroke="#1c2333" stroke-width="1.5" opacity="0.4"/>
-        </g>
-      </svg>
-    </div>
-
-    <!-- ========== 右半区：执行详情面板 ========== -->
-    <div class="w-[40%] bg-surface border-l border-outline-variant/15 flex flex-col overflow-hidden">
-
-      <!-- 执行概览卡片 -->
-      <div id="exec-overview" class="p-4 border-b border-outline-variant/15">
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-sm font-semibold text-on-surface">执行概览</h2>
-          <span class="text-xs text-on-surface-variant">5/8 完成</span>
+      <!-- 2. 数据检查器（中部，约35%） -->
+      <div id="data-inspector-section" class="flex flex-col border-b border-outline-variant/20" style="flex: 35;">
+        <!-- 标题栏 -->
+        <div class="flex items-center justify-between px-3 py-2 bg-surface-container border-b border-outline-variant/20 shrink-0">
+          <div class="flex items-center gap-1.5">
+            <i data-lucide="database" class="w-3.5 h-3.5 text-port-data"></i>
+            <span class="text-xs font-semibold text-on-surface">数据检查器</span>
+          </div>
+          <select id="port-selector" class="bg-surface-container-high border-none rounded px-2 py-0.5 text-[10px] text-on-surface focus:ring-2 focus:ring-primary/30">
+            <option value="report_out">report_out</option>
+            <option value="image_in">image_in</option>
+          </select>
         </div>
-        <!-- 进度条 -->
-        <div class="w-full h-2 bg-surface-container-highest rounded-full overflow-hidden mb-3">
-          <div id="overview-progress" class="h-full progress-shimmer rounded-full" style="width: 62%"></div>
-        </div>
+        <!-- 检查器内容 -->
+        <div class="flex-1 overflow-y-auto p-3">
+          <div class="text-[10px] text-on-surface-variant mb-2">当前检查：<span class="text-on-surface font-medium">节点3 质检Agent</span> → <span class="text-port-data font-medium">report_out</span></div>
 
-        <!-- 智能优化统计 -->
-        <div class="bg-success/8 border border-success/15 rounded-lg p-3 mb-3">
-          <div class="flex items-center gap-1.5 mb-2">
-            <i data-lucide="zap" class="w-3.5 h-3.5 text-success"></i>
-            <span class="text-xs font-medium text-success">智能优化统计</span>
-          </div>
-          <div class="grid grid-cols-3 gap-2 text-center">
-            <!-- 缓存命中 -->
-            <div class="bg-surface/50 rounded-md py-1.5 px-1">
-              <div class="text-xs font-semibold text-success">1次</div>
-              <div class="text-[10px] text-on-surface-variant">缓存命中</div>
-              <div class="text-[10px] text-success/70">节省2.1s</div>
-            </div>
-            <!-- 分支跳过 -->
-            <div class="bg-surface/50 rounded-md py-1.5 px-1">
-              <div class="text-xs font-semibold text-success">2节点</div>
-              <div class="text-[10px] text-on-surface-variant">分支跳过</div>
-              <div class="text-[10px] text-success/70">节省5.2s</div>
-            </div>
-            <!-- 预计剩余 -->
-            <div class="bg-surface/50 rounded-md py-1.5 px-1">
-              <div class="text-xs font-semibold text-primary">8s</div>
-              <div class="text-[10px] text-on-surface-variant">预计剩余</div>
-              <div class="text-[10px] text-on-surface-variant/60">原始15.3s</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 智能优化条 -->
-        <div class="bg-surface-container rounded-md p-2.5">
-          <div class="flex items-center justify-between mb-1.5">
-            <span class="text-[10px] text-on-surface-variant">执行时间优化</span>
-            <span class="text-[10px] font-semibold text-success">已优化47%</span>
-          </div>
-          <div class="w-full h-1.5 bg-surface-container-highest rounded-full overflow-hidden flex">
-            <div class="h-full bg-success/60 rounded-full" style="width: 47%"></div>
-            <div class="h-full bg-surface-container-high rounded-full" style="width: 53%"></div>
-          </div>
-          <div class="flex justify-between mt-1">
-            <span class="text-[9px] text-success/60">优化部分 7.3s</span>
-            <span class="text-[9px] text-on-surface-variant/50">实际执行 8s</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 可滚动内容区 -->
-      <div class="flex-1 overflow-y-auto custom-scroll">
-
-        <!-- 节点执行时间线 -->
-        <div id="exec-timeline" class="p-4">
-
-          <!-- 时间线-节点1：AI生图 ✅ 完成 -->
-          <div id="timeline-node-1" class="flex gap-3 mb-4 relative">
-            <div class="flex flex-col items-center">
-              <div class="w-6 h-6 rounded-full bg-success/20 flex items-center justify-center shrink-0">
-                <i data-lucide="check" class="w-3 h-3 text-success"></i>
-              </div>
-              <div class="w-px flex-1 bg-success/30 mt-1"></div>
-            </div>
-            <div class="flex-1 pb-3">
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-semibold text-on-surface">AI生图</span>
-                <span class="text-[10px] text-success font-medium">完成</span>
-              </div>
-              <div class="text-[10px] text-on-surface-variant mt-0.5">14:32:05 → 14:32:08 | 3.2s</div>
-              <!-- 结果缩略图 -->
-              <div class="mt-2 w-16 h-12 rounded overflow-hidden bg-surface-container">
-                <img src="https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=200&h=150&fit=crop" alt="AI生图结果" data-category="艺术" class="w-full h-full object-cover">
-              </div>
-            </div>
-          </div>
-
-          <!-- 时间线-节点2：质量检测 ✅ 完成（条件分支） -->
-          <div id="timeline-node-2" class="flex gap-3 mb-4 relative">
-            <div class="flex flex-col items-center">
-              <div class="w-6 h-6 rounded-full bg-success/20 flex items-center justify-center shrink-0">
-                <i data-lucide="check" class="w-3 h-3 text-success"></i>
-              </div>
-              <div class="w-px flex-1 bg-success/30 mt-1"></div>
-            </div>
-            <div class="flex-1 pb-3">
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-semibold text-on-surface">质量检测</span>
-                <span class="text-[10px] text-success font-medium">完成（条件分支）</span>
-              </div>
-              <div class="text-[10px] text-on-surface-variant mt-0.5">14:32:08 → 14:32:09 | 0.8s</div>
-              <div class="text-[10px] text-on-surface mt-1">检测结果：<span class="text-success font-semibold">0.85分（通过）</span></div>
-              <!-- 分支决策展示 -->
-              <div class="mt-2 bg-surface-container rounded-md p-2 space-y-1">
-                <div class="flex items-center gap-1.5">
-                  <i data-lucide="check-circle" class="w-3 h-3 text-success"></i>
-                  <span class="text-[10px] text-success font-medium">"通过"分支 → 执行</span>
-                </div>
-                <div class="flex items-center gap-1.5">
-                  <i data-lucide="x-circle" class="w-3 h-3 text-on-surface-variant/40"></i>
-                  <span class="text-[10px] text-on-surface-variant/50 line-through">"不通过"分支 → 跳过</span>
-                </div>
-              </div>
-              <!-- 结果缩略图 -->
-              <div class="mt-2 w-16 h-12 rounded overflow-hidden bg-surface-container">
-                <img src="https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=200&h=150&fit=crop" alt="质量检测结果" data-category="艺术" class="w-full h-full object-cover">
-              </div>
-            </div>
-          </div>
-
-          <!-- 时间线-节点3：无损放大 ✅ 缓存命中（新增状态） -->
-          <div id="timeline-node-3" class="flex gap-3 mb-4 relative">
-            <div class="flex flex-col items-center">
-              <div class="w-6 h-6 rounded-full bg-success/20 flex items-center justify-center shrink-0">
-                <i data-lucide="database" class="w-3 h-3 text-success"></i>
-              </div>
-              <div class="w-px flex-1 bg-success/30 mt-1"></div>
-            </div>
-            <div class="flex-1 pb-3">
-              <div class="flex items-center gap-2">
-                <span class="text-xs font-semibold text-on-surface">无损放大</span>
-                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-success/15 text-success animate-cache-flash">缓存</span>
-              </div>
-              <div class="text-[10px] text-on-surface-variant mt-0.5">14:32:09 | 0.01s（缓存读取）</div>
-              <!-- 缓存信息 -->
-              <div class="mt-1.5 bg-success/5 border border-success/10 rounded-md p-2">
-                <div class="text-[10px] text-success/80">输入与上次执行相同，跳过重算</div>
-                <button id="btn-clear-cache" class="text-[10px] text-primary hover:underline mt-1">清除缓存并重算</button>
-              </div>
-              <!-- 结果缩略图（带缓存角标） -->
-              <div class="mt-2 relative w-16 h-12 rounded overflow-hidden bg-surface-container">
-                <img src="https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=200&h=150&fit=crop" alt="无损放大结果" data-category="艺术" class="w-full h-full object-cover">
-                <div class="absolute top-0 right-0 bg-success/80 text-[7px] text-white px-1 rounded-bl font-semibold">缓存</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 时间线-节点4：提示词优化 ⊘ 未激活 -->
-          <div id="timeline-node-4" class="flex gap-3 mb-4 relative opacity-40">
-            <div class="flex flex-col items-center">
-              <div class="w-6 h-6 rounded-full bg-surface-container-high flex items-center justify-center shrink-0">
-                <i data-lucide="minus" class="w-3 h-3 text-on-surface-variant/50"></i>
-              </div>
-              <div class="w-px flex-1 bg-outline-variant/20 mt-1"></div>
-            </div>
-            <div class="flex-1 pb-3">
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-medium text-on-surface-variant line-through">提示词优化</span>
-                <span class="text-[10px] text-on-surface-variant/50">未激活</span>
-              </div>
-              <div class="text-[10px] text-on-surface-variant/50 mt-0.5">原因：条件分支"不通过"未触发</div>
-              <div class="text-[10px] text-on-surface-variant/40 mt-0.5">预估耗时：2.1s（已节省）</div>
-            </div>
-          </div>
-
-          <!-- 时间线-节点5：重新生成 ⊘ 未激活 -->
-          <div id="timeline-node-5" class="flex gap-3 mb-4 relative opacity-40">
-            <div class="flex flex-col items-center">
-              <div class="w-6 h-6 rounded-full bg-surface-container-high flex items-center justify-center shrink-0">
-                <i data-lucide="minus" class="w-3 h-3 text-on-surface-variant/50"></i>
-              </div>
-              <div class="w-px flex-1 bg-outline-variant/20 mt-1"></div>
-            </div>
-            <div class="flex-1 pb-3">
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-medium text-on-surface-variant line-through">重新生成</span>
-                <span class="text-[10px] text-on-surface-variant/50">未激活</span>
-              </div>
-              <div class="text-[10px] text-on-surface-variant/50 mt-0.5">原因：上游分支未激活</div>
-            </div>
-          </div>
-
-          <!-- 时间线-节点6：电商白底图 ⏳ 执行中（子图展开） -->
-          <div id="timeline-node-6" class="flex gap-3 mb-4 relative">
-            <div class="flex flex-col items-center">
-              <div class="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center shrink-0 animate-pulse-gold">
-                <i data-lucide="loader" class="w-3 h-3 text-primary"></i>
-              </div>
-              <div class="w-px flex-1 bg-primary/30 mt-1"></div>
-            </div>
-            <div class="flex-1 pb-3">
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-semibold text-on-surface">电商白底图</span>
-                <span class="text-[10px] text-primary font-medium">执行中</span>
-              </div>
-              <div class="text-[10px] text-on-surface-variant mt-0.5">14:32:09 → 进行中 | 已耗时4.2s</div>
-
-              <!-- 子图进度展开 -->
-              <div class="mt-2 bg-surface-container rounded-md p-2.5 space-y-1.5 border border-primary/10">
-                <!-- 子节点1 -->
-                <div class="flex items-center justify-between">
-                  <div class="flex items-center gap-1.5">
-                    <i data-lucide="check-circle" class="w-3 h-3 text-success"></i>
-                    <span class="text-[10px] text-on-surface">移除背景</span>
-                  </div>
-                  <span class="text-[10px] text-on-surface-variant">2.1s</span>
-                </div>
-                <!-- 子节点2 -->
-                <div class="flex items-center justify-between">
-                  <div class="flex items-center gap-1.5">
-                    <i data-lucide="check-circle" class="w-3 h-3 text-success"></i>
-                    <span class="text-[10px] text-on-surface">蒙版优化</span>
-                  </div>
-                  <span class="text-[10px] text-on-surface-variant">1.8s</span>
-                </div>
-                <!-- 子节点3 执行中 -->
-                <div class="flex items-center justify-between">
-                  <div class="flex items-center gap-1.5">
-                    <i data-lucide="loader" class="w-3 h-3 text-primary animate-spin"></i>
-                    <span class="text-[10px] text-on-surface font-medium">居中构图</span>
-                    <span class="text-[9px] text-primary font-semibold">42%</span>
-                  </div>
-                </div>
-                <div class="w-full h-1 bg-surface-container-highest rounded-full overflow-hidden">
-                  <div class="h-full bg-primary rounded-full" style="width: 42%"></div>
-                </div>
-                <!-- 子节点4 等待 -->
-                <div class="flex items-center justify-between opacity-50">
-                  <div class="flex items-center gap-1.5">
-                    <i data-lucide="circle" class="w-3 h-3 text-on-surface-variant"></i>
-                    <span class="text-[10px] text-on-surface-variant">白底合成</span>
-                  </div>
-                </div>
-                <!-- 子节点5 等待 -->
-                <div class="flex items-center justify-between opacity-50">
-                  <div class="flex items-center gap-1.5">
-                    <i data-lucide="circle" class="w-3 h-3 text-on-surface-variant"></i>
-                    <span class="text-[10px] text-on-surface-variant">放大2x</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 时间线-节点7：保存导出 ⏸ 等待中 -->
-          <div id="timeline-node-7" class="flex gap-3 mb-4 relative">
-            <div class="flex flex-col items-center">
-              <div class="w-6 h-6 rounded-full bg-surface-container-high flex items-center justify-center shrink-0">
-                <i data-lucide="clock" class="w-3 h-3 text-on-surface-variant/50"></i>
-              </div>
-              <div class="w-px flex-1 bg-outline-variant/20 mt-1"></div>
-            </div>
-            <div class="flex-1 pb-3">
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-medium text-on-surface-variant">保存导出</span>
-                <span class="text-[10px] text-on-surface-variant/50">等待中</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- 时间线-节点8：版本标记 ⏸ 等待中 -->
-          <div id="timeline-node-8" class="flex gap-3 mb-2 relative">
-            <div class="flex flex-col items-center">
-              <div class="w-6 h-6 rounded-full bg-surface-container-high flex items-center justify-center shrink-0">
-                <i data-lucide="clock" class="w-3 h-3 text-on-surface-variant/50"></i>
-              </div>
-            </div>
+          <!-- 左右分栏 -->
+          <div class="flex gap-3">
+            <!-- 左：输入数据 -->
             <div class="flex-1">
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-medium text-on-surface-variant">版本标记</span>
-                <span class="text-[10px] text-on-surface-variant/50">等待中</span>
+              <div class="text-[10px] font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">输入数据</div>
+              <div class="bg-surface-container rounded-md p-2.5 space-y-1.5">
+                <div class="flex items-center justify-between text-[10px]">
+                  <span class="text-on-surface-variant">端口</span>
+                  <span class="text-port-image font-mono">image_in</span>
+                </div>
+                <div class="flex items-center justify-between text-[10px]">
+                  <span class="text-on-surface-variant">类型</span>
+                  <span class="text-on-surface">image</span>
+                </div>
+                <div class="flex items-center justify-between text-[10px]">
+                  <span class="text-on-surface-variant">尺寸</span>
+                  <span class="text-on-surface">1536×1024</span>
+                </div>
+                <div class="flex items-center justify-between text-[10px]">
+                  <span class="text-on-surface-variant">格式</span>
+                  <span class="text-on-surface">PNG</span>
+                </div>
+                <!-- 缩略图 -->
+                <div class="rounded overflow-hidden mt-1">
+                  <img src="https://images.unsplash.com/photo-1558618666-fcd25c85f82e?w=320&h=240&fit=crop" alt="输入图片预览" data-category="建筑城市" class="w-full h-[80px] object-cover" width="160" height="120" />
+                </div>
+                <button class="text-[9px] text-primary hover:underline">放大查看</button>
+              </div>
+            </div>
+
+            <!-- 右：输出数据 -->
+            <div class="flex-1">
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="text-[10px] font-semibold text-on-surface-variant uppercase tracking-wider">输出数据</div>
+                <span class="text-[9px] text-warning bg-warning/15 px-1.5 py-0.5 rounded">生成中...</span>
+              </div>
+              <div class="bg-surface-container rounded-md p-2.5 space-y-1.5">
+                <div class="flex items-center justify-between text-[10px]">
+                  <span class="text-on-surface-variant">端口</span>
+                  <span class="text-port-data font-mono">report_out</span>
+                </div>
+                <div class="flex items-center justify-between text-[10px]">
+                  <span class="text-on-surface-variant">类型</span>
+                  <span class="text-on-surface">data</span>
+                </div>
+                <div class="text-[10px] text-on-surface-variant mt-1 mb-1">部分结果（实时更新）：</div>
+                <!-- JSON展示区 -->
+                <div id="json-display" class="bg-surface-container-lowest rounded-md p-2 font-mono text-[10px] leading-relaxed overflow-x-auto">
+<pre class="whitespace-pre-wrap">{
+  <span class="json-key">"构图"</span>: { <span class="json-key">"score"</span>: <span class="json-number">0.52</span>, <span class="json-key">"status"</span>: <span class="json-string">"不通过"</span> },
+  <span class="json-key">"清晰度"</span>: { <span class="json-key">"score"</span>: <span class="json-number">0.68</span>, <span class="json-key">"status"</span>: <span class="json-string">"不通过"</span> },
+  <span class="json-key">"色彩"</span>: { <span class="json-key">"score"</span>: <span class="json-number">0.89</span>, <span class="json-key">"status"</span>: <span class="json-string">"通过"</span> },
+  <span class="json-key">"品牌一致性"</span>: { <span class="json-key">"score"</span>: <span class="json-string">"..."</span>, <span class="json-key">"status"</span>: <span class="json-string json-flash">"检测中"</span> }
+}</pre>
+                </div>
+                <div class="flex items-center gap-2 mt-1.5">
+                  <button id="btn-copy-json" class="text-[9px] text-primary hover:underline flex items-center gap-0.5">
+                    <i data-lucide="copy" class="w-2.5 h-2.5"></i>复制JSON
+                  </button>
+                  <button id="btn-export-data" class="text-[9px] text-primary hover:underline flex items-center gap-0.5">
+                    <i data-lucide="download" class="w-2.5 h-2.5"></i>导出完整数据
+                  </button>
+                </div>
               </div>
             </div>
           </div>
 
-        </div>
-
-        <!-- 失败自愈日志面板（可折叠） -->
-        <div id="self-heal-panel" class="px-4 pb-3">
-          <div class="bg-surface-container rounded-lg border border-outline-variant/10">
-            <button id="btn-toggle-heal" class="w-full flex items-center justify-between p-3 hover:bg-surface-container-high/30 transition-colors rounded-lg">
-              <div class="flex items-center gap-2">
-                <i data-lucide="wrench" class="w-3.5 h-3.5 text-warning"></i>
-                <span class="text-xs font-semibold text-on-surface">自愈记录</span>
-                <span class="text-[9px] px-1.5 py-0.5 rounded bg-warning/10 text-warning font-medium">1次</span>
-              </div>
-              <i data-lucide="chevron-down" id="heal-chevron" class="w-3.5 h-3.5 text-on-surface-variant transition-transform"></i>
-            </button>
-            <div id="heal-log-content" class="animate-accordion">
-              <div class="px-3 pb-3 space-y-2">
-                <!-- 自愈记录1：失败 -->
-                <div class="flex items-start gap-2">
-                  <i data-lucide="x-circle" class="w-3 h-3 text-error mt-0.5 shrink-0"></i>
-                  <div>
-                    <div class="text-[10px] text-on-surface">14:28:32 无损放大执行失败</div>
-                    <div class="text-[9px] text-on-surface-variant">upscayl模型超时</div>
-                  </div>
-                </div>
-                <!-- 自愈记录2：自动切换 -->
-                <div class="flex items-start gap-2">
-                  <i data-lucide="refresh-cw" class="w-3 h-3 text-warning mt-0.5 shrink-0"></i>
-                  <div>
-                    <div class="text-[10px] text-on-surface">14:28:33 自动切换备选模型</div>
-                    <div class="text-[9px] text-on-surface-variant">real-esrgan</div>
-                  </div>
-                </div>
-                <!-- 自愈记录3：成功 -->
-                <div class="flex items-start gap-2">
-                  <i data-lucide="check-circle" class="w-3 h-3 text-success mt-0.5 shrink-0"></i>
-                  <div>
-                    <div class="text-[10px] text-on-surface">14:28:35 real-esrgan 执行成功</div>
-                  </div>
-                </div>
-                <!-- 自愈结果 -->
-                <div class="flex items-start gap-2 pt-1 border-t border-outline-variant/10">
-                  <i data-lucide="check-check" class="w-3 h-3 text-success mt-0.5 shrink-0"></i>
-                  <div>
-                    <div class="text-[10px] text-success font-medium">结果：自愈成功，额外耗时3.2s</div>
-                  </div>
-                </div>
-                <!-- 查看完整日志 -->
-                <button id="btn-view-full-log" class="text-[10px] text-primary hover:underline mt-1">查看完整日志</button>
-              </div>
+          <!-- 数据流追踪 -->
+          <div class="mt-3 bg-surface-container rounded-md p-2">
+            <div class="text-[10px] text-on-surface-variant mb-1">数据流追踪</div>
+            <div class="text-[10px] font-mono leading-relaxed">
+              <span class="text-port-image">image_in</span>
+              <span class="text-on-surface-variant"> ← </span>
+              <a href="#" class="text-node-agent hover:underline">[生图Agent.image_out]</a>
+              <span class="text-on-surface-variant"> ← </span>
+              <a href="#" class="text-node-input hover:underline">[产品描述.prompt_out]</a>
             </div>
           </div>
         </div>
-
-        <!-- 结果预览区 -->
-        <div id="result-preview" class="px-4 pb-4">
-          <h3 class="text-xs font-semibold text-on-surface mb-2">结果预览</h3>
-          <div class="flex gap-2 overflow-x-auto pb-2 custom-scroll">
-            <!-- 预览1：AI生图结果 -->
-            <div class="shrink-0 w-20 h-16 rounded-md overflow-hidden bg-surface-container relative">
-              <img src="https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=200&h=150&fit=crop" alt="AI生图结果" data-category="艺术" class="w-full h-full object-cover">
-              <div class="absolute bottom-0 left-0 right-0 bg-black/60 text-[7px] text-white text-center py-0.5">AI生图</div>
-            </div>
-            <!-- 预览2：质量检测结果 -->
-            <div class="shrink-0 w-20 h-16 rounded-md overflow-hidden bg-surface-container relative">
-              <img src="https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=200&h=150&fit=crop" alt="质量检测结果" data-category="艺术" class="w-full h-full object-cover">
-              <div class="absolute top-0 right-0 bg-success/90 text-[7px] text-white px-1 rounded-bl font-semibold">0.85</div>
-              <div class="absolute bottom-0 left-0 right-0 bg-black/60 text-[7px] text-white text-center py-0.5">质量检测</div>
-            </div>
-            <!-- 预览3：无损放大结果（缓存角标） -->
-            <div class="shrink-0 w-20 h-16 rounded-md overflow-hidden bg-surface-container relative">
-              <img src="https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=200&h=150&fit=crop" alt="无损放大结果" data-category="艺术" class="w-full h-full object-cover">
-              <div class="absolute top-0 right-0 bg-success/90 text-[7px] text-white px-1 rounded-bl font-semibold">缓存</div>
-              <div class="absolute bottom-0 left-0 right-0 bg-black/60 text-[7px] text-white text-center py-0.5">无损放大</div>
-            </div>
-            <!-- 预览4：移除背景结果 -->
-            <div class="shrink-0 w-20 h-16 rounded-md overflow-hidden bg-surface-container relative">
-              <img src="https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=200&h=150&fit=crop" alt="移除背景结果" data-category="艺术" class="w-full h-full object-cover">
-              <div class="absolute bottom-0 left-0 right-0 bg-black/60 text-[7px] text-white text-center py-0.5">移除背景</div>
-            </div>
-            <!-- 预览5：蒙版优化结果 -->
-            <div class="shrink-0 w-20 h-16 rounded-md overflow-hidden bg-surface-container relative">
-              <img src="https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=200&h=150&fit=crop" alt="蒙版优化结果" data-category="艺术" class="w-full h-full object-cover">
-              <div class="absolute bottom-0 left-0 right-0 bg-black/60 text-[7px] text-white text-center py-0.5">蒙版优化</div>
-            </div>
-          </div>
-        </div>
-
       </div>
 
-      <!-- 底部操作栏 -->
-      <div id="exec-actions" class="border-t border-outline-variant/15 bg-surface p-3 flex items-center gap-2 flex-wrap">
-        <!-- 停止执行 -->
-        <button id="btn-stop-bottom" class="flex items-center gap-1 px-3 py-1.5 rounded-md bg-error/15 text-error text-xs font-medium hover:bg-error/25 transition-colors">
-          <i data-lucide="square" class="w-3 h-3"></i>
-          停止执行
-        </button>
-        <!-- 暂停 -->
-        <button id="btn-pause" class="flex items-center gap-1 px-3 py-1.5 rounded-md bg-surface-container text-on-surface-variant text-xs font-medium hover:bg-surface-container-high transition-colors">
-          <i data-lucide="pause" class="w-3 h-3"></i>
-          暂停
-        </button>
-
-        <div class="w-px h-5 bg-outline-variant/20"></div>
-
-        <!-- 执行模式 -->
-        <div class="flex items-center gap-1.5 text-xs text-on-surface-variant">
-          <i data-lucide="layers" class="w-3 h-3"></i>
-          <span>并行</span>
-        </div>
-
-        <div class="w-px h-5 bg-outline-variant/20"></div>
-
-        <!-- 仅重算未缓存节点 开关 -->
-        <div class="flex items-center gap-1.5">
-          <span class="text-[10px] text-on-surface-variant">仅重算未缓存</span>
-          <div id="toggle-uncached" class="toggle-switch active">
-            <div class="toggle-knob"></div>
+      <!-- 3. 自演化日志（底部，约25%，可折叠） -->
+      <div id="evolution-section" class="flex flex-col" style="flex: 25;">
+        <!-- 标题栏 -->
+        <div class="flex items-center justify-between px-3 py-2 bg-surface-container border-b border-outline-variant/20 shrink-0 cursor-pointer" id="evolution-header">
+          <div class="flex items-center gap-1.5">
+            <i data-lucide="dna" class="w-3.5 h-3.5 text-primary"></i>
+            <span class="text-xs font-semibold text-on-surface">自演化日志</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <a href="#" class="text-[9px] text-primary hover:underline">查看全部</a>
+            <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-on-surface-variant transition-transform" id="evolution-chevron"></i>
           </div>
         </div>
+        <!-- 折叠摘要 -->
+        <div id="evolution-summary" class="px-3 py-2 text-[10px] text-on-surface-variant shrink-0">
+          本次执行已有<span class="text-primary font-medium">2项</span>自动优化：缓存命中1次(省2.1s)，模型自动切换1次
+        </div>
+        <!-- 展开详细内容 -->
+        <div id="evolution-detail" class="evolution-detail overflow-y-auto px-3 pb-2">
+          <div class="space-y-2">
 
-        <!-- 失败自愈 开关 -->
-        <div class="flex items-center gap-1.5">
-          <span class="text-[10px] text-on-surface-variant">失败自愈</span>
-          <div id="toggle-self-heal" class="toggle-switch toggle-switch-green active">
-            <div class="toggle-knob"></div>
+            <!-- 列表-自动优化1 -->
+            <div class="bg-surface-container rounded-md p-2.5">
+              <div class="flex items-center gap-1.5 mb-1">
+                <i data-lucide="wrench" class="w-3 h-3 text-primary"></i>
+                <span class="text-[10px] font-semibold text-on-surface">自动优化 #1</span>
+              </div>
+              <div class="text-[10px] text-on-surface-variant space-y-0.5 leading-relaxed">
+                <div>触发：无损放大节点执行前</div>
+                <div>操作：<span class="text-on-surface">跳过执行，使用缓存结果</span></div>
+                <div>条件：输入图像与上次完全一致（SHA256匹配）</div>
+                <div>效果：<span class="text-success font-medium">节省2.1s</span></div>
+              </div>
+              <button class="text-[9px] text-primary hover:underline mt-1">查看缓存详情</button>
+            </div>
+
+            <!-- 列表-自动优化2 -->
+            <div class="bg-surface-container rounded-md p-2.5">
+              <div class="flex items-center gap-1.5 mb-1">
+                <i data-lucide="wrench" class="w-3 h-3 text-primary"></i>
+                <span class="text-[10px] font-semibold text-on-surface">自动优化 #2</span>
+              </div>
+              <div class="text-[10px] text-on-surface-variant space-y-0.5 leading-relaxed">
+                <div>触发：生图Agent模型选择</div>
+                <div>操作：<span class="text-on-surface">从dall-e-3自动切换为seedream-5</span></div>
+                <div>条件：产品类图片在seedream-5上平均得分高12%</div>
+                <div>来源：<span class="text-primary">长期记忆-学习规则#7</span></div>
+                <div>效果：<span class="text-success font-medium">预计提升质量15%</span></div>
+              </div>
+              <button class="text-[9px] text-primary hover:underline mt-1">查看学习详情</button>
+            </div>
+
+            <!-- 列表-自学习建议 -->
+            <div class="bg-primary/5 rounded-md p-2.5 border border-primary/10">
+              <div class="flex items-center gap-1.5 mb-1.5">
+                <i data-lucide="trending-up" class="w-3 h-3 text-primary"></i>
+                <span class="text-[10px] font-semibold text-primary">自学习建议</span>
+              </div>
+              <div class="text-[10px] text-on-surface-variant space-y-0.5 leading-relaxed">
+                <div>根据最近50次执行，修图Agent的"构图居中"策略成功率已从72%提升到89%</div>
+                <div>建议将构图权重从0.25提高到0.30</div>
+              </div>
+              <div class="flex items-center gap-2 mt-1.5">
+                <button id="btn-apply-suggestion" class="text-[9px] bg-primary text-on-primary px-2 py-0.5 rounded hover:opacity-90 transition-opacity">应用</button>
+                <button id="btn-ignore-suggestion" class="text-[9px] text-on-surface-variant hover:underline">忽略</button>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
 
     </div>
+  </main>
 
+  <!-- 底部 — 执行控制栏 -->
+  <footer id="control-bar" class="h-12 bg-surface-container border-t border-outline-variant/20 flex items-center px-3 gap-4 shrink-0 z-30">
+    <!-- 左侧：步进控制 -->
+    <div class="flex items-center gap-0.5">
+      <button id="btn-restart-bar" class="p-1.5 rounded-md hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors" title="重新开始">
+        <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+      </button>
+      <button id="btn-continue-bar" class="p-1.5 rounded-md hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors" title="继续执行">
+        <i data-lucide="play" class="w-3.5 h-3.5"></i>
+      </button>
+      <button id="btn-step-over-bar" class="p-1.5 rounded-md hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors" title="步过">
+        <i data-lucide="step-forward" class="w-3.5 h-3.5"></i>
+      </button>
+      <button id="btn-step-into-bar" class="p-1.5 rounded-md hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors" title="步入">
+        <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+      </button>
+      <button id="btn-step-out-bar" class="p-1.5 rounded-md hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors" title="步出">
+        <i data-lucide="chevron-up" class="w-3.5 h-3.5"></i>
+      </button>
+      <button id="btn-stop-bar" class="p-1.5 rounded-md hover:bg-surface-container-high text-on-surface-variant hover:text-error transition-colors" title="停止">
+        <i data-lucide="square" class="w-3.5 h-3.5"></i>
+      </button>
+    </div>
+
+    <div class="w-px h-6 bg-outline-variant/30"></div>
+
+    <!-- 中间：断点管理 -->
+    <div class="flex items-center gap-2 relative">
+      <div class="flex items-center gap-1.5">
+        <span class="w-2 h-2 rounded-full bg-debug-breakpoint"></span>
+        <span class="text-xs text-on-surface-variant">断点: <span class="text-on-surface font-medium">3个</span></span>
+      </div>
+      <button id="btn-manage-breakpoints" class="text-xs text-primary hover:underline">管理断点</button>
+    </div>
+
+    <div class="w-px h-6 bg-outline-variant/30"></div>
+
+    <!-- 右侧：执行模式 -->
+    <div class="flex items-center gap-3 ml-auto">
+      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-[10px] font-bold bg-error/15 text-error">调试模式</span>
+      <div class="flex items-center gap-0.5 bg-surface-container-high rounded-md p-0.5">
+        <button id="btn-speed-05" class="text-[10px] px-1.5 py-0.5 rounded text-on-surface-variant hover:text-on-surface transition-colors">0.5x</button>
+        <button id="btn-speed-1" class="text-[10px] px-1.5 py-0.5 rounded bg-surface-container-highest text-on-surface font-medium">1x</button>
+        <button id="btn-speed-2" class="text-[10px] px-1.5 py-0.5 rounded text-on-surface-variant hover:text-on-surface transition-colors">2x</button>
+      </div>
+      <a href="home.html" class="text-[10px] text-on-surface-variant hover:text-primary transition-colors">切换到正常执行</a>
+    </div>
+  </footer>
+
+  <!-- 断点管理弹窗 -->
+  <div id="breakpoint-modal" class="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+    <div class="bg-surface rounded-xl shadow-dialog max-w-md w-full max-h-[90vh] overflow-y-auto p-5">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold text-on-surface">断点管理</h2>
+        <button id="btn-close-bp-modal" class="p-1 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <!-- 断点列表 -->
+      <div class="space-y-2 mb-4">
+        <!-- 列表-断点1 -->
+        <div class="flex items-center justify-between bg-surface-container rounded-md p-3">
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-debug-breakpoint"></span>
+            <span class="text-sm text-on-surface">质检Agent</span>
+            <span class="text-[9px] text-warning bg-warning/15 px-1.5 py-0.5 rounded">已命中</span>
+          </div>
+          <button class="text-xs text-on-surface-variant hover:text-error transition-colors">移除</button>
+        </div>
+        <!-- 列表-断点2 -->
+        <div class="flex items-center justify-between bg-surface-container rounded-md p-3">
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full border-2 border-debug-breakpoint"></span>
+            <span class="text-sm text-on-surface">无损放大</span>
+            <span class="text-[9px] text-on-surface-variant bg-surface-container-high px-1.5 py-0.5 rounded">等待中</span>
+          </div>
+          <button class="text-xs text-on-surface-variant hover:text-error transition-colors">移除</button>
+        </div>
+        <!-- 列表-断点3 -->
+        <div class="flex items-center justify-between bg-surface-container rounded-md p-3">
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full border-2 border-debug-breakpoint"></span>
+            <span class="text-sm text-on-surface">视频Agent</span>
+            <span class="text-[9px] text-on-surface-variant bg-surface-container-high px-1.5 py-0.5 rounded">等待中</span>
+          </div>
+          <button class="text-xs text-on-surface-variant hover:text-error transition-colors">移除</button>
+        </div>
+      </div>
+      <!-- 添加条件断点 -->
+      <button id="btn-add-condition-bp" class="w-full flex items-center justify-center gap-1.5 py-2 rounded-md border border-outline-variant/20 text-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors">
+        <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+        添加条件断点
+      </button>
+    </div>
   </div>
 
   <!-- @main-content:end -->
@@ -932,116 +981,197 @@
   <script>
   $(function() {
 
-    // ====== 关闭智能调度信息条 ======
-    $('#btn-close-schedule-bar').on('click', function() {
-      $('#schedule-info-bar').fadeOut(200);
-    });
-
-    // ====== 失败自愈日志折叠/展开 ======
-    let healExpanded = true;
-    $('#btn-toggle-heal').on('click', function() {
-      healExpanded = !healExpanded;
-      if (healExpanded) {
-        $('#heal-log-content').slideDown(250);
-        $('#heal-chevron').css('transform', 'rotate(0deg)');
+    // === 断点指示器点击切换 ===
+    $('.bp-indicator').on('click', function(e) {
+      e.stopPropagation();
+      var $bp = $(this);
+      var nodeId = $bp.data('node');
+      if ($bp.hasClass('bp-hit')) {
+        // 已命中断点不可直接取消
+        console.log('当前断点已命中，无法直接移除，请先继续执行');
+        return;
+      }
+      if ($bp.hasClass('bp-set')) {
+        // 已设断点 → 取消
+        $bp.removeClass('bp-set').addClass('bp-none');
+        console.log('移除断点：节点' + nodeId);
       } else {
-        $('#heal-log-content').slideUp(250);
-        $('#heal-chevron').css('transform', 'rotate(-90deg)');
+        // 无断点 → 设置
+        $bp.removeClass('bp-none').addClass('bp-set');
+        console.log('设置断点：节点' + nodeId);
       }
     });
 
-    // ====== Toggle开关交互 ======
-    $('#toggle-uncached').on('click', function() {
-      $(this).toggleClass('active inactive');
-      // 复杂交互 - 切换"仅重算未缓存节点"模式：
-      // 1. 切换开关状态
-      // 2. 如果关闭，所有节点（包括缓存命中的）都会被标记为需要重新执行
-      // 3. 如果开启，缓存命中的节点将保持跳过状态
-      // 4. 应更新执行计划并刷新节点图上的缓存标记
-      console.log('切换仅重算未缓存节点模式:', $(this).hasClass('active'));
+    // === 步进按钮交互 ===
+    // 重新开始 - 点击后应实现：
+    // 1. 重置所有节点状态为未执行
+    // 2. 清除所有断点命中状态
+    // 3. 重置步骤计数器和计时器
+    // 4. 从第一个节点重新开始执行
+    $('#btn-restart, #btn-restart-bar').on('click', function() {
+      console.log('重新开始：重置执行状态，从节点1开始重新执行');
     });
 
-    $('#toggle-self-heal').on('click', function() {
-      $(this).toggleClass('active inactive');
-      // 复杂交互 - 切换"失败自愈"模式：
-      // 1. 切换开关状态
-      // 2. 如果关闭，节点执行失败时不会自动尝试备选方案，直接报错停止
-      // 3. 如果开启，执行失败时系统自动查找备选模型/参数重试
-      // 4. 自愈日志面板应根据开关状态显示/隐藏历史记录
-      console.log('切换失败自愈模式:', $(this).hasClass('active'));
+    // 继续执行 - 点击后应实现：
+    // 1. 继续执行当前断点处暂停的节点
+    // 2. 自动执行到下一个断点或工作流结束
+    // 3. 移动执行指针到新位置
+    $('#btn-continue, #btn-continue-bar').on('click', function() {
+      console.log('继续执行：从当前断点处继续执行至下一个断点');
     });
 
-    // ====== 停止执行按钮 ======
-    $('#btn-stop-exec, #btn-stop-bottom').on('click', function() {
-      // 复杂交互 - 停止执行工作流：
-      // 1. 弹出确认对话框："确认停止执行？已完成的节点结果将被保留"
-      // 2. 确认后，将所有"执行中"的节点状态改为"已停止"
-      // 3. 将所有"等待中"的节点状态改为"已取消"
-      // 4. 停止计时器
-      // 5. 更新进度条和概览统计
-      // 6. 按钮文字变为"已停止"，禁用按钮
-      console.log('停止执行');
+    // 步过 - 点击后应实现：
+    // 1. 执行当前节点（质检Agent）的剩余部分
+    // 2. 停在下一个断点（无损放大 或 视频Agent）
+    // 3. 更新步骤计数器
+    $('#btn-step-over, #btn-step-over-bar').on('click', function() {
+      console.log('步过：执行当前节点，停在下一个断点');
     });
 
-    // ====== 暂停按钮 ======
-    $('#btn-pause').on('click', function() {
-      // 复杂交互 - 暂停/恢复执行：
-      // 1. 切换暂停/恢复状态
-      // 2. 暂停时：停止所有执行中的节点动画，计时器暂停
-      // 3. 恢复时：继续执行和动画
-      // 4. 按钮文字在"暂停"和"继续"之间切换
-      console.log('暂停/继续执行');
+    // 步入 - 点击后应实现：
+    // 1. 进入当前Agent（质检Agent）的内部子图
+    // 2. 显示Agent内部决策步骤
+    // 3. 在第一个内部步骤处暂停
+    $('#btn-step-into, #btn-step-into-bar').on('click', function() {
+      console.log('步入：进入质检Agent内部，展示子步骤');
     });
 
-    // ====== 清除缓存并重算 ======
-    $('#btn-clear-cache').on('click', function() {
-      // 复杂交互 - 清除缓存并重算节点：
-      // 1. 弹出确认对话框："确认清除缓存并重新执行无损放大节点？"
-      // 2. 确认后，将节点3的状态从"缓存命中"改为"等待中"
-      // 3. 移除缓存角标和标签
-      // 4. 将该节点加入执行队列
-      // 5. 更新进度和优化统计（缓存命中数-1，节省时间减少2.1s）
-      console.log('清除缓存并重算');
+    // 步出 - 点击后应实现：
+    // 1. 执行完当前Agent/子图的所有内部步骤
+    // 2. 回到上一层工作流
+    // 3. 在上一层的下一个断点处暂停
+    $('#btn-step-out, #btn-step-out-bar').on('click', function() {
+      console.log('步出：执行完当前Agent，回到上一层');
     });
 
-    // ====== 查看完整日志 ======
-    $('#btn-view-full-log').on('click', function() {
-      // 复杂交互 - 打开完整日志弹窗：
-      // 1. 打开模态对话框
-      // 2. 展示详细的自愈日志，包括每次重试的参数、模型信息、耗时
-      // 3. 提供下载日志的选项
-      console.log('查看完整日志');
+    // 停止 - 点击后应实现：
+    // 1. 终止当前执行
+    // 2. 保存当前状态
+    // 3. 切换回编辑模式
+    $('#btn-stop, #btn-stop-bar').on('click', function() {
+      console.log('停止：终止调试会话');
+      window.location.href = 'home.html';
     });
 
-    // ====== 节点点击 - 高亮对应时间线 ======
-    $('#node-1, #node-2, #node-3, #node-6, #node-7, #node-8').on('click', function() {
-      const nodeId = $(this).attr('id');
-      const timelineId = '#timeline-' + nodeId;
-      // 滚动到对应时间线项
-      const $target = $(timelineId);
-      if ($target.length) {
-        $('.bg-primary/10').removeClass('bg-primary/10');
-        $target.find('.flex-1').first().addClass('bg-primary/10');
-        // 2秒后移除高亮
-        setTimeout(function() {
-          $target.find('.flex-1').first().removeClass('bg-primary/10');
-        }, 2000);
+    // === 日志条目点击高亮对应节点 ===
+    $('#log-1').on('click', function() {
+      console.log('高亮节点2：生图Agent');
+      // 移除其他节点高亮
+      $('.wf-node').removeClass('ring-2 ring-primary');
+      $('#node-2').addClass('ring-2 ring-primary');
+    });
+    $('#log-2').on('click', function() {
+      console.log('高亮节点2：生图Agent（质量自检）');
+      $('.wf-node').removeClass('ring-2 ring-primary');
+      $('#node-2').addClass('ring-2 ring-primary');
+    });
+    $('#log-3, #log-4').on('click', function() {
+      console.log('高亮节点3：质检Agent');
+      $('.wf-node').removeClass('ring-2 ring-primary');
+      $('#node-3').addClass('ring-2 ring-primary');
+    });
+
+    // === 数据检查器端口切换 ===
+    $('#port-selector').on('change', function() {
+      var port = $(this).val();
+      console.log('切换检查端口为：' + port);
+      // 应实现：根据选择的端口更新检查器显示的数据内容
+    });
+
+    // === Agent决策气泡关闭 ===
+    $('#btn-close-bubble').on('click', function(e) {
+      e.stopPropagation();
+      $('#agent-bubble').hide();
+    });
+
+    // === 自演化日志折叠/展开 ===
+    var evolutionExpanded = false;
+    $('#evolution-header').on('click', function() {
+      evolutionExpanded = !evolutionExpanded;
+      if (evolutionExpanded) {
+        $('#evolution-detail').addClass('expanded');
+        $('#evolution-summary').hide();
+        $('#evolution-chevron').css('transform', 'rotate(180deg)');
+      } else {
+        $('#evolution-detail').removeClass('expanded');
+        $('#evolution-summary').show();
+        $('#evolution-chevron').css('transform', 'rotate(0deg)');
       }
     });
 
-    // ====== 计时器模拟 ======
-    let seconds = 504; // 8:24
-    setInterval(function() {
-      seconds++;
-      const m = Math.floor(seconds / 60).toString().padStart(2, '0');
-      const s = (seconds % 60).toString().padStart(2, '0');
-      $('#exec-timer').text('00:' + m + ':' + s);
-    }, 1000);
+    // === 断点管理弹窗 ===
+    $('#btn-manage-breakpoints').on('click', function() {
+      $('#breakpoint-modal').show();
+    });
+    $('#btn-close-bp-modal').on('click', function() {
+      $('#breakpoint-modal').hide();
+    });
+    $('#breakpoint-modal').on('click', function(e) {
+      if ($(e.target).is('#breakpoint-modal')) {
+        $('#breakpoint-modal').hide();
+      }
+    });
 
+    // 添加条件断点 - 点击后应实现：
+    // 1. 弹出条件设置面板
+    // 2. 允许选择节点和设置条件（如：端口值 > 阈值）
+    // 3. 保存条件断点并添加到列表
+    $('#btn-add-condition-bp').on('click', function() {
+      console.log('添加条件断点：弹出条件设置面板，选择节点并设置触发条件');
+    });
+
+    // === 复制JSON ===
+    $('#btn-copy-json').on('click', function() {
+      console.log('复制JSON数据到剪贴板');
+    });
+
+    // === 导出完整数据 ===
+    $('#btn-export-data').on('click', function() {
+      console.log('导出完整数据为JSON文件');
+    });
+
+    // === 自学习建议应用/忽略 ===
+    // 应用 - 点击后应实现：
+    // 1. 将构图权重从0.25更新为0.30
+    // 2. 标记此建议已应用
+    // 3. 记录到自演化日志
+    $('#btn-apply-suggestion').on('click', function() {
+      console.log('应用自学习建议：将构图权重从0.25提高到0.30');
+    });
+    // 忽略 - 点击后应实现：
+    // 1. 标记此建议已忽略
+    // 2. 记录忽略操作到自演化日志
+    $('#btn-ignore-suggestion').on('click', function() {
+      console.log('忽略自学习建议');
+    });
+
+    // === 执行速度切换 ===
+    $('#btn-speed-05').on('click', function() {
+      $(this).addClass('bg-surface-container-highest text-on-surface font-medium');
+      $('#btn-speed-1, #btn-speed-2').removeClass('bg-surface-container-highest text-on-surface font-medium').addClass('text-on-surface-variant');
+      console.log('设置执行速度为0.5x');
+    });
+    $('#btn-speed-1').on('click', function() {
+      $(this).addClass('bg-surface-container-highest text-on-surface font-medium');
+      $('#btn-speed-05, #btn-speed-2').removeClass('bg-surface-container-highest text-on-surface font-medium').addClass('text-on-surface-variant');
+      console.log('设置执行速度为1x');
+    });
+    $('#btn-speed-2').on('click', function() {
+      $(this).addClass('bg-surface-container-highest text-on-surface font-medium');
+      $('#btn-speed-05, #btn-speed-1').removeClass('bg-surface-container-highest text-on-surface font-medium').addClass('text-on-surface-variant');
+      console.log('设置执行速度为2x');
+    });
+
+    // === 日志筛选 ===
+    $('#log-filter').on('change', function() {
+      var filter = $(this).val();
+      console.log('筛选日志：' + filter);
+      // 应实现：根据筛选条件显示/隐藏日志条目
+    });
+
+    lucide.createIcons();
   });
   </script>
-
-  <script>lucide.createIcons();</script>
 </body>
 
 </html>

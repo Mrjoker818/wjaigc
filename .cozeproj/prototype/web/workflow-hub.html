@@ -41,15 +41,25 @@
       --color-node-ai:       #d4af37;
       --color-node-logic:    #f59e0b;
       --color-node-subgraph: #06b6d4;
+      --color-node-agent:    #f472b6;
+      --color-node-plugin:   #a3e635;
+      --color-node-memory:   #c084fc;
       /* === 端口专用色 === */
       --color-port-image:    #3b82f6;
       --color-port-mask:     #f472b6;
       --color-port-prompt:   #a78bfa;
       --color-port-condition: #f59e0b;
       --color-port-any:      #7d8590;
+      --color-port-video:    #ef4444;
+      --color-port-audio:    #f97316;
+      --color-port-data:     #22d3ee;
       /* === 智能指令栏 === */
       --color-smart-bar:     #1a2332;
       --color-smart-bar-border: #d4af37/30;
+      /* === Agent专属 === */
+      --color-agent-glow:    rgba(244,114,182,0.3);
+      --color-collab-cursor: #22d3ee;
+      --color-debug-breakpoint: #ef4444;
       /* === 圆角 === */
       --radius-sm:   0.25rem;
       --radius-md:   0.375rem;
@@ -65,6 +75,21 @@
       /* === 字体 === */
       --font-sans: "Inter", "Noto Sans SC", system-ui, sans-serif;
     }
+  </style>
+
+  <style>
+    .agent-card:hover { box-shadow: 0 0 20px rgba(244,114,182,0.25); border-color: rgba(244,114,182,0.5); }
+    .market-card:hover { box-shadow: 0 0 20px rgba(244,114,182,0.25); border-color: rgba(244,114,182,0.5); }
+    .plugin-card:hover { box-shadow: 0 0 16px rgba(244,114,182,0.15); }
+    .category-tag.active { background: rgba(244,114,182,0.15); color: #f472b6; border-color: rgba(244,114,182,0.4); }
+    .filter-tag.active { background: rgba(244,114,182,0.15); color: #f472b6; border-color: rgba(244,114,182,0.4); }
+    .time-tab.active { background: rgba(244,114,182,0.15); color: #f472b6; }
+    .my-agent-scroll::-webkit-scrollbar { height: 4px; }
+    .my-agent-scroll::-webkit-scrollbar-track { background: transparent; }
+    .my-agent-scroll::-webkit-scrollbar-thumb { background: rgba(244,114,182,0.3); border-radius: 2px; }
+    .plugin-scroll::-webkit-scrollbar { height: 4px; }
+    .plugin-scroll::-webkit-scrollbar-track { background: transparent; }
+    .plugin-scroll::-webkit-scrollbar-thumb { background: rgba(163,230,53,0.3); border-radius: 2px; }
   </style>
 
   <!-- 图片兜底 -->
@@ -86,7 +111,7 @@
   </script>
 </head>
 
-<body class="bg-background text-on-surface font-sans">
+<body class="bg-background text-on-surface font-sans min-h-screen flex flex-col">
 
   <!-- @nav:start 导航组件 -->
   <header class="bg-surface sticky top-0 z-40 h-11 flex items-center justify-between px-3 border-b border-outline-variant/20">
@@ -95,20 +120,18 @@
       <span class="font-bold text-sm text-on-surface">无界AI</span>
       <span class="text-xs text-on-surface-variant ml-0.5">Studio</span>
       <div class="w-px h-4 bg-outline-variant/30 mx-2"></div>
-      <!-- 页面导航链接 -->
-      <nav class="flex items-center gap-1">
-        <a href="home.html" class="px-2.5 py-1 text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container rounded-md transition-colors">编辑器</a>
-        <a href="run-monitor.html" class="px-2.5 py-1 text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container rounded-md transition-colors">执行</a>
-        <a href="workflow-hub.html" class="px-2.5 py-1 text-xs font-medium text-primary bg-primary/10 rounded-md" aria-current="page">工作流市场</a>
-      </nav>
+      <span class="text-xs text-on-surface-variant">电商白底图处理 v2</span>
     </div>
     <div class="flex items-center gap-1">
-      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="撤销">
-        <i data-lucide="undo" class="w-3.5 h-3.5"></i>
-      </button>
-      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="重做">
-        <i data-lucide="redo" class="w-3.5 h-3.5"></i>
-      </button>
+      <a href="home.html" id="nav-editor" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container rounded-md transition-colors">
+        <i data-lucide="pencil-ruler" class="w-3.5 h-3.5"></i>编辑器
+      </a>
+      <a href="run-monitor.html" id="nav-debugger" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container rounded-md transition-colors">
+        <i data-lucide="bug" class="w-3.5 h-3.5"></i>调试器
+      </a>
+      <a href="workflow-hub.html" id="nav-market" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-node-agent bg-node-agent/10 rounded-md transition-colors" aria-current="page">
+        <i data-lucide="store" class="w-3.5 h-3.5"></i>Agent市场
+      </a>
       <div class="w-px h-4 bg-outline-variant/30 mx-1"></div>
       <button class="flex items-center gap-1 px-2.5 py-1 rounded-md bg-primary text-on-primary text-xs font-medium hover:opacity-90 transition-opacity">
         <i data-lucide="play" class="w-3 h-3"></i>
@@ -130,686 +153,929 @@
   </header>
   <!-- @nav:end 导航组件 -->
 
-  <!-- @main-content:start -->
-  <main class="max-w-7xl mx-auto px-6 py-8">
+  <main class="flex-1 overflow-y-auto">
+    <!-- @main-content:start -->
 
-    <!-- ============ 第一区：页面标题 + 搜索 ============ -->
-    <section id="section-hero" class="text-center mb-10">
-      <h1 class="text-2xl font-bold text-on-surface mb-1">工作流市场</h1>
-      <p class="text-sm text-on-surface-variant mb-6">发现、复用、分享专业AI工作流</p>
-      <div class="flex items-center justify-center gap-3">
-        <div class="relative w-[640px]">
-          <i data-lucide="search" class="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant"></i>
-          <input id="search-input" type="text" placeholder="搜索工作流模板..." class="w-full bg-surface-container border-none rounded-xl pl-10 pr-4 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
-          <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
-            <button id="btn-filter-category" class="flex items-center gap-1 px-2.5 py-1 rounded-md bg-surface-container-high text-xs text-on-surface-variant hover:text-on-surface transition-colors">
-              <i data-lucide="filter" class="w-3 h-3"></i>分类
-              <i data-lucide="chevron-down" class="w-3 h-3"></i>
-            </button>
-            <button id="btn-sort" class="flex items-center gap-1 px-2.5 py-1 rounded-md bg-surface-container-high text-xs text-on-surface-variant hover:text-on-surface transition-colors">
-              <i data-lucide="arrow-up-down" class="w-3 h-3"></i>排序
-              <i data-lucide="chevron-down" class="w-3 h-3"></i>
-            </button>
+    <!-- 第一区：Hero Banner + 搜索 -->
+    <section id="hero-banner" class="bg-gradient-to-br from-background via-background to-node-agent/10 relative overflow-hidden">
+      <div class="max-w-7xl mx-auto px-6 py-10">
+        <div class="flex items-start justify-between gap-8">
+          <!-- 左侧标题 -->
+          <div class="flex-1">
+            <h1 class="text-2xl font-bold text-on-surface">Agent 生态市场</h1>
+            <p class="text-sm text-on-surface-variant mt-2">让AI工作流成为可对话、可进化的自主Agent</p>
+          </div>
+          <!-- 右侧统计卡片 -->
+          <div class="flex items-center gap-3">
+            <!-- 统计-可用Agent -->
+            <div class="bg-surface-container/60 rounded-lg px-5 py-3 text-center border border-outline-variant/10">
+              <div class="text-2xl font-bold text-node-agent">1,247</div>
+              <div class="text-xs text-on-surface-variant mt-0.5">可用Agent</div>
+            </div>
+            <!-- 统计-官方认证 -->
+            <div class="bg-surface-container/60 rounded-lg px-5 py-3 text-center border border-outline-variant/10">
+              <div class="text-2xl font-bold text-primary">89</div>
+              <div class="text-xs text-on-surface-variant mt-0.5">官方认证</div>
+            </div>
+            <!-- 统计-累计使用 -->
+            <div class="bg-surface-container/60 rounded-lg px-5 py-3 text-center border border-outline-variant/10">
+              <div class="text-2xl font-bold text-node-output">45K+</div>
+              <div class="text-xs text-on-surface-variant mt-0.5">累计使用</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 搜索栏 -->
+        <div class="mt-6 flex justify-center">
+          <div class="w-[640px] flex items-center gap-2">
+            <div class="flex-1 flex items-center gap-2 bg-surface-container rounded-lg px-4 py-2.5 border-none">
+              <i data-lucide="search" class="w-4 h-4 text-on-surface-variant shrink-0"></i>
+              <input id="search-input" type="text" placeholder="搜索Agent、工作流、插件..." class="w-full bg-transparent border-none text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none" />
+            </div>
+            <div class="flex items-center gap-1">
+              <button id="filter-agent" class="filter-tag active px-3 py-2 rounded-md text-xs font-medium border border-outline-variant/20 transition-colors">Agent</button>
+              <button id="filter-workflow" class="filter-tag px-3 py-2 rounded-md text-xs font-medium text-on-surface-variant border border-outline-variant/20 transition-colors">工作流</button>
+              <button id="filter-plugin" class="filter-tag px-3 py-2 rounded-md text-xs font-medium text-on-surface-variant border border-outline-variant/20 transition-colors">插件</button>
+            </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- ============ 第二区：我的工作流 ============ -->
-    <section id="section-my-workflows" class="mb-10">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-base font-semibold text-on-surface">我的工作流</h2>
-        <div class="flex items-center gap-3">
-          <a id="link-view-all" href="#" class="text-xs text-primary font-medium hover:underline">查看全部</a>
-          <button id="btn-import-workflow" class="flex items-center gap-1 px-3 py-1.5 rounded-md border border-outline-variant/20 text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors">
-            <i data-lucide="download" class="w-3 h-3"></i>导入工作流
+    <div class="max-w-7xl mx-auto px-6 pb-16">
+
+      <!-- 第二区：我的Agent -->
+      <section id="my-agents" class="mt-8">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <h2 class="text-lg font-bold text-on-surface">我的Agent</h2>
+            <button id="btn-view-all-agents" class="text-xs text-on-surface-variant hover:text-node-agent transition-colors">查看全部</button>
+          </div>
+          <button id="btn-create-agent" class="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-node-agent/15 text-node-agent text-xs font-medium hover:bg-node-agent/25 transition-colors border border-node-agent/30">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>创建Agent
           </button>
-          <button id="btn-new-blank" class="flex items-center gap-1 px-3 py-1.5 rounded-md bg-primary text-on-primary text-xs font-medium hover:opacity-90 transition-opacity">
-            <i data-lucide="plus" class="w-3 h-3"></i>新建空白
+        </div>
+        <div class="my-agent-scroll flex gap-4 overflow-x-auto pb-2">
+          <!-- 我的Agent-卡片1：电商产品质检助手 -->
+          <div class="agent-card shrink-0 w-[280px] bg-surface rounded-lg border-2 border-node-agent/30 p-4 transition-all cursor-pointer">
+            <div class="flex items-start justify-between mb-2">
+              <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-node-agent/20 to-node-agent/5 flex items-center justify-center border border-node-agent/30">
+                <i data-lucide="bot" class="w-5 h-5 text-node-agent"></i>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-semibold bg-node-agent/15 text-node-agent">自主Agent</span>
+                <span class="text-[10px] text-on-surface-variant">v2.1</span>
+              </div>
+            </div>
+            <h3 class="text-sm font-semibold text-on-surface">电商产品质检助手</h3>
+            <p class="text-xs text-on-surface-variant mt-1 leading-relaxed">专业质检+自动修图+白底处理，支持对话式调试</p>
+            <div class="flex flex-wrap gap-1.5 mt-2">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">🔍质检</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">🎨修图</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">📦白底</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">🔄自学习</span>
+            </div>
+            <div class="text-[10px] text-on-surface-variant mt-2.5">4 Agent · 12节点 · 使用847次 · 准确率94%</div>
+            <!-- 自学习指标：小型折线图 -->
+            <div class="mt-2 flex items-end gap-[3px] h-6">
+              <div class="w-1 bg-node-agent/30 rounded-sm" style="height:40%"></div>
+              <div class="w-1 bg-node-agent/30 rounded-sm" style="height:55%"></div>
+              <div class="w-1 bg-node-agent/40 rounded-sm" style="height:50%"></div>
+              <div class="w-1 bg-node-agent/40 rounded-sm" style="height:65%"></div>
+              <div class="w-1 bg-node-agent/50 rounded-sm" style="height:60%"></div>
+              <div class="w-1 bg-node-agent/60 rounded-sm" style="height:75%"></div>
+              <div class="w-1 bg-node-agent/70 rounded-sm" style="height:70%"></div>
+              <div class="w-1 bg-node-agent/70 rounded-sm" style="height:80%"></div>
+              <div class="w-1 bg-node-agent/80 rounded-sm" style="height:78%"></div>
+              <div class="w-1 bg-node-agent/80 rounded-sm" style="height:85%"></div>
+              <div class="w-1 bg-node-agent/90 rounded-sm" style="height:90%"></div>
+              <div class="w-1 bg-node-agent rounded-sm" style="height:94%"></div>
+            </div>
+            <div class="flex items-center gap-2 mt-2.5">
+              <button id="btn-chat-agent-1" class="flex items-center gap-1 px-2.5 py-1 rounded-md border border-node-agent/40 text-node-agent text-[11px] font-medium hover:bg-node-agent/10 transition-colors">
+                <i data-lucide="message-circle" class="w-3 h-3"></i>对话
+              </button>
+            </div>
+          </div>
+
+          <!-- 我的Agent-卡片2：品牌视觉管家 -->
+          <div class="agent-card shrink-0 w-[280px] bg-surface rounded-lg border-2 border-node-agent/20 p-4 transition-all cursor-pointer">
+            <div class="flex items-start justify-between mb-2">
+              <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-node-agent/20 to-node-agent/5 flex items-center justify-center border border-node-agent/30">
+                <i data-lucide="palette" class="w-5 h-5 text-node-agent"></i>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-semibold bg-node-agent/15 text-node-agent">自主Agent</span>
+                <span class="text-[10px] text-on-surface-variant">v1.3</span>
+              </div>
+            </div>
+            <h3 class="text-sm font-semibold text-on-surface">品牌视觉管家</h3>
+            <p class="text-xs text-on-surface-variant mt-1 leading-relaxed">品牌风格统一管理与视觉合规检测</p>
+            <div class="flex flex-wrap gap-1.5 mt-2">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">🎨生图</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">🎨风格</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">🔍合规</span>
+            </div>
+            <div class="text-[10px] text-on-surface-variant mt-2.5">3 Agent · 8节点 · 使用234次</div>
+            <div class="flex items-center gap-2 mt-2.5">
+              <button id="btn-chat-agent-2" class="flex items-center gap-1 px-2.5 py-1 rounded-md border border-node-agent/40 text-node-agent text-[11px] font-medium hover:bg-node-agent/10 transition-colors">
+                <i data-lucide="message-circle" class="w-3 h-3"></i>对话
+              </button>
+            </div>
+          </div>
+
+          <!-- 我的Agent-卡片3：视频创作助手 -->
+          <div class="agent-card shrink-0 w-[280px] bg-surface rounded-lg border-2 border-node-agent/20 p-4 transition-all cursor-pointer">
+            <div class="flex items-start justify-between mb-2">
+              <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-node-agent/20 to-node-agent/5 flex items-center justify-center border border-node-agent/30">
+                <i data-lucide="clapperboard" class="w-5 h-5 text-node-agent"></i>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] font-semibold bg-node-agent/15 text-node-agent">自主Agent</span>
+                <span class="text-[10px] text-on-surface-variant">v1.0</span>
+              </div>
+            </div>
+            <h3 class="text-sm font-semibold text-on-surface">视频创作助手</h3>
+            <p class="text-xs text-on-surface-variant mt-1 leading-relaxed">AI视频生成、配乐与智能剪辑一体化</p>
+            <div class="flex flex-wrap gap-1.5 mt-2">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">🎬视频</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">🎵配乐</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">✂️剪辑</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-error/15 text-error">跨模态</span>
+            </div>
+            <div class="text-[10px] text-on-surface-variant mt-2.5">2 Agent · 6节点 · 使用89次</div>
+            <div class="flex items-center gap-2 mt-2.5">
+              <button id="btn-chat-agent-3" class="flex items-center gap-1 px-2.5 py-1 rounded-md border border-node-agent/40 text-node-agent text-[11px] font-medium hover:bg-node-agent/10 transition-colors">
+                <i data-lucide="message-circle" class="w-3 h-3"></i>对话
+              </button>
+            </div>
+          </div>
+
+          <!-- 我的Agent-卡片4：创建新Agent -->
+          <div class="agent-card shrink-0 w-[280px] bg-surface rounded-lg border-2 border-dashed border-node-agent/40 p-4 flex flex-col items-center justify-center gap-2 transition-all cursor-pointer hover:border-node-agent/60">
+            <div class="w-12 h-12 rounded-full bg-node-agent/10 flex items-center justify-center border border-node-agent/20">
+              <i data-lucide="plus" class="w-6 h-6 text-node-agent"></i>
+            </div>
+            <span class="text-sm font-medium text-node-agent">从工作流创建Agent</span>
+            <span class="text-[10px] text-on-surface-variant">或从空白开始</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 第三区：自学习报告 -->
+      <section id="self-learning" class="mt-10">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-2">
+            <h2 class="text-lg font-bold text-on-surface">自学习报告</h2>
+            <span class="text-sm text-on-surface-variant">— 电商产品质检助手</span>
+          </div>
+          <div class="flex items-center gap-1 bg-surface-container rounded-md p-0.5">
+            <button id="time-7d" class="time-tab active px-3 py-1 rounded text-xs font-medium transition-colors">7天</button>
+            <button id="time-30d" class="time-tab px-3 py-1 rounded text-xs font-medium text-on-surface-variant transition-colors">30天</button>
+            <button id="time-all" class="time-tab px-3 py-1 rounded text-xs font-medium text-on-surface-variant transition-colors">全部</button>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <!-- 报告卡片A：执行趋势 -->
+          <div class="bg-surface rounded-lg border border-outline-variant/10 p-5">
+            <h3 class="text-sm font-semibold text-on-surface mb-3">执行趋势</h3>
+            <!-- 面积图 SVG -->
+            <svg viewBox="0 0 300 100" class="w-full h-28">
+              <defs>
+                <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="rgba(244,114,182,0.4)" />
+                  <stop offset="100%" stop-color="rgba(244,114,182,0.02)" />
+                </linearGradient>
+              </defs>
+              <line x1="0" y1="25" x2="300" y2="25" stroke="rgba(125,133,144,0.15)" stroke-width="0.5"/>
+              <line x1="0" y1="50" x2="300" y2="50" stroke="rgba(125,133,144,0.15)" stroke-width="0.5"/>
+              <line x1="0" y1="75" x2="300" y2="75" stroke="rgba(125,133,144,0.15)" stroke-width="0.5"/>
+              <polygon points="0,70 50,62 100,65 150,50 200,45 250,38 300,30 300,100 0,100" fill="url(#areaGrad)"/>
+              <polyline points="0,70 50,62 100,65 150,50 200,45 250,38 300,30" fill="none" stroke="#f472b6" stroke-width="2" stroke-linejoin="round"/>
+              <circle cx="300" cy="30" r="3" fill="#f472b6"/>
+            </svg>
+            <div class="flex items-center justify-between mt-3 text-xs">
+              <span class="text-on-surface-variant">本周执行127次</span>
+              <span class="text-node-output font-medium">较上周↑18%</span>
+            </div>
+          </div>
+
+          <!-- 报告卡片B：质量演化 -->
+          <div class="bg-surface rounded-lg border border-outline-variant/10 p-5">
+            <h3 class="text-sm font-semibold text-on-surface mb-3">质量演化</h3>
+            <!-- 折线图 SVG -->
+            <svg viewBox="0 0 300 100" class="w-full h-28">
+              <defs>
+                <linearGradient id="blueGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="rgba(59,130,246,0.15)" />
+                  <stop offset="100%" stop-color="rgba(59,130,246,0)" />
+                </linearGradient>
+              </defs>
+              <line x1="0" y1="20" x2="300" y2="20" stroke="rgba(125,133,144,0.15)" stroke-width="0.5"/>
+              <line x1="0" y1="50" x2="300" y2="50" stroke="rgba(125,133,144,0.15)" stroke-width="0.5"/>
+              <line x1="0" y1="80" x2="300" y2="80" stroke="rgba(125,133,144,0.15)" stroke-width="0.5"/>
+              <!-- 质检准确率（蓝）89%→94% -->
+              <polyline points="0,55 50,52 100,48 150,42 200,36 250,32 300,26" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linejoin="round"/>
+              <circle cx="300" cy="26" r="3" fill="#3b82f6"/>
+              <!-- 用户满意度（金）82%→91% -->
+              <polyline points="0,72 50,68 100,62 150,54 200,48 250,40 300,32" fill="none" stroke="#d4af37" stroke-width="2" stroke-linejoin="round" stroke-dasharray="4 2"/>
+              <circle cx="300" cy="32" r="3" fill="#d4af37"/>
+            </svg>
+            <div class="flex items-center justify-between mt-3">
+              <div class="flex items-center gap-3">
+                <span class="flex items-center gap-1 text-[10px]"><span class="w-2 h-2 rounded-full bg-node-input inline-block"></span><span class="text-on-surface-variant">准确率</span></span>
+                <span class="flex items-center gap-1 text-[10px]"><span class="w-2 h-2 rounded-full bg-primary inline-block"></span><span class="text-on-surface-variant">满意度</span></span>
+              </div>
+              <div class="text-xs">
+                <span class="text-node-output font-medium">准确率↑5%</span>
+                <span class="text-on-surface-variant mx-1">·</span>
+                <span class="text-primary font-medium">满意度↑9%</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 报告卡片C：学习成果 -->
+          <div class="bg-surface rounded-lg border border-outline-variant/10 p-5">
+            <h3 class="text-sm font-semibold text-on-surface mb-3">学习成果</h3>
+            <div class="space-y-3">
+              <!-- 学习规则1 -->
+              <div id="rule-1" class="flex items-start gap-2 p-2.5 rounded-md bg-surface-container/50">
+                <span class="text-node-output text-sm mt-0.5">✅</span>
+                <div class="flex-1 min-w-0">
+                  <p class="text-xs text-on-surface font-medium">品牌Logo区域检测权重+20%</p>
+                  <p class="text-[10px] text-on-surface-variant mt-0.5">置信度92%，已应用</p>
+                </div>
+                <button class="text-[10px] text-on-surface-variant hover:text-on-surface shrink-0">查看详情</button>
+              </div>
+              <!-- 学习规则2 -->
+              <div id="rule-2" class="flex items-start gap-2 p-2.5 rounded-md bg-surface-container/50">
+                <span class="text-node-output text-sm mt-0.5">✅</span>
+                <div class="flex-1 min-w-0">
+                  <p class="text-xs text-on-surface font-medium">暖色调产品阈值可降低5%</p>
+                  <p class="text-[10px] text-on-surface-variant mt-0.5">置信度87%，已应用</p>
+                </div>
+                <button class="text-[10px] text-on-surface-variant hover:text-on-surface shrink-0">查看详情</button>
+              </div>
+              <!-- 学习规则3 -->
+              <div id="rule-3" class="flex items-start gap-2 p-2.5 rounded-md bg-surface-container/50">
+                <span class="text-warning text-sm mt-0.5">🧪</span>
+                <div class="flex-1 min-w-0">
+                  <p class="text-xs text-on-surface font-medium">人物+产品构图需双重检测</p>
+                  <p class="text-[10px] text-on-surface-variant mt-0.5">置信度71%，待验证</p>
+                </div>
+                <div class="flex items-center gap-1.5 shrink-0">
+                  <button class="rule-apply text-[10px] px-1.5 py-0.5 rounded bg-node-agent/15 text-node-agent hover:bg-node-agent/25 transition-colors">应用</button>
+                  <button class="rule-ignore text-[10px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors">忽略</button>
+                </div>
+              </div>
+              <!-- 学习规则4 -->
+              <div id="rule-4" class="flex items-start gap-2 p-2.5 rounded-md bg-surface-container/50">
+                <span class="text-warning text-sm mt-0.5">🧪</span>
+                <div class="flex-1 min-w-0">
+                  <p class="text-xs text-on-surface font-medium">夜景产品需降低清晰度要求</p>
+                  <p class="text-[10px] text-on-surface-variant mt-0.5">置信度65%，待验证</p>
+                </div>
+                <div class="flex items-center gap-1.5 shrink-0">
+                  <button class="rule-apply text-[10px] px-1.5 py-0.5 rounded bg-node-agent/15 text-node-agent hover:bg-node-agent/25 transition-colors">应用</button>
+                  <button class="rule-ignore text-[10px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors">忽略</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 报告卡片D：优化建议 -->
+          <div class="bg-surface rounded-lg border border-outline-variant/10 p-5">
+            <h3 class="text-sm font-semibold text-on-surface mb-3">优化建议</h3>
+            <div class="space-y-3">
+              <!-- 建议条目1 -->
+              <div class="p-2.5 rounded-md bg-surface-container/50">
+                <div class="flex items-start gap-2">
+                  <i data-lucide="lightbulb" class="w-3.5 h-3.5 text-primary mt-0.5 shrink-0"></i>
+                  <p class="text-xs text-on-surface flex-1">建议增加"品牌合规"工具到质检Agent</p>
+                </div>
+                <p class="text-[10px] text-node-output mt-1 ml-5.5">预计提升准确率3%</p>
+                <div class="flex items-center gap-2 mt-2 ml-5.5">
+                  <button id="suggestion-apply-1" class="text-[10px] px-2 py-0.5 rounded bg-node-agent/15 text-node-agent hover:bg-node-agent/25 transition-colors font-medium">应用</button>
+                  <button id="suggestion-more-1" class="text-[10px] px-2 py-0.5 rounded text-on-surface-variant hover:text-on-surface transition-colors">了解更多</button>
+                </div>
+              </div>
+              <!-- 建议条目2 -->
+              <div class="p-2.5 rounded-md bg-surface-container/50">
+                <div class="flex items-start gap-2">
+                  <i data-lucide="lightbulb" class="w-3.5 h-3.5 text-primary mt-0.5 shrink-0"></i>
+                  <p class="text-xs text-on-surface flex-1">修图Agent可增加"智能裁切"能力</p>
+                </div>
+                <p class="text-[10px] text-node-output mt-1 ml-5.5">预计减少人工干预40%</p>
+                <div class="flex items-center gap-2 mt-2 ml-5.5">
+                  <button id="suggestion-apply-2" class="text-[10px] px-2 py-0.5 rounded bg-node-agent/15 text-node-agent hover:bg-node-agent/25 transition-colors font-medium">应用</button>
+                  <button id="suggestion-more-2" class="text-[10px] px-2 py-0.5 rounded text-on-surface-variant hover:text-on-surface transition-colors">了解更多</button>
+                </div>
+              </div>
+              <!-- 建议条目3 -->
+              <div class="p-2.5 rounded-md bg-surface-container/50">
+                <div class="flex items-start gap-2">
+                  <i data-lucide="lightbulb" class="w-3.5 h-3.5 text-primary mt-0.5 shrink-0"></i>
+                  <p class="text-xs text-on-surface flex-1">视频Agent可学习用户偏好的视频风格</p>
+                </div>
+                <p class="text-[10px] text-node-output mt-1 ml-5.5">预计提升满意度15%</p>
+                <div class="flex items-center gap-2 mt-2 ml-5.5">
+                  <button id="suggestion-apply-3" class="text-[10px] px-2 py-0.5 rounded bg-node-agent/15 text-node-agent hover:bg-node-agent/25 transition-colors font-medium">应用</button>
+                  <button id="suggestion-more-3" class="text-[10px] px-2 py-0.5 rounded text-on-surface-variant hover:text-on-surface transition-colors">了解更多</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 第四区：Agent市场 -->
+      <section id="agent-market" class="mt-10">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-bold text-on-surface">Agent市场</h2>
+          <div class="flex items-center gap-1">
+            <button class="category-tag active px-2.5 py-1 rounded-md text-xs font-medium border border-outline-variant/20 transition-colors" data-category="all">全部</button>
+            <button class="category-tag px-2.5 py-1 rounded-md text-xs font-medium text-on-surface-variant border border-outline-variant/20 transition-colors" data-category="ecommerce">电商</button>
+            <button class="category-tag px-2.5 py-1 rounded-md text-xs font-medium text-on-surface-variant border border-outline-variant/20 transition-colors" data-category="portrait">人像</button>
+            <button class="category-tag px-2.5 py-1 rounded-md text-xs font-medium text-on-surface-variant border border-outline-variant/20 transition-colors" data-category="video">视频</button>
+            <button class="category-tag px-2.5 py-1 rounded-md text-xs font-medium text-on-surface-variant border border-outline-variant/20 transition-colors" data-category="creative">创意</button>
+            <button class="category-tag px-2.5 py-1 rounded-md text-xs font-medium text-on-surface-variant border border-outline-variant/20 transition-colors" data-category="data">数据分析</button>
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-4">
+          <!-- 市场Agent-卡片1：电商全能助手Pro -->
+          <div class="market-card bg-surface rounded-lg border border-outline-variant/10 overflow-hidden transition-all cursor-pointer">
+            <div class="h-24 bg-gradient-to-br from-node-agent/20 via-node-agent/10 to-primary/10 flex items-center justify-center relative">
+              <i data-lucide="bot" class="w-10 h-10 text-node-agent/60"></i>
+              <!-- 节点图水印 -->
+              <svg class="absolute inset-0 w-full h-full opacity-10" viewBox="0 0 200 80">
+                <circle cx="30" cy="30" r="4" fill="#f472b6"/><line x1="34" y1="30" x2="70" y2="50" stroke="#f472b6" stroke-width="1"/>
+                <circle cx="74" cy="50" r="4" fill="#3b82f6"/><line x1="78" y1="50" x2="120" y2="30" stroke="#3b82f6" stroke-width="1"/>
+                <circle cx="124" cy="30" r="4" fill="#d4af37"/><line x1="128" y1="30" x2="170" y2="50" stroke="#d4af37" stroke-width="1"/>
+                <circle cx="174" cy="50" r="4" fill="#2ea043"/>
+              </svg>
+              <span class="absolute top-2 right-2 inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-semibold bg-node-input/15 text-node-input">官方</span>
+            </div>
+            <div class="p-4">
+              <div class="flex items-center gap-1.5 mb-1">
+                <h3 class="text-sm font-semibold text-on-surface">电商全能助手 Pro</h3>
+              </div>
+              <p class="text-[11px] text-on-surface-variant mb-1">无界AI官方</p>
+              <p class="text-xs text-on-surface-variant leading-relaxed">从生图到白底到视频，全链路自动化</p>
+              <div class="flex flex-wrap gap-1.5 mt-2">
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-node-agent/10 text-node-agent">🤖自主</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-node-agent/10 text-node-agent">🔄自学习</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-error/10 text-error">🎬跨模态</span>
+              </div>
+              <div class="text-[10px] text-on-surface-variant mt-2">⭐4.9 · 使用1.2k次 · 4 Agent · 15节点</div>
+              <div class="flex items-center gap-2 mt-3">
+                <button id="btn-chat-market-1" class="flex items-center gap-1 px-2.5 py-1 rounded-md border border-node-agent/40 text-node-agent text-[11px] font-medium hover:bg-node-agent/10 transition-colors">
+                  <i data-lucide="message-circle" class="w-3 h-3"></i>对话体验
+                </button>
+                <button id="btn-install-market-1" class="flex items-center gap-1 px-2.5 py-1 rounded-md bg-primary text-on-primary text-[11px] font-medium hover:opacity-90 transition-opacity">
+                  <i data-lucide="download" class="w-3 h-3"></i>安装Agent
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 市场Agent-卡片2：人像证件照大师 -->
+          <div class="market-card bg-surface rounded-lg border border-outline-variant/10 overflow-hidden transition-all cursor-pointer">
+            <div class="h-24 bg-gradient-to-br from-node-agent/15 via-surface-container to-primary/5 flex items-center justify-center relative">
+              <i data-lucide="camera" class="w-10 h-10 text-node-agent/50"></i>
+            </div>
+            <div class="p-4">
+              <div class="flex items-center gap-1.5 mb-1">
+                <h3 class="text-sm font-semibold text-on-surface">人像证件照大师</h3>
+              </div>
+              <p class="text-[11px] text-on-surface-variant mb-1">摄影师小王</p>
+              <p class="text-xs text-on-surface-variant leading-relaxed">智能证件照生成，支持多国标准</p>
+              <div class="flex flex-wrap gap-1.5 mt-2">
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-node-agent/10 text-node-agent">🤖自主</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-node-agent/10 text-node-agent">🎨修图</span>
+              </div>
+              <div class="text-[10px] text-on-surface-variant mt-2">⭐4.7 · 使用856次</div>
+              <div class="flex items-center gap-2 mt-3">
+                <button id="btn-chat-market-2" class="flex items-center gap-1 px-2.5 py-1 rounded-md border border-node-agent/40 text-node-agent text-[11px] font-medium hover:bg-node-agent/10 transition-colors">
+                  <i data-lucide="message-circle" class="w-3 h-3"></i>对话体验
+                </button>
+                <button id="btn-install-market-2" class="flex items-center gap-1 px-2.5 py-1 rounded-md bg-primary text-on-primary text-[11px] font-medium hover:opacity-90 transition-opacity">
+                  <i data-lucide="download" class="w-3 h-3"></i>安装Agent
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 市场Agent-卡片3：4K视频生成器 -->
+          <div class="market-card bg-surface rounded-lg border border-outline-variant/10 overflow-hidden transition-all cursor-pointer">
+            <div class="h-24 bg-gradient-to-br from-port-video/15 via-surface-container to-node-agent/10 flex items-center justify-center relative">
+              <i data-lucide="video" class="w-10 h-10 text-port-video/50"></i>
+            </div>
+            <div class="p-4">
+              <div class="flex items-center gap-1.5 mb-1">
+                <h3 class="text-sm font-semibold text-on-surface">4K视频生成器</h3>
+              </div>
+              <p class="text-[11px] text-on-surface-variant mb-1">视频工坊</p>
+              <p class="text-xs text-on-surface-variant leading-relaxed">高质量4K视频生成，支持多种风格</p>
+              <div class="flex flex-wrap gap-1.5 mt-2">
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-error/10 text-error">🎬跨模态</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-node-agent/10 text-node-agent">🤖自主</span>
+              </div>
+              <div class="text-[10px] text-on-surface-variant mt-2">⭐4.5 · 使用423次</div>
+              <div class="flex items-center gap-2 mt-3">
+                <button id="btn-chat-market-3" class="flex items-center gap-1 px-2.5 py-1 rounded-md border border-node-agent/40 text-node-agent text-[11px] font-medium hover:bg-node-agent/10 transition-colors">
+                  <i data-lucide="message-circle" class="w-3 h-3"></i>对话体验
+                </button>
+                <button id="btn-install-market-3" class="flex items-center gap-1 px-2.5 py-1 rounded-md bg-primary text-on-primary text-[11px] font-medium hover:opacity-90 transition-opacity">
+                  <i data-lucide="download" class="w-3 h-3"></i>安装Agent
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 市场Agent-卡片4：数据分析师 -->
+          <div class="market-card bg-surface rounded-lg border border-outline-variant/10 overflow-hidden transition-all cursor-pointer">
+            <div class="h-24 bg-gradient-to-br from-port-data/15 via-surface-container to-node-agent/10 flex items-center justify-center relative">
+              <i data-lucide="bar-chart-3" class="w-10 h-10 text-port-data/50"></i>
+            </div>
+            <div class="p-4">
+              <div class="flex items-center gap-1.5 mb-1">
+                <h3 class="text-sm font-semibold text-on-surface">数据分析师</h3>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-port-data/15 text-port-data">数据分析Agent</span>
+              </div>
+              <p class="text-[11px] text-on-surface-variant mb-1">数据智能团队</p>
+              <p class="text-xs text-on-surface-variant leading-relaxed">自动化数据分析与可视化报告生成</p>
+              <div class="flex flex-wrap gap-1.5 mt-2">
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-port-data/10 text-port-data">📊数据</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-node-memory/10 text-node-memory">🧠学习</span>
+              </div>
+              <div class="text-[10px] text-on-surface-variant mt-2">⭐4.8 · 使用678次</div>
+              <div class="flex items-center gap-2 mt-3">
+                <button id="btn-chat-market-4" class="flex items-center gap-1 px-2.5 py-1 rounded-md border border-node-agent/40 text-node-agent text-[11px] font-medium hover:bg-node-agent/10 transition-colors">
+                  <i data-lucide="message-circle" class="w-3 h-3"></i>对话体验
+                </button>
+                <button id="btn-install-market-4" class="flex items-center gap-1 px-2.5 py-1 rounded-md bg-primary text-on-primary text-[11px] font-medium hover:opacity-90 transition-opacity">
+                  <i data-lucide="download" class="w-3 h-3"></i>安装Agent
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 市场Agent-卡片5：品牌合规检测 -->
+          <div class="market-card bg-surface rounded-lg border border-outline-variant/10 overflow-hidden transition-all cursor-pointer">
+            <div class="h-24 bg-gradient-to-br from-node-logic/15 via-surface-container to-node-agent/10 flex items-center justify-center relative">
+              <i data-lucide="shield-check" class="w-10 h-10 text-node-logic/50"></i>
+            </div>
+            <div class="p-4">
+              <div class="flex items-center gap-1.5 mb-1">
+                <h3 class="text-sm font-semibold text-on-surface">品牌合规检测</h3>
+              </div>
+              <p class="text-[11px] text-on-surface-variant mb-1">合规卫士</p>
+              <p class="text-xs text-on-surface-variant leading-relaxed">自动化品牌标识合规性检测与报告</p>
+              <div class="flex flex-wrap gap-1.5 mt-2">
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-node-logic/10 text-node-logic">🔍检测</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-node-subgraph/10 text-node-subgraph">📋合规</span>
+              </div>
+              <div class="text-[10px] text-on-surface-variant mt-2">⭐4.6 · 使用312次</div>
+              <div class="flex items-center gap-2 mt-3">
+                <button id="btn-chat-market-5" class="flex items-center gap-1 px-2.5 py-1 rounded-md border border-node-agent/40 text-node-agent text-[11px] font-medium hover:bg-node-agent/10 transition-colors">
+                  <i data-lucide="message-circle" class="w-3 h-3"></i>对话体验
+                </button>
+                <button id="btn-install-market-5" class="flex items-center gap-1 px-2.5 py-1 rounded-md bg-primary text-on-primary text-[11px] font-medium hover:opacity-90 transition-opacity">
+                  <i data-lucide="download" class="w-3 h-3"></i>安装Agent
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 市场Agent-卡片6：插件开发工具包 -->
+          <div class="market-card bg-surface rounded-lg border border-outline-variant/10 overflow-hidden transition-all cursor-pointer">
+            <div class="h-24 bg-gradient-to-br from-node-plugin/15 via-surface-container to-node-agent/10 flex items-center justify-center relative">
+              <i data-lucide="puzzle" class="w-10 h-10 text-node-plugin/50"></i>
+            </div>
+            <div class="p-4">
+              <div class="flex items-center gap-1.5 mb-1">
+                <h3 class="text-sm font-semibold text-on-surface">插件开发工具包</h3>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-node-plugin/15 text-node-plugin">🧩插件</span>
+              </div>
+              <p class="text-[11px] text-on-surface-variant mb-1">开发者工具</p>
+              <p class="text-xs text-on-surface-variant leading-relaxed">自定义节点开发框架，支持TypeScript</p>
+              <div class="flex flex-wrap gap-1.5 mt-2">
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-node-plugin/10 text-node-plugin">🧩插件</span>
+              </div>
+              <div class="text-[10px] text-on-surface-variant mt-2">⭐4.4 · 使用245次</div>
+              <div class="flex items-center gap-2 mt-3">
+                <button id="btn-chat-market-6" class="flex items-center gap-1 px-2.5 py-1 rounded-md border border-node-agent/40 text-node-agent text-[11px] font-medium hover:bg-node-agent/10 transition-colors">
+                  <i data-lucide="message-circle" class="w-3 h-3"></i>对话体验
+                </button>
+                <button id="btn-install-market-6" class="flex items-center gap-1 px-2.5 py-1 rounded-md bg-primary text-on-primary text-[11px] font-medium hover:opacity-90 transition-opacity">
+                  <i data-lucide="download" class="w-3 h-3"></i>安装Agent
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 第五区：插件市场 -->
+      <section id="plugin-market" class="mt-10">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-bold text-on-surface">插件市场</h2>
+          <button id="btn-submit-plugin" class="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-node-plugin/15 text-node-plugin text-xs font-medium hover:bg-node-plugin/25 transition-colors border border-node-plugin/30">
+            <i data-lucide="upload" class="w-3.5 h-3.5"></i>提交插件
           </button>
         </div>
-      </div>
-
-      <div id="my-workflow-list" class="flex gap-4 overflow-x-auto pb-2" style="scrollbar-width: thin;">
-
-        <!-- 列表-我的工作流1：电商白底图处理 v2 -->
-        <div class="my-workflow-card shrink-0 w-64 bg-surface rounded-xl shadow-card overflow-hidden cursor-pointer group transition-all duration-200 hover:shadow-float hover:ring-1 hover:ring-primary/60 relative" data-category="电商">
-          <!-- 编辑中脉冲点 -->
-          <div class="absolute top-3 right-3 z-10 flex items-center gap-1.5">
-            <span class="relative flex h-2 w-2">
-              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span>
-              <span class="relative inline-flex rounded-full h-2 w-2 bg-success"></span>
-            </span>
-            <span class="text-[10px] text-success font-medium">编辑中</span>
-          </div>
-          <!-- 缩略图：节点图缩略示意 -->
-          <div class="h-28 bg-surface-container-lowest relative overflow-hidden flex items-center justify-center">
-            <svg width="200" height="90" viewBox="0 0 200 90" fill="none" class="opacity-40">
-              <!-- Row 1 -->
-              <rect x="10" y="5" width="28" height="16" rx="3" fill="#3b82f6" opacity="0.6"/>
-              <rect x="85" y="5" width="28" height="16" rx="3" fill="#8b5cf6" opacity="0.6"/>
-              <!-- Row 2 -->
-              <rect x="48" y="38" width="28" height="16" rx="3" fill="#d4af37" opacity="0.6"/>
-              <rect x="130" y="38" width="28" height="16" rx="3" fill="#8b5cf6" opacity="0.6"/>
-              <!-- Row 3 -->
-              <rect x="85" y="68" width="28" height="16" rx="3" fill="#2ea043" opacity="0.6"/>
-              <rect x="160" y="68" width="28" height="16" rx="3" fill="#2ea043" opacity="0.6"/>
-              <!-- Lines -->
-              <line x1="38" y1="13" x2="48" y2="46" stroke="#7d8590" stroke-width="1" opacity="0.4"/>
-              <line x1="113" y1="13" x2="130" y2="46" stroke="#7d8590" stroke-width="1" opacity="0.4"/>
-              <line x1="76" y1="46" x2="85" y2="76" stroke="#7d8590" stroke-width="1" opacity="0.4"/>
-              <line x1="158" y1="46" x2="160" y2="76" stroke="#7d8590" stroke-width="1" opacity="0.4"/>
-              <line x1="99" y1="76" x2="160" y2="76" stroke="#7d8590" stroke-width="1" opacity="0.4"/>
-            </svg>
-          </div>
-          <div class="p-4">
-            <div class="flex items-center gap-2 mb-2">
-              <h3 class="text-sm font-semibold text-on-surface truncate">电商白底图处理</h3>
-              <span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-primary/15 text-primary">v2.1</span>
+        <div class="plugin-scroll flex gap-4 overflow-x-auto pb-2">
+          <!-- 插件-卡片1：Stability AI 连接器 -->
+          <div class="plugin-card shrink-0 w-[260px] bg-surface rounded-lg border border-outline-variant/10 p-4 transition-all">
+            <div class="flex items-start gap-3 mb-3">
+              <div class="w-10 h-10 rounded-lg bg-node-plugin/10 flex items-center justify-center border border-node-plugin/20 shrink-0">
+                <i data-lucide="globe" class="w-5 h-5 text-node-plugin"></i>
+              </div>
+              <div class="flex-1 min-w-0">
+                <h3 class="text-sm font-semibold text-on-surface">Stability AI 连接器</h3>
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-medium bg-node-plugin/15 text-node-plugin mt-0.5">🌐 API插件</span>
+              </div>
             </div>
-            <div class="flex items-center gap-1.5 mb-3 flex-wrap">
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#电商</span>
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#白底</span>
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#自动化</span>
+            <p class="text-xs text-on-surface-variant leading-relaxed">接入Stable Diffusion XL和SD3模型</p>
+            <div class="flex items-center justify-between mt-3">
+              <span class="text-[10px] text-on-surface-variant">⭐4.7 · 下载2.3k</span>
+              <button id="btn-install-plugin-1" class="px-2.5 py-1 rounded-md bg-node-plugin/15 text-node-plugin text-[11px] font-medium hover:bg-node-plugin/25 transition-colors">安装</button>
             </div>
-            <p class="text-xs text-on-surface-variant">8节点 · 使用47次 · 上次2.3s</p>
           </div>
-          <!-- hover浮现继续编辑按钮 -->
-          <div class="absolute inset-0 bg-background/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-            <a href="home.html?workflow=ecommerce-white-bg" class="px-4 py-2 rounded-md bg-primary text-on-primary text-sm font-medium hover:opacity-90 transition-opacity">继续编辑</a>
+
+          <!-- 插件-卡片2：批量水印 -->
+          <div class="plugin-card shrink-0 w-[260px] bg-surface rounded-lg border border-outline-variant/10 p-4 transition-all">
+            <div class="flex items-start gap-3 mb-3">
+              <div class="w-10 h-10 rounded-lg bg-node-plugin/10 flex items-center justify-center border border-node-plugin/20 shrink-0">
+                <i data-lucide="stamp" class="w-5 h-5 text-node-plugin"></i>
+              </div>
+              <div class="flex-1 min-w-0">
+                <h3 class="text-sm font-semibold text-on-surface">批量水印</h3>
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-medium bg-node-plugin/15 text-node-plugin mt-0.5">🧩 功能插件</span>
+              </div>
+            </div>
+            <p class="text-xs text-on-surface-variant leading-relaxed">批量添加/移除水印，支持自定义位置和透明度</p>
+            <div class="flex items-center justify-between mt-3">
+              <span class="text-[10px] text-on-surface-variant">⭐4.3 · 下载1.1k</span>
+              <button id="btn-install-plugin-2" class="px-2.5 py-1 rounded-md bg-node-plugin/15 text-node-plugin text-[11px] font-medium hover:bg-node-plugin/25 transition-colors">安装</button>
+            </div>
+          </div>
+
+          <!-- 插件-卡片3：Notion同步 -->
+          <div class="plugin-card shrink-0 w-[260px] bg-surface rounded-lg border border-outline-variant/10 p-4 transition-all">
+            <div class="flex items-start gap-3 mb-3">
+              <div class="w-10 h-10 rounded-lg bg-node-plugin/10 flex items-center justify-center border border-node-plugin/20 shrink-0">
+                <i data-lucide="book-open" class="w-5 h-5 text-node-plugin"></i>
+              </div>
+              <div class="flex-1 min-w-0">
+                <h3 class="text-sm font-semibold text-on-surface">Notion同步</h3>
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-medium bg-node-plugin/15 text-node-plugin mt-0.5">🌐 API插件</span>
+              </div>
+            </div>
+            <p class="text-xs text-on-surface-variant leading-relaxed">将执行结果自动同步到Notion数据库</p>
+            <div class="flex items-center justify-between mt-3">
+              <span class="text-[10px] text-on-surface-variant">⭐4.5 · 下载890</span>
+              <button id="btn-install-plugin-3" class="px-2.5 py-1 rounded-md bg-node-plugin/15 text-node-plugin text-[11px] font-medium hover:bg-node-plugin/25 transition-colors">安装</button>
+            </div>
+          </div>
+
+          <!-- 插件-卡片4：开发自定义插件 -->
+          <div class="plugin-card shrink-0 w-[260px] bg-surface rounded-lg border-2 border-dashed border-node-plugin/30 p-4 flex flex-col items-center justify-center gap-2 transition-all cursor-pointer hover:border-node-plugin/50">
+            <div class="w-10 h-10 rounded-full bg-node-plugin/10 flex items-center justify-center border border-node-plugin/20">
+              <i data-lucide="plus" class="w-5 h-5 text-node-plugin"></i>
+            </div>
+            <span class="text-sm font-medium text-node-plugin">开发自定义插件</span>
+            <span class="text-[10px] text-on-surface-variant">使用TypeScript SDK开发</span>
+            <a href="#" class="text-[10px] text-node-plugin hover:underline mt-0.5">查看文档</a>
           </div>
         </div>
+      </section>
 
-        <!-- 列表-我的工作流2：人像精修流水线 -->
-        <div class="my-workflow-card shrink-0 w-64 bg-surface rounded-xl shadow-card overflow-hidden cursor-pointer group transition-all duration-200 hover:shadow-float hover:ring-1 hover:ring-primary/60 relative" data-category="人像">
-          <div class="h-28 bg-surface-container-lowest relative overflow-hidden flex items-center justify-center">
-            <svg width="200" height="90" viewBox="0 0 200 90" fill="none" class="opacity-40">
-              <rect x="20" y="10" width="28" height="16" rx="3" fill="#3b82f6" opacity="0.6"/>
-              <rect x="85" y="10" width="28" height="16" rx="3" fill="#8b5cf6" opacity="0.6"/>
-              <rect x="50" y="50" width="28" height="16" rx="3" fill="#d4af37" opacity="0.6"/>
-              <rect x="120" y="50" width="28" height="16" rx="3" fill="#2ea043" opacity="0.6"/>
-              <line x1="48" y1="18" x2="50" y2="58" stroke="#7d8590" stroke-width="1" opacity="0.4"/>
-              <line x1="113" y1="18" x2="120" y2="58" stroke="#7d8590" stroke-width="1" opacity="0.4"/>
-              <line x1="78" y1="58" x2="120" y2="58" stroke="#7d8590" stroke-width="1" opacity="0.4"/>
-            </svg>
-          </div>
-          <div class="p-4">
-            <div class="flex items-center gap-2 mb-2">
-              <h3 class="text-sm font-semibold text-on-surface truncate">人像精修流水线</h3>
-              <span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-surface-container-high text-on-surface-variant">v1.3</span>
+      <!-- 第六区：分享与发布 -->
+      <section id="publish-section" class="mt-10">
+        <div class="grid grid-cols-2 gap-4">
+          <!-- 发布为Agent -->
+          <div class="bg-surface rounded-lg border border-outline-variant/10 p-5">
+            <div class="flex items-center gap-3 mb-3">
+              <div class="w-10 h-10 rounded-lg bg-node-agent/10 flex items-center justify-center border border-node-agent/20">
+                <i data-lucide="rocket" class="w-5 h-5 text-node-agent"></i>
+              </div>
+              <div>
+                <h3 class="text-sm font-semibold text-on-surface">将工作流发布为Agent</h3>
+                <p class="text-[11px] text-on-surface-variant mt-0.5">其他用户可以直接与你的Agent对话，无需了解工作流细节</p>
+              </div>
             </div>
-            <div class="flex items-center gap-1.5 mb-3 flex-wrap">
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#人像</span>
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#精修</span>
+            <div class="space-y-2 mb-4">
+              <!-- 步骤1 -->
+              <div class="flex items-start gap-2">
+                <span class="w-5 h-5 rounded-full bg-node-agent/15 text-node-agent text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">1</span>
+                <p class="text-xs text-on-surface">配置Agent人格和工具</p>
+              </div>
+              <!-- 步骤2 -->
+              <div class="flex items-start gap-2">
+                <span class="w-5 h-5 rounded-full bg-node-agent/15 text-node-agent text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">2</span>
+                <p class="text-xs text-on-surface">设置对话入口和权限</p>
+              </div>
+              <!-- 步骤3 -->
+              <div class="flex items-start gap-2">
+                <span class="w-5 h-5 rounded-full bg-node-agent/15 text-node-agent text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">3</span>
+                <p class="text-xs text-on-surface">发布到市场或生成专属链接</p>
+              </div>
             </div>
-            <p class="text-xs text-on-surface-variant">6节点 · 使用23次</p>
+            <div class="flex items-center gap-3">
+              <button id="btn-publish-agent" class="px-4 py-2 rounded-md bg-node-agent text-on-primary text-sm font-medium hover:opacity-90 transition-opacity">开始发布</button>
+              <a href="#" class="text-xs text-on-surface-variant hover:text-node-agent transition-colors">查看发布指南</a>
+            </div>
           </div>
-          <div class="absolute inset-0 bg-background/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-            <a href="home.html?workflow=portrait-retouch" class="px-4 py-2 rounded-md bg-primary text-on-primary text-sm font-medium hover:opacity-90 transition-opacity">继续编辑</a>
+
+          <!-- 导入与集成 -->
+          <div class="bg-surface rounded-lg border border-outline-variant/10 p-5">
+            <div class="flex items-center gap-3 mb-3">
+              <div class="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center border border-primary/20">
+                <i data-lucide="download" class="w-5 h-5 text-primary"></i>
+              </div>
+              <div>
+                <h3 class="text-sm font-semibold text-on-surface">导入与集成</h3>
+                <p class="text-[11px] text-on-surface-variant mt-0.5">从JSON/链接导入工作流，或通过API集成到你的系统</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 mt-5">
+              <button id="btn-upload-json" class="px-3 py-1.5 rounded-md bg-surface-container text-on-surface text-xs font-medium hover:bg-surface-container-high transition-colors">
+                <i data-lucide="file-up" class="w-3.5 h-3.5 inline mr-1"></i>上传JSON
+              </button>
+              <button id="btn-import-url" class="px-3 py-1.5 rounded-md bg-surface-container text-on-surface text-xs font-medium hover:bg-surface-container-high transition-colors">
+                <i data-lucide="link" class="w-3.5 h-3.5 inline mr-1"></i>从链接导入
+              </button>
+              <button id="btn-api-docs" class="px-3 py-1.5 rounded-md bg-surface-container text-on-surface text-xs font-medium hover:bg-surface-container-high transition-colors">
+                <i data-lucide="book-open" class="w-3.5 h-3.5 inline mr-1"></i>API文档
+              </button>
+            </div>
           </div>
         </div>
+      </section>
 
-        <!-- 列表-我的工作流3：风格迁移 -->
-        <div class="my-workflow-card shrink-0 w-64 bg-surface rounded-xl shadow-card overflow-hidden cursor-pointer group transition-all duration-200 hover:shadow-float hover:ring-1 hover:ring-primary/60 relative" data-category="创意">
-          <div class="h-28 bg-surface-container-lowest relative overflow-hidden flex items-center justify-center">
-            <svg width="200" height="90" viewBox="0 0 200 90" fill="none" class="opacity-40">
-              <rect x="30" y="10" width="28" height="16" rx="3" fill="#3b82f6" opacity="0.6"/>
-              <rect x="90" y="40" width="28" height="16" rx="3" fill="#06b6d4" opacity="0.6"/>
-              <rect x="150" y="65" width="28" height="16" rx="3" fill="#2ea043" opacity="0.6"/>
-              <rect x="30" y="60" width="28" height="16" rx="3" fill="#8b5cf6" opacity="0.6"/>
-              <line x1="58" y1="18" x2="90" y2="48" stroke="#7d8590" stroke-width="1" opacity="0.4"/>
-              <line x1="118" y1="48" x2="150" y2="73" stroke="#7d8590" stroke-width="1" opacity="0.4"/>
-              <line x1="44" y1="26" x2="44" y2="60" stroke="#7d8590" stroke-width="1" opacity="0.4"/>
-            </svg>
+      <!-- 页面底部 -->
+      <footer class="mt-12 pt-6 border-t border-outline-variant/10 text-center">
+        <p class="text-xs text-on-surface-variant">无界AI Studio · 让AI Agent触手可及</p>
+        <p class="text-[10px] text-on-surface-variant/50 mt-1">v4.0 自主Agent平台</p>
+      </footer>
+    </div>
+    <!-- @main-content:end -->
+  </main>
+
+  <!-- 对话浮窗 -->
+  <div id="chat-dialog" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+    <div class="bg-surface rounded-xl shadow-dialog w-[420px] max-h-[80vh] overflow-hidden flex flex-col">
+      <div class="flex items-center justify-between px-5 py-3 border-b border-outline-variant/10">
+        <div class="flex items-center gap-2">
+          <div class="w-7 h-7 rounded-full bg-node-agent/15 flex items-center justify-center">
+            <i data-lucide="bot" class="w-4 h-4 text-node-agent"></i>
           </div>
-          <div class="p-4">
-            <div class="flex items-center gap-2 mb-2">
-              <h3 class="text-sm font-semibold text-on-surface truncate">风格迁移</h3>
-              <span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-surface-container-high text-on-surface-variant">v1.0</span>
-            </div>
-            <div class="flex items-center gap-1.5 mb-3 flex-wrap">
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#风格</span>
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#迁移</span>
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#创意</span>
-            </div>
-            <p class="text-xs text-on-surface-variant">5节点 · 使用8次</p>
-          </div>
-          <div class="absolute inset-0 bg-background/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-            <a href="home.html?workflow=style-transfer" class="px-4 py-2 rounded-md bg-primary text-on-primary text-sm font-medium hover:opacity-90 transition-opacity">继续编辑</a>
-          </div>
+          <span id="chat-agent-name" class="text-sm font-semibold text-on-surface">Agent对话</span>
         </div>
-
-        <!-- 列表-我的工作流4：新建工作流 -->
-        <div id="card-new-workflow" class="shrink-0 w-64 rounded-xl cursor-pointer group transition-all duration-200 border-2 border-dashed border-outline-variant/30 hover:border-primary/50 flex flex-col items-center justify-center min-h-[240px]">
-          <div class="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center mb-2 group-hover:bg-primary/15 transition-colors">
-            <i data-lucide="plus" class="w-5 h-5 text-on-surface-variant group-hover:text-primary transition-colors"></i>
-          </div>
-          <span class="text-sm font-medium text-on-surface-variant group-hover:text-on-surface transition-colors">空白工作流</span>
-          <span class="text-[10px] text-on-surface-variant/60 mt-1">或从模板创建</span>
-        </div>
-
-      </div>
-    </section>
-
-    <!-- ============ 第三区：版本历史 ============ -->
-    <section id="section-version-history" class="mb-10">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-base font-semibold text-on-surface">版本历史 — 电商白底图处理</h2>
-        <button id="btn-toggle-history" class="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors">
-          <i data-lucide="chevron-up" class="w-3.5 h-3.5" id="icon-toggle-history"></i>
-          <span id="label-toggle-history">收起</span>
+        <button id="btn-close-chat" class="p-1 rounded-md hover:bg-surface-container text-on-surface-variant transition-colors">
+          <i data-lucide="x" class="w-4 h-4"></i>
         </button>
       </div>
-
-      <div id="version-timeline" class="bg-surface rounded-xl shadow-card p-5">
-        <div class="relative pl-6">
-
-          <!-- 版本-v2.1（当前） -->
-          <div class="version-item relative pb-6 border-l-2 border-primary/40 pl-6 last:pb-0" data-version="v2.1">
-            <div class="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-primary border-2 border-surface"></div>
-            <div class="flex items-start justify-between gap-4">
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 mb-1">
-                  <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-primary/15 text-primary">v2.1</span>
-                  <span class="text-xs text-on-surface-variant">今天 14:32</span>
-                  <span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-success/15 text-success">当前</span>
-                </div>
-                <p class="text-sm text-on-surface mb-1">新增"质量检测"条件分支</p>
-                <div class="flex items-center gap-3 text-xs">
-                  <span class="text-success">+2节点（质量检测、提示词优化）</span>
-                  <span class="text-success">+3连线</span>
-                </div>
-              </div>
-              <div class="shrink-0">
-                <span class="text-xs text-on-surface-variant/40 cursor-default">回滚到此版本</span>
-              </div>
-            </div>
+      <div class="flex-1 overflow-y-auto p-4 space-y-3 min-h-[300px]">
+        <!-- Agent消息1 -->
+        <div class="flex items-start gap-2">
+          <div class="w-6 h-6 rounded-full bg-node-agent/15 flex items-center justify-center shrink-0">
+            <i data-lucide="bot" class="w-3 h-3 text-node-agent"></i>
           </div>
-
-          <!-- 版本-v2.0 -->
-          <div class="version-item relative pb-6 border-l-2 border-outline-variant/20 pl-6" data-version="v2.0">
-            <div class="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-surface-container-high border-2 border-surface"></div>
-            <div class="flex items-start justify-between gap-4">
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 mb-1">
-                  <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-surface-container-high text-on-surface-variant">v2.0</span>
-                  <span class="text-xs text-on-surface-variant">昨天 16:20</span>
-                </div>
-                <p class="text-sm text-on-surface mb-1">子图封装"电商白底图"</p>
-                <div class="flex items-center gap-3 text-xs">
-                  <span class="text-warning">~1节点（封装5节点为子图）</span>
-                </div>
-              </div>
-              <div class="shrink-0 flex items-center gap-3">
-                <a href="#" class="text-xs text-primary hover:underline rollback-link">回滚到此版本</a>
-                <a href="#" class="text-xs text-primary hover:underline diff-link">对比差异</a>
-              </div>
-            </div>
+          <div class="bg-surface-container rounded-lg px-3 py-2 text-xs text-on-surface max-w-[80%]">
+            你好！我是电商产品质检助手。你可以直接告诉我需要质检的产品图片，或者询问质检流程相关问题。
           </div>
-
-          <!-- 版本-v1.2 -->
-          <div class="version-item relative pb-6 border-l-2 border-outline-variant/20 pl-6" data-version="v1.2">
-            <div class="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-surface-container-high border-2 border-surface"></div>
-            <div class="flex items-start justify-between gap-4">
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 mb-1">
-                  <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-surface-container-high text-on-surface-variant">v1.2</span>
-                  <span class="text-xs text-on-surface-variant">3天前</span>
-                </div>
-                <p class="text-sm text-on-surface mb-1">放大倍率改为4x</p>
-                <div class="flex items-center gap-3 text-xs">
-                  <span class="text-warning">~1参数（无损放大.倍率 2x→4x）</span>
-                </div>
-              </div>
-              <div class="shrink-0">
-                <a href="#" class="text-xs text-primary hover:underline rollback-link">回滚到此版本</a>
-              </div>
-            </div>
+        </div>
+        <!-- 用户消息1 -->
+        <div class="flex items-start gap-2 justify-end">
+          <div class="bg-node-agent/15 rounded-lg px-3 py-2 text-xs text-on-surface max-w-[80%]">
+            这张产品图片有没有问题？
           </div>
-
-          <!-- 版本-v1.1 -->
-          <div class="version-item relative pb-6 border-l-2 border-outline-variant/20 pl-6" data-version="v1.1">
-            <div class="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-surface-container-high border-2 border-surface"></div>
-            <div class="flex items-start justify-between gap-4">
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 mb-1">
-                  <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-surface-container-high text-on-surface-variant">v1.1</span>
-                  <span class="text-xs text-on-surface-variant">5天前</span>
-                </div>
-                <p class="text-sm text-on-surface mb-1">添加蒙版优化步骤</p>
-                <div class="flex items-center gap-3 text-xs">
-                  <span class="text-success">+1节点</span>
-                  <span class="text-success">+2连线</span>
-                </div>
-              </div>
-              <div class="shrink-0">
-                <a href="#" class="text-xs text-primary hover:underline rollback-link">回滚到此版本</a>
-              </div>
-            </div>
+        </div>
+        <!-- Agent消息2 -->
+        <div class="flex items-start gap-2">
+          <div class="w-6 h-6 rounded-full bg-node-agent/15 flex items-center justify-center shrink-0">
+            <i data-lucide="bot" class="w-3 h-3 text-node-agent"></i>
           </div>
-
-          <!-- 版本-v1.0 -->
-          <div class="version-item relative pb-0 border-l-2 border-outline-variant/20 pl-6" data-version="v1.0">
-            <div class="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-surface-container-high border-2 border-surface"></div>
-            <div class="flex items-start justify-between gap-4">
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 mb-1">
-                  <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-surface-container-high text-on-surface-variant">v1.0</span>
-                  <span class="text-xs text-on-surface-variant">1周前</span>
-                </div>
-                <p class="text-sm text-on-surface">初始版本</p>
-              </div>
-              <div class="shrink-0">
-                <a href="#" class="text-xs text-primary hover:underline rollback-link">回滚到此版本</a>
-              </div>
-            </div>
+          <div class="bg-surface-container rounded-lg px-3 py-2 text-xs text-on-surface max-w-[80%]">
+            我已检测到以下问题：1) 品牌Logo被裁切 2) 背景未达到纯白标准。是否需要我自动修复？
           </div>
-
         </div>
       </div>
-    </section>
-
-    <!-- ============ 第四区：精选模板 ============ -->
-    <section id="section-templates" class="mb-10">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-base font-semibold text-on-surface">精选模板</h2>
-        <div id="category-tabs" class="flex items-center gap-1">
-          <button class="category-tab px-3 py-1 rounded-md text-xs font-medium bg-primary/10 text-primary transition-colors" data-category="全部">全部</button>
-          <button class="category-tab px-3 py-1 rounded-md text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors" data-category="电商">电商</button>
-          <button class="category-tab px-3 py-1 rounded-md text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors" data-category="人像">人像</button>
-          <button class="category-tab px-3 py-1 rounded-md text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors" data-category="风景">风景</button>
-          <button class="category-tab px-3 py-1 rounded-md text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors" data-category="创意">创意</button>
-        </div>
+      <div class="px-4 py-3 border-t border-outline-variant/10 flex items-center gap-2">
+        <input id="chat-input" type="text" placeholder="输入消息与Agent对话..." class="flex-1 bg-surface-container border-none rounded-md px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-node-agent/30 transition-colors" />
+        <button id="btn-send-chat" class="p-2 rounded-md bg-node-agent text-on-primary hover:opacity-90 transition-opacity">
+          <i data-lucide="send" class="w-3.5 h-3.5"></i>
+        </button>
       </div>
-
-      <div id="template-grid" class="grid grid-cols-3 gap-4">
-
-        <!-- 模板1：电商白底图 Pro -->
-        <div class="template-card bg-surface rounded-xl shadow-card overflow-hidden group transition-all duration-200 hover:shadow-float hover:ring-1 hover:ring-primary/60 hover:-translate-y-0.5" data-category="电商" data-name="电商白底图 Pro">
-          <div class="relative overflow-hidden" style="height:120px;">
-            <div class="absolute inset-0 bg-gradient-to-br from-primary/20 via-node-process/10 to-node-input/20"></div>
-            <svg class="absolute inset-0 w-full h-full opacity-15" viewBox="0 0 300 120" fill="none">
-              <rect x="20" y="10" width="32" height="18" rx="3" fill="#8b5cf6"/>
-              <rect x="100" y="10" width="32" height="18" rx="3" fill="#3b82f6"/>
-              <rect x="180" y="10" width="32" height="18" rx="3" fill="#8b5cf6"/>
-              <rect x="60" y="55" width="32" height="18" rx="3" fill="#d4af37"/>
-              <rect x="140" y="55" width="32" height="18" rx="3" fill="#8b5cf6"/>
-              <rect x="220" y="55" width="32" height="18" rx="3" fill="#d4af37"/>
-              <rect x="100" y="90" width="32" height="18" rx="3" fill="#2ea043"/>
-              <line x1="52" y1="19" x2="60" y2="64" stroke="#7d8590" stroke-width="1"/>
-              <line x1="132" y1="19" x2="140" y2="64" stroke="#7d8590" stroke-width="1"/>
-              <line x1="212" y1="19" x2="220" y2="64" stroke="#7d8590" stroke-width="1"/>
-              <line x1="92" y1="64" x2="100" y2="99" stroke="#7d8590" stroke-width="1"/>
-              <line x1="172" y1="64" x2="100" y2="99" stroke="#7d8590" stroke-width="1"/>
-            </svg>
-            <span class="absolute top-3 right-3 px-1.5 py-0.5 rounded text-[10px] font-medium bg-node-input/20 text-node-input">官方</span>
-          </div>
-          <div class="p-4">
-            <div class="flex items-center gap-2 mb-1">
-              <h3 class="text-sm font-semibold text-on-surface">电商白底图 Pro</h3>
-            </div>
-            <p class="text-xs text-on-surface-variant mb-2">无界AI官方</p>
-            <p class="text-xs text-on-surface-variant mb-3 line-clamp-2">一键生成电商标准白底图，含质量检测和自动重试</p>
-            <div class="flex items-center gap-1.5 mb-3 flex-wrap">
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#电商</span>
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#白底</span>
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#自动化</span>
-            </div>
-            <div class="flex items-center justify-between">
-              <span class="text-xs text-on-surface-variant">⭐ 4.9 · 使用1.2k次 · 12节点</span>
-              <a href="home.html?template=ecommerce-white-bg-pro" class="use-template-btn px-3 py-1.5 rounded-md bg-primary text-on-primary text-xs font-medium hover:opacity-90 transition-opacity">使用模板</a>
-            </div>
-          </div>
-        </div>
-
-        <!-- 模板2：人像证件照 -->
-        <div class="template-card bg-surface rounded-xl shadow-card overflow-hidden group transition-all duration-200 hover:shadow-float hover:ring-1 hover:ring-primary/60 hover:-translate-y-0.5" data-category="人像" data-name="人像证件照">
-          <div class="relative overflow-hidden" style="height:120px;">
-            <div class="absolute inset-0 bg-gradient-to-br from-node-ai/15 via-node-process/15 to-node-output/10"></div>
-            <svg class="absolute inset-0 w-full h-full opacity-15" viewBox="0 0 300 120" fill="none">
-              <rect x="30" y="15" width="32" height="18" rx="3" fill="#3b82f6"/>
-              <rect x="130" y="15" width="32" height="18" rx="3" fill="#8b5cf6"/>
-              <rect x="80" y="60" width="32" height="18" rx="3" fill="#d4af37"/>
-              <rect x="180" y="60" width="32" height="18" rx="3" fill="#2ea043"/>
-              <line x1="62" y1="24" x2="80" y2="69" stroke="#7d8590" stroke-width="1"/>
-              <line x1="162" y1="24" x2="180" y2="69" stroke="#7d8590" stroke-width="1"/>
-              <line x1="112" y1="69" x2="180" y2="69" stroke="#7d8590" stroke-width="1"/>
-            </svg>
-          </div>
-          <div class="p-4">
-            <div class="flex items-center gap-2 mb-1">
-              <h3 class="text-sm font-semibold text-on-surface">人像证件照</h3>
-            </div>
-            <p class="text-xs text-on-surface-variant mb-2">摄影师小王</p>
-            <p class="text-xs text-on-surface-variant mb-3 line-clamp-2">证件照自动处理：换底色、裁切、美颜</p>
-            <div class="flex items-center gap-1.5 mb-3 flex-wrap">
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#证件照</span>
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#人像</span>
-            </div>
-            <div class="flex items-center justify-between">
-              <span class="text-xs text-on-surface-variant">⭐ 4.7 · 使用856次 · 8节点</span>
-              <a href="home.html?template=portrait-id-photo" class="use-template-btn px-3 py-1.5 rounded-md border border-primary/30 text-primary text-xs font-medium hover:bg-primary/10 transition-colors">使用模板</a>
-            </div>
-          </div>
-        </div>
-
-        <!-- 模板3：4K风景放大 -->
-        <div class="template-card bg-surface rounded-xl shadow-card overflow-hidden group transition-all duration-200 hover:shadow-float hover:ring-1 hover:ring-primary/60 hover:-translate-y-0.5" data-category="风景" data-name="4K风景放大">
-          <div class="relative overflow-hidden" style="height:120px;">
-            <div class="absolute inset-0 bg-gradient-to-br from-node-output/15 via-node-subgraph/10 to-node-input/15"></div>
-            <svg class="absolute inset-0 w-full h-full opacity-15" viewBox="0 0 300 120" fill="none">
-              <rect x="40" y="20" width="32" height="18" rx="3" fill="#3b82f6"/>
-              <rect x="140" y="50" width="32" height="18" rx="3" fill="#06b6d4"/>
-              <rect x="240" y="80" width="32" height="18" rx="3" fill="#2ea043"/>
-              <line x1="72" y1="29" x2="140" y2="59" stroke="#7d8590" stroke-width="1"/>
-              <line x1="172" y1="59" x2="240" y2="89" stroke="#7d8590" stroke-width="1"/>
-            </svg>
-          </div>
-          <div class="p-4">
-            <div class="flex items-center gap-2 mb-1">
-              <h3 class="text-sm font-semibold text-on-surface">4K风景放大</h3>
-            </div>
-            <p class="text-xs text-on-surface-variant mb-2">风景达人</p>
-            <p class="text-xs text-on-surface-variant mb-3 line-clamp-2">专为风景照设计，智能补细节放大到4K</p>
-            <div class="flex items-center gap-1.5 mb-3 flex-wrap">
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#风景</span>
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#放大</span>
-            </div>
-            <div class="flex items-center justify-between">
-              <span class="text-xs text-on-surface-variant">⭐ 4.5 · 使用423次 · 6节点</span>
-              <a href="home.html?template=4k-landscape-upscale" class="use-template-btn px-3 py-1.5 rounded-md border border-primary/30 text-primary text-xs font-medium hover:bg-primary/10 transition-colors">使用模板</a>
-            </div>
-          </div>
-        </div>
-
-        <!-- 模板4：Logo矢量化 -->
-        <div class="template-card bg-surface rounded-xl shadow-card overflow-hidden group transition-all duration-200 hover:shadow-float hover:ring-1 hover:ring-primary/60 hover:-translate-y-0.5" data-category="创意" data-name="Logo矢量化">
-          <div class="relative overflow-hidden" style="height:120px;">
-            <div class="absolute inset-0 bg-gradient-to-br from-node-logic/15 via-node-ai/15 to-node-process/10"></div>
-            <svg class="absolute inset-0 w-full h-full opacity-15" viewBox="0 0 300 120" fill="none">
-              <rect x="20" y="20" width="32" height="18" rx="3" fill="#3b82f6"/>
-              <rect x="100" y="45" width="32" height="18" rx="3" fill="#d4af37"/>
-              <rect x="180" y="20" width="32" height="18" rx="3" fill="#8b5cf6"/>
-              <rect x="140" y="85" width="32" height="18" rx="3" fill="#2ea043"/>
-              <line x1="52" y1="29" x2="100" y2="54" stroke="#7d8590" stroke-width="1"/>
-              <line x1="212" y1="29" x2="100" y2="54" stroke="#7d8590" stroke-width="1"/>
-              <line x1="132" y1="54" x2="140" y2="94" stroke="#7d8590" stroke-width="1"/>
-            </svg>
-          </div>
-          <div class="p-4">
-            <div class="flex items-center gap-2 mb-1">
-              <h3 class="text-sm font-semibold text-on-surface">Logo矢量化</h3>
-            </div>
-            <p class="text-xs text-on-surface-variant mb-2">设计师小林</p>
-            <p class="text-xs text-on-surface-variant mb-3 line-clamp-2">位图Logo自动矢量化，支持多色和黑白模式</p>
-            <div class="flex items-center gap-1.5 mb-3 flex-wrap">
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#Logo</span>
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#矢量化</span>
-            </div>
-            <div class="flex items-center justify-between">
-              <span class="text-xs text-on-surface-variant">⭐ 4.8 · 使用678次 · 5节点</span>
-              <a href="home.html?template=logo-vectorize" class="use-template-btn px-3 py-1.5 rounded-md border border-primary/30 text-primary text-xs font-medium hover:bg-primary/10 transition-colors">使用模板</a>
-            </div>
-          </div>
-        </div>
-
-        <!-- 模板5：商品场景合成 -->
-        <div class="template-card bg-surface rounded-xl shadow-card overflow-hidden group transition-all duration-200 hover:shadow-float hover:ring-1 hover:ring-primary/60 hover:-translate-y-0.5" data-category="电商" data-name="商品场景合成">
-          <div class="relative overflow-hidden" style="height:120px;">
-            <div class="absolute inset-0 bg-gradient-to-br from-node-input/15 via-node-ai/20 to-node-output/10"></div>
-            <svg class="absolute inset-0 w-full h-full opacity-15" viewBox="0 0 300 120" fill="none">
-              <rect x="15" y="10" width="28" height="16" rx="3" fill="#3b82f6"/>
-              <rect x="75" y="10" width="28" height="16" rx="3" fill="#8b5cf6"/>
-              <rect x="135" y="40" width="28" height="16" rx="3" fill="#d4af37"/>
-              <rect x="195" y="40" width="28" height="16" rx="3" fill="#8b5cf6"/>
-              <rect x="255" y="70" width="28" height="16" rx="3" fill="#06b6d4"/>
-              <rect x="55" y="85" width="28" height="16" rx="3" fill="#2ea043"/>
-              <line x1="43" y1="18" x2="135" y2="48" stroke="#7d8590" stroke-width="1"/>
-              <line x1="103" y1="18" x2="195" y2="48" stroke="#7d8590" stroke-width="1"/>
-              <line x1="163" y1="48" x2="255" y2="78" stroke="#7d8590" stroke-width="1"/>
-              <line x1="223" y1="48" x2="55" y2="93" stroke="#7d8590" stroke-width="1"/>
-            </svg>
-          </div>
-          <div class="p-4">
-            <div class="flex items-center gap-2 mb-1">
-              <h3 class="text-sm font-semibold text-on-surface">商品场景合成</h3>
-            </div>
-            <p class="text-xs text-on-surface-variant mb-2">电商极客</p>
-            <p class="text-xs text-on-surface-variant mb-3 line-clamp-2">自动移除背景并合成场景，支持多场景切换</p>
-            <div class="flex items-center gap-1.5 mb-3 flex-wrap">
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#电商</span>
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#场景</span>
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#合成</span>
-            </div>
-            <div class="flex items-center justify-between">
-              <span class="text-xs text-on-surface-variant">⭐ 4.6 · 使用312次 · 10节点</span>
-              <a href="home.html?template=product-scene-compose" class="use-template-btn px-3 py-1.5 rounded-md border border-primary/30 text-primary text-xs font-medium hover:bg-primary/10 transition-colors">使用模板</a>
-            </div>
-          </div>
-        </div>
-
-        <!-- 模板6：AI修图助手 -->
-        <div class="template-card bg-surface rounded-xl shadow-card overflow-hidden group transition-all duration-200 hover:shadow-float hover:ring-1 hover:ring-primary/60 hover:-translate-y-0.5" data-category="创意" data-name="AI修图助手">
-          <div class="relative overflow-hidden" style="height:120px;">
-            <div class="absolute inset-0 bg-gradient-to-br from-node-ai/20 via-node-logic/10 to-node-output/15"></div>
-            <svg class="absolute inset-0 w-full h-full opacity-15" viewBox="0 0 300 120" fill="none">
-              <rect x="60" y="15" width="32" height="18" rx="3" fill="#3b82f6"/>
-              <rect x="160" y="50" width="32" height="18" rx="3" fill="#d4af37"/>
-              <rect x="100" y="85" width="32" height="18" rx="3" fill="#2ea043"/>
-              <line x1="92" y1="24" x2="160" y2="59" stroke="#7d8590" stroke-width="1"/>
-              <line x1="192" y1="59" x2="100" y2="94" stroke="#7d8590" stroke-width="1"/>
-            </svg>
-          </div>
-          <div class="p-4">
-            <div class="flex items-center gap-2 mb-1">
-              <h3 class="text-sm font-semibold text-on-surface">AI修图助手</h3>
-            </div>
-            <p class="text-xs text-on-surface-variant mb-2">AI探索者</p>
-            <p class="text-xs text-on-surface-variant mb-3 line-clamp-2">自然语言修图，支持多轮对话式编辑</p>
-            <div class="flex items-center gap-1.5 mb-3 flex-wrap">
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#AI</span>
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#修图</span>
-              <span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-container text-on-surface-variant">#对话</span>
-            </div>
-            <div class="flex items-center justify-between">
-              <span class="text-xs text-on-surface-variant">⭐ 4.4 · 使用245次 · 4节点</span>
-              <a href="home.html?template=ai-retouch-assistant" class="use-template-btn px-3 py-1.5 rounded-md border border-primary/30 text-primary text-xs font-medium hover:bg-primary/10 transition-colors">使用模板</a>
-            </div>
-          </div>
-        </div>
-
-      </div>
-    </section>
-
-    <!-- ============ 第五区：分享与导入 ============ -->
-    <section id="section-share-import" class="mb-12">
-      <h2 class="text-base font-semibold text-on-surface mb-4">分享与协作</h2>
-      <div class="grid grid-cols-2 gap-4">
-
-        <!-- 卡片1：分享工作流 -->
-        <div class="bg-surface-container rounded-xl p-6">
-          <div class="flex items-center gap-3 mb-4">
-            <div class="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-              <i data-lucide="share-2" class="w-5 h-5 text-primary"></i>
-            </div>
-            <div>
-              <h3 class="text-sm font-semibold text-on-surface">分享工作流</h3>
-              <p class="text-xs text-on-surface-variant">将你的工作流发布到社区，或生成分享链接</p>
-            </div>
-          </div>
-          <div class="flex items-center gap-3">
-            <button id="btn-create-share-link" class="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-primary/30 text-primary text-xs font-medium hover:bg-primary/10 transition-colors">
-              <i data-lucide="link" class="w-3 h-3"></i>创建分享链接
-            </button>
-            <button id="btn-publish-community" class="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-primary/30 text-primary text-xs font-medium hover:bg-primary/10 transition-colors">
-              <i data-lucide="globe" class="w-3 h-3"></i>发布到社区
-            </button>
-          </div>
-        </div>
-
-        <!-- 卡片2：导入工作流 -->
-        <div class="bg-surface-container rounded-xl p-6">
-          <div class="flex items-center gap-3 mb-4">
-            <div class="w-10 h-10 rounded-lg bg-node-input/10 flex items-center justify-center">
-              <i data-lucide="download" class="w-5 h-5 text-node-input"></i>
-            </div>
-            <div>
-              <h3 class="text-sm font-semibold text-on-surface">导入工作流</h3>
-              <p class="text-xs text-on-surface-variant">从JSON文件或分享链接导入工作流</p>
-            </div>
-          </div>
-          <div class="flex items-center gap-3">
-            <button id="btn-upload-json" class="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-primary/30 text-primary text-xs font-medium hover:bg-primary/10 transition-colors">
-              <i data-lucide="file-up" class="w-3 h-3"></i>上传JSON文件
-            </button>
-            <button id="btn-import-from-link" class="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-primary/30 text-primary text-xs font-medium hover:bg-primary/10 transition-colors">
-              <i data-lucide="link" class="w-3 h-3"></i>从链接导入
-            </button>
-          </div>
-        </div>
-
-      </div>
-    </section>
-
-    <!-- ============ 页面底部 ============ -->
-    <footer class="text-center pb-8">
-      <p class="text-xs text-on-surface-variant">无界AI Studio · 让AI工作流触手可及</p>
-      <p class="text-[10px] text-on-surface-variant/50 mt-1">v3.0</p>
-    </footer>
-
-  </main>
-  <!-- @main-content:end -->
+    </div>
+  </div>
 
   <script>
-  $(function() {
+    $(function() {
 
-    // === 搜索框输入筛选模板 ===
-    $('#search-input').on('input', function() {
-      const keyword = $(this).val().toLowerCase().trim();
-      $('.template-card').each(function() {
-        const name = $(this).data('name') ? $(this).data('name').toLowerCase() : '';
-        const text = $(this).text().toLowerCase();
-        if (keyword === '' || name.includes(keyword) || text.includes(keyword)) {
-          $(this).show();
-        } else {
-          $(this).hide();
+      // ===== 搜索筛选Agent/工作流/插件 =====
+      $('#filter-agent, #filter-workflow, #filter-plugin').on('click', function() {
+        $('#filter-agent, #filter-workflow, #filter-plugin').removeClass('active').addClass('text-on-surface-variant');
+        $(this).addClass('active').removeClass('text-on-surface-variant');
+        var filterType = $(this).text().trim();
+        console.log('筛选类型切换为:', filterType);
+        // 后续应实现：根据筛选类型过滤页面上展示的卡片内容
+      });
+
+      // ===== 分类标签切换 =====
+      $('.category-tag').on('click', function() {
+        $('.category-tag').removeClass('active').addClass('text-on-surface-variant');
+        $(this).addClass('active').removeClass('text-on-surface-variant');
+        var category = $(this).data('category');
+        console.log('市场分类切换为:', category);
+        // 后续应实现：根据分类过滤Agent市场卡片显示/隐藏
+      });
+
+      // ===== 自学习报告时间范围切换 =====
+      $('#time-7d, #time-30d, #time-all').on('click', function() {
+        $('#time-7d, #time-30d, #time-all').removeClass('active').addClass('text-on-surface-variant');
+        $(this).addClass('active').removeClass('text-on-surface-variant');
+        var timeRange = $(this).text().trim();
+        console.log('自学习报告时间范围切换为:', timeRange);
+        // 后续应实现：根据时间范围更新报告图表和数据
+      });
+
+      // ===== 学习规则应用/忽略 =====
+      $('#self-learning').on('click', '.rule-apply', function() {
+        var ruleItem = $(this).closest('[id^="rule-"]');
+        var ruleId = ruleItem.attr('id');
+        // 1. 将规则状态从"待验证"改为"已应用"
+        // 2. 更新规则图标从🧪变为✅
+        // 3. 移除"应用/忽略"按钮，添加"查看详情"按钮
+        // 4. 更新置信度文案为"已应用"
+        ruleItem.find('.text-warning').first().text('✅').removeClass('text-warning').addClass('text-node-output');
+        ruleItem.find('.text-on-surface-variant').last().text('已应用');
+        $(this).closest('.flex.items-center.gap-1\\.5').replaceWith('<button class="text-[10px] text-on-surface-variant hover:text-on-surface shrink-0">查看详情</button>');
+        console.log('应用学习规则:', ruleId);
+      });
+
+      $('#self-learning').on('click', '.rule-ignore', function() {
+        var ruleItem = $(this).closest('[id^="rule-"]');
+        var ruleId = ruleItem.attr('id');
+        // 1. 将规则标记为"已忽略"
+        // 2. 降低该规则卡片的视觉权重（变灰/透明度降低）
+        // 3. 移除"应用/忽略"按钮
+        ruleItem.css('opacity', '0.5');
+        $(this).closest('.flex.items-center.gap-1\\.5').replaceWith('<span class="text-[10px] text-on-surface-variant">已忽略</span>');
+        console.log('忽略学习规则:', ruleId);
+      });
+
+      // ===== Agent卡片"对话体验"（打开对话浮窗） =====
+      var agentNames = {
+        'btn-chat-agent-1': '电商产品质检助手',
+        'btn-chat-agent-2': '品牌视觉管家',
+        'btn-chat-agent-3': '视频创作助手',
+        'btn-chat-market-1': '电商全能助手 Pro',
+        'btn-chat-market-2': '人像证件照大师',
+        'btn-chat-market-3': '4K视频生成器',
+        'btn-chat-market-4': '数据分析师',
+        'btn-chat-market-5': '品牌合规检测',
+        'btn-chat-market-6': '插件开发工具包'
+      };
+
+      $('[id^="btn-chat-"]').on('click', function() {
+        var btnId = $(this).attr('id');
+        var name = agentNames[btnId] || 'Agent';
+        $('#chat-agent-name').text(name);
+        $('#chat-dialog').removeClass('hidden');
+      });
+
+      // 关闭对话浮窗
+      $('#btn-close-chat').on('click', function() {
+        $('#chat-dialog').addClass('hidden');
+      });
+
+      // 点击遮罩关闭
+      $('#chat-dialog').on('click', function(e) {
+        if ($(e.target).is('#chat-dialog')) {
+          $('#chat-dialog').addClass('hidden');
         }
       });
-    });
 
-    // === 分类标签切换 ===
-    $('#category-tabs').on('click', '.category-tab', function() {
-      // 切换激活态
-      $('.category-tab').removeClass('bg-primary/10 text-primary').addClass('text-on-surface-variant');
-      $(this).removeClass('text-on-surface-variant').addClass('bg-primary/10 text-primary');
+      // 发送对话消息
+      // 后续应实现完整的对话交互：
+      // 1. 用户输入消息后，在聊天区域添加用户消息气泡
+      // 2. 显示Agent"思考中"状态
+      // 3. 模拟Agent回复，添加回复气泡
+      // 4. 清空输入框
+      $('#btn-send-chat').on('click', function() {
+        var msg = $('#chat-input').val().trim();
+        if (!msg) return;
+        console.log('发送消息给Agent:', msg);
+        $('#chat-input').val('');
+      });
 
-      const category = $(this).data('category');
-      $('.template-card').each(function() {
-        if (category === '全部' || $(this).data('category') === category) {
-          $(this).show();
-        } else {
-          $(this).hide();
+      $('#chat-input').on('keydown', function(e) {
+        if (e.key === 'Enter') {
+          $('#btn-send-chat').trigger('click');
         }
       });
-    });
 
-    // === 版本历史折叠/展开 ===
-    let historyExpanded = true;
-    $('#btn-toggle-history').on('click', function() {
-      historyExpanded = !historyExpanded;
-      if (historyExpanded) {
-        $('#version-timeline').slideDown(200);
-        $('#label-toggle-history').text('收起');
-        $('#icon-toggle-history').attr('data-lucide', 'chevron-up');
-      } else {
-        $('#version-timeline').slideUp(200);
-        $('#label-toggle-history').text('展开');
-        $('#icon-toggle-history').attr('data-lucide', 'chevron-down');
-      }
-      lucide.createIcons();
-    });
+      // ===== 插件安装 =====
+      $('[id^="btn-install-plugin-"]').on('click', function() {
+        var btnId = $(this).attr('id');
+        // 1. 按钮文案变为"安装中..."
+        // 2. 模拟安装延迟后变为"已安装"
+        // 3. 按钮变为禁用态
+        var $btn = $(this);
+        $btn.text('安装中...').prop('disabled', true);
+        setTimeout(function() {
+          $btn.text('已安装').removeClass('bg-node-plugin/15 text-node-plugin hover:bg-node-plugin/25').addClass('bg-surface-container-high text-on-surface-variant cursor-default');
+          console.log('插件安装完成:', btnId);
+        }, 1000);
+      });
 
-    // === 回滚到此版本 ===
-    $('#version-timeline').on('click', '.rollback-link', function(e) {
-      e.preventDefault();
-      const version = $(this).closest('.version-item').data('version');
-      console.log('回滚到版本:', version);
-      // 后续应实现：1. 弹出确认对话框，提示回滚操作将丢弃当前版本之后的所有变更
-      // 2. 用户确认后，调用后端API执行回滚
-      // 3. 回滚成功后刷新页面，版本历史列表更新
-    });
+      // ===== 市场Agent安装 =====
+      $('[id^="btn-install-market-"]').on('click', function() {
+        var btnId = $(this).attr('id');
+        var $btn = $(this);
+        $btn.html('<i data-lucide="loader" class="w-3 h-3 animate-spin"></i>安装中').prop('disabled', true);
+        lucide.createIcons();
+        setTimeout(function() {
+          $btn.html('<i data-lucide="check" class="w-3 h-3"></i>已安装').removeClass('bg-primary text-on-primary hover:opacity-90').addClass('bg-surface-container-high text-on-surface-variant cursor-default');
+          lucide.createIcons();
+          console.log('Agent安装完成:', btnId);
+        }, 1200);
+      });
 
-    // === 对比差异 ===
-    $('#version-timeline').on('click', '.diff-link', function(e) {
-      e.preventDefault();
-      const version = $(this).closest('.version-item').data('version');
-      console.log('对比差异，版本:', version);
-      // 后续应实现：1. 打开差异对比模态框，左右分栏展示两个版本的节点和连线差异
-      // 2. 左侧显示当前版本，右侧显示选中版本
-      // 3. 高亮新增（绿色）、删除（红色）、修改（黄色）的节点和连线
-      // 4. 支持在差异视图中点击节点查看参数变更详情
-    });
+      // ===== 发布流程入口 =====
+      // 后续应实现完整的发布流程：
+      // 1. 打开发布向导弹窗
+      // 2. 步骤1：选择要发布的工作流，配置Agent名称、描述、头像
+      // 3. 步骤2：设置对话入口方式（网页/SDK/API）、权限级别
+      // 4. 步骤3：预览Agent效果，确认发布或生成专属链接
+      $('#btn-publish-agent').on('click', function() {
+        console.log('打开发布Agent向导');
+      });
 
-    // === 新建空白工作流 ===
-    $('#card-new-workflow').on('click', function() {
-      window.location.href = 'home.html?workflow=new';
-    });
+      // ===== 查看全部 =====
+      $('#btn-view-all-agents').on('click', function() {
+        console.log('查看全部我的Agent');
+      });
 
-    // === 新建空白按钮 ===
-    $('#btn-new-blank').on('click', function() {
-      window.location.href = 'home.html?workflow=new';
-    });
+      // ===== 创建Agent =====
+      // 后续应实现：打开创建Agent弹窗，提供"从工作流创建"和"从空白创建"两个选项
+      $('#btn-create-agent').on('click', function() {
+        console.log('打开创建Agent弹窗');
+      });
 
-    // === 导入工作流按钮（顶部） ===
-    $('#btn-import-workflow').on('click', function() {
-      console.log('导入工作流：应弹出导入对话框，支持上传JSON文件或输入分享链接');
-      // 后续应实现：1. 弹出模态框，包含"上传JSON文件"和"输入分享链接"两个Tab
-      // 2. 文件上传Tab支持拖拽上传和点击选择文件
-      // 3. 链接Tab包含输入框和导入按钮
-      // 4. 导入成功后跳转到编辑器页面
-    });
+      // ===== 提交插件 =====
+      // 后续应实现：打开插件提交表单，填写插件名称、描述、仓库地址等信息
+      $('#btn-submit-plugin').on('click', function() {
+        console.log('打开提交插件表单');
+      });
 
-    // === 分享工作流 ===
-    $('#btn-create-share-link').on('click', function() {
-      console.log('创建分享链接：应生成唯一分享链接并复制到剪贴板');
-      // 后续应实现：1. 调用后端API生成分享链接
-      // 2. 将链接显示在输入框中，并自动复制到剪贴板
-      // 3. 显示"已复制"提示
-    });
+      // ===== 优化建议应用 =====
+      $('[id^="suggestion-apply-"]').on('click', function() {
+        var id = $(this).attr('id');
+        $(this).text('已应用').prop('disabled', true).removeClass('bg-node-agent/15 text-node-agent hover:bg-node-agent/25').addClass('bg-surface-container-high text-on-surface-variant cursor-default');
+        console.log('应用优化建议:', id);
+      });
 
-    $('#btn-publish-community').on('click', function() {
-      console.log('发布到社区：应弹出发布表单，填写描述和标签后发布');
-      // 后续应实现：1. 弹出发布模态框，包含标题、描述、标签、封面图等字段
-      // 2. 用户填写后提交发布
-      // 3. 发布成功后显示"已发布"状态
-    });
+      $('[id^="suggestion-more-"]').on('click', function() {
+        var id = $(this).attr('id');
+        console.log('了解更多优化建议:', id);
+      });
 
-    // === 导入工作流 ===
-    $('#btn-upload-json').on('click', function() {
-      console.log('上传JSON文件：应弹出文件选择器');
-      // 后续应实现：1. 触发文件选择器，限制.json类型
-      // 2. 选择文件后读取内容并解析
-      // 3. 校验JSON格式和必要字段
-      // 4. 校验通过后导入工作流并跳转到编辑器
-    });
+      // ===== 导入与集成 =====
+      // 上传JSON - 后续应实现：
+      // 1. 打开文件选择器（accept=".json"）
+      // 2. 读取JSON文件内容并解析
+      // 3. 验证工作流格式
+      // 4. 导入到编辑器
+      $('#btn-upload-json').on('click', function() {
+        console.log('打开JSON文件上传');
+      });
 
-    $('#btn-import-from-link').on('click', function() {
-      console.log('从链接导入：应弹出链接输入框');
-      // 后续应实现：1. 弹出输入框让用户粘贴分享链接
-      // 2. 点击导入后从链接获取工作流数据
-      // 3. 导入成功后跳转到编辑器页面
-    });
+      // 从链接导入 - 后续应实现：
+      // 1. 弹出输入框让用户粘贴链接
+      // 2. 验证链接有效性
+      // 3. 从链接获取工作流数据并导入
+      $('#btn-import-url').on('click', function() {
+        console.log('打开链接导入输入框');
+      });
 
-    // === 查看全部 ===
-    $('#link-view-all').on('click', function(e) {
-      e.preventDefault();
-      console.log('查看全部工作流：应展开完整的工作流列表页');
-      // 后续应实现：展开所有用户工作流的完整列表，支持搜索和排序
-    });
+      // API文档
+      $('#btn-api-docs').on('click', function() {
+        console.log('打开API文档页面');
+      });
 
-  });
+      // ===== 搜索 =====
+      $('#search-input').on('input', function() {
+        var keyword = $(this).val().trim();
+        console.log('搜索关键词:', keyword);
+        // 后续应实现：根据关键词和当前筛选类型过滤页面内容
+      });
+
+    });
   </script>
-
   <script>lucide.createIcons();</script>
 </body>
 

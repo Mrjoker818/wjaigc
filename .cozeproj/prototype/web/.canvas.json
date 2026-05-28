@@ -5,7 +5,7 @@
       "options": {
         "path": ".cozeproj/prototype/web/home.html"
       },
-      "title": "智能工作流编辑器",
+      "title": "多Agent工作流编辑器",
       "size": "web"
     },
     {
@@ -13,7 +13,7 @@
       "options": {
         "path": ".cozeproj/prototype/web/run-monitor.html"
       },
-      "title": "智能执行监控",
+      "title": "可视化调试器",
       "size": "web"
     },
     {
@@ -21,7 +21,7 @@
       "options": {
         "path": ".cozeproj/prototype/web/workflow-hub.html"
       },
-      "title": "工作流市场",
+      "title": "Agent生态市场",
       "size": "web"
     }
   ]
