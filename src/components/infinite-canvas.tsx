@@ -3350,8 +3350,8 @@ export function InfiniteCanvas({
     return () => { document.removeEventListener('visibilitychange', handleVisibility); };
   }, []);
 
-  const getThreeDProviders = useCallback((): Array<{ id: string; name: string; baseUrl: string; apiKey: string; model?: string; providerPreset?: string; advancedParams?: Record<string, string> }> => {
-    const results: Array<{ id: string; name: string; baseUrl: string; apiKey: string; model?: string; providerPreset?: string; advancedParams?: Record<string, string> }> = [];
+  const getThreeDProviders = useCallback((): Array<{ id: string; name: string; baseUrl: string; apiKey: string; model?: string; providerPreset?: string; advancedParams?: Record<string, string>; providerName?: string }> => {
+    const results: Array<{ id: string; name: string; baseUrl: string; apiKey: string; model?: string; providerPreset?: string; advancedParams?: Record<string, string>; providerName?: string }> = [];
 
     // 1. Admin-configured 3D models (server-side)
     for (const m of admin3DModels) {
@@ -3363,6 +3363,7 @@ export function InfiniteCanvas({
         model: m.model,
         providerPreset: m.providerPreset,
         advancedParams: m.advancedParams,
+        providerName: m.providerName,
       });
     }
 
@@ -3386,6 +3387,7 @@ export function InfiniteCanvas({
                   model,
                   providerPreset: p.providerPreset || '',
                   advancedParams: p.advancedParams,
+                  providerName: displayName,
                 });
               }
             } else if (p.selectedModel) {
@@ -3397,6 +3399,7 @@ export function InfiniteCanvas({
                 model: p.selectedModel,
                 providerPreset: p.providerPreset || '',
                 advancedParams: p.advancedParams,
+                providerName: displayName,
               });
             }
           }
@@ -9047,8 +9050,9 @@ export function InfiniteCanvas({
                             <optgroup key={group.label} label={group.label}>
                               {group.items.map(p => {
                                 const modelLabel = get3DModelLabel(p.model || p.name);
+                                const providerLabel = p.providerName || p.name || '';
                                 return (
-                                  <option key={p.id} value={p.id}>{modelLabel}</option>
+                                  <option key={p.id} value={p.id}>{providerLabel ? `${modelLabel} (${providerLabel})` : modelLabel}</option>
                                 );
                               })}
                             </optgroup>
@@ -10307,7 +10311,7 @@ export function InfiniteCanvas({
                     {canvasGenModels.length === 0 && <option value="">暂无可用模型</option>}
                     {canvasGenModels.map(m => {
                       const compositeKey = `${m.providerId}::${m.id}`;
-                      return <option key={compositeKey} value={compositeKey}>{m.id}{m.providerName ? ` (${m.providerName})` : ''}</option>;
+                      return <option key={compositeKey} value={compositeKey}>{getModelDisplayName(m.id)}{m.providerName ? ` (${m.providerName})` : ''}</option>;
                     })}
                   </select>
                 </div>

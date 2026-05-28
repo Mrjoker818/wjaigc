@@ -244,9 +244,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     return false;
   })();
 
-  // 当前选中的图像模型名称
+  // 当前选中的图像模型名称（始终显示供应商名称）
   const currentModelName = currentImageModel
-    ? `${getModelDisplayName(currentImageModel.id)}${imageModels.filter(m => m.id === currentImageModel.id).length > 1 ? ` (${currentImageModel.providerName})` : ''}`
+    ? `${getModelDisplayName(currentImageModel.id)}${currentImageModel.providerName ? ` (${currentImageModel.providerName})` : ''}`
     : '选择图像模型';
 
   // 当前选中的LLM模型
@@ -259,7 +259,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   })();
 
   const currentLlmModelName = currentLlmModel
-    ? `${currentLlmModel.name}${llmModels.filter(m => m.id === currentLlmModel.id).length > 1 ? ` (${currentLlmModel.providerName})` : ''}`
+    ? `${currentLlmModel.name}${currentLlmModel.providerName ? ` (${currentLlmModel.providerName})` : ''}`
     : '选择LLM模型';
 
   // 图片预览区缩放/平移状态
@@ -1291,7 +1291,6 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   // 模型列表项组件
   const renderModelItem = (model: ServerModel, modelKey: string, isSelected: boolean, supportsMask?: boolean) => {
     const hint = getModelHint(model.id);
-    const hasDuplicate = imageModels.filter(m => m.id === model.id).length > 1;
     const maskSupported = supportsMask ?? model.supportsMask ?? false;
     return (
       <button
@@ -1306,7 +1305,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         <div className="flex-1 min-w-0">
           <div className="font-medium flex items-center gap-1.5">
             {getModelDisplayName(model.id)}
-            {hasDuplicate && <span className={`text-[10px] px-1 py-0.5 ${thAccentLight} ${thAccentLightText} rounded`}>{model.providerName}</span>}
+            {model.providerName && <span className={`text-[10px] px-1 py-0.5 ${thAccentLight} ${thAccentLightText} rounded`}>{model.providerName}</span>}
             {maskSupported
               ? <span className="text-[10px] px-1 py-0.5 bg-green-500/20 text-green-400 rounded">支持涂抹</span>
               : <span className="text-[10px] px-1 py-0.5 bg-orange-500/20 text-orange-400 rounded">仅文字修图</span>
@@ -1855,7 +1854,6 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                 {llmModels.length > 0 ? llmModels.map(model => {
                   const key = `server::${model.providerId}::${model.id}`;
                   const isSelected = selectedLlmKey === key;
-                  const hasDuplicate = llmModels.filter(m => m.id === model.id).length > 1;
                   return (
                     <button
                       key={key}
@@ -1869,7 +1867,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                       <div className="flex-1 min-w-0">
                         <div className="font-medium flex items-center gap-1.5">
                           {model.name}
-                          {hasDuplicate && <span className="text-[10px] px-1 py-0.5 bg-blue-400/20 text-blue-400 rounded">{model.providerName}</span>}
+                          {model.providerName && <span className="text-[10px] px-1 py-0.5 bg-blue-400/20 text-blue-400 rounded">{model.providerName}</span>}
                         </div>
                         <div className={`text-xs ${thTextMuted} truncate`}>{model.providerName} · 分析原图+优化指令</div>
                       </div>

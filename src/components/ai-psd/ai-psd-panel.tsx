@@ -508,8 +508,8 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
       zip: taskData.zipUrl || '',
       report: taskData.reportUrl || '',
     };
-    const url = urlMap[format];
-    if (!url) return;
+    const downloadUrl = urlMap[format];
+    if (!downloadUrl && format !== 'json') return;
     if (format === 'json') {
       const blob = new Blob([JSON.stringify(taskData.layerPlan, null, 2)], { type: 'application/json' });
       const blobUrl = URL.createObjectURL(blob);
@@ -537,16 +537,15 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
       }
       return;
     }
-    const fileUrl = urlMap[format];
-    if (fileUrl) {
-      const response = await fetch(fileUrl);
+    if (downloadUrl) {
+      const response = await fetch(downloadUrl);
       const blob = await response.blob();
-      const bUrl = URL.createObjectURL(blob);
+      const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = bUrl;
+      link.href = blobUrl;
       link.download = `ai-psd-${taskId}.${format === 'psd' ? 'psd' : 'zip'}`;
       link.click();
-      URL.revokeObjectURL(bUrl);
+      URL.revokeObjectURL(blobUrl);
     }
   }, [taskData, taskId]);
 
@@ -620,7 +619,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
             onChange={e => { setSelectedImageModel(e.target.value); localStorage.setItem('wujie_psd_image_model', e.target.value); }}>
             <option value="">选择图像模型</option>
             {imageModels.map(m => (
-              <option key={m.id} value={m.id}>{m.name} ({m.providerName})</option>
+              <option key={m.id} value={m.id}>{m.name}{m.providerName ? ` (${m.providerName})` : ''}</option>
             ))}
           </select>
         </div>
@@ -630,7 +629,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
             onChange={e => { setSelectedLlmModel(e.target.value); localStorage.setItem('wujie_psd_llm_model', e.target.value); }}>
             <option value="">选择LLM模型</option>
             {llmModels.map(m => (
-              <option key={m.id} value={m.id}>{m.name} ({m.providerName})</option>
+              <option key={m.id} value={m.id}>{m.name}{m.providerName ? ` (${m.providerName})` : ''}</option>
             ))}
           </select>
         </div>
