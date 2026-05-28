@@ -263,6 +263,9 @@ async function pollTaskResult(
   maxMs = 60000
 ): Promise<{ success: boolean; imageUrl?: string; imageUrls?: string[]; error?: string }> {
   const pollUrl = buildPollUrl(providerInfo.baseUrl, taskId, providerInfo.profile);
+  if (!pollUrl) {
+    return { success: false, error: '无法构建轮询URL，该提供商不支持异步轮询' };
+  }
   const start = Date.now();
   while (Date.now() - start < maxMs) {
     await new Promise(r => setTimeout(r, 3000));
