@@ -12,6 +12,8 @@ import { toast } from 'sonner';
 import { Image as ImageIcon, MessageSquare, Sparkles, GitBranch } from 'lucide-react';
 import { OperationChainPanel } from '@/components/operation-chain-panel';
 import { NodeLibraryPanel } from '@/components/node-library-panel';
+import NodeEditor from '@/components/node-editor';
+import WorkflowHub from '@/components/workflow-hub';
 
 /** Node label mapping for pipeline step display */
 const NODE_LABELS: Record<string, string> = {
@@ -173,6 +175,7 @@ function CanvasApp() {
 
   // Pipeline chain state - 操作链
   const [pipelineChains, setPipelineChains] = useState<Record<string, PipelineChain>>({});
+  const [appMode, setAppMode] = useState<'canvas' | 'node' | 'workflow-hub'>('canvas');
 
   // Language-based image editing state
   const [showImageEditor, setShowImageEditor] = useState(false);
@@ -294,10 +297,19 @@ function CanvasApp() {
       if (!cancelled) setAuthChecked(true);
     };
     void initCurrentUser();
-    return () => {
-      cancelled = true;
-    };
   }, []);
+
+  // 模式切换处理
+  const handleSwitchToCanvas = useCallback(() => setAppMode('canvas'), []);
+  const handleSwitchToNode = useCallback(() => setAppMode('node'), []);
+  const handleSwitchToWorkflowHub = useCallback(() => setAppMode('workflow-hub'), []);
+
+  const handleEditWorkflowInNode = useCallback((_wf: import('@/lib/workflow-engine').Workflow) => {
+    setAppMode('node');
+  }, []);
+
+  // 节点模式 / 工作流中心 - 在 return 中条件渲染
+
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [ohMyPromptOpen, setOhMyPromptOpen] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
@@ -2137,6 +2149,22 @@ function CanvasApp() {
     }
   }, [currentUser, getLocalFavorites, saveLocalFavorites]);
 
+  // 节点模式
+  if (appMode === 'node') {
+    return (
+      <div className="h-screen w-screen bg-[#0e1117] overflow-hidden">
+        <NodeEditor workflow={null} onBack={handleSwitchToCanvas} onWorkflowChange={() => {}} onOpenWorkflowHub={handleSwitchToWorkflowHub} />
+      </div>
+    );
+  }
+
+  // 工作流中心
+  if (appMode === 'workflow-hub') {
+    return (
+      <WorkflowHub onBack={handleSwitchToCanvas} onEditWorkflow={handleEditWorkflowInNode} />
+    );
+  }
+
   return (
     <div className={`h-screen w-screen relative overflow-hidden ${themeStyle === 'monochrome' ? 'bg-gradient-to-br from-blue-50 via-white to-purple-50/30' : 'bg-[#0a0a0a]'}`}>
       {/* Canvas - 全屏 */}
@@ -2265,8 +2293,24 @@ function CanvasApp() {
         />
       )}
 
+      {/* Mode Switch - Top-left floating */}
+      <div className="absolute top-3 left-3 z-40 flex items-center gap-1 bg-[#161b22]/90 backdrop-blur-sm border border-[#30363d] rounded-lg p-1">
+        <button onClick={handleSwitchToCanvas}
+          className={`px-2.5 py-1 rounded-md text-[10px] font-medium transition-colors bg-[#d4af37] text-[#0e1117]`}>
+          画布
+        </button>
+        <button onClick={handleSwitchToNode}
+          className={`px-2.5 py-1 rounded-md text-[10px] font-medium transition-colors text-[#7d8590] hover:text-[#e6edf3]`}>
+          节点
+        </button>
+        <button onClick={handleSwitchToWorkflowHub}
+          className={`px-2.5 py-1 rounded-md text-[10px] font-medium transition-colors text-[#7d8590] hover:text-[#e6edf3]`}>
+          工作流
+        </button>
+      </div>
+
       {/* Node Library Panel - Left side floating */}
-      <div className={`absolute top-3 left-3 bottom-3 z-30 transition-all duration-300 flex ${
+      <div className={`absolute top-14 left-3 bottom-3 z-30 transition-all duration-300 flex ${
         nodeLibraryCollapsed ? '' : ''
       }`}>
         <NodeLibraryPanel
