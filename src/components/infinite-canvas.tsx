@@ -3140,9 +3140,24 @@ export function InfiniteCanvas({
       onSelectImage(selectedCompleted);
     }
     // 预加载验证：如果图片 URL 无法加载，自动通过 /api/save-image 兜底
+    // 同时获取图片真实像素尺寸更新 originalWidth/originalHeight
     if (newUrl && !newUrl.startsWith('data:')) {
       const testImg = new window.Image();
-      testImg.onload = () => {}; // 加载成功，无需处理
+      testImg.onload = () => {
+        // 更新真实像素尺寸（覆盖显示尺寸/请求尺寸）
+        const natW = testImg.naturalWidth;
+        const natH = testImg.naturalHeight;
+        if (natW > 0 && natH > 0) {
+          const needUpdate = imagesRef.current.find(img => img.id === id);
+          if (needUpdate && (needUpdate.originalWidth !== natW || needUpdate.originalHeight !== natH)) {
+            const updatedImages = imagesRef.current.map(img =>
+              img.id === id ? { ...img, originalWidth: natW, originalHeight: natH } : img
+            );
+            imagesRef.current = updatedImages;
+            onImagesChange(updatedImages);
+          }
+        }
+      }; // 加载成功，更新真实尺寸
       testImg.onerror = () => {
         console.warn('[Canvas] Image URL failed to load, attempting save-image fallback:', newUrl);
         // 通过 /api/save-image 将图片持久化为可靠的 data URL
@@ -3154,20 +3169,55 @@ export function InfiniteCanvas({
         .then(r => r.json())
         .then(data => {
           if (data.success && data.url) {
-            // 更新图片 URL 为持久化后的 URL
-            const fallbackImages = imagesRef.current.map(img => {
-              if (img.id === id) {
-                return { ...img, url: data.url };
-              }
-              return img;
-            });
-            imagesRef.current = fallbackImages;
-            onImagesChange(fallbackImages);
+            // 更新图片 URL 为持久化后的 URL，同时获取真实尺寸
+            const fallbackImg = new window.Image();
+            fallbackImg.onload = () => {
+              const natW = fallbackImg.naturalWidth;
+              const natH = fallbackImg.naturalHeight;
+              const fallbackImages = imagesRef.current.map(img => {
+                if (img.id === id) {
+                  return { ...img, url: data.url, originalWidth: natW > 0 ? natW : img.originalWidth, originalHeight: natH > 0 ? natH : img.originalHeight };
+                }
+                return img;
+              });
+              imagesRef.current = fallbackImages;
+              onImagesChange(fallbackImages);
+            };
+            fallbackImg.onerror = () => {
+              // 持久化 URL 也无法加载，仅更新 URL
+              const fallbackImages = imagesRef.current.map(img => {
+                if (img.id === id) {
+                  return { ...img, url: data.url };
+                }
+                return img;
+              });
+              imagesRef.current = fallbackImages;
+              onImagesChange(fallbackImages);
+            };
+            fallbackImg.src = data.url;
           }
         })
         .catch(err => console.warn('[Canvas] save-image fallback failed:', err));
       };
       testImg.src = newUrl;
+    } else if (newUrl && newUrl.startsWith('data:')) {
+      // data: URL 也需要获取真实尺寸
+      const dataImg = new window.Image();
+      dataImg.onload = () => {
+        const natW = dataImg.naturalWidth;
+        const natH = dataImg.naturalHeight;
+        if (natW > 0 && natH > 0) {
+          const needUpdate = imagesRef.current.find(img => img.id === id);
+          if (needUpdate && (needUpdate.originalWidth !== natW || needUpdate.originalHeight !== natH)) {
+            const updatedImages = imagesRef.current.map(img =>
+              img.id === id ? { ...img, originalWidth: natW, originalHeight: natH } : img
+            );
+            imagesRef.current = updatedImages;
+            onImagesChange(updatedImages);
+          }
+        }
+      };
+      dataImg.src = newUrl;
     }
     return completedImage;
   }, [onImagesChange, onSelectImage]);
@@ -6895,7 +6945,7 @@ export function InfiniteCanvas({
                         </div>
                         {/* Cancel button */}
                         <button
-                          onClick={(e) => { e.stopPropagation(); removeProcessingFrame(group.resultPlaceholder.id); }}
+                          onClick={(e) => { e.stopPropagation(); if (group.resultPlaceholder.imageId) { removeProcessingFrame(group.resultPlaceholder.imageId); fetch('/api/cancel-task', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: group.resultPlaceholder.imageId }) }).catch(() => {}); } }}
                           className="mt-1 px-3 py-1 text-xs rounded-md transition-colors hover:opacity-80"
                           style={{ background: `${accentColor}33`, color: accentColor }}
                         >

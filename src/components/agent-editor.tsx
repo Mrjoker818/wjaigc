@@ -57,7 +57,7 @@ export function AgentEditor({
   const [resultImageUrl, setResultImageUrl] = useState('');
   const [resultPrompt, setResultPrompt] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
-  const { elapsed, formatted: elapsedFormatted, start: startTimer, stop: stopTimer, reset: resetTimer } = useProgressTimer();
+  const { elapsed, totalTime, formatTime, startTimer, stopTimer, resetTimer } = useProgressTimer();
 
   // 拖动状态
   const [position, setPosition] = useState(() => {
@@ -478,7 +478,7 @@ export function AgentEditor({
             )}
             <div className="flex items-center justify-between mt-0.5">
               <span className="text-xs" style={{ color: mutedColor }}>
-                {isProcessing ? elapsedStr : (totalTime !== null ? `总耗时 ${totalTime}` : '')}
+                {isProcessing ? formatTime(elapsed) : (totalTime !== null ? `总耗时 ${formatTime(totalTime)}` : '')}
               </span>
             </div>
           </div>

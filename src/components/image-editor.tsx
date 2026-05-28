@@ -42,16 +42,6 @@ interface ImageEditorProps {
   themeStyle?: 'gold' | 'monochrome';
 }
 
-// 画面比例选项
-const ASPECT_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '2:3', '3:2', '1:2', '2:1'];
-// 图片质量选项
-const QUALITIES = [
-  { value: 'low', label: '快速' },
-  { value: 'medium', label: '中等' },
-  { value: 'high', label: '高清' },
-  { value: 'auto', label: '自动' },
-  { value: 'standard', label: '标准' },
-];
 // 生图数量选项
 const COUNTS = [1, 2, 3, 4];
 
@@ -70,6 +60,7 @@ const MODEL_HINTS: Record<string, string> = {
 };
 
 import { getModelDisplayName } from '@/lib/model-name-map';
+import { MODEL_ASPECT_RATIOS, MODEL_QUALITIES, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, QUALITY_DISPLAY_NAMES, findModelConfig } from '@/lib/canvas-generation-group';
 
 function getModelHint(modelId: string): string {
   for (const [key, hint] of Object.entries(MODEL_HINTS)) {
@@ -186,6 +177,10 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
   // 模型选择：使用 "server::<providerId>::<modelId>" 作为 key
   const [selectedModelKey, setSelectedModelKey] = useState('');
+
+  // 根据当前选择的模型动态计算可用的画面比例和质量
+  const availableRatios = findModelConfig(MODEL_ASPECT_RATIOS, selectedModelKey.split('::').pop() || '') || DEFAULT_ASPECT_RATIOS;
+  const availableQualities = findModelConfig(MODEL_QUALITIES, selectedModelKey.split('::').pop() || '') || DEFAULT_QUALITIES;
   const [modelListExpanded, setModelListExpanded] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
@@ -526,7 +521,13 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     setSelectedModelKey(key);
     setModelListExpanded(false);
     localStorage.setItem('wujie_edit_selected_model', key);
-  }, []);
+    // 切换模型后自动调整画面比例和质量
+    const modelId = key.split('::').pop() || '';
+    const newRatios = findModelConfig(MODEL_ASPECT_RATIOS, modelId) || DEFAULT_ASPECT_RATIOS;
+    if (!newRatios.includes(aspectRatio)) setAspectRatio(newRatios[0]);
+    const newQualities = findModelConfig(MODEL_QUALITIES, modelId) || DEFAULT_QUALITIES;
+    if (!newQualities.includes(quality)) setQuality(newQualities[0]);
+  }, [aspectRatio, quality]);
 
   const handleLlmSelect = useCallback((key: string) => {
     setSelectedLlmKey(key);
@@ -1981,7 +1982,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                 onChange={(e) => setAspectRatio(e.target.value)}
                 className={`w-full px-2.5 py-2 ${thInput} rounded text-sm appearance-none cursor-pointer focus:outline-none`}
               >
-                {ASPECT_RATIOS.map(r => <option key={r} value={r}>{r}</option>)}
+                {availableRatios.map(r => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
             <div>
@@ -1991,7 +1992,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                 onChange={(e) => setQuality(e.target.value)}
                 className={`w-full px-2.5 py-2 ${thInput} rounded text-sm appearance-none cursor-pointer focus:outline-none`}
               >
-                {QUALITIES.map(q => <option key={q.value} value={q.value}>{q.label}</option>)}
+                {availableQualities.map(q => <option key={q} value={q}>{QUALITY_DISPLAY_NAMES[q] || q}</option>)}
               </select>
             </div>
             <div>

@@ -107,7 +107,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
-  const { elapsedTime: imageElapsedTime, totalTime: imageTotalTime, startTimer: startImageTimer, stopTimer: stopImageTimer, resetTimer: resetImageTimer, formatTime: formatImageTime } = useProgressTimer();
+  const { elapsed: imageElapsed, totalTime: imageTotalTime, startTimer: startImageTimer, stopTimer: stopImageTimer, resetTimer: resetImageTimer, formatTime: formatImageTime } = useProgressTimer();
   // Gallery state
   const [galleryLoading, setGalleryLoading] = useState(false);
   const [galleryItems, setGalleryItems] = useState<GalleryDataItem[]>([]);
@@ -1439,8 +1439,8 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                       <p className="text-sm" style={{ color: subTextColor }}>正在生成字体设计图片，请耐心等待...</p>
                       <div className="flex items-center justify-center gap-3 mt-1">
                         <p className="text-xs" style={{ color: subTextColor }}>通常需要15-60秒</p>
-                        {imageElapsedTime > 0 && (
-                          <span className="text-xs" style={{ color: subTextColor }}>· 已用 {formatImageTime(imageElapsedTime)}</span>
+                        {imageElapsed > 0 && (
+                          <span className="text-xs" style={{ color: subTextColor }}>· 已用 {formatImageTime(imageElapsed)}</span>
                         )}
                       </div>
                       <div className="flex items-center justify-center gap-2 mt-3">
@@ -1466,7 +1466,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                     </div>
                   )}
                   {/* Group images by plan */}
-                  {generatedImages.length > 0 && imageTotalTime > 0 && (
+                  {generatedImages.length > 0 && imageTotalTime !== null && imageTotalTime > 0 && (
                     <div className="text-xs text-right mb-2" style={{ color: subTextColor }}>
                       总耗时 {formatImageTime(imageTotalTime)}
                     </div>

@@ -431,7 +431,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
   const [projects, setProjects] = useState<BrandProject[]>([]);
   const [currentProject, setCurrentProject] = useState<BrandProject | null>(null);
   const [loading, setLoading] = useState(false);
-  const { elapsedTime: apiElapsedTime, totalTime: apiTotalTime, startTimer: startApiTimer, stopTimer: stopApiTimer, resetTimer: resetApiTimer, formatTime: formatApiTime } = useProgressTimer();
+  const { elapsed: apiElapsed, totalTime: apiTotalTime, startTimer: startApiTimer, stopTimer: stopApiTimer, resetTimer: resetApiTimer, formatTime: formatApiTime } = useProgressTimer();
   const [error, setError] = useState('');
 
   // === Model selection ===
@@ -973,6 +973,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
               <p className={`${th.textSec} text-sm mb-3`}>请先在「品牌资产」Tab上传Logo、产品图、IP形象等资料</p>
               <button className={th.btn} onClick={handleAnalyzeDNA} disabled={loading}>
                 <Zap className="w-4 h-4 inline mr-1" />开始AI分析
+                {loading && apiElapsed > 0 && <span className="ml-1 text-xs opacity-70">({formatApiTime(apiElapsed)})</span>}
               </button>
             </div>
           )}
@@ -1131,6 +1132,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
             </div>
             <button className={`${th.btn} w-full`} onClick={handleGenerateKV} disabled={loading}>
               <Layout className="w-4 h-4 inline mr-1" />生成主KV
+              {loading && apiElapsed > 0 && <span className="ml-2 text-xs opacity-70">({formatApiTime(apiElapsed)})</span>}
             </button>
           </div>
 
@@ -1195,6 +1197,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
           <div className="grid grid-cols-3 gap-2">
             <button className={`${th.btn} text-xs py-2`} onClick={handleBatchGenerate} disabled={batchGenerating || selectedMats.size === 0}>
               {batchGenerating ? <RefreshCw className="w-3 h-3 inline mr-1 animate-spin" /> : <Zap className="w-3 h-3 inline mr-1" />}批量生成
+              {batchGenerating && apiElapsed > 0 && <span className="ml-1 opacity-70">({formatApiTime(apiElapsed)})</span>}
             </button>
             <button className={`${th.btnGhost} text-xs border ${th.borderLight} py-2`}><PenTool className="w-3 h-3 inline mr-1" />单张优化</button>
             <button className={`${th.btnGhost} text-xs border ${th.borderLight} py-2`}><Palette className="w-3 h-3 inline mr-1" />统一风格</button>
@@ -1331,13 +1334,17 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
               onChange={e => setTitleText(e.target.value)} />
             <button className={`${th.btn} w-full`} onClick={handleGenerateChineseTitle} disabled={loading || !titleText}>
               <Type className="w-4 h-4 inline mr-1" />生成标题字
+              {loading && apiElapsed > 0 && <span className="ml-2 text-xs opacity-70">({formatApiTime(apiElapsed)})</span>}
             </button>
           </div>
 
           <div className="space-y-4">
             {titleResult && (
               <div className={`${th.card} p-4`}>
-                <h4 className={`${th.textSec} text-xs mb-2`}>生成结果</h4>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className={`${th.textSec} text-xs`}>生成结果</h4>
+                  {apiTotalTime !== null && apiTotalTime > 0 && <span className={`${th.textMuted} text-[11px]`}>总耗时 {formatApiTime(apiTotalTime)}</span>}
+                </div>
                 <pre className={`${th.text} text-sm whitespace-pre-wrap bg-black/30 p-3 rounded`}>{titleResult}</pre>
               </div>
             )}

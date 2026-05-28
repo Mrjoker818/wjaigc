@@ -97,7 +97,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   const [models, setModels] = useState<ImageModel[]>([]);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const { elapsedTime, totalTime, startTimer, stopTimer, resetTimer, formatTime } = useProgressTimer();
+  const { elapsed, totalTime, startTimer, stopTimer, resetTimer, formatTime } = useProgressTimer();
   const [progress, setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
   const [results, setResults] = useState<RefineResult[]>([]);
@@ -1201,8 +1201,8 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                   />
                 </div>
                 <span className="text-[11px] font-mono" style={{ color: textMutedColor }}>{progress}%</span>
-                {elapsedTime > 0 && (
-                  <span className="text-[11px]" style={{ color: textMutedColor }}>已用 {formatTime(elapsedTime)}</span>
+                {elapsed > 0 && (
+                  <span className="text-[11px]" style={{ color: textMutedColor }}>已用 {formatTime(elapsed)}</span>
                 )}
                 <button
                   onClick={async () => {
@@ -1228,7 +1228,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-xs" style={{ color: textSubColor }}>精修完成 · {results.length} 张</span>
-                    {totalTime > 0 && (
+                    {totalTime !== null && totalTime > 0 && (
                       <span className="text-[11px]" style={{ color: textMutedColor }}>总耗时 {formatTime(totalTime)}</span>
                     )}
                   </div>

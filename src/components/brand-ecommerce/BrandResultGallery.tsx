@@ -23,8 +23,8 @@ interface Props {
   onAddToCanvas: (urls?: string[]) => void;
   onRegenerateTemplate?: (templateId: string) => void;
   isMonochrome?: boolean;
-  elapsedTime?: number;
-  totalTime?: number;
+  elapsedTime?: number | null;
+  totalTime?: number | null;
   formatTime?: (ms: number) => string;
 }
 
@@ -72,7 +72,7 @@ export function BrandResultGallery({
               <p className={`text-sm font-medium ${text} truncate`}>{progressLabel || '正在生成...'}</p>
               <div className="flex items-center gap-2">
                 <p className={`text-xs ${textMuted}`}>共 {selectedTemplateCount} 个模板</p>
-                {elapsedTime > 0 && formatTime && (
+                {elapsedTime !== null && elapsedTime > 0 && formatTime && (
                   <span className={`text-xs ${textMuted}`}>· 已用 {formatTime(elapsedTime)}</span>
                 )}
               </div>
@@ -98,7 +98,7 @@ export function BrandResultGallery({
       {/* Results: grouped by template with variants */}
       {Object.keys(groupedResults).length > 0 && (
         <div className="space-y-3">
-          {!isGenerating && totalTime > 0 && formatTime && (
+          {!isGenerating && totalTime !== null && totalTime > 0 && formatTime && (
             <div className={`text-xs ${textMuted} text-right`}>
               总耗时 {formatTime(totalTime)}
             </div>

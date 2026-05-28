@@ -1022,8 +1022,8 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
             <div className="flex items-center justify-between text-xs mb-1">
               <span className="text-gray-400">{taskData?.label || '处理中...'}</span>
               <div className="flex items-center gap-2">
-                {elapsedTime > 0 && (
-                  <span className="text-gray-500">已用 {formatTime(elapsedTime)}</span>
+                {elapsed > 0 && (
+                  <span className="text-gray-500">已用 {formatTime(elapsed)}</span>
                 )}
                 <span className="text-[#d4af37]">{taskData?.progress || 0}%</span>
               </div>
@@ -1042,7 +1042,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
             >
               取消任务
             </button>
-          )
+          )}
 
           {/* Layer progress */}
           {currentStep === 2 && layerProgress.total > 0 && (
@@ -1076,7 +1076,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
           <div className="flex items-center gap-2 mb-3">
             <Check className="w-4 h-4 text-green-400" />
             <span className="text-xs text-green-400">生成完成</span>
-            {totalTime > 0 && (
+            {totalTime !== null && totalTime > 0 && (
               <span className="text-xs text-gray-500 ml-auto">总耗时 {formatTime(totalTime)}</span>
             )}
           </div>

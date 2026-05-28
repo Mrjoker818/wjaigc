@@ -88,7 +88,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   const [productConsistencyStrength, setProductConsistencyStrength] = useState(60);
   const [templateFieldValues, setTemplateFieldValues] = useState<Record<string, Record<string, string>>>({});
   const [isGenerating, setIsGenerating] = useState(false);
-  const { elapsedTime, totalTime, startTimer, stopTimer, resetTimer, formatTime } = useProgressTimer();
+  const { elapsed, totalTime, startTimer, stopTimer, resetTimer, formatTime } = useProgressTimer();
   const [isAssisting, setIsAssisting] = useState(false);
   const [assistError, setAssistError] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -849,7 +849,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
               onAddToCanvas={handleAddToCanvas}
               onRegenerateTemplate={handleRegenerateTemplate}
               isMonochrome={isMonochrome}
-              elapsedTime={elapsedTime}
+              elapsedTime={elapsed}
               totalTime={totalTime}
               formatTime={formatTime}
             />
