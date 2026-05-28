@@ -23,6 +23,9 @@ interface Props {
   onAddToCanvas: (urls?: string[]) => void;
   onRegenerateTemplate?: (templateId: string) => void;
   isMonochrome?: boolean;
+  elapsedTime?: number;
+  totalTime?: number;
+  formatTime?: (ms: number) => string;
 }
 
 // ─── Component ────────────────────────────────────────────────
@@ -37,6 +40,9 @@ export function BrandResultGallery({
   onAddToCanvas,
   onRegenerateTemplate,
   isMonochrome = false,
+  elapsedTime = 0,
+  totalTime = 0,
+  formatTime,
 }: Props) {
   const text = isMonochrome ? 'text-gray-900' : 'text-gray-100';
   const textMuted = isMonochrome ? 'text-gray-400' : 'text-gray-500';
@@ -64,7 +70,12 @@ export function BrandResultGallery({
             <Loader2 size={18} className={`animate-spin ${accentText}`} />
             <div className="flex-1 min-w-0">
               <p className={`text-sm font-medium ${text} truncate`}>{progressLabel || '正在生成...'}</p>
-              <p className={`text-xs ${textMuted}`}>共 {selectedTemplateCount} 个模板</p>
+              <div className="flex items-center gap-2">
+                <p className={`text-xs ${textMuted}`}>共 {selectedTemplateCount} 个模板</p>
+                {elapsedTime > 0 && formatTime && (
+                  <span className={`text-xs ${textMuted}`}>· 已用 {formatTime(elapsedTime)}</span>
+                )}
+              </div>
             </div>
             <button
               onClick={onCancel}
@@ -87,6 +98,11 @@ export function BrandResultGallery({
       {/* Results: grouped by template with variants */}
       {Object.keys(groupedResults).length > 0 && (
         <div className="space-y-3">
+          {!isGenerating && totalTime > 0 && formatTime && (
+            <div className={`text-xs ${textMuted} text-right`}>
+              总耗时 {formatTime(totalTime)}
+            </div>
+          )}
           {Object.entries(groupedResults).map(([templateId, templateResults]) => {
             const successVariants = templateResults.filter(r => r.imageUrl);
             const failedVariants = templateResults.filter(r => r.error);

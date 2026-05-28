@@ -195,6 +195,14 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   const [currentHistoryIndex, setCurrentHistoryIndex] = useState(-1);
   const [currentImageUrl, setCurrentImageUrl] = useState(image?.url || '');
 
+  // 进度计时 & 取消
+  const [editStartTime, setEditStartTime] = useState<number | null>(null);
+  const editStartTimeRef = useRef<number | null>(null);
+  const [editElapsed, setEditElapsed] = useState(0);
+  const [editTotalTime, setEditTotalTime] = useState<number | null>(null);
+  const [editTaskId, setEditTaskId] = useState<string | null>(null);
+  const editTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // 结果图片状态
   const [resultImages, setResultImages] = useState<string[]>([]);
   const [selectedResultIndexes, setSelectedResultIndexes] = useState<Set<number>>(new Set());
@@ -216,6 +224,39 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
   // ★ LLM自动区域识别 + 自动Mask
   const [autoMaskPreview, setAutoMaskPreview] = useState<string | null>(null); // 预览用data URL
+
+  // ★ 进度计时器
+  useEffect(() => {
+    if (editStartTime && !editTotalTime) {
+      editTimerRef.current = setInterval(() => {
+        setEditElapsed(Math.floor((Date.now() - editStartTime) / 1000));
+      }, 1000);
+    }
+    return () => {
+      if (editTimerRef.current) clearInterval(editTimerRef.current);
+    };
+  }, [editStartTime, editTotalTime]);
+
+  // 格式化时间 mm:ss
+  const formatElapsed = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  // 取消当前编辑任务
+  const handleCancelEdit = async () => {
+    if (editTaskId) {
+      try { await fetch('/api/cancel-task', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: editTaskId }) }); } catch {}
+    }
+    setIsLoading(false);
+    setLoadingProgress(0);
+    if (editStartTime) setEditTotalTime(Math.floor((Date.now() - editStartTime) / 1000));
+    setEditStartTime(null);
+    editStartTimeRef.current = null;
+    setEditTaskId(null);
+    if (editTimerRef.current) { clearInterval(editTimerRef.current); editTimerRef.current = null; }
+  };
 
   // ★ 输入框展开状态
   const [promptExpanded, setPromptExpanded] = useState(false);
@@ -916,6 +957,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     setResultImages([]);
     setSelectedResultIndexes(new Set());
     setLoadingProgress(0);
+    setEditStartTime(Date.now());
+    editStartTimeRef.current = Date.now();
+    setEditTotalTime(null);
 
     let progressIntervalId: ReturnType<typeof setInterval> | null = null;
     try {
@@ -928,6 +972,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         setError('图片加载失败，请尝试重新添加图片');
         setIsLoading(false);
         setIsResultLoading(false);
+        if (editStartTimeRef.current) {
+          setEditTotalTime(Math.round((Date.now() - editStartTimeRef.current) / 1000));
+        }
         return;
       }
       const maskDataUrl = currentModelSupportsMask ? exportMask() : null;
@@ -989,11 +1036,15 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         const submitData = await submitResp.json();
         if (submitData.success && submitData.taskId) {
           taskIds.push(submitData.taskId);
+          setEditTaskId(submitData.taskId);
         } else if (!submitData.success) {
           clearInterval(progressInterval);
           setIsResultLoading(false);
           setError(submitData.error || '提交失败');
           setIsLoading(false);
+          if (editStartTimeRef.current) {
+            setEditTotalTime(Math.round((Date.now() - editStartTimeRef.current) / 1000));
+          }
           return;
         }
       } catch (submitErr: unknown) {
@@ -1002,6 +1053,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         const errMsg = submitErr instanceof Error ? submitErr.message : '提交失败，请重试';
         setError(errMsg);
         setIsLoading(false);
+        if (editStartTimeRef.current) {
+          setEditTotalTime(Math.round((Date.now() - editStartTimeRef.current) / 1000));
+        }
         return;
       }
 
@@ -1093,6 +1147,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       clearInterval(progressInterval);
       setLoadingProgress(100);
       setIsResultLoading(false);
+      if (editStartTimeRef.current) {
+        setEditTotalTime(Math.round((Date.now() - editStartTimeRef.current) / 1000));
+      }
 
       // 处理超时
       if (completedTasks.size < taskIds.length && collectedUrls.length === 0) {
@@ -2027,25 +2084,51 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           </div>
           <div className="p-3">
             {isResultLoading ? (
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {Array.from({ length: Math.max(1, Math.min(outputCount, 4)) }, (_, i) => {
-                  const ratioParts = aspectRatio.split(':').map(Number);
-                  const ratioW = ratioParts[0] || 1;
-                  const ratioH = ratioParts[1] || 1;
-                  return (
-                    <div key={i} className={`relative ${isMonochrome ? "bg-gray-50" : "bg-[#1a1a1a]"} rounded-lg border-2 border-dashed ${isMonochrome ? "border-gray-300" : "border-white/[0.06]"} flex flex-col items-center justify-center overflow-hidden flex-shrink-0`}
-                      style={{ aspectRatio: `${ratioW}/${ratioH}`, width: outputCount > 1 ? '200px' : '320px', maxHeight: '400px' }}
-                    >
-                      <div className="relative w-8 h-8 mb-1">
-                        <div className={`absolute inset-0 border-2 ${isMonochrome ? "border-gray-200" : "border-white/[0.06]"} rounded-full`} />
-                        <div className={`absolute inset-0 border-2 ${isMonochrome ? "border-gray-900" : "border-[#d4af37]"} rounded-full animate-spin`} />
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {Array.from({ length: Math.max(1, Math.min(outputCount, 4)) }, (_, i) => {
+                    const ratioParts = aspectRatio.split(':').map(Number);
+                    const ratioW = ratioParts[0] || 1;
+                    const ratioH = ratioParts[1] || 1;
+                    return (
+                      <div key={i} className={`relative ${isMonochrome ? "bg-gray-50" : "bg-[#1a1a1a]"} rounded-lg border-2 border-dashed ${isMonochrome ? "border-gray-300" : "border-white/[0.06]"} flex flex-col items-center justify-center overflow-hidden flex-shrink-0`}
+                        style={{ aspectRatio: `${ratioW}/${ratioH}`, width: outputCount > 1 ? '200px' : '320px', maxHeight: '400px' }}
+                      >
+                        <div className="relative w-8 h-8 mb-1">
+                          <div className={`absolute inset-0 border-2 ${isMonochrome ? "border-gray-200" : "border-white/[0.06]"} rounded-full`} />
+                          <div className={`absolute inset-0 border-2 ${isMonochrome ? "border-gray-900" : "border-[#d4af37]"} rounded-full animate-spin`} />
+                        </div>
+                        <span className={`text-xs ${thTextMuted}`}>生成中 {outputCount > 1 ? `(${i + 1}/${outputCount})` : `${loadingProgress}%`}</span>
                       </div>
-                      <span className={`text-xs ${thTextMuted}`}>生成中 {outputCount > 1 ? `(${i + 1}/${outputCount})` : `${loadingProgress}%`}</span>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
+                {/* 进度信息栏：已用时间 + 取消按钮 */}
+                <div className={`flex items-center justify-between px-1 py-1.5 rounded-lg ${isMonochrome ? "bg-gray-50" : "bg-white/[0.03]"}`}>
+                  <div className="flex items-center gap-3 text-xs">
+                    <span className={thTextMuted}>
+                      进度 {loadingProgress}%
+                    </span>
+                    {editStartTimeRef.current && (
+                      <span className={thTextMuted}>
+                        已用时 {Math.floor((Date.now() - editStartTimeRef.current) / 60000)}:{String(Math.floor(((Date.now() - editStartTimeRef.current) % 60000) / 1000)).padStart(2, '0')}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleCancelEdit}
+                    className={`px-2 py-0.5 text-xs rounded font-medium transition-all ${
+                      isMonochrome
+                        ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
+                        : "bg-white/[0.08] hover:bg-white/[0.15] text-gray-300"
+                    }`}
+                  >
+                    取消
+                  </button>
+                </div>
               </div>
             ) : resultImages.length > 0 ? (
+              <div className="flex flex-col gap-1.5">
               <div className={`flex gap-2 overflow-x-auto pb-1`}>
                 {resultImages.length > 1 && (
                   <div className="flex items-center gap-1.5 mb-1 flex-shrink-0">
@@ -2121,8 +2204,14 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                   );
                 })}
               </div>
-            ) : null}
-            {/* ★ LLM自动区域识别 - 非阻塞内联卡片，嵌入结果框底部 */}
+              {editTotalTime !== null && (
+              <div className={`text-xs text-center mt-1 ${isMonochrome ? "text-gray-400" : "text-[#999]"}`}>
+                总耗时 {editTotalTime}s
+              </div>
+            )}
+          </div>
+        ) : null}
+        {/* ★ LLM自动区域识别 - 非阻塞内联卡片，嵌入结果框底部 */}
             {pendingAutoRegions.length > 0 && (
               <div className={`${isMonochrome ? "bg-gray-50 border border-gray-300" : "bg-[#1a1a1a] border border-white/[0.08]"} rounded-lg p-2.5 mt-2`}>
                 <div className="flex items-center justify-between mb-1.5">

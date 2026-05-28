@@ -9,6 +9,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useProgressTimer } from '@/hooks/useProgressTimer';
 import {
   X, GripVertical, Layers, Image as ImageIcon, Sparkles, FileImage,
   Upload, RotateCcw, Eye, EyeOff, ChevronDown, ChevronRight,
@@ -257,6 +258,9 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
   const [currentStep, setCurrentStep] = useState(0); // 0-3: planning/preview/layers/export
   const [layerProgress, setLayerProgress] = useState({ done: 0, total: 0 });
 
+  // === Progress timer ===
+  const { elapsed, totalTime, startTimer, stopTimer, resetTimer, formatTime } = useProgressTimer();
+
   // === Right panel state ===
   const [rightTab, setRightTab] = useState<'layers' | 'report'>('layers');
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -356,9 +360,11 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
           // Update step based on status
           if (data.task.status === 'success' || data.task.status === 'completed') {
             setIsGenerating(false);
+            stopTimer();
             setCurrentStep(3);
           } else if (data.task.status === 'failed') {
             setIsGenerating(false);
+            stopTimer();
             setError(data.task.error || '任务失败');
           } else {
             // Map progress to step
@@ -425,6 +431,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
     setCurrentStep(0);
     setTaskData(null);
     setLayerProgress({ done: 0, total: 0 });
+    startTimer();
 
     try {
       const res = await fetch('/api/ai-psd/create', {
@@ -466,10 +473,12 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
       } else {
         setError(data.error || '创建任务失败');
         setIsGenerating(false);
+        stopTimer();
       }
     } catch (err) {
       setError('网络错误');
       setIsGenerating(false);
+      stopTimer();
     }
   }, [prompt, title, subtitle, slogan, aspectRatio, customWidth, customHeight, usageType,
     styleDirections, colorTendency, customColors, layerComplexity, outputQuality, textLayerMode,
@@ -487,6 +496,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
       });
     } catch { /* ignore */ }
     setIsGenerating(false);
+    stopTimer();
     setTaskData(null);
     setTaskId('');
   }, [taskId]);
@@ -498,6 +508,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
     setIsGenerating(false);
     setCurrentStep(0);
     setError('');
+    resetTimer();
   }, []);
 
   // ─── Download handler ──────────────────────────────────────
@@ -1010,13 +1021,28 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
           <div className="mb-3">
             <div className="flex items-center justify-between text-xs mb-1">
               <span className="text-gray-400">{taskData?.label || '处理中...'}</span>
-              <span className="text-[#d4af37]">{taskData?.progress || 0}%</span>
+              <div className="flex items-center gap-2">
+                {elapsedTime > 0 && (
+                  <span className="text-gray-500">已用 {formatTime(elapsedTime)}</span>
+                )}
+                <span className="text-[#d4af37]">{taskData?.progress || 0}%</span>
+              </div>
             </div>
             <div className="h-2 bg-white/[0.06] rounded-full overflow-hidden">
               <div className="h-full bg-gradient-to-r from-[#d4af37] to-[#e5c44a] rounded-full transition-all duration-500"
                 style={{ width: `${taskData?.progress || 0}%` }} />
             </div>
           </div>
+
+          {/* Cancel button */}
+          {taskId && (
+            <button
+              onClick={handleCancel}
+              className="mb-3 w-full py-1.5 text-xs text-gray-400 hover:text-red-400 border border-white/[0.08] hover:border-red-400/30 rounded transition-colors"
+            >
+              取消任务
+            </button>
+          )
 
           {/* Layer progress */}
           {currentStep === 2 && layerProgress.total > 0 && (
@@ -1050,6 +1076,9 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
           <div className="flex items-center gap-2 mb-3">
             <Check className="w-4 h-4 text-green-400" />
             <span className="text-xs text-green-400">生成完成</span>
+            {totalTime > 0 && (
+              <span className="text-xs text-gray-500 ml-auto">总耗时 {formatTime(totalTime)}</span>
+            )}
           </div>
           {taskData?.previewUrl ? (
             <div className="flex-1 flex items-center justify-center bg-black/20 rounded-lg overflow-hidden relative">

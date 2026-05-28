@@ -7,6 +7,7 @@ import {
   Check, Shuffle, Trash2, Clock, Plus, GripVertical, Minus, PenTool,
   Palette, Zap, Search, List, Grid3X3, Maximize2,
 } from 'lucide-react';
+import { useProgressTimer } from '@/hooks/useProgressTimer';
 
 interface StyleSubCategory { id: string; name: string; prompt: string; }
 interface StyleCategory { id: string; name: string; subStyles: StyleSubCategory[]; }
@@ -106,6 +107,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const { elapsedTime: imageElapsedTime, totalTime: imageTotalTime, startTimer: startImageTimer, stopTimer: stopImageTimer, resetTimer: resetImageTimer, formatTime: formatImageTime } = useProgressTimer();
   // Gallery state
   const [galleryLoading, setGalleryLoading] = useState(false);
   const [galleryItems, setGalleryItems] = useState<GalleryDataItem[]>([]);
@@ -241,7 +243,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     const poll = async () => {
       const taskIds = Array.from(activeTasksRef.current.keys());
       if (taskIds.length === 0) {
-        setIsGeneratingImage(false);
+        setIsGeneratingImage(false); stopImageTimer();
         pollingTimerRef.current = null;
         return;
       }
@@ -278,7 +280,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       if (activeTasksRef.current.size > 0) {
         pollingTimerRef.current = setTimeout(poll, 3000);
       } else {
-        setIsGeneratingImage(false);
+        setIsGeneratingImage(false); stopImageTimer();
         pollingTimerRef.current = null;
       }
     };
@@ -295,7 +297,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   }, []);
 
   // Cleanup on unmount
-  useEffect(() => { return () => { stopPolling(); setIsGeneratingImage(false); }; }, [stopPolling]);
+  useEffect(() => { return () => { stopPolling(); setIsGeneratingImage(false); stopImageTimer(); }; }, [stopPolling]);
 
   const handleRandomExample = useCallback(() => {
     setText(RANDOM_EXAMPLES[Math.floor(Math.random() * RANDOM_EXAMPLES.length)]);
@@ -387,6 +389,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     if (!text.trim()) return;
     stopPolling();
     setIsGeneratingImage(true);
+    startImageTimer();
     setGeneratedImages([]);
     setActiveTab('images');
     try {
@@ -401,18 +404,18 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
         }),
       });
       const data = await res.json();
-      if (data.error) { showToast(data.error); setIsGeneratingImage(false); return; }
+      if (data.error) { showToast(data.error); setIsGeneratingImage(false); stopImageTimer(); return; }
       if (data.taskId) {
         activeTasksRef.current.set(data.taskId, { planIndex: 0, variant: 0, planTitle: mode === 'black-on-white' ? '黑底白字' : mode === 'transparent-logo' ? '透明Logo' : '完整版' });
         startPolling();
       } else {
-        setIsGeneratingImage(false);
+        setIsGeneratingImage(false); stopImageTimer();
       }
       if (data.prompt) {
         setPrompts(prev => prev ? { ...prev, prompt: data.prompt } : { prompt: data.prompt, shortPrompt: '', enhancedPrompt: '', blackOnWhitePrompt: '', transparentLogoPrompt: '' });
       }
       setHistory(prev => [{ id: `h-${Date.now()}`, text, scene, style: secondaryStyle || primaryStyleCategory, prompt: data.prompt || '', createdAt: new Date().toLocaleString() }, ...prev]);
-    } catch { showToast('生成图片失败'); setIsGeneratingImage(false); }
+    } catch { showToast('生成图片失败'); setIsGeneratingImage(false); stopImageTimer(); }
   }, [text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast, stopPolling, startPolling]);
 
   /** Generate 2 variant images for a single design plan */
@@ -420,6 +423,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     if (!text.trim()) return;
     stopPolling();
     setIsGeneratingImage(true);
+    startImageTimer();
     setGeneratedImages([]);
     setActiveTab('images');
     const stylePrefix = buildStyleEnforcementPrefix();
@@ -452,10 +456,10 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       if (activeTasksRef.current.size > 0) {
         startPolling();
       } else {
-        setIsGeneratingImage(false);
+        setIsGeneratingImage(false); stopImageTimer();
       }
       setHistory(prev => [{ id: `h-${Date.now()}`, text, scene, style: plan.title || secondaryStyle || primaryStyleCategory, prompt: plan.prompt || '', createdAt: new Date().toLocaleString() }, ...prev]);
-    } catch { showToast('生成图片失败'); setIsGeneratingImage(false); }
+    } catch { showToast('生成图片失败'); setIsGeneratingImage(false); stopImageTimer(); }
   }, [text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast, stopPolling, startPolling, buildStyleEnforcementPrefix]);
 
   /** Generate 2 varied images per plan × 4 plans = 8 different images total */
@@ -463,6 +467,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     if (plans.length === 0) { showToast('请先生成设计方案'); return; }
     stopPolling();
     setIsGeneratingImage(true);
+    startImageTimer();
     setGeneratedImages([]);
     setActiveTab('images');
     const stylePrefix = buildStyleEnforcementPrefix();
@@ -498,10 +503,10 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       if (activeTasksRef.current.size > 0) {
         startPolling();
       } else {
-        setIsGeneratingImage(false);
+        setIsGeneratingImage(false); stopImageTimer();
       }
       setHistory(prev => [...plans.map((plan, i) => ({ id: `h-${Date.now()}-${i}`, text, scene, style: plan.title || secondaryStyle || primaryStyleCategory, prompt: plan.prompt || '', createdAt: new Date().toLocaleString() })), ...prev]);
-    } catch { showToast('生成图片失败'); setIsGeneratingImage(false); }
+    } catch { showToast('生成图片失败'); setIsGeneratingImage(false); stopImageTimer(); }
   }, [plans, text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast, stopPolling, startPolling, buildStyleEnforcementPrefix]);
 
   /** Black-on-white test: 2 images per plan × 4 plans = 8 different images */
@@ -509,6 +514,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     if (plans.length === 0) { showToast('请先生成字体方案'); return; }
     stopPolling();
     setIsGeneratingImage(true);
+    startImageTimer();
     setGeneratedImages([]);
     setActiveTab('images');
     const stylePrefix = buildStyleEnforcementPrefix();
@@ -536,8 +542,8 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
           }
         }
       }
-      if (activeTasksRef.current.size > 0) { startPolling(); } else { setIsGeneratingImage(false); }
-    } catch { showToast('黑底白字测试失败'); setIsGeneratingImage(false); }
+      if (activeTasksRef.current.size > 0) { startPolling(); } else { setIsGeneratingImage(false); stopImageTimer(); }
+    } catch { showToast('黑底白字测试失败'); setIsGeneratingImage(false); stopImageTimer(); }
   }, [plans, text, scene, primaryStyleCategory, secondaryStyle, ratio, selectedModel, showToast, stopPolling, startPolling, buildStyleEnforcementPrefix]);
 
   const handleAddToCanvas = useCallback((url: string) => { onAddImages?.([url]); }, [onAddImages]);
@@ -631,7 +637,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
         }
       }).catch(err => {
         console.error('灵感同款生成失败:', err);
-        if (vIdx === 1) setIsGeneratingImage(false);
+        if (vIdx === 1) { setIsGeneratingImage(false); stopImageTimer(); }
       });
     }
   }, [inspirationKeywords, isGeneratingImage, inspirationRef, text, ratio, primaryStyleCategory, startPolling, showToast]);
@@ -1431,10 +1437,40 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                     <div className="text-center py-12">
                       <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" style={{ color: accentColor }} />
                       <p className="text-sm" style={{ color: subTextColor }}>正在生成字体设计图片，请耐心等待...</p>
-                      <p className="text-xs mt-1" style={{ color: subTextColor }}>通常需要15-60秒</p>
+                      <div className="flex items-center justify-center gap-3 mt-1">
+                        <p className="text-xs" style={{ color: subTextColor }}>通常需要15-60秒</p>
+                        {imageElapsedTime > 0 && (
+                          <span className="text-xs" style={{ color: subTextColor }}>· 已用 {formatImageTime(imageElapsedTime)}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-center gap-2 mt-3">
+                        <button
+                          onClick={async () => {
+                            // Cancel all active tasks
+                            const taskIds = Array.from(activeTasksRef.current.keys());
+                            for (const tid of taskIds) {
+                              try {
+                                await fetch('/api/cancel-task', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: tid }) });
+                              } catch { /* ignore */ }
+                            }
+                            stopPolling();
+                            setIsGeneratingImage(false);
+                            stopImageTimer();
+                          }}
+                          className="text-xs px-3 py-1 rounded transition-colors cursor-pointer"
+                          style={{ color: subTextColor, border: `1px solid ${borderColor}` }}
+                        >
+                          取消生成
+                        </button>
+                      </div>
                     </div>
                   )}
                   {/* Group images by plan */}
+                  {generatedImages.length > 0 && imageTotalTime > 0 && (
+                    <div className="text-xs text-right mb-2" style={{ color: subTextColor }}>
+                      总耗时 {formatImageTime(imageTotalTime)}
+                    </div>
+                  )}
                   {(() => {
                     const grouped = new Map<number, GeneratedImage[]>();
                     generatedImages.forEach(img => {

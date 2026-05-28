@@ -15,6 +15,7 @@ import {
   ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS,
   findModelConfig as sharedFindModelConfig,
 } from '@/lib/canvas-generation-group';
+import { useProgressTimer } from '@/hooks/useProgressTimer';
 
 /* ─── types ─── */
 interface ImageModel {
@@ -96,6 +97,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   const [models, setModels] = useState<ImageModel[]>([]);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const { elapsedTime, totalTime, startTimer, stopTimer, resetTimer, formatTime } = useProgressTimer();
   const [progress, setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
   const [results, setResults] = useState<RefineResult[]>([]);
@@ -180,6 +182,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   // ─── Switch tab when image is first uploaded (not when user manually navigates) ───
   const switchToSettingsRef = useRef(false);
   const pollAttemptRef = useRef(0);
+  const currentTaskIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (switchToSettingsRef.current && sourceImage) {
       setActiveTab('settings');
@@ -281,6 +284,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   const handleRefine = async () => {
     if (!sourceImage || !selectedModel) return;
     setIsProcessing(true);
+    startTimer();
     setProgress(10);
     setProgressLabel('提交任务...');
     setResults([]);
@@ -330,6 +334,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         console.error('[refine-engine-panel] API error:', data.error);
         setProgressLabel('精修失败: ' + data.error);
         setIsProcessing(false);
+        stopTimer();
         return;
       }
 
@@ -342,6 +347,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         const label = refineMode === 'expert' ? '专家精修' : '标准精修';
         setResults(directUrls.map((url: string) => ({ imageUrl: url, label })));
         setIsProcessing(false);
+        stopTimer();
         return;
       }
 
@@ -350,6 +356,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         console.error('[refine-engine-panel] Sync mode returned success but no images');
         setProgressLabel('精修完成但未返回图片');
         setIsProcessing(false);
+        stopTimer();
         return;
       }
 
@@ -357,6 +364,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
       if (data.taskId) {
         console.log('[refine-engine-panel] No directImageUrls, falling back to poll mode with taskId:', data.taskId);
         setProgressLabel('精修处理中...');
+        currentTaskIdRef.current = data.taskId;
         pollAttemptRef.current = 0;
         setProgress(30);
         const pollInterval = setInterval(async () => {
@@ -366,6 +374,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
             clearInterval(pollInterval);
             setProgressLabel('超时，请重试');
             setIsProcessing(false);
+            stopTimer();
             return;
           }
           try {
@@ -401,15 +410,18 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                 setProgressLabel('精修完成但未获取到图片');
               }
               setIsProcessing(false);
+              stopTimer();
             } else if (pollData.status === 'failed') {
               clearInterval(pollInterval);
               setProgressLabel(pollData.error || '精修失败');
               setIsProcessing(false);
+              stopTimer();
               setResults([]);
             } else if (pollData.status === 'cancelled') {
               clearInterval(pollInterval);
               setProgressLabel('任务已取消');
               setIsProcessing(false);
+              stopTimer();
               setResults([]);
             } else {
               // Still processing — update progress but don't stop polling
@@ -429,6 +441,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         console.error('[refine-engine-panel] Unexpected response:', data);
         setProgressLabel('精修失败：未知响应');
         setIsProcessing(false);
+        stopTimer();
       }
     } catch (err) {
       console.error('Refine failed:', err);
@@ -438,6 +451,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         setProgressLabel('精修失败，请重试');
       }
       setIsProcessing(false);
+      stopTimer();
     }
   };
 
@@ -1187,12 +1201,37 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                   />
                 </div>
                 <span className="text-[11px] font-mono" style={{ color: textMutedColor }}>{progress}%</span>
+                {elapsedTime > 0 && (
+                  <span className="text-[11px]" style={{ color: textMutedColor }}>已用 {formatTime(elapsedTime)}</span>
+                )}
+                <button
+                  onClick={async () => {
+                    if (currentTaskIdRef.current) {
+                      try {
+                        await fetch('/api/cancel-task', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: currentTaskIdRef.current }) });
+                      } catch { /* ignore */ }
+                      currentTaskIdRef.current = null;
+                    }
+                    setIsProcessing(false);
+                    stopTimer();
+                    setProgressLabel('已取消');
+                  }}
+                  className="text-[11px] px-2 py-0.5 rounded transition-colors cursor-pointer"
+                  style={{ color: textMutedColor, border: `1px solid ${borderColor}` }}
+                >
+                  取消
+                </button>
               </div>
             ) : results.length > 0 ? (
               /* ── Results: aspect-ratio-matched image frames ── */
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs" style={{ color: textSubColor }}>精修完成 · {results.length} 张</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs" style={{ color: textSubColor }}>精修完成 · {results.length} 张</span>
+                    {totalTime > 0 && (
+                      <span className="text-[11px]" style={{ color: textMutedColor }}>总耗时 {formatTime(totalTime)}</span>
+                    )}
+                  </div>
                   <button
                     onClick={handleRefine}
                     className="text-[11px] flex items-center gap-1 transition-colors"

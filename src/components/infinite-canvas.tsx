@@ -6893,6 +6893,14 @@ export function InfiniteCanvas({
                         <div className="w-3/4 h-1.5 rounded-full overflow-hidden" style={{ background: `${accentColor}22` }}>
                           <div className="h-full rounded-full transition-all duration-300" style={{ width: `${group.resultPlaceholder.progress || 0}%`, background: accentColor }} />
                         </div>
+                        {/* Cancel button */}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); removeProcessingFrame(group.resultPlaceholder.id); }}
+                          className="mt-1 px-3 py-1 text-xs rounded-md transition-colors hover:opacity-80"
+                          style={{ background: `${accentColor}33`, color: accentColor }}
+                        >
+                          取消
+                        </button>
                       </>
                     ) : group.resultPlaceholder.errorMsg ? (
                       <>

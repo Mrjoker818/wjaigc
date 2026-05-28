@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { X, GripVertical, RefreshCw, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle, ImagePlus, Minus, Zap } from 'lucide-react';
+import { X, GripVertical, RefreshCw, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle, ImagePlus, Minus, Zap, Timer, Clock } from 'lucide-react';
+import { useProgressTimer } from '@/hooks/useProgressTimer';
 
 interface AgentEditorProps {
   imageUrl?: string;
@@ -56,6 +57,7 @@ export function AgentEditor({
   const [resultImageUrl, setResultImageUrl] = useState('');
   const [resultPrompt, setResultPrompt] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
+  const { elapsed, formatted: elapsedFormatted, start: startTimer, stop: stopTimer, reset: resetTimer } = useProgressTimer();
 
   // 拖动状态
   const [position, setPosition] = useState(() => {
@@ -124,7 +126,8 @@ export function AgentEditor({
       if (pollAttempts.current > 180) {
         // 180 * 2s = 360s = 6 分钟超时（留余量给后端 5 分钟全局超时）
         if (pollInterval.current) clearInterval(pollInterval.current);
-        setIsProcessing(false);
+        stopTimer();
+        setIsProcessing(false); stopTimer();
         setError('任务超时，请重试');
         return;
       }
@@ -153,7 +156,8 @@ export function AgentEditor({
 
         if (status === 'completed') {
           if (pollInterval.current) clearInterval(pollInterval.current);
-          setIsProcessing(false);
+          stopTimer();
+          setIsProcessing(false); stopTimer();
           setProgress(100);
           setProgressLabel('完成');
 
@@ -175,13 +179,13 @@ export function AgentEditor({
           }
         } else if (status === 'failed') {
           if (pollInterval.current) clearInterval(pollInterval.current);
-          setIsProcessing(false);
+          setIsProcessing(false); stopTimer();
           // 优先使用 result.finalResponse，它包含更详细的错误描述
           const errorMsg = taskError || (result?.finalResponse ? String(result.finalResponse) : '') || '任务执行失败';
           setError(errorMsg);
         } else if (status === 'cancelled') {
           if (pollInterval.current) clearInterval(pollInterval.current);
-          setIsProcessing(false);
+          setIsProcessing(false); stopTimer();
           setError('任务已取消');
         }
       } catch {
@@ -208,6 +212,7 @@ export function AgentEditor({
     setSteps([]);
     setResultImageUrl('');
     setResultPrompt('');
+    startTimer();
     setTaskId(null);
 
     try {
@@ -245,7 +250,7 @@ export function AgentEditor({
           if (result.imageUrl) setResultImageUrl(String(result.imageUrl));
           if (result.prompt) setResultPrompt(String(result.prompt));
         }
-        setIsProcessing(false);
+        setIsProcessing(false); stopTimer();
         setProgress(100);
       }
     } catch (err) {
@@ -471,6 +476,11 @@ export function AgentEditor({
                 {progressLabel}
               </p>
             )}
+            <div className="flex items-center justify-between mt-0.5">
+              <span className="text-xs" style={{ color: mutedColor }}>
+                {isProcessing ? elapsedStr : (totalTime !== null ? `总耗时 ${totalTime}` : '')}
+              </span>
+            </div>
           </div>
         )}
 

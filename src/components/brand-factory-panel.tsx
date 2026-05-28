@@ -9,6 +9,7 @@ import {
   Zap, RefreshCw, Save, BookOpen, Users, PenTool, Type,
   Cpu, MessageCircle
 } from 'lucide-react';
+import { useProgressTimer } from '@/hooks/useProgressTimer';
 
 /* ========== TYPES ========== */
 interface BrandProject {
@@ -430,6 +431,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
   const [projects, setProjects] = useState<BrandProject[]>([]);
   const [currentProject, setCurrentProject] = useState<BrandProject | null>(null);
   const [loading, setLoading] = useState(false);
+  const { elapsedTime: apiElapsedTime, totalTime: apiTotalTime, startTimer: startApiTimer, stopTimer: stopApiTimer, resetTimer: resetApiTimer, formatTime: formatApiTime } = useProgressTimer();
   const [error, setError] = useState('');
 
   // === Model selection ===
@@ -609,6 +611,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
   // === API calls (pass model info) ===
   const apiCall = async (action: string, body: Record<string, unknown> = {}) => {
     setLoading(true);
+    startApiTimer();
     setError('');
     try {
       const res = await fetch('/api/brand-factory', {
@@ -625,6 +628,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages: _onAddImages }
       return null;
     } finally {
       setLoading(false);
+      stopApiTimer();
     }
   };
 

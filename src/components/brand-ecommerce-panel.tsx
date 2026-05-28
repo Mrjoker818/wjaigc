@@ -7,6 +7,7 @@ import { type TemplateFieldValues } from './brand-ecommerce/template-fields';
 import { BrandSettingsForm } from './brand-ecommerce/BrandSettingsForm';
 import { BrandResultGallery, type GenerateResult } from './brand-ecommerce/BrandResultGallery';
 import { BrandAssetManager, type BrandAssetData } from './brand-ecommerce/BrandAssetManager';
+import { useProgressTimer } from '@/hooks/useProgressTimer';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -87,6 +88,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   const [productConsistencyStrength, setProductConsistencyStrength] = useState(60);
   const [templateFieldValues, setTemplateFieldValues] = useState<Record<string, Record<string, string>>>({});
   const [isGenerating, setIsGenerating] = useState(false);
+  const { elapsedTime, totalTime, startTimer, stopTimer, resetTimer, formatTime } = useProgressTimer();
   const [isAssisting, setIsAssisting] = useState(false);
   const [assistError, setAssistError] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -296,6 +298,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       return;
     }
     setIsGenerating(true);
+    startTimer();
     setResults([]);
     setProgress(0);
     setActiveTab('results');
@@ -335,6 +338,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         console.error('[brand-ecommerce-panel] HTTP error:', resp.status, errText);
         setResults([{ templateId: 'error', templateName: '生成失败', error: `HTTP ${resp.status}: ${errText.slice(0, 200)}` }]);
         setIsGenerating(false);
+        stopTimer();
         return;
       }
 
@@ -344,12 +348,14 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       } catch {
         setResults([{ templateId: 'error', templateName: '生成失败', error: '响应解析失败' }]);
         setIsGenerating(false);
+        stopTimer();
         return;
       }
 
       if (data.error) {
         setResults([{ templateId: 'error', templateName: '生成失败', error: String(data.error) }]);
         setIsGenerating(false);
+        stopTimer();
         return;
       }
 
@@ -358,6 +364,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       if (syncResults && syncResults.length > 0) {
         setResults(syncResults);
         setIsGenerating(false);
+        stopTimer();
         return;
       }
 
@@ -372,6 +379,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           if (pollAttempts >= maxPollAttempts) {
             setResults(prev => prev.length ? prev : [{ templateId: 'error', templateName: '生成失败', error: '轮询超时' }]);
             setIsGenerating(false);
+            stopTimer();
             setTaskId(null);
             return;
           }
@@ -398,12 +406,14 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
             if (pollData.status === 'completed' && pollData.result?.results) {
               setResults(pollData.result.results);
               setIsGenerating(false);
+              stopTimer();
               setTaskId(null);
               return;
             }
             if (pollData.status === 'failed' || pollData.status === 'cancelled') {
               setResults(prev => prev.length ? prev : [{ templateId: 'error', templateName: '生成失败', error: pollData.error || '任务失败' }]);
               setIsGenerating(false);
+              stopTimer();
               setTaskId(null);
               return;
             }
@@ -418,11 +428,13 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       } else {
         setResults([{ templateId: 'error', templateName: '生成失败', error: 'API返回格式异常' }]);
         setIsGenerating(false);
+        stopTimer();
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '网络错误';
       setResults([{ templateId: 'error', templateName: '生成失败', error: msg }]);
       setIsGenerating(false);
+      stopTimer();
     }
   }, [selectedTemplates, productDesc, styleExtra, sceneDesc, selectedModel, refImage, brandColors, productImage]);
 
@@ -449,6 +461,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       setTaskId(null);
     }
     setIsGenerating(false);
+    stopTimer();
   }, [taskId]);
 
   // ─── Regenerate single template ──────────────────────────────
@@ -460,6 +473,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
     if (!selectedModel || !productDesc.trim()) return;
 
     setIsGenerating(true);
+    startTimer();
     setProgress(0);
     setProgressLabel('重新生成...');
 
@@ -494,10 +508,12 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
               if (pd.status === 'completed' && pd.result?.results) {
                 setResults(prev => [...prev.filter(r => r.templateId !== templateId), ...pd.result.results]);
                 setIsGenerating(false);
+                stopTimer();
                 return;
               }
               if (pd.status === 'failed' || pd.status === 'cancelled') {
                 setIsGenerating(false);
+                stopTimer();
                 return;
               }
               setTimeout(poll, 3000);
@@ -506,7 +522,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           setTimeout(poll, 2000);
         }
       })
-      .catch(() => setIsGenerating(false));
+      .catch(() => { setIsGenerating(false); stopTimer(); });
   }, [selectedModel, productDesc, styleExtra, sceneDesc, refImage, productImage, brandColors]);
 
   // ─── AI Assist ────────────────────────────────────────────────
@@ -833,6 +849,9 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
               onAddToCanvas={handleAddToCanvas}
               onRegenerateTemplate={handleRegenerateTemplate}
               isMonochrome={isMonochrome}
+              elapsedTime={elapsedTime}
+              totalTime={totalTime}
+              formatTime={formatTime}
             />
           )}
         </div>
