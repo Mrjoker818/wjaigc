@@ -1,215 +1,762 @@
 'use client';
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
-  Workflow, WorkflowNode, WorkflowConnection, NodeType, NodeCategory, PortType,
+  WorkflowNode, WorkflowConnection, Workflow as WorkflowData, NodeType, NodeCategory,
   NODE_TYPE_COLORS, NODE_TYPE_LABELS, NODE_TYPE_ICONS, NODE_CATEGORY_LABELS,
-  getNodeCategory, createWorkflowNode, createConnection, createEmptyWorkflow,
-  NODE_TEMPLATES, PORT_COLORS, getNodePropertyFields, PropertyField,
-  createDemoWorkflow,
+  PORT_COLORS, NodePort, PortType, PropertyField,
+  createWorkflowNode, createConnection, createEmptyWorkflow, createDemoWorkflow,
+  getNodePropertyFields, getNodeCategory, NODE_TEMPLATES,
 } from '@/lib/workflow-engine';
+import {
+  Image, Type, SlidersHorizontal, Wand2, Pencil, Maximize, Scissors,
+  PenTool, Palette, Sun, GitBranch, GitMerge, Repeat, RefreshCw, Layers,
+  Bot, MessageSquare, ImageDown, Save, Download, Play, Square,
+  ChevronRight, ChevronDown, Plus, Trash2, ZoomIn, ZoomOut, RotateCcw,
+  Settings, Upload, X, Check, AlertCircle, Loader2, BoxSelect, Group,
+  Search, ScanSearch, Eye, Pause, SkipForward, Workflow as WorkflowIcon, Timer,
+  ArrowLeft, LayoutGrid,
+} from 'lucide-react';
 
-// ==================== 图标组件 ====================
+// ==================== 图标映射 ====================
 
-function NodeIcon({ type, size = 16 }: { type: NodeType; size?: number }) {
-  const cat = getNodeCategory(type);
-  const color = NODE_TYPE_COLORS[cat];
+const ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
+  Image, Type, SlidersHorizontal, Wand2, Pencil, Maximize, Scissors,
+  PenTool, Palette, Sun, GitBranch, GitMerge, Repeat, RefreshCw, Layers,
+  Bot, MessageSquare, ImageDown, Save, Download, BoxSelect, Group,
+  ScanSearch,
+};
+
+function getNodeIcon(type: NodeType, size = 14, className = '') {
   const iconName = NODE_TYPE_ICONS[type];
+  const IconComp = ICON_MAP[iconName] || Settings;
+  return <IconComp size={size} className={className} />;
+}
 
-  const iconPaths: Record<string, string> = {
-    'Image': 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l2-2 4 4 2-2 5 5M14 2H5a2 2 0 0 0-2 2v10l5-5 3 3 3-3 5 5',
-    'Type': 'M4 7V4h16v3M9 20h6M12 4v16',
-    'SlidersHorizontal': 'M21 4H14M10 4H3M21 12H12M8 12H3M21 20H16M12 20H3M14 2v4M8 10v4M16 18v4',
-    'Wand2': 'M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8L19 13M17.8 6.2L19 5M12.2 11.8L11 13M12.2 6.2L11 5M9 20l3-3 3 3M12 17v4',
-    'Pencil': 'M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z',
-    'Maximize': 'M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7',
-    'Scissors': 'M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM20 4 8.6 15.4M14.5 14.5 20 20M8.6 8.6l5.9 5.9',
-    'PenTool': 'M12 19l7-7 3 3-7 7-3-3z M5 2l7 7 M2 5l7 7',
-    'Palette': 'M2 12a10 10 0 1 0 20 0 10 10 0 0 0-20 0ZM8 10a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM11 7a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM16 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM17 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z',
-    'Sun': 'M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z',
-    'GitBranch': 'M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM18 9c0 4-6 6-6 12',
-    'GitMerge': 'M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM6 15c0-3 6-3 6-6',
-    'Repeat': 'M17 2l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3',
-    'RefreshCw': 'M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M1 1h5v5M21 21h-5v-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16',
-    'Layers': 'M12 2L2 7l10 5 10-5-10-5ZM2 17l10 5 10-5M2 12l10 5 10-5',
-    'Bot': 'M12 8V4H8M16 4h-4M12 4V2M8 4v4M16 4v4M6 12h12M6 12v6a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-6M6 12l-2-2M18 12l2-2',
-    'MessageSquare': 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
-    'BoxSelect': 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z',
-    'Group': 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z',
-    'ImageDown': 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l2-2 4 4 2-2 5 5M14 2H5a2 2 0 0 0-2 2v10M21 7l-5 5M16 7h5v5',
-    'Save': 'M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z M17 21v-8H7v8 M7 3v5h8',
-    'Download': 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3',
-  };
+// ==================== 模型列表 Hook ====================
+
+interface ModelOption { id: string; name: string; type: string; provider: string; }
+
+function useModelList() {
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const fetchModels = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/workflow/models?type=all');
+      if (res.ok) {
+        const data = await res.json();
+        setModels(data.models || []);
+      }
+    } catch (e) { console.error('[NodeEditor] 模型列表加载失败:', e); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchModels(); }, [fetchModels]);
+  return { models, loading, fetchModels };
+}
+
+// ==================== 连线临时状态 ====================
+
+interface DraggingConn {
+  fromNodeId: string;
+  fromPortId: string;
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  portType: PortType;
+}
+
+// ==================== 主组件 ====================
+
+interface NodeEditorProps {
+  workflow?: WorkflowData | null;
+  onBack?: () => void;
+  onWorkflowChange?: (wf: WorkflowData | null) => void;
+  onOpenWorkflowHub?: () => void;
+}
+
+export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenWorkflowHub }: NodeEditorProps) {
+  const [wf, setWf] = useState<WorkflowData>(workflow || createDemoWorkflow());
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [draggingNode, setDraggingNode] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [draggingConn, setDraggingConn] = useState<DraggingConn | null>(null);
+  const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 0.8 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0, vx: 0, vy: 0 });
+  const [sidebarTab, setSidebarTab] = useState<'nodes' | 'props'>('nodes');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [executionId, setExecutionId] = useState<string | null>(null);
+  const [execStatus, setExecStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
+  const [execResults, setExecResults] = useState<Record<string, { status: string; output?: Record<string, unknown>; error?: string }>>({});
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [showMinimap, setShowMinimap] = useState(true);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+
+  const svgRef = useRef<SVGSVGElement>(null);
+  const { models, loading: modelsLoading } = useModelList();
+
+  const selectedNode = useMemo(() => wf.nodes.find(n => n.id === selectedNodeId) || null, [wf.nodes, selectedNodeId]);
+
+  // 同步工作流变更到父组件
+  useEffect(() => {
+    onWorkflowChange?.(wf);
+  }, [wf, onWorkflowChange]);
+
+  // ─── 节点操作 ───
+
+  const handleAddNode = useCallback((type: NodeType) => {
+    const node = createWorkflowNode(type, 400 - viewport.x / viewport.zoom, 300 - viewport.y / viewport.zoom);
+    setWf(prev => ({ ...prev, nodes: [...prev.nodes, node] }));
+    setSelectedNodeId(node.id);
+    setSidebarTab('props');
+  }, [viewport]);
+
+  const handleDeleteNode = useCallback((nodeId: string) => {
+    setWf(prev => ({
+      ...prev,
+      nodes: prev.nodes.filter(n => n.id !== nodeId),
+      connections: prev.connections.filter(c => c.fromNodeId !== nodeId && c.toNodeId !== nodeId),
+    }));
+    if (selectedNodeId === nodeId) setSelectedNodeId(null);
+  }, [selectedNodeId]);
+
+  const handleNodeUpdate = useCallback((nodeId: string, updates: Partial<WorkflowNode>) => {
+    setWf(prev => {
+      const nodes = prev.nodes.map(n => {
+        if (n.id !== nodeId) return n;
+        // 需要同时更新到节点顶层属性的字段
+        const topLevelKeys = ['label', 'condition', 'loopCount', 'breakpoint', 'agentRound'];
+        const topLevel: Record<string, unknown> = {};
+        const configUpdates: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(updates)) {
+          if (k === 'config') {
+            Object.assign(configUpdates, v as Record<string, unknown>);
+          } else if (topLevelKeys.includes(k)) {
+            topLevel[k] = v;
+          } else {
+            configUpdates[k] = v;
+          }
+        }
+        const newConfig = { ...n.config, ...configUpdates };
+        // 同步config中的字段到顶层
+        for (const key of topLevelKeys) {
+          if (configUpdates[key] !== undefined) {
+            (topLevel as Record<string, unknown>)[key] = configUpdates[key];
+          }
+        }
+        return { ...n, ...topLevel, config: newConfig };
+      });
+      return { ...prev, nodes };
+    });
+  }, []);
+
+  // ─── 连线操作 ───
+
+  const handlePortMouseDown = useCallback((e: React.MouseEvent, nodeId: string, port: NodePort) => {
+    e.stopPropagation();
+    if (port.direction === 'out') {
+      const svgRect = svgRef.current?.getBoundingClientRect();
+      if (!svgRect) return;
+      const x = (e.clientX - svgRect.left - viewport.x) / viewport.zoom;
+      const y = (e.clientY - svgRect.top - viewport.y) / viewport.zoom;
+      setDraggingConn({ fromNodeId: nodeId, fromPortId: port.id, fromX: x, fromY: y, toX: x, toY: y, portType: port.type });
+    }
+  }, [viewport]);
+
+  const handlePortMouseUp = useCallback((nodeId: string, port: NodePort) => {
+    if (draggingConn && port.direction === 'in' && draggingConn.fromNodeId !== nodeId) {
+      // 检查是否已存在连线
+      const exists = wf.connections.some(c =>
+        c.fromNodeId === draggingConn.fromNodeId && c.toNodeId === nodeId
+      );
+      if (!exists) {
+        const conn = createConnection(draggingConn.fromNodeId, draggingConn.fromPortId, nodeId, port.id, draggingConn.portType);
+        setWf(prev => ({ ...prev, connections: [...prev.connections, conn] }));
+      }
+    }
+    setDraggingConn(null);
+  }, [draggingConn, wf.connections]);
+
+  // ─── 画布操作 ───
+
+  const handleCanvasMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.target === svgRef.current || (e.target as Element).classList.contains('canvas-bg')) {
+      if (e.button === 0) {
+        setSelectedNodeId(null);
+      }
+      if (e.button === 1 || (e.button === 0 && e.altKey)) {
+        setIsPanning(true);
+        setPanStart({ x: e.clientX, y: e.clientY, vx: viewport.x, vy: viewport.y });
+        e.preventDefault();
+      }
+    }
+  }, [viewport]);
+
+  const handleCanvasMouseMove = useCallback((e: React.MouseEvent) => {
+    if (isPanning) {
+      const dx = e.clientX - panStart.x;
+      const dy = e.clientY - panStart.y;
+      setViewport(v => ({ ...v, x: panStart.vx + dx, y: panStart.vy + dy }));
+    }
+    if (draggingConn) {
+      const svgRect = svgRef.current?.getBoundingClientRect();
+      if (svgRect) {
+        const x = (e.clientX - svgRect.left - viewport.x) / viewport.zoom;
+        const y = (e.clientY - svgRect.top - viewport.y) / viewport.zoom;
+        setDraggingConn(prev => prev ? { ...prev, toX: x, toY: y } : null);
+      }
+    }
+    if (draggingNode) {
+      const svgRect = svgRef.current?.getBoundingClientRect();
+      if (svgRect) {
+        const mx = (e.clientX - svgRect.left - viewport.x) / viewport.zoom;
+        const my = (e.clientY - svgRect.top - viewport.y) / viewport.zoom;
+        setWf(prev => ({
+          ...prev,
+          nodes: prev.nodes.map(n => n.id === draggingNode ? { ...n, x: mx - dragOffset.x, y: my - dragOffset.y } : n),
+        }));
+      }
+    }
+  }, [isPanning, panStart, draggingConn, draggingNode, dragOffset, viewport]);
+
+  const handleCanvasMouseUp = useCallback(() => {
+    setIsPanning(false);
+    setDraggingNode(null);
+    if (draggingConn) setDraggingConn(null);
+  }, [draggingConn]);
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 0.92 : 1.08;
+    setViewport(v => {
+      const newZoom = Math.max(0.2, Math.min(3, v.zoom * factor));
+      const svgRect = svgRef.current?.getBoundingClientRect();
+      if (!svgRect) return { ...v, zoom: newZoom };
+      const mx = e.clientX - svgRect.left;
+      const my = e.clientY - svgRect.top;
+      const newX = mx - (mx - v.x) * (newZoom / v.zoom);
+      const newY = my - (my - v.y) * (newZoom / v.zoom);
+      return { x: newX, y: newY, zoom: newZoom };
+    });
+  }, []);
+
+  // ─── 执行工作流 ───
+
+  const handleRunWorkflow = useCallback(async () => {
+    if (wf.nodes.length === 0) return;
+    setExecStatus('running');
+    setExecResults({});
+
+    try {
+      const res = await fetch('/api/workflow/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'start',
+          nodes: wf.nodes,
+          connections: wf.connections,
+        }),
+      });
+      const data = await res.json();
+      if (data.executionId) {
+        setExecutionId(data.executionId);
+        // 开始轮询
+        const pollInterval = setInterval(async () => {
+          try {
+            const statusRes = await fetch('/api/workflow/execute', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'status', executionId: data.executionId }),
+            });
+            const statusData = await statusRes.json();
+            setExecStatus(statusData.status === 'running' ? 'running' : statusData.status);
+            setExecResults(statusData.results || {});
+
+            if (statusData.status !== 'running') {
+              clearInterval(pollInterval);
+            }
+          } catch {
+            clearInterval(pollInterval);
+            setExecStatus('failed');
+          }
+        }, 2000);
+      }
+    } catch (err) {
+      console.error('[NodeEditor] 执行失败:', err);
+      setExecStatus('failed');
+    }
+  }, [wf]);
+
+  const handleStopWorkflow = useCallback(async () => {
+    if (executionId) {
+      await fetch('/api/workflow/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel', executionId }),
+      });
+    }
+    setExecStatus('idle');
+  }, [executionId]);
+
+  // ─── 保存工作流 ───
+
+  const handleSaveWorkflow = useCallback(async () => {
+    setSaveStatus('saving');
+    try {
+      const userId = localStorage.getItem('wujie_user_id') || 'anonymous';
+      const res = await fetch('/api/workflow/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, workflow: { ...wf, updatedAt: Date.now() } }),
+      });
+      setSaveStatus(res.ok ? 'saved' : 'error');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } catch {
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    }
+  }, [wf]);
+
+  // ─── 图片上传 ───
+
+  const handleImageUpload = useCallback(async (nodeId: string, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch('/api/save-image', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.url) {
+        handleNodeUpdate(nodeId, { config: { imageUrl: data.url, source: 'upload' } });
+      }
+    } catch (e) {
+      console.error('[NodeEditor] 图片上传失败:', e);
+    }
+  }, [handleNodeUpdate]);
+
+  // ─── 连线路径计算 ───
+
+  const getConnPath = useCallback((fromX: number, fromY: number, toX: number, toY: number) => {
+    const dx = Math.abs(toX - fromX) * 0.5;
+    return `M ${fromX} ${fromY} C ${fromX + dx} ${fromY}, ${toX - dx} ${toY}, ${toX} ${toY}`;
+  }, []);
+
+  const getPortPosition = useCallback((node: WorkflowNode, port: NodePort) => {
+    const portIndex = node.ports.filter(p => p.direction === port.direction).findIndex(p => p.id === port.id);
+    const total = node.ports.filter(p => p.direction === port.direction).length;
+    if (port.direction === 'in') {
+      return { x: node.x, y: node.y + (portIndex + 1) * (node.height / (total + 1)) };
+    }
+    return { x: node.x + node.width, y: node.y + (portIndex + 1) * (node.height / (total + 1)) };
+  }, []);
+
+  // ─── 过滤节点模板 ───
+
+  const filteredTemplates = useMemo(() => {
+    if (!searchQuery) return NODE_TEMPLATES;
+    const q = searchQuery.toLowerCase();
+    return NODE_TEMPLATES.filter(t => t.label.includes(q) || t.desc.includes(q) || t.type.includes(q));
+  }, [searchQuery]);
+
+  // 按分类分组
+  const groupedTemplates = useMemo(() => {
+    const groups: Record<NodeCategory, typeof NODE_TEMPLATES> = {} as never;
+    for (const t of filteredTemplates) {
+      if (!groups[t.category]) groups[t.category] = [];
+      groups[t.category].push(t);
+    }
+    return groups;
+  }, [filteredTemplates]);
+
+  // ─── 渲染 ───
 
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d={iconPaths[iconName] || iconPaths['BoxSelect']} />
-    </svg>
+    <div className="h-screen w-screen flex bg-[#0d0d0d] text-gray-200 overflow-hidden select-none">
+      {/* 左侧栏: 节点库 + 属性面板 */}
+      <div className="w-[280px] flex flex-col border-r border-gray-800 bg-[#111] flex-shrink-0">
+        {/* 标签切换 */}
+        <div className="flex border-b border-gray-800">
+          <button
+            onClick={() => setSidebarTab('nodes')}
+            className={`flex-1 py-2 text-xs font-medium transition-colors ${sidebarTab === 'nodes' ? 'text-[#d4af37] border-b-2 border-[#d4af37]' : 'text-gray-500 hover:text-gray-300'}`}
+          >
+            节点库
+          </button>
+          <button
+            onClick={() => setSidebarTab('props')}
+            className={`flex-1 py-2 text-xs font-medium transition-colors ${sidebarTab === 'props' ? 'text-[#d4af37] border-b-2 border-[#d4af37]' : 'text-gray-500 hover:text-gray-300'}`}
+          >
+            属性面板
+          </button>
+        </div>
+
+        {sidebarTab === 'nodes' ? (
+          <div className="flex-1 overflow-y-auto">
+            {/* 搜索 */}
+            <div className="p-2 sticky top-0 bg-[#111] z-10">
+              <div className="relative">
+                <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
+                <input
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder="搜索节点..."
+                  className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-7 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
+                />
+              </div>
+            </div>
+
+            {/* 节点分类列表 */}
+            {Object.entries(groupedTemplates).map(([cat, templates]) => (
+              <div key={cat} className="mb-2">
+                <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-500 font-semibold flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: NODE_TYPE_COLORS[cat as NodeCategory] }} />
+                  {NODE_CATEGORY_LABELS[cat as NodeCategory]}
+                </div>
+                {templates.map(t => (
+                  <button
+                    key={t.type}
+                    onClick={() => handleAddNode(t.type)}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-white/5 transition-colors cursor-pointer group"
+                  >
+                    <span className="text-gray-400 group-hover:text-[#d4af37] transition-colors">
+                      {getNodeIcon(t.type, 14)}
+                    </span>
+                    <div className="flex-1 text-left">
+                      <div className="text-gray-300 group-hover:text-white">{t.label}</div>
+                      <div className="text-[10px] text-gray-600">{t.desc}</div>
+                    </div>
+                    <Plus size={12} className="text-gray-600 group-hover:text-[#d4af37] opacity-0 group-hover:opacity-100 transition-all" />
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <PropertyPanel
+            node={selectedNode}
+            models={models}
+            modelsLoading={modelsLoading}
+            onUpdate={handleNodeUpdate}
+            onDelete={handleDeleteNode}
+            onImageUpload={handleImageUpload}
+          />
+        )}
+      </div>
+
+      {/* 主画布 */}
+      <div className="flex-1 relative">
+        {/* 顶部工具栏 */}
+        <div className="absolute top-3 left-3 right-3 z-20 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {onBack && (
+              <button onClick={onBack} className="p-1.5 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer" title="返回画布">
+                <ArrowLeft size={14} />
+              </button>
+            )}
+            <span className="text-sm font-semibold text-[#d4af37]">{wf.name}</span>
+            <span className="text-[10px] text-gray-600">v{wf.version}</span>
+            <span className="text-[10px] text-gray-700">|</span>
+            <span className="text-[10px] text-gray-500">{wf.nodes.length} 节点 · {wf.connections.length} 连线</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button onClick={() => setViewport(v => ({ ...v, zoom: Math.min(3, v.zoom * 1.2) }))} className="p-1.5 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer">
+              <ZoomIn size={14} />
+            </button>
+            <span className="text-[10px] text-gray-500 w-10 text-center">{Math.round(viewport.zoom * 100)}%</span>
+            <button onClick={() => setViewport(v => ({ ...v, zoom: Math.max(0.2, v.zoom * 0.8) }))} className="p-1.5 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer">
+              <ZoomOut size={14} />
+            </button>
+            <button onClick={() => setViewport({ x: 0, y: 0, zoom: 0.8 })} className="p-1.5 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer">
+              <RotateCcw size={14} />
+            </button>
+            <div className="w-px h-4 bg-gray-800 mx-1" />
+            <button onClick={handleSaveWorkflow} disabled={saveStatus === 'saving'} className={`px-3 py-1.5 rounded text-xs font-medium transition-colors cursor-pointer flex items-center gap-1 ${saveStatus === 'saved' ? 'bg-green-900/30 text-green-400' : saveStatus === 'error' ? 'bg-red-900/30 text-red-400' : 'bg-[#1a1a1a] hover:bg-[#222] text-gray-300'}`}>
+              {saveStatus === 'saving' ? <Loader2 size={12} className="animate-spin" /> : saveStatus === 'saved' ? <Check size={12} /> : <Save size={12} />}
+              {saveStatus === 'saving' ? '保存中...' : saveStatus === 'saved' ? '已保存' : '保存'}
+            </button>
+            <button onClick={execStatus === 'running' ? handleStopWorkflow : handleRunWorkflow} className={`px-3 py-1.5 rounded text-xs font-medium transition-colors cursor-pointer flex items-center gap-1 ${execStatus === 'running' ? 'bg-red-900/30 text-red-400 hover:bg-red-900/50' : 'bg-[#d4af37]/20 text-[#d4af37] hover:bg-[#d4af37]/30'}`}>
+              {execStatus === 'running' ? <><Square size={12} /> 停止</> : <><Play size={12} /> 运行</>}
+            </button>
+          </div>
+        </div>
+
+        {/* SVG画布 */}
+        <svg
+          ref={svgRef}
+          className="w-full h-full canvas-bg"
+          onMouseDown={handleCanvasMouseDown}
+          onMouseMove={handleCanvasMouseMove}
+          onMouseUp={handleCanvasMouseUp}
+          onWheel={handleWheel}
+          style={{ cursor: isPanning ? 'grabbing' : draggingConn ? 'crosshair' : 'default' }}
+        >
+          {/* 网格背景 */}
+          <defs>
+            <pattern id="grid" width={20 * viewport.zoom} height={20 * viewport.zoom} patternUnits="userSpaceOnUse" x={viewport.x % (20 * viewport.zoom)} y={viewport.y % (20 * viewport.zoom)}>
+              <circle cx={1} cy={1} r={0.5} fill="#333" />
+            </pattern>
+            <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#555" />
+            </marker>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#grid)" />
+
+          <g transform={`translate(${viewport.x}, ${viewport.y}) scale(${viewport.zoom})`}>
+            {/* 连线 */}
+            {wf.connections.map(conn => {
+              const fromNode = wf.nodes.find(n => n.id === conn.fromNodeId);
+              const toNode = wf.nodes.find(n => n.id === conn.toNodeId);
+              if (!fromNode || !toNode) return null;
+              const fromPort = fromNode.ports.find(p => p.id === conn.fromPortId);
+              const toPort = toNode.ports.find(p => p.id === conn.toPortId);
+              if (!fromPort || !toPort) return null;
+              const from = getPortPosition(fromNode, fromPort);
+              const to = getPortPosition(toNode, toPort);
+              const color = PORT_COLORS[conn.type] || '#555';
+
+              // 检查此连线的源/目标节点是否有执行结果
+              const isRunning = execStatus === 'running' && (execResults[conn.fromNodeId]?.status === 'success' || execResults[conn.toNodeId]);
+
+              return (
+                <g key={conn.id}>
+                  <path
+                    d={getConnPath(from.x, from.y, to.x, to.y)}
+                    fill="none" stroke={color} strokeWidth={2}
+                    strokeOpacity={isRunning ? 1 : 0.5}
+                    markerEnd="url(#arrowhead)"
+                    className={isRunning ? 'animate-pulse' : ''}
+                  />
+                  <path
+                    d={getConnPath(from.x, from.y, to.x, to.y)}
+                    fill="none" stroke="transparent" strokeWidth={10}
+                    onClick={() => setWf(prev => ({ ...prev, connections: prev.connections.filter(c => c.id !== conn.id) }))}
+                    className="cursor-pointer"
+                  />
+                </g>
+              );
+            })}
+
+            {/* 临时连线 */}
+            {draggingConn && (
+              <path
+                d={getConnPath(draggingConn.fromX, draggingConn.fromY, draggingConn.toX, draggingConn.toY)}
+                fill="none" stroke={PORT_COLORS[draggingConn.portType]} strokeWidth={2} strokeDasharray="6 4" strokeOpacity={0.7}
+              />
+            )}
+
+            {/* 节点 */}
+            {wf.nodes.map(node => (
+              <NodeCard
+                key={node.id}
+                node={node}
+                isSelected={selectedNodeId === node.id}
+                execResult={execResults[node.id]}
+                isRunning={execStatus === 'running'}
+                onSelect={() => { setSelectedNodeId(node.id); setSidebarTab('props'); }}
+                onDragStart={(e) => {
+                  const svgRect = svgRef.current?.getBoundingClientRect();
+                  if (!svgRect) return;
+                  const mx = (e.clientX - svgRect.left - viewport.x) / viewport.zoom;
+                  const my = (e.clientY - svgRect.top - viewport.y) / viewport.zoom;
+                  setDraggingNode(node.id);
+                  setDragOffset({ x: mx - node.x, y: my - node.y });
+                }}
+                onPortMouseDown={handlePortMouseDown}
+                onPortMouseUp={handlePortMouseUp}
+                onDelete={() => handleDeleteNode(node.id)}
+                onPreviewImage={(url) => setImagePreviewUrl(url)}
+              />
+            ))}
+          </g>
+        </svg>
+
+        {/* 小地图 */}
+        {showMinimap && (
+          <div className="absolute bottom-3 right-3 w-[160px] h-[100px] bg-[#111]/90 border border-gray-800 rounded overflow-hidden">
+            <svg viewBox="0 0 1200 800" className="w-full h-full">
+              {wf.connections.map(conn => {
+                const from = wf.nodes.find(n => n.id === conn.fromNodeId);
+                const to = wf.nodes.find(n => n.id === conn.toNodeId);
+                if (!from || !to) return null;
+                return <line key={conn.id} x1={from.x + from.width / 2} y1={from.y + from.height / 2} x2={to.x + to.width / 2} y2={to.y + to.height / 2} stroke="#444" strokeWidth={1} />;
+              })}
+              {wf.nodes.map(n => (
+                <rect key={n.id} x={n.x} y={n.y} width={n.width} height={n.height} rx={4}
+                  fill={selectedNodeId === n.id ? '#d4af37' : NODE_TYPE_COLORS[getNodeCategory(n.type)]}
+                  fillOpacity={0.6} stroke="none"
+                />
+              ))}
+            </svg>
+            <button onClick={() => setShowMinimap(false)} className="absolute top-0.5 right-0.5 text-gray-600 hover:text-gray-400 cursor-pointer">
+              <X size={10} />
+            </button>
+          </div>
+        )}
+
+        {/* 执行状态栏 */}
+        {execStatus !== 'idle' && (
+          <div className="absolute bottom-3 left-3 bg-[#111]/95 border border-gray-800 rounded px-3 py-2 flex items-center gap-3 text-xs">
+            {execStatus === 'running' && <Loader2 size={14} className="animate-spin text-[#d4af37]" />}
+            {execStatus === 'completed' && <Check size={14} className="text-green-400" />}
+            {execStatus === 'failed' && <AlertCircle size={14} className="text-red-400" />}
+            <span className={execStatus === 'running' ? 'text-[#d4af37]' : execStatus === 'completed' ? 'text-green-400' : 'text-red-400'}>
+              {execStatus === 'running' ? '执行中...' : execStatus === 'completed' ? '执行完成' : '执行失败'}
+            </span>
+            <span className="text-gray-600">
+              {Object.keys(execResults).length}/{wf.nodes.length} 节点
+            </span>
+            <button onClick={() => { setExecStatus('idle'); setExecResults({}); }} className="text-gray-500 hover:text-gray-300 cursor-pointer">
+              <X size={12} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* 图片预览弹窗 */}
+      {imagePreviewUrl && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center" onClick={() => setImagePreviewUrl(null)}>
+          <div className="relative max-w-[80vw] max-h-[80vh]">
+            <img src={imagePreviewUrl} alt="预览" className="max-w-full max-h-[80vh] rounded shadow-2xl" />
+            <button onClick={() => setImagePreviewUrl(null)} className="absolute -top-2 -right-2 p-1 bg-[#1a1a1a] rounded-full text-gray-400 hover:text-white cursor-pointer">
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
-// ==================== 节点组件 ====================
+// ==================== 节点卡片 ====================
 
 interface NodeCardProps {
   node: WorkflowNode;
   isSelected: boolean;
+  execResult?: { status: string; output?: Record<string, unknown>; error?: string };
   isRunning: boolean;
-  onSelect: (id: string) => void;
-  onDrag: (id: string, dx: number, dy: number) => void;
-  onPortClick: (nodeId: string, portId: string, portType: PortType, direction: 'in' | 'out') => void;
-  onToggleBreakpoint: (id: string) => void;
+  onSelect: () => void;
+  onDragStart: (e: React.MouseEvent) => void;
+  onPortMouseDown: (e: React.MouseEvent, nodeId: string, port: NodePort) => void;
+  onPortMouseUp: (nodeId: string, port: NodePort) => void;
+  onDelete: () => void;
+  onPreviewImage: (url: string) => void;
 }
 
-function NodeCard({ node, isSelected, isRunning, onSelect, onDrag, onPortClick, onToggleBreakpoint }: NodeCardProps) {
+function NodeCard({ node, isSelected, execResult, isRunning, onSelect, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onPreviewImage }: NodeCardProps) {
   const cat = getNodeCategory(node.type);
   const color = NODE_TYPE_COLORS[cat];
+  const inputPorts = node.ports.filter(p => p.direction === 'in');
+  const outputPorts = node.ports.filter(p => p.direction === 'out');
   const isCondition = node.type.startsWith('condition-');
-  const dragRef = useRef<{ startX: number; startY: number; nodeX: number; nodeY: number } | null>(null);
 
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    onSelect(node.id);
-    dragRef.current = { startX: e.clientX, startY: e.clientY, nodeX: node.x, nodeY: node.y };
+  // 执行结果状态颜色
+  const statusColor = execResult?.status === 'success' ? '#22c55e'
+    : execResult?.status === 'failed' ? '#ef4444'
+    : isRunning ? '#d4af37' : 'transparent';
 
-    const handleMouseMove = (ev: MouseEvent) => {
-      if (!dragRef.current) return;
-      const dx = ev.clientX - dragRef.current.startX;
-      const dy = ev.clientY - dragRef.current.startY;
-      onDrag(node.id, dragRef.current.nodeX + dx, dragRef.current.nodeY + dy);
-    };
+  const hasImageOutput = execResult?.output?.imageUrl as string | undefined;
 
-    const handleMouseUp = () => {
-      dragRef.current = null;
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-  }, [node.id, node.x, node.y, onSelect, onDrag]);
-
-  // 条件节点：菱形
-  if (isCondition) {
-    return (
-      <g transform={`translate(${node.x}, ${node.y})`} onMouseDown={handleMouseDown} style={{ cursor: 'grab' }}>
-        <polygon
-          points="55,0 110,55 55,110 0,55"
-          fill="#161b22"
-          stroke={isSelected ? '#d4af37' : isRunning ? color : '#30363d'}
-          strokeWidth={isSelected ? 2.5 : 1.5}
-          style={{ filter: isRunning ? `drop-shadow(0 0 8px ${color})` : isSelected ? 'drop-shadow(0 0 6px #d4af37)' : undefined }}
-        />
-        {node.breakpoint && <circle cx="55" cy="-4" r="5" fill="#f85149" className="animate-pulse" />}
-        <text x="55" y="50" textAnchor="middle" fill={color} fontSize="11" fontWeight="600">{node.label}</text>
-        {node.condition && <text x="55" y="68" textAnchor="middle" fill="#7d8590" fontSize="9">{node.condition}</text>}
-        {/* 端口 */}
-        {node.ports.filter(p => p.direction === 'in').map((port, i) => (
-          <circle key={port.id} cx={0} cy={55} r={5} fill={PORT_COLORS[port.type]} stroke="#0e1117" strokeWidth={1.5}
-            onMouseDown={(e) => { e.stopPropagation(); onPortClick(node.id, port.id, port.type, 'in'); }}
-            style={{ cursor: 'crosshair' }} />
-        ))}
-        {node.ports.filter(p => p.direction === 'out').map((port, i) => {
-          const outPorts = node.ports.filter(p => p.direction === 'out');
-          const angle = -60 + (120 / (outPorts.length - 1 || 1)) * i;
-          const rad = (angle * Math.PI) / 180;
-          const px = 110 + Math.cos(rad) * 5;
-          const py = 55 + Math.sin(rad) * 5;
-          return (
-            <circle key={port.id} cx={px} cy={py} r={5} fill={PORT_COLORS[port.type]} stroke="#0e1117" strokeWidth={1.5}
-              onMouseDown={(e) => { e.stopPropagation(); onPortClick(node.id, port.id, port.type, 'out'); }}
-              style={{ cursor: 'crosshair' }} />
-          );
-        })}
-      </g>
-    );
-  }
-
-  // 常规矩形节点
   return (
-    <g transform={`translate(${node.x}, ${node.y})`} onMouseDown={handleMouseDown} style={{ cursor: 'grab' }}>
-      {/* 选中ring / 运行glow */}
-      {isSelected && <rect x="-4" y="-4" width={node.width + 8} height={node.height + 8} rx="10" fill="none" stroke="#d4af37" strokeWidth="1.5" opacity="0.5" />}
-      {/* 主体 */}
-      <rect
-        width={node.width} height={node.height} rx="8"
-        fill="#161b22"
-        stroke={isRunning ? color : isSelected ? '#d4af37' : '#30363d'}
-        strokeWidth={1.5}
-        style={{ filter: isRunning ? `drop-shadow(0 0 10px ${color})` : isSelected ? 'drop-shadow(0 0 6px #d4af3780)' : undefined }}
+    <g>
+      {/* 选中边框 */}
+      {isSelected && (
+        <rect x={node.x - 2} y={node.y - 2} width={node.width + 4} height={node.height + 4} rx={isCondition ? 55 : 10}
+          fill="none" stroke="#d4af37" strokeWidth={2} strokeDasharray="4 2" className="animate-pulse" />
+      )}
+
+      {/* 节点主体 */}
+      <rect x={node.x} y={node.y} width={node.width} height={node.height} rx={isCondition ? 55 : 8}
+        fill={isSelected ? '#1e1e1e' : '#161616'}
+        stroke={execResult ? statusColor : color}
+        strokeWidth={execResult ? 2 : 1}
+        strokeOpacity={execResult ? 1 : 0.4}
+        onMouseDown={(e) => { e.stopPropagation(); onSelect(); onDragStart(e as unknown as React.MouseEvent); }}
+        className="cursor-move"
       />
-      {/* 顶部色条 */}
-      <rect width={node.width} height="3" rx="8" fill={color} />
-      {/* 断点 */}
-      {node.breakpoint && <circle cx={node.width / 2} cy="-4" r="5" fill="#f85149" className="animate-pulse" />}
-      {/* 图标 + 标签 */}
-      <foreignObject x="10" y="10" width={node.width - 20} height={node.height - 16}>
-        <div className="flex items-center gap-2 h-full">
-          <div className="shrink-0"><NodeIcon type={node.type} size={16} /></div>
-          <span className="text-xs font-medium text-[#e6edf3] truncate">{node.label}</span>
-        </div>
-      </foreignObject>
-      {/* 循环/Agent标记 */}
-      {node.type.startsWith('loop-') && (
-        <circle cx={node.width - 14} cy={node.height - 14} r="10" fill="#f59e0b20" stroke="#f59e0b" strokeWidth="1" />
+
+      {/* 执行成功动画光圈 */}
+      {execResult?.status === 'success' && (
+        <rect x={node.x - 4} y={node.y - 4} width={node.width + 8} height={node.height + 8} rx={isCondition ? 55 : 12}
+          fill="none" stroke="#22c55e" strokeWidth={1} strokeOpacity={0.3} className="animate-ping" />
       )}
-      {node.type.startsWith('agent-') && (
-        <circle cx={node.width - 14} cy={node.height - 14} r="10" fill="#f472b620" stroke="#f472b6" strokeWidth="1" className="animate-pulse" />
+
+      {/* 节点标题区 */}
+      {!isCondition && (
+        <g>
+          {/* 色条 */}
+          <rect x={node.x} y={node.y} width={node.width} height={3} rx={8} fill={color} fillOpacity={0.8} />
+          {/* 图标 */}
+          <foreignObject x={node.x + 8} y={node.y + 10} width={16} height={16}>
+            <div className="flex items-center justify-center" style={{ color }}>{getNodeIcon(node.type, 12)}</div>
+          </foreignObject>
+          {/* 标题 */}
+          <text x={node.x + 28} y={node.y + 22} fill="#ccc" fontSize={11} fontWeight={500} className="pointer-events-none">
+            {node.label.length > 12 ? node.label.slice(0, 12) + '...' : node.label}
+          </text>
+          {/* 图片缩略图 */}
+          {hasImageOutput && (
+            <foreignObject x={node.x + 8} y={node.y + 32} width={node.width - 16} height={node.height - 44}>
+              <div className="w-full h-full relative group cursor-pointer" onClick={() => onPreviewImage(hasImageOutput)}>
+                <img src={hasImageOutput} alt="" className="w-full h-full object-cover rounded opacity-70 group-hover:opacity-100 transition-opacity" />
+              </div>
+            </foreignObject>
+          )}
+        </g>
       )}
+
+      {/* 条件节点: 菱形内文字 */}
+      {isCondition && (
+        <text x={node.x + node.width / 2} y={node.y + node.height / 2 + 4} textAnchor="middle" fill="#ccc" fontSize={10} fontWeight={500}>
+          {node.label.length > 8 ? node.label.slice(0, 8) + '..' : node.label}
+        </text>
+      )}
+
       {/* 输入端口 */}
-      {node.ports.filter(p => p.direction === 'in').map((port, i) => (
-        <g key={port.id} onMouseDown={(e) => { e.stopPropagation(); onPortClick(node.id, port.id, port.type, 'in'); }} style={{ cursor: 'crosshair' }}>
-          <circle cx={0} cy={20 + i * 22} r={5} fill={PORT_COLORS[port.type]} stroke="#0e1117" strokeWidth={1.5} />
-          <text x="10" y={24 + i * 22} fill="#7d8590" fontSize="8">{port.label}</text>
-        </g>
-      ))}
+      {inputPorts.map((port, i) => {
+        const py = node.y + (i + 1) * (node.height / (inputPorts.length + 1));
+        return (
+          <g key={port.id} onMouseUp={() => onPortMouseUp(node.id, port)}>
+            <circle cx={node.x} cy={py} r={5} fill="#161616" stroke={PORT_COLORS[port.type] || '#555'} strokeWidth={1.5} className="cursor-pointer" />
+            <text x={node.x + 8} y={py + 3} fill="#888" fontSize={8} className="pointer-events-none">{port.label}</text>
+          </g>
+        );
+      })}
+
       {/* 输出端口 */}
-      {node.ports.filter(p => p.direction === 'out').map((port, i) => (
-        <g key={port.id} onMouseDown={(e) => { e.stopPropagation(); onPortClick(node.id, port.id, port.type, 'out'); }} style={{ cursor: 'crosshair' }}>
-          <circle cx={node.width} cy={20 + i * 22} r={5} fill={PORT_COLORS[port.type]} stroke="#0e1117" strokeWidth={1.5} />
-          <text x={node.width - 10} y={24 + i * 22} fill="#7d8590" fontSize="8" textAnchor="end">{port.label}</text>
+      {outputPorts.map((port, i) => {
+        const py = node.y + (i + 1) * (node.height / (outputPorts.length + 1));
+        return (
+          <g key={port.id} onMouseDown={(e) => onPortMouseDown(e as unknown as React.MouseEvent, node.id, port)}>
+            <circle cx={node.x + node.width} cy={py} r={5} fill={PORT_COLORS[port.type] || '#555'} stroke="none" className="cursor-pointer hover:r-[7px]" />
+            <text x={node.x + node.width - 8} y={py + 3} fill="#888" fontSize={8} textAnchor="end" className="pointer-events-none">{port.label}</text>
+          </g>
+        );
+      })}
+
+      {/* 断点标记 */}
+      {node.breakpoint && (
+        <circle cx={node.x + node.width - 8} cy={node.y + 8} r={4} fill="#ef4444" />
+      )}
+
+      {/* 删除按钮 (选中时显示) */}
+      {isSelected && (
+        <g onClick={(e) => { e.stopPropagation(); onDelete(); }} className="cursor-pointer">
+          <circle cx={node.x + node.width + 6} cy={node.y - 6} r={8} fill="#1a1a1a" stroke="#555" strokeWidth={1} />
+          <foreignObject x={node.x + node.width + 1} y={node.y - 11} width={12} height={12}>
+            <X size={10} className="text-gray-400 hover:text-red-400" />
+          </foreignObject>
         </g>
-      ))}
-    </g>
-  );
-}
+      )}
 
-// ==================== 连线组件 ====================
-
-interface ConnectionLineProps {
-  conn: WorkflowConnection;
-  nodes: WorkflowNode[];
-  isSelected: boolean;
-  onSelect: (id: string) => void;
-}
-
-function ConnectionLine({ conn, nodes, isSelected, onSelect }: ConnectionLineProps) {
-  const fromNode = nodes.find(n => n.id === conn.fromNodeId);
-  const toNode = nodes.find(n => n.id === conn.toNodeId);
-  if (!fromNode || !toNode) return null;
-
-  // 起点端口坐标
-  const fromPort = fromNode.ports.find(p => p.id === conn.fromPortId);
-  const toPort = toNode.ports.find(p => p.id === conn.toPortId);
-  if (!fromPort || !toPort) return null;
-
-  const fromOutIdx = fromNode.ports.filter(p => p.direction === 'out').findIndex(p => p.id === conn.fromPortId);
-  const toInIdx = toNode.ports.filter(p => p.direction === 'in').findIndex(p => p.id === conn.toPortId);
-
-  const x1 = fromNode.x + (fromNode.type.startsWith('condition-') ? 110 : fromNode.width);
-  const y1 = fromNode.y + (fromNode.type.startsWith('condition-') ? 55 : 20 + fromOutIdx * 22);
-  const x2 = toNode.x;
-  const y2 = toNode.y + 20 + toInIdx * 22;
-
-  const midX = (x1 + x2) / 2;
-  const path = `M${x1},${y1} C${midX},${y1} ${midX},${y2} ${x2},${y2}`;
-
-  return (
-    <g onClick={() => onSelect(conn.id)} style={{ cursor: 'pointer' }}>
-      <path d={path} fill="none" stroke={PORT_COLORS[conn.type]} strokeWidth={isSelected ? 3 : 2}
-        strokeDasharray={conn.type === 'mask' ? '6 3' : undefined} opacity={isSelected ? 1 : 0.7} />
-      {/* 端口圆点 */}
-      <circle cx={x1} cy={y1} r="3" fill={PORT_COLORS[conn.type]} />
-      <circle cx={x2} cy={y2} r="3" fill={PORT_COLORS[conn.type]} />
+      {/* 执行错误提示 */}
+      {execResult?.error && (
+        <foreignObject x={node.x} y={node.y + node.height + 2} width={node.width} height={20}>
+          <div className="text-[9px] text-red-400 truncate px-1">{execResult.error}</div>
+        </foreignObject>
+      )}
     </g>
   );
 }
@@ -218,684 +765,281 @@ function ConnectionLine({ conn, nodes, isSelected, onSelect }: ConnectionLinePro
 
 interface PropertyPanelProps {
   node: WorkflowNode | null;
-  onUpdate: (id: string, updates: Partial<WorkflowNode>) => void;
-  onToggleBreakpoint: (id: string) => void;
+  models: { id: string; name: string; type: string; provider: string }[];
+  modelsLoading: boolean;
+  onUpdate: (nodeId: string, updates: Partial<WorkflowNode>) => void;
+  onDelete: (nodeId: string) => void;
+  onImageUpload: (nodeId: string, file: File) => void;
 }
 
-function PropertyPanel({ node, onUpdate, onToggleBreakpoint }: PropertyPanelProps) {
+function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImageUpload }: PropertyPanelProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({ basic: true, advanced: true });
+
   if (!node) {
     return (
-      <div className="h-full flex items-center justify-center text-[#7d8590] text-sm">
-        选择节点查看属性
+      <div className="flex-1 flex items-center justify-center text-gray-600 text-xs">
+        <div className="text-center">
+          <Settings size={24} className="mx-auto mb-2 opacity-30" />
+          <p>选择节点查看属性</p>
+        </div>
       </div>
     );
   }
 
-  const fields = getNodePropertyFields(node.type);
   const cat = getNodeCategory(node.type);
   const color = NODE_TYPE_COLORS[cat];
+  const fields = getNodePropertyFields(node.type);
 
-  return (
-    <div className="h-full overflow-y-auto p-4 space-y-4">
-      {/* 节点类型标签 */}
-      <div className="flex items-center gap-2 pb-3 border-b border-[#30363d]">
-        <div className="w-7 h-7 rounded-md flex items-center justify-center" style={{ backgroundColor: `${color}20` }}>
-          <NodeIcon type={node.type} size={14} />
-        </div>
-        <div>
-          <p className="text-xs font-medium text-[#e6edf3]">{node.label}</p>
-          <p className="text-[10px] text-[#7d8590]">{NODE_CATEGORY_LABELS[cat]}</p>
-        </div>
-      </div>
+  // 分组字段: basic(前3个) + advanced(其余)
+  const basicFields = fields.slice(0, 3);
+  const advancedFields = fields.slice(3);
 
-      {/* 属性字段 */}
-      {fields.map((field) => (
-        <div key={field.key} className="space-y-1.5">
-          <label className="text-xs text-[#7d8590] font-medium">{field.label}</label>
-          {renderField(field, node, (val) => {
-            // 部分字段需要同步更新到节点顶层属性（而非仅config）
-            const topLevelKey = field.key as 'label' | 'condition' | 'loopCount';
-            const needsTopLevel = ['label', 'condition', 'loopCount'].includes(field.key);
-            const updates: Partial<WorkflowNode> = { config: { [field.key]: val } };
-            if (needsTopLevel) {
-              (updates as Record<string, unknown>)[topLevelKey] = val;
-            }
-            onUpdate(node.id, updates);
-          })}
-        </div>
-      ))}
+  const toggleSection = (key: string) => setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
 
-      {/* 断点 */}
-      <div className="flex items-center justify-between pt-2 border-t border-[#30363d]">
-        <span className="text-xs text-[#7d8590]">调试断点</span>
-        <button onClick={() => onToggleBreakpoint(node.id)}
-          className={`w-8 h-4 rounded-full transition-colors ${node.breakpoint ? 'bg-[#f85149]' : 'bg-[#30363d]'}`}>
-          <div className={`w-3 h-3 rounded-full bg-white transition-transform ${node.breakpoint ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-        </button>
-      </div>
-    </div>
-  );
-}
+  const renderField = (field: PropertyField) => {
+    // 优先从config读取，兼容从顶层属性读取
+    const value = node.config?.[field.key] ?? (node as unknown as Record<string, unknown>)[field.key] ?? field.defaultValue ?? '';
 
-function renderField(field: PropertyField, node: WorkflowNode, onChange: (val: unknown) => void) {
-  // 统一从 config 读取值，部分字段（label/condition/loopCount）也兼容顶层属性
-  const configVal = node.config?.[field.key];
-  // 对于 label/condition/loopCount，如果 config 中没有，尝试从节点顶层读取
-  const topLevelVal = (node as unknown as Record<string, unknown>)[field.key];
-  const rawVal = configVal !== undefined ? configVal : (topLevelVal !== undefined ? topLevelVal : field.defaultValue);
-
-  switch (field.type) {
-    case 'text':
-      return <input type="text" value={String(rawVal ?? '')} onChange={(e) => onChange(e.target.value)}
-        className="w-full bg-[#1c2333] border border-[#30363d] rounded-md px-2.5 py-1.5 text-xs text-[#e6edf3] focus:outline-none focus:ring-1 focus:ring-[#d4af37]/50" />;
-
-    case 'textarea':
-      return <textarea value={String(rawVal ?? '')} onChange={(e) => onChange(e.target.value)} rows={3}
-        className="w-full bg-[#1c2333] border border-[#30363d] rounded-md px-2.5 py-1.5 text-xs text-[#e6edf3] resize-y focus:outline-none focus:ring-1 focus:ring-[#d4af37]/50" />;
-
-    case 'number': {
-      const numVal = typeof rawVal === 'number' ? rawVal : Number(rawVal) || (field.defaultValue as number) || 0;
-      return <input type="number" value={numVal} min={field.min} max={field.max} step={field.step ?? 1}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full bg-[#1c2333] border border-[#30363d] rounded-md px-2.5 py-1.5 text-xs text-[#e6edf3] focus:outline-none focus:ring-1 focus:ring-[#d4af37]/50" />;
-    }
-
-    case 'select':
-      return (
-        <select value={String(rawVal ?? '')} onChange={(e) => onChange(e.target.value)}
-          className="w-full bg-[#1c2333] border border-[#30363d] rounded-md px-2.5 py-1.5 text-xs text-[#e6edf3] focus:outline-none focus:ring-1 focus:ring-[#d4af37]/50 appearance-none cursor-pointer">
-          {field.options?.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-        </select>
-      );
-
-    case 'toggle': {
-      const boolVal = Boolean(rawVal);
-      return (
-        <button onClick={() => onChange(!boolVal)}
-          className={`w-8 h-4 rounded-full transition-colors ${boolVal ? 'bg-[#d4af37]' : 'bg-[#30363d]'}`}>
-          <div className={`w-3 h-3 rounded-full bg-white transition-transform ${boolVal ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-        </button>
-      );
-    }
-
-    case 'slider':
-      return <input type="range" value={Number(rawVal) || 0} min={field.min ?? 0} max={field.max ?? 100} step={field.step ?? 1}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full accent-[#d4af37]" />;
-
-    case 'model-select':
-      return <input type="text" value={String(rawVal ?? '')} placeholder="选择模型..." onChange={(e) => onChange(e.target.value)}
-        className="w-full bg-[#1c2333] border border-[#30363d] rounded-md px-2.5 py-1.5 text-xs text-[#e6edf3] focus:outline-none focus:ring-1 focus:ring-[#d4af37]/50" />;
-
-    default:
-      return null;
-  }
-}
-
-// ==================== 节点库面板 ====================
-
-interface NodeLibrarySidebarProps {
-  onAddNode: (type: NodeType) => void;
-  collapsed: boolean;
-  onToggleCollapse: () => void;
-}
-
-function NodeLibrarySidebar({ onAddNode, collapsed, onToggleCollapse }: NodeLibrarySidebarProps) {
-  const [search, setSearch] = useState('');
-  const [expandedCats, setExpandedCats] = useState<Set<NodeCategory>>(new Set(['ai', 'logic', 'agent']));
-
-  const filtered = NODE_TEMPLATES.filter(t =>
-    !search || t.label.includes(search) || t.desc.includes(search)
-  );
-
-  const toggleCat = (cat: NodeCategory) => {
-    setExpandedCats(prev => {
-      const next = new Set(prev);
-      if (next.has(cat)) next.delete(cat); else next.add(cat);
-      return next;
-    });
-  };
-
-  if (collapsed) return null;
-
-  const categories: NodeCategory[] = ['input', 'ai', 'logic', 'agent', 'subgraph', 'output'];
-
-  return (
-    <div className="w-[200px] h-full bg-[#161b22] border-r border-[#30363d] flex flex-col shrink-0">
-      {/* 搜索 */}
-      <div className="p-2 border-b border-[#30363d]">
-        <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="搜索节点..."
-          className="w-full bg-[#1c2333] border border-[#30363d] rounded-md px-2.5 py-1.5 text-xs text-[#e6edf3] placeholder:text-[#7d8590]/50 focus:outline-none focus:ring-1 focus:ring-[#d4af37]/50" />
-      </div>
-      {/* 分类列表 */}
-      <div className="flex-1 overflow-y-auto">
-        {categories.map(cat => {
-          const items = filtered.filter(t => t.category === cat);
-          if (items.length === 0) return null;
-          const isExpanded = expandedCats.has(cat);
-          return (
-            <div key={cat}>
-              <button onClick={() => toggleCat(cat)}
-                className="w-full flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-[#7d8590] hover:text-[#e6edf3] hover:bg-[#1c2333] transition-colors">
-                <svg width="8" height="8" viewBox="0 0 8 8" fill="none" className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
-                  <path d="M2 1l4 3-4 3" fill="currentColor" />
-                </svg>
-                <span style={{ color: NODE_TYPE_COLORS[cat] }}>{NODE_CATEGORY_LABELS[cat]}</span>
-                <span className="ml-auto text-[10px]">{items.length}</span>
-              </button>
-              {isExpanded && items.map(t => (
-                <button key={t.type} onClick={() => onAddNode(t.type)}
-                  className="w-full flex items-center gap-2 px-5 py-1.5 text-xs text-[#e6edf3] hover:bg-[#1c2333] transition-colors cursor-grab">
-                  <div className="w-4 h-4 rounded flex items-center justify-center shrink-0" style={{ backgroundColor: `${NODE_TYPE_COLORS[t.category]}20` }}>
-                    <NodeIcon type={t.type} size={10} />
-                  </div>
-                  <span className="truncate">{t.label}</span>
-                </button>
-              ))}
-            </div>
-          );
-        })}
-      </div>
-      {/* 收起按钮 */}
-      <button onClick={onToggleCollapse} className="p-2 border-t border-[#30363d] text-[#7d8590] hover:text-[#e6edf3] text-xs text-center transition-colors">
-        收起
-      </button>
-    </div>
-  );
-}
-
-// ==================== 主编辑器 ====================
-
-interface NodeEditorProps {
-  workflow: Workflow | null;
-  onBack: () => void;
-  onWorkflowChange: (wf: Workflow) => void;
-  onOpenWorkflowHub?: () => void;
-}
-
-/* CSS动画定义 */
-const NODE_EDITOR_STYLES = `
-@keyframes agentGlow {
-  0%, 100% { filter: drop-shadow(0 0 6px rgba(244,114,182,0.4)); }
-  50% { filter: drop-shadow(0 0 14px rgba(244,114,182,0.8)); }
-}
-@keyframes goldPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(212,175,55,0); }
-  50% { box-shadow: 0 0 0 6px rgba(212,175,55,0.3); }
-}
-@keyframes dashFlow {
-  to { stroke-dashoffset: -20; }
-}
-@keyframes breakpointPulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(1.3); }
-}
-@keyframes selectRing {
-  0%, 100% { stroke-opacity: 0.6; }
-  50% { stroke-opacity: 1; }
-}
-@keyframes progressFill {
-  from { width: 0; }
-  to { width: 100%; }
-}
-@keyframes condFlash {
-  0%, 100% { stroke: #22c55e; }
-  50% { stroke: #ef4444; }
-}
-@keyframes subgraphBreathe {
-  0%, 100% { stroke-dasharray: 6 3; opacity: 0.4; }
-  50% { stroke-dasharray: 8 2; opacity: 0.8; }
-}
-.node-agent { animation: agentGlow 2s ease-in-out infinite; }
-.node-running { animation: goldPulse 1.2s ease-in-out infinite; }
-.conn-dash-flow { animation: dashFlow 0.6s linear infinite; }
-.conn-cond-flash { animation: condFlash 1.5s ease-in-out infinite; }
-.subgraph-breathe { animation: subgraphBreathe 2s ease-in-out infinite; }
-.breakpoint-pulse { animation: breakpointPulse 1s ease-in-out infinite; }
-`;
-
-export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenWorkflowHub }: NodeEditorProps) {
-  const [wf, setWf] = useState<Workflow>(workflow || createDemoWorkflow());
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [selectedConnId, setSelectedConnId] = useState<string | null>(null);
-  const [running, setRunning] = useState(false);
-  const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
-  const [libCollapsed, setLibCollapsed] = useState(false);
-  const [connecting, setConnecting] = useState<{ nodeId: string; portId: string; type: PortType; direction: 'in' | 'out' } | null>(null);
-  const svgRef = useRef<SVGSVGElement>(null);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
-  const isPanning = useRef(false);
-  const panStart = useRef({ x: 0, y: 0 });
-
-  useEffect(() => {
-    if (workflow) setWf(workflow);
-  }, [workflow]);
-
-  const updateWf = useCallback((updates: Partial<Workflow>) => {
-    setWf(prev => {
-      const next = { ...prev, ...updates, updatedAt: Date.now() };
-      onWorkflowChange(next);
-      return next;
-    });
-  }, [onWorkflowChange]);
-
-  // 添加节点
-  const handleAddNode = useCallback((type: NodeType) => {
-    const x = 200 + Math.random() * 300;
-    const y = 100 + Math.random() * 200;
-    const node = createWorkflowNode(type, x, y);
-    updateWf({ nodes: [...wf.nodes, node] });
-    setSelectedNodeId(node.id);
-  }, [wf, updateWf]);
-
-  // 拖动节点
-  const handleNodeDrag = useCallback((id: string, x: number, y: number) => {
-    setWf(prev => ({
-      ...prev,
-      nodes: prev.nodes.map(n => n.id === id ? { ...n, x, y } : n),
-      updatedAt: Date.now(),
-    }));
-  }, []);
-
-  // 连接端口
-  const handlePortClick = useCallback((nodeId: string, portId: string, type: PortType, direction: 'in' | 'out') => {
-    if (!connecting) {
-      setConnecting({ nodeId, portId, type, direction });
-    } else {
-      // 完成连接
-      if (connecting.direction === direction) {
-        setConnecting(null);
-        return; // 同方向不连接
-      }
-      const fromNodeId = direction === 'in' ? connecting.nodeId : nodeId;
-      const fromPortId = direction === 'in' ? connecting.portId : portId;
-      const toNodeId = direction === 'out' ? connecting.nodeId : nodeId;
-      const toPortId = direction === 'out' ? connecting.portId : portId;
-
-      if (fromNodeId === toNodeId) { setConnecting(null); return; }
-
-      const conn = createConnection(fromNodeId, fromPortId, toNodeId, toPortId, connecting.type);
-      updateWf({ connections: [...wf.connections, conn] });
-      setConnecting(null);
-    }
-  }, [connecting, wf, updateWf]);
-
-  // 更新节点属性
-  const handleNodeUpdate = useCallback((id: string, updates: Partial<WorkflowNode>) => {
-    setWf(prev => ({
-      ...prev,
-      nodes: prev.nodes.map(n => {
-        if (n.id !== id) return n;
-        // 深度合并config，保留非config的顶级字段直接展开
-        const newConfig = { ...n.config, ...(updates.config || {}) };
-        const { config: _cfg, ...topLevel } = updates as Record<string, unknown>;
-        return { ...n, ...topLevel, config: newConfig };
-      }),
-      updatedAt: Date.now(),
-    }));
-  }, []);
-
-  // 切换断点
-  const handleToggleBreakpoint = useCallback((id: string) => {
-    setWf(prev => ({
-      ...prev,
-      nodes: prev.nodes.map(n => n.id === id ? { ...n, breakpoint: !n.breakpoint } : n),
-      updatedAt: Date.now(),
-    }));
-  }, []);
-
-  // 删除选中
-  const handleDelete = useCallback(() => {
-    if (selectedNodeId) {
-      setWf(prev => ({
-        ...prev,
-        nodes: prev.nodes.filter(n => n.id !== selectedNodeId),
-        connections: prev.connections.filter(c => c.fromNodeId !== selectedNodeId && c.toNodeId !== selectedNodeId),
-        updatedAt: Date.now(),
-      }));
-      setSelectedNodeId(null);
-    } else if (selectedConnId) {
-      setWf(prev => ({
-        ...prev,
-        connections: prev.connections.filter(c => c.id !== selectedConnId),
-        updatedAt: Date.now(),
-      }));
-      setSelectedConnId(null);
-    }
-  }, [selectedNodeId, selectedConnId]);
-
-  // 画布平移
-  const handleCanvasMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.button === 0 && e.target === svgRef.current) {
-      isPanning.current = true;
-      panStart.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
-      setSelectedNodeId(null);
-      setSelectedConnId(null);
-    }
-  }, [pan]);
-
-  const handleCanvasMouseMove = useCallback((e: React.MouseEvent) => {
-    if (isPanning.current) {
-      setPan({ x: e.clientX - panStart.current.x, y: e.clientY - panStart.current.y });
-    }
-  }, []);
-
-  const handleCanvasMouseUp = useCallback(() => {
-    isPanning.current = false;
-  }, []);
-
-  // 缩放
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    setZoom(prev => Math.min(3, Math.max(0.2, prev * delta)));
-  }, []);
-
-  // 键盘事件
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
-        handleDelete();
-      }
-      if (e.key === 'Escape') {
-        setConnecting(null);
-        setSelectedNodeId(null);
-        setSelectedConnId(null);
-      }
+    const onChange = (val: unknown) => {
+      onUpdate(node.id, { config: { [field.key]: val } });
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [handleDelete]);
 
-  const selectedNode = wf.nodes.find(n => n.id === selectedNodeId) || null;
-
-  // 模拟运行
-  const handleRun = useCallback(() => {
-    if (wf.nodes.length === 0) return;
-    setRunning(true);
-    let idx = 0;
-    const interval = setInterval(() => {
-      if (idx < wf.nodes.length) {
-        setRunningNodeId(wf.nodes[idx].id);
-        idx++;
-      } else {
-        setRunningNodeId(null);
-        setRunning(false);
-        updateWf({ status: 'completed' });
-        clearInterval(interval);
-      }
-    }, 800);
-  }, [wf.nodes, updateWf]);
-
-  return (
-    <div className="fixed inset-0 bg-[#0e1117] z-[100] flex flex-col">
-      <style>{`
-        @keyframes agentGlow {
-          0%, 100% { filter: drop-shadow(0 0 4px rgba(244,114,182,0.3)); }
-          50% { filter: drop-shadow(0 0 12px rgba(244,114,182,0.7)); }
-        }
-        @keyframes goldPulse {
-          0%, 100% { box-shadow: 0 0 4px rgba(212,175,55,0.3); }
-          50% { box-shadow: 0 0 16px rgba(212,175,55,0.7); }
-        }
-        @keyframes dashFlow {
-          to { stroke-dashoffset: -20; }
-        }
-        @keyframes breakpointPulse {
-          0%, 100% { transform: scale(1); opacity: 1; }
-          50% { transform: scale(1.4); opacity: 0.6; }
-        }
-        @keyframes selectRing {
-          0%, 100% { opacity: 0.5; }
-          50% { opacity: 1; }
-        }
-        @keyframes condFlash {
-          0%, 45% { stroke: #f59e0b; }
-          50%, 95% { stroke: #ef4444; }
-          100% { stroke: #f59e0b; }
-        }
-        @keyframes subgraphBreathe {
-          0%, 100% { opacity: 0.3; }
-          50% { opacity: 0.6; }
-        }
-        .node-agent { animation: agentGlow 2s ease-in-out infinite; }
-        .node-running { animation: goldPulse 1.5s ease-in-out infinite; }
-        .dash-flow { animation: dashFlow 0.8s linear infinite; }
-        .breakpoint-pulse { animation: breakpointPulse 1.2s ease-in-out infinite; }
-        .select-ring { animation: selectRing 2s ease-in-out infinite; }
-        .cond-flash { animation: condFlash 2s ease-in-out infinite; }
-        .subgraph-breathe { animation: subgraphBreathe 3s ease-in-out infinite; }
-      `}</style>
-      {/* 顶部工具栏 */}
-      <div className="h-11 bg-[#161b22] border-b border-[#30363d] flex items-center px-3 gap-3 shrink-0">
-        <button onClick={onBack} className="p-1.5 rounded-md hover:bg-[#1c2333] text-[#7d8590] hover:text-[#e6edf3] transition-colors" title="返回画布">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
-        </button>
-        <div className="w-px h-5 bg-[#30363d]" />
-        <span className="text-sm font-medium text-[#e6edf3]">{wf.name}</span>
-        <span className="text-[10px] text-[#7d8590]">{wf.version}</span>
-        <div className="flex-1" />
-        <button onClick={() => setLibCollapsed(!libCollapsed)}
-          className="px-2.5 py-1 rounded-md text-xs text-[#7d8590] hover:text-[#e6edf3] hover:bg-[#1c2333] transition-colors">
-          节点库
-        </button>
-        <button className="px-2.5 py-1 rounded-md text-xs text-[#7d8590] hover:text-[#e6edf3] hover:bg-[#1c2333] transition-colors">
-          保存
-        </button>
-        <button onClick={handleRun} disabled={running}
-          className="px-4 py-1.5 rounded-md text-xs font-medium bg-[#d4af37] text-[#0e1117] hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50">
-          {running ? '执行中...' : '运行工作流'}
-        </button>
-      </div>
-
-      <div className="flex-1 flex overflow-hidden">
-        {/* 左侧节点库 */}
-        <NodeLibrarySidebar onAddNode={handleAddNode} collapsed={libCollapsed} onToggleCollapse={() => setLibCollapsed(!libCollapsed)} />
-
-        {/* 中间画布 */}
-        <div className="flex-1 relative overflow-hidden">
-          {/* 连接提示 */}
-          {connecting && (
-            <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 bg-[#d4af37] text-[#0e1117] text-xs font-medium px-3 py-1 rounded-full">
-              点击目标端口完成连接 · ESC 取消
-            </div>
-          )}
-
-          <svg ref={svgRef} className="w-full h-full"
-            onMouseDown={handleCanvasMouseDown}
-            onMouseMove={handleCanvasMouseMove}
-            onMouseUp={handleCanvasMouseUp}
-            onWheel={handleWheel}>
-            {/* 网格背景 */}
-            <defs>
-              <pattern id="node-grid" width="20" height="20" patternUnits="userSpaceOnUse">
-                <circle cx="1" cy="1" r="0.5" fill="#30363d" />
-              </pattern>
-            </defs>
-            <rect width="100%" height="100%" fill="#0e1117" />
-            <rect width="100%" height="100%" fill="url(#node-grid)" />
-
-            <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
-              {/* 连线 */}
-              {wf.connections.map(conn => (
-                <ConnectionLine key={conn.id} conn={conn} nodes={wf.nodes}
-                  isSelected={conn.id === selectedConnId} onSelect={setSelectedConnId} />
-              ))}
-              {/* 节点 */}
-              {wf.nodes.map(node => (
-                <NodeCard key={node.id} node={node}
-                  isSelected={node.id === selectedNodeId}
-                  isRunning={node.id === runningNodeId}
-                  onSelect={setSelectedNodeId}
-                  onDrag={handleNodeDrag}
-                  onPortClick={handlePortClick}
-                  onToggleBreakpoint={handleToggleBreakpoint} />
-              ))}
-            </g>
-          </svg>
-
-          {/* 缩放控制 */}
-          <div className="absolute bottom-3 right-3 flex items-center gap-1 bg-[#161b22] border border-[#30363d] rounded-lg px-2 py-1">
-            <button onClick={() => setZoom(z => Math.max(0.2, z * 0.8))} className="p-1 text-[#7d8590] hover:text-[#e6edf3]">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14" /></svg>
-            </button>
-            <span className="text-[10px] text-[#7d8590] min-w-[36px] text-center">{Math.round(zoom * 100)}%</span>
-            <button onClick={() => setZoom(z => Math.min(3, z * 1.2))} className="p-1 text-[#7d8590] hover:text-[#e6edf3]">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>
-            </button>
-            <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }} className="p-1 text-[#7d8590] hover:text-[#e6edf3]">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 2v4M12 18v4M2 12h4M18 12h4" /></svg>
-            </button>
-          </div>
-
-          {/* 空态提示 */}
-          {wf.nodes.length === 0 && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="text-center">
-                <p className="text-lg font-bold text-[#e6edf3]">节点编辑器</p>
-                <p className="text-sm text-[#7d8590] mt-1">从左侧节点库拖入节点，或点击添加</p>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* 右侧属性面板 */}
-        <div className="w-[280px] bg-[#161b22] border-l border-[#30363d] shrink-0">
-          <div className="h-8 border-b border-[#30363d] flex items-center px-3">
-            <span className="text-xs font-medium text-[#7d8590]">属性</span>
-          </div>
-          <PropertyPanel node={selectedNode} onUpdate={handleNodeUpdate} onToggleBreakpoint={handleToggleBreakpoint} />
-        </div>
-      </div>
-
-      {/* 底部调试栏 */}
-      <div className="h-11 bg-[#161b22] border-t border-[#30363d] flex items-center px-3 gap-2 shrink-0">
-        {/* 控制按钮 */}
-        <button onClick={handleRun} disabled={running}
-          className="p-1.5 rounded text-[#7d8590] hover:text-[#2ea043] hover:bg-[#1c2333] disabled:opacity-50 transition-colors" title="运行">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3" /></svg>
-        </button>
-        <button disabled={!running} className="p-1.5 rounded text-[#7d8590] hover:text-[#d4af37] hover:bg-[#1c2333] disabled:opacity-50 transition-colors" title="暂停">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
-        </button>
-        <button className="p-1.5 rounded text-[#7d8590] hover:text-[#3b82f6] hover:bg-[#1c2333] transition-colors" title="单步执行">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 4 15 12 5 20 5 4" /><line x1="19" y1="5" x2="19" y2="19" /></svg>
-        </button>
-        <button onClick={() => { setRunning(false); setRunningNodeId(null); }} className="p-1.5 rounded text-[#7d8590] hover:text-[#f85149] hover:bg-[#1c2333] transition-colors" title="重置">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
-        </button>
-
-        <div className="w-px h-5 bg-[#30363d]" />
-
-        {/* 断点标记 */}
-        <div className="flex items-center gap-1">
-          <div className="w-2.5 h-2.5 rounded-full bg-[#f85149] opacity-60" style={{ animation: 'breakpointPulse 2s infinite' }} />
-          <span className="text-[10px] text-[#7d8590]">断点: {wf.nodes.filter(n => n.breakpoint).length}</span>
-        </div>
-
-        <div className="w-px h-5 bg-[#30363d]" />
-
-        {/* 进度条 */}
-        <div className="flex items-center gap-2 flex-1 max-w-xs">
-          <div className="flex-1 h-1.5 bg-[#30363d] rounded-full overflow-hidden">
-            <div className="h-full bg-[#d4af37] rounded-full transition-all duration-300"
-              style={{ width: `${wf.nodes.length > 0 ? ((wf.nodes.findIndex(n => n.id === runningNodeId) + 1) / wf.nodes.length * 100) : 0}%`, animation: running ? 'progressFill 2s infinite' : 'none' }} />
-          </div>
-          <span className="text-[10px] text-[#7d8590] whitespace-nowrap">
-            {running && runningNodeId
-              ? `${wf.nodes.findIndex(n => n.id === runningNodeId) + 1}/${wf.nodes.length}`
-              : `0/${wf.nodes.length}`}
-          </span>
-        </div>
-
-        {/* 计时器 */}
-        {running && (
-          <div className="flex items-center gap-1">
-            <div className="w-2 h-2 rounded-full bg-[#2ea043]" style={{ animation: 'agentGlow 1.5s infinite' }} />
-            <span className="text-[10px] text-[#2ea043] font-mono">
-              {Math.floor((Date.now() % 60000) / 1000)}s
-            </span>
-          </div>
-        )}
-
-        <div className="flex-1" />
-
-        {/* 当前执行节点 */}
-        {running && runningNodeId && (
-          <span className="text-[10px] text-[#d4af37] flex items-center gap-1" style={{ animation: 'goldPulse 2s infinite' }}>
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10" /></svg>
-            {wf.nodes.find(n => n.id === runningNodeId)?.label}
-          </span>
-        )}
-
-        {!running && (
-          <span className="text-[10px] text-[#7d8590]">就绪</span>
-        )}
-
-        <div className="w-px h-5 bg-[#30363d]" />
-
-        <span className="text-[10px] text-[#7d8590]">节点: {wf.nodes.length} · 连线: {wf.connections.length}</span>
-      </div>
-
-      {/* 小地图 - 右下角 */}
-      {(() => {
-        // 计算节点边界框
-        const nodesBBox = wf.nodes.length > 0 ? {
-          minX: Math.min(...wf.nodes.map(n => n.x)) - 50,
-          minY: Math.min(...wf.nodes.map(n => n.y)) - 50,
-          maxX: Math.max(...wf.nodes.map(n => n.x + n.width)) + 50,
-          maxY: Math.max(...wf.nodes.map(n => n.y + n.height)) + 50,
-        } : { minX: 0, minY: 0, maxX: 800, maxY: 600 };
-        const bboxW = nodesBBox.maxX - nodesBBox.minX;
-        const bboxH = nodesBBox.maxY - nodesBBox.minY;
+    switch (field.type) {
+      case 'text':
         return (
-          <div className="absolute bottom-14 right-2 w-40 h-28 bg-[#161b22]/90 border border-[#30363d] rounded-lg overflow-hidden z-20">
-            <svg width="100%" height="100%" viewBox={`${nodesBBox.minX} ${nodesBBox.minY} ${bboxW} ${bboxH}`}>
-              {/* 节点缩略图 */}
-              {wf.nodes.map(node => {
-                const catColor = Object.values(NODE_TYPE_COLORS).find(() => false);
-                const nodeCat = Object.entries(NODE_TYPE_COLORS).find(([cat]) => {
-                  const types = NODE_TEMPLATES.filter(t => t.category === cat);
-                  return types.some(t => t.type === node.type);
-                });
-                const color = nodeCat ? nodeCat[1] : '#7d8590';
-                const isRunning = node.id === runningNodeId;
-                return (
-                  <rect
-                    key={node.id}
-                    x={node.x}
-                    y={node.y}
-                    width={node.width}
-                    height={node.height}
-                    fill={color}
-                    fillOpacity={isRunning ? 0.9 : 0.5}
-                    rx="2"
-                    stroke={isRunning ? '#d4af37' : 'none'}
-                    strokeWidth={isRunning ? 1 : 0}
-                  />
-                );
-              })}
-              {/* 视口矩形 */}
-              <rect
-                x={-pan.x / zoom}
-                y={-pan.y / zoom}
-                width={160 / zoom}
-                height={112 / zoom}
-                fill="none"
-                stroke="#d4af37"
-                strokeWidth="2"
-                strokeOpacity="0.6"
-                rx="1"
-              />
-            </svg>
-            <div className="absolute top-1 left-1 text-[8px] text-[#7d8590] bg-[#161b22]/80 px-1 rounded">
-              {Math.round(zoom * 100)}%
-            </div>
+          <input
+            type="text"
+            value={String(value)}
+            onChange={e => onChange(e.target.value)}
+            placeholder={field.placeholder}
+            className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
+          />
+        );
+
+      case 'textarea':
+        return (
+          <textarea
+            value={String(value)}
+            onChange={e => onChange(e.target.value)}
+            placeholder={field.placeholder}
+            rows={3}
+            className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50 resize-y"
+          />
+        );
+
+      case 'number':
+        return (
+          <input
+            type="number"
+            value={value !== undefined && value !== '' ? Number(value) : (field.defaultValue != null ? Number(field.defaultValue) : '')}
+            onChange={e => onChange(e.target.value === '' ? '' : Number(e.target.value))}
+            min={field.min}
+            max={field.max}
+            step={field.step || 1}
+            placeholder={field.placeholder}
+            className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
+          />
+        );
+
+      case 'select':
+        return (
+          <select
+            value={String(value)}
+            onChange={e => onChange(e.target.value)}
+            className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-[#d4af37]/50"
+          >
+            {field.options?.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        );
+
+      case 'slider': {
+        const numVal = Number(value) || Number(field.defaultValue) || 0;
+        return (
+          <div className="flex items-center gap-2">
+            <input
+              type="range"
+              value={numVal}
+              onChange={e => onChange(Number(e.target.value))}
+              min={field.min || 0}
+              max={field.max || 100}
+              step={field.step || 1}
+              className="flex-1 h-1 accent-[#d4af37]"
+            />
+            <span className="text-[10px] text-gray-400 w-8 text-right">{numVal}</span>
           </div>
         );
-      })()}
+      }
+
+      case 'toggle': {
+        const boolVal = Boolean(value) || value === 'true';
+        return (
+          <button
+            onClick={() => onChange(!boolVal)}
+            className={`relative w-9 h-5 rounded-full transition-colors cursor-pointer ${boolVal ? 'bg-[#d4af37]' : 'bg-gray-700'}`}
+          >
+            <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${boolVal ? 'translate-x-4' : ''}`} />
+          </button>
+        );
+      }
+
+      case 'model-select':
+        return (
+          <select
+            value={String(value || '')}
+            onChange={e => onChange(e.target.value)}
+            disabled={modelsLoading}
+            className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-[#d4af37]/50 disabled:opacity-50"
+          >
+            <option value="">{modelsLoading ? '加载中...' : '选择模型'}</option>
+            {models.filter(m => m.type === 'image' || m.type === 'chat').map(m => (
+              <option key={m.id} value={m.id}>{m.name} ({m.provider})</option>
+            ))}
+          </select>
+        );
+
+      case 'image-upload':
+        return (
+          <div className="space-y-2">
+            {node.config?.imageUrl ? (
+              <div className="relative group">
+                <img src={String(node.config.imageUrl)} alt="预览" className="w-full h-24 object-cover rounded border border-gray-700" />
+                <button onClick={() => onChange('')} className="absolute top-1 right-1 p-0.5 bg-black/70 rounded text-gray-400 hover:text-red-400 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity">
+                  <X size={10} />
+                </button>
+              </div>
+            ) : (
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full h-20 border-2 border-dashed border-gray-700 rounded flex flex-col items-center justify-center cursor-pointer hover:border-[#d4af37]/50 transition-colors text-gray-600 hover:text-gray-400"
+              >
+                <Upload size={16} />
+                <span className="text-[10px] mt-1">上传图片</span>
+              </div>
+            )}
+            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={e => {
+              const file = e.target.files?.[0];
+              if (file) onImageUpload(node.id, file);
+            }} />
+            <input
+              type="text"
+              value={String(value || '')}
+              onChange={e => onChange(e.target.value)}
+              placeholder="或输入图片URL"
+              className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
+            />
+          </div>
+        );
+
+      default:
+        return (
+          <input
+            type="text"
+            value={String(value)}
+            onChange={e => onChange(e.target.value)}
+            placeholder={field.placeholder}
+            className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
+          />
+        );
+    }
+  };
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      {/* 节点标题 */}
+      <div className="p-3 border-b border-gray-800">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="w-6 h-6 rounded flex items-center justify-center" style={{ backgroundColor: color + '20', color }}>
+            {getNodeIcon(node.type, 14)}
+          </span>
+          <div>
+            <div className="text-xs font-medium text-gray-200">{NODE_TYPE_LABELS[node.type]}</div>
+            <div className="text-[10px] text-gray-600">{NODE_CATEGORY_LABELS[cat]}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* 基础属性 */}
+      <div className="border-b border-gray-800">
+        <button onClick={() => toggleSection('basic')} className="w-full flex items-center gap-1 px-3 py-2 text-[10px] uppercase tracking-wider text-gray-500 font-semibold hover:text-gray-300 cursor-pointer">
+          {expandedSections.basic ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+          基础属性
+        </button>
+        {expandedSections.basic && (
+          <div className="px-3 pb-3 space-y-2">
+            {basicFields.map(field => (
+              <div key={field.key}>
+                <label className="block text-[10px] text-gray-500 mb-0.5">{field.label}</label>
+                {renderField(field)}
+              </div>
+            ))}
+            {/* 断点开关 */}
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] text-gray-500">断点</label>
+              <button
+                onClick={() => onUpdate(node.id, { breakpoint: !node.breakpoint })}
+                className={`relative w-9 h-5 rounded-full transition-colors cursor-pointer ${node.breakpoint ? 'bg-red-500' : 'bg-gray-700'}`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${node.breakpoint ? 'translate-x-4' : ''}`} />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 高级属性 */}
+      {advancedFields.length > 0 && (
+        <div className="border-b border-gray-800">
+          <button onClick={() => toggleSection('advanced')} className="w-full flex items-center gap-1 px-3 py-2 text-[10px] uppercase tracking-wider text-gray-500 font-semibold hover:text-gray-300 cursor-pointer">
+            {expandedSections.advanced ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+            高级属性
+          </button>
+          {expandedSections.advanced && (
+            <div className="px-3 pb-3 space-y-2">
+              {advancedFields.map(field => (
+                <div key={field.key}>
+                  <label className="block text-[10px] text-gray-500 mb-0.5">{field.label}</label>
+                  {renderField(field)}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 端口信息 */}
+      <div className="px-3 py-2">
+        <div className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold mb-1">端口</div>
+        <div className="space-y-1">
+          {node.ports.filter(p => p.direction === 'in').map(p => (
+            <div key={p.id} className="flex items-center gap-1.5 text-[10px]">
+              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: PORT_COLORS[p.type] }} />
+              <span className="text-gray-500">→</span>
+              <span className="text-gray-400">{p.label}</span>
+              <span className="text-gray-600 ml-auto">{p.type}</span>
+            </div>
+          ))}
+          {node.ports.filter(p => p.direction === 'out').map(p => (
+            <div key={p.id} className="flex items-center gap-1.5 text-[10px]">
+              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: PORT_COLORS[p.type] }} />
+              <span className="text-gray-400">{p.label}</span>
+              <span className="text-gray-600 ml-auto">{p.type} →</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 删除按钮 */}
+      <div className="p-3 border-t border-gray-800">
+        <button
+          onClick={() => onDelete(node.id)}
+          className="w-full py-1.5 rounded text-xs text-red-400 hover:bg-red-900/20 transition-colors cursor-pointer flex items-center justify-center gap-1"
+        >
+          <Trash2 size={12} /> 删除节点
+        </button>
+      </div>
     </div>
   );
 }
