@@ -60,6 +60,10 @@ export interface PipelineStep {
   error?: string;
   /** 关联的图片ID（如生成的新图片ID） */
   outputImageId?: string;
+  /** API动作标识（如 'removebg', 'upscale', 'img2img'） */
+  apiAction?: string;
+  /** API调用参数 */
+  apiParams?: Record<string, unknown>;
   /** 创建时间 */
   createdAt: number;
 }
@@ -229,7 +233,7 @@ export function generateStepId(): string {
 /** 向操作链添加一个步骤 */
 export function addStepToChain(
   chain: PipelineChain,
-  partial: { type: PipelineStepType; label: string; description?: string }
+  partial: { type: PipelineStepType; label: string; description?: string; apiAction?: string; apiParams?: Record<string, unknown> }
 ): PipelineChain {
   const now = Date.now();
   const step: PipelineStep = {
@@ -238,6 +242,8 @@ export function addStepToChain(
     status: 'pending',
     label: partial.label,
     description: partial.description,
+    apiAction: partial.apiAction,
+    apiParams: partial.apiParams,
     createdAt: now,
   };
   return {
@@ -245,4 +251,174 @@ export function addStepToChain(
     steps: [...chain.steps, step],
     updatedAt: now,
   };
+}
+
+/** 节点ID到API动作的映射 */
+export const NODE_ACTION_MAP: Record<string, { apiAction: string; stepType: PipelineStepType; label: string; description: string }> = {
+  'remove-bg':    { apiAction: 'removebg',  stepType: 'process',   label: '移除背景', description: '自动分离主体与背景' },
+  'upscale':      { apiAction: 'upscale',   stepType: 'process',   label: '无损放大', description: '放大图片同时增强细节' },
+  'img2img':      { apiAction: 'img2img',   stepType: 'generate',  label: '图生图',   description: '基于原图生成新图' },
+  'adjust-color': { apiAction: 'adjust',    stepType: 'process',   label: '调色',     description: '调整色彩/亮度/对比度' },
+  'white-bg':     { apiAction: 'whitebg',   stepType: 'process',   label: '白底合成', description: '透明背景替换为白色' },
+  'erase-repair': { apiAction: 'erase',     stepType: 'process',   label: '擦除修复', description: '涂抹消除并智能修补' },
+  'ai-check':     { apiAction: 'ai_check',  stepType: 'agent',     label: 'AI质检',   description: '自动检测图片质量问题' },
+  'ai-optimize':  { apiAction: 'ai_optimize',stepType: 'agent',    label: 'AI优化',   description: '智能优化图片效果' },
+  'ai-retouch':   { apiAction: 'edit',      stepType: 'edit',      label: 'AI修图',   description: '自然语言描述修改图片' },
+  'image-analysis':{ apiAction: 'analyze',  stepType: 'agent',     label: '图片分析', description: 'AI分析图片内容与标签' },
+  'export-svg':   { apiAction: 'svg_trace', stepType: 'output',    label: '导出SVG',  description: '矢量化导出' },
+  'export-psd':   { apiAction: 'psd_export',stepType: 'output',    label: '导出PSD',  description: '分层导出PSD文件' },
+};
+
+/** 获取步骤的Lucide图标名 */
+export function getStepIconName(type: PipelineStepType): string {
+  const iconMap: Record<PipelineStepType, string> = {
+    load: 'Image',
+    process: 'Layers',
+    generate: 'Sparkles',
+    condition: 'GitBranch',
+    loop: 'Repeat',
+    agent: 'Bot',
+    subgraph: 'Package',
+    output: 'Download',
+    edit: 'Pencil',
+  };
+  return iconMap[type] || 'Circle';
+}
+
+/** 执行单个步骤 — 调用真实API */
+export async function executeStep(
+  step: PipelineStep,
+  imageUrl: string,
+  onProgress?: (progress: number) => void
+): Promise<{ success: boolean; resultUrl?: string; error?: string }> {
+  const action = step.apiAction;
+  if (!action) {
+    // 无API动作的步骤（条件/循环/加载等）直接标记完成
+    return { success: true };
+  }
+
+  try {
+    // 1. 提交任务
+    const submitRes = await fetch('/api/image-edit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action,
+        imageUrl,
+        ...(step.apiParams || {}),
+      }),
+    });
+
+    if (!submitRes.ok) {
+      const err = await submitRes.json().catch(() => ({}));
+      return { success: false, error: err.error || `API返回 ${submitRes.status}` };
+    }
+
+    const submitData = await submitRes.json();
+    const taskId = submitData.taskId;
+
+    if (!taskId) {
+      // 同步返回结果
+      return { success: true, resultUrl: submitData.url || submitData.resultUrl };
+    }
+
+    // 2. 轮询任务进度
+    let attempts = 0;
+    const maxAttempts = 120; // 最多轮询2分钟
+    while (attempts < maxAttempts) {
+      await new Promise(r => setTimeout(r, 1000));
+      attempts++;
+
+      const pollRes = await fetch('/api/poll-task', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId }),
+      });
+
+      if (!pollRes.ok) continue;
+      const pollData = await pollRes.json();
+
+      if (pollData.status === 'completed') {
+        const resultUrl = pollData.url || pollData.resultUrl || pollData.outputUrl;
+        return { success: true, resultUrl };
+      }
+
+      if (pollData.status === 'failed') {
+        return { success: false, error: pollData.error || '任务执行失败' };
+      }
+
+      // 更新进度
+      if (pollData.progress && onProgress) {
+        onProgress(pollData.progress);
+      }
+    }
+
+    return { success: false, error: '任务超时' };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : '网络错误';
+    return { success: false, error: message };
+  }
+}
+
+/** 执行整条操作链 */
+export async function executeChain(
+  chain: PipelineChain,
+  onStepUpdate: (chain: PipelineChain) => void,
+): Promise<PipelineChain> {
+  let currentChain = { ...chain, updatedAt: Date.now() };
+  let currentUrl = chain.currentUrl || chain.originalUrl || '';
+
+  for (let i = 0; i < currentChain.steps.length; i++) {
+    const step = currentChain.steps[i];
+
+    // 跳过已完成的步骤
+    if (step.status === 'completed') continue;
+
+    // 标记为执行中
+    currentChain = {
+      ...currentChain,
+      steps: currentChain.steps.map((s, idx) =>
+        idx === i ? { ...s, status: 'running' as PipelineStepStatus, progress: 0 } : s
+      ),
+      updatedAt: Date.now(),
+    };
+    onStepUpdate(currentChain);
+
+    // 执行步骤
+    const result = await executeStep(step, currentUrl, (progress) => {
+      currentChain = {
+        ...currentChain,
+        steps: currentChain.steps.map((s, idx) =>
+          idx === i ? { ...s, progress } : s
+        ),
+      };
+      onStepUpdate(currentChain);
+    });
+
+    if (result.success) {
+      currentChain = {
+        ...currentChain,
+        steps: currentChain.steps.map((s, idx) =>
+          idx === i ? { ...s, status: 'completed' as PipelineStepStatus, progress: 100, resultThumbnailUrl: result.resultUrl, duration: 0 } : s
+        ),
+        currentUrl: result.resultUrl || currentUrl,
+        updatedAt: Date.now(),
+      };
+      if (result.resultUrl) currentUrl = result.resultUrl;
+    } else {
+      currentChain = {
+        ...currentChain,
+        steps: currentChain.steps.map((s, idx) =>
+          idx === i ? { ...s, status: 'failed' as PipelineStepStatus, error: result.error } : s
+        ),
+        updatedAt: Date.now(),
+      };
+    }
+    onStepUpdate(currentChain);
+
+    // 如果失败，停止执行
+    if (!result.success) break;
+  }
+
+  return currentChain;
 }

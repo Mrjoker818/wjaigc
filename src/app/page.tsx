@@ -25,7 +25,7 @@ const NODE_LABELS: Record<string, string> = {
   'subgraph': '子图', 'batch': '批量组合',
   'save-image': '保存图片', 'export-psd': '导出PSD', 'export-svg': '导出SVG',
 };
-import { PipelineChain, createPipelineChain, generateStepId, PipelineStepType, addStepToChain } from '@/lib/pipeline-chain';
+import { PipelineChain, createPipelineChain, generateStepId, PipelineStepType, addStepToChain, executeChain, executeStep, NODE_ACTION_MAP } from '@/lib/pipeline-chain';
 import { ImageEditor } from '@/components/image-editor';
 import { UserManager } from '@/components/user-manager';
 import { ProjectDataPanel } from '@/components/project-data-panel';
@@ -1889,75 +1889,117 @@ function CanvasApp() {
   }, [pipelineChains]);
 
   /** Add a step to the selected image's pipeline chain */
-  const handleAddPipelineStep = useCallback((stepType: PipelineStepType, label: string) => {
+  const handleAddPipelineStep = useCallback((stepType: PipelineStepType, label: string, nodeId?: string) => {
     if (!selectedImage) return;
+    // 从 NODE_ACTION_MAP 查找 apiAction
+    const actionInfo = nodeId ? NODE_ACTION_MAP[nodeId] : undefined;
     setPipelineChains(prev => {
       const chain = prev[selectedImage.id] || createPipelineChain(selectedImage.id, selectedImage.url);
       return {
         ...prev,
-        [selectedImage.id]: {
-          ...chain,
-          steps: [...chain.steps, {
-            id: generateStepId(),
-            type: stepType,
-            status: 'pending',
-            label,
-            createdAt: Date.now(),
-          }],
-          updatedAt: Date.now(),
-        },
+        [selectedImage.id]: addStepToChain(chain, {
+          type: stepType,
+          label,
+          apiAction: actionInfo?.apiAction,
+          apiParams: actionInfo ? { scale: 2 } : undefined,
+        }),
       };
     });
   }, [selectedImage]);
 
-  /** Run the entire pipeline chain */
-  const handleRunChain = useCallback(() => {
-    // Placeholder: mark all pending steps as running in sequence
+  /** Run the entire pipeline chain with real API execution */
+  const handleRunChain = useCallback(async () => {
     if (!selectedImage) return;
+    const chain = pipelineChains[selectedImage.id];
+    if (!chain || chain.steps.length === 0) return;
+
+    // Use executeChain from pipeline-chain.ts with real API calls
+    await executeChain(chain, (updatedChain) => {
+      setPipelineChains(prev => ({
+        ...prev,
+        [selectedImage.id]: updatedChain,
+      }));
+      // If currentUrl changed, update canvas image
+      const prevChain = pipelineChains[selectedImage.id];
+      if (updatedChain.currentUrl && updatedChain.currentUrl !== prevChain?.currentUrl) {
+        setImagesRaw(prev => prev.map(img =>
+          img.id === selectedImage.id ? { ...img, url: updatedChain.currentUrl! } : img
+        ));
+      }
+    });
+  }, [selectedImage, pipelineChains]);
+
+  /** Step through the pipeline chain (execute one step) */
+  const handleStepChain = useCallback(async () => {
+    if (!selectedImage) return;
+    const chain = pipelineChains[selectedImage.id];
+    if (!chain) return;
+
+    // Find next pending step or running step
+    const runningIdx = chain.steps.findIndex(s => s.status === 'running');
+    const firstPendingIdx = chain.steps.findIndex(s => s.status === 'pending');
+
+    // If there's a running step, wait for it; otherwise start next pending
+    if (runningIdx >= 0) return; // Already running
+    if (firstPendingIdx < 0) return; // Nothing to run
+
+    const step = chain.steps[firstPendingIdx];
+
+    // Mark as running
     setPipelineChains(prev => {
-      const chain = prev[selectedImage.id];
-      if (!chain) return prev;
-      const firstPendingIdx = chain.steps.findIndex(s => s.status === 'pending');
-      if (firstPendingIdx === -1) return prev;
+      const c = prev[selectedImage.id];
+      if (!c) return prev;
       return {
         ...prev,
         [selectedImage.id]: {
-          ...chain,
-          steps: chain.steps.map((s, i) =>
+          ...c,
+          steps: c.steps.map((s, i) =>
             i === firstPendingIdx ? { ...s, status: 'running' as const, progress: 0 } : s
           ),
           updatedAt: Date.now(),
         },
       };
     });
-  }, [selectedImage]);
 
-  /** Step through the pipeline chain (one step at a time) */
-  const handleStepChain = useCallback(() => {
-    if (!selectedImage) return;
-    setPipelineChains(prev => {
-      const chain = prev[selectedImage.id];
-      if (!chain) return prev;
-      const runningIdx = chain.steps.findIndex(s => s.status === 'running');
-      const firstPendingIdx = chain.steps.findIndex(s => s.status === 'pending');
-      return {
-        ...prev,
-        [selectedImage.id]: {
-          ...chain,
-          steps: chain.steps.map((s, i) => {
-            if (runningIdx >= 0 && i === runningIdx) {
-              return { ...s, status: 'completed' as const, progress: 100 };
-            }
-            if (runningIdx < 0 && i === firstPendingIdx) {
-              return { ...s, status: 'running' as const, progress: 0 };
-            }
-            return s;
-          }),
-          updatedAt: Date.now(),
-        },
-      };
-    });
-  }, [selectedImage]);
+    // Execute the step
+    try {
+      const result = await executeStep(step, chain.currentUrl || chain.originalUrl || '');
+      // Mark as completed
+      setPipelineChains(prev => {
+        const c = prev[selectedImage.id];
+        if (!c) return prev;
+        return {
+          ...prev,
+          [selectedImage.id]: {
+            ...c,
+            steps: c.steps.map(s => s.id === step.id ? { ...s, status: 'completed' as const, progress: 100, resultUrl: result.resultUrl } : s),
+            currentUrl: result.resultUrl || c.currentUrl,
+            updatedAt: Date.now(),
+          },
+        };
+      });
+      // Update canvas image
+      if (result.resultUrl) {
+        setImagesRaw(prev => prev.map(img =>
+          img.id === selectedImage.id ? { ...img, url: result.resultUrl! } : img
+        ));
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : '执行失败';
+      setPipelineChains(prev => {
+        const c = prev[selectedImage.id];
+        if (!c) return prev;
+        return {
+          ...prev,
+          [selectedImage.id]: {
+            ...c,
+            steps: c.steps.map(s => s.id === step.id ? { ...s, status: 'failed' as const, error: errorMsg } : s),
+            updatedAt: Date.now(),
+          },
+        };
+      });
+    }
+  }, [selectedImage, pipelineChains]);
 
   /** Reset the pipeline chain */
   const handleResetChain = useCallback(() => {
@@ -2320,6 +2362,7 @@ function CanvasApp() {
           onAddNode={(nodeType, nodeId) => {
             // When a node is added from library, add it to the selected image's pipeline chain
             if (selectedImage) {
+              const actionInfo = NODE_ACTION_MAP[nodeId];
               setPipelineChains(prev => {
                 const chain = prev[selectedImage.id] || createPipelineChain(selectedImage.id, selectedImage.url);
                 return {
@@ -2328,6 +2371,8 @@ function CanvasApp() {
                     type: nodeType as import('@/lib/pipeline-chain').PipelineStepType,
                     label: NODE_LABELS[nodeId] || nodeId,
                     description: '',
+                    apiAction: actionInfo?.apiAction,
+                    apiParams: actionInfo ? { scale: 2 } : undefined,
                   }),
                 };
               });

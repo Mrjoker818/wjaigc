@@ -20,8 +20,8 @@ interface OperationChainPanelProps {
   imageName?: string;
   /** 主题风格 */
   themeStyle: 'gold' | 'monochrome';
-  /** 添加操作步骤回调 */
-  onAddStep?: (stepType: PipelineStepType, label: string) => void;
+  /** 添加操作步骤回调（含nodeId用于查找apiAction） */
+  onAddStep?: (stepType: PipelineStepType, label: string, nodeId?: string) => void;
   /** 执行操作链回调 */
   onRunChain?: () => void;
   /** 逐步执行回调 */
@@ -145,7 +145,7 @@ export function OperationChainPanel({
   };
 
   const handleAddNode = (item: NodeItem) => {
-    onAddStep?.(item.stepType, item.label);
+    onAddStep?.(item.stepType, item.label, item.id);
     setShowAddMenu(false);
   };
 
@@ -218,7 +218,7 @@ export function OperationChainPanel({
           ].map(tag => (
             <button
               key={tag.type}
-              onClick={() => onAddStep?.(tag.type, tag.label.replace(/^[^\s]+\s/, ''))}
+              onClick={() => onAddStep?.(tag.type, tag.label.replace(/^[^\s]+\s/, ''), undefined)}
               className={`px-2 py-0.5 rounded-full text-[10px] cursor-pointer transition-colors ${isMono ? 'hover:opacity-80' : 'hover:opacity-80'}`}
               style={{
                 backgroundColor: `${tag.color}15`,

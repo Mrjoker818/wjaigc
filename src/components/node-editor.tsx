@@ -6,6 +6,7 @@ import {
   NODE_TYPE_COLORS, NODE_TYPE_LABELS, NODE_TYPE_ICONS, NODE_CATEGORY_LABELS,
   getNodeCategory, createWorkflowNode, createConnection, createEmptyWorkflow,
   NODE_TEMPLATES, PORT_COLORS, getNodePropertyFields, PropertyField,
+  createDemoWorkflow,
 } from '@/lib/workflow-engine';
 
 // ==================== 图标组件 ====================
@@ -397,8 +398,49 @@ interface NodeEditorProps {
   onOpenWorkflowHub?: () => void;
 }
 
+/* CSS动画定义 */
+const NODE_EDITOR_STYLES = `
+@keyframes agentGlow {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(244,114,182,0.4)); }
+  50% { filter: drop-shadow(0 0 14px rgba(244,114,182,0.8)); }
+}
+@keyframes goldPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(212,175,55,0); }
+  50% { box-shadow: 0 0 0 6px rgba(212,175,55,0.3); }
+}
+@keyframes dashFlow {
+  to { stroke-dashoffset: -20; }
+}
+@keyframes breakpointPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.3); }
+}
+@keyframes selectRing {
+  0%, 100% { stroke-opacity: 0.6; }
+  50% { stroke-opacity: 1; }
+}
+@keyframes progressFill {
+  from { width: 0; }
+  to { width: 100%; }
+}
+@keyframes condFlash {
+  0%, 100% { stroke: #22c55e; }
+  50% { stroke: #ef4444; }
+}
+@keyframes subgraphBreathe {
+  0%, 100% { stroke-dasharray: 6 3; opacity: 0.4; }
+  50% { stroke-dasharray: 8 2; opacity: 0.8; }
+}
+.node-agent { animation: agentGlow 2s ease-in-out infinite; }
+.node-running { animation: goldPulse 1.2s ease-in-out infinite; }
+.conn-dash-flow { animation: dashFlow 0.6s linear infinite; }
+.conn-cond-flash { animation: condFlash 1.5s ease-in-out infinite; }
+.subgraph-breathe { animation: subgraphBreathe 2s ease-in-out infinite; }
+.breakpoint-pulse { animation: breakpointPulse 1s ease-in-out infinite; }
+`;
+
 export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenWorkflowHub }: NodeEditorProps) {
-  const [wf, setWf] = useState<Workflow>(workflow || createEmptyWorkflow('未命名工作流'));
+  const [wf, setWf] = useState<Workflow>(workflow || createDemoWorkflow());
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedConnId, setSelectedConnId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -568,6 +610,43 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
 
   return (
     <div className="fixed inset-0 bg-[#0e1117] z-[100] flex flex-col">
+      <style>{`
+        @keyframes agentGlow {
+          0%, 100% { filter: drop-shadow(0 0 4px rgba(244,114,182,0.3)); }
+          50% { filter: drop-shadow(0 0 12px rgba(244,114,182,0.7)); }
+        }
+        @keyframes goldPulse {
+          0%, 100% { box-shadow: 0 0 4px rgba(212,175,55,0.3); }
+          50% { box-shadow: 0 0 16px rgba(212,175,55,0.7); }
+        }
+        @keyframes dashFlow {
+          to { stroke-dashoffset: -20; }
+        }
+        @keyframes breakpointPulse {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.4); opacity: 0.6; }
+        }
+        @keyframes selectRing {
+          0%, 100% { opacity: 0.5; }
+          50% { opacity: 1; }
+        }
+        @keyframes condFlash {
+          0%, 45% { stroke: #f59e0b; }
+          50%, 95% { stroke: #ef4444; }
+          100% { stroke: #f59e0b; }
+        }
+        @keyframes subgraphBreathe {
+          0%, 100% { opacity: 0.3; }
+          50% { opacity: 0.6; }
+        }
+        .node-agent { animation: agentGlow 2s ease-in-out infinite; }
+        .node-running { animation: goldPulse 1.5s ease-in-out infinite; }
+        .dash-flow { animation: dashFlow 0.8s linear infinite; }
+        .breakpoint-pulse { animation: breakpointPulse 1.2s ease-in-out infinite; }
+        .select-ring { animation: selectRing 2s ease-in-out infinite; }
+        .cond-flash { animation: condFlash 2s ease-in-out infinite; }
+        .subgraph-breathe { animation: subgraphBreathe 3s ease-in-out infinite; }
+      `}</style>
       {/* 顶部工具栏 */}
       <div className="h-11 bg-[#161b22] border-b border-[#30363d] flex items-center px-3 gap-3 shrink-0">
         <button onClick={onBack} className="p-1.5 rounded-md hover:bg-[#1c2333] text-[#7d8590] hover:text-[#e6edf3] transition-colors" title="返回画布">
@@ -671,27 +750,131 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
       </div>
 
       {/* 底部调试栏 */}
-      <div className="h-9 bg-[#161b22] border-t border-[#30363d] flex items-center px-3 gap-3 shrink-0">
+      <div className="h-11 bg-[#161b22] border-t border-[#30363d] flex items-center px-3 gap-2 shrink-0">
+        {/* 控制按钮 */}
         <button onClick={handleRun} disabled={running}
-          className="p-1 rounded text-[#7d8590] hover:text-[#2ea043] disabled:opacity-50 transition-colors" title="运行">
+          className="p-1.5 rounded text-[#7d8590] hover:text-[#2ea043] hover:bg-[#1c2333] disabled:opacity-50 transition-colors" title="运行">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3" /></svg>
         </button>
-        <button disabled={!running} className="p-1 rounded text-[#7d8590] hover:text-[#d4af37] disabled:opacity-50 transition-colors" title="暂停">
+        <button disabled={!running} className="p-1.5 rounded text-[#7d8590] hover:text-[#d4af37] hover:bg-[#1c2333] disabled:opacity-50 transition-colors" title="暂停">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
         </button>
-        <button className="p-1 rounded text-[#7d8590] hover:text-[#3b82f6] transition-colors" title="单步执行">
+        <button className="p-1.5 rounded text-[#7d8590] hover:text-[#3b82f6] hover:bg-[#1c2333] transition-colors" title="单步执行">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 4 15 12 5 20 5 4" /><line x1="19" y1="5" x2="19" y2="19" /></svg>
         </button>
-        <button onClick={() => { setRunning(false); setRunningNodeId(null); }} className="p-1 rounded text-[#7d8590] hover:text-[#f85149] transition-colors" title="重置">
+        <button onClick={() => { setRunning(false); setRunningNodeId(null); }} className="p-1.5 rounded text-[#7d8590] hover:text-[#f85149] hover:bg-[#1c2333] transition-colors" title="重置">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
         </button>
-        <div className="w-px h-4 bg-[#30363d]" />
-        <span className="text-[10px] text-[#7d8590]">
-          {running ? `执行中: ${runningNodeId ? wf.nodes.find(n => n.id === runningNodeId)?.label : ''}` : '就绪'}
-        </span>
+
+        <div className="w-px h-5 bg-[#30363d]" />
+
+        {/* 断点标记 */}
+        <div className="flex items-center gap-1">
+          <div className="w-2.5 h-2.5 rounded-full bg-[#f85149] opacity-60" style={{ animation: 'breakpointPulse 2s infinite' }} />
+          <span className="text-[10px] text-[#7d8590]">断点: {wf.nodes.filter(n => n.config.hasBreakpoint).length}</span>
+        </div>
+
+        <div className="w-px h-5 bg-[#30363d]" />
+
+        {/* 进度条 */}
+        <div className="flex items-center gap-2 flex-1 max-w-xs">
+          <div className="flex-1 h-1.5 bg-[#30363d] rounded-full overflow-hidden">
+            <div className="h-full bg-[#d4af37] rounded-full transition-all duration-300"
+              style={{ width: `${wf.nodes.length > 0 ? ((wf.nodes.findIndex(n => n.id === runningNodeId) + 1) / wf.nodes.length * 100) : 0}%`, animation: running ? 'progressFill 2s infinite' : 'none' }} />
+          </div>
+          <span className="text-[10px] text-[#7d8590] whitespace-nowrap">
+            {running && runningNodeId
+              ? `${wf.nodes.findIndex(n => n.id === runningNodeId) + 1}/${wf.nodes.length}`
+              : `0/${wf.nodes.length}`}
+          </span>
+        </div>
+
+        {/* 计时器 */}
+        {running && (
+          <div className="flex items-center gap-1">
+            <div className="w-2 h-2 rounded-full bg-[#2ea043]" style={{ animation: 'agentGlow 1.5s infinite' }} />
+            <span className="text-[10px] text-[#2ea043] font-mono">
+              {Math.floor((Date.now() % 60000) / 1000)}s
+            </span>
+          </div>
+        )}
+
         <div className="flex-1" />
+
+        {/* 当前执行节点 */}
+        {running && runningNodeId && (
+          <span className="text-[10px] text-[#d4af37] flex items-center gap-1" style={{ animation: 'goldPulse 2s infinite' }}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10" /></svg>
+            {wf.nodes.find(n => n.id === runningNodeId)?.label}
+          </span>
+        )}
+
+        {!running && (
+          <span className="text-[10px] text-[#7d8590]">就绪</span>
+        )}
+
+        <div className="w-px h-5 bg-[#30363d]" />
+
         <span className="text-[10px] text-[#7d8590]">节点: {wf.nodes.length} · 连线: {wf.connections.length}</span>
       </div>
+
+      {/* 小地图 - 右下角 */}
+      {(() => {
+        // 计算节点边界框
+        const nodesBBox = wf.nodes.length > 0 ? {
+          minX: Math.min(...wf.nodes.map(n => n.x)) - 50,
+          minY: Math.min(...wf.nodes.map(n => n.y)) - 50,
+          maxX: Math.max(...wf.nodes.map(n => n.x + n.width)) + 50,
+          maxY: Math.max(...wf.nodes.map(n => n.y + n.height)) + 50,
+        } : { minX: 0, minY: 0, maxX: 800, maxY: 600 };
+        const bboxW = nodesBBox.maxX - nodesBBox.minX;
+        const bboxH = nodesBBox.maxY - nodesBBox.minY;
+        return (
+          <div className="absolute bottom-14 right-2 w-40 h-28 bg-[#161b22]/90 border border-[#30363d] rounded-lg overflow-hidden z-20">
+            <svg width="100%" height="100%" viewBox={`${nodesBBox.minX} ${nodesBBox.minY} ${bboxW} ${bboxH}`}>
+              {/* 节点缩略图 */}
+              {wf.nodes.map(node => {
+                const catColor = Object.values(NODE_TYPE_COLORS).find(() => false);
+                const nodeCat = Object.entries(NODE_TYPE_COLORS).find(([cat]) => {
+                  const types = NODE_TEMPLATES.filter(t => t.category === cat);
+                  return types.some(t => t.type === node.type);
+                });
+                const color = nodeCat ? nodeCat[1] : '#7d8590';
+                const isRunning = node.id === runningNodeId;
+                return (
+                  <rect
+                    key={node.id}
+                    x={node.x}
+                    y={node.y}
+                    width={node.width}
+                    height={node.height}
+                    fill={color}
+                    fillOpacity={isRunning ? 0.9 : 0.5}
+                    rx="2"
+                    stroke={isRunning ? '#d4af37' : 'none'}
+                    strokeWidth={isRunning ? 1 : 0}
+                  />
+                );
+              })}
+              {/* 视口矩形 */}
+              <rect
+                x={-pan.x / zoom}
+                y={-pan.y / zoom}
+                width={160 / zoom}
+                height={112 / zoom}
+                fill="none"
+                stroke="#d4af37"
+                strokeWidth="2"
+                strokeOpacity="0.6"
+                rx="1"
+              />
+            </svg>
+            <div className="absolute top-1 left-1 text-[8px] text-[#7d8590] bg-[#161b22]/80 px-1 rounded">
+              {Math.round(zoom * 100)}%
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

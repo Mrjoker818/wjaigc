@@ -7,8 +7,8 @@
 
 export type NodeType =
   | 'input-image' | 'input-text' | 'input-param'
-  | 'ai-generate' | 'ai-edit' | 'ai-upscale' | 'ai-removebg' | 'ai-vectorize' | 'ai-style-transfer' | 'ai-color-adjust'
-  | 'condition-if' | 'condition-switch' | 'loop-for' | 'loop-while' | 'parallel'
+  | 'ai-generate' | 'ai-edit' | 'ai-retouch' | 'ai-upscale' | 'ai-removebg' | 'ai-vectorize' | 'ai-style-transfer' | 'ai-color-adjust' | 'ai-analyze'
+  | 'condition-if' | 'condition-switch' | 'loop-for' | 'loop-while' | 'loop-each' | 'parallel'
   | 'agent-auto' | 'agent-chat'
   | 'subgraph' | 'group'
   | 'output-image' | 'output-save' | 'output-export';
@@ -58,9 +58,12 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   'ai-vectorize': '矢量化',
   'ai-style-transfer': '风格转换',
   'ai-color-adjust': '调色',
+  'ai-analyze': 'AI分析',
+  'ai-retouch': 'AI修图',
   'condition-if': '条件分支',
   'condition-switch': '开关分支',
   'loop-for': '循环',
+  'loop-each': '逐项循环',
   'loop-while': '条件循环',
   'parallel': '并行执行',
   'agent-auto': 'Agent 自动',
@@ -84,9 +87,12 @@ export const NODE_TYPE_ICONS: Record<NodeType, string> = {
   'ai-vectorize': 'PenTool',
   'ai-style-transfer': 'Palette',
   'ai-color-adjust': 'Sun',
+  'ai-analyze': 'ScanSearch',
+  'ai-retouch': 'Wand2',
   'condition-if': 'GitBranch',
   'condition-switch': 'GitMerge',
   'loop-for': 'Repeat',
+  'loop-each': 'RepeatOne',
   'loop-while': 'RefreshCw',
   'parallel': 'Layers',
   'agent-auto': 'Bot',
@@ -399,4 +405,76 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
   fields.push({ key: 'breakpoint', label: '断点', type: 'toggle', defaultValue: false });
 
   return fields;
+}
+
+// ==================== 演示工作流 ====================
+
+function makePort(nodeId: string, dir: 'in' | 'out', idx: number, label: string, portType: PortType = 'any'): NodePort {
+  return { id: `${nodeId}-${dir}-${idx}`, label, type: portType, direction: dir };
+}
+
+/** 创建包含4条预置链的演示工作流 */
+export function createDemoWorkflow(): Workflow {
+  const wf = createEmptyWorkflow('演示工作流');
+  wf.version = 'v1.0';
+  wf.description = '包含4条预置节点链的演示工作流';
+
+  let nodeId = 0;
+  const nid = () => `demo-n${++nodeId}`;
+
+  // ─── 链1: AI生成链 ───
+  const n1 = nid(), n2 = nid(), n3 = nid();
+  wf.nodes.push(
+    { id: n1, type: 'input-text', x: 80, y: 80, width: 180, height: 80, label: '提示词输入', config: { text: '一只橘色猫咪在阳光下打盹' }, ports: [makePort(n1, 'out', 1, '文本', 'prompt')] },
+    { id: n2, type: 'ai-generate', x: 340, y: 60, width: 200, height: 100, label: '图像生成', config: { model: 'seedream-3.0', quality: 'hd' }, ports: [makePort(n2, 'in', 1, '提示词', 'prompt'), makePort(n2, 'out', 1, '图片', 'image')] },
+    { id: n3, type: 'output-image', x: 620, y: 80, width: 180, height: 80, label: '结果图片', config: {}, ports: [makePort(n3, 'in', 1, '图片', 'image')] },
+  );
+  wf.connections.push(
+    { id: 'dc-1', fromNodeId: n1, fromPortId: `${n1}-output-1`, toNodeId: n2, toPortId: `${n2}-input-1`, type: 'data' },
+    { id: 'dc-2', fromNodeId: n2, fromPortId: `${n2}-output-1`, toNodeId: n3, toPortId: `${n3}-input-1`, type: 'data' },
+  );
+
+  // ─── 链2: 条件分支链 ───
+  const n4 = nid(), n5 = nid(), n6 = nid(), n7 = nid(), n8 = nid();
+  wf.nodes.push(
+    { id: n4, type: 'input-image', x: 80, y: 260, width: 180, height: 80, label: '图片输入', config: { source: 'canvas' }, ports: [makePort(n4, 'out', 1, '图片', 'image')] },
+    { id: n5, type: 'ai-analyze', x: 340, y: 240, width: 200, height: 100, label: '风格分析', config: {}, ports: [makePort(n5, 'in', 1, '图片', 'image'), makePort(n5, 'out', 1, '分析结果', 'prompt')] },
+    { id: n6, type: 'condition-if', x: 620, y: 230, width: 160, height: 120, label: '风格=写实？', config: { condition: 'style === "realistic"' }, ports: [makePort(n6, 'in', 1, '输入', 'any'), makePort(n6, 'out', 1, 'True', 'any'), makePort(n6, 'out', 2, 'False', 'any')] },
+    { id: n7, type: 'output-image', x: 880, y: 190, width: 180, height: 80, label: '写实增强', config: {}, ports: [makePort(n7, 'in', 1, '图片', 'image')] },
+    { id: n8, type: 'output-image', x: 880, y: 320, width: 180, height: 80, label: '风格化处理', config: {}, ports: [makePort(n8, 'in', 1, '图片', 'image')] },
+  );
+  wf.connections.push(
+    { id: 'dc-3', fromNodeId: n4, fromPortId: `${n4}-output-1`, toNodeId: n5, toPortId: `${n5}-input-1`, type: 'data' },
+    { id: 'dc-4', fromNodeId: n5, fromPortId: `${n5}-output-1`, toNodeId: n6, toPortId: `${n6}-input-1`, type: 'data' },
+    { id: 'dc-5', fromNodeId: n6, fromPortId: `${n6}-output-1`, toNodeId: n7, toPortId: `${n7}-input-1`, type: 'condition' },
+    { id: 'dc-6', fromNodeId: n6, fromPortId: `${n6}-output-2`, toNodeId: n8, toPortId: `${n8}-input-1`, type: 'data' },
+  );
+
+  // ─── 链3: 循环处理链 ───
+  const n9 = nid(), n10 = nid(), n11 = nid(), n12 = nid(), n13 = nid();
+  wf.nodes.push(
+    { id: n9, type: 'input-image', x: 80, y: 500, width: 180, height: 80, label: '批量图片', config: { source: 'canvas' }, ports: [makePort(n9, 'out', 1, '图片', 'image')] },
+    { id: n10, type: 'ai-analyze', x: 340, y: 480, width: 200, height: 100, label: '元素识别', config: {}, ports: [makePort(n10, 'in', 1, '图片', 'image'), makePort(n10, 'out', 1, '元素', 'prompt')] },
+    { id: n11, type: 'loop-each', x: 620, y: 470, width: 160, height: 120, label: '循环 ×3', config: { loopCount: 3 }, ports: [makePort(n11, 'in', 1, '输入', 'any'), makePort(n11, 'out', 1, '当前项', 'any'), makePort(n11, 'out', 2, '完成', 'any')] },
+    { id: n12, type: 'ai-retouch', x: 880, y: 460, width: 200, height: 100, label: '单图修图', config: {}, ports: [makePort(n12, 'in', 1, '图片', 'image'), makePort(n12, 'out', 1, '图片', 'image')] },
+    { id: n13, type: 'output-image', x: 1140, y: 500, width: 180, height: 80, label: '结果集合', config: {}, ports: [makePort(n13, 'in', 1, '图片', 'image')] },
+  );
+  wf.connections.push(
+    { id: 'dc-7', fromNodeId: n9, fromPortId: `${n9}-output-1`, toNodeId: n10, toPortId: `${n10}-input-1`, type: 'data' },
+    { id: 'dc-8', fromNodeId: n10, fromPortId: `${n10}-output-1`, toNodeId: n11, toPortId: `${n11}-input-1`, type: 'data' },
+    { id: 'dc-9', fromNodeId: n11, fromPortId: `${n11}-output-1`, toNodeId: n12, toPortId: `${n12}-input-1`, type: 'data' },
+    { id: 'dc-10', fromNodeId: n12, fromPortId: `${n12}-output-1`, toNodeId: n13, toPortId: `${n13}-input-1`, type: 'data' },
+  );
+
+  // ─── 链4: Agent自主链 ───
+  const n14 = nid(), n15 = nid();
+  wf.nodes.push(
+    { id: n14, type: 'agent-auto', x: 80, y: 700, width: 220, height: 120, label: 'AI Agent', config: { maxRounds: 5, tools: 'image_edit,generate_image,analyze_image' }, ports: [makePort(n14, 'out', 1, '结果', 'any')] },
+    { id: n15, type: 'output-image', x: 400, y: 720, width: 180, height: 80, label: '输出', config: {}, ports: [makePort(n15, 'in', 1, '图片', 'image')] },
+  );
+  wf.connections.push(
+    { id: 'dc-11', fromNodeId: n14, fromPortId: `${n14}-output-1`, toNodeId: n15, toPortId: `${n15}-input-1`, type: 'data' },
+  );
+
+  return wf;
 }
