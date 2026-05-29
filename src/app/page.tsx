@@ -395,6 +395,7 @@ function CanvasApp() {
           url: urlMapping[img.url] || img.url,
         }));
         const persistableCanvasImages = resolvedImages
+          .filter(img => !img.isProcessingPlaceholder) // 不保存正在处理的占位框到项目数据
           .map(img => ({
             id: img.id,
             url: img.url.startsWith('data:') || img.url.startsWith('blob:') ? '' : img.url,
@@ -547,7 +548,19 @@ function CanvasApp() {
           if (latest) {
             setCurrentProject(latest);
             if (latest.canvasImages) {
-              setImages(latest.canvasImages.map(img => ({ ...img })));
+              // 保留当前正在处理的占位框（isProcessingPlaceholder），避免服务器同步覆盖导致加载框消失
+              const processingPlaceholders = latestImagesRef.current.filter(
+                img => img.isProcessingPlaceholder
+              );
+              // 去重：避免服务器数据中已包含占位框 id 时重复添加
+              const serverIds = new Set(latest.canvasImages.map(img => img.id));
+              const uniquePlaceholders = processingPlaceholders.filter(
+                img => !serverIds.has(img.id)
+              );
+              setImages([
+                ...latest.canvasImages.map(img => ({ ...img })),
+                ...uniquePlaceholders,
+              ]);
             }
           }
         }
