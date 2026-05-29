@@ -818,12 +818,10 @@ export function getNodeInputs(
         if (upstreamOutput.imageUrl) inputs.imageUrl = upstreamOutput.imageUrl;
         break;
       case 'prompt':
-        // 提示词连线: 传递prompt或text
-        if (upstreamOutput.prompt) {
-          inputs.prompt = inputs.prompt ? `${inputs.prompt}, ${upstreamOutput.prompt}` : upstreamOutput.prompt;
-        }
-        if (upstreamOutput.text) {
-          inputs.prompt = inputs.prompt ? `${inputs.prompt}, ${upstreamOutput.text}` : upstreamOutput.text;
+        // 提示词连线: 传递prompt/text/textContent
+        const promptVal = upstreamOutput.prompt || upstreamOutput.text || upstreamOutput.textContent;
+        if (promptVal) {
+          inputs.prompt = inputs.prompt ? `${inputs.prompt}, ${promptVal}` : promptVal;
         }
         break;
       case 'mask':
@@ -842,8 +840,10 @@ export function getNodeInputs(
       default: {
         // any类型: 智能推断
         if (upstreamOutput.imageUrl) inputs.imageUrl = upstreamOutput.imageUrl;
-        if (upstreamOutput.prompt || upstreamOutput.text) {
-          inputs.prompt = inputs.prompt || upstreamOutput.prompt || upstreamOutput.text;
+        // 提示词传递: 支持prompt/text/textContent三种键名
+        const defaultPrompt = upstreamOutput.prompt || upstreamOutput.text || upstreamOutput.textContent;
+        if (defaultPrompt) {
+          inputs.prompt = inputs.prompt || defaultPrompt;
         }
         if (upstreamOutput.maskUrl) inputs.maskUrl = upstreamOutput.maskUrl;
         if (upstreamOutput.analysisResult) inputs.analysisResult = upstreamOutput.analysisResult;
@@ -894,7 +894,7 @@ export function buildNodeExecutionRequest(
         endpoint: '/api/generate',
         method: 'POST',
         body: {
-          prompt: config.prompt || '',
+          prompt: config.prompt || config.textContent || config.text || '',
           negativePrompt: config.negativePrompt || '',
           model: config.model || '',
           quality: config.quality || 'standard',
@@ -911,7 +911,7 @@ export function buildNodeExecutionRequest(
         body: {
           action: config.action || 'edit',
           imageUrl: config.imageUrl || '',
-          prompt: config.prompt || '',
+          prompt: config.prompt || config.textContent || config.text || '',
           negativePrompt: config.negativePrompt || '',
           model: config.model || '',
           strength: config.strength || 75,
@@ -992,7 +992,7 @@ export function buildNodeExecutionRequest(
         method: 'POST',
         body: {
           image: config.imageUrl || '',
-          prompt: config.prompt || '',
+          prompt: config.prompt || config.textContent || config.text || '',
           model: config.editModel || config.model || '',
           size: config.size || '1024',
         }
@@ -1009,7 +1009,7 @@ export function buildNodeExecutionRequest(
           scene: config.scene || 'logo',
           mode: config.mode || 'full',
           model: config.model || '',
-          prompt: config.prompt || '',
+          prompt: config.prompt || config.textContent || config.text || '',
         }
       };
 
