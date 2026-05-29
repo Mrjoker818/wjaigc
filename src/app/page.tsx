@@ -693,18 +693,18 @@ function CanvasApp() {
       if (data.success && data.mode === 'polling') {
         const { taskIds, estimatedTime, prompt: enhancedPrompt, originalPrompt, category, style } = data;
         
-        // 自适应轮询间隔策略
-        // 根据模型预估时间调整：快速模型1.5s起步，慢速模型2.5s起步
+        // 自适应轮询间隔策略（优化版）
+        // 前期更快探测，后期适度延长避免浪费请求
         const getPollInterval = (pollCount: number, estTime: number) => {
-          const baseInterval = estTime <= 20 ? 1500 : estTime <= 60 ? 2000 : 2500;
-          // 后期延长间隔避免浪费请求
-          if (pollCount > 20) return baseInterval + 1500;
+          const baseInterval = estTime <= 20 ? 1000 : estTime <= 60 ? 1500 : 2000;
+          if (pollCount > 30) return baseInterval + 2000;
+          if (pollCount > 20) return baseInterval + 1000;
           if (pollCount > 10) return baseInterval + 500;
           return baseInterval;
         };
 
-        // 最大轮询时间：预估时间 * 3 + 30秒（兜底），最少60秒，最多600秒（兼容token link等慢速API）
-        const maxPollTime = Math.min(600, Math.max(60, estimatedTime * 3 + 30)) * 1000;
+        // 最大轮询时间：预估时间 * 4 + 60秒（兜底），最少120秒，最多900秒（15分钟，兼容慢速API）
+        const maxPollTime = Math.min(900, Math.max(120, estimatedTime * 4 + 60)) * 1000;
         const pollStartTime = Date.now();
 
         const completedImages: Array<{ id: string; url: string; prompt: string; model?: string; quality?: string; aspectRatio?: string; stylePreset?: string; category?: string; size?: string; sourceUrl?: string }> = [];        let consecutiveErrors = 0;
@@ -718,9 +718,9 @@ function CanvasApp() {
             // 检查是否超时
             if (Date.now() - pollStartTime > maxPollTime) {
               toast.error('生成超时', {
-                description: `${data.modelName} 生成时间过长，请尝试降低分辨率或简化提示词后重试`,
+                description: `${data.modelName} 生成时间过长（已等待${Math.round((Date.now() - pollStartTime) / 1000)}秒）。可能原因：API排队中、模型负载高、提示词复杂度高。请稍后重试或降低分辨率`,
                 className: 'bg-[#141414] border border-red-900 text-white',
-                duration: 8000,
+                duration: 10000,
               });
               break;
             }

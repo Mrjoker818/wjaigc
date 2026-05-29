@@ -310,10 +310,11 @@ export async function POST(request: NextRequest) {
     }
 
     // ★ 短循环模式：服务端内部快速轮询，减少前端→后端往返
-    // 当任务仍在处理中时，在服务端内快速重试最多5次（间隔1.5秒）
-    // 增加到5次以减少前端轮询往返次数，缓解擦除等长时间任务的超时问题
-    const MAX_QUICK_POLLS = 5;
-    const QUICK_POLL_INTERVAL = 1500;
+    // 当任务仍在处理中时，在服务端内快速重试最多10次（间隔1秒）
+    // 增加到10次以减少前端轮询往返次数，缓解慢速API和擦除等长时间任务的超时问题
+    // 10次 * 1秒 = 最多10秒服务端等待，足够覆盖大多数模型的首轮返回
+    const MAX_QUICK_POLLS = 10;
+    const QUICK_POLL_INTERVAL = 1000;
 
     const doSinglePoll = async (): Promise<{ statusResult: Record<string, unknown>; statusResponse: Response } | null> => {
       const ctrl = new AbortController();
