@@ -401,9 +401,6 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
     ]});
   }
 
-  // 断点
-  fields.push({ key: 'breakpoint', label: '断点', type: 'toggle', defaultValue: false });
-
   return fields;
 }
 

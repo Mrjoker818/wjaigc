@@ -252,7 +252,16 @@ function PropertyPanel({ node, onUpdate, onToggleBreakpoint }: PropertyPanelProp
       {fields.map((field) => (
         <div key={field.key} className="space-y-1.5">
           <label className="text-xs text-[#7d8590] font-medium">{field.label}</label>
-          {renderField(field, node, (val) => onUpdate(node.id, { [field.key]: val }))}
+          {renderField(field, node, (val) => {
+            // 部分字段需要同步更新到节点顶层属性（而非仅config）
+            const topLevelKey = field.key as 'label' | 'condition' | 'loopCount';
+            const needsTopLevel = ['label', 'condition', 'loopCount'].includes(field.key);
+            const updates: Partial<WorkflowNode> = { config: { [field.key]: val } };
+            if (needsTopLevel) {
+              (updates as Record<string, unknown>)[topLevelKey] = val;
+            }
+            onUpdate(node.id, updates);
+          })}
         </div>
       ))}
 
@@ -269,47 +278,53 @@ function PropertyPanel({ node, onUpdate, onToggleBreakpoint }: PropertyPanelProp
 }
 
 function renderField(field: PropertyField, node: WorkflowNode, onChange: (val: unknown) => void) {
-  const value = (node.config?.[field.key] ?? field.defaultValue) as string;
-  const nodeValue = (node.config as Record<string, unknown> | undefined)?.[field.key] as string | undefined;
+  // 统一从 config 读取值，部分字段（label/condition/loopCount）也兼容顶层属性
+  const configVal = node.config?.[field.key];
+  // 对于 label/condition/loopCount，如果 config 中没有，尝试从节点顶层读取
+  const topLevelVal = (node as unknown as Record<string, unknown>)[field.key];
+  const rawVal = configVal !== undefined ? configVal : (topLevelVal !== undefined ? topLevelVal : field.defaultValue);
 
   switch (field.type) {
     case 'text':
-      return <input type="text" value={nodeValue ?? value ?? ''} onChange={(e) => onChange(e.target.value)}
+      return <input type="text" value={String(rawVal ?? '')} onChange={(e) => onChange(e.target.value)}
         className="w-full bg-[#1c2333] border border-[#30363d] rounded-md px-2.5 py-1.5 text-xs text-[#e6edf3] focus:outline-none focus:ring-1 focus:ring-[#d4af37]/50" />;
 
     case 'textarea':
-      return <textarea value={nodeValue ?? value ?? ''} onChange={(e) => onChange(e.target.value)} rows={3}
+      return <textarea value={String(rawVal ?? '')} onChange={(e) => onChange(e.target.value)} rows={3}
         className="w-full bg-[#1c2333] border border-[#30363d] rounded-md px-2.5 py-1.5 text-xs text-[#e6edf3] resize-y focus:outline-none focus:ring-1 focus:ring-[#d4af37]/50" />;
 
-    case 'number':
-      return <input type="number" value={Number(value) || (field.defaultValue as number) || 0} min={field.min} max={field.max} step={field.step ?? 1}
+    case 'number': {
+      const numVal = typeof rawVal === 'number' ? rawVal : Number(rawVal) || (field.defaultValue as number) || 0;
+      return <input type="number" value={numVal} min={field.min} max={field.max} step={field.step ?? 1}
         onChange={(e) => onChange(Number(e.target.value))}
         className="w-full bg-[#1c2333] border border-[#30363d] rounded-md px-2.5 py-1.5 text-xs text-[#e6edf3] focus:outline-none focus:ring-1 focus:ring-[#d4af37]/50" />;
+    }
 
     case 'select':
       return (
-        <select value={String(value)} onChange={(e) => onChange(e.target.value)}
+        <select value={String(rawVal ?? '')} onChange={(e) => onChange(e.target.value)}
           className="w-full bg-[#1c2333] border border-[#30363d] rounded-md px-2.5 py-1.5 text-xs text-[#e6edf3] focus:outline-none focus:ring-1 focus:ring-[#d4af37]/50 appearance-none cursor-pointer">
           {field.options?.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
         </select>
       );
 
-    case 'toggle':
-      const boolVal = value === 'true' || String(value) === 'true';
+    case 'toggle': {
+      const boolVal = Boolean(rawVal);
       return (
         <button onClick={() => onChange(!boolVal)}
           className={`w-8 h-4 rounded-full transition-colors ${boolVal ? 'bg-[#d4af37]' : 'bg-[#30363d]'}`}>
           <div className={`w-3 h-3 rounded-full bg-white transition-transform ${boolVal ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
         </button>
       );
+    }
 
     case 'slider':
-      return <input type="range" value={Number(value)} min={field.min ?? 0} max={field.max ?? 100} step={field.step ?? 1}
+      return <input type="range" value={Number(rawVal) || 0} min={field.min ?? 0} max={field.max ?? 100} step={field.step ?? 1}
         onChange={(e) => onChange(Number(e.target.value))}
         className="w-full accent-[#d4af37]" />;
 
     case 'model-select':
-      return <input type="text" value={String(value ?? '')} placeholder="选择模型..." onChange={(e) => onChange(e.target.value)}
+      return <input type="text" value={String(rawVal ?? '')} placeholder="选择模型..." onChange={(e) => onChange(e.target.value)}
         className="w-full bg-[#1c2333] border border-[#30363d] rounded-md px-2.5 py-1.5 text-xs text-[#e6edf3] focus:outline-none focus:ring-1 focus:ring-[#d4af37]/50" />;
 
     default:
@@ -510,7 +525,13 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   const handleNodeUpdate = useCallback((id: string, updates: Partial<WorkflowNode>) => {
     setWf(prev => ({
       ...prev,
-      nodes: prev.nodes.map(n => n.id === id ? { ...n, ...updates } : n),
+      nodes: prev.nodes.map(n => {
+        if (n.id !== id) return n;
+        // 深度合并config，保留非config的顶级字段直接展开
+        const newConfig = { ...n.config, ...(updates.config || {}) };
+        const { config: _cfg, ...topLevel } = updates as Record<string, unknown>;
+        return { ...n, ...topLevel, config: newConfig };
+      }),
       updatedAt: Date.now(),
     }));
   }, []);
@@ -771,7 +792,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
         {/* 断点标记 */}
         <div className="flex items-center gap-1">
           <div className="w-2.5 h-2.5 rounded-full bg-[#f85149] opacity-60" style={{ animation: 'breakpointPulse 2s infinite' }} />
-          <span className="text-[10px] text-[#7d8590]">断点: {wf.nodes.filter(n => n.config.hasBreakpoint).length}</span>
+          <span className="text-[10px] text-[#7d8590]">断点: {wf.nodes.filter(n => n.breakpoint).length}</span>
         </div>
 
         <div className="w-px h-5 bg-[#30363d]" />

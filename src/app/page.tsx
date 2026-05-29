@@ -9,23 +9,10 @@ import { PromptEquation } from '@/components/prompt-equation';
 
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
-import { Image as ImageIcon, MessageSquare, Sparkles, GitBranch } from 'lucide-react';
-import { OperationChainPanel } from '@/components/operation-chain-panel';
-import { NodeLibraryPanel } from '@/components/node-library-panel';
+import { Image as ImageIcon, MessageSquare, Sparkles, GitBranch, CircleDot } from 'lucide-react';
 import NodeEditor from '@/components/node-editor';
 import WorkflowHub from '@/components/workflow-hub';
-
-/** Node label mapping for pipeline step display */
-const NODE_LABELS: Record<string, string> = {
-  'load-image': '加载图片', 'load-url': '加载URL', 'text-input': '文本输入',
-  'remove-bg': '移除背景', 'upscale': '无损放大', 'img2img': '图生图',
-  'adjust-color': '调色', 'white-bg': '白底合成', 'erase': '擦除修复',
-  'ai-check': 'AI质检', 'ai-optimize': 'AI优化', 'ai-edit': 'AI修图', 'image-analyze': '图片分析',
-  'condition': '条件分支', 'else': '否则', 'loop': '循环', 'parallel': '并行执行', 'switch': '开关',
-  'subgraph': '子图', 'batch': '批量组合',
-  'save-image': '保存图片', 'export-psd': '导出PSD', 'export-svg': '导出SVG',
-};
-import { PipelineChain, createPipelineChain, generateStepId, PipelineStepType, addStepToChain, executeChain, executeStep, NODE_ACTION_MAP } from '@/lib/pipeline-chain';
+import { createDemoWorkflow, type Workflow } from '@/lib/workflow-engine';
 import { ImageEditor } from '@/components/image-editor';
 import { UserManager } from '@/components/user-manager';
 import { ProjectDataPanel } from '@/components/project-data-panel';
@@ -59,7 +46,7 @@ import { toStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 
 type ThemeStyle = 'gold' | 'monochrome';
-type ActivePanel = 'generate' | 'chat' | 'pipeline';
+type ActivePanel = 'generate' | 'chat';
 
 
 function recordUserData(input: {
@@ -151,6 +138,7 @@ function CanvasApp() {
   const [themeStyle, setThemeStyle] = useState<ThemeStyle>('gold');
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [activePanel, setActivePanel] = useState<ActivePanel>('generate');
+  const [appMode, setAppMode] = useState<'canvas' | 'node' | 'workflow-hub'>('canvas');
   const [showUserManager, setShowUserManager] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [showAdminSystem, setShowAdminSystem] = useState(false);
@@ -173,10 +161,6 @@ function CanvasApp() {
   const [altRefMarkers, setAltRefMarkers] = useState<Array<{id: string; url: string; number: number}>>([]);
   const [showPromptEquation, setShowPromptEquation] = useState(false);
 
-  // Pipeline chain state - 操作链
-  const [pipelineChains, setPipelineChains] = useState<Record<string, PipelineChain>>({});
-  const [appMode, setAppMode] = useState<'canvas' | 'node' | 'workflow-hub'>('canvas');
-
   // Language-based image editing state
   const [showImageEditor, setShowImageEditor] = useState(false);
   const [editingImage, setEditingImage] = useState<CanvasImage | null>(null);
@@ -190,19 +174,6 @@ function CanvasApp() {
   const [visionPromptEnabled, setVisionPromptEnabled] = useState(false);
   const [isVisionAnalyzing, setIsVisionAnalyzing] = useState(false);
   const [visionResult, setVisionResult] = useState<import('@/components/oh-my-prompt').VisionApiResultData | null>(null);
-
-  // Node library panel state
-  const [nodeLibraryCollapsed, setNodeLibraryCollapsed] = useState(true);
-
-  // Auto-create pipeline chain when an image is selected
-  useEffect(() => {
-    if (selectedImage && !pipelineChains[selectedImage.id]) {
-      setPipelineChains(prev => ({
-        ...prev,
-        [selectedImage.id]: createPipelineChain(selectedImage.id, selectedImage.url),
-      }));
-    }
-  }, [selectedImage, pipelineChains]);
 
   // Initialize current user and admin UI state
   useEffect(() => {
@@ -297,19 +268,10 @@ function CanvasApp() {
       if (!cancelled) setAuthChecked(true);
     };
     void initCurrentUser();
+    return () => {
+      cancelled = true;
+    };
   }, []);
-
-  // 模式切换处理
-  const handleSwitchToCanvas = useCallback(() => setAppMode('canvas'), []);
-  const handleSwitchToNode = useCallback(() => setAppMode('node'), []);
-  const handleSwitchToWorkflowHub = useCallback(() => setAppMode('workflow-hub'), []);
-
-  const handleEditWorkflowInNode = useCallback((_wf: import('@/lib/workflow-engine').Workflow) => {
-    setAppMode('node');
-  }, []);
-
-  // 节点模式 / 工作流中心 - 在 return 中条件渲染
-
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [ohMyPromptOpen, setOhMyPromptOpen] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
@@ -1878,154 +1840,6 @@ function CanvasApp() {
     setActivePanel('generate');
   }, []);
 
-  // === Pipeline Chain Handlers ===
-  /** Get or create pipeline chain for a given image */
-  const getOrCreateChain = useCallback((imageId: string, imageUrl?: string): PipelineChain => {
-    const existing = pipelineChains[imageId];
-    if (existing) return existing;
-    const newChain = createPipelineChain(imageId, imageUrl);
-    setPipelineChains(prev => ({ ...prev, [imageId]: newChain }));
-    return newChain;
-  }, [pipelineChains]);
-
-  /** Add a step to the selected image's pipeline chain */
-  const handleAddPipelineStep = useCallback((stepType: PipelineStepType, label: string, nodeId?: string) => {
-    if (!selectedImage) return;
-    // 从 NODE_ACTION_MAP 查找 apiAction
-    const actionInfo = nodeId ? NODE_ACTION_MAP[nodeId] : undefined;
-    setPipelineChains(prev => {
-      const chain = prev[selectedImage.id] || createPipelineChain(selectedImage.id, selectedImage.url);
-      return {
-        ...prev,
-        [selectedImage.id]: addStepToChain(chain, {
-          type: stepType,
-          label,
-          apiAction: actionInfo?.apiAction,
-          apiParams: actionInfo ? { scale: 2 } : undefined,
-        }),
-      };
-    });
-  }, [selectedImage]);
-
-  /** Run the entire pipeline chain with real API execution */
-  const handleRunChain = useCallback(async () => {
-    if (!selectedImage) return;
-    const chain = pipelineChains[selectedImage.id];
-    if (!chain || chain.steps.length === 0) return;
-
-    // Use executeChain from pipeline-chain.ts with real API calls
-    await executeChain(chain, (updatedChain) => {
-      setPipelineChains(prev => ({
-        ...prev,
-        [selectedImage.id]: updatedChain,
-      }));
-      // If currentUrl changed, update canvas image
-      const prevChain = pipelineChains[selectedImage.id];
-      if (updatedChain.currentUrl && updatedChain.currentUrl !== prevChain?.currentUrl) {
-        setImagesRaw(prev => prev.map(img =>
-          img.id === selectedImage.id ? { ...img, url: updatedChain.currentUrl! } : img
-        ));
-      }
-    });
-  }, [selectedImage, pipelineChains]);
-
-  /** Step through the pipeline chain (execute one step) */
-  const handleStepChain = useCallback(async () => {
-    if (!selectedImage) return;
-    const chain = pipelineChains[selectedImage.id];
-    if (!chain) return;
-
-    // Find next pending step or running step
-    const runningIdx = chain.steps.findIndex(s => s.status === 'running');
-    const firstPendingIdx = chain.steps.findIndex(s => s.status === 'pending');
-
-    // If there's a running step, wait for it; otherwise start next pending
-    if (runningIdx >= 0) return; // Already running
-    if (firstPendingIdx < 0) return; // Nothing to run
-
-    const step = chain.steps[firstPendingIdx];
-
-    // Mark as running
-    setPipelineChains(prev => {
-      const c = prev[selectedImage.id];
-      if (!c) return prev;
-      return {
-        ...prev,
-        [selectedImage.id]: {
-          ...c,
-          steps: c.steps.map((s, i) =>
-            i === firstPendingIdx ? { ...s, status: 'running' as const, progress: 0 } : s
-          ),
-          updatedAt: Date.now(),
-        },
-      };
-    });
-
-    // Execute the step
-    try {
-      const result = await executeStep(step, chain.currentUrl || chain.originalUrl || '');
-      // Mark as completed
-      setPipelineChains(prev => {
-        const c = prev[selectedImage.id];
-        if (!c) return prev;
-        return {
-          ...prev,
-          [selectedImage.id]: {
-            ...c,
-            steps: c.steps.map(s => s.id === step.id ? { ...s, status: 'completed' as const, progress: 100, resultUrl: result.resultUrl } : s),
-            currentUrl: result.resultUrl || c.currentUrl,
-            updatedAt: Date.now(),
-          },
-        };
-      });
-      // Update canvas image
-      if (result.resultUrl) {
-        setImagesRaw(prev => prev.map(img =>
-          img.id === selectedImage.id ? { ...img, url: result.resultUrl! } : img
-        ));
-      }
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : '执行失败';
-      setPipelineChains(prev => {
-        const c = prev[selectedImage.id];
-        if (!c) return prev;
-        return {
-          ...prev,
-          [selectedImage.id]: {
-            ...c,
-            steps: c.steps.map(s => s.id === step.id ? { ...s, status: 'failed' as const, error: errorMsg } : s),
-            updatedAt: Date.now(),
-          },
-        };
-      });
-    }
-  }, [selectedImage, pipelineChains]);
-
-  /** Reset the pipeline chain */
-  const handleResetChain = useCallback(() => {
-    if (!selectedImage) return;
-    setPipelineChains(prev => {
-      const chain = prev[selectedImage.id];
-      if (!chain) return prev;
-      return {
-        ...prev,
-        [selectedImage.id]: {
-          ...chain,
-          steps: chain.steps.map(s => ({
-            ...s,
-            status: s.type === 'load' ? 'completed' as const : 'pending' as const,
-            progress: undefined,
-            duration: undefined,
-          })),
-          updatedAt: Date.now(),
-        },
-      };
-    });
-  }, [selectedImage]);
-
-  /** Get pipeline chain for selected image */
-  const selectedChain = selectedImage ? (pipelineChains[selectedImage.id] || null) : null;
-
   const handleExternalPromptConsumed = useCallback(() => {
     setExternalPrompt(undefined);
   }, []);
@@ -2191,20 +2005,22 @@ function CanvasApp() {
     }
   }, [currentUser, getLocalFavorites, saveLocalFavorites]);
 
-  // 节点模式
+  // Workflow state for node mode
+  const [nodeWorkflow, setNodeWorkflow] = useState<Workflow | null>(null);
+
+  // Mode switching - early return for non-canvas modes
   if (appMode === 'node') {
     return (
-      <div className="h-screen w-screen bg-[#0e1117] overflow-hidden">
-        <NodeEditor workflow={null} onBack={handleSwitchToCanvas} onWorkflowChange={() => {}} onOpenWorkflowHub={handleSwitchToWorkflowHub} />
-      </div>
+      <NodeEditor
+        workflow={nodeWorkflow}
+        onBack={() => setAppMode('canvas')}
+        onWorkflowChange={setNodeWorkflow}
+        onOpenWorkflowHub={() => setAppMode('workflow-hub')}
+      />
     );
   }
-
-  // 工作流中心
   if (appMode === 'workflow-hub') {
-    return (
-      <WorkflowHub onBack={handleSwitchToCanvas} onEditWorkflow={handleEditWorkflowInNode} />
-    );
+    return <WorkflowHub onBack={() => setAppMode('canvas')} onEditWorkflow={(wf) => { setNodeWorkflow(wf); setAppMode('node'); }} />;
   }
 
   return (
@@ -2249,7 +2065,8 @@ function CanvasApp() {
           onToggleHelp={() => setShowHelpGuide(true)}
           onAddToFavorites={handleAddToFavorites}
           onToggleFavorites={() => setShowFavorites(true)}
-          pipelineChains={pipelineChains}
+          onSwitchToNodeMode={() => setAppMode('node')}
+          onSwitchToWorkflowHub={() => setAppMode('workflow-hub')}
           initialViewState={viewStateRef.current || undefined}
           isPanelCollapsed={panelCollapsed}
           navigateToImageId={navigateToImageId}
@@ -2334,54 +2151,6 @@ function CanvasApp() {
           }}
         />
       )}
-
-      {/* Mode Switch - Top-left floating */}
-      <div className="absolute top-3 left-3 z-40 flex items-center gap-1 bg-[#161b22]/90 backdrop-blur-sm border border-[#30363d] rounded-lg p-1">
-        <button onClick={handleSwitchToCanvas}
-          className={`px-2.5 py-1 rounded-md text-[10px] font-medium transition-colors bg-[#d4af37] text-[#0e1117]`}>
-          画布
-        </button>
-        <button onClick={handleSwitchToNode}
-          className={`px-2.5 py-1 rounded-md text-[10px] font-medium transition-colors text-[#7d8590] hover:text-[#e6edf3]`}>
-          节点
-        </button>
-        <button onClick={handleSwitchToWorkflowHub}
-          className={`px-2.5 py-1 rounded-md text-[10px] font-medium transition-colors text-[#7d8590] hover:text-[#e6edf3]`}>
-          工作流
-        </button>
-      </div>
-
-      {/* Node Library Panel - Left side floating */}
-      <div className={`absolute top-14 left-3 bottom-3 z-30 transition-all duration-300 flex ${
-        nodeLibraryCollapsed ? '' : ''
-      }`}>
-        <NodeLibraryPanel
-          isMonochrome={themeStyle === 'monochrome'}
-          collapsed={nodeLibraryCollapsed}
-          onToggleCollapse={() => setNodeLibraryCollapsed(prev => !prev)}
-          onAddNode={(nodeType, nodeId) => {
-            // When a node is added from library, add it to the selected image's pipeline chain
-            if (selectedImage) {
-              const actionInfo = NODE_ACTION_MAP[nodeId];
-              setPipelineChains(prev => {
-                const chain = prev[selectedImage.id] || createPipelineChain(selectedImage.id, selectedImage.url);
-                return {
-                  ...prev,
-                  [selectedImage.id]: addStepToChain(chain, {
-                    type: nodeType as import('@/lib/pipeline-chain').PipelineStepType,
-                    label: NODE_LABELS[nodeId] || nodeId,
-                    description: '',
-                    apiAction: actionInfo?.apiAction,
-                    apiParams: actionInfo ? { scale: 2 } : undefined,
-                  }),
-                };
-              });
-              // Switch to operation chain tab to show the new step
-              setActivePanel('pipeline');
-            }
-          }}
-        />
-      </div>
 
       {/* Floating Panel */}
       {!panelCollapsed && (
@@ -2468,24 +2237,6 @@ function CanvasApp() {
                 <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-gradient-to-r from-blue-500 to-cyan-400' : 'bg-[#d4af37] shadow-[0_0_6px_rgba(212,175,55,0.5)]'}`} />
               )}
             </button>
-            <button
-              onClick={() => setActivePanel('pipeline')}
-              className={`flex-1 py-2 px-3 flex items-center justify-center gap-1.5 transition-all text-sm relative ${
-                activePanel === 'pipeline'
-                  ? themeStyle === 'monochrome'
-                    ? 'text-blue-600 font-semibold'
-                    : 'text-[#d4af37] font-semibold'
-                  : themeStyle === 'monochrome'
-                    ? 'text-gray-500 hover:text-blue-600 hover:bg-blue-50/50'
-                    : 'text-[#888] hover:text-white hover:bg-[#1a1a1a]/70'
-              }`}
-            >
-              <GitBranch size={15} className={themeStyle === 'monochrome' && activePanel === 'pipeline' ? 'text-blue-500' : ''} />
-              <span className="text-sm">操作链</span>
-              {activePanel === 'pipeline' && (
-                <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-gradient-to-r from-blue-500 to-cyan-400' : 'bg-[#d4af37] shadow-[0_0_6px_rgba(212,175,55,0.5)]'}`} />
-              )}
-            </button>
           </div>
           <div className="panel-divider" />
 
@@ -2527,19 +2278,6 @@ function CanvasApp() {
               </div>
               <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
                 <ChatPanel themeStyle={themeStyle} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} canvasImages={images} onChatModelChange={setCurrentChatModelInfo} />
-              </div>
-
-              {/* 操作链面板 */}
-              <div className={activePanel === 'pipeline' ? 'flex-1 overflow-hidden flex flex-col' : 'hidden'}>
-                <OperationChainPanel
-                  chain={selectedChain}
-                  imageName={selectedImage?.prompt?.slice(0, 30) || undefined}
-                  themeStyle={themeStyle}
-                  onAddStep={handleAddPipelineStep}
-                  onRunChain={handleRunChain}
-                  onStepChain={handleStepChain}
-                  onResetChain={handleResetChain}
-                />
               </div>
 
             {/* 固定在底部的开始生成按钮 */}
