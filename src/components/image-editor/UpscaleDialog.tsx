@@ -3,6 +3,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { X, Loader2, ZoomIn } from 'lucide-react';
 
+/** 前端兜底：将纯英文 API 错误翻译为中文友好提示 */
+function translateErrorFrontend(msg: string): string {
+  if (!msg) return '操作失败，请重试';
+  const lower = msg.toLowerCase();
+  if (lower.includes('try again later') || lower.includes('please wait')) return '当前模型暂时不可用，请稍后重试或切换其他模型';
+  if (lower.includes('insufficient balance') || lower.includes('insufficient')) return 'API 余额不足，请联系管理员充值';
+  if (lower.includes('rate limit') || lower.includes('too many requests')) return '请求过于频繁，请稍后再试';
+  if (/^[a-zA-Z]/.test(msg) && !/[\u4e00-\u9fff]/.test(msg)) return `API 返回错误: ${msg.replace(/\s*\(request id:.*?\)\s*/i, '').trim()}`;
+  return msg;
+}
+
 export interface UpscaleDialogProps {
   imageUrl: string;
   onClose: () => void;
@@ -99,7 +110,7 @@ export default function UpscaleDialog({ imageUrl, onClose, onSuccess, isMonochro
       if (data.success && data.imageUrl) {
         onSuccess(data.imageUrl);
       } else {
-        setError(data.error || '放大失败');
+        setError(translateErrorFrontend(data.error || '放大失败'));
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : '网络错误';

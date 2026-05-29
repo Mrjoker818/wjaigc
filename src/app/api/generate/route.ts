@@ -3,6 +3,7 @@ import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, normalizeApiBaseUrl, findAllProvidersForType, findProviderById } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { translateApiError } from '@/lib/api-error-translate';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile } from '@/lib/api-compatibility';
@@ -38,33 +39,6 @@ interface ModelConfig {
 
 // 通用支持的尺寸列表
 const COMMON_SIZES = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
-
-/**
- * 将 API 返回的英文错误信息翻译为中文友好提示
- * 避免用户看到原始英文错误消息
- */
-function translateGenerateApiError(rawMsg: string): string {
-  const msg = rawMsg.toLowerCase();
-
-  if (msg.includes('try again later') || msg.includes('please wait') || msg.includes('_error')) {
-    return '当前模型暂时不可用，请稍后重试或切换其他模型';
-  }
-  if (msg.includes('internal server error') || msg.includes('server error')) {
-    return 'API 服务内部错误，请稍后重试';
-  }
-  if (msg.includes('timeout') || msg.includes('timed out')) {
-    return '请求超时，请稍后重试';
-  }
-  if (msg.includes('content_policy') || msg.includes('content policy') || msg.includes('safety')) {
-    return '内容被安全策略拦截，请修改描述后重试';
-  }
-
-  // 兜底：纯英文消息加中文前缀
-  if (/^[a-zA-Z]/.test(rawMsg) && !/[\u4e00-\u9fff]/.test(rawMsg)) {
-    return `API 返回错误: ${rawMsg}`;
-  }
-  return rawMsg;
-}
 
 /**
  * 根据模型ID和兼容性档案动态推断模型配置
@@ -594,7 +568,7 @@ export async function POST(request: NextRequest) {
           }
           
           // ★ 翻译英文错误信息为中文
-          throw new Error(translateGenerateApiError(errorMsg));
+          throw new Error(translateApiError(errorMsg));
 
         }
 

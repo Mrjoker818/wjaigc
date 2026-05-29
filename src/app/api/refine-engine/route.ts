@@ -3,6 +3,7 @@ import { findProviderForModel, getPublicModels, getPublicApiProviders } from '@/
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, isEditsEndpointRejected, stripEditsOnlyFields } from '@/lib/api-compatibility';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { translateApiError } from '@/lib/api-error-translate';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 
 // ─── Persist result image to local server ───
@@ -748,7 +749,7 @@ export async function POST(request: NextRequest) {
       } catch (procErr) {
         const errMsg = procErr instanceof Error ? procErr.message : String(procErr);
         console.error(`[refine-engine] submitRefineToApi FAILED taskId=${taskId}:`, errMsg);
-        updateTaskProgress(taskId, { status: 'failed', error: errMsg });
+        updateTaskProgress(taskId, { status: 'failed', error: translateApiError(errMsg) });
         return NextResponse.json({
           success: false,
           taskId,

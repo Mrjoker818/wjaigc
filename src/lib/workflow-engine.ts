@@ -336,13 +336,23 @@ export function createWorkflowNode(type: NodeType, x: number, y: number, label?:
   const defaultLabel = label || NODE_TYPE_LABELS[type];
 
   const isCondition = type.startsWith('condition-');
-  const width = isCondition ? 120 : 220;
-  // 动态计算高度：根据端口数量确保端口之间有足够间距
-  const ports = createDefaultPorts(type);
-  const maxInPorts = Math.max(1, ports.filter(p => p.direction === 'in').length);
-  const maxOutPorts = Math.max(1, ports.filter(p => p.direction === 'out').length);
-  const maxPorts = Math.max(maxInPorts, maxOutPorts);
-  const height = isCondition ? 110 : Math.max(60, 30 + maxPorts * 28);
+  // 根据节点类型确定尺寸：文字/图片节点需要更大的空间来展示内容
+  const isTextNode = type === 'input-text';
+  const isImageNode = type === 'input-image' || type === 'output-image' || type === 'output-image-group';
+  const isEditorNode = type.startsWith('ai-') && type !== 'ai-generate';
+  let width: number;
+  let height: number;
+  if (isCondition) {
+    width = 120; height = 110;
+  } else if (isTextNode) {
+    width = 280; height = 200;
+  } else if (isImageNode) {
+    width = 260; height = 200;
+  } else if (isEditorNode) {
+    width = 260; height = 160;
+  } else {
+    width = 240; height = 100;
+  }
 
   return {
     id: `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -352,7 +362,7 @@ export function createWorkflowNode(type: NodeType, x: number, y: number, label?:
     y,
     width,
     height,
-    ports,
+    ports: createDefaultPorts(type),
     config: { color },
     condition: type.startsWith('condition-') ? '' : undefined,
     loopCount: type.startsWith('loop-') ? 3 : undefined,

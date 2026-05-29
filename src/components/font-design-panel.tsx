@@ -70,6 +70,19 @@ const COLOR_OPTIONS = [
 
 const BACKGROUND_OPTIONS = ['纯色背景', '透明背景', '高级留白', '商业KV背景', '暗黑背景', '黑金背景'];
 
+/** 前端兜底：将纯英文 API 错误翻译为中文友好提示 */
+function translateErrorFrontend(msg: string): string {
+  if (!msg) return '操作失败，请重试';
+  const lower = msg.toLowerCase();
+  if (lower.includes('try again later') || lower.includes('please wait')) return '当前模型暂时不可用，请稍后重试或切换其他模型';
+  if (lower.includes('insufficient balance') || lower.includes('insufficient')) return 'API 余额不足，请联系管理员充值';
+  if (lower.includes('rate limit') || lower.includes('too many requests')) return '请求过于频繁，请稍后再试';
+  if (lower.includes('model not found')) return '模型不存在或已下线，请尝试切换其他模型';
+  if (lower.includes('timeout') || lower.includes('timed out')) return '请求超时，请稍后重试';
+  if (/^[a-zA-Z]/.test(msg) && !/[\u4e00-\u9fff]/.test(msg)) return `API 返回错误: ${msg.replace(/\s*\(request id:.*?\)\s*/i, '').trim()}`;
+  return msg;
+}
+
 export default function FontDesignPanel({ isMonochrome = false, onClose, onAddImages }: FontDesignPanelProps) {
   const [text, setText] = useState('好好养自己');
   const [scene, setScene] = useState('KV主标题');
@@ -357,7 +370,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
         }),
       });
       const data = await res.json();
-      if (data.error) { showToast(data.error); return; }
+      if (data.error) { showToast(translateErrorFrontend(data.error)); return; }
       setPlans(data.plans || []);
       setPrompts({ prompt: data.prompt || '', shortPrompt: data.shortPrompt || '', enhancedPrompt: data.enhancedPrompt || '', blackOnWhitePrompt: data.shortPrompt || '', transparentLogoPrompt: '' });
     } catch { showToast('生成方案失败'); }
@@ -379,7 +392,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
         }),
       });
       const data = await res.json();
-      if (data.error) { showToast(data.error); return; }
+      if (data.error) { showToast(translateErrorFrontend(data.error)); return; }
       setPrompts({ prompt: data.prompt || '', shortPrompt: data.shortPrompt || '', enhancedPrompt: data.enhancedPrompt || '', blackOnWhitePrompt: data.blackOnWhitePrompt || '', transparentLogoPrompt: data.transparentLogoPrompt || '' });
     } catch { showToast('生成提示词失败'); }
     finally { setIsGeneratingPrompt(false); }
@@ -404,7 +417,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
         }),
       });
       const data = await res.json();
-      if (data.error) { showToast(data.error); setIsGeneratingImage(false); stopImageTimer(); return; }
+      if (data.error) { showToast(translateErrorFrontend(data.error)); setIsGeneratingImage(false); stopImageTimer(); return; }
       if (data.taskId) {
         activeTasksRef.current.set(data.taskId, { planIndex: 0, variant: 0, planTitle: mode === 'black-on-white' ? '黑底白字' : mode === 'transparent-logo' ? '透明Logo' : '完整版' });
         startPolling();
@@ -448,7 +461,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
           }),
         });
         const data = await res.json();
-        if (data.error) { showToast(`变体${v + 1}生成失败: ${data.error}`); continue; }
+        if (data.error) { showToast(`变体${v + 1}生成失败: ${translateErrorFrontend(data.error)}`); continue; }
         if (data.taskId) {
           activeTasksRef.current.set(data.taskId, { planIndex, variant: v, planTitle: plan.title });
         }
@@ -494,7 +507,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
             }),
           });
           const data = await res.json();
-          if (data.error) { showToast(`方案"${plan.title}"生成失败: ${data.error}`); continue; }
+          if (data.error) { showToast(`方案"${plan.title}"生成失败: ${translateErrorFrontend(data.error)}`); continue; }
           if (data.taskId) {
             activeTasksRef.current.set(data.taskId, { planIndex: pi, variant: v, planTitle: plan.title });
           }

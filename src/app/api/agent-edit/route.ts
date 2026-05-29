@@ -3,6 +3,7 @@ import { findProviderForFeature, findProviderById } from '@/lib/server-api-confi
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { executeAgentLoop, getToolsForLLM, type AgentContext, type AgentResult } from '@/lib/agent-engine';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
+import { translateApiError } from '@/lib/api-error-translate';
 export const runtime = 'nodejs';
 export const maxDuration = 600;
 
@@ -245,7 +246,7 @@ export async function POST(request: NextRequest) {
                 // 更新步骤结果为实际编辑结果
                 step.result = `编辑成功: ${String(step.params.prompt || prompt)}`;
               } else {
-                step.result = `编辑失败: ${editResult.error || '未知错误'}`;
+                step.result = `编辑失败: ${translateApiError(editResult.error || '未知错误')}`;
                 step.success = false;
               }
             } catch (err) {
@@ -333,7 +334,7 @@ export async function POST(request: NextRequest) {
             status: 'failed',
             progress: 100,
             label: '失败',
-            error: result.error || result.finalResponse || 'Agent 执行失败',
+            error: translateApiError(result.error || result.finalResponse || 'Agent 执行失败'),
             result: {
               imageUrl: finalImageUrl,
               steps: result.steps,
@@ -347,7 +348,7 @@ export async function POST(request: NextRequest) {
         console.error('[agent-edit] Error:', errMsg);
         const task = localTaskStore.get(taskId);
         if (task && task.status === 'processing') {
-          localTaskStore.set(taskId, { ...task, status: 'failed', error: errMsg, progress: 100 });
+          localTaskStore.set(taskId, { ...task, status: 'failed', error: translateApiError(errMsg), progress: 100 });
         }
       } finally {
         clearTimeout(timeout);

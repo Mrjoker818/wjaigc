@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature, findProviderForModel, findProviderById } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { parseAgentGenerateResult, parseEcommerceGenerateResult, type AgentTemplateCategory, type EcommerceConfig } from '@/lib/omp-agent-parsers';
+import { translateApiError } from '@/lib/api-error-translate';
 
 const API_TIMEOUT_MS = 300000;
 const DEFAULT_AGENT_MAX_TOKENS = 4096;
@@ -324,7 +325,7 @@ export async function POST(request: NextRequest) {
           if (errorBody?.error?.message) errorDetail = errorBody.error.message;
           else if (errorBody?.message) errorDetail = errorBody.message;
         } catch { /* ignore */ }
-        return NextResponse.json({ success: false, error: errorDetail }, { status: response.status });
+        return NextResponse.json({ success: false, error: translateApiError(errorDetail) }, { status: response.status });
       }
 
       // Handle both SSE stream and JSON responses

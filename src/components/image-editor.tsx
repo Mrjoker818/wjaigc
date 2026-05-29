@@ -77,6 +77,32 @@ function getModelHint(modelId: string): string {
   return '';
 }
 
+/** 前端兜底：将纯英文 API 错误翻译为中文友好提示 */
+function translateErrorFrontend(msg: string): string {
+  if (!msg) return '编辑失败，请重试';
+  const lower = msg.toLowerCase();
+  if (lower.includes('try again later') || lower.includes('please wait')) {
+    return '当前模型暂时不可用，请稍后重试或切换其他模型';
+  }
+  if (lower.includes('insufficient balance') || lower.includes('insufficient')) {
+    return 'API 余额不足，请联系管理员充值';
+  }
+  if (lower.includes('rate limit') || lower.includes('too many requests')) {
+    return '请求过于频繁，请稍后再试';
+  }
+  if (lower.includes('model not found')) {
+    return '模型不存在或已下线，请尝试切换其他模型';
+  }
+  if (lower.includes('timeout') || lower.includes('timed out')) {
+    return '请求超时，请稍后重试';
+  }
+  // 纯英文兜底
+  if (/^[a-zA-Z]/.test(msg) && !/[\u4e00-\u9fff]/.test(msg)) {
+    return `API 返回错误: ${msg.replace(/\s*\(request id:.*?\)\s*/i, '').trim()}`;
+  }
+  return msg;
+}
+
 export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectionStart, initialAspectRatio, initialQuality, initialCount, onParamsChange, themeStyle = 'gold' }: ImageEditorProps) {
   // ★ 主题变量系统
   const isMonochrome = themeStyle === 'monochrome';
@@ -1051,7 +1077,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         } else if (!submitData.success) {
           clearInterval(progressInterval);
           setIsResultLoading(false);
-          setError(submitData.error || '提交失败');
+          setError(translateErrorFrontend(submitData.error || '提交失败'));
           setIsLoading(false);
           if (editStartTimeRef.current) {
             setEditTotalTime(Math.round((Date.now() - editStartTimeRef.current) / 1000));
@@ -1133,15 +1159,15 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                 collectedEditRegions = data.editRegions;
               }
             } else if (!firstError && data.error) {
-              firstError = data.error;
+              firstError = translateErrorFrontend(data.error);
             }
           } else if (pollData.status === 'failed') {
             completedTasks.add(taskId);
-            if (!firstError) firstError = pollData.error || pollData.message || '编辑失败';
+            if (!firstError) firstError = translateErrorFrontend(pollData.error || pollData.message || '编辑失败');
           } else if (pollData.status === 'error') {
             // 任务不存在或已过期（可能是服务重启导致内存清空）
             completedTasks.add(taskId);
-            if (!firstError) firstError = pollData.error || '任务已过期，请重新提交';
+            if (!firstError) firstError = translateErrorFrontend(pollData.error || '任务已过期，请重新提交');
           }
 
           // 更新进度条（基于已完成任务数）

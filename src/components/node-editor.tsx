@@ -330,24 +330,24 @@ interface NodeEditorProps {
 // ==================== 双主题配色 ====================
 const nodeThemes = {
   gold: {
-    // 侧边栏
-    sidebarBg: '#0e1117',
+    // 侧边栏 — 与窗口模式面板 (#1a1a1a) 统一
+    sidebarBg: '#1a1a1a',
     sidebarBorder: 'rgba(212,175,55,0.15)',
     sidebarText: '#e5e5e5',
     sidebarMuted: '#888',
     sidebarDimmed: '#555',
-    // 节点
-    nodeBg: '#1c2333',
+    // 节点 — 与窗口模式浮窗统一 (#1a1a1a 主体 + 金色强调)
+    nodeBg: '#1a1a1a',
     nodeBorder: 'rgba(212,175,55,0.3)',
     nodeSelectedBorder: 'var(--ne-accent)',
-    nodeHoverBg: '#232d40',
+    nodeHoverBg: '#222',
     nodeHeaderText: '#e5e5e5',
     nodePortText: '#999',
     nodeTitleText: '#ccc',
-    nodeBody: '#161616',
+    nodeBody: '#1a1a1a',
     nodeSelected: '#1e1e1e',
     nodeTitle: '#ccc',
-    portFill: '#161616',
+    portFill: '#1a1a1a',
     portLabel: '#999',
     badgeText: '#000',
     gridDot: '#333',
@@ -360,29 +360,29 @@ const nodeThemes = {
     accentDim: 'rgba(212,175,55,0.15)',
     accentMuted: 'rgba(212,175,55,0.25)',
     // 卡片
-    cardBg: '#1c2333',
+    cardBg: '#1a1a1a',
     cardBorder: 'rgba(212,175,55,0.15)',
     border: 'rgba(212,175,55,0.15)',
     text: '#e5e5e5',
     textMuted: '#888',
-    // 输入框
+    // 输入框 — 与窗口模式输入框统一
     inputBg: 'rgba(255,255,255,0.05)',
-    inputBorder: 'rgba(255,255,255,0.1)',
+    inputBorder: 'rgba(212,175,55,0.2)',
     inputText: '#e5e5e5',
     inputPlaceholder: '#666',
-    // 按钮
+    // 按钮 — 与窗口模式按钮统一
     btnBg: 'rgba(212,175,55,0.1)',
     btnHoverBg: 'rgba(212,175,55,0.2)',
     btnText: 'var(--ne-accent)',
     // 画布
-    canvasBg: '#0a0e17',
+    canvasBg: '#111',
     canvasGrid: 'rgba(255,255,255,0.03)',
     canvasDot: 'rgba(255,255,255,0.08)',
     // 连线
     connColor: '#555',
     connHighlight: 'var(--ne-accent)',
     // 工具栏
-    toolbarBg: '#141820',
+    toolbarBg: '#1a1a1a',
     toolbarBorder: 'rgba(212,175,55,0.15)',
     toolbarText: '#999',
     // 标签
@@ -394,7 +394,7 @@ const nodeThemes = {
     statusSuccess: '#4ade80',
     statusError: '#f87171',
     // 滚动条
-    scrollbarTrack: '#0e1117',
+    scrollbarTrack: '#111',
     scrollbarThumb: 'rgba(212,175,55,0.2)',
   },
   monochrome: {
@@ -2252,6 +2252,9 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
               }}
             >
               <svg viewBox={`${minX} ${minY} ${vw} ${vh}`} className="w-full h-full">
+                <defs>
+                  <style>{`@keyframes fadeOut { from { stroke-opacity: 0.6; } to { stroke-opacity: 0; } }`}</style>
+                </defs>
                 {wf.connections.map(conn => {
                   const from = wf.nodes.find(n => n.id === conn.fromNodeId);
                   const to = wf.nodes.find(n => n.id === conn.toNodeId);
@@ -2554,10 +2557,10 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
         className="cursor-move"
       />
 
-      {/* 执行成功动画光圈 */}
+      {/* 执行成功光圈 (渐现后消失, 不持续闪烁) */}
       {execResult?.status === 'success' && (
-        <rect x={node.x - 4} y={node.y - 4} width={node.width + 8} height={node.height + 8} rx={isCondition ? 55 : 12}
-          fill="none" stroke={T.statusSuccess} strokeWidth={1} strokeOpacity={0.3} className="animate-ping" />
+        <rect x={node.x - 3} y={node.y - 3} width={node.width + 6} height={node.height + 6} rx={isCondition ? 55 : 10}
+          fill="none" stroke={T.statusSuccess} strokeWidth={1.5} strokeOpacity={0.5} style={{ animation: 'fadeOut 1.5s ease-out forwards' }} />
       )}
 
       {/* 画布模式专用标记 (右上角小徽章) */}
@@ -2586,11 +2589,11 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
           <text x={node.x + 30} y={node.y + 23} fill={T.nodeTitle} fontSize={13} fontWeight={500} className="pointer-events-none" clipPath={`url(#title-clip-${node.id})`}>
             {node.label}
           </text>
-          {/* 图片缩略图 */}
+          {/* 图片缩略图 — 自适应内容展示，不裁切 */}
           {hasImageOutput && (
             <foreignObject x={node.x + 8} y={node.y + 32} width={node.width - 16} height={node.height - 44}>
-              <div className="w-full h-full relative group cursor-pointer" onClick={() => onPreviewImage(hasImageOutput)}>
-                <img src={hasImageOutput} alt="" className="w-full h-full object-cover rounded opacity-70 group-hover:opacity-100 transition-opacity" />
+              <div className="w-full h-full relative group cursor-pointer flex items-center justify-center" onClick={() => onPreviewImage(hasImageOutput)}>
+                <img src={hasImageOutput} alt="" className="max-w-full max-h-full object-contain rounded opacity-70 group-hover:opacity-100 transition-opacity" />
               </div>
             </foreignObject>
           )}
@@ -2598,13 +2601,13 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
           {/* ===== P0: input-text 节点直接编辑 + LLM 优化 + 预设 ===== */}
           {isInputText && (
             <foreignObject x={node.x + 6} y={node.y + 32} width={node.width - 12} height={node.height - 38}>
-              <div className="flex flex-col gap-1 overflow-hidden" style={{ color: T.nodeTitle, fontSize: 11 }}>
-                {/* 可编辑文本区域 */}
+              <div className="flex flex-col gap-1 h-full" style={{ color: T.nodeTitle, fontSize: 11 }}>
+                {/* 可编辑文本区域 — 自适应内容 */}
                 <div
                   contentEditable
                   suppressContentEditableWarning
-                  className="w-full min-h-[32px] max-h-[120px] overflow-y-auto rounded px-2 py-1 text-[11px] leading-tight outline-none focus:ring-1 focus:ring-[var(--ne-accent)] resize-y"
-                  style={{ background: T.inputBg, color: T.text, borderColor: T.border }}
+                  className="w-full flex-1 min-h-[32px] overflow-y-auto rounded px-2 py-1 text-[11px] leading-tight outline-none focus:ring-1 focus:ring-[var(--ne-accent)]"
+                  style={{ background: T.inputBg, color: T.text, borderColor: T.border, wordBreak: 'break-word' }}
                   onBlur={(e) => {
                     const text = e.currentTarget.innerText || '';
                     onNodeFieldChange?.(node.id, 'textContent', text);

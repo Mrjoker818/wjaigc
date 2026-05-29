@@ -7,6 +7,7 @@ import { postProcessAIRemoveBG } from '@/lib/remove-bg-postprocess';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { getEditTask, deleteEditTask } from '@/lib/edit-task-store';
 import { isTaskCancelled, updateTaskProgress, getTaskInfo, releaseQueueSlot } from '@/lib/task-registry';
+import { translateApiError } from '@/lib/api-error-translate';
 import { getRefineResult } from '@/app/api/refine-engine/route';
 import { getBrandResult } from '@/app/api/brand-ecommerce/route';
 
@@ -90,7 +91,7 @@ export async function POST(request: NextRequest) {
           success: false,
           status: 'failed',
           stage: task.stage,
-          error: task.error || '处理失败',
+          error: translateApiError(task.error || '处理失败'),
           retryable: false,
         }, { status: 200 });
       }
@@ -119,7 +120,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: false,
         status: 'failed',
-        error: cachedFailed.error,
+        error: translateApiError(cachedFailed.error),
         retryable: true,
       }, { status: 200 });
     }
@@ -163,7 +164,7 @@ export async function POST(request: NextRequest) {
           success: false,
           status: 'failed',
           progress: registryTask.progress,
-          error: registryTask.error || '处理失败',
+          error: translateApiError(registryTask.error || '处理失败'),
           retryable: false,
         }, { status: 200 });
       }
@@ -717,25 +718,17 @@ export async function POST(request: NextRequest) {
       if (!pollResult.imageUrl) {
         const taskError = taskData?.error as Record<string, unknown> | undefined;
         const errorDetail = (taskError?.message as string) || '';
-        pollResult.error = errorDetail || '模型返回了文本而不是生成图像，请尝试重新措辞提示';
+        pollResult.error = translateApiError(errorDetail) || '模型返回了文本而不是生成图像，请尝试重新措辞提示';
         pollResult.success = false;
         pollResult.retryable = true;
       }
     } else if (taskStatus === 'failed') {
-      updateTaskProgress(taskId, { status: 'failed', error: (taskData?.error as Record<string, unknown>)?.message as string || '图像生成任务失败' });
-      failedTaskCache.set(taskId, { error: (taskData?.error as Record<string, unknown>)?.message as string || '图像生成任务失败', timestamp: Date.now() });
+      const rawError = ((taskData?.error as Record<string, unknown>)?.message as string) || '图像生成任务失败';
+      const translatedError = translateApiError(rawError);
+      updateTaskProgress(taskId, { status: 'failed', error: translatedError });
+      failedTaskCache.set(taskId, { error: translatedError, timestamp: Date.now() });
       releaseQueueSlot(taskId);
-      const taskError = taskData?.error as Record<string, unknown> | undefined;
-      const rawError = (taskError?.message as string) || '图像生成任务失败';
-      if (rawError.includes('ratio or price') || rawError.includes('not configured')) {
-        pollResult.error = '当前模型暂不可用，请切换其他模型或联系管理员配置';
-      } else if (rawError.includes('Insufficient balance') || rawError.includes('insufficient')) {
-        pollResult.error = 'API 余额不足，请联系管理员充值';
-      } else if (rawError.includes('Rate limit') || rawError.includes('rate_limit') || rawError.includes('Too many requests')) {
-        pollResult.error = '请求过于频繁，请稍后再试';
-      } else {
-        pollResult.error = rawError;
-      }
+      pollResult.error = translatedError;
       pollResult.success = false;
     } else if (taskStatus === 'cancelled') {
       pollResult.error = '任务已被取消';
@@ -750,7 +743,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: false,
       status: 'error',
-      error: errMsg,
+      error: translateApiError(errMsg),
       retryable: true,
     }, { status: 500 });
   }

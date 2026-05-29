@@ -3,6 +3,7 @@ import { findProviderForModel, findProviderById, findProviderForFeature, findAll
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
+import { translateApiError } from '@/lib/api-error-translate';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, convertAspectRatioToSize, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, type ApiCompatProfile, type ImageEndpoint } from '@/lib/api-compatibility';
 import { saveImageFile } from '@/lib/server-data-root';
 import sharp from 'sharp';
@@ -721,37 +722,27 @@ async function submitImageTask(
       }
     }
 
-    // 清理常见 API 错误信息，提供更友好的中文提示
+    // ★ 使用统一翻译函数翻译 API 错误信息
+    const translatedMsg = translateApiError(errorMsg);
+
+    // 模型能力错误（支持自动回退）
     if (errorMsg.includes('ratio or price') || errorMsg.includes('not configured') || errorMsg.includes('宽高比不在允许') || errorMsg.includes('aspect ratio is not in the allowed') || errorMsg.includes('Invalid aspect ratio') || errorMsg.includes('not a valid size')) {
-      throw new ModelCapabilityError(`当前模型不支持此画面比例，尝试切换到标准比例...`);
+      throw new ModelCapabilityError(translatedMsg);
     }
     if (errorMsg.includes('image_urls') || errorMsg.includes('mask_image') || errorMsg.includes('image editing')) {
-      throw new ModelCapabilityError(`当前模型不支持图像编辑功能，尝试回退到视觉模型...`);
+      throw new ModelCapabilityError(translatedMsg);
     }
     if (errorMsg.includes('must be an URL') || errorMsg.includes('Invalid URL') || errorMsg.includes('data:')) {
-      throw new ModelCapabilityError(`当前模型不支持 Base64 图片输入，尝试回退到视觉模型...`);
-    }
-    if (errorMsg.includes('Insufficient balance') || errorMsg.includes('insufficient')) {
-      throw new Error(`API 余额不足，请联系管理员充值`);
-    }
-    if (errorMsg.includes('Rate limit') || errorMsg.includes('rate_limit') || errorMsg.includes('Too many requests')) {
-      throw new Error(`请求过于频繁，请稍后再试`);
+      throw new ModelCapabilityError(translatedMsg);
     }
     if (errorMsg.includes('model_not_found') || errorMsg.includes('model not found') || errorMsg.includes('Model not found')) {
-      throw new ModelCapabilityError(`模型不存在或已下线，尝试切换其他模型...`);
+      throw new ModelCapabilityError(translatedMsg);
     }
     if (errorMsg.includes('_error') || errorMsg.includes('try again later')) {
-      throw new ModelCapabilityError(`当前模型暂时不可用，尝试切换其他模型...`);
-    }
-    if (errorMsg.includes('Invalid API key') || errorMsg.includes('invalid api_key')) {
-      throw new Error(`API 密钥无效，请联系管理员检查配置`);
+      throw new ModelCapabilityError(translatedMsg);
     }
 
-    // ★ 兜底：翻译纯英文错误信息
-    if (/^[a-zA-Z]/.test(errorMsg) && !/[\u4e00-\u9fff]/.test(errorMsg)) {
-      throw new Error(`API 返回错误: ${errorMsg}`);
-    }
-    throw new Error(errorMsg);
+    throw new Error(translatedMsg);
   }
 
   // 解析响应 — 防止 API 返回 HTML 页面导致 JSON 解析失败

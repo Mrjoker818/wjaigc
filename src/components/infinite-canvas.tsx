@@ -378,6 +378,32 @@ type MultiAngleMode = 'image' | 'camera';
 type ThreeDBackend = 'api' | 'local';
 type ThreeDType = 'ip' | 'figure' | 'product' | 'character';
 
+/** 前端兜底：将纯英文 API 错误翻译为中文友好提示 */
+function translateErrorFrontend(msg: string): string {
+  if (!msg) return '操作失败，请重试';
+  const lower = msg.toLowerCase();
+  if (lower.includes('try again later') || lower.includes('please wait')) {
+    return '当前模型暂时不可用，请稍后重试或切换其他模型';
+  }
+  if (lower.includes('insufficient balance') || lower.includes('insufficient')) {
+    return 'API 余额不足，请联系管理员充值';
+  }
+  if (lower.includes('rate limit') || lower.includes('too many requests')) {
+    return '请求过于频繁，请稍后再试';
+  }
+  if (lower.includes('model not found')) {
+    return '模型不存在或已下线，请尝试切换其他模型';
+  }
+  if (lower.includes('timeout') || lower.includes('timed out')) {
+    return '请求超时，请稍后重试';
+  }
+  // 纯英文兜底
+  if (/^[a-zA-Z]/.test(msg) && !/[\u4e00-\u9fff]/.test(msg)) {
+    return `API 返回错误: ${msg.replace(/\s*\(request id:.*?\)\s*/i, '').trim()}`;
+  }
+  return msg;
+}
+
 export function InfiniteCanvas({
   images,
   onImagesChange,
@@ -3002,7 +3028,7 @@ export function InfiniteCanvas({
                     };
                   }));
                 } else {
-                  const errMsg = pollData.error || '生成完成但未返回图片，请重试';
+                  const errMsg = translateErrorFrontend(pollData.error || '生成完成但未返回图片，请重试');
                   setGenGroups(prev => prev.map(g => {
                     if (g.id !== group.id) return g;
                     return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: errMsg } };
@@ -3013,7 +3039,7 @@ export function InfiniteCanvas({
 
               // 不可重试错误：立即失败
               if (pollData.status === 'failed' || (pollData.status === 'error' && !pollData.retryable)) {
-                const errMsg = pollData.error || '生成失败，请检查模型和API配置';
+                const errMsg = translateErrorFrontend(pollData.error || '生成失败，请检查模型和API配置');
                 setGenGroups(prev => prev.map(g => {
                   if (g.id !== group.id) return g;
                   return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: errMsg } };
@@ -3962,12 +3988,12 @@ export function InfiniteCanvas({
         }
         if (data.status === 'failed' || data.status === 'error') {
           console.error('Task failed:', data.error);
-          lastPollErrorRef.current = data.error || 'AI 模型处理失败';
+          lastPollErrorRef.current = translateErrorFrontend(data.error || 'AI 模型处理失败');
           return null;
         }
         // retryable errors — continue polling
         if (data.retryable === false) {
-          lastPollErrorRef.current = data.error || '任务不可重试';
+          lastPollErrorRef.current = translateErrorFrontend(data.error || '任务不可重试');
           return null;
         }
       } catch (e: unknown) {
@@ -4325,8 +4351,8 @@ export function InfiniteCanvas({
       if (!data.success) {
         updateProcessingFrame(placeholderId, {
           progress: -1,
-          status: `❌ ${String(data.error || '放大失败')}`,
-          error: String(data.error || '放大失败'),
+          status: `❌ ${translateErrorFrontend(String(data.error || '放大失败'))}`,
+          error: translateErrorFrontend(String(data.error || '放大失败')),
         });
         setTimeout(() => removeProcessingFrame(placeholderId), 5000);
         setIsEditProcessing(false);
@@ -4453,7 +4479,7 @@ export function InfiniteCanvas({
       }
 
       if (!data.success) {
-        alert(String(data.error || '移除背景失败'));
+        alert(translateErrorFrontend(String(data.error || '移除背景失败')));
         setIsEditProcessing(false);
         return;
       }
@@ -4542,7 +4568,7 @@ export function InfiniteCanvas({
           }
         }
       } else {
-        alert(lastPollErrorRef.current || data.error || '移除背景超时，请重试');
+        alert(translateErrorFrontend(lastPollErrorRef.current || String(data.error || '移除背景超时，请重试')));
       }
     } catch (e) {
       console.error('Remove background error:', e);
@@ -4723,7 +4749,7 @@ export function InfiniteCanvas({
       if (!res.ok) throw new Error(`多角度生成失败: HTTP ${res.status}`);
       const data = await res.json();
       if (!data.success) {
-        alert(data.error || '多角度生成失败');
+        alert(translateErrorFrontend(data.error || '多角度生成失败'));
         return;
       }
       updateProcessingFrame(placeholderId, { progress: 24, status: 'AI 正在重建立体视角...' });
@@ -4821,7 +4847,7 @@ export function InfiniteCanvas({
       const data = await res.json();
       console.log('[3D] API response:', JSON.stringify(data).slice(0, 500));
       if (!data.success) {
-        alert(data.error || '图生 3D 任务创建失败');
+        alert(translateErrorFrontend(data.error || '图生 3D 任务创建失败'));
         setThreeDProgress(null);
         return;
       }
@@ -4872,7 +4898,7 @@ export function InfiniteCanvas({
               break;
             }
             if (pollData.status === 'failed') {
-              alert(pollData.error || '3D 生成失败');
+              alert(translateErrorFrontend(pollData.error || '3D 生成失败'));
               removeProcessingFrame(placeholderId);
               setThreeDProgress(null);
               return;
@@ -5250,7 +5276,7 @@ export function InfiniteCanvas({
         if (!data.success) {
           console.error('Image edit failed:', data.error);
           // 后端已根据 editMode 返回不同错误消息
-          let errorMessage = data.error || '编辑失败';
+          let errorMessage = translateErrorFrontend(data.error || '编辑失败');
           updateProcessingFrame(placeholderId, {
             progress: -1,
             status: `❌ ${errorMessage}`,
@@ -5369,7 +5395,7 @@ export function InfiniteCanvas({
           data = { success: false, error: `HTTP ${res.status}` };
         }
         if (!data.success) {
-          alert(data.error || '扩展失败');
+          alert(translateErrorFrontend(data.error || '扩展失败'));
           removeProcessingFrame(placeholderId);
           return;
         }

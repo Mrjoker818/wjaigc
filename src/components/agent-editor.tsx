@@ -34,6 +34,31 @@ const MONO_TEXT = '#333333';
 const MONO_MUTED = '#888888';
 const MONO_ACCENT = '#3b82f6';
 
+/** 前端兜底：将纯英文 API 错误翻译为中文友好提示 */
+function translateErrorFrontend(msg: string): string {
+  if (!msg) return '操作失败，请重试';
+  const lower = msg.toLowerCase();
+  if (lower.includes('try again later') || lower.includes('please wait')) {
+    return '当前模型暂时不可用，请稍后重试或切换其他模型';
+  }
+  if (lower.includes('insufficient balance') || lower.includes('insufficient')) {
+    return 'API 余额不足，请联系管理员充值';
+  }
+  if (lower.includes('rate limit') || lower.includes('too many requests')) {
+    return '请求过于频繁，请稍后再试';
+  }
+  if (lower.includes('model not found')) {
+    return '模型不存在或已下线，请尝试切换其他模型';
+  }
+  if (lower.includes('timeout') || lower.includes('timed out')) {
+    return '请求超时，请稍后重试';
+  }
+  if (/^[a-zA-Z]/.test(msg) && !/[\u4e00-\u9fff]/.test(msg)) {
+    return `API 返回错误: ${msg.replace(/\s*\(request id:.*?\)\s*/i, '').trim()}`;
+  }
+  return msg;
+}
+
 export function AgentEditor({
   imageUrl,
   imagePrompt,
@@ -181,7 +206,7 @@ export function AgentEditor({
           if (pollInterval.current) clearInterval(pollInterval.current);
           setIsProcessing(false); stopTimer();
           // 优先使用 result.finalResponse，它包含更详细的错误描述
-          const errorMsg = taskError || (result?.finalResponse ? String(result.finalResponse) : '') || '任务执行失败';
+          const errorMsg = translateErrorFrontend(taskError || (result?.finalResponse ? String(result.finalResponse) : '') || '任务执行失败');
           setError(errorMsg);
         } else if (status === 'cancelled') {
           if (pollInterval.current) clearInterval(pollInterval.current);
@@ -233,7 +258,7 @@ export function AgentEditor({
       const data = await resp.json() as Record<string, unknown>;
 
       if (!resp.ok) {
-        throw new Error(String(data.error || '提交失败'));
+        throw new Error(translateErrorFrontend(String(data.error || '提交失败')));
       }
 
       const tid = String(data.taskId || '');
