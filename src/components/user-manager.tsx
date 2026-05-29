@@ -284,73 +284,172 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
 
   if (!user) {
     return (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ background: isGold ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.9)', backdropFilter: 'blur(20px)' }}>
-        <div className={`w-full max-w-md rounded-2xl overflow-hidden shadow-2xl ${isGold ? 'bg-[#111] border border-[#2a2a2a]' : 'bg-white border border-gray-200'}`}>
-          <div className={`px-6 pt-6 pb-4 text-center ${isGold ? 'bg-gradient-to-b from-[#1a1a1a] to-[#111]' : 'bg-gradient-to-b from-gray-50 to-white'}`}>
-            <div className="w-16 h-16 mx-auto mb-3">
-              <img src="/logo.png" alt="无界AI" className="w-full h-full object-contain rounded-2xl" />
-            </div>
-            <h2 className={`text-xl font-bold ${isGold ? 'text-white' : 'text-gray-900'}`}>无界AI 登录</h2>
-            <p className={`text-sm mt-1 ${isGold ? 'text-[#888]' : 'text-gray-500'}`}>请选择用户并输入密码</p>
-          </div>
+      <div className="fixed inset-0 z-[100] flex min-h-screen" style={{ background: '#0A0A0F' }}>
+        <div className="w-full min-h-screen flex flex-col lg:flex-row">
 
-          <div className={`px-6 pb-6 ${isGold ? 'border-t border-[#2a2a2a]' : 'border-t border-gray-100'}`}>
-            <div className="space-y-3 mt-4">
-              <div>
-                <Label className={`text-xs ${isGold ? 'text-[#888]' : 'text-gray-500'}`}>用户名</Label>
-                <Input value={loginName} onChange={(e) => setLoginName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void handleLogin(); }} placeholder="输入用户名" className={`mt-1 h-10 ${isGold ? 'border-[#2a2a2a] bg-[#1a1a1a] text-white focus:border-[#d4af37]' : 'border-gray-200 bg-gray-50 text-gray-900'}`} />
+          {/* 左侧品牌展示区 */}
+          <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden flex-col justify-between p-12 xl:p-16"
+               style={{ background: 'linear-gradient(135deg, #0E0E16 0%, #151520 40%, #1A1A28 70%, #0E0E16 100%)' }}>
+
+            {/* 渐变光效背景装饰 */}
+            <div className="absolute top-0 left-0 w-full h-full pointer-events-none" aria-hidden="true">
+              <div className="absolute -top-24 -left-24 w-80 h-80 rounded-full opacity-20"
+                   style={{ background: 'radial-gradient(circle, rgba(212,175,55,0.3) 0%, transparent 70%)' }} />
+              <div className="absolute bottom-20 right-10 w-96 h-96 rounded-full opacity-10"
+                   style={{ background: 'radial-gradient(circle, rgba(212,175,55,0.25) 0%, transparent 70%)' }} />
+              <div className="absolute top-1/2 left-1/3 w-64 h-64 rounded-full opacity-10"
+                   style={{ background: 'radial-gradient(circle, rgba(212,175,55,0.2) 0%, transparent 60%)' }} />
+            </div>
+
+            {/* 品牌头部 */}
+            <div className="relative z-10">
+              <div className="flex items-center gap-3 mb-3">
+                <img src="/logo.png" alt="无界AI" className="w-10 h-10 object-contain rounded-lg" />
+                <h1 className="text-3xl xl:text-4xl font-bold text-foreground tracking-tight">无界AI</h1>
               </div>
-              <div>
-                <Label className={`text-xs ${isGold ? 'text-[#888]' : 'text-gray-500'}`}>密码</Label>
-                <div className="relative mt-1">
-                  <Input
-                    type={showLoginPassword ? 'text' : 'password'}
-                    value={loginPassword}
-                    onChange={(e) => setLoginPassword(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') void handleLogin(); }}
-                    placeholder="输入密码"
-                    className={`h-10 pr-11 ${isGold ? 'border-[#2a2a2a] bg-[#1a1a1a] text-white focus:border-[#d4af37]' : 'border-gray-200 bg-gray-50 text-gray-900'}`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowLoginPassword((value) => !value)}
-                    aria-label={showLoginPassword ? '隐藏密码' : '显示密码'}
-                    title={showLoginPassword ? '隐藏密码' : '显示密码'}
-                    className={`absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg transition-colors ${isGold ? 'text-[#888] hover:bg-[#252525] hover:text-[#d4af37] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d4af37]' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-gray-400'}`}
-                  >
-                    {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
+              <p className="text-muted-foreground text-base xl:text-lg">AI图像生成与协作平台</p>
+            </div>
+
+            {/* 特性卡片 */}
+            <div className="relative z-10 space-y-4 my-12">
+              <div className="flex items-start gap-4 p-5 rounded-lg bg-muted/50 border border-border/20 hover:border-primary/30 transition-colors group">
+                <div className="w-10 h-10 rounded-md bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-shadow">
+                  <Zap className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground mb-1">无限画布</h3>
+                  <p className="text-xs text-muted-foreground leading-relaxed">自由缩放、无限延展的创作空间，支持多图层协同编辑</p>
                 </div>
               </div>
-              {loginError && <p className="text-xs text-red-400">{loginError}</p>}
-                <button onClick={() => void handleLogin()} className={`w-full p-3 rounded-xl text-sm font-medium transition-all ${isGold ? 'bg-gradient-to-r from-[#d4af37] to-[#daa520] text-black hover:from-[#daa520] hover:to-[#d4af37]' : 'bg-gray-900 text-white hover:bg-gray-800'}`}>
-                登录
-              </button>
+
+              <div className="flex items-start gap-4 p-5 rounded-lg bg-muted/50 border border-border/20 hover:border-primary/30 transition-colors group">
+                <div className="w-10 h-10 rounded-md bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-shadow">
+                  <MessageSquareText className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground mb-1">AI智能修图</h3>
+                  <p className="text-xs text-muted-foreground leading-relaxed">一键抠图、智能补全、风格迁移，让创作更高效</p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-4 p-5 rounded-lg bg-muted/50 border border-border/20 hover:border-primary/30 transition-colors group">
+                <div className="w-10 h-10 rounded-md bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-shadow">
+                  <FileText className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground mb-1">工作流编排</h3>
+                  <p className="text-xs text-muted-foreground leading-relaxed">可视化节点编排，自定义AI处理流水线，自动化批量生成</p>
+                </div>
+              </div>
             </div>
 
-            {allUsers.length > 0 && (
-              <div className="mt-4 space-y-2">
-                <p className={`text-xs font-medium uppercase tracking-wider ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>已有用户</p>
-                {allUsers.filter((existingUser) => existingUser.role !== 'admin').map((existingUser) => (
-                  <button
-                    key={existingUser.id}
-                    onClick={() => void handleSelectUser(existingUser)}
-                    className={`w-full p-3 rounded-xl text-left transition-all group flex items-center gap-3 ${isGold ? 'hover:bg-[#1a1a1a] bg-[#0f0f0f] border border-[#2a2a2a]' : 'hover:bg-gray-50 bg-gray-50/50 border border-gray-100'}`}
-                  >
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm ${isGold ? 'bg-gradient-to-br from-[#d4af37] to-[#b8860b]' : 'bg-gradient-to-br from-gray-600 to-gray-800'}`}>
-                      {existingUser.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className={`font-medium truncate text-sm ${isGold ? 'text-white' : 'text-gray-900'}`}>{existingUser.name}</p>
-                      <p className={`text-xs truncate ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>{existingUser.email || '未设置邮箱'}</p>
-                    </div>
-                    <ChevronRight className={`w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity ${isGold ? 'text-[#d4af37]' : 'text-gray-400'}`} />
-                  </button>
-                ))}
-              </div>
-            )}
+            {/* 版本号 */}
+            <div className="relative z-10">
+              <p className="text-xs text-muted-foreground/50 font-mono">v2.9.0</p>
+            </div>
+          </div>
 
-            <p className={`mt-4 text-xs ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>请联系管理员创建新账户。</p>
+          {/* 右侧登录表单区 */}
+          <div className="flex-1 flex items-center justify-center p-6 sm:p-8 lg:p-12" style={{ backgroundColor: '#0F1117' }}>
+            <div className="w-full max-w-sm">
+
+              {/* 移动端品牌标识 */}
+              <div className="lg:hidden flex items-center gap-2 mb-10 justify-center">
+                <img src="/logo.png" alt="无界AI" className="w-8 h-8 object-contain rounded" />
+                <span className="text-2xl font-bold text-foreground tracking-tight">无界AI</span>
+              </div>
+
+              {/* 登录标题 */}
+              <h2 className="text-2xl font-bold text-foreground mb-8">登录</h2>
+
+              {/* 登录表单 */}
+              <form onSubmit={(e) => { e.preventDefault(); void handleLogin(); }} autoComplete="off">
+                {/* 用户名输入框 */}
+                <div className="mb-5">
+                  <Label className="block text-xs font-medium text-muted-foreground mb-1.5">用户名</Label>
+                  <div className="relative">
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                      <UserIcon className="w-4 h-4 text-muted-foreground/60" />
+                    </div>
+                    <input
+                      type="text"
+                      value={loginName}
+                      onChange={(e) => setLoginName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') void handleLogin(); }}
+                      placeholder="请输入用户名"
+                      className="w-full bg-muted border-none rounded-md pl-10 pr-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors"
+                    />
+                  </div>
+                </div>
+
+                {/* 密码输入框 */}
+                <div className="mb-6">
+                  <Label className="block text-xs font-medium text-muted-foreground mb-1.5">密码</Label>
+                  <div className="relative">
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                      <Settings className="w-4 h-4 text-muted-foreground/60" />
+                    </div>
+                    <input
+                      type={showLoginPassword ? 'text' : 'password'}
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') void handleLogin(); }}
+                      placeholder="请输入密码"
+                      className="w-full bg-muted border-none rounded-md pl-10 pr-10 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowLoginPassword((value) => !value)}
+                      aria-label={showLoginPassword ? '隐藏密码' : '显示密码'}
+                      title={showLoginPassword ? '隐藏密码' : '显示密码'}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                    >
+                      {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 登录按钮 */}
+                <button
+                  type="submit"
+                  className="w-full bg-primary text-primary-foreground font-semibold py-2.5 rounded-md text-sm hover:brightness-110 active:scale-[0.98] transition-all inline-flex items-center justify-center gap-2"
+                >
+                  登录
+                </button>
+              </form>
+
+              {/* 错误提示 */}
+              {loginError && (
+                <div className="mt-4 px-4 py-3 rounded-md text-sm font-medium" style={{ backgroundColor: '#3D1518' }}>
+                  <span className="text-destructive">{loginError}</span>
+                </div>
+              )}
+
+              {/* 已有用户快捷登录 */}
+              {allUsers.length > 0 && (
+                <div className="mt-6 space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground/50">已有用户</p>
+                  {allUsers.filter((existingUser) => existingUser.role !== 'admin').map((existingUser) => (
+                    <button
+                      key={existingUser.id}
+                      onClick={() => void handleSelectUser(existingUser)}
+                      className="w-full p-3 rounded-lg text-left transition-all group flex items-center gap-3 hover:bg-muted/80 bg-muted/30 border border-border/30 hover:border-primary/30"
+                    >
+                      <div className="w-10 h-10 rounded-md flex items-center justify-center text-primary-foreground font-bold text-sm bg-gradient-to-br from-primary to-[#b8860b]">
+                        {existingUser.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate text-sm text-foreground">{existingUser.name}</p>
+                        <p className="text-xs truncate text-muted-foreground">{existingUser.email || '未设置邮箱'}</p>
+                      </div>
+                      <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity text-primary" />
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <p className="mt-6 text-xs text-muted-foreground/50">请联系管理员创建新账户。</p>
+            </div>
           </div>
         </div>
       </div>
@@ -364,20 +463,20 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
   ];
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ background: isGold ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.9)', backdropFilter: 'blur(20px)' }}>
-      <div className={`w-full max-w-2xl max-h-[85vh] rounded-2xl overflow-hidden shadow-2xl flex flex-col ${isGold ? 'bg-[#111] border border-[#2a2a2a]' : 'bg-white border border-gray-200'}`}>
-        <div className={`px-5 py-3 flex items-center justify-between shrink-0 ${isGold ? 'border-b border-[#2a2a2a]' : 'border-b border-gray-100'}`}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-background/90 backdrop-blur-xl">
+      <div className="w-full max-w-2xl max-h-[85vh] rounded-2xl overflow-hidden shadow-[0_8px_40px_rgba(0,0,0,0.6)] flex flex-col bg-card border border-border">
+        <div className="px-5 py-3 flex items-center justify-between shrink-0 border-b border-border">
           <div className="flex items-center gap-3">
-            <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-sm ${isGold ? 'bg-gradient-to-br from-[#d4af37] to-[#b8860b]' : 'bg-gradient-to-br from-gray-600 to-gray-800'}`}>
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center text-primary-foreground font-bold text-sm bg-gradient-to-br from-primary to-[#b8860b]">
               {user.name.charAt(0).toUpperCase()}
             </div>
             <div>
-              <h3 className={`text-sm font-semibold ${isGold ? 'text-white' : 'text-gray-900'}`}>{user.name}</h3>
-              <p className={`text-xs ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>{user.email || '未设置邮箱'} · 加入于 {new Date(user.createdAt).toLocaleDateString()}</p>
+              <h3 className="text-sm font-semibold text-foreground">{user.name}</h3>
+              <p className="text-xs text-muted-foreground">{user.email || '未设置邮箱'} · 加入于 {new Date(user.createdAt).toLocaleDateString()}</p>
             </div>
           </div>
           {onClose && (
-            <button onClick={onClose} className={`p-2 rounded-lg transition-colors ${isGold ? 'hover:bg-[#1a1a1a] text-[#888]' : 'hover:bg-gray-100 text-gray-400'}`}>
+            <button onClick={onClose} className="p-2 rounded-lg transition-colors hover:bg-muted text-muted-foreground">
               <X className="w-4 h-4" />
             </button>
           )}

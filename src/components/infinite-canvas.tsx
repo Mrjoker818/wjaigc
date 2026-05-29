@@ -25,7 +25,7 @@ import {
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
-  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid
+  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, ChevronsRight, ChevronsLeft
 } from 'lucide-react';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
 import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
@@ -5881,196 +5881,177 @@ export function InfiniteCanvas({
         />
 
         {/* Collapsible toolbar - top left */}
-        <div className="absolute top-3 left-3 z-50 group/toolbar">
-          {/* Collapsed: logo icon */}
-          <div className="group-hover/toolbar:hidden">
+        <div className="absolute top-4 left-4 z-50 group/toolbar">
+          {/* Collapsed: icon column */}
+          <div className="group-hover/toolbar:hidden flex flex-col items-center py-2 gap-1 rounded-xl bg-background/85 border border-white/[0.06]" style={{ width: 48, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+            <button className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-gold/20 text-gold" title="选择 (V)">
+              <MousePointer2 className="w-4 h-4" />
+            </button>
+            <button className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright" title="平移 (H)">
+              <Hand className="w-4 h-4" />
+            </button>
+            <button className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright" title="上传图片">
+              <ImagePlus className="w-4 h-4" />
+            </button>
+            <div className="w-5 my-1 h-px bg-white/[0.06]" />
             <button
-              className={`flex items-center justify-center w-7 h-7 rounded-md transition-all overflow-hidden ${
-                isMonochrome
-                  ? 'bg-white/60 hover:bg-white/80'
-                  : 'bg-[#181818]/80 hover:bg-[#252525]'
-              }`}
-              title="展开工具栏"
+              onClick={onSwitchToNodeMode}
+              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              title="节点模式"
             >
-              <img src="/logo.png" alt="" className="w-5 h-5 object-contain" />
+              <Workflow className="w-4 h-4" />
+            </button>
+            <button
+              onClick={onSwitchToWorkflowHub}
+              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              title="工作流中心"
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+            <div className="w-5 my-1 h-px bg-white/[0.06]" />
+            <button className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright" title="展开工具栏">
+              <ChevronsRight className="w-4 h-4" />
             </button>
           </div>
-          {/* Expanded: show all buttons */}
-          <div className={`hidden group-hover/toolbar:flex flex-col gap-1 min-w-[130px] p-1.5 rounded-xl ${
-            isMonochrome ? 'bg-white/95 border border-gray-100 shadow-lg' : 'bg-[#181818]/95'
-          }`}>
+          {/* Expanded: full toolbar */}
+          <div className="hidden group-hover/toolbar:flex flex-col gap-1 min-w-[160px] p-2 rounded-xl bg-background/85 border border-white/[0.06]" style={{ backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
             {/* Logo header */}
             <div className="flex items-center gap-2 px-2 py-1.5">
-              <img src="/logo.png" alt="无界AI" className="w-5 h-5 object-contain rounded" />
-              <span className={`text-xs font-bold ${isMonochrome ? 'text-gray-700' : 'text-[#ccc]'}`}>无界AI</span>
+              <img src="/logo.png" alt="无界AI" className="w-6 h-6 object-contain rounded" />
+              <span className="text-sm font-bold text-foreground">无界AI</span>
             </div>
             {/* Divider */}
-            <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-[#333]'}`} />
+            <div className="mx-2 h-px bg-white/[0.06]" />
+            {/* Section: Canvas tools */}
+            <div className="text-xs font-semibold mb-1 px-2 text-gold-muted">画布操作</div>
             {/* OMP Toggle */}
             <button
               onClick={() => {
                 if (onToggleVisionPrompt) onToggleVisionPrompt();
               }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all ${
                 ohMyPromptOpen
-                  ? isMonochrome
-                    ? 'bg-blue-50 border border-blue-200 text-blue-600 hover:bg-blue-100'
-                    : 'bg-[#d4af37]/20 border-[#d4af37]/50 text-[#d4af37] hover:bg-[#d4af37]/30'
-                  : isMonochrome
-                    ? 'bg-transparent text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-                    : 'bg-transparent text-[#777] hover:text-[#ccc] hover:bg-white/[0.06]'
+                  ? 'bg-gold/20 text-gold'
+                  : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'
               }`}
               title="Oh My Prompt - 提示词管理与图片识词"
             >
-              <Sparkles className={`h-3 w-3 ${ohMyPromptOpen ? '' : isMonochrome ? 'text-amber-500' : ''}`} />
+              <Sparkles className="h-3.5 w-3.5" />
               <span>Oh My Prompt</span>
               {ohMyPromptOpen && (
-                <span className={`ml-auto w-1.5 h-1.5 rounded-full animate-pulse ${isMonochrome ? 'bg-blue-500' : 'bg-[#d4af37]'}`} />
+                <span className="ml-auto w-1.5 h-1.5 rounded-full animate-pulse bg-gold" />
               )}
             </button>
             {/* Ctrl+Click Reference Fusion Toggle */}
             <button
               onClick={() => setShowRefFusion(prev => !prev)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all ${
                 showRefFusion
-                  ? isMonochrome
-                    ? 'bg-blue-50 border border-blue-200 text-blue-600 hover:bg-blue-100'
-                    : 'bg-[#d4af37]/20 border-[#d4af37]/50 text-[#d4af37] hover:bg-[#d4af37]/30'
-                  : isMonochrome
-                    ? 'bg-transparent text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-                    : 'bg-transparent text-[#777] hover:text-[#ccc] hover:bg-white/[0.06]'
+                  ? 'bg-gold/20 text-gold'
+                  : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'
               }`}
               title="Ctrl+Click 画布图片选择参考融合"
             >
-              <GitMerge className={`h-3 w-3 ${showRefFusion ? '' : isMonochrome ? 'text-teal-500' : ''}`} />
+              <GitMerge className="h-3.5 w-3.5" />
               <span>参考融合</span>
               {showRefFusion && (
-                <span className={`ml-auto w-1.5 h-1.5 rounded-full animate-pulse ${isMonochrome ? 'bg-blue-500' : 'bg-[#d4af37]'}`} />
+                <span className="ml-auto w-1.5 h-1.5 rounded-full animate-pulse bg-gold" />
               )}
             </button>
             {/* Divider */}
-            <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-[#333]'}`} />
+            <div className="mx-2 h-px bg-white/[0.06]" />
+            {/* Section: Mode switching */}
+            <div className="text-xs font-semibold mb-1 px-2 text-gold-muted">模式切换</div>
             {/* Settings */}
             <button
               onClick={onToggleSettings}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                isMonochrome
-                  ? 'bg-transparent text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-                  : 'bg-transparent text-[#777] hover:text-[#ccc] hover:bg-white/[0.06]'
-              }`}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
               title="设置"
             >
-              <Settings className={`h-3 w-3 ${isMonochrome ? 'text-slate-500' : ''}`} />
+              <Settings className="h-3.5 w-3.5" />
               <span>设置</span>
-              {!isPanelCollapsed && (
-                <span className={`ml-auto w-1.5 h-1.5 rounded-full animate-pulse ${isMonochrome ? 'bg-blue-500' : 'bg-[#d4af37]'}`} />
-              )}
             </button>
             {/* UI Theme Toggle */}
             <button
               onClick={onToggleTheme}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                isMonochrome
-                  ? 'bg-transparent text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-                  : 'bg-transparent text-[#777] hover:text-[#ccc] hover:bg-white/[0.06]'
-              }`}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
               title="UI 主题切换"
             >
-              <Palette className={`h-3 w-3 ${isMonochrome ? 'text-purple-500' : ''}`} />
+              <Palette className="h-3.5 w-3.5" />
               <span>{isMonochrome ? '彩色模式' : '黑白模式'}</span>
             </button>
             {/* User Manager */}
             <button
               onClick={onToggleUserManager}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                isMonochrome
-                  ? 'bg-transparent text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-                  : 'bg-transparent text-[#777] hover:text-[#ccc] hover:bg-white/[0.06]'
-              }`}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
               title="用户管理"
             >
-              <Users className={`h-3 w-3 ${isMonochrome ? 'text-sky-500' : ''}`} />
+              <Users className="h-3.5 w-3.5" />
               <span>用户管理</span>
             </button>
             {/* Project Data */}
             <button
               onClick={onToggleProjectData}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                isMonochrome
-                  ? 'bg-transparent text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-                  : 'bg-transparent text-[#777] hover:text-[#ccc] hover:bg-white/[0.06]'
-              }`}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
               title="项目数据"
             >
-              <FolderOpen className={`h-3 w-3 ${isMonochrome ? 'text-emerald-500' : ''}`} />
+              <FolderOpen className="h-3.5 w-3.5" />
               <span>项目数据</span>
             </button>
             {isAdmin && (
               <button
                 onClick={onToggleAdminSystem}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  isMonochrome
-                    ? 'bg-transparent text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-                    : 'bg-[#1a1a1a]/90 border-[#d4af37]/30 text-[#d4af37] hover:bg-[#222]/80'
-                }`}
+                className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-gold/15 text-gold hover:bg-gold/25"
                 title="管理员系统"
               >
-                <Shield className={`h-3 w-3 ${isMonochrome ? 'text-orange-500' : ''}`} />
+                <Shield className="h-3.5 w-3.5" />
                 <span>管理员系统</span>
               </button>
             )}
-            {/* Help / Usage Guide */}
+            {/* Favorites */}
             <button
               onClick={onToggleFavorites}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                isMonochrome
-                  ? 'bg-transparent text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-                  : 'bg-transparent text-[#d4af37]/70 hover:text-[#d4af37] hover:bg-[#d4af37]/10'
-              }`}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
               title="收藏夹"
             >
-              <Heart className={`h-3 w-3 ${isMonochrome ? 'text-rose-500' : ''}`} />
+              <Heart className="h-3.5 w-3.5" />
               <span>收藏夹</span>
             </button>
+            {/* Help */}
             <button
               onClick={onToggleHelp}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                isMonochrome
-                  ? 'bg-transparent text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-                  : 'bg-transparent text-[#777] hover:text-[#ccc] hover:bg-white/[0.06]'
-              }`}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
               title="使用说明"
             >
-              <HelpCircle className={`h-3 w-3 ${isMonochrome ? 'text-indigo-500' : ''}`} />
+              <HelpCircle className="h-3.5 w-3.5" />
               <span>使用说明</span>
             </button>
             {/* Divider */}
-            <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-[#333]'}`} />
+            <div className="mx-2 h-px bg-white/[0.06]" />
             {/* Node Mode */}
             <button
               onClick={onSwitchToNodeMode}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                isMonochrome
-                  ? 'bg-transparent text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-                  : 'bg-transparent text-[#777] hover:text-[#ccc] hover:bg-white/[0.06]'
-              }`}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
               title="节点模式"
             >
-              <Workflow className={`h-3 w-3 ${isMonochrome ? 'text-emerald-500' : ''}`} />
+              <Workflow className="h-3.5 w-3.5" />
               <span>节点模式</span>
             </button>
             {/* Workflow Hub */}
             <button
               onClick={onSwitchToWorkflowHub}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                isMonochrome
-                  ? 'bg-transparent text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-                  : 'bg-transparent text-[#777] hover:text-[#ccc] hover:bg-white/[0.06]'
-              }`}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
               title="工作流中心"
             >
-              <LayoutGrid className={`h-3 w-3 ${isMonochrome ? 'text-violet-500' : ''}`} />
+              <LayoutGrid className="h-3.5 w-3.5" />
               <span>工作流中心</span>
+            </button>
+            {/* Divider */}
+            <div className="mx-2 h-px bg-white/[0.06]" />
+            {/* Collapse button */}
+            <button className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright" title="收起工具栏">
+              <ChevronsLeft className="h-3.5 w-3.5" />
+              <span>收起</span>
             </button>
           </div>
         </div>
@@ -10593,40 +10574,26 @@ export function InfiniteCanvas({
       })()}
 
       {/* Floating pill toolbar - always on top (z-50) */}
-      <div data-toolbar="bottom-toolbar" className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 border rounded-2xl px-3 py-2 flex items-center gap-1.5 shadow-2xl ${
-        isMonochrome 
-          ? 'bg-white border-gray-200/80' 
-          : 'bg-[#1a1a1a] border-[#333]'
-      }`} style={{ boxShadow: isMonochrome ? '0 8px 24px rgba(0,0,0,0.08)' : '0 8px 32px rgba(0,0,0,0.5)' }}>
+      <div data-toolbar="bottom-toolbar" className="absolute bottom-5 left-1/2 -translate-x-1/2 z-50 rounded-2xl px-3 py-2 flex items-center gap-1.5 bg-background/85 border border-white/[0.06] shadow-2xl" style={{ backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
         {/* Select tool */}
         <button
-          className={`tool-btn p-2 rounded-xl transition-all relative group ${
-            isMonochrome
-              ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-50'
-              : 'text-[#888] hover:text-white hover:bg-white/10'
-          }`}
+          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
           title="选择工具"
         >
           <MousePointer2 className="h-4 w-4" />
-          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-black/90 text-white'}`}>选择工具</span>
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">选择工具</span>
         </button>
 
         {/* Hand/Pan tool */}
         <button
           className={`tool-btn p-2 rounded-xl transition-all relative group ${
             isPanning || isSpacePressed
-              ? isMonochrome
-                ? 'bg-blue-100 text-blue-700'
-                : 'bg-[#d4af37]/20 text-[#d4af37]'
-              : isMonochrome
-                ? 'text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50'
-                : 'text-[#888] hover:text-white hover:bg-white/10'
+              ? 'bg-gold/20 text-gold'
+              : 'text-gold-muted hover:text-text-bright hover:bg-white/10'
           }`}
           title="抓手工具"
           onClick={() => {
-            // Toggle pan mode: activate panning
             setIsSpacePressed(true);
-            // Auto-deactivate when mouse is released after a pan
             const handleUp = () => {
               setIsSpacePressed(false);
               window.removeEventListener('mouseup', handleUp);
@@ -10635,148 +10602,112 @@ export function InfiniteCanvas({
           }}
         >
           <Hand className="h-4 w-4" />
-          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-black/90 text-white'}`}>抓手工具</span>
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">抓手工具</span>
         </button>
 
-        <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`} />
+        <div className="w-px h-5 bg-white/[0.06]" />
 
         {/* Upload */}
         <input ref={uploadFileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleCanvasImageUpload} />
         <button
           onClick={() => uploadFileInputRef.current?.click()}
-          className={`tool-btn p-2 rounded-xl transition-all relative group ${
-            isMonochrome
-              ? 'text-violet-600 hover:text-violet-700 hover:bg-violet-50'
-              : 'text-[#888] hover:text-white hover:bg-white/10'
-          }`}
+          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
           title="图片上传"
         >
           <Upload className="h-4 w-4" />
-          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-black/90 text-white'}`}>图片上传</span>
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">图片上传</span>
         </button>
 
-        <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`} />
+        <div className="w-px h-5 bg-white/[0.06]" />
 
-        {/* Image Generator - gold accent / blue for monochrome */}
+        {/* Image Generator - gold accent */}
         <button
           onClick={handleOpenCanvasGenerator}
-          className={`p-2 rounded-xl transition-all shadow-lg relative group ${isMonochrome ? (showCanvasGenerator ? 'bg-blue-500 text-white ring-2 ring-blue-400/50' : 'bg-blue-500 hover:bg-blue-600 text-white') : (showCanvasGenerator ? 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-black ring-2 ring-[#d4af37]/50' : 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] hover:from-[#daa520] hover:to-[#cd9b1d] text-black')}`}
+          className={`p-2 rounded-xl transition-all shadow-lg relative group ${showCanvasGenerator ? 'bg-gradient-to-r from-gold to-gold-dark text-black ring-2 ring-gold/50' : 'bg-gradient-to-r from-gold to-gold-dark hover:from-gold-light hover:to-gold text-black'}`}
           title="图像生成器"
         >
           <Sparkles className="h-4 w-4" />
-          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-blue-600 text-white' : 'bg-black/90 text-white'}`}>图像生成器</span>
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">图像生成器</span>
         </button>
 
-        <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`} />
+        <div className="w-px h-5 bg-white/[0.06]" />
 
         {/* Language Edit - 修图 */}
         <button
           onClick={() => { onEditImage?.(null); }}
-          className={`tool-btn p-2 rounded-xl transition-all relative group ${
-            isMonochrome
-              ? 'text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50'
-              : 'text-[#888] hover:text-white hover:bg-white/10'
-          }`}
+          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
           title="语言修图"
         >
           <Pencil className="h-4 w-4" />
-          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-black/90 text-white'}`}>修图</span>
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">修图</span>
         </button>
 
         {/* Agent Edit - Agent编排 */}
         <button
           onClick={() => { setAgentEditImage(null); setShowAgentEditor(true); }}
-          className={`tool-btn p-2 rounded-xl transition-all relative group ${
-            isMonochrome
-              ? 'text-violet-600 hover:text-violet-700 hover:bg-violet-50'
-              : 'text-[#888] hover:text-white hover:bg-white/10'
-          }`}
+          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
           title="Agent编排"
         >
           <Bot className="h-4 w-4" />
-          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-black/90 text-white'}`}>Agent</span>
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">Agent</span>
         </button>
 
         {/* Brand E-commerce - 品牌电商 */}
         <button
           onClick={() => setShowBrandEcommerce(true)}
-          className={`tool-btn p-2 rounded-xl transition-all relative group ${
-            isMonochrome
-              ? 'text-amber-600 hover:text-amber-700 hover:bg-amber-50'
-              : 'text-[#888] hover:text-white hover:bg-white/10'
-          }`}
+          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
           title="品牌电商"
         >
           <ShoppingBag className="h-4 w-4" />
-          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-black/90 text-white'}`}>品牌电商</span>
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">品牌电商</span>
         </button>
 
         {/* Refine Engine - 精修引擎 */}
         <button
           onClick={() => { setRefineEngineImageUrl(''); setShowRefineEngine(true); }}
-          className={`tool-btn p-2 rounded-xl transition-all relative group ${
-            isMonochrome
-              ? 'text-violet-600 hover:text-violet-700 hover:bg-violet-50'
-              : 'text-[#888] hover:text-white hover:bg-white/10'
-          }`}
+          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
           title="精修引擎"
         >
           <Scan className="h-4 w-4" />
-          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-black/90 text-white'}`}>精修引擎</span>
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">精修引擎</span>
         </button>
 
         {/* Font Design - 字境大师 */}
         <button
           onClick={() => setShowFontDesign(true)}
-          className={`tool-btn p-2 rounded-xl transition-all relative group ${
-            isMonochrome
-              ? 'text-amber-600 hover:text-amber-700 hover:bg-amber-50'
-              : 'text-[#d4af37] hover:text-[#f0d060] hover:bg-[#d4af37]/10'
-          }`}
+          className="tool-btn p-2 rounded-xl transition-all relative group text-gold hover:text-gold-light hover:bg-gold/10"
           title="字境大师"
         >
           <span className="text-sm font-bold leading-none">字</span>
-          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-black/90 text-white'}`}>字境大师</span>
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">字境大师</span>
         </button>
 
         {/* Brand Factory - 品牌工厂 */}
         <button
           onClick={() => setShowBrandFactory(true)}
-          className={`tool-btn p-2 rounded-xl transition-all relative group ${
-            isMonochrome
-              ? 'text-amber-600 hover:text-amber-700 hover:bg-amber-50'
-              : 'text-[#888] hover:text-white hover:bg-white/10'
-          }`}
+          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
           title="品牌工厂"
         >
           <Building2 className="h-4 w-4" />
-          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-black/90 text-white'}`}>品牌工厂</span>
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">品牌工厂</span>
         </button>
 
         {/* AI PSD Generator - AI PSD生成器 */}
         <button
           onClick={() => setShowAiPsd(true)}
-          className={`tool-btn p-2 rounded-xl transition-all relative group ${
-            isMonochrome
-              ? 'text-amber-600 hover:text-amber-700 hover:bg-amber-50'
-              : 'text-[#888] hover:text-white hover:bg-white/10'
-          }`}
+          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
           title="AI PSD生成器"
         >
           <FileImage className="h-4 w-4" />
-          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-black/90 text-white'}`}>AI PSD</span>
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">AI PSD</span>
         </button>
 
-        <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`} />
+        <div className="w-px h-5 bg-white/[0.06]" />
 
         {/* HexCube 六面体 */}
         <button
           onClick={handleCreateHexCube}
-          className={`tool-btn p-2 rounded-xl transition-all relative group ${
-            isMonochrome
-              ? 'text-orange-600 hover:text-orange-700 hover:bg-orange-50'
-              : 'text-[#888] hover:text-white hover:bg-white/10'
-          }`}
+          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
           title="六面体"
         >
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
@@ -10784,60 +10715,56 @@ export function InfiniteCanvas({
             <path d="M12 3v18" />
             <path d="M3 8l9 5 9-5" />
           </svg>
-          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-black/90 text-white'}`}>六面体</span>
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">六面体</span>
         </button>
 
-        <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`} />
+        <div className="w-px h-5 bg-white/[0.06]" />
 
         {/* Zoom controls */}
         <div className="flex items-center gap-1 px-1">
           <button
             onClick={() => { setZoom(z => Math.max(0.1, z / 1.2)); }}
-            className={`p-1.5 rounded-lg transition-all ${isMonochrome ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-50' : 'text-[#888] hover:text-white hover:bg-white/10'}`}
+            className="p-1.5 rounded-lg transition-all text-gold-muted hover:text-text-bright hover:bg-white/10"
             title="缩小"
           >
             <ZoomOut className="h-3.5 w-3.5" />
           </button>
-          <span className={`text-xs font-mono w-10 text-center ${isMonochrome ? 'text-blue-600' : 'text-[#d4af37]'}`}>
+          <span className="text-xs font-mono w-10 text-center text-gold">
             {Math.round(zoom * 100)}%
           </span>
           <button
             onClick={() => { setZoom(z => Math.min(5, z * 1.2)); }}
-            className={`p-1.5 rounded-lg transition-all ${isMonochrome ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-50' : 'text-[#888] hover:text-white hover:bg-white/10'}`}
+            className="p-1.5 rounded-lg transition-all text-gold-muted hover:text-text-bright hover:bg-white/10"
             title="放大"
           >
             <ZoomIn className="h-3.5 w-3.5" />
           </button>
         </div>
 
-        <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`} />
+        <div className="w-px h-5 bg-white/[0.06]" />
 
         {/* Reset view */}
         <button
           onClick={() => { setZoom(1); setViewOffset({ x: 0, y: 0 }); }}
-          className={`tool-btn p-2 rounded-xl transition-all relative group ${
-            isMonochrome
-              ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-              : 'text-[#888] hover:text-white hover:bg-white/10'
-          }`}
+          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
           title="重置视图"
         >
           <Maximize2 className="h-4 w-4" />
-          <span className={`absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-black/90 text-white'}`}>重置视图</span>
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">重置视图</span>
         </button>
 
         {/* Generating progress */}
         {isGenerating && (
           <>
-            <div className={`w-px h-5 ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`} />
+            <div className="w-px h-5 bg-white/[0.06]" />
             <div className="flex items-center gap-1.5">
-              <div className={`w-14 h-1.5 rounded-full overflow-hidden ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'}`}>
+              <div className="w-14 h-1.5 rounded-full overflow-hidden bg-white/[0.06]">
                 <div className="h-full rounded-full progress-bar shimmer" style={{ 
                   width: `${generationProgress ? (generationProgress.current / generationProgress.total * 100) : 0}%`,
-                  background: 'linear-gradient(90deg, #d4af37, #f0d060, #d4af37)'
+                  background: 'linear-gradient(90deg, #C8A45C, #E8D5A3, #C8A45C)'
                 }} />
               </div>
-              <span className={`text-xs ${isMonochrome ? 'text-gray-500' : 'text-[#d4af37]/80'}`}>生成中</span>
+              <span className="text-xs text-gold/80">生成中</span>
             </div>
           </>
         )}
