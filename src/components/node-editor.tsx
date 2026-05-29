@@ -324,8 +324,10 @@ interface NodeEditorProps {
 }
 
 export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenWorkflowHub, canvasImages }: NodeEditorProps) {
-  const [wf, setWf] = useState<WorkflowData>(workflow || createDemoWorkflow());
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [wf, setWf] = useState<WorkflowData>(workflow || createEmptyWorkflow('新工作流'));
+  const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
+  // 兼容：获取单个选中节点ID
+  const selectedNodeId = useMemo(() => selectedNodeIds.size > 0 ? [...selectedNodeIds][0] : null, [selectedNodeIds]);
   // 拖动状态使用ref避免每次mousemove触发重渲染导致闪烁
   const draggingNodeRef = useRef<string | null>(null);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
@@ -539,7 +541,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   const handleAddNode = useCallback((type: NodeType) => {
     const node = createWorkflowNode(type, 300 + Math.random() * 200, 200 + Math.random() * 200);
     setWf(prev => ({ ...prev, nodes: [...prev.nodes, node] }));
-    setSelectedNodeId(node.id);
+    setSelectedNodeIds(new Set([node.id]));
     setSidebarTab('props');
   }, []);
 
@@ -549,8 +551,8 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
       nodes: prev.nodes.filter(n => n.id !== nodeId),
       connections: prev.connections.filter(c => c.fromNodeId !== nodeId && c.toNodeId !== nodeId),
     }));
-    if (selectedNodeId === nodeId) setSelectedNodeId(null);
-  }, [selectedNodeId]);
+    setSelectedNodeIds(prev => { const next = new Set(prev); next.delete(nodeId); return next; });
+  }, []);
 
   const handleNodeUpdate = useCallback((nodeId: string, updates: Partial<WorkflowNode>) => {
     setWf(prev => ({
@@ -571,13 +573,15 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
 
-      // Ctrl+C / Cmd+C 复制选中节点
-      if ((e.metaKey || e.ctrlKey) && e.key === 'c' && selectedNodeId) {
+      // Ctrl+C / Cmd+C 复制选中节点（支持多选）
+      if ((e.metaKey || e.ctrlKey) && e.key === 'c' && selectedNodeIds.size > 0) {
         e.preventDefault();
-        const node = wf.nodes.find(n => n.id === selectedNodeId);
-        if (node) {
-          const relatedConns = wf.connections.filter(c => c.fromNodeId === selectedNodeId || c.toNodeId === selectedNodeId);
-          setClipboard({ nodes: [node], connections: relatedConns });
+        const selectedNodes = wf.nodes.filter(n => selectedNodeIds.has(n.id));
+        if (selectedNodes.length > 0) {
+          const relatedConns = wf.connections.filter(c =>
+            selectedNodeIds.has(c.fromNodeId) && selectedNodeIds.has(c.toNodeId)
+          );
+          setClipboard({ nodes: selectedNodes, connections: relatedConns });
         }
       }
       // Ctrl+V / Cmd+V 粘贴节点
@@ -599,14 +603,14 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
           .filter((c): c is WorkflowConnection => c !== null);
         setWf(prev => ({ ...prev, nodes: [...prev.nodes, ...newNodes], connections: [...prev.connections, ...newConns] }));
         if (newNodes.length > 0) {
-          setSelectedNodeId(newNodes[0].id);
+          setSelectedNodeIds(new Set([newNodes[0].id]));
           setSidebarTab('props');
         }
       }
-      // Delete / Backspace 删除选中节点
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId) {
+      // Delete / Backspace 删除选中节点（支持多选）
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeIds.size > 0) {
         e.preventDefault();
-        handleDeleteNode(selectedNodeId);
+        [...selectedNodeIds].forEach(id => handleDeleteNode(id));
       }
       // Ctrl+Z / Cmd+Z 撤销
       if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
@@ -621,7 +625,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNodeId, clipboard, wf, handleDeleteNode, handleUndo, handleRedo]);
+  }, [selectedNodeIds, selectedNodeId, clipboard, wf, handleDeleteNode, handleUndo, handleRedo]);
 
   // ─── 连线操作 (含端口类型约束) ───
 
@@ -670,7 +674,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
       setPanStart({ x: e.clientX, y: e.clientY, vx: vp.x, vy: vp.y });
     } else if (e.button === 0 && !draggingConn) {
       // 左键点击空白区域 = 取消选中 + 开始框选
-      setSelectedNodeId(null);
+      setSelectedNodeIds(new Set());
       setSidebarTab('nodes');
       // 开始框选
       const svgRect = svgRef.current?.getBoundingClientRect();
@@ -746,7 +750,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
       });
     }
     setDraggingConn(null);
-    // 完成框选：选中框内的第一个节点
+    // 完成框选：选中框内所有节点
     if (isBoxSelectingRef.current && boxSelect) {
       const minX = Math.min(boxSelect.startX, boxSelect.endX);
       const maxX = Math.max(boxSelect.startX, boxSelect.endX);
@@ -759,7 +763,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
           n.x + n.width > minX && n.x < maxX && n.y + n.height > minY && n.y < maxY
         );
         if (nodesInBox.length > 0) {
-          setSelectedNodeId(nodesInBox[0].id);
+          setSelectedNodeIds(new Set(nodesInBox.map(n => n.id)));
           setSidebarTab('props');
         }
       }
@@ -900,7 +904,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
       const data = await res.json();
       if (data.success && data.workflow) {
         setWf(data.workflow);
-        setSelectedNodeId(null);
+        setSelectedNodeIds(new Set());
         setSidebarTab('nodes');
         setAiBuildInput('');
       } else {
@@ -945,7 +949,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
     // 自动布局
     const layouted = autoLayoutWorkflow(newWf);
     setWf(layouted);
-    setSelectedNodeId(null);
+    setSelectedNodeIds(new Set());
     setSidebarTab('nodes');
   }, []);
 
@@ -1473,14 +1477,12 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
             {/* P1: 复制粘贴按钮 */}
             <button
               onClick={() => {
-                if (!selectedNodeId) return;
-                const node = wf.nodes.find(n => n.id === selectedNodeId);
-                if (node) {
-                  const relatedConns = wf.connections.filter(c => c.fromNodeId === selectedNodeId || c.toNodeId === selectedNodeId);
-                  setClipboard({ nodes: [node], connections: relatedConns });
-                }
+                if (selectedNodeIds.size === 0) return;
+                const selectedNodes = wf.nodes.filter(n => selectedNodeIds.has(n.id));
+                const relatedConns = wf.connections.filter(c => selectedNodeIds.has(c.fromNodeId) && selectedNodeIds.has(c.toNodeId));
+                setClipboard({ nodes: selectedNodes, connections: relatedConns });
               }}
-              disabled={!selectedNodeId}
+              disabled={selectedNodeIds.size === 0}
               className="p-2 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
               title="复制节点 (Ctrl+C)"
             >
@@ -1504,7 +1506,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                   })
                   .filter((c): c is WorkflowConnection => c !== null);
                 setWf(prev => ({ ...prev, nodes: [...prev.nodes, ...newNodes], connections: [...prev.connections, ...newConns] }));
-                if (newNodes.length > 0) { setSelectedNodeId(newNodes[0].id); setSidebarTab('props'); }
+                if (newNodes.length > 0) { setSelectedNodeIds(new Set([newNodes[0].id])); setSidebarTab('props'); }
               }}
               disabled={!clipboard}
               className="p-2 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
@@ -1726,11 +1728,24 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
               <NodeCard
                 key={node.id}
                 node={node}
-                isSelected={selectedNodeId === node.id}
+                isSelected={selectedNodeIds.has(node.id)}
                 isHighlighted={getConnectedNodeIds.has(node.id)}
                 execResult={execResults[node.id]}
                 isRunning={execStatus === 'running'}
-                onSelect={() => { setSelectedNodeId(node.id); setSidebarTab('props'); }}
+                onSelect={(e) => {
+                  if (e && (e.ctrlKey || e.metaKey)) {
+                    // Ctrl+点击: 切换多选
+                    setSelectedNodeIds(prev => {
+                      const next = new Set(prev);
+                      if (next.has(node.id)) next.delete(node.id); else next.add(node.id);
+                      return next;
+                    });
+                  } else {
+                    // 普通点击: 单选
+                    setSelectedNodeIds(new Set([node.id]));
+                  }
+                  setSidebarTab('props');
+                }}
                 onHover={setHighlightNodeId}
                 onDragStart={(e) => {
                   const svgRect = svgRef.current?.getBoundingClientRect();
@@ -1809,7 +1824,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 })}
                 {wf.nodes.map(n => (
                   <rect key={n.id} x={n.x} y={n.y} width={n.width} height={n.height} rx={4}
-                    fill={selectedNodeId === n.id ? '#d4af37' : NODE_TYPE_COLORS[getNodeCategory(n.type)]}
+                    fill={selectedNodeIds.has(n.id) ? '#d4af37' : NODE_TYPE_COLORS[getNodeCategory(n.type)]}
                     fillOpacity={0.6} stroke="none"
                   />
                 ))}
@@ -1928,7 +1943,7 @@ interface NodeCardProps {
   isHighlighted: boolean;
   execResult?: { status: string; output?: Record<string, unknown>; error?: string };
   isRunning: boolean;
-  onSelect: () => void;
+  onSelect: (e?: React.MouseEvent) => void;
   onHover: (id: string | null) => void;
   onDragStart: (e: React.MouseEvent) => void;
   onPortMouseDown: (e: React.MouseEvent, nodeId: string, port: NodePort) => void;
@@ -1976,7 +1991,7 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, onSe
         stroke={execResult ? statusColor : color}
         strokeWidth={execResult ? 2 : 1}
         strokeOpacity={execResult ? 1 : isHighlighted ? 0.7 : 0.4}
-        onMouseDown={(e) => { e.stopPropagation(); onSelect(); onDragStart(e as unknown as React.MouseEvent); }}
+        onMouseDown={(e) => { e.stopPropagation(); onSelect(e); onDragStart(e as unknown as React.MouseEvent); }}
         className="cursor-move"
       />
 
@@ -2290,7 +2305,8 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
         );
       }
 
-      case 'model-select':
+      case 'model-select': {
+        const modelFilterType = field.modelFilter || 'image'; // 默认只显示图像模型
         return (
           <select
             value={String(value || '')}
@@ -2299,11 +2315,12 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
             className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-[#d4af37]/50 disabled:opacity-50"
           >
             <option value="">{modelsLoading ? '加载中...' : '选择模型'}</option>
-            {models.filter(m => m.type === 'image' || m.type === 'chat').map(m => (
-              <option key={m.id} value={m.id}>{m.name} ({m.provider})</option>
+            {models.filter(m => m.type === modelFilterType).map(m => (
+              <option key={`${m.id}-${m.provider}`} value={m.id}>{m.name} ({m.provider})</option>
             ))}
           </select>
         );
+      }
 
       case 'image-upload':
         return (

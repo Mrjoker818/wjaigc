@@ -405,6 +405,7 @@ export interface PropertyField {
   max?: number;
   step?: number;
   defaultValue?: unknown;
+  modelFilter?: 'image' | 'chat' | '3d' | 'vector' | 'segment'; // model-select 字段过滤模型类型
   placeholder?: string;
 }
 
@@ -442,7 +443,7 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
   if (cat === 'ai') {
     // 不为有专用model字段的节点添加通用model
     if (type !== 'ai-removebg' && type !== 'ai-font-design' && type !== 'ai-refine-engine' && type !== 'ai-brand-ecommerce') {
-      fields.push({ key: 'model', label: '模型', type: 'model-select' });
+      fields.push({ key: 'model', label: '模型', type: 'model-select', modelFilter: 'image' });
     }
     fields.push({ key: 'prompt', label: '提示词', type: 'textarea', placeholder: '描述你想要的图像效果' });
     fields.push({ key: 'negativePrompt', label: '反向提示词', type: 'textarea', placeholder: '低质量, 模糊, 变形...' });
@@ -516,7 +517,7 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
   }
 
   if (type === 'ai-retouch') {
-    fields.push({ key: 'editModel', label: '修图模型', type: 'model-select' });
+    fields.push({ key: 'editModel', label: '修图模型', type: 'model-select', modelFilter: 'image' });
     fields.push({ key: 'size', label: '输出尺寸', type: 'select', options: [
       { label: '1024', value: '1024' }, { label: '1536', value: '1536' }, { label: '2048', value: '2048' }
     ], defaultValue: '1024' });
@@ -524,7 +525,7 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
 
   // ─── 画布模式专用节点 ───
   if (type === 'ai-font-design') {
-    fields.push({ key: 'model', label: '生图模型', type: 'model-select' });
+    fields.push({ key: 'model', label: '生图模型', type: 'model-select', modelFilter: 'image' });
     fields.push({ key: 'textContent', label: '文字内容', type: 'text', placeholder: '如: 无界AI' });
     fields.push({ key: 'styleCategory', label: '字体风格', type: 'select', options: [
       { label: '书法行楷', value: 'calligraphy' }, { label: '科技未来', value: 'tech' },
@@ -543,7 +544,7 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
   }
 
   if (type === 'ai-refine-engine') {
-    fields.push({ key: 'model', label: '生图模型', type: 'model-select' });
+    fields.push({ key: 'model', label: '生图模型', type: 'model-select', modelFilter: 'image' });
     fields.push({ key: 'mode', label: '精修模式', type: 'select', options: [
       { label: '标准模式', value: 'standard' }, { label: '专家模式', value: 'expert' }
     ], defaultValue: 'standard' });
@@ -568,7 +569,7 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
   }
 
   if (type === 'ai-brand-ecommerce') {
-    fields.push({ key: 'model', label: '生图模型', type: 'model-select' });
+    fields.push({ key: 'model', label: '生图模型', type: 'model-select', modelFilter: 'image' });
     fields.push({ key: 'templateType', label: '模板类型', type: 'select', options: [
       { label: '商品场景图', value: 'product-scene' }, { label: '模特展示', value: 'model-show' },
       { label: '营销Banner', value: 'banner' }, { label: '详情页', value: 'detail' },
@@ -587,7 +588,7 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
   }
 
   if (type === 'ai-segment') {
-    fields.push({ key: 'model', label: '分层模型', type: 'model-select' });
+    fields.push({ key: 'model', label: '分层模型', type: 'model-select', modelFilter: 'segment' });
     fields.push({ key: 'exportFormat', label: '导出格式', type: 'select', options: [
       { label: 'PSD (Pro)', value: 'psd-pro' }, { label: 'PSD (Studio)', value: 'psd-studio' },
       { label: 'SVG', value: 'svg' }, { label: '仅分层', value: 'layers-only' }
@@ -595,7 +596,7 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
   }
 
   if (type === 'ai-multi-angle') {
-    fields.push({ key: 'model', label: '生图模型', type: 'model-select' });
+    fields.push({ key: 'model', label: '生图模型', type: 'model-select', modelFilter: 'image' });
     fields.push({ key: 'angles', label: '视角选择', type: 'select', options: [
       { label: '四宫格 (正/侧/后/俯)', value: 'quad' },
       { label: '前后对比', value: 'front-back' },
@@ -605,7 +606,7 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
   }
 
   if (type === 'ai-3d-model') {
-    fields.push({ key: 'model', label: '3D模型', type: 'model-select' });
+    fields.push({ key: 'model', label: '3D模型', type: 'model-select', modelFilter: '3d' });
     fields.push({ key: 'quality', label: '模型质量', type: 'select', options: [
       { label: '标准', value: 'standard' }, { label: '高清', value: 'hd' }
     ], defaultValue: 'standard' });
@@ -636,20 +637,20 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
 
   // ─── Agent节点 ───
   if (type === 'agent-auto') {
-    fields.push({ key: 'model', label: '模型', type: 'model-select' });
+    fields.push({ key: 'model', label: '模型', type: 'model-select', modelFilter: 'chat' });
     fields.push({ key: 'maxRounds', label: '最大轮次', type: 'number', min: 1, max: 20, defaultValue: 5 });
     fields.push({ key: 'systemPrompt', label: '系统指令', type: 'textarea', placeholder: '你是一个专业的图像编辑助手...' });
     fields.push({ key: 'tools', label: '可用工具', type: 'text', defaultValue: 'image_edit,generate_image,analyze_image,adjust_color' });
   }
   if (type === 'agent-chat') {
-    fields.push({ key: 'model', label: '模型', type: 'model-select' });
+    fields.push({ key: 'model', label: '模型', type: 'model-select', modelFilter: 'chat' });
     fields.push({ key: 'systemPrompt', label: '系统提示词', type: 'textarea', placeholder: '你是一个AI图像创作助手...' });
     fields.push({ key: 'temperature', label: '创造性', type: 'slider', min: 0, max: 100, step: 5, defaultValue: 70 });
   }
 
   // ─── 分镜串行节点 ───
   if (type === 'storyboard-sequence') {
-    fields.push({ key: 'model', label: '生图模型', type: 'model-select' });
+    fields.push({ key: 'model', label: '生图模型', type: 'model-select', modelFilter: 'image' });
     fields.push({ key: 'scenes', label: '场景列表', type: 'textarea', placeholder: '每行一个场景描述，如:\n场景1: 角色A站在山顶\n场景2: 角色A走向远方\n场景3: 角色A回眸微笑' });
     fields.push({ key: 'character', label: '角色描述', type: 'textarea', placeholder: '角色外观/服饰/特征描述，保持角色一致性' });
     fields.push({ key: 'style', label: '整体风格', type: 'text', placeholder: '如: 日系动漫/写实摄影/水墨画' });
@@ -867,18 +868,12 @@ export function buildNodeExecutionRequest(
 
   switch (node.type) {
     case 'input-image':
-      return {
-        endpoint: '/api/save-image',
-        method: 'POST',
-        body: { imageUrl: config.imageUrl || '', action: 'passthrough' }
-      };
+      // 图片输入节点：直接输出图片URL，不需要调用API
+      return null;
 
     case 'input-text':
-      return {
-        endpoint: '/api/optimize-prompt',
-        method: 'POST',
-        body: { prompt: config.text || '', mode: 'enhance' }
-      };
+      // 文本输入节点：直接输出文本，不需要调用API优化
+      return null;
 
     case 'ai-generate':
       return {
@@ -1112,27 +1107,9 @@ export function buildNodeExecutionRequest(
       };
 
     case 'output-export':
-      return {
-        endpoint: '/api/save-image',
-        method: 'POST',
-        body: {
-          imageUrl: config.imageUrl || '',
-          format: config.format || 'png',
-          quality: config.quality || 'basic',
-        }
-      };
-
     case 'output-image-group':
-      return {
-        endpoint: '/api/save-image',
-        method: 'POST',
-        body: {
-          imageUrl: config.imageUrl || '',
-          imageUrls: config.imageUrls || [],
-          format: config.format || 'png',
-          quality: config.quality || 'basic',
-        }
-      };
+      // 输出节点：直接传递结果，不需要API调用
+      return null;
 
     // 逻辑节点不需要API调用，由引擎内部处理
     case 'condition-if':

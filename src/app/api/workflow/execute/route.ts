@@ -206,10 +206,19 @@ async function executeWorkflow(
 
       // 逻辑节点/输出节点不需要外部API调用
       if (!req) {
+        const outputData: Record<string, unknown> = { ...inputs, _type: node.type };
+        // input-text 节点: text → prompt 映射，供下游节点读取
+        if (node.type === 'input-text' && outputData.text && !outputData.prompt) {
+          outputData.prompt = outputData.text;
+        }
+        // input-image 节点: 确保有 imageUrl
+        if (node.type === 'input-image' && !outputData.imageUrl && node.config.imageUrl) {
+          outputData.imageUrl = node.config.imageUrl;
+        }
         const result: ExecutionResult = {
           nodeId: node.id,
           status: 'success',
-          output: { ...inputs, _type: node.type },
+          output: outputData,
           durationMs: Date.now() - nodeStart,
         };
         resultMap.set(node.id, result);
@@ -496,6 +505,9 @@ function parseApiOutput(nodeType: NodeType, data: Record<string, unknown>): Reco
   // 文本/分析结果
   if (data.text) output.text = data.text;
   if (data.prompt) output.prompt = data.prompt;
+  // optimize-prompt API 返回 { optimized: "..." } 格式
+  if (data.optimized && !output.prompt) output.prompt = data.optimized;
+  if (data.optimized && !output.text) output.text = data.optimized;
   if (data.analysisResult) output.analysisResult = data.analysisResult;
   if (data.keywords) output.analysisResult = data.keywords;
   if (data.description) output.analysisResult = data.description;
