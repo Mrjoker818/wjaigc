@@ -110,6 +110,67 @@ function modelSupportsNativeMask(modelId: string, providerBaseUrl: string): bool
 }
 
 /**
+ * 将 API 返回的英文错误信息翻译为中文友好提示
+ * 避免用户看到 "Please wait and try again later" 等原始英文消息
+ */
+function translateApiError(rawMsg: string): string {
+  const msg = rawMsg.toLowerCase();
+
+  // 余额不足
+  if (msg.includes('insufficient balance') || msg.includes('insufficient')) {
+    return 'API 余额不足，请联系管理员充值';
+  }
+  // 频率限制
+  if (msg.includes('rate limit') || msg.includes('rate_limit') || msg.includes('too many requests')) {
+    return '请求过于频繁，请稍后再试';
+  }
+  // 模型不存在
+  if (msg.includes('model_not_found') || msg.includes('model not found')) {
+    return '模型不存在或已下线，请尝试切换其他模型';
+  }
+  // 暂时不可用 / 稍后重试
+  if (msg.includes('try again later') || msg.includes('please wait') || msg.includes('_error')) {
+    return '当前模型暂时不可用，请稍后重试或切换其他模型';
+  }
+  // API Key 无效
+  if (msg.includes('invalid api key') || msg.includes('invalid api_key')) {
+    return 'API 密钥无效，请联系管理员检查配置';
+  }
+  // 不支持的画面比例
+  if (msg.includes('ratio or price') || msg.includes('not configured')
+    || msg.includes('aspect ratio is not in the allowed') || msg.includes('invalid aspect ratio')
+    || msg.includes('not a valid size') || msg.includes('宽高比不在允许')) {
+    return '当前模型不支持此画面比例，请尝试切换到标准比例';
+  }
+  // 不支持图片编辑
+  if (msg.includes('image_urls') || msg.includes('mask_image') || msg.includes('image editing')) {
+    return '当前模型不支持图像编辑功能，请尝试切换模型';
+  }
+  // 不支持 Base64
+  if (msg.includes('must be an url') || msg.includes('invalid url') || msg.includes('data:')) {
+    return '当前模型不支持 Base64 图片输入，请尝试切换模型';
+  }
+  // 内容安全
+  if (msg.includes('content_policy') || msg.includes('content policy') || msg.includes('safety')) {
+    return '内容被安全策略拦截，请修改指令后重试';
+  }
+  // 服务端错误
+  if (msg.includes('internal server error') || msg.includes('server error')) {
+    return 'API 服务内部错误，请稍后重试';
+  }
+  // 超时
+  if (msg.includes('timeout') || msg.includes('timed out')) {
+    return '请求超时，请稍后重试';
+  }
+
+  // 兜底：如果是纯英文消息，加上中文前缀
+  if (/^[a-zA-Z]/.test(rawMsg) && !/[\u4e00-\u9fff]/.test(rawMsg)) {
+    return `API 返回错误: ${rawMsg}`;
+  }
+  return rawMsg;
+}
+
+/**
  * 解析 SSE 流式响应，拼接所有 delta content 为完整 JSON 结构
  * 兼容第三方代理忽略 stream:false 强制流式返回的情况
  */
@@ -826,8 +887,10 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         if (errText) errorMsg += `: ${errText.substring(0, 200)}`;
       }
 
+      // ★ 清理常见 API 错误信息，提供更友好的中文提示
+      const translatedMsg = translateApiError(errorMsg);
       if (chatResponse.status === 401 || chatResponse.status === 403) {
-        failTask(taskId, `API Key 无效或权限不足: ${errorMsg}`);
+        failTask(taskId, `API Key 无效或权限不足: ${translatedMsg}`);
         return;
       }
       if (chatResponse.status === 429) {
@@ -879,11 +942,11 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
             }
           } catch { /* 忽略 */ }
         }
-        failTask(taskId, `请求参数错误: ${errorMsg}`);
+        failTask(taskId, `请求参数错误: ${translatedMsg}`);
         return;
       }
 
-      failTask(taskId, errorMsg);
+      failTask(taskId, translatedMsg);
       return;
     }
 

@@ -957,7 +957,7 @@ export function GenerationPanel(
                             // Group discovered models by provider name
                             const grouped: Record<string, typeof discoveredModels> = {};
                             discoveredModels.forEach(dm => {
-                                const key = dm.providerName || '未知';
+                                const key = (dm.providerName || '未知').replace(/\bimgae\b/gi, 'image');
                                 if (!grouped[key]) grouped[key] = [];
                                 grouped[key].push(dm);
                             });

@@ -18,7 +18,7 @@ import {
   Settings, Upload, X, Check, AlertCircle, Loader2, BoxSelect, Group,
   Search, ScanSearch, Eye, Pause, SkipForward, Workflow as WorkflowIcon, Timer,
   ArrowLeft, LayoutGrid, Sparkles, MessageCircle, Rotate3d, Box, ShoppingBag, Zap,
-  Copy, Clipboard, Package, Film, Bookmark, Grid3X3, ArrowLeftFromLine,
+  Copy, Clipboard, Package, Film, Bookmark, BookmarkPlus, GitCompare, Grid3X3, ArrowLeftFromLine,
 } from 'lucide-react';
 
 // ==================== 图标映射 ====================
@@ -490,7 +490,44 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
     '--ne-btn-hover-bg': T.btnHoverBg,
     '--ne-btn-text': T.btnText,
   } as React.CSSProperties;
-  const [wf, setWf] = useState<WorkflowData>(workflow || createEmptyWorkflow('新工作流'));
+  // P2: BroadcastChannel 跨标签同步
+  const bcRef = useRef<BroadcastChannel | null>(null);
+  const bcIgnoreRef = useRef(false); // 防止自己发的消息回触发
+  const bcDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [wfRaw, setWfRaw] = useState<WorkflowData>(workflow || createEmptyWorkflow('新工作流'));
+  // P2: 包装setWf以广播变化
+  const broadcastWorkflow = useCallback((updatedWf: WorkflowData) => {
+    if (!bcRef.current) return;
+    if (bcDebounceRef.current) clearTimeout(bcDebounceRef.current);
+    bcDebounceRef.current = setTimeout(() => {
+      bcIgnoreRef.current = true;
+      bcRef.current?.postMessage({ type: 'workflow-update', wf: updatedWf, source: 'tab' });
+    }, 500);
+  }, []);
+  const setWf = useCallback((updater: WorkflowData | ((prev: WorkflowData) => WorkflowData)) => {
+    setWfRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      broadcastWorkflow(next);
+      return next;
+    });
+  }, [broadcastWorkflow]);
+  const wf = wfRaw;
+
+  // BroadcastChannel 接收端
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return;
+    const bc = new BroadcastChannel('wujie-workflow-sync');
+    bcRef.current = bc;
+    bc.onmessage = (e: MessageEvent) => {
+      if (bcIgnoreRef.current) { bcIgnoreRef.current = false; return; }
+      const msg = e.data as { type: string; wf: WorkflowData; source: string };
+      if (msg.type === 'workflow-update' && msg.wf) {
+        setWfRaw(msg.wf); // 直接更新raw，避免触发广播
+      }
+    };
+    return () => { bc.close(); bcRef.current = null; };
+  }, []);
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
   // 兼容：获取单个选中节点ID
   const selectedNodeId = useMemo(() => selectedNodeIds.size > 0 ? [...selectedNodeIds][0] : null, [selectedNodeIds]);
@@ -510,6 +547,8 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [showMinimap, setShowMinimap] = useState(true);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [compareImages, setCompareImages] = useState<{ before: string; after: string } | null>(null);
+  const [comparePosition, setComparePosition] = useState(50);
   const [highlightNodeId, setHighlightNodeId] = useState<string | null>(null);
 
   // P2: build_mode检测 — 生产环境禁用部分开发功能
@@ -521,9 +560,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   const [aiBuildError, setAiBuildError] = useState<string | null>(null);
 
   // P1: 执行日志
-  const [execLogs, setExecLogs] = useState<{ time: number; nodeId: string; label: string; status: string; message: string }[]>([]);
-
-  // P1: 节点复制粘贴
+  const [execLogs, setExecLogs] = useState<{ time: number; nodeId: string; label: string; status: string; message: string; duration?: number; nodeType?: string }[]>([]);  // P1: 节点复制粘贴
   const [clipboard, setClipboard] = useState<{ nodes: WorkflowNode[]; connections: WorkflowConnection[] } | null>(null);
 
   // P1: 素材库
@@ -735,10 +772,38 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
 
   const handleAddNode = useCallback((type: NodeType) => {
     const node = createWorkflowNode(type, 300 + Math.random() * 200, 200 + Math.random() * 200);
-    setWf(prev => ({ ...prev, nodes: [...prev.nodes, node] }));
+    setWf(prev => {
+      let autoConns: WorkflowConnection[] = [];
+      // P2: 拖拽自动连线 — 如果有选中节点，尝试自动连线
+      const selectedNodes = prev.nodes.filter(n => selectedNodeIds.has(n.id));
+      if (selectedNodes.length > 0) {
+        for (const selNode of selectedNodes) {
+          // 选中节点的输出端口 → 新节点的输入端口
+          const selOutPorts = selNode.ports.filter(p => p.direction === 'out');
+          const newInPorts = node.ports.filter(p => p.direction === 'in');
+          for (const outP of selOutPorts) {
+            for (const inP of newInPorts) {
+              if (canConnectPorts(outP.type, inP.type)) {
+                const exists = prev.connections.some(c =>
+                  c.fromNodeId === selNode.id && c.fromPortId === outP.id &&
+                  c.toNodeId === node.id && c.toPortId === inP.id
+                );
+                if (!exists) {
+                  autoConns.push(createConnection(selNode.id, outP.id, node.id, inP.id, outP.type));
+                  break; // 每对节点只连一条
+                }
+              }
+            }
+            if (autoConns.length > 0) break;
+          }
+          if (autoConns.length > 0) break; // 只连接第一个选中节点
+        }
+      }
+      return { ...prev, nodes: [...prev.nodes, node], connections: [...prev.connections, ...autoConns] };
+    });
     setSelectedNodeIds(new Set([node.id]));
     setSidebarTab('props');
-  }, []);
+  }, [selectedNodeIds]);
 
   const handleDeleteNode = useCallback((nodeId: string) => {
     setWf(prev => ({
@@ -854,6 +919,24 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
     }
     setWf(prev => ({ ...prev, nodes: [...prev.nodes, ...newNodes], connections: [...prev.connections, ...newConns] }));
   }, [wf.nodes]);
+
+  // P2: 对比滑块 — 找到上游原图，与当前节点图片对比
+  const handleCompare = useCallback((nodeId: string) => {
+    const node = wf.nodes.find(n => n.id === nodeId);
+    if (!node) return;
+    const imageUrl = (node.config?.imageUrl as string) || (execResults[nodeId]?.output?.imageUrl as string);
+    if (!imageUrl) return;
+    // 查找上游输入图片
+    const upstreamConn = wf.connections.find(c => c.toNodeId === nodeId && (c.type === 'image' || c.type === 'data'));
+    let beforeUrl = '';
+    if (upstreamConn) {
+      const upNode = wf.nodes.find(n => n.id === upstreamConn.fromNodeId);
+      beforeUrl = (upNode?.config?.imageUrl as string) || (execResults[upstreamConn.fromNodeId]?.output?.imageUrl as string) || '';
+    }
+    if (!beforeUrl) return;
+    setCompareImages({ before: beforeUrl, after: imageUrl });
+    setComparePosition(50);
+  }, [wf.nodes, wf.connections, execResults]);
 
   // P1: 键盘快捷键 (复制/粘贴/删除)
   useEffect(() => {
@@ -1941,50 +2024,97 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
 
               return (
                 <g key={conn.id}>
-                  {/* 发光效果(高亮时) */}
-                  {isHighlighted && (
-                    <path
-                      d={getConnPath(from.x, from.y, to.x, to.y)}
-                      fill="none" stroke={color} strokeWidth={6}
-                      strokeOpacity={0.15}
-                    />
-                  )}
-                  <path
-                    d={getConnPath(from.x, from.y, to.x, to.y)}
-                    fill="none" stroke={color} strokeWidth={2}
-                    strokeOpacity={isHighlighted ? 1 : isRunning ? 0.9 : 0.4}
-                    markerEnd={`url(#${markerId})`}
-                    className={isRunning ? 'animate-pulse' : ''}
-                  />
-                  {/* 数据流动画 (执行中) */}
-                  {isRunning && (
-                    <circle r={3} fill={color}>
-                      <animateMotion dur="1.5s" repeatCount="indefinite" path={getConnPath(from.x, from.y, to.x, to.y)} />
-                    </circle>
-                  )}
-                  {/* 连线类型标签 */}
-                  {(conn.type !== 'any' && (isHighlighted || viewport.zoom > 0.6)) && (
-                    <text
-                      x={(from.x + to.x) / 2}
-                      y={(from.y + to.y) / 2 - 6}
-                      textAnchor="middle"
-                      fill={color}
-                      fontSize={10}
-                      fillOpacity={0.7}
-                      className="pointer-events-none"
-                    >
-                      {conn.type}
-                    </text>
-                  )}
-                  {/* 点击删除连线 (增大点击区域) */}
-                  <path
-                    d={getConnPath(from.x, from.y, to.x, to.y)}
-                    fill="none" stroke="transparent" strokeWidth={16}
-                    onClick={() => {
-                      setWf(prev => ({ ...prev, connections: prev.connections.filter(c => c.id !== conn.id) }));
-                    }}
-                    className="cursor-pointer"
-                  />
+                  {/* P1: 输入引用阻断 — 检查是否被阻断 */}
+                  {(() => {
+                    const isBlocked = Array.isArray(toNode.config?.blockedInputs) && (toNode.config.blockedInputs as string[]).includes(conn.id);
+                    return (
+                      <>
+                        {/* 发光效果(高亮时) */}
+                        {isHighlighted && !isBlocked && (
+                          <path
+                            d={getConnPath(from.x, from.y, to.x, to.y)}
+                            fill="none" stroke={color} strokeWidth={6}
+                            strokeOpacity={0.15}
+                          />
+                        )}
+                        <path
+                          d={getConnPath(from.x, from.y, to.x, to.y)}
+                          fill="none" stroke={isBlocked ? '#666' : color} strokeWidth={2}
+                          strokeOpacity={isBlocked ? 0.3 : isHighlighted ? 1 : isRunning ? 0.9 : 0.4}
+                          strokeDasharray={isBlocked ? '4 4' : undefined}
+                          markerEnd={isBlocked ? undefined : `url(#${markerId})`}
+                          className={isRunning && !isBlocked ? 'animate-pulse' : ''}
+                        />
+                        {/* 数据流动画 (执行中, 未阻断) */}
+                        {isRunning && !isBlocked && (
+                          <circle r={3} fill={color}>
+                            <animateMotion dur="1.5s" repeatCount="indefinite" path={getConnPath(from.x, from.y, to.x, to.y)} />
+                          </circle>
+                        )}
+                        {/* 连线类型标签 */}
+                        {(conn.type !== 'any' && (isHighlighted || viewport.zoom > 0.6)) && (
+                          <text
+                            x={(from.x + to.x) / 2}
+                            y={(from.y + to.y) / 2 - 6}
+                            textAnchor="middle"
+                            fill={isBlocked ? '#666' : color}
+                            fontSize={10}
+                            fillOpacity={isBlocked ? 0.4 : 0.7}
+                            className="pointer-events-none"
+                          >
+                            {isBlocked ? 'blocked' : conn.type}
+                          </text>
+                        )}
+                        {/* P1: 阻断切换按钮 (连线中点) */}
+                        <g
+                          className="cursor-pointer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const blocked = Array.isArray(toNode.config?.blockedInputs) ? [...(toNode.config.blockedInputs as string[])] : [];
+                            const idx = blocked.indexOf(conn.id);
+                            if (idx >= 0) blocked.splice(idx, 1);
+                            else blocked.push(conn.id);
+                            setWf(prev => ({
+                              ...prev,
+                              nodes: prev.nodes.map(n =>
+                                n.id === toNode.id ? { ...n, config: { ...n.config, blockedInputs: blocked } } : n
+                              ),
+                            }));
+                          }}
+                        >
+                          <circle
+                            cx={(from.x + to.x) / 2}
+                            cy={(from.y + to.y) / 2}
+                            r={6}
+                            fill={isBlocked ? '#ef4444' : 'transparent'}
+                            stroke={isBlocked ? '#ef4444' : 'transparent'}
+                            strokeWidth={1}
+                            opacity={isHighlighted || isBlocked ? 1 : 0}
+                            className="transition-opacity"
+                          />
+                          {isBlocked && (
+                            <text
+                              x={(from.x + to.x) / 2}
+                              y={(from.y + to.y) / 2 + 3.5}
+                              textAnchor="middle"
+                              fill="white"
+                              fontSize={8}
+                              fontWeight="bold"
+                            >✕</text>
+                          )}
+                        </g>
+                        {/* 点击删除连线 (增大点击区域) */}
+                        <path
+                          d={getConnPath(from.x, from.y, to.x, to.y)}
+                          fill="none" stroke="transparent" strokeWidth={16}
+                          onClick={() => {
+                            setWf(prev => ({ ...prev, connections: prev.connections.filter(c => c.id !== conn.id) }));
+                          }}
+                          className="cursor-pointer"
+                        />
+                      </>
+                    );
+                  })()}
                 </g>
               );
             })}
@@ -2060,6 +2190,14 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 onNodeFieldChange={handleNodeFieldChange}
                 onExtractToSource={handleExtractToSource}
                 onGridSplit={handleGridSplit}
+                onCompare={handleCompare}
+                upstreamImageUrl={(() => {
+                  const upConn = wf.connections.find(c => c.toNodeId === node.id && (c.type === 'image' || c.type === 'data'));
+                  if (!upConn) return undefined;
+                  const upNode = wf.nodes.find(n => n.id === upConn.fromNodeId);
+                  const url = (upNode?.config?.imageUrl as string) || (execResults[upConn.fromNodeId]?.output?.imageUrl as string);
+                  return url || undefined;
+                })()}
                 llmModels={chatModels}
                 canvasImages={canvasImages}
               />
@@ -2162,22 +2300,41 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
           </div>
         )}
 
-        {/* P1: 执行日志面板 */}
+        {/* P2: 执行日志面板 (增强版) */}
         {execLogs.length > 0 && (
-          <div className="absolute bottom-12 right-3 w-[320px] max-h-[240px] bg-[var(--ne-card-bg)]/95 border border-border rounded overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between px-3 py-1.5 border-b border-border">
+          <div className="absolute bottom-12 right-3 w-[380px] max-h-[280px] bg-[var(--ne-card-bg)]/95 border border-border rounded-lg overflow-hidden flex flex-col shadow-lg">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-[var(--ne-input-bg)]/50">
               <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">执行日志</span>
-              <button onClick={() => setExecLogs([])} className="text-muted-foreground hover:text-muted-foreground cursor-pointer"><X size={10} /></button>
+              <div className="flex items-center gap-2">
+                {(() => {
+                  const success = execLogs.filter(l => l.status === 'success').length;
+                  const failed = execLogs.filter(l => l.status === 'error').length;
+                  const total = execLogs.length;
+                  return (
+                    <div className="flex items-center gap-1.5 text-[10px]">
+                      <span className="text-green-400">{success} 通过</span>
+                      {failed > 0 && <span className="text-red-400">{failed} 失败</span>}
+                      <span className="text-muted-foreground">{total} 总计</span>
+                    </div>
+                  );
+                })()}
+                <button onClick={() => setExecLogs([])} className="text-muted-foreground hover:text-foreground cursor-pointer"><X size={10} /></button>
+              </div>
             </div>
             <div className="flex-1 overflow-y-auto text-[10px]">
-              {execLogs.map((log, i) => (
-                <div key={i} className="flex items-center gap-2 px-3 py-1 hover:bg-white/5">
-                  {log.status === 'success' ? <Check size={8} className="text-green-400 flex-shrink-0" /> : <AlertCircle size={8} className="text-red-400 flex-shrink-0" />}
-                  <span className="text-muted-foreground flex-shrink-0">{log.label}</span>
-                  <span className={`flex-1 truncate ${log.status === 'success' ? 'text-green-400/60' : 'text-red-400/60'}`}>{log.message}</span>
-                  <span className="text-muted-foreground flex-shrink-0">{new Date(log.time).toLocaleTimeString()}</span>
-                </div>
-              ))}
+              {execLogs.map((log, i) => {
+                const nodeIcon = log.nodeType === 'image' ? '🖼' : log.nodeType === 'text' ? '📝' : log.nodeType === 'control' ? '🔄' : '⚙';
+                return (
+                  <div key={i} className={`flex items-center gap-2 px-3 py-1.5 hover:bg-white/5 ${log.status === 'error' ? 'bg-red-500/5' : ''}`}>
+                    <span className="flex-shrink-0 text-[10px]">{nodeIcon}</span>
+                    {log.status === 'success' ? <Check size={8} className="text-green-400 flex-shrink-0" /> : log.status === 'running' ? <Loader2 size={8} className="text-yellow-400 flex-shrink-0 animate-spin" /> : <AlertCircle size={8} className="text-red-400 flex-shrink-0" />}
+                    <span className="text-foreground/80 flex-shrink-0 font-medium">{log.label}</span>
+                    <span className={`flex-1 truncate ${log.status === 'success' ? 'text-green-400/60' : log.status === 'running' ? 'text-yellow-400/60' : 'text-red-400/60'}`}>{log.message}</span>
+                    {log.duration != null && <span className="text-muted-foreground/60 flex-shrink-0 tabular-nums">{log.duration >= 1000 ? `${(log.duration / 1000).toFixed(1)}s` : `${log.duration}ms`}</span>}
+                    <span className="text-muted-foreground/40 flex-shrink-0">{new Date(log.time).toLocaleTimeString()}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -2189,6 +2346,47 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
           <div className="relative max-w-[80vw] max-h-[80vh]">
             <img src={imagePreviewUrl} alt="预览" className="max-w-full max-h-[80vh] rounded shadow-2xl" />
             <button onClick={() => setImagePreviewUrl(null)} className="absolute -top-2 -right-2 p-1 bg-[var(--ne-input-bg)] rounded-full text-muted-foreground hover:text-foreground cursor-pointer">
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* P2: 对比滑块弹窗 */}
+      {compareImages && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center" onClick={() => setCompareImages(null)}>
+          <div className="relative w-[80vw] max-w-[900px] aspect-video bg-black rounded-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+            {/* Before 图片 (底层, 完整显示) */}
+            <img src={compareImages.before} alt="原图" className="absolute inset-0 w-full h-full object-contain" />
+            {/* After 图片 (顶层, clip 裁切) */}
+            <div className="absolute inset-0" style={{ clipPath: `inset(0 0 0 ${comparePosition}%)` }}>
+              <img src={compareImages.after} alt="结果" className="w-full h-full object-contain" />
+            </div>
+            {/* 滑块线 */}
+            <div className="absolute top-0 bottom-0 w-0.5 bg-white/80" style={{ left: `${comparePosition}%` }}>
+              <div className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-white rounded-full flex items-center justify-center shadow-lg cursor-ew-resize"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  const startX = e.clientX;
+                  const startPos = comparePosition;
+                  const container = (e.target as HTMLElement).closest('.relative')!;
+                  const containerRect = container.getBoundingClientRect();
+                  const onMove = (ev: MouseEvent) => {
+                    const delta = ev.clientX - startX;
+                    const pct = startPos + (delta / containerRect.width) * 100;
+                    setComparePosition(Math.max(0, Math.min(100, pct)));
+                  };
+                  const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+                  document.addEventListener('mousemove', onMove);
+                  document.addEventListener('mouseup', onUp);
+                }}>
+                <span className="text-black text-xs font-bold">⟺</span>
+              </div>
+            </div>
+            {/* 标签 */}
+            <div className="absolute top-2 left-2 px-2 py-0.5 bg-black/60 text-white text-xs rounded">原图</div>
+            <div className="absolute top-2 right-2 px-2 py-0.5 bg-black/60 text-white text-xs rounded">结果</div>
+            <button onClick={() => setCompareImages(null)} className="absolute -top-2 -right-2 p-1 bg-[var(--ne-input-bg)] rounded-full text-muted-foreground hover:text-foreground cursor-pointer z-10">
               <X size={14} />
             </button>
           </div>
@@ -2251,6 +2449,8 @@ interface NodeCardProps {
   onCascadeRun?: (nodeId: string) => void;
   onExtractToSource?: (nodeId: string) => void;
   onGridSplit?: (nodeId: string, cols: number, rows: number) => void;
+  onCompare?: (nodeId: string) => void;
+  upstreamImageUrl?: string;
   onSelect: (e?: React.MouseEvent) => void;
   onHover: (id: string | null) => void;
   onDragStart: (e: React.MouseEvent) => void;
@@ -2260,7 +2460,7 @@ interface NodeCardProps {
   onPreviewImage: (url: string) => void;
 }
 
-function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, theme, canvasImages, llmModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onPreviewImage }: NodeCardProps) {
+function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, theme, canvasImages, llmModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onPreviewImage }: NodeCardProps) {
   const T = theme;
   const cat = getNodeCategory(node.type);
   const color = NODE_TYPE_COLORS[cat];
@@ -2303,11 +2503,28 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
     });
   };
 
-  // P1: 提示词预设列表 (localStorage)
-  const [presetList] = useState<{ id: string; name: string; text: string }[]>(() => {
+  // P1: 提示词预设列表 (localStorage, 支持增删)
+  const [presetList, setPresetList] = useState<{ id: string; name: string; text: string }[]>(() => {
     try { return JSON.parse(localStorage.getItem('wujie-node-presets') || '[]'); } catch { return []; }
   });
   const [presetOpen, setPresetOpen] = useState(false);
+  const [presetSaving, setPresetSaving] = useState(false);
+  const [presetName, setPresetName] = useState('');
+
+  const savePreset = (name: string, text: string) => {
+    if (!name.trim() || !text.trim()) return;
+    const newList = [...presetList, { id: `p-${Date.now()}`, name: name.trim(), text }];
+    setPresetList(newList);
+    localStorage.setItem('wujie-node-presets', JSON.stringify(newList));
+    setPresetSaving(false);
+    setPresetName('');
+  };
+
+  const deletePreset = (id: string) => {
+    const newList = presetList.filter(p => p.id !== id);
+    setPresetList(newList);
+    localStorage.setItem('wujie-node-presets', JSON.stringify(newList));
+  };
 
   return (
     <g
@@ -2431,15 +2648,42 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
                     >
                       <Bookmark size={9} /> 预设
                     </button>
-                    {presetOpen && presetList.length > 0 && (
-                      <div className="absolute left-0 top-full mt-0.5 z-50 bg-popover border border-border rounded shadow-lg min-w-[120px] max-h-[100px] overflow-y-auto"
+                    {presetOpen && (
+                      <div className="absolute left-0 top-full mt-0.5 z-50 bg-popover border border-border rounded shadow-lg min-w-[140px] max-h-[120px] overflow-y-auto"
                         onMouseDown={(e) => e.stopPropagation()}>
-                        {presetList.map(p => (
-                          <button key={p.id} className="block w-full text-left px-2 py-1 text-[10px] hover:bg-muted truncate"
-                            onClick={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'textContent', p.text); setPresetOpen(false); }}>
-                            {p.name}
+                        {/* 保存为预设 */}
+                        {!presetSaving ? (
+                          <button className="block w-full text-left px-2 py-1 text-[10px] hover:bg-muted text-[var(--ne-accent)] flex items-center gap-1"
+                            onClick={(e) => { e.stopPropagation(); setPresetSaving(true); }}>
+                            <BookmarkPlus size={9} /> 保存为预设
                           </button>
+                        ) : (
+                          <div className="flex items-center gap-1 px-2 py-1">
+                            <input type="text" className="flex-1 text-[9px] rounded px-1 py-0.5 outline-none min-w-0"
+                              style={{ background: T.nodeBody, color: T.text, border: `1px solid ${T.border}` }}
+                              placeholder="预设名称" value={presetName}
+                              onChange={(e) => setPresetName(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { savePreset(presetName, textContent); } if (e.key === 'Escape') { setPresetSaving(false); setPresetName(''); } }}
+                              autoFocus />
+                            <button className="text-[9px] text-[var(--ne-accent)] hover:opacity-80 shrink-0"
+                              onClick={() => savePreset(presetName, textContent)}>✓</button>
+                          </div>
+                        )}
+                        {presetList.length > 0 && <div className="border-t border-border" />}
+                        {presetList.map(p => (
+                          <div key={p.id} className="flex items-center gap-0.5 px-1 py-0.5 hover:bg-muted group">
+                            <button className="flex-1 text-left text-[10px] truncate cursor-pointer"
+                              onClick={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'textContent', p.text); setPresetOpen(false); }}>
+                              {p.name}
+                            </button>
+                            <button className="text-[8px] text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 shrink-0 cursor-pointer"
+                              onClick={(e) => { e.stopPropagation(); deletePreset(p.id); }}
+                              title="删除预设">×</button>
+                          </div>
                         ))}
+                        {presetList.length === 0 && !presetSaving && (
+                          <div className="px-2 py-1 text-[9px] text-muted-foreground">暂无预设</div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -2531,6 +2775,16 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
                 >
                   <Grid3X3 size={8} /> 切分
                 </button>
+                {/* P2: 对比滑块 */}
+                {upstreamImageUrl && (
+                  <button
+                    className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5"
+                    onClick={(e) => { e.stopPropagation(); onCompare?.(node.id); }}
+                    title="对比原图"
+                  >
+                    <GitCompare size={8} /> 对比
+                  </button>
+                )}
                 {/* P0: 级联运行 */}
                 <button
                   className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5 ml-auto"

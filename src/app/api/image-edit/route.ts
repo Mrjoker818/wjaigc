@@ -747,6 +747,10 @@ async function submitImageTask(
       throw new Error(`API 密钥无效，请联系管理员检查配置`);
     }
 
+    // ★ 兜底：翻译纯英文错误信息
+    if (/^[a-zA-Z]/.test(errorMsg) && !/[\u4e00-\u9fff]/.test(errorMsg)) {
+      throw new Error(`API 返回错误: ${errorMsg}`);
+    }
     throw new Error(errorMsg);
   }
 

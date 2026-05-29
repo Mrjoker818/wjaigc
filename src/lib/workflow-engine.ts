@@ -786,7 +786,11 @@ export function getNodeInputs(
 
   // 从上游连线中获取输入 (按端口类型映射)
   const incomingConns = connections.filter(c => c.toNodeId === node.id);
+  // P1: 输入引用阻断 — 获取被阻断的连接ID列表
+  const blockedInputs = new Set<string>(Array.isArray(node.config?.blockedInputs) ? node.config.blockedInputs as string[] : []);
   for (const conn of incomingConns) {
+    // P1: 跳过被阻断的输入连接
+    if (blockedInputs.has(conn.id)) continue;
     const upstreamResult = results.get(conn.fromNodeId);
     if (!upstreamResult?.output) continue;
 

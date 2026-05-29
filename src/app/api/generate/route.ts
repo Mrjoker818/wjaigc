@@ -40,6 +40,33 @@ interface ModelConfig {
 const COMMON_SIZES = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
 
 /**
+ * 将 API 返回的英文错误信息翻译为中文友好提示
+ * 避免用户看到原始英文错误消息
+ */
+function translateGenerateApiError(rawMsg: string): string {
+  const msg = rawMsg.toLowerCase();
+
+  if (msg.includes('try again later') || msg.includes('please wait') || msg.includes('_error')) {
+    return '当前模型暂时不可用，请稍后重试或切换其他模型';
+  }
+  if (msg.includes('internal server error') || msg.includes('server error')) {
+    return 'API 服务内部错误，请稍后重试';
+  }
+  if (msg.includes('timeout') || msg.includes('timed out')) {
+    return '请求超时，请稍后重试';
+  }
+  if (msg.includes('content_policy') || msg.includes('content policy') || msg.includes('safety')) {
+    return '内容被安全策略拦截，请修改描述后重试';
+  }
+
+  // 兜底：纯英文消息加中文前缀
+  if (/^[a-zA-Z]/.test(rawMsg) && !/[\u4e00-\u9fff]/.test(rawMsg)) {
+    return `API 返回错误: ${rawMsg}`;
+  }
+  return rawMsg;
+}
+
+/**
  * 根据模型ID和兼容性档案动态推断模型配置
  * - 不依赖任何硬编码的模型列表
  * - 根据模型名称关键词智能推断能力
@@ -566,7 +593,9 @@ export async function POST(request: NextRequest) {
             throw new Error(`API 密钥无效，请联系管理员检查配置`);
           }
           
-          throw new Error(errorMsg);
+          // ★ 翻译英文错误信息为中文
+          throw new Error(translateGenerateApiError(errorMsg));
+
         }
 
         // 解析响应 — 防止 API 返回 HTML 页面（如 404/502 错误页）导致 JSON 解析失败

@@ -27,6 +27,14 @@ interface ReferenceImage {
   prompt?: string;
 }
 
+/** 修正常见的提供商名称拼写错误 */
+function fixProviderName(name: string): string {
+  if (!name) return name;
+  return name
+    .replace(/\bimgae\b/gi, 'image')
+    .replace(/\bAPImart imgae\b/gi, 'APImart image');
+}
+
 interface ImageEditorProps {
   image: CanvasImage | null;
   onClose: () => void;
@@ -283,7 +291,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
   // 当前选中的图像模型名称（始终显示供应商名称）
   const currentModelName = currentImageModel
-    ? `${getModelDisplayName(currentImageModel.id)}${currentImageModel.providerName ? ` (${currentImageModel.providerName})` : ''}`
+    ? `${getModelDisplayName(currentImageModel.id)}${currentImageModel.providerName ? ` (${fixProviderName(currentImageModel.providerName)})` : ''}`
     : '选择图像模型';
 
   // 当前选中的LLM模型
@@ -296,7 +304,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   })();
 
   const currentLlmModelName = currentLlmModel
-    ? `${currentLlmModel.name}${currentLlmModel.providerName ? ` (${currentLlmModel.providerName})` : ''}`
+    ? `${currentLlmModel.name}${currentLlmModel.providerName ? ` (${fixProviderName(currentLlmModel.providerName)})` : ''}`
     : '选择LLM模型';
 
   // 图片预览区缩放/平移状态
@@ -1365,13 +1373,13 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         <div className="flex-1 min-w-0">
           <div className="font-medium flex items-center gap-1.5">
             {getModelDisplayName(model.id)}
-            {model.providerName && <span className={`text-[10px] px-1 py-0.5 ${thAccentLight} ${thAccentLightText} rounded`}>{model.providerName}</span>}
+            {model.providerName && <span className={`text-[10px] px-1 py-0.5 ${thAccentLight} ${thAccentLightText} rounded`}>{fixProviderName(model.providerName)}</span>}
             {maskSupported
               ? <span className="text-[10px] px-1 py-0.5 bg-green-500/20 text-green-400 rounded">支持涂抹</span>
               : <span className="text-[10px] px-1 py-0.5 bg-orange-500/20 text-orange-400 rounded">仅文字修图</span>
             }
           </div>
-          <div className={`text-xs ${thTextMuted} truncate`}>{model.providerName}{hint ? ` · ${hint}` : ''}</div>
+          <div className={`text-xs ${thTextMuted} truncate`}>{fixProviderName(model.providerName)}{hint ? ` · ${hint}` : ''}</div>
         </div>
         {isSelected && <Check size={12} className={`${isMonochrome ? "text-blue-500" : "text-[#d4af37]"} flex-shrink-0`} />}
       </button>
@@ -1937,9 +1945,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                       <div className="flex-1 min-w-0">
                         <div className="font-medium flex items-center gap-1.5">
                           {model.name}
-                          {model.providerName && <span className="text-[10px] px-1 py-0.5 bg-blue-400/20 text-blue-400 rounded">{model.providerName}</span>}
+                          {model.providerName && <span className="text-[10px] px-1 py-0.5 bg-blue-400/20 text-blue-400 rounded">{fixProviderName(model.providerName)}</span>}
                         </div>
-                        <div className={`text-xs ${thTextMuted} truncate`}>{model.providerName} · 分析原图+优化指令</div>
+                        <div className={`text-xs ${thTextMuted} truncate`}>{fixProviderName(model.providerName)} · 分析原图+优化指令</div>
                       </div>
                       {isSelected && <Check size={12} className={`${isMonochrome ? "text-blue-500" : "text-[#d4af37]"} flex-shrink-0`} />}
                     </button>

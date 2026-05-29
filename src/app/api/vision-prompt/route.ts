@@ -353,7 +353,20 @@ export async function POST(request: NextRequest) {
       } else if (response.status === 400) {
         try {
           const errJson = JSON.parse(errorText);
-          errorMessage = errJson.error?.message || errJson.message || errorMessage;
+          const rawMsg = errJson.error?.message || errJson.message || '';
+          if (rawMsg) {
+            // 翻译常见英文错误为中文
+            const lowerMsg = rawMsg.toLowerCase();
+            if (lowerMsg.includes('try again later') || lowerMsg.includes('please wait')) {
+              errorMessage = '当前模型暂时不可用，请稍后重试';
+            } else if (lowerMsg.includes('invalid api key') || lowerMsg.includes('invalid api_key')) {
+              errorMessage = 'API 密钥无效，请检查配置';
+            } else if (/^[a-zA-Z]/.test(rawMsg) && !/[\u4e00-\u9fff]/.test(rawMsg)) {
+              errorMessage = `API 返回错误: ${rawMsg}`;
+            } else {
+              errorMessage = rawMsg;
+            }
+          }
         } catch {}
       }
 
