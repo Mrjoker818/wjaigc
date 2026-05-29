@@ -522,6 +522,33 @@ body {
   --ne-scrollbar-track: transparent;
 }
 
+/* Gold 主题：暗色背景 + 金色强调 - 覆盖 shadcn 变量 */
+.theme-gold {
+  --background: #0a0e17;
+  --foreground: #e2e8f0;
+  --card: #1c2333;
+  --card-foreground: #e2e8f0;
+  --popover: #1c2333;
+  --popover-foreground: #e2e8f0;
+  --primary: #d4af37;
+  --primary-foreground: #0e1117;
+  --secondary: #1c2333;
+  --secondary-foreground: #e2e8f0;
+  --muted: #1c2333;
+  --muted-foreground: #94a3b8;
+  --accent: #1c2333;
+  --accent-foreground: #d4af37;
+  --destructive: #ef4444;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.1);
+  --ring: #d4af37;
+  --chart-1: #d4af37;
+  --chart-2: #3b82f6;
+  --chart-3: #22c55e;
+  --chart-4: #f59e0b;
+  --chart-5: #ef4444;
+}
+
 .theme-gold .node-editor-root,
 .node-editor-root {
   --ne-accent: #d4af37;
