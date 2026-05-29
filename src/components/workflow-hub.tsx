@@ -107,7 +107,7 @@ function WorkflowCard({ wf, onEdit, onRun, onToggleFav, theme }: WorkflowCardPro
   return (
     <div className="rounded-lg p-4 transition-colors group" style={{ backgroundColor: theme.cardBg, border: '1px solid ' + theme.border }}>
       <div className="flex items-start gap-3">
-        <MiniFlowSVG count={Math.min(wf.stats?.totalRuns ? 5 : 3, 6)} />
+        <MiniFlowSVG count={Math.min(wf.stats?.totalRuns ? 5 : 3, 6)} color={theme.accent} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-medium truncate" style={{ color: theme.primaryText }}>{wf.name}</h3>
@@ -160,6 +160,7 @@ interface WorkflowHubProps {
 
 const hubThemes: Record<string, Record<string, string>> = {
   gold: {
+    bg: '#0a0e17',
     pageBg: '#0a0e17',
     headerBg: '#0e1117',
     cardBg: '#1c2333',
@@ -179,6 +180,7 @@ const hubThemes: Record<string, Record<string, string>> = {
     statsText: '#64748b',
   },
   monochrome: {
+    bg: '#f8fafc',
     pageBg: '#f8fafc',
     headerBg: '#ffffff',
     cardBg: '#ffffff',
@@ -331,7 +333,7 @@ export default function WorkflowHub({ onBack, onEditWorkflow, themeStyle = 'gold
                 <div key={tpl.id} className="rounded-lg overflow-hidden transition-colors" style={{ backgroundColor: T.cardBg, border: `1px solid ${T.border}` }}>
                   {/* 封面 */}
                   <div className="h-24 flex items-center justify-center" style={{ background: `linear-gradient(to bottom right, ${T.cardBg}, ${T.bg})` }}>
-                    <MiniFlowSVG count={4} />
+                    <MiniFlowSVG count={4} color={T.accent} />
                   </div>
                   <div className="p-3">
                     <h3 className="text-sm font-medium" style={{ color: T.primaryText }}>{tpl.name}</h3>

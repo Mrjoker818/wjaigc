@@ -354,7 +354,7 @@ const nodeThemes = {
     arrowFill: '#555',
     // 强调色
     accent: 'var(--ne-accent)',
-    accentHover: 'var(--ne-accent-dark)',
+    accentHover: '#c9a02e',
     accentDim: 'rgba(212,175,55,0.15)',
     accentMuted: 'rgba(212,175,55,0.25)',
     // 卡片
@@ -1218,7 +1218,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   placeholder="搜索节点..."
-                  className="w-full border rounded px-7 py-2 text-sm placeholder-gray-600 focus:outline-none"
+                  className="w-full border rounded px-7 py-2 text-sm placeholder:text-muted-foreground focus:outline-none"
                   style={{ background: T.inputBg, borderColor: T.sidebarBorder, color: T.sidebarText }}
                 />
               </div>
@@ -1239,7 +1239,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                       {getNodeIcon(t.type, 16)}
                     </span>
                     <div className="flex-1 text-left">
-                      <div className="text-foreground group-hover:text-white text-[13px]">{t.label}</div>
+                      <div className="text-foreground group-hover:text-foreground text-[13px]">{t.label}</div>
                       <div className="text-[11px] text-muted-foreground">{t.desc}</div>
                     </div>
                     <Plus size={14} className="text-muted-foreground group-hover:text-[var(--ne-accent)] opacity-0 group-hover:opacity-100 transition-all" />
@@ -1277,7 +1277,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
               value={aiBuildInput}
               onChange={e => setAiBuildInput(e.target.value)}
               placeholder={"例如:\n帮我生成一张赛博朋克风格的城市夜景图，然后去除背景，再放大2倍\n\n或者:\n我要给产品图做商业精修，影棚灯光，白色背景，然后导出PNG"}
-              className="flex-1 min-h-[140px] bg-[var(--ne-input-bg)] border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder-gray-600 focus:outline-none focus:border-[var(--ne-accent)]/50 resize-none"
+              className="flex-1 min-h-[140px] bg-[var(--ne-input-bg)] border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50 resize-none"
               onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAIBuild(); }}
             />
             {aiBuildError && (
@@ -1322,7 +1322,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                     <IconComp size={14} className="text-muted-foreground group-hover:text-[var(--ne-accent)] transition-colors" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-foreground group-hover:text-white">{preset.name}</div>
+                    <div className="text-sm font-medium text-foreground group-hover:text-foreground">{preset.name}</div>
                     <div className="text-xs text-muted-foreground">{preset.description}</div>
                     <div className="flex flex-wrap gap-1 mt-0.5">
                       {preset.tags.map(tag => (
@@ -1347,7 +1347,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                   value={promptSearch}
                   onChange={e => setPromptSearch(e.target.value)}
                   placeholder="搜索提示词..."
-                  className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-6 py-1.5 text-xs text-foreground placeholder-gray-600 focus:outline-none focus:border-[var(--ne-accent)]/50"
+                  className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-6 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50"
                 />
               </div>
             </div>
@@ -1356,14 +1356,14 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 value={newSnippetText}
                 onChange={e => setNewSnippetText(e.target.value)}
                 placeholder="输入新提示词..."
-                className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-1.5 text-xs text-foreground placeholder-gray-600 focus:outline-none focus:border-[var(--ne-accent)]/50 resize-none h-14"
+                className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50 resize-none h-14"
               />
               <div className="flex gap-1">
                 <input
                   value={newSnippetTags}
                   onChange={e => setNewSnippetTags(e.target.value)}
                   placeholder="标签(逗号分隔)"
-                  className="flex-1 bg-[var(--ne-input-bg)] border border-border rounded px-3 py-1 text-xs text-foreground placeholder-gray-600 focus:outline-none focus:border-[var(--ne-accent)]/50"
+                  className="flex-1 bg-[var(--ne-input-bg)] border border-border rounded px-3 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50"
                 />
                 <select
                   value={newSnippetCategory}
@@ -1497,7 +1497,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 onChange={e => setAssistantInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAssistantMessage(); } }}
                 placeholder="输入问题..."
-                className="flex-1 bg-[var(--ne-input-bg)] border border-border rounded px-3 py-1.5 text-xs text-foreground placeholder-gray-600 focus:outline-none focus:border-[var(--ne-accent)]/50"
+                className="flex-1 bg-[var(--ne-input-bg)] border border-border rounded px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50"
               />
               <button onClick={sendAssistantMessage} disabled={assistantLoading || !assistantInput.trim()} className="p-1 rounded bg-[var(--ne-accent)]/20 text-[var(--ne-accent)] hover:bg-[var(--ne-accent)]/30 transition-colors cursor-pointer disabled:opacity-30">
                 <Zap size={12} />
@@ -1526,14 +1526,14 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                   <option value="color">颜色</option>
                 </select>
                 <input value={materialLabel} onChange={e => setMaterialLabel(e.target.value)} placeholder="名称"
-                  className="flex-1 bg-[var(--ne-input-bg)] border border-border rounded px-3 py-1.5 text-sm text-foreground placeholder-gray-600 focus:outline-none focus:border-[var(--ne-accent)]/50" />
+                  className="flex-1 bg-[var(--ne-input-bg)] border border-border rounded px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50" />
               </div>
               <div className="flex gap-1 mt-1.5">
                 <input value={materialInput} onChange={e => setMaterialInput(e.target.value)}
                   placeholder={materialType === 'color' ? '#ff6600' : materialType === 'image' ? '图片URL' : '提示词内容'}
-                  className="flex-1 bg-[var(--ne-input-bg)] border border-border rounded px-3 py-1.5 text-sm text-foreground placeholder-gray-600 focus:outline-none focus:border-[var(--ne-accent)]/50" />
+                  className="flex-1 bg-[var(--ne-input-bg)] border border-border rounded px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50" />
                 <input value={materialTags} onChange={e => setMaterialTags(e.target.value)} placeholder="标签(逗号分隔)"
-                  className="w-24 bg-[var(--ne-input-bg)] border border-border rounded px-3 py-1.5 text-sm text-foreground placeholder-gray-600 focus:outline-none focus:border-[var(--ne-accent)]/50" />
+                  className="w-24 bg-[var(--ne-input-bg)] border border-border rounded px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50" />
               </div>
               <button
                 onClick={() => {
@@ -1625,7 +1625,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
         <div className="absolute top-3 left-3 right-3 z-20 flex items-center justify-between">
           <div className="flex items-center gap-2">
             {onBack && (
-              <button onClick={onBack} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-white transition-colors cursor-pointer" title="返回画布">
+              <button onClick={onBack} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer" title="返回画布">
                 <ArrowLeft size={16} />
               </button>
             )}
@@ -1635,7 +1635,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
             <span className="text-sm text-muted-foreground">{wf.nodes.length} 节点 · {wf.connections.length} 连线</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <button onClick={handleAutoLayout} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-white transition-colors cursor-pointer" title="自动布局">
+            <button onClick={handleAutoLayout} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer" title="自动布局">
               <LayoutGrid size={16} />
             </button>
             {/* P1: 复制粘贴按钮 */}
@@ -1647,7 +1647,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 setClipboard({ nodes: selectedNodes, connections: relatedConns });
               }}
               disabled={selectedNodeIds.size === 0}
-              className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-white transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
               title="复制节点 (Ctrl+C)"
             >
               <Copy size={16} />
@@ -1673,19 +1673,19 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 if (newNodes.length > 0) { setSelectedNodeIds(new Set([newNodes[0].id])); setSidebarTab('props'); }
               }}
               disabled={!clipboard}
-              className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-white transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
               title="粘贴节点 (Ctrl+V)"
             >
               <Clipboard size={16} />
             </button>
-            <button onClick={() => setViewport(v => ({ ...v, zoom: Math.min(3, v.zoom * 1.2) }))} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-white transition-colors cursor-pointer">
+            <button onClick={() => setViewport(v => ({ ...v, zoom: Math.min(3, v.zoom * 1.2) }))} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
               <ZoomIn size={16} />
             </button>
             <span className="text-xs text-muted-foreground w-12 text-center">{Math.round(viewport.zoom * 100)}%</span>
-            <button onClick={() => setViewport(v => ({ ...v, zoom: Math.max(0.2, v.zoom * 0.8) }))} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-white transition-colors cursor-pointer">
+            <button onClick={() => setViewport(v => ({ ...v, zoom: Math.max(0.2, v.zoom * 0.8) }))} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
               <ZoomOut size={16} />
             </button>
-            <button onClick={() => setViewport({ x: 0, y: 0, zoom: 0.8 })} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-white transition-colors cursor-pointer">
+            <button onClick={() => setViewport({ x: 0, y: 0, zoom: 0.8 })} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
               <RotateCcw size={16} />
             </button>
             {/* P2: ComfyUI导入 */}
@@ -1715,17 +1715,17 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 };
                 input.click();
               }}
-              className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-white transition-colors cursor-pointer"
+              className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
               title="导入ComfyUI工作流"
             >
               <FileInput size={16} />
             </button>
             <div className="w-px h-5 bg-muted mx-1" />
             {/* P2: 撤销重做按钮 */}
-            <button onClick={handleUndo} disabled={historyIndex <= 0} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-white transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="撤销 (Ctrl+Z)">
+            <button onClick={handleUndo} disabled={historyIndex <= 0} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="撤销 (Ctrl+Z)">
               <RotateCcw size={16} />
             </button>
-            <button onClick={handleRedo} disabled={historyIndex >= historyStack.length - 1} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-white transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="重做 (Ctrl+Shift+Z)">
+            <button onClick={handleRedo} disabled={historyIndex >= historyStack.length - 1} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="重做 (Ctrl+Shift+Z)">
               <RotateCcw size={16} className="scale-x-[-1]" />
             </button>
             {/* P2: JSON编辑器（build_mode下隐藏） */}
@@ -1735,7 +1735,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 setJsonEditContent(JSON.stringify({ nodes: wf.nodes, connections: wf.connections }, null, 2));
                 setJsonEditorOpen(true);
               }}
-              className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-white transition-colors cursor-pointer"
+              className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
               title="查看/编辑JSON"
             >
               <Settings size={16} />
@@ -1801,7 +1801,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
               if (!fromPort || !toPort) return null;
               const from = getPortPositionLocal(fromNode, fromPort);
               const to = getPortPositionLocal(toNode, toPort);
-              const color = PORT_COLORS[conn.type] || '#555';
+              const color = PORT_COLORS[conn.type] || T.connColor;
               const isHighlighted = isConnectionHighlighted(conn);
               const isRunning = execStatus === 'running' && (execResults[conn.fromNodeId]?.status === 'success');
 
@@ -1985,7 +1985,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                   const from = wf.nodes.find(n => n.id === conn.fromNodeId);
                   const to = wf.nodes.find(n => n.id === conn.toNodeId);
                   if (!from || !to) return null;
-                  return <line key={conn.id} x1={from.x + from.width / 2} y1={from.y + from.height / 2} x2={to.x + to.width / 2} y2={to.y + to.height / 2} stroke={PORT_COLORS[conn.type] || '#444'} strokeWidth={2} opacity={0.6} />;
+                  return <line key={conn.id} x1={from.x + from.width / 2} y1={from.y + from.height / 2} x2={to.x + to.width / 2} y2={to.y + to.height / 2} stroke={PORT_COLORS[conn.type] || T.connColor} strokeWidth={2} opacity={0.6} />;
                 })}
                 {wf.nodes.map(n => (
                   <rect key={n.id} x={n.x} y={n.y} width={n.width} height={n.height} rx={4}
@@ -2055,7 +2055,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center" onClick={() => setImagePreviewUrl(null)}>
           <div className="relative max-w-[80vw] max-h-[80vh]">
             <img src={imagePreviewUrl} alt="预览" className="max-w-full max-h-[80vh] rounded shadow-2xl" />
-            <button onClick={() => setImagePreviewUrl(null)} className="absolute -top-2 -right-2 p-1 bg-[var(--ne-input-bg)] rounded-full text-muted-foreground hover:text-white cursor-pointer">
+            <button onClick={() => setImagePreviewUrl(null)} className="absolute -top-2 -right-2 p-1 bg-[var(--ne-input-bg)] rounded-full text-muted-foreground hover:text-foreground cursor-pointer">
               <X size={14} />
             </button>
           </div>
@@ -2068,7 +2068,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
           <div className="w-[640px] max-h-[80vh] bg-[var(--ne-card-bg)] border border-border rounded-lg flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-2 border-b border-border">
               <span className="text-sm font-semibold text-[var(--ne-accent)]">工作流 JSON 编辑器</span>
-              <button onClick={() => setJsonEditorOpen(false)} className="text-muted-foreground hover:text-white cursor-pointer"><X size={14} /></button>
+              <button onClick={() => setJsonEditorOpen(false)} className="text-muted-foreground hover:text-foreground cursor-pointer"><X size={14} /></button>
             </div>
             <textarea
               value={jsonEditContent}
@@ -2077,7 +2077,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
               spellCheck={false}
             />
             <div className="flex justify-end gap-2 px-4 py-2 border-t border-border">
-              <button onClick={() => setJsonEditorOpen(false)} className="px-3 py-1.5 text-xs rounded bg-muted text-muted-foreground hover:text-white cursor-pointer">取消</button>
+              <button onClick={() => setJsonEditorOpen(false)} className="px-3 py-1.5 text-xs rounded bg-muted text-muted-foreground hover:text-foreground cursor-pointer">取消</button>
               <button
                 onClick={() => {
                   try {
@@ -2222,7 +2222,7 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
       {/* 输入端口 (颜色按类型区分) */}
       {inputPorts.map((port, i) => {
         const py = node.y + (i + 1) * (node.height / (inputPorts.length + 1));
-        const portColor = PORT_COLORS[port.type] || '#555';
+        const portColor = PORT_COLORS[port.type] || T.connColor;
         return (
           <g key={port.id} onMouseUp={() => onPortMouseUp(node.id, port)}>
             <circle cx={node.x} cy={py} r={6} fill={T.portFill} stroke={portColor} strokeWidth={1.5} className="cursor-pointer" />
@@ -2234,7 +2234,7 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
       {/* 输出端口 (颜色按类型区分, 实心) */}
       {outputPorts.map((port, i) => {
         const py = node.y + (i + 1) * (node.height / (outputPorts.length + 1));
-        const portColor = PORT_COLORS[port.type] || '#555';
+        const portColor = PORT_COLORS[port.type] || T.connColor;
         return (
           <g key={port.id} onMouseDown={(e) => onPortMouseDown(e as unknown as React.MouseEvent, node.id, port)}>
             <circle cx={node.x + node.width} cy={py} r={6} fill={portColor} stroke="none" className="cursor-pointer hover:r-[8px]" />
@@ -2340,7 +2340,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
             value={String(value)}
             onChange={e => onChange(e.target.value)}
             placeholder={field.placeholder}
-            className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-2 text-sm text-foreground placeholder-gray-600 focus:outline-none focus:border-[var(--ne-accent)]/50"
+            className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50"
           />
         );
 
@@ -2376,7 +2376,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
               }}
               placeholder={isPromptField && canvasImages && canvasImages.length > 0 ? `${field.placeholder} (输入@引用画布图片)` : field.placeholder}
               rows={3}
-              className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-2 text-sm text-foreground placeholder-gray-600 focus:outline-none focus:border-[var(--ne-accent)]/50 resize-y"
+              className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50 resize-y"
             />
             {/* P0: @图片引用弹窗 */}
             {isPromptField && mentionPopup.visible && mentionPopup.nodeId === node.id && mentionPopup.fieldKey === field.key && (
@@ -2435,7 +2435,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
             max={field.max}
             step={field.step || 1}
             placeholder={field.placeholder}
-            className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-2 text-sm text-foreground placeholder-gray-600 focus:outline-none focus:border-[var(--ne-accent)]/50"
+            className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50"
           />
         );
 
@@ -2560,7 +2560,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
               value={String(value || '')}
               onChange={e => onChange(e.target.value)}
               placeholder="或输入图片URL"
-              className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-2 text-sm text-foreground placeholder-gray-600 focus:outline-none focus:border-[var(--ne-accent)]/50"
+              className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50"
             />
           </div>
         );
@@ -2572,7 +2572,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
             value={String(value)}
             onChange={e => onChange(e.target.value)}
             placeholder={field.placeholder}
-            className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-2 text-sm text-foreground placeholder-gray-600 focus:outline-none focus:border-[var(--ne-accent)]/50"
+            className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50"
           />
         );
     }
