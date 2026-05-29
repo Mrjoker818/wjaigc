@@ -326,8 +326,10 @@ interface NodeEditorProps {
 export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenWorkflowHub, canvasImages }: NodeEditorProps) {
   const [wf, setWf] = useState<WorkflowData>(workflow || createDemoWorkflow());
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [draggingNode, setDraggingNode] = useState<string | null>(null);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  // 拖动状态使用ref避免每次mousemove触发重渲染导致闪烁
+  const draggingNodeRef = useRef<string | null>(null);
+  const dragOffsetRef = useRef({ x: 0, y: 0 });
+  const isDraggingRef = useRef(false); // 标记正在拖动，跳过历史快照
   const [draggingConn, setDraggingConn] = useState<DraggingConn | null>(null);
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 0.8 });
   const [isPanning, setIsPanning] = useState(false);
@@ -381,6 +383,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   // P2: 撤销重做
   const [historyStack, setHistoryStack] = useState<HistoryEntry[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const historyIndexRef = useRef(-1);
   const isUndoRedoRef = useRef(false);
 
   // P2: 画布助手 (节点感知)
@@ -392,38 +395,60 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   const [jsonEditorOpen, setJsonEditorOpen] = useState(false);
   const [jsonEditContent, setJsonEditContent] = useState('');
 
-  // P2: 保存历史快照 (每次wf变化时记录)
+  // P2: 保存历史快照 (每次wf变化时记录，拖动期间跳过)
   const prevWfRef = useRef(wf);
   useEffect(() => {
     if (isUndoRedoRef.current) { isUndoRedoRef.current = false; return; }
     if (prevWfRef.current === wf) return;
+    if (isDraggingRef.current) return; // 拖动期间不记录历史快照
     prevWfRef.current = wf;
     const entry: HistoryEntry = { nodes: wf.nodes, connections: wf.connections, label: '变更' };
     setHistoryStack(prev => {
-      const newStack = prev.slice(0, historyIndex + 1);
+      const idx = historyIndexRef.current;
+      const newStack = prev.slice(0, idx + 1);
       newStack.push(entry);
       if (newStack.length > 50) newStack.shift();
       return newStack;
     });
-    setHistoryIndex(prev => Math.min(prev + 1, 49));
-  }, [wf, historyIndex]);
+    setHistoryIndex(prev => {
+      const newIdx = Math.min(prev + 1, 49);
+      historyIndexRef.current = newIdx;
+      return newIdx;
+    });
+  }, [wf]);
 
   // P2: 撤销/重做函数
   const handleUndo = useCallback(() => {
-    if (historyIndex <= 0) return;
+    const idx = historyIndexRef.current;
+    if (idx <= 0) return;
     isUndoRedoRef.current = true;
-    const entry = historyStack[historyIndex - 1];
-    setWf(prev => ({ ...prev, nodes: entry.nodes, connections: entry.connections }));
-    setHistoryIndex(prev => prev - 1);
-  }, [historyStack, historyIndex]);
+    setHistoryStack(stack => {
+      const entry = stack[idx - 1];
+      if (entry) setWf(prev => ({ ...prev, nodes: entry.nodes, connections: entry.connections }));
+      return stack;
+    });
+    setHistoryIndex(prev => {
+      const newIdx = prev - 1;
+      historyIndexRef.current = newIdx;
+      return newIdx;
+    });
+  }, []);
 
   const handleRedo = useCallback(() => {
-    if (historyIndex >= historyStack.length - 1) return;
-    isUndoRedoRef.current = true;
-    const entry = historyStack[historyIndex + 1];
-    setWf(prev => ({ ...prev, nodes: entry.nodes, connections: entry.connections }));
-    setHistoryIndex(prev => prev + 1);
-  }, [historyStack, historyIndex]);
+    const idx = historyIndexRef.current;
+    setHistoryStack(stack => {
+      if (idx >= stack.length - 1) return stack;
+      isUndoRedoRef.current = true;
+      const entry = stack[idx + 1];
+      if (entry) setWf(prev => ({ ...prev, nodes: entry.nodes, connections: entry.connections }));
+      setHistoryIndex(prev => {
+        const newIdx = prev + 1;
+        historyIndexRef.current = newIdx;
+        return newIdx;
+      });
+      return stack;
+    });
+  }, []);
 
   // P2: 保存提示词到库
   const savePromptSnippet = useCallback((text: string, tags: string[], category: string) => {
@@ -489,18 +514,24 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   }, [assistantInput, selectedNodeId, wf.nodes]);
 
   const svgRef = useRef<SVGSVGElement>(null);
+  const viewportRef = useRef(viewport);
+  viewportRef.current = viewport; // 始终保持最新值，避免拖动时stale closure
   const { models, loading: modelsLoading } = useModelList();
+
+  // 框选状态
+  const [boxSelect, setBoxSelect] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
+  const isBoxSelectingRef = useRef(false);
 
   const selectedNode = useMemo(() => wf.nodes.find(n => n.id === selectedNodeId) || null, [wf.nodes, selectedNodeId]);
 
-  // 同步外部workflow变化
+  // 同步外部workflow变化 (拖动期间跳过，避免循环更新导致闪烁)
   useEffect(() => {
-    if (workflow) setWf(workflow);
+    if (workflow && !isDraggingRef.current) setWf(workflow);
   }, [workflow]);
 
-  // 通知外部
+  // 通知外部 (拖动期间跳过，mouseup时统一通知)
   useEffect(() => {
-    onWorkflowChange?.(wf);
+    if (!isDraggingRef.current) onWorkflowChange?.(wf);
   }, [wf, onWorkflowChange]);
 
   // ─── 节点操作 ───
@@ -633,40 +664,109 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
 
   const handleCanvasMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
+      // 中键或Alt+左键 = 平移
+      const vp = viewportRef.current;
       setIsPanning(true);
-      setPanStart({ x: e.clientX, y: e.clientY, vx: viewport.x, vy: viewport.y });
+      setPanStart({ x: e.clientX, y: e.clientY, vx: vp.x, vy: vp.y });
     } else if (e.button === 0 && !draggingConn) {
+      // 左键点击空白区域 = 取消选中 + 开始框选
       setSelectedNodeId(null);
       setSidebarTab('nodes');
+      // 开始框选
+      const svgRect = svgRef.current?.getBoundingClientRect();
+      const vp = viewportRef.current;
+      if (svgRect) {
+        const mx = (e.clientX - svgRect.left - vp.x) / vp.zoom;
+        const my = (e.clientY - svgRect.top - vp.y) / vp.zoom;
+        setBoxSelect({ startX: mx, startY: my, endX: mx, endY: my });
+        isBoxSelectingRef.current = true;
+      }
     }
-  }, [viewport, draggingConn]);
+  }, [draggingConn]);
 
   const handleCanvasMouseMove = useCallback((e: React.MouseEvent) => {
     if (isPanning) {
       setViewport(v => ({ ...v, x: panStart.vx + (e.clientX - panStart.x), y: panStart.vy + (e.clientY - panStart.y) }));
-    } else if (draggingNode) {
+    } else if (draggingNodeRef.current) {
       const svgRect = svgRef.current?.getBoundingClientRect();
       if (!svgRect) return;
-      const mx = (e.clientX - svgRect.left - viewport.x) / viewport.zoom;
-      const my = (e.clientY - svgRect.top - viewport.y) / viewport.zoom;
+      const vp = viewportRef.current;
+      const mx = (e.clientX - svgRect.left - vp.x) / vp.zoom;
+      const my = (e.clientY - svgRect.top - vp.y) / vp.zoom;
+      const nodeId = draggingNodeRef.current;
+      const offset = dragOffsetRef.current;
       setWf(prev => ({
         ...prev,
-        nodes: prev.nodes.map(n => n.id === draggingNode ? { ...n, x: mx - dragOffset.x, y: my - dragOffset.y } : n),
+        nodes: prev.nodes.map(n => n.id === nodeId ? { ...n, x: mx - offset.x, y: my - offset.y } : n),
       }));
     } else if (draggingConn) {
       const svgRect = svgRef.current?.getBoundingClientRect();
       if (!svgRect) return;
-      const mx = (e.clientX - svgRect.left - viewport.x) / viewport.zoom;
-      const my = (e.clientY - svgRect.top - viewport.y) / viewport.zoom;
+      const vp = viewportRef.current;
+      const mx = (e.clientX - svgRect.left - vp.x) / vp.zoom;
+      const my = (e.clientY - svgRect.top - vp.y) / vp.zoom;
       setDraggingConn(prev => prev ? { ...prev, toX: mx, toY: my } : null);
+    } else if (isBoxSelectingRef.current && boxSelect) {
+      // 更新框选范围
+      const svgRect = svgRef.current?.getBoundingClientRect();
+      if (!svgRect) return;
+      const vp = viewportRef.current;
+      const mx = (e.clientX - svgRect.left - vp.x) / vp.zoom;
+      const my = (e.clientY - svgRect.top - vp.y) / vp.zoom;
+      setBoxSelect(prev => prev ? { ...prev, endX: mx, endY: my } : null);
     }
-  }, [isPanning, panStart, draggingNode, dragOffset, viewport, draggingConn]);
+  }, [isPanning, panStart, draggingConn, boxSelect]);
 
   const handleCanvasMouseUp = useCallback(() => {
     setIsPanning(false);
-    setDraggingNode(null);
+    if (draggingNodeRef.current) {
+      // 拖动结束：标记结束，记录一次历史快照，通知外部
+      draggingNodeRef.current = null;
+      isDraggingRef.current = false;
+      // 手动记录一次历史快照 (使用最新的wf状态)
+      setWf(currentWf => {
+        prevWfRef.current = currentWf;
+        const entry: HistoryEntry = { nodes: currentWf.nodes, connections: currentWf.connections, label: '移动节点' };
+        setHistoryStack(prev => {
+          // 使用最新的historyIndex，从historyIndexRef读取
+          const idx = historyIndexRef.current;
+          const newStack = prev.slice(0, idx + 1);
+          newStack.push(entry);
+          if (newStack.length > 50) newStack.shift();
+          return newStack;
+        });
+        setHistoryIndex(prev => {
+          const newIdx = Math.min(prev + 1, 49);
+          historyIndexRef.current = newIdx;
+          return newIdx;
+        });
+        // 拖动结束后通知外部
+        onWorkflowChange?.(currentWf);
+        return currentWf; // 不修改状态，只是读取最新值
+      });
+    }
     setDraggingConn(null);
-  }, []);
+    // 完成框选：选中框内的第一个节点
+    if (isBoxSelectingRef.current && boxSelect) {
+      const minX = Math.min(boxSelect.startX, boxSelect.endX);
+      const maxX = Math.max(boxSelect.startX, boxSelect.endX);
+      const minY = Math.min(boxSelect.startY, boxSelect.endY);
+      const maxY = Math.max(boxSelect.startY, boxSelect.endY);
+      // 判断是否有实际框选范围（避免单击误触发）
+      const hasArea = (maxX - minX) > 10 || (maxY - minY) > 10;
+      if (hasArea) {
+        const nodesInBox = wf.nodes.filter(n =>
+          n.x + n.width > minX && n.x < maxX && n.y + n.height > minY && n.y < maxY
+        );
+        if (nodesInBox.length > 0) {
+          setSelectedNodeId(nodesInBox[0].id);
+          setSidebarTab('props');
+        }
+      }
+    }
+    setBoxSelect(null);
+    isBoxSelectingRef.current = false;
+  }, [wf, historyIndex, boxSelect]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
@@ -1493,6 +1593,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
           onMouseDown={handleCanvasMouseDown}
           onMouseMove={handleCanvasMouseMove}
           onMouseUp={handleCanvasMouseUp}
+          onMouseLeave={handleCanvasMouseUp}
           onWheel={handleWheel}
           style={{ cursor: isPanning ? 'grabbing' : draggingConn ? 'crosshair' : 'default' }}
         >
@@ -1583,11 +1684,13 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                       {conn.type}
                     </text>
                   )}
-                  {/* 点击区域 */}
+                  {/* 点击删除连线 (增大点击区域) */}
                   <path
                     d={getConnPath(from.x, from.y, to.x, to.y)}
-                    fill="none" stroke="transparent" strokeWidth={10}
-                    onClick={() => setWf(prev => ({ ...prev, connections: prev.connections.filter(c => c.id !== conn.id) }))}
+                    fill="none" stroke="transparent" strokeWidth={16}
+                    onClick={() => {
+                      setWf(prev => ({ ...prev, connections: prev.connections.filter(c => c.id !== conn.id) }));
+                    }}
                     className="cursor-pointer"
                   />
                 </g>
@@ -1601,6 +1704,22 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 fill="none" stroke={PORT_COLORS[draggingConn.portType]} strokeWidth={2} strokeDasharray="6 4" strokeOpacity={0.7}
               />
             )}
+
+            {/* 框选矩形 */}
+            {boxSelect && (() => {
+              const minX = Math.min(boxSelect.startX, boxSelect.endX);
+              const minY = Math.min(boxSelect.startY, boxSelect.endY);
+              const w = Math.abs(boxSelect.endX - boxSelect.startX);
+              const h = Math.abs(boxSelect.endY - boxSelect.startY);
+              if (w < 5 && h < 5) return null;
+              return (
+                <rect
+                  x={minX} y={minY} width={w} height={h}
+                  fill="rgba(212, 175, 55, 0.08)" stroke="rgba(212, 175, 55, 0.4)"
+                  strokeWidth={1} strokeDasharray="4 2" rx={2}
+                />
+              );
+            })()}
 
             {/* 节点 */}
             {wf.nodes.map(node => (
@@ -1616,10 +1735,15 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 onDragStart={(e) => {
                   const svgRect = svgRef.current?.getBoundingClientRect();
                   if (!svgRect) return;
-                  const mx = (e.clientX - svgRect.left - viewport.x) / viewport.zoom;
-                  const my = (e.clientY - svgRect.top - viewport.y) / viewport.zoom;
-                  setDraggingNode(node.id);
-                  setDragOffset({ x: mx - node.x, y: my - node.y });
+                  const vp = viewportRef.current;
+                  const mx = (e.clientX - svgRect.left - vp.x) / vp.zoom;
+                  const my = (e.clientY - svgRect.top - vp.y) / vp.zoom;
+                  draggingNodeRef.current = node.id;
+                  dragOffsetRef.current = { x: mx - node.x, y: my - node.y };
+                  isDraggingRef.current = true;
+                  // 拖动开始时取消框选
+                  setBoxSelect(null);
+                  isBoxSelectingRef.current = false;
                 }}
                 onPortMouseDown={handlePortMouseDown}
                 onPortMouseUp={handlePortMouseUp}
@@ -1934,12 +2058,15 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, onSe
 
       {/* 删除按钮 (选中时显示) */}
       {isSelected && (
-        <g onClick={(e) => { e.stopPropagation(); onDelete(); }} className="cursor-pointer">
-          <circle cx={node.x + node.width + 6} cy={node.y - 6} r={8} fill="#1a1a1a" stroke="#555" strokeWidth={1} />
-          <foreignObject x={node.x + node.width + 1} y={node.y - 11} width={12} height={12}>
-            <X size={10} className="text-gray-400 hover:text-red-400" />
-          </foreignObject>
-        </g>
+        <foreignObject x={node.x + node.width + 1} y={node.y - 12} width={18} height={18}>
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            className="w-full h-full rounded-full bg-[#1a1a1a] border border-gray-600 flex items-center justify-center text-gray-400 hover:text-red-400 hover:border-red-400 cursor-pointer transition-colors"
+            style={{ fontSize: 0, lineHeight: 0 }}
+          >
+            <X size={10} />
+          </button>
+        </foreignObject>
       )}
 
       {/* 执行错误提示 */}
@@ -2189,12 +2316,45 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
                 </button>
               </div>
             ) : (
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full h-20 border-2 border-dashed border-gray-700 rounded flex flex-col items-center justify-center cursor-pointer hover:border-[#d4af37]/50 transition-colors text-gray-600 hover:text-gray-400"
-              >
-                <Upload size={16} />
-                <span className="text-[10px] mt-1">上传图片</span>
+              <div className="flex gap-1.5">
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex-1 h-16 border-2 border-dashed border-gray-700 rounded flex flex-col items-center justify-center cursor-pointer hover:border-[#d4af37]/50 transition-colors text-gray-600 hover:text-gray-400"
+                >
+                  <Upload size={14} />
+                  <span className="text-[9px] mt-0.5">上传</span>
+                </div>
+                {canvasImages && canvasImages.length > 0 && (
+                  <div className="relative group/canvas">
+                    <div
+                      className="flex-1 h-16 border-2 border-dashed border-gray-700 rounded flex flex-col items-center justify-center cursor-pointer hover:border-[#d4af37]/50 transition-colors text-gray-600 hover:text-gray-400"
+                      onClick={(e) => {
+                        const dropdown = (e.currentTarget.nextElementSibling as HTMLElement);
+                        if (dropdown) dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+                      }}
+                    >
+                      <ImageIcon size={14} />
+                      <span className="text-[9px] mt-0.5">画布</span>
+                    </div>
+                    <div style={{ display: 'none' }} className="absolute left-0 top-full mt-1 w-full max-h-40 overflow-y-auto bg-[#1a1a1a] border border-gray-700 rounded shadow-lg z-50">
+                      {canvasImages.map((img, idx) => (
+                        <button
+                          key={img.id}
+                          className="w-full px-2 py-1.5 text-left text-[10px] text-gray-300 hover:bg-[#d4af37]/10 hover:text-[#d4af37] cursor-pointer truncate transition-colors"
+                          onClick={() => {
+                            onChange(img.url);
+                            onUpdate(node.id, { config: { ...node.config, source: 'canvas' } });
+                            const dropdown = document.querySelector('.group\\/canvas > div:last-child') as HTMLElement;
+                            if (dropdown) dropdown.style.display = 'none';
+                          }}
+                          title={img.description}
+                        >
+                          {idx + 1}. {img.description?.slice(0, 25) || '图片 ' + (idx + 1)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={e => {

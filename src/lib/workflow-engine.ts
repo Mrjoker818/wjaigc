@@ -337,7 +337,12 @@ export function createWorkflowNode(type: NodeType, x: number, y: number, label?:
 
   const isCondition = type.startsWith('condition-');
   const width = isCondition ? 110 : 180;
-  const height = isCondition ? 110 : 60;
+  // 动态计算高度：根据端口数量确保端口之间有足够间距
+  const ports = createDefaultPorts(type);
+  const maxInPorts = Math.max(1, ports.filter(p => p.direction === 'in').length);
+  const maxOutPorts = Math.max(1, ports.filter(p => p.direction === 'out').length);
+  const maxPorts = Math.max(maxInPorts, maxOutPorts);
+  const height = isCondition ? 110 : Math.max(60, 30 + maxPorts * 28);
 
   return {
     id: `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -347,7 +352,7 @@ export function createWorkflowNode(type: NodeType, x: number, y: number, label?:
     y,
     width,
     height,
-    ports: createDefaultPorts(type),
+    ports,
     config: { color },
     condition: type.startsWith('condition-') ? '' : undefined,
     loopCount: type.startsWith('loop-') ? 3 : undefined,
@@ -416,7 +421,7 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
     fields.push({ key: 'source', label: '来源', type: 'select', options: [
       { label: '上传图片', value: 'upload' }, { label: 'URL地址', value: 'url' }, { label: '画布选图', value: 'canvas' }
     ], defaultValue: 'upload' });
-    fields.push({ key: 'imageUrl', label: '图片URL', type: 'text', placeholder: '输入图片URL或上传图片' });
+    fields.push({ key: 'imageUrl', label: '图片', type: 'image-upload', placeholder: '输入图片URL或上传图片' });
   }
 
   if (type === 'input-text') {
