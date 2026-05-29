@@ -1,0 +1,1138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/jquery/jquery-3.7.1.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/lucide/lucide-1.11.0.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/tailwindcss/tailwindcss-browser-4.2.4.min.js"></script>
+
+  <style type="text/tailwindcss">
+    @theme {
+      /* === 品牌色（金色） === */
+      --color-primary:              #D4AF37;
+      --color-primary-container:    #3D3420;
+      --color-on-primary:           #0A0A0F;
+      /* === 背景 / 表面（深色科技） === */
+      --color-background:                 #0A0A0F;
+      --color-surface-container-lowest:   #0E0E16;
+      --color-surface:                    #12121A;
+      --color-surface-container:          #181824;
+      --color-surface-container-high:     #1E1E2C;
+      --color-surface-container-highest:  #2A2A38;
+      /* === 文字 === */
+      --color-on-surface:           #E8E8ED;
+      --color-on-surface-variant:   #8B8B9E;
+      /* === 功能色 === */
+      --color-success:  #34D399;
+      --color-error:    #F87171;
+      --color-warning:  #FBBF24;
+      /* === 边框 === */
+      --color-outline:          #2A2A38;
+      --color-outline-variant:  #1E1E2A;
+      /* === 画布专用色 === */
+      --color-canvas-bg:        #0F1117;
+      --color-panel-bg:         #141418;
+      --color-toolbar-bg:       #1A1D27;
+      --color-toolbar-hover:    #2A2D37;
+      --color-gold:             #D4AF37;
+      --color-gold-muted:       #8B8FA3;
+      --color-text-bright:      #E8E8ED;
+      --color-text-dark:        #0A0A0F;
+      /* === 圆角 === */
+      --radius-sm:   0.375rem;
+      --radius-md:   0.625rem;
+      --radius-lg:   0.875rem;
+      --radius-xl:   1rem;
+      --radius-2xl:  1.25rem;
+      --radius-full: 9999px;
+      /* === 阴影 === */
+      --shadow-card:   0 2px 8px rgba(0,0,0,0.3);
+      --shadow-float:  0 4px 24px rgba(0,0,0,0.4);
+      --shadow-dialog: 0 8px 40px rgba(0,0,0,0.6);
+      --shadow-gold:   0 0 20px rgba(212,175,55,0.15);
+      /* === 字体 === */
+      --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+      --font-mono: "JetBrains Mono", "SF Mono", monospace;
+    }
+  </style>
+
+  <!-- 画布模式自定义样式 -->
+  <style>
+    /* 画布网格背景 */
+    #canvas-area {
+      background-color: var(--color-canvas-bg);
+      background-image:
+        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+
+    /* 工具按钮 tooltip */
+    .tool-btn { position: relative; }
+    .tool-btn .tooltip {
+      display: none;
+      position: absolute;
+      left: calc(100% + 8px);
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(0,0,0,0.9);
+      color: white;
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      white-space: nowrap;
+      z-index: 100;
+      pointer-events: none;
+    }
+    .tool-btn:hover .tooltip { display: block; }
+
+    /* 底部控制条 tooltip（向上弹出） */
+    .ctrl-btn { position: relative; }
+    .ctrl-btn .tooltip {
+      display: none;
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.9);
+      color: white;
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      white-space: nowrap;
+      z-index: 100;
+      pointer-events: none;
+    }
+    .ctrl-btn:hover .tooltip { display: block; }
+
+    /* 右侧面板 tooltip（向左弹出） */
+    .panel-tool-btn { position: relative; }
+    .panel-tool-btn .tooltip {
+      display: none;
+      position: absolute;
+      right: calc(100% + 8px);
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(0,0,0,0.9);
+      color: white;
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      white-space: nowrap;
+      z-index: 100;
+      pointer-events: none;
+    }
+    .panel-tool-btn:hover .tooltip { display: block; }
+
+    /* 选中图片的手柄 */
+    .canvas-image.selected { border: 2px solid var(--color-gold); }
+    .resize-handle {
+      width: 8px; height: 8px;
+      background: var(--color-gold);
+      border-radius: 1px;
+      position: absolute;
+    }
+
+    /* 上下文工具栏 tooltip（向下弹出） */
+    .ctx-btn { position: relative; }
+    .ctx-btn .tooltip {
+      display: none;
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.9);
+      color: white;
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      white-space: nowrap;
+      z-index: 100;
+      pointer-events: none;
+    }
+    .ctx-btn:hover .tooltip { display: block; }
+
+    /* 面板 Tab 下划线指示器 */
+    .tab-indicator {
+      position: absolute;
+      bottom: 0;
+      height: 2px;
+      background: var(--color-gold);
+      transition: left 200ms ease-out, width 200ms ease-out;
+    }
+
+    /* 折叠面板过渡 */
+    #right-panel {
+      transition: width 200ms ease-out;
+      overflow: hidden;
+    }
+
+    /* 左侧工具栏折叠过渡 */
+    #left-toolbar {
+      transition: width 200ms ease-out;
+      overflow: hidden;
+    }
+
+    /* 滚动条美化 */
+    .panel-scroll::-webkit-scrollbar { width: 4px; }
+    .panel-scroll::-webkit-scrollbar-track { background: transparent; }
+    .panel-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+    /* 下拉菜单 */
+    .dropdown-menu {
+      display: none;
+      position: absolute;
+      top: calc(100% + 4px);
+      right: 0;
+      background: var(--color-toolbar-bg);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 8px;
+      padding: 4px;
+      min-width: 140px;
+      z-index: 200;
+    }
+    .dropdown-menu.show { display: block; }
+    .dropdown-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 13px;
+      color: var(--color-gold-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .dropdown-item:hover {
+      background: rgba(255,255,255,0.06);
+      color: var(--color-text-bright);
+    }
+  </style>
+
+  <!-- 图片兜底 -->
+  <script>
+    document.addEventListener('error', function (e) {
+      var img = e.target;
+      if (img.tagName !== 'IMG' || img.dataset.fallback) return;
+      img.dataset.fallback = '1';
+      var cat = img.getAttribute('data-category') || '其他';
+      var alt = img.getAttribute('alt') || '';
+      var label = alt.length > 8 ? alt.slice(0, 8) + '…' : alt;
+      label = label.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      var icons = { '人物': '👤', '自然风景': '🏞', '动物': '🐾', '建筑城市': '🏙', '运动体育': '⚽', '交通工具': '🚗', '食物': '🍽', '服饰时尚': '👗', '商业科技': '💼', '游戏娱乐': '🎮', '艺术': '🎨', '其他': '🖼' };
+      var icon = icons[cat] || '🖼';
+      var w = img.width || 400, h = img.height || 300;
+      var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '"><rect width="100%" height="100%" fill="%2312121A"/><text x="50%" y="45%" text-anchor="middle" font-size="' + Math.min(w, h) * 0.18 + '" dominant-baseline="central">' + icon + '</text><text x="50%" y="68%" text-anchor="middle" font-size="' + Math.min(w, h) * 0.07 + '" fill="%238B8B9E" font-family="system-ui,sans-serif" dominant-baseline="central">' + label + '</text></svg>';
+      img.src = 'data:image/svg+xml,' + svg;
+    }, true);
+  </script>
+</head>
+
+<body class="bg-background text-on-surface font-sans overflow-hidden">
+
+  <main class="w-screen h-screen flex flex-col relative">
+
+    <!-- @main-content:start -->
+
+    <!-- ==================== 中央画布区域 ==================== -->
+    <div id="canvas-area" class="flex-1 relative overflow-hidden">
+
+      <!-- ---- 画布上的示例图片 ---- -->
+
+      <!-- 列表-图片1：赛博朋克城市夜景 -->
+      <div class="canvas-image absolute cursor-move" id="canvas-img-1"
+           style="left: 120px; top: 80px; width: 280px; height: 200px;">
+        <img src="https://images.unsplash.com/photo-1515705576963-95cad62945b6?w=560&h=400&fit=crop"
+             alt="赛博朋克城市夜景" data-category="建筑城市"
+             class="w-full h-full object-cover rounded-lg shadow-float" />
+      </div>
+
+      <!-- 列表-图片2：梦幻山水风景 -->
+      <div class="canvas-image absolute cursor-move" id="canvas-img-2"
+           style="left: 480px; top: 140px; width: 320px; height: 220px;">
+        <img src="https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=640&h=440&fit=crop"
+             alt="梦幻山水风景" data-category="自然风景"
+             class="w-full h-full object-cover rounded-lg shadow-float" />
+      </div>
+
+      <!-- 列表-图片3：抽象艺术纹理（选中态） -->
+      <div class="canvas-image selected absolute cursor-move" id="canvas-img-3"
+           style="left: 260px; top: 340px; width: 300px; height: 240px;">
+        <img src="https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=600&h=480&fit=crop"
+             alt="抽象艺术纹理" data-category="艺术"
+             class="w-full h-full object-cover rounded-lg" />
+        <!-- 选中手柄 -->
+        <div class="resize-handle" style="top: -4px; left: -4px; cursor: nw-resize;"></div>
+        <div class="resize-handle" style="top: -4px; right: -4px; cursor: ne-resize;"></div>
+        <div class="resize-handle" style="bottom: -4px; left: -4px; cursor: sw-resize;"></div>
+        <div class="resize-handle" style="bottom: -4px; right: -4px; cursor: se-resize;"></div>
+        <!-- 顶部尺寸标签 -->
+        <div class="absolute -top-7 left-1/2 -translate-x-1/2 text-xs font-mono px-2 py-0.5 rounded bg-black/80 text-gold">300 × 240</div>
+      </div>
+
+      <!-- 列表-图片4：人物肖像特写 -->
+      <div class="canvas-image absolute cursor-move" id="canvas-img-4"
+           style="left: 640px; top: 400px; width: 240px; height: 280px;">
+        <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=480&h=560&fit=crop"
+             alt="人物肖像特写" data-category="人物"
+             class="w-full h-full object-cover rounded-lg shadow-float" />
+      </div>
+
+      <!-- ---- 空状态引导（默认隐藏，有图片时不显示） ---- -->
+      <div id="canvas-empty-state" class="hidden absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div class="border-2 border-dashed rounded-2xl p-16 text-center border-white/10 bg-canvas-bg/40">
+          <i data-lucide="upload-cloud" class="w-16 h-16 mx-auto mb-4 text-white/15"></i>
+          <p class="text-lg font-medium mb-2 text-white/40">拖拽图片到画布</p>
+          <p class="text-sm text-white/20">或使用AI生成第一张图</p>
+        </div>
+      </div>
+
+    </div>
+    <!-- ==================== 中央画布区域 END ==================== -->
+
+
+    <!-- ==================== 左上角可折叠工具栏（浮动面板） ==================== -->
+    <div id="left-toolbar" class="absolute top-4 left-4 z-30 rounded-xl bg-background/85"
+         style="width: 48px; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);">
+
+      <!-- 折叠状态内容 -->
+      <div id="toolbar-collapsed" class="flex flex-col items-center py-2 gap-1">
+        <!-- 分组1-画布操作 -->
+        <button class="tool-btn w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-gold/20 text-gold"
+                id="btn-select-collapsed"
+                onclick="setActiveTool('select')">
+          <i data-lucide="mouse-pointer-2" class="w-4 h-4"></i>
+          <span class="tooltip">选择 (V)</span>
+        </button>
+        <button class="tool-btn w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+                id="btn-hand-collapsed"
+                onclick="setActiveTool('hand')">
+          <i data-lucide="hand" class="w-4 h-4"></i>
+          <span class="tooltip">平移 (H)</span>
+        </button>
+        <button class="tool-btn w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+                id="btn-upload-collapsed">
+          <i data-lucide="image-plus" class="w-4 h-4"></i>
+          <span class="tooltip">上传图片</span>
+        </button>
+
+        <!-- 分隔线 -->
+        <div class="w-5 my-1 h-px bg-white/6"></div>
+
+        <!-- 分组2-模式切换 -->
+        <button class="tool-btn w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+                id="btn-node-collapsed">
+          <i data-lucide="git-branch" class="w-4 h-4"></i>
+          <span class="tooltip">节点模式</span>
+        </button>
+        <button class="tool-btn w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+                id="btn-workflow-collapsed">
+          <i data-lucide="workflow" class="w-4 h-4"></i>
+          <span class="tooltip">工作流中心</span>
+        </button>
+
+        <!-- 展开/折叠切换 -->
+        <div class="w-5 my-1 h-px bg-white/6"></div>
+        <button class="tool-btn w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+                id="btn-expand-toolbar">
+          <i data-lucide="chevrons-right" class="w-4 h-4"></i>
+          <span class="tooltip">展开工具栏</span>
+        </button>
+      </div>
+
+      <!-- 展开状态内容 -->
+      <div id="toolbar-expanded" class="hidden py-3 px-2" style="width: 160px;">
+        <!-- 分组1-画布操作 -->
+        <div class="text-xs font-semibold mb-2 px-2 text-gold-muted">画布操作</div>
+        <button class="tool-btn w-full flex items-center gap-3 px-2 py-1.5 rounded-lg transition-all duration-150 bg-gold/20 text-gold"
+                id="btn-select-expanded"
+                onclick="setActiveTool('select')">
+          <i data-lucide="mouse-pointer-2" class="w-4 h-4"></i>
+          <span class="text-sm">选择工具</span>
+          <span class="ml-auto text-xs opacity-50">V</span>
+        </button>
+        <button class="tool-btn w-full flex items-center gap-3 px-2 py-1.5 rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+                id="btn-hand-expanded"
+                onclick="setActiveTool('hand')">
+          <i data-lucide="hand" class="w-4 h-4"></i>
+          <span class="text-sm">平移工具</span>
+          <span class="ml-auto text-xs opacity-50">H</span>
+        </button>
+        <button class="tool-btn w-full flex items-center gap-3 px-2 py-1.5 rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+                id="btn-upload-expanded">
+          <i data-lucide="image-plus" class="w-4 h-4"></i>
+          <span class="text-sm">上传图片</span>
+        </button>
+
+        <!-- 分隔线 -->
+        <div class="my-2 mx-2 h-px bg-white/6"></div>
+
+        <!-- 分组2-模式切换 -->
+        <div class="text-xs font-semibold mb-2 px-2 text-gold-muted">模式切换</div>
+        <button class="tool-btn w-full flex items-center gap-3 px-2 py-1.5 rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+                id="btn-node-expanded">
+          <i data-lucide="git-branch" class="w-4 h-4"></i>
+          <span class="text-sm">节点模式</span>
+        </button>
+        <button class="tool-btn w-full flex items-center gap-3 px-2 py-1.5 rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+                id="btn-workflow-expanded">
+          <i data-lucide="workflow" class="w-4 h-4"></i>
+          <span class="text-sm">工作流中心</span>
+        </button>
+
+        <!-- 分隔线 -->
+        <div class="my-2 mx-2 h-px bg-white/6"></div>
+
+        <!-- 折叠按钮 -->
+        <button class="tool-btn w-full flex items-center gap-3 px-2 py-1.5 rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+                id="btn-collapse-toolbar">
+          <i data-lucide="chevrons-left" class="w-4 h-4"></i>
+          <span class="text-sm">收起</span>
+        </button>
+      </div>
+    </div>
+
+
+    <!-- ==================== 顶部选中图片上下文工具栏 ==================== -->
+    <div id="context-toolbar" class="absolute z-20 flex items-center gap-1 px-2 py-1.5 rounded-xl bg-background/90 border border-white/6"
+         style="top: 300px; left: 310px; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);">
+
+      <!-- 列表-上下文按钮1：放大 -->
+      <button class="ctx-btn w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              id="ctx-zoom-in">
+        <i data-lucide="zoom-in" class="w-4 h-4"></i>
+        <span class="tooltip">放大</span>
+      </button>
+
+      <!-- 列表-上下文按钮2：移除背景 -->
+      <button class="ctx-btn w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              id="ctx-remove-bg">
+        <i data-lucide="eraser" class="w-4 h-4"></i>
+        <span class="tooltip">移除背景</span>
+      </button>
+
+      <!-- 列表-上下文按钮3：SVG描摹 -->
+      <button class="ctx-btn w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              id="ctx-svg-trace">
+        <i data-lucide="pen-tool" class="w-4 h-4"></i>
+        <span class="tooltip">SVG描摹</span>
+      </button>
+
+      <!-- 列表-上下文按钮4：擦除 -->
+      <button class="ctx-btn w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              id="ctx-erase">
+        <i data-lucide="paintbrush" class="w-4 h-4"></i>
+        <span class="tooltip">擦除</span>
+      </button>
+
+      <!-- 列表-上下文按钮5：蒙版 -->
+      <button class="ctx-btn w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              id="ctx-mask">
+        <i data-lucide="square-dashed-bottom" class="w-4 h-4"></i>
+        <span class="tooltip">蒙版</span>
+      </button>
+
+      <!-- 列表-上下文按钮6：编辑元素 -->
+      <button class="ctx-btn w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              id="ctx-edit">
+        <i data-lucide="pencil" class="w-4 h-4"></i>
+        <span class="tooltip">编辑元素</span>
+      </button>
+
+      <!-- 分隔线 -->
+      <div class="w-px h-5 mx-0.5 bg-white/6"></div>
+
+      <!-- 列表-上下文按钮7：扩展 -->
+      <button class="ctx-btn w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              id="ctx-expand">
+        <i data-lucide="expand" class="w-4 h-4"></i>
+        <span class="tooltip">扩展</span>
+      </button>
+
+      <!-- 列表-上下文按钮8：图生图 -->
+      <button class="ctx-btn w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              id="ctx-img2img">
+        <i data-lucide="image" class="w-4 h-4"></i>
+        <span class="tooltip">图生图</span>
+      </button>
+
+      <!-- 更多按钮（收纳溢出项） -->
+      <div class="relative">
+        <button class="ctx-btn w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+                id="ctx-more">
+          <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+          <span class="tooltip">更多操作</span>
+        </button>
+        <!-- 更多下拉菜单 -->
+        <div class="dropdown-menu" id="ctx-more-dropdown">
+          <div class="dropdown-item" id="ctx-crop">
+            <i data-lucide="crop" class="w-4 h-4"></i>裁切
+          </div>
+          <div class="dropdown-item" id="ctx-download">
+            <i data-lucide="download" class="w-4 h-4"></i>下载
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ==================== 底部浮动视图控制条 ==================== -->
+    <div id="bottom-controls" class="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3 py-2 rounded-xl bg-background/85 border border-white/6"
+         style="backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);">
+
+      <!-- 分组1-导航 -->
+      <button class="ctrl-btn w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-150 bg-gold/20 text-gold"
+              id="ctrl-select"
+              onclick="setActiveTool('select')">
+        <i data-lucide="mouse-pointer-2" class="w-4 h-4"></i>
+        <span class="tooltip">选择 (V)</span>
+      </button>
+      <button class="ctrl-btn w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              id="ctrl-hand"
+              onclick="setActiveTool('hand')">
+        <i data-lucide="hand" class="w-4 h-4"></i>
+        <span class="tooltip">平移 (H)</span>
+      </button>
+
+      <!-- 分隔线 -->
+      <div class="w-px h-5 bg-white/6"></div>
+
+      <!-- 分组2-视图 -->
+      <button class="ctrl-btn w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              id="ctrl-upload">
+        <i data-lucide="upload" class="w-4 h-4"></i>
+        <span class="tooltip">上传图片</span>
+      </button>
+      <button class="ctrl-btn w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              id="ctrl-zoom-in">
+        <i data-lucide="search" class="w-4 h-4"></i>
+        <span class="tooltip">放大 (+)</span>
+      </button>
+      <button class="ctrl-btn w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              id="ctrl-zoom-out">
+        <i data-lucide="search" class="w-4 h-4" style="transform: scale(0.85);"></i>
+        <span class="tooltip">缩小 (-)</span>
+      </button>
+
+      <!-- 缩放百分比 -->
+      <button class="ctrl-btn h-8 flex items-center justify-center px-2 rounded-lg transition-all duration-150 text-xs font-mono bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              id="ctrl-zoom-level"
+              style="min-width: 48px;">
+        100%
+        <span class="tooltip">点击输入缩放比例</span>
+      </button>
+      <button class="ctrl-btn w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              id="ctrl-reset-view">
+        <i data-lucide="maximize" class="w-4 h-4"></i>
+        <span class="tooltip">重置视图</span>
+      </button>
+
+      <!-- 分隔线 -->
+      <div class="w-px h-5 bg-white/6"></div>
+
+      <!-- 分组3-信息 -->
+      <span class="text-xs font-medium px-1 text-gold-muted" id="image-count">4 张图片</span>
+      <button class="ctrl-btn h-8 flex items-center justify-center px-3 rounded-lg transition-all duration-150 text-xs font-medium bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              id="ctrl-fit-all">
+        适应全部
+        <span class="tooltip">将所有图片适应视口</span>
+      </button>
+    </div>
+
+
+    <!-- ==================== 右侧面板（可折叠） ==================== -->
+    <div id="right-panel" class="absolute top-0 right-0 bottom-0 z-30 flex"
+         style="width: 360px;">
+
+      <!-- 折叠按钮（竖条，在面板左边缘） -->
+      <button id="btn-toggle-panel"
+              class="w-5 flex items-center justify-center cursor-pointer transition-all duration-200 shrink-0 bg-toolbar-bg hover:bg-toolbar-hover border-r border-white/6"
+              style="border-radius: 4px 0 0 4px;">
+        <i data-lucide="chevron-right" class="w-3.5 h-3.5 text-gold-muted" id="panel-toggle-icon"></i>
+      </button>
+
+      <!-- 面板内容 -->
+      <div id="panel-content" class="flex-1 flex flex-col bg-panel-bg border-l border-white/6">
+
+        <!-- Tab 头部 -->
+        <div class="relative flex border-b border-white/6" id="panel-tabs">
+          <button class="flex-1 py-3 text-sm font-medium text-center transition-colors duration-150 text-gold"
+                  id="tab-ai-chat"
+                  onclick="switchTab('chat')">
+            AI聊天
+          </button>
+          <button class="flex-1 py-3 text-sm font-medium text-center transition-colors duration-150 text-gold-muted hover:text-text-bright"
+                  id="tab-img-gen"
+                  onclick="switchTab('generate')">
+            图像生成
+          </button>
+          <!-- Tab 下划线指示器 -->
+          <div class="tab-indicator" id="tab-indicator" style="left: 0; width: 50%;"></div>
+        </div>
+
+        <!-- AI聊天面板 -->
+        <div id="panel-chat" class="flex-1 flex flex-col overflow-hidden">
+          <!-- 消息列表 -->
+          <div class="flex-1 overflow-y-auto panel-scroll p-4 space-y-4">
+
+            <!-- 列表-消息1：AI欢迎消息 -->
+            <div class="flex gap-3">
+              <div class="w-7 h-7 rounded-full flex items-center justify-center shrink-0 bg-gold/15">
+                <i data-lucide="sparkles" class="w-3.5 h-3.5 text-gold"></i>
+              </div>
+              <div class="flex-1">
+                <div class="rounded-xl rounded-tl-sm p-3 text-sm bg-white/5 text-text-bright">
+                  你好！我是无界AI助手。我可以帮你生成图片、修改画布上的元素，或者回答关于创作的问题。有什么需要帮忙的吗？
+                </div>
+                <div class="text-xs mt-1 text-white/20">刚刚</div>
+              </div>
+            </div>
+
+            <!-- 列表-消息2：用户提问 -->
+            <div class="flex gap-3 flex-row-reverse">
+              <div class="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-medium bg-gold/30 text-gold">初</div>
+              <div class="flex-1 flex flex-col items-end">
+                <div class="rounded-xl rounded-tr-sm p-3 text-sm bg-gold/15 text-text-bright">
+                  帮我把画布上选中的图片风格转换为水彩画效果
+                </div>
+                <div class="text-xs mt-1 text-white/20">2分钟前</div>
+              </div>
+            </div>
+
+            <!-- 列表-消息3：AI回复 -->
+            <div class="flex gap-3">
+              <div class="w-7 h-7 rounded-full flex items-center justify-center shrink-0 bg-gold/15">
+                <i data-lucide="sparkles" class="w-3.5 h-3.5 text-gold"></i>
+              </div>
+              <div class="flex-1">
+                <div class="rounded-xl rounded-tl-sm p-3 text-sm bg-white/5 text-text-bright">
+                  好的！我将为选中的图片应用水彩画风格转换。处理大约需要10-15秒，请稍候...
+                </div>
+                <div class="text-xs mt-1 text-white/20">1分钟前</div>
+              </div>
+            </div>
+
+            <!-- 列表-消息4：用户追问 -->
+            <div class="flex gap-3 flex-row-reverse">
+              <div class="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-medium bg-gold/30 text-gold">初</div>
+              <div class="flex-1 flex flex-col items-end">
+                <div class="rounded-xl rounded-tr-sm p-3 text-sm bg-gold/15 text-text-bright">
+                  还能把背景去掉吗？
+                </div>
+                <div class="text-xs mt-1 text-white/20">30秒前</div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- 输入区域 -->
+          <div class="p-3 border-t border-white/6">
+            <div class="flex gap-2">
+              <input type="text" id="chat-input"
+                     class="flex-1 rounded-lg px-3 py-2 text-sm bg-white/5 border-none text-text-bright placeholder:text-gold-muted/50 focus:outline-none focus:ring-2 focus:ring-gold/30 transition-colors"
+                     placeholder="输入消息，与AI助手对话..."
+              />
+              <button id="btn-send-chat"
+                      class="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-gold text-text-dark hover:opacity-90">
+                <i data-lucide="send" class="w-4 h-4"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 图像生成面板 -->
+        <div id="panel-generate" class="flex-1 flex flex-col overflow-hidden hidden">
+          <div class="flex-1 overflow-y-auto panel-scroll p-4 space-y-5">
+
+            <!-- 模型选择 -->
+            <div>
+              <label class="text-xs font-semibold mb-2 block text-gold-muted">模型选择</label>
+              <div class="relative">
+                <select id="gen-model"
+                        class="w-full rounded-lg px-3 py-2 text-sm appearance-none cursor-pointer bg-white/5 border-none text-text-bright focus:outline-none focus:ring-2 focus:ring-gold/30">
+                  <option value="flux-pro">FLUX.1 Pro</option>
+                  <option value="sdxl">Stable Diffusion XL</option>
+                  <option value="midjourney">MidJourney v6</option>
+                  <option value="dall-e">DALL·E 3</option>
+                </select>
+                <i data-lucide="chevron-down" class="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gold-muted"></i>
+              </div>
+            </div>
+
+            <!-- 提示词输入 -->
+            <div>
+              <label class="text-xs font-semibold mb-2 block text-gold-muted">提示词</label>
+              <textarea id="gen-prompt"
+                        class="w-full rounded-lg px-3 py-2 text-sm resize-none bg-white/5 border-none text-text-bright placeholder:text-gold-muted/50 focus:outline-none focus:ring-2 focus:ring-gold/30"
+                        style="min-height: 100px;"
+                        placeholder="描述你想要生成的图片内容..."
+              ></textarea>
+            </div>
+
+            <!-- 参数设置 -->
+            <div class="space-y-4">
+              <label class="text-xs font-semibold block text-gold-muted">参数设置</label>
+
+              <!-- 图片尺寸 -->
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="text-xs text-gold-muted">图片尺寸</span>
+                  <span class="text-xs font-mono text-gold" id="size-label">1024 × 1024</span>
+                </div>
+                <div class="flex gap-2">
+                  <button class="flex-1 py-1.5 text-xs rounded-lg transition-all duration-150 bg-gold/20 text-gold border-none"
+                          id="size-1-1"
+                          onclick="selectSize('1:1')">1:1</button>
+                  <button class="flex-1 py-1.5 text-xs rounded-lg transition-all duration-150 bg-white/5 text-gold-muted border-none hover:bg-white/10"
+                          id="size-4-3"
+                          onclick="selectSize('4:3')">4:3</button>
+                  <button class="flex-1 py-1.5 text-xs rounded-lg transition-all duration-150 bg-white/5 text-gold-muted border-none hover:bg-white/10"
+                          id="size-16-9"
+                          onclick="selectSize('16:9')">16:9</button>
+                  <button class="flex-1 py-1.5 text-xs rounded-lg transition-all duration-150 bg-white/5 text-gold-muted border-none hover:bg-white/10"
+                          id="size-9-16"
+                          onclick="selectSize('9:16')">9:16</button>
+                </div>
+              </div>
+
+              <!-- 引导强度 -->
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="text-xs text-gold-muted">引导强度</span>
+                  <span class="text-xs font-mono text-gold" id="guidance-label">7.5</span>
+                </div>
+                <input type="range" id="gen-guidance"
+                       min="1" max="20" step="0.5" value="7.5"
+                       class="w-full h-1 rounded-full appearance-none cursor-pointer bg-white/10 accent-gold" />
+              </div>
+
+              <!-- 生成步数 -->
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="text-xs text-gold-muted">生成步数</span>
+                  <span class="text-xs font-mono text-gold" id="steps-label">30</span>
+                </div>
+                <input type="range" id="gen-steps"
+                       min="10" max="100" step="5" value="30"
+                       class="w-full h-1 rounded-full appearance-none cursor-pointer bg-white/10 accent-gold" />
+              </div>
+
+              <!-- 随机种子 -->
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="text-xs text-gold-muted">随机种子</span>
+                  <span class="text-xs font-mono text-gold-muted">-1 (随机)</span>
+                </div>
+                <div class="flex gap-2">
+                  <input type="number" id="gen-seed"
+                         class="flex-1 rounded-lg px-3 py-1.5 text-xs font-mono bg-white/5 border-none text-text-bright focus:outline-none focus:ring-2 focus:ring-gold/30"
+                         value="-1" />
+                  <button class="w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted border-none hover:bg-white/10 hover:text-text-bright"
+                          id="btn-random-seed">
+                    <i data-lucide="shuffle" class="w-3.5 h-3.5"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 生成按钮 -->
+          <div class="p-4 border-t border-white/6">
+            <button id="btn-generate"
+                    class="w-full py-2.5 rounded-lg text-sm font-semibold transition-all duration-150 flex items-center justify-center gap-2 bg-gold text-text-dark hover:opacity-90">
+              <i data-lucide="sparkles" class="w-4 h-4"></i>
+              生成图片
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+
+    <!-- @main-content:end -->
+
+  </main>
+
+  <script>
+  $(function() {
+
+    // ==================== 左侧工具栏折叠/展开 ====================
+    var toolbarExpanded = false;
+
+    $('#btn-expand-toolbar').on('click', function() {
+      toolbarExpanded = true;
+      $('#left-toolbar').css('width', '160px');
+      $('#toolbar-collapsed').addClass('hidden');
+      $('#toolbar-expanded').removeClass('hidden');
+      lucide.createIcons();
+    });
+
+    $('#btn-collapse-toolbar').on('click', function() {
+      toolbarExpanded = false;
+      $('#left-toolbar').css('width', '48px');
+      $('#toolbar-expanded').addClass('hidden');
+      $('#toolbar-collapsed').removeClass('hidden');
+      lucide.createIcons();
+    });
+
+    // ==================== 工具按钮激活状态 ====================
+    window.setActiveTool = function(tool) {
+      var resetStyle = 'rgba(255,255,255,0.05)';
+      var resetColor = 'var(--color-gold-muted)';
+      var activeStyle = 'rgba(212,175,55,0.2)';
+      var activeColor = 'var(--color-gold)';
+
+      // 折叠状态按钮 - 重置
+      $('#btn-select-collapsed, #btn-hand-collapsed').each(function() {
+        $(this).css({ background: resetStyle, color: resetColor });
+        $(this).off('mouseenter.mouseenterleave');
+        $(this).on('mouseenter.mstool', function() { $(this).css({ background: 'rgba(255,255,255,0.1)', color: 'var(--color-text-bright)' }); });
+        $(this).on('mouseleave.mstool', function() { $(this).css({ background: resetStyle, color: resetColor }); });
+      });
+
+      // 展开状态按钮 - 重置
+      $('#btn-select-expanded, #btn-hand-expanded').each(function() {
+        $(this).css({ background: resetStyle, color: resetColor });
+        $(this).off('mouseenter.mstool mouseleave.mstool');
+        $(this).on('mouseenter.mstool', function() { $(this).css({ background: 'rgba(255,255,255,0.1)', color: 'var(--color-text-bright)' }); });
+        $(this).on('mouseleave.mstool', function() { $(this).css({ background: resetStyle, color: resetColor }); });
+      });
+
+      // 底部控制条按钮 - 重置
+      $('#ctrl-select, #ctrl-hand').each(function() {
+        $(this).css({ background: resetStyle, color: resetColor });
+        $(this).off('mouseenter.mstool mouseleave.mstool');
+        $(this).on('mouseenter.mstool', function() { $(this).css({ background: 'rgba(255,255,255,0.1)', color: 'var(--color-text-bright)' }); });
+        $(this).on('mouseleave.mstool', function() { $(this).css({ background: resetStyle, color: resetColor }); });
+      });
+
+      // 激活选中工具
+      if (tool === 'select') {
+        $('#btn-select-collapsed, #btn-select-expanded, #ctrl-select').each(function() {
+          $(this).css({ background: activeStyle, color: activeColor });
+          $(this).off('mouseenter.mstool mouseleave.mstool');
+        });
+      } else if (tool === 'hand') {
+        $('#btn-hand-collapsed, #btn-hand-expanded, #ctrl-hand').each(function() {
+          $(this).css({ background: activeStyle, color: activeColor });
+          $(this).off('mouseenter.mstool mouseleave.mstool');
+        });
+      }
+    };
+
+    // ==================== 右侧面板折叠/展开 ====================
+    var panelExpanded = true;
+
+    $('#btn-toggle-panel').on('click', function() {
+      if (panelExpanded) {
+        $('#right-panel').css('width', '20px');
+        $('#panel-content').addClass('hidden');
+        $('#panel-toggle-icon').attr('data-lucide', 'chevron-left');
+        panelExpanded = false;
+      } else {
+        $('#right-panel').css('width', '360px');
+        $('#panel-content').removeClass('hidden');
+        $('#panel-toggle-icon').attr('data-lucide', 'chevron-right');
+        panelExpanded = true;
+      }
+      lucide.createIcons();
+    });
+
+    // ==================== Tab切换 ====================
+    window.switchTab = function(tab) {
+      if (tab === 'chat') {
+        $('#panel-chat').removeClass('hidden');
+        $('#panel-generate').addClass('hidden');
+        $('#tab-ai-chat').css('color', 'var(--color-gold)').addClass('active');
+        $('#tab-img-gen').css('color', 'var(--color-gold-muted)').removeClass('active');
+        $('#tab-indicator').css('left', '0');
+      } else {
+        $('#panel-chat').addClass('hidden');
+        $('#panel-generate').removeClass('hidden');
+        $('#tab-ai-chat').css('color', 'var(--color-gold-muted)').removeClass('active');
+        $('#tab-img-gen').css('color', 'var(--color-gold)').addClass('active');
+        $('#tab-indicator').css('left', '50%');
+      }
+      lucide.createIcons();
+    };
+
+    // ==================== 图片尺寸选择 ====================
+    window.selectSize = function(ratio) {
+      var sizes = {
+        '1:1': '1024 × 1024',
+        '4:3': '1024 × 768',
+        '16:9': '1024 × 576',
+        '9:16': '576 × 1024'
+      };
+      $('#size-label').text(sizes[ratio]);
+
+      // 重置所有尺寸按钮
+      $('#size-1-1, #size-4-3, #size-16-9, #size-9-16').each(function() {
+        $(this).css({ background: 'rgba(255,255,255,0.05)', color: 'var(--color-gold-muted)' });
+        $(this).off('mouseenter.sizesel mouseleave.sizesel');
+        $(this).on('mouseenter.sizesel', function() { $(this).css('background', 'rgba(255,255,255,0.1)'); });
+        $(this).on('mouseleave.sizesel', function() { $(this).css('background', 'rgba(255,255,255,0.05)'); });
+      });
+
+      // 激活选中
+      var activeId = '#size-' + ratio.replace(':', '-');
+      $(activeId).css({ background: 'rgba(212,175,55,0.2)', color: 'var(--color-gold)' });
+      $(activeId).off('mouseenter.sizesel mouseleave.sizesel');
+    };
+
+    // ==================== 参数滑块实时更新 ====================
+    $('#gen-guidance').on('input', function() {
+      $('#guidance-label').text($(this).val());
+    });
+    $('#gen-steps').on('input', function() {
+      $('#steps-label').text($(this).val());
+    });
+
+    // ==================== 上下文工具栏"更多"下拉 ====================
+    $('#ctx-more').on('click', function(e) {
+      e.stopPropagation();
+      $('#ctx-more-dropdown').toggleClass('show');
+    });
+
+    // 点击其他区域关闭下拉
+    $(document).on('click', function() {
+      $('#ctx-more-dropdown').removeClass('show');
+    });
+
+    // ==================== 画布图片点击选中 ====================
+    // 点击图片 - 切换选中态
+    // 完整交互说明：
+    // 1. 点击画布上的图片，将其设置为选中状态（添加金色边框 + 尺寸手柄）
+    // 2. 取消其他图片的选中状态
+    // 3. 选中图片时显示上下文工具栏，位置跟随选中图片上方
+    // 4. 点击画布空白区域取消所有选中
+    $('.canvas-image').on('click', function(e) {
+      e.stopPropagation();
+      // 移除所有选中态
+      $('.canvas-image').removeClass('selected');
+      $('.canvas-image .resize-handle').remove();
+      $('.canvas-image .size-label-tag').remove();
+
+      // 添加当前选中态
+      $(this).addClass('selected');
+      // 显示上下文工具栏
+      $('#context-toolbar').show();
+    });
+
+    // 点击画布空白区域取消选中
+    $('#canvas-area').on('click', function(e) {
+      if ($(e.target).closest('.canvas-image').length === 0 &&
+          $(e.target).closest('#left-toolbar').length === 0 &&
+          $(e.target).closest('#context-toolbar').length === 0 &&
+          $(e.target).closest('#bottom-controls').length === 0 &&
+          $(e.target).closest('#right-panel').length === 0) {
+        $('.canvas-image').removeClass('selected');
+        $('#context-toolbar').hide();
+      }
+    });
+
+    // ==================== 缩放百分比点击 ====================
+    // 点击缩放百分比 - 应实现：
+    // 1. 显示内联输入框替代百分比文字
+    // 2. 用户输入数字后按 Enter 确认缩放
+    // 3. 按 ESC 取消编辑
+    // 4. 缩放范围限制在 10%-500%
+    $('#ctrl-zoom-level').on('click', function() {
+      console.log('缩放百分比点击 - 应弹出内联输入框允许输入精确缩放比例');
+    });
+
+    // ==================== 发送聊天消息 ====================
+    // 点击发送按钮 - 应实现：
+    // 1. 获取输入框文本，若为空则不发送
+    // 2. 将用户消息追加到消息列表
+    // 3. 清空输入框
+    // 4. 模拟AI回复（显示加载动画，延迟后追加AI消息）
+    $('#btn-send-chat').on('click', function() {
+      var msg = $('#chat-input').val().trim();
+      if (!msg) return;
+      console.log('发送聊天消息:', msg);
+      $('#chat-input').val('');
+    });
+
+    // 回车发送
+    $('#chat-input').on('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        $('#btn-send-chat').trigger('click');
+      }
+    });
+
+    // ==================== 生成图片按钮 ====================
+    // 点击生成按钮 - 应实现：
+    // 1. 读取提示词、模型、参数设置
+    // 2. 显示生成进度（按钮变为加载态，显示进度百分比）
+    // 3. 生成完成后将图片添加到画布中央
+    // 4. 更新底部图片数量指示
+    $('#btn-generate').on('click', function() {
+      var prompt = $('#gen-prompt').val().trim();
+      var model = $('#gen-model').val();
+      console.log('生成图片 - 模型:', model, '提示词:', prompt);
+    });
+
+    // ==================== 上传图片按钮 ====================
+    // 点击上传 - 应实现：
+    // 1. 弹出文件选择对话框
+    // 2. 选择图片后添加到画布
+    // 3. 更新底部图片数量指示
+    $('#btn-upload-collapsed, #btn-upload-expanded, #ctrl-upload').on('click', function() {
+      console.log('上传图片 - 应弹出文件选择对话框');
+    });
+
+    // ==================== 随机种子按钮 ====================
+    $('#btn-random-seed').on('click', function() {
+      var randomSeed = Math.floor(Math.random() * 999999999);
+      $('#gen-seed').val(randomSeed);
+    });
+
+    // ==================== 上下文工具栏按钮事件 ====================
+    // 移除背景 - 应实现：
+    // 1. 对选中图片调用AI抠图模型
+    // 2. 显示处理进度
+    // 3. 处理完成后替换图片为去背景版本（透明背景）
+    $('#ctx-remove-bg').on('click', function() {
+      console.log('移除背景 - 对选中图片调用AI抠图模型');
+    });
+
+    // SVG描摹 - 应实现：
+    // 1. 将选中位图图片转换为SVG矢量路径
+    // 2. 显示处理进度
+    // 3. 在画布上用SVG版本替换原图
+    $('#ctx-svg-trace').on('click', function() {
+      console.log('SVG描摹 - 将位图转换为矢量路径');
+    });
+
+    // 擦除 - 应实现：
+    // 1. 进入擦除模式，光标变为画笔
+    // 2. 用户在图片上涂抹区域标记为需擦除
+    // 3. 调用AI inpainting模型填充擦除区域
+    $('#ctx-erase').on('click', function() {
+      console.log('擦除 - 进入擦除模式，调用AI inpainting');
+    });
+
+    // 蒙版 - 应实现：
+    // 1. 进入蒙版编辑模式
+    // 2. 用户绘制蒙版区域（白色保留，黑色隐藏）
+    // 3. 应用蒙版到选中图片
+    $('#ctx-mask').on('click', function() {
+      console.log('蒙版 - 进入蒙版编辑模式');
+    });
+
+    // 编辑元素 - 应实现：
+    // 1. 选中图片进入元素编辑模式
+    // 2. 自动识别图片中的独立元素
+    // 3. 用户可选择、移动、删除单个元素
+    $('#ctx-edit').on('click', function() {
+      console.log('编辑元素 - 进入元素编辑模式');
+    });
+
+    // 扩展 - 应实现：
+    // 1. 进入图片扩展模式
+    // 2. 用户拖拽边框扩展画布区域
+    // 3. 调用AI outpainting填充新增区域
+    $('#ctx-expand').on('click', function() {
+      console.log('扩展 - 进入outpainting模式');
+    });
+
+    // 图生图 - 应实现：
+    // 1. 切换到右侧图像生成面板
+    // 2. 自动填入图生图模式
+    // 3. 以选中图片作为参考图
+    $('#ctx-img2img').on('click', function() {
+      console.log('图生图 - 以选中图片为参考，切换到生成面板');
+      switchTab('generate');
+    });
+
+    // 裁切 - 应实现：
+    // 1. 进入裁切模式，显示裁切框
+    // 2. 用户调整裁切区域
+    // 3. 确认裁切后更新图片
+    $('#ctx-crop').on('click', function() {
+      console.log('裁切 - 进入裁切模式');
+      $('#ctx-more-dropdown').removeClass('show');
+    });
+
+    // 下载 - 应实现：
+    // 1. 将选中图片导出为PNG/JPG
+    // 2. 触发浏览器下载
+    $('#ctx-download').on('click', function() {
+      console.log('下载 - 导出选中图片');
+      $('#ctx-more-dropdown').removeClass('show');
+    });
+
+    // ==================== 底部控制条按钮事件 ====================
+    // 放大
+    $('#ctrl-zoom-in').on('click', function() {
+      console.log('放大画布视图');
+    });
+
+    // 缩小
+    $('#ctrl-zoom-out').on('click', function() {
+      console.log('缩小画布视图');
+    });
+
+    // 重置视图
+    $('#ctrl-reset-view').on('click', function() {
+      console.log('重置画布视图到默认缩放和位置');
+    });
+
+    // 适应全部
+    $('#ctrl-fit-all').on('click', function() {
+      console.log('将所有图片适应到视口中显示');
+    });
+
+    // ==================== 节点模式 & 工作流中心 ====================
+    // 节点模式 - 应实现：
+    // 1. 切换画布为节点编辑模式
+    // 2. 图片显示为节点卡片
+    // 3. 节点之间可连线表示处理流程
+    $('#btn-node-collapsed, #btn-node-expanded').on('click', function() {
+      console.log('切换到节点模式');
+    });
+
+    // 工作流中心 - 应实现：
+    // 1. 打开工作流管理面板
+    // 2. 显示已保存的工作流列表
+    // 3. 允许创建、编辑、删除工作流
+    $('#btn-workflow-collapsed, #btn-workflow-expanded').on('click', function() {
+      console.log('打开工作流中心');
+    });
+
+    // ==================== 调整手柄拖拽（复杂交互占位） ====================
+    // 调整手柄 - 应实现：
+    // 1. mousedown 在手柄上开始拖拽
+    // 2. 根据手柄位置（四角/四边）计算新尺寸
+    // 3. 实时更新图片元素宽高和位置
+    // 4. mouseup 结束拖拽，更新尺寸标签
+    // 5. 按住 Shift 约束等比缩放
+    $('.resize-handle').on('mousedown', function(e) {
+      e.stopPropagation();
+      console.log('调整手柄拖拽 - 应实现图片缩放交互');
+    });
+
+    // ==================== 画布图片拖拽移动（复杂交互占位） ====================
+    // 图片拖拽 - 应实现：
+    // 1. mousedown 在图片上开始拖拽
+    // 2. 记录鼠标起始位置和图片起始位置
+    // 3. mousemove 时计算偏移，实时更新图片 position
+    // 4. mouseup 结束拖拽
+    // 5. 上下文工具栏跟随图片位置更新
+    $('.canvas-image').on('mousedown', function(e) {
+      if ($(e.target).hasClass('resize-handle')) return;
+      console.log('图片拖拽移动 - 应实现画布图片自由拖动');
+    });
+
+  });
+  </script>
+
+  <script>lucide.createIcons();</script>
+</body>
+</html>

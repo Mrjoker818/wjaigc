@@ -5,74 +5,48 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <link href="https://lf-code-agent.coze.cn/obj/x-ai-cn/fonts/google/google-all-fonts.css" rel="stylesheet"/>
-
   <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/jquery/jquery-3.7.1.min.js"></script>
   <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/lucide/lucide-1.11.0.min.js"></script>
   <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/tailwindcss/tailwindcss-browser-4.2.4.min.js"></script>
 
   <style type="text/tailwindcss">
     @theme {
-      /* === 品牌色（黑金体系） === */
-      --color-primary:              #d4af37;
-      --color-primary-container:    #3d3218;
-      --color-on-primary:           #0e1117;
-      /* === 背景 / 表面（深色层级） === */
-      --color-background:                 #0e1117;
-      --color-surface-container-lowest:   #131820;
-      --color-surface:                    #161b22;
-      --color-surface-container:          #1c2333;
-      --color-surface-container-high:     #242d3d;
-      --color-surface-container-highest:  #2d3748;
+      /* === 品牌色（金色） === */
+      --color-primary:              #D4AF37;
+      --color-primary-container:    #3D3420;
+      --color-on-primary:           #0A0A0F;
+      /* === 背景 / 表面（深色科技） === */
+      --color-background:                 #0A0A0F;
+      --color-surface-container-lowest:   #0E0E16;
+      --color-surface:                    #12121A;
+      --color-surface-container:          #181824;
+      --color-surface-container-high:     #1E1E2C;
+      --color-surface-container-highest:  #2A2A38;
       /* === 文字 === */
-      --color-on-surface:           #e6edf3;
-      --color-on-surface-variant:   #7d8590;
+      --color-on-surface:           #E8E8ED;
+      --color-on-surface-variant:   #8B8B9E;
       /* === 功能色 === */
-      --color-success:  #2ea043;
-      --color-error:    #f85149;
-      --color-warning:  #d29922;
+      --color-success:  #34D399;
+      --color-error:    #F87171;
+      --color-warning:  #FBBF24;
       /* === 边框 === */
-      --color-outline:          #30363d;
-      --color-outline-variant:  #21262d;
-      /* === 节点专用色 === */
-      --color-node-input:    #3b82f6;
-      --color-node-process:  #8b5cf6;
-      --color-node-output:   #2ea043;
-      --color-node-ai:       #d4af37;
-      --color-node-logic:    #f59e0b;
-      --color-node-subgraph: #06b6d4;
-      --color-node-agent:    #f472b6;
-      --color-node-plugin:   #a3e635;
-      --color-node-memory:   #c084fc;
-      /* === 端口专用色 === */
-      --color-port-image:    #3b82f6;
-      --color-port-mask:     #f472b6;
-      --color-port-prompt:   #a78bfa;
-      --color-port-condition: #f59e0b;
-      --color-port-any:      #7d8590;
-      --color-port-video:    #ef4444;
-      --color-port-audio:    #f97316;
-      --color-port-data:     #22d3ee;
-      /* === 智能指令栏 === */
-      --color-smart-bar:     #1a2332;
-      --color-smart-bar-border: #d4af37/30;
-      /* === Agent专属 === */
-      --color-agent-glow:    rgba(244,114,182,0.3);
-      --color-debug-breakpoint: #ef4444;
+      --color-outline:          #2A2A38;
+      --color-outline-variant:  #1E1E2A;
       /* === 圆角 === */
-      --radius-sm:   0.25rem;
-      --radius-md:   0.375rem;
-      --radius-lg:   0.5rem;
-      --radius-xl:   0.75rem;
-      --radius-2xl:  1rem;
+      --radius-sm:   0.375rem;
+      --radius-md:   0.625rem;
+      --radius-lg:   0.875rem;
+      --radius-xl:   1rem;
+      --radius-2xl:  1.25rem;
       --radius-full: 9999px;
       /* === 阴影 === */
-      --shadow-card:   0 2px 8px rgba(0,0,0,0.4);
-      --shadow-float:  0 10px 25px rgba(0,0,0,0.5);
-      --shadow-dialog: 0 25px 50px rgba(0,0,0,0.6);
-      --shadow-glow-primary: 0 0 20px rgba(212,175,55,0.3);
+      --shadow-card:   0 2px 8px rgba(0,0,0,0.3);
+      --shadow-float:  0 4px 24px rgba(0,0,0,0.4);
+      --shadow-dialog: 0 8px 40px rgba(0,0,0,0.6);
+      --shadow-gold:   0 0 20px rgba(212,175,55,0.15);
       /* === 字体 === */
-      --font-sans: "Inter", "Noto Sans SC", system-ui, sans-serif;
+      --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+      --font-mono: "JetBrains Mono", "SF Mono", monospace;
     }
   </style>
 
@@ -89,7 +63,7 @@
       const icons = { '人物': '👤', '自然风景': '🏞', '动物': '🐾', '建筑城市': '🏙', '运动体育': '⚽', '交通工具': '🚗', '食物': '🍽', '服饰时尚': '👗', '商业科技': '💼', '游戏娱乐': '🎮', '艺术': '🎨', '其他': '🖼' };
       const icon = icons[cat] || '🖼';
       const w = img.width || 400, h = img.height || 300;
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="%23f3f4f6"/><text x="50%" y="45%" text-anchor="middle" font-size="${Math.min(w, h) * 0.18}" dominant-baseline="central">${icon}</text><text x="50%" y="68%" text-anchor="middle" font-size="${Math.min(w, h) * 0.07}" fill="%239ca3af" font-family="system-ui,sans-serif" dominant-baseline="central">${label}</text></svg>`;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="%2312121A"/><text x="50%" y="45%" text-anchor="middle" font-size="${Math.min(w, h) * 0.18}" dominant-baseline="central">${icon}</text><text x="50%" y="68%" text-anchor="middle" font-size="${Math.min(w, h) * 0.07}" fill="%238B8B9E" font-family="system-ui,sans-serif" dominant-baseline="central">${label}</text></svg>`;
       img.src = 'data:image/svg+xml,' + svg;
     }, true);
   </script>
@@ -97,53 +71,14 @@
 
 <body class="bg-background text-on-surface font-sans">
 
-  <!-- @nav:start 导航组件 -->
-  <header class="bg-surface sticky top-0 z-40 h-11 flex items-center justify-between px-3 border-b border-outline-variant/20">
-    <div class="flex items-center gap-2">
-      <i data-lucide="infinity" class="text-primary w-4 h-4"></i>
-      <span class="font-bold text-sm text-on-surface">无界AI</span>
-      <span class="text-xs text-on-surface-variant ml-0.5">Studio</span>
-      <div class="w-px h-4 bg-outline-variant/30 mx-2"></div>
-      <span class="text-xs text-on-surface-variant">电商白底图处理 v2</span>
-      <a href="workflow-hub.html" class="flex items-center gap-1 px-2 py-0.5 rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface text-xs transition-colors">
-        <i data-lucide="bookmark" class="w-3 h-3"></i>
-        收藏
-      </a>
-    </div>
-    <div class="flex items-center gap-1">
-      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="撤销">
-        <i data-lucide="undo" class="w-3.5 h-3.5"></i>
-      </button>
-      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="重做">
-        <i data-lucide="redo" class="w-3.5 h-3.5"></i>
-      </button>
-      <div class="w-px h-4 bg-outline-variant/30 mx-1"></div>
-      <button class="flex items-center gap-1 px-2.5 py-1 rounded-md bg-primary text-on-primary text-xs font-medium hover:opacity-90 transition-opacity">
-        <i data-lucide="play" class="w-3 h-3"></i>
-        执行
-      </button>
-      <button class="flex items-center gap-1 px-2.5 py-1 rounded-md border border-primary/30 text-primary text-xs font-medium hover:bg-primary/10 transition-colors">
-        <i data-lucide="sparkles" class="w-3 h-3"></i>
-        AI优化
-      </button>
-      <div class="w-px h-4 bg-outline-variant/30 mx-1"></div>
-      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="版本历史">
-        <i data-lucide="git-branch" class="w-3.5 h-3.5"></i>
-      </button>
-      <button class="p-1.5 rounded-md hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="设置">
-        <i data-lucide="settings" class="w-3.5 h-3.5"></i>
-      </button>
-      <div class="w-6 h-6 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[10px] font-medium">初</div>
-    </div>
-  </header>
+  <!-- @nav:start 导航组件，画布模式不需要传统导航 -->
   <!-- @nav:end 导航组件 -->
 
-  <main class="flex-1">
+  <main class="flex-1 min-h-screen">
     <!-- @main-content:start -->
     <!-- @main-content:end -->
   </main>
 
   <script>lucide.createIcons();</script>
 </body>
-
 </html>

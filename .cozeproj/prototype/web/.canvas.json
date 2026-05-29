@@ -3,25 +3,17 @@
     {
       "type": "html",
       "options": {
-        "path": ".cozeproj/prototype/web/home.html"
+        "path": ".cozeproj/prototype/web/login.html"
       },
-      "title": "画布模式",
+      "title": "登录页",
       "size": "web"
     },
     {
       "type": "html",
       "options": {
-        "path": ".cozeproj/prototype/web/node-mode.html"
+        "path": ".cozeproj/prototype/web/canvas.html"
       },
-      "title": "节点模式",
-      "size": "web"
-    },
-    {
-      "type": "html",
-      "options": {
-        "path": ".cozeproj/prototype/web/workflow-hub.html"
-      },
-      "title": "工作流社区",
+      "title": "画布模式工作区",
       "size": "web"
     }
   ]
