@@ -891,20 +891,20 @@ export function GenerationPanel(
     // Section title style
     const stl = mc 
         ? "text-xs font-semibold text-blue-500 uppercase tracking-wider flex items-center gap-1.5 mb-1"
-        : "text-xs font-semibold text-[#888] uppercase tracking-wider flex items-center gap-1.5 mb-1";
-    const dot = <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${mc ? 'bg-blue-500' : 'bg-[#d4af37]'}`} />;
+        : "text-xs font-semibold text-gold-muted uppercase tracking-wider flex items-center gap-1.5 mb-1";
+    const dot = <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${mc ? 'bg-blue-500' : 'bg-gold'}`} />;
     // Input/Select style - comfortable padding
     const inputStl = mc
         ? "w-full px-3 py-2 rounded-lg text-sm bg-white text-gray-900 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:shadow-sm transition-all hover:border-blue-300"
-        : "w-full px-3 py-2 rounded-lg text-sm bg-[#1a1a1a]/85 text-[#e0e0e0] border border-white/[0.08] focus:outline-none focus:ring-2 focus:ring-[#d4af37]/30 focus:shadow-[0_0_12px_rgba(212,175,55,0.08)] transition-all hover:border-white/[0.14]";
+        : "w-full px-3 py-2 rounded-lg text-sm bg-white/5 text-text-bright border border-white/[0.06] focus:outline-none focus:ring-2 focus:ring-gold/30 focus:shadow-gold/8 transition-all hover:border-white/[0.10]";
     // Grid button unselected/selected
     const gridBtnBase = "py-1.5 px-2 text-xs rounded-md transition-all duration-200 border";
     const gridBtnOff = mc
         ? "bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600"
-        : "bg-[#1a1a1a]/80 text-[#888] border-white/[0.08] hover:border-white/[0.14] hover:text-[#bbb]";
+        : "bg-white/5 text-gold-muted border-white/[0.06] hover:border-white/[0.10] hover:text-[#bbb]";
     const gridBtnOn = mc
         ? "bg-blue-500 text-white border-blue-500 shadow-sm shadow-blue-200"
-        : "bg-[#d4af37]/15 text-[#d4af37] border-[#d4af37]/40 shadow-[0_0_10px_rgba(212,175,55,0.08)]";
+        : "bg-gold/15 text-gold border-gold/40 shadow-gold/8";
 
     return (
         <div className={`h-full flex flex-col ${containerClass}`}>
@@ -985,7 +985,7 @@ export function GenerationPanel(
                             const compositeKey = `${dm.providerId}::${dm.id}`;
                             return compositeKey === model || dm.id === model;
                         });
-                        if (discoveredModel) return <p className={`text-xs mt-0.5 ${mc ? 'text-gray-400' : 'text-[#666]'}`}>{discoveredModel.is3DProvider ? `${discoveredModel.displayLabel || getModelDisplayName(discoveredModel.id)} · 来自 ${discoveredModel.providerName}` : `${getModelDisplayName(discoveredModel.id)} · 来自 ${discoveredModel.providerName}`}</p>;
+                        if (discoveredModel) return <p className={`text-xs mt-0.5 ${mc ? 'text-gray-400' : 'text-gold-muted/70'}`}>{discoveredModel.is3DProvider ? `${discoveredModel.displayLabel || getModelDisplayName(discoveredModel.id)} · 来自 ${discoveredModel.providerName}` : `${getModelDisplayName(discoveredModel.id)} · 来自 ${discoveredModel.providerName}`}</p>;
                         return null;
                     })()}
                 </div>
@@ -993,10 +993,10 @@ export function GenerationPanel(
                 {/* 创意描述 - 可拖动调整高度，支持参考图标记 */}
                 <div className="space-y-1">
                     <label className={stl}>{dot}创意描述{altRefMarkers.length > 0 && <span className="ml-1.5 text-xs text-[#6366f1] font-normal">({altRefMarkers.length}张参考图)</span>}</label>
-                    <div className={`relative rounded-md border ${mc ? 'border-gray-200' : 'border-white/[0.08]'} overflow-hidden`}>
+                    <div className={`relative rounded-md border ${mc ? 'border-gray-200' : 'border-white/[0.06]'} overflow-hidden`}>
                         {/* Alt reference marker chips displayed above the textarea */}
                         {altRefMarkers.length > 0 && (
-                            <div className={`flex flex-wrap gap-1.5 px-3 py-2 border-b ${mc ? 'border-gray-200 bg-gray-50' : 'border-white/[0.08] bg-[#111]/85'}`}>
+                            <div className={`flex flex-wrap gap-1.5 px-3 py-2 border-b ${mc ? 'border-gray-200 bg-gray-50' : 'border-white/[0.06] bg-white/[0.03]'}`}>
                                 {altRefMarkers.map((marker) => (
                                     <div
                                         key={marker.id}
@@ -1015,7 +1015,7 @@ export function GenerationPanel(
                                         {/* Marker number */}
                                         <span className="font-bold">R{marker.number}</span>
                                         {/* Description hint */}
-                                        <span className={`${mc ? 'text-gray-400' : 'text-[#555]'}`}>参考图{marker.number}</span>
+                                        <span className={`${mc ? 'text-gray-400' : 'text-gold-muted/50'}`}>参考图{marker.number}</span>
                                         {/* Remove button */}
                                         <button
                                             onClick={(e) => {
@@ -1050,7 +1050,7 @@ export function GenerationPanel(
                             }}
                             placeholder={altRefMarkers.length > 0 ? "用 R1、R2... 引用参考图来控制生成效果..." : "描述你想要创建的图像..."}
                             style={{ height: prompt ? promptHeight : undefined, minHeight: 80 }}
-                            className={`w-full px-3 py-2.5 text-sm resize-none ${mc ? 'bg-gray-50 text-gray-900 placeholder:text-gray-400' : 'bg-[#1a1a1a]/85 text-[#e0e0e0] placeholder:text-[#555]'} leading-relaxed focus:outline-none focus:ring-1 ${mc ? 'focus:ring-gray-300' : 'focus:ring-[#d4af37]/30'} rounded-lg transition-shadow`}
+                            className={`w-full px-3 py-2.5 text-sm resize-none ${mc ? 'bg-gray-50 text-gray-900 placeholder:text-gray-400' : 'bg-white/5 text-text-bright placeholder:text-gold-muted/50'} leading-relaxed focus:outline-none focus:ring-1 ${mc ? 'focus:ring-gray-300' : 'focus:ring-gold/30'} rounded-lg transition-shadow`}
                         />
                         {/* 拖动手柄 - 仅在有内容时显示 */}
                         {prompt && (
@@ -1074,7 +1074,7 @@ export function GenerationPanel(
                                     window.addEventListener('mouseup', onUp);
                                 }}
                             >
-                                <GripHorizontal className={`w-4 h-4 ${mc ? 'text-gray-400' : 'text-[#555]'}`} />
+                                <GripHorizontal className={`w-4 h-4 ${mc ? 'text-gray-400' : 'text-gold-muted/50'}`} />
                             </div>
                         )}
                     </div>
@@ -1084,10 +1084,10 @@ export function GenerationPanel(
                         className={`w-full flex items-center justify-center gap-1.5 py-2 rounded-md text-xs font-medium transition-all duration-200 border ${
                             mc
                                 ? 'border-gray-200 text-gray-500 hover:border-gray-400 hover:text-gray-700 bg-white'
-                                : 'border-white/[0.08] text-[#888] hover:border-[#d4af37]/40 hover:text-[#d4af37] bg-[#1a1a1a]/80'
+                                : 'border-white/[0.06] text-gold-muted hover:border-gold/40 hover:text-gold bg-white/5'
                         }`}
                     >
-                        <Zap className={`w-3.5 h-3.5 ${mc ? '' : 'text-[#d4af37]'}`} />
+                        <Zap className={`w-3.5 h-3.5 ${mc ? '' : 'text-gold'}`} />
                         提示词方程式
                     </button>
                 </div>
@@ -1104,10 +1104,10 @@ export function GenerationPanel(
                                     selectedTags.includes(tag) 
                                         ? mc
                                             ? 'bg-blue-500 text-white border-blue-500'
-                                            : 'bg-[#d4af37]/15 text-[#d4af37] border-[#d4af37]/30'
+                                            : 'bg-gold/15 text-gold border-gold/30'
                                         : mc
                                             ? 'bg-white text-gray-500 border-gray-200 hover:border-blue-300 hover:text-blue-600'
-                                            : 'bg-[#1a1a1a]/80 text-[#666] border-white/[0.08] hover:border-white/[0.14] hover:text-[#999]'
+                                            : 'bg-white/5 text-gold-muted/70 border-white/[0.06] hover:border-white/[0.10] hover:text-muted-foreground'
                                 }`}
                             >
                                 {tag}
@@ -1171,7 +1171,7 @@ export function GenerationPanel(
                 <div className="space-y-1.5">
                     <div className="flex items-center gap-2">
                         <label className={stl}>{dot}参考图片</label>
-                        <span className={`text-xs px-1.5 py-0.5 rounded-md ${mc ? 'bg-gray-100 text-gray-500' : 'bg-[#1a1a1a]/80 text-[#666]'}`}>
+                        <span className={`text-xs px-1.5 py-0.5 rounded-md ${mc ? 'bg-gray-100 text-gray-500' : 'bg-white/5 text-gold-muted/70'}`}>
                             {filledCount}/{MAX_REF_IMAGES}
                         </span>
                     </div>
@@ -1186,7 +1186,7 @@ export function GenerationPanel(
                                         className={`w-full py-2.5 rounded-md border border-dashed flex items-center justify-center gap-1.5 transition-all ${
                                             mc
                                                 ? 'border-gray-300 hover:border-gray-500 hover:bg-gray-50 text-gray-400 hover:text-gray-700'
-                                                : 'border-white/[0.08] hover:border-[#d4af37]/40 hover:bg-[#1a1a1a]/70 text-[#555] hover:text-[#d4af37]'
+                                                : 'border-white/[0.06] hover:border-gold/40 hover:bg-white/10 text-gold-muted/50 hover:text-gold'
                                         }`}
                                     >
                                         <Plus className="h-3.5 w-3.5" />
@@ -1223,7 +1223,7 @@ export function GenerationPanel(
                                                             className={`text-xs px-1.5 py-0.5 rounded transition-all ${
                                                                 selectedCats.has(cat.key)
                                                                     ? 'bg-blue-500 text-white font-semibold'
-                                                                    : mc ? 'bg-gray-100 text-gray-400 hover:text-blue-500' : 'bg-[#1a1a1a]/80 text-[#666] hover:text-[#999]'
+                                                                    : mc ? 'bg-gray-100 text-gray-400 hover:text-blue-500' : 'bg-white/5 text-gold-muted/70 hover:text-muted-foreground'
                                                             }`}
                                                         >
                                                             {cat.label}
@@ -1231,7 +1231,7 @@ export function GenerationPanel(
                                                     ))}
                                                 </div>
                                                 <div className="flex items-center gap-1.5">
-                                                    <span className={`text-xs ${mc ? 'text-gray-400' : 'text-[#666]'}`}>强度</span>
+                                                    <span className={`text-xs ${mc ? 'text-gray-400' : 'text-gold-muted/70'}`}>强度</span>
                                                     <input
                                                         type="range"
                                                         min={0}
@@ -1245,7 +1245,7 @@ export function GenerationPanel(
                                                         }}
                                                         className="flex-1 h-1 accent-blue-500 [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5"
                                                     />
-                                                    <span className={`text-xs w-7 text-right ${mc ? 'text-gray-500' : 'text-[#888]'}`}>{strength}%</span>
+                                                    <span className={`text-xs w-7 text-right ${mc ? 'text-gray-500' : 'text-gold-muted'}`}>{strength}%</span>
                                                 </div>
                                             </div>
                                         </div>
@@ -1255,7 +1255,7 @@ export function GenerationPanel(
                                             className={`w-full py-2.5 rounded-md border border-dashed flex items-center justify-center gap-1.5 transition-all ${
                                                 mc
                                                     ? 'border-gray-300 hover:border-gray-500 hover:bg-gray-50 text-gray-400 hover:text-gray-700'
-                                                    : 'border-white/[0.08] hover:border-[#d4af37]/40 hover:bg-[#1a1a1a]/70 text-[#555] hover:text-[#d4af37]'
+                                                    : 'border-white/[0.06] hover:border-gold/40 hover:bg-white/10 text-gold-muted/50 hover:text-gold'
                                             }`}
                                         >
                                             <Upload className="h-3.5 w-3.5" />
@@ -1281,7 +1281,7 @@ export function GenerationPanel(
                     <div className="space-y-2">
                         <div className="flex items-center gap-2">
                             <span className={stl}>{dot}参考融合</span>
-                            <span className={`text-xs px-2 py-0.5 rounded-full ${mc ? 'bg-gray-100 text-gray-500' : 'bg-[#1a1a1a]/80 text-[#777]'}`}>
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${mc ? 'bg-gray-100 text-gray-500' : 'bg-white/5 text-[#777]'}`}>
                                 画布中 Ctrl+Click 添加
                             </span>
                             <button
@@ -1289,7 +1289,7 @@ export function GenerationPanel(
                                     ctrlRefSelections.forEach(ref => onRemoveCtrlRef?.(ref.id));
                                 }}
                                 className={`ml-auto text-xs px-2 py-0.5 rounded-md transition-colors ${
-                                    mc ? 'text-gray-400 hover:text-red-500' : 'text-[#666] hover:text-red-400'
+                                    mc ? 'text-gray-400 hover:text-red-500' : 'text-gold-muted/70 hover:text-red-400'
                                 }`}
                             >
                                 清空
@@ -1300,10 +1300,10 @@ export function GenerationPanel(
                             <div className="space-y-2">
                                 {ctrlRefSelections.map((ref) => (
                                     <div key={ref.id} className="flex items-center gap-2">
-                                        <span className="shrink-0 w-5 h-5 rounded-full bg-[#d4af37] text-black text-xs font-bold flex items-center justify-center">
+                                        <span className="shrink-0 w-5 h-5 rounded-full bg-gold text-black text-xs font-bold flex items-center justify-center">
                                             {ref.number}
                                         </span>
-                                        <div className="w-9 h-9 rounded overflow-hidden border border-[#d4af37]/40 shrink-0">
+                                        <div className="w-9 h-9 rounded overflow-hidden border border-gold/40 shrink-0">
                                             <img src={ref.url} className="w-full h-full object-cover" alt="" />
                                         </div>
                                         <input
@@ -1314,7 +1314,7 @@ export function GenerationPanel(
                                             className={`flex-1 min-w-0 px-3 py-1.5 rounded-md text-xs border ${
                                                 mc
                                                     ? 'bg-white border-gray-200 text-gray-700 placeholder:text-gray-400'
-                                                    : 'bg-[#1a1a1a]/85 border-white/[0.08] text-[#ccc] placeholder:text-[#555]'
+                                                    : 'bg-white/5 border-white/[0.06] text-[#ccc] placeholder:text-gold-muted/50'
                                             } focus:outline-none focus:border-[#d4af37]/50`}
                                         />
                                         <button
@@ -1338,7 +1338,7 @@ export function GenerationPanel(
                                     className={`w-full px-3 py-2 rounded-md text-xs border resize-none ${
                                         mc
                                             ? 'bg-white border-gray-200 text-gray-700 placeholder:text-gray-400'
-                                            : 'bg-[#1a1a1a]/85 border-white/[0.08] text-[#ccc] placeholder:text-[#555]'
+                                            : 'bg-white/5 border-white/[0.06] text-[#ccc] placeholder:text-gold-muted/50'
                                     } focus:outline-none focus:border-[#d4af37]/50 leading-relaxed`}
                                 />
                             </div>
@@ -1445,7 +1445,7 @@ export function GenerationPanel(
                     className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs border transition-all duration-200 ${
                         mc
                             ? 'bg-gray-50 text-gray-500 border-gray-200 hover:border-gray-400 hover:text-gray-700'
-                            : 'bg-[#1a1a1a]/80 text-[#777] border-white/[0.08] hover:border-[#d4af37]/20 hover:text-[#999]'
+                            : 'bg-white/5 text-[#777] border-white/[0.06] hover:border-[#d4af37]/20 hover:text-muted-foreground'
                     }`}
                 >
                     <span className="flex items-center gap-1.5">

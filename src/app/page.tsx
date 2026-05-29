@@ -9,7 +9,7 @@ import { PromptEquation } from '@/components/prompt-equation';
 
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
-import { Image as ImageIcon, MessageSquare, Sparkles, GitBranch, CircleDot } from 'lucide-react';
+import { Image as ImageIcon, MessageSquare, Sparkles, GitBranch, CircleDot, ChevronLeft, ChevronRight } from 'lucide-react';
 import NodeEditor from '@/components/node-editor';
 import WorkflowHub from '@/components/workflow-hub';
 import { createDemoWorkflow, type Workflow } from '@/lib/workflow-engine';
@@ -2190,9 +2190,25 @@ function CanvasApp() {
         />
       )}
 
-      {/* Floating Panel */}
-      {!panelCollapsed && (
-        <div className="absolute top-3 right-3 bottom-3 w-[340px] z-30 flex flex-col transition-all duration-300 overflow-hidden panel-slide-in bg-background/85 border border-white/[0.06] rounded-xl shadow-2xl" style={{ backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+      {/* Right Panel - with vertical collapse strip */}
+      <div className={`absolute top-0 right-0 bottom-0 z-30 flex transition-all duration-200 ${panelCollapsed ? '' : ''}`} style={{ width: panelCollapsed ? '20px' : '360px' }}>
+        {/* Vertical collapse strip */}
+        <button
+          onClick={() => setPanelCollapsed(prev => !prev)}
+          className="w-5 flex items-center justify-center cursor-pointer transition-all duration-200 shrink-0 bg-toolbar-bg hover:bg-toolbar-hover border-r border-white/[0.06]"
+          style={{ borderRadius: '4px 0 0 4px' }}
+          title={panelCollapsed ? '展开面板' : '收起面板'}
+        >
+          {panelCollapsed ? (
+            <ChevronLeft size={14} className="text-gold-muted" />
+          ) : (
+            <ChevronRight size={14} className="text-gold-muted" />
+          )}
+        </button>
+
+        {/* Panel Content */}
+        {!panelCollapsed && (
+        <div className="flex-1 flex flex-col bg-panel-bg border-l border-white/[0.06] overflow-hidden">
           {/* 软件标题 - 版本号在下方，项目名在右侧 */}
           <div className="px-4 py-2.5 flex-shrink-0 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -2220,6 +2236,20 @@ function CanvasApp() {
           {/* Panel Tabs - 紧凑化 */}
           <div className="flex flex-shrink-0">
             <button
+              onClick={() => setActivePanel('chat')}
+              className={`flex-1 py-2 px-3 flex items-center justify-center gap-1.5 transition-all text-sm relative ${
+                activePanel === 'chat'
+                  ? 'text-gold font-semibold'
+                  : 'text-gold-muted hover:text-text-bright hover:bg-white/5'
+              }`}
+            >
+              <MessageSquare size={15} />
+              <span className="text-sm">AI聊天</span>
+              {activePanel === 'chat' && (
+                <span className="absolute bottom-0 left-2 right-2 h-[2px] rounded-full bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]" />
+              )}
+            </button>
+            <button
               onClick={() => setActivePanel('generate')}
               className={`flex-1 py-2 px-3 flex items-center justify-center gap-1.5 transition-all text-sm relative ${
                 activePanel === 'generate'
@@ -2230,20 +2260,6 @@ function CanvasApp() {
               <ImageIcon size={15} />
               <span className="text-sm">图像生成</span>
               {activePanel === 'generate' && (
-                <span className="absolute bottom-0 left-2 right-2 h-[2px] rounded-full bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]" />
-              )}
-            </button>
-            <button
-              onClick={() => setActivePanel('chat')}
-              className={`flex-1 py-2 px-3 flex items-center justify-center gap-1.5 transition-all text-sm relative ${
-                activePanel === 'chat'
-                  ? 'text-gold font-semibold'
-                  : 'text-gold-muted hover:text-text-bright hover:bg-white/5'
-              }`}
-            >
-              <MessageSquare size={15} />
-              <span className="text-sm">智能对话</span>
-              {activePanel === 'chat' && (
                 <span className="absolute bottom-0 left-2 right-2 h-[2px] rounded-full bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]" />
               )}
             </button>
@@ -2303,9 +2319,11 @@ function CanvasApp() {
                 </button>
               </div>
             )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
+      {/* End Right Panel */}
 
 
       {/* 提示词方程式 */}

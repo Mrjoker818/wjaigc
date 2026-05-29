@@ -425,7 +425,7 @@ function createMarkdownComponents(isGold: boolean, onAddImage?: (url: string) =>
     // Links
     a: ({ href, children }) => (
       <a href={href} target="_blank" rel="noopener noreferrer" className={`underline ${
-        isGold ? 'text-[#d4af37]' : 'text-blue-500'
+        isGold ? 'text-gold' : 'text-blue-500'
       }`}>{children}</a>
     ),
     // Paragraphs
@@ -440,12 +440,12 @@ function createMarkdownComponents(isGold: boolean, onAddImage?: (url: string) =>
     li: ({ children }) => <li className="mb-0.5">{children}</li>,
     // Blockquote
     blockquote: ({ children }) => <blockquote className={`border-l-2 pl-3 my-1.5 ${
-      isGold ? 'border-[#d4af37]' : 'border-gray-300'
+      isGold ? 'border-gold' : 'border-gray-300'
     }`}>{children}</blockquote>,
     // Table
     table: ({ children }) => <table className="border-collapse my-1.5 text-sm">{children}</table>,
-    th: ({ children }) => <th className={`border px-2 py-1 ${isGold ? 'border-white/[0.08]' : 'border-gray-300'}`}>{children}</th>,
-    td: ({ children }) => <td className={`border px-2 py-1 ${isGold ? 'border-white/[0.08]' : 'border-gray-300'}`}>{children}</td>,
+    th: ({ children }) => <th className={`border px-2 py-1 ${isGold ? 'border-white/[0.04]' : 'border-gray-300'}`}>{children}</th>,
+    td: ({ children }) => <td className={`border px-2 py-1 ${isGold ? 'border-white/[0.04]' : 'border-gray-300'}`}>{children}</td>,
   };
 }
 
@@ -776,32 +776,32 @@ ${outputSpec || '1. 设计理念（200字内）\n2. 详细方案描述\n3. 材�
 
   const inputClass = `w-full h-9 px-3 text-sm rounded-md border transition-colors ${
     isGold
-      ? 'bg-[#1a1a1a]/85 border-white/[0.10] text-white placeholder:text-[#555] focus:border-[#d4af37]/50'
+      ? 'bg-white/5 border-white/[0.04] text-text-bright placeholder:text-gold-muted/50 focus:border-gold/50'
       : 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-gray-400'
   } outline-none`;
 
-  const labelClass = `text-xs font-medium ${isGold ? 'text-[#999]' : 'text-gray-500'}`;
+  const labelClass = `text-xs font-medium ${isGold ? 'text-muted-foreground' : 'text-gray-500'}`;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center" onClick={onClose}>
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
       <div
         className={`relative w-[340px] max-h-[85vh] rounded-xl shadow-2xl overflow-hidden flex flex-col ${
-          isGold ? 'bg-[#111]/90 backdrop-blur-xl border border-white/[0.08]' : 'bg-white border border-gray-200'
+          isGold ? 'bg-white/[0.03] backdrop-blur-xl border border-white/[0.04]' : 'bg-white border border-gray-200'
         }`}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className={`flex items-center justify-between px-4 py-3 border-b ${isGold ? 'border-white/[0.06]' : 'border-gray-100'}`}>
+        <div className={`flex items-center justify-between px-4 py-3 border-b ${isGold ? 'border-white/[0.04]' : 'border-gray-100'}`}>
           <div className="flex items-center gap-2">
-            <div className="w-5 h-5 rounded-md bg-gradient-to-br from-[#d4af37] to-[#f0c040] flex items-center justify-center">
+            <div className="w-5 h-5 rounded-md bg-gradient-to-br from-gold to-gold-light flex items-center justify-center">
               <Bot size={12} className="text-black" />
             </div>
             <span className={`text-sm font-semibold ${isGold ? 'text-white' : 'text-gray-900'}`}>
               {editingAgent ? '编辑智能体' : '新建智能体'}
             </span>
           </div>
-          <button onClick={onClose} className={`p-1 rounded-md transition-colors ${isGold ? 'hover:bg-[#1a1a1a]/80 text-[#888]' : 'hover:bg-gray-100 text-gray-400'}`}>
+          <button onClick={onClose} className={`p-1 rounded-md transition-colors ${isGold ? 'hover:bg-white/[0.04] text-gold-muted' : 'hover:bg-gray-100 text-gray-400'}`}>
             <X size={16} />
           </button>
         </div>
@@ -814,11 +814,11 @@ ${outputSpec || '1. 设计理念（200字内）\n2. 详细方案描述\n3. 材�
               <label className={labelClass}>图标</label>
               <div className="mt-0.5 relative group">
                 <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-lg border cursor-pointer transition-colors ${
-                  isGold ? 'bg-[#1a1a1a]/80 border-white/[0.10] hover:border-white/[0.18]' : 'bg-gray-50 border-gray-200 hover:border-gray-300'
+                  isGold ? 'bg-white/[0.04] border-white/[0.04] hover:border-white/[0.10]' : 'bg-gray-50 border-gray-200 hover:border-gray-300'
                 }`}>
                   {icon}
                 </div>
-                <div className="absolute top-full left-0 mt-1 p-1.5 grid grid-cols-8 gap-0.5 rounded-lg shadow-xl z-50 hidden group-hover:grid bg-[#111]/90 backdrop-blur-xl border border-white/[0.10]">
+                <div className="absolute top-full left-0 mt-1 p-1.5 grid grid-cols-8 gap-0.5 rounded-lg shadow-xl z-50 hidden group-hover:grid bg-white/[0.03] backdrop-blur-xl border border-white/[0.04]">
                   {EMOJI_OPTIONS.map(e => (
                     <button key={e} onClick={() => setIcon(e)} className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/[0.1] text-sm">{e}</button>
                   ))}
@@ -910,11 +910,11 @@ ${outputSpec || '1. 设计理念（200字内）\n2. 详细方案描述\n3. 材�
         </div>
 
         {/* Footer */}
-        <div className={`flex items-center gap-2 px-4 py-3 border-t ${isGold ? 'border-white/[0.06]' : 'border-gray-100'}`}>
+        <div className={`flex items-center gap-2 px-4 py-3 border-t ${isGold ? 'border-white/[0.04]' : 'border-gray-100'}`}>
           <button
             onClick={onClose}
             className={`flex-1 h-8 text-xs rounded-lg transition-colors ${
-              isGold ? 'bg-[#1a1a1a]/80 text-[#999] hover:bg-[#222]/80' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+              isGold ? 'bg-white/[0.04] text-muted-foreground hover:bg-white/[0.06]' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
             }`}
           >
             取消
@@ -922,7 +922,7 @@ ${outputSpec || '1. 设计理念（200字内）\n2. 详细方案描述\n3. 材�
           <button
             onClick={handleSave}
             disabled={!name.trim() || !nameEn.trim()}
-            className={`flex-1 h-8 text-xs rounded-lg ${isGold ? 'bg-gradient-to-r from-[#d4af37] to-[#f0c040] text-black' : 'bg-gradient-to-r from-blue-500 to-blue-600 text-white'} font-medium transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed`}
+            className={`flex-1 h-8 text-xs rounded-lg ${isGold ? 'bg-gradient-to-r from-gold to-gold-light text-black' : 'bg-gradient-to-r from-blue-500 to-blue-600 text-white'} font-medium transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed`}
           >
             {editingAgent ? '保存修改' : '创建智能体'}
           </button>
@@ -1758,12 +1758,12 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   const themeClasses = themeStyle === 'gold'
     ? {
         bg: 'bg-transparent',
-        border: 'border-white/[0.06]',
+        border: 'border-white/[0.04]',
         text: 'text-white',
-        textMuted: 'text-[#888]',
-        accent: 'from-[#d4af37] to-[#b8860b]',
-        inputBg: 'bg-[#1a1a1a]/85',
-        cardBg: 'bg-[#1a1a1a]/80',
+        textMuted: 'text-gold-muted',
+        accent: 'from-gold to-gold-dark',
+        inputBg: 'bg-white/5',
+        cardBg: 'bg-white/[0.04]',
       }
     : {
         bg: 'bg-white',
@@ -1782,16 +1782,16 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
       {/* Header with Tabs - 精致标签设计 */}
       <div className={`shrink-0 ${isGold ? 'border-b border-white/[0.04]' : ''}`}>
         <div className="px-4 pt-3 flex items-center justify-between">
-          <div className={`relative flex items-center ${isGold ? 'bg-[#1a1a1a]/80 p-0.5 rounded-lg' : 'bg-gray-100 p-0.5 rounded-lg'}`}>
+          <div className={`relative flex items-center ${isGold ? 'bg-white/[0.04] p-0.5 rounded-lg' : 'bg-gray-100 p-0.5 rounded-lg'}`}>
             <button
               onClick={() => setActiveTab('chat')}
               className={`relative z-10 px-2.5 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
                 activeTab === 'chat'
                   ? isGold
-                    ? 'bg-[#d4af37]/15 text-[#d4af37] shadow-sm'
+                    ? 'bg-gold/15 text-gold shadow-sm'
                     : 'bg-white text-gray-900 shadow-sm'
                   : isGold
-                    ? 'text-[#666] hover:text-[#999]'
+                    ? 'text-gold-muted/70 hover:text-muted-foreground'
                     : 'text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -1803,10 +1803,10 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
               className={`relative z-10 px-2.5 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
                 activeTab === 'optimizer'
                   ? isGold
-                    ? 'bg-[#d4af37]/15 text-[#d4af37] shadow-sm'
+                    ? 'bg-gold/15 text-gold shadow-sm'
                     : 'bg-white text-gray-900 shadow-sm'
                   : isGold
-                    ? 'text-[#666] hover:text-[#999]'
+                    ? 'text-gold-muted/70 hover:text-muted-foreground'
                     : 'text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -1819,7 +1819,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
               <button
                 onClick={handleNewChat}
                 className={`p-1.5 rounded-md transition-colors ${
-                  isGold ? 'text-[#888] hover:text-[#d4af37] hover:bg-[#1a1a1a]/70' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'
+                  isGold ? 'text-gold-muted hover:text-gold hover:bg-white/[0.06]' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'
                 }`}
                 title="新建对话"
               >
@@ -1829,8 +1829,8 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                 onClick={() => { setShowHistoryPanel(!showHistoryPanel); setShowFilePanel(false); }}
                 className={`p-2 rounded-lg transition-colors ${
                   showHistoryPanel
-                    ? isGold ? 'text-[#d4af37] bg-[#d4af37]/10' : 'text-gray-900 bg-gray-100'
-                    : isGold ? 'text-[#888] hover:text-[#d4af37] hover:bg-[#1a1a1a]/70' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'
+                    ? isGold ? 'text-gold bg-gold/10' : 'text-gray-900 bg-gray-100'
+                    : isGold ? 'text-gold-muted hover:text-gold hover:bg-white/[0.06]' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'
                 }`}
                 title="历史对话"
               >
@@ -1840,8 +1840,8 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                 onClick={() => { setShowFilePanel(!showFilePanel); setShowHistoryPanel(false); }}
                 className={`p-2 rounded-lg transition-colors ${
                   showFilePanel
-                    ? isGold ? 'text-[#d4af37] bg-[#d4af37]/10' : 'text-gray-900 bg-gray-100'
-                    : isGold ? 'text-[#888] hover:text-[#d4af37] hover:bg-[#1a1a1a]/70' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'
+                    ? isGold ? 'text-gold bg-gold/10' : 'text-gray-900 bg-gray-100'
+                    : isGold ? 'text-gold-muted hover:text-gold hover:bg-white/[0.06]' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'
                 }`}
                 title="文件列表"
               >
@@ -1850,7 +1850,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
               <button
                 onClick={clearChat}
                 className={`p-2 rounded-lg transition-colors ${
-                  isGold ? 'text-[#888] hover:text-red-400 hover:bg-red-400/10' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'
+                  isGold ? 'text-gold-muted hover:text-red-400 hover:bg-red-400/10' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'
                 }`}
                 title="清空聊天"
               >
@@ -1870,7 +1870,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
           <div className={`border-b ${themeClasses.border} shrink-0 max-h-[240px] overflow-y-auto`}>
             <div className={`p-3 ${isGold ? 'bg-[#0d0d0d]' : 'bg-gray-50'}`}>
               <div className="flex items-center justify-between mb-2.5">
-                <span className={`text-xs font-medium ${isGold ? 'text-[#999]' : 'text-gray-500'}`}>历史对话</span>
+                <span className={`text-xs font-medium ${isGold ? 'text-muted-foreground' : 'text-gray-500'}`}>历史对话</span>
                 <span className={`text-xs ${themeClasses.textMuted}`}>{chatSessions.length} 条记录</span>
               </div>
               {chatSessions.length === 0 ? (
@@ -1883,11 +1883,11 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                       onClick={() => handleSwitchSession(session.id)}
                       className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all group ${
                         session.id === currentSessionId
-                          ? isGold ? 'bg-[#d4af37]/10 border border-[#d4af37]/20' : 'bg-blue-50 border border-blue-200'
-                          : isGold ? 'hover:bg-[#1a1a1a]/70 border border-transparent' : 'hover:bg-white border border-transparent'
+                          ? isGold ? 'bg-gold/10 border border-gold/20' : 'bg-blue-50 border border-blue-200'
+                          : isGold ? 'hover:bg-white/[0.06] border border-transparent' : 'hover:bg-white border border-transparent'
                       }`}
                     >
-                      <MessageSquare size={12} className={session.id === currentSessionId ? (isGold ? 'text-[#d4af37]' : 'text-blue-500') : themeClasses.textMuted} />
+                      <MessageSquare size={12} className={session.id === currentSessionId ? (isGold ? 'text-gold' : 'text-blue-500') : themeClasses.textMuted} />
                       <div className="flex-1 min-w-0">
                         <div className={`text-xs font-medium truncate ${session.id === currentSessionId ? themeClasses.text : themeClasses.textMuted}`}>
                           {session.title}
@@ -1899,7 +1899,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                       <button
                         onClick={(e) => handleDeleteSession(session.id, e)}
                         className={`opacity-0 group-hover:opacity-100 p-1 rounded transition-all ${
-                          isGold ? 'hover:text-red-400 text-[#666]' : 'hover:text-red-500 text-gray-400'
+                          isGold ? 'hover:text-red-400 text-gold-muted/70' : 'hover:text-red-500 text-gray-400'
                         }`}
                       >
                         <X size={14} />
@@ -1917,7 +1917,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
           <div className={`border-b ${themeClasses.border} shrink-0 max-h-[240px] overflow-y-auto`}>
             <div className={`p-3 ${isGold ? 'bg-[#0d0d0d]' : 'bg-gray-50'}`}>
               <div className="flex items-center justify-between mb-2.5">
-                <span className={`text-xs font-medium ${isGold ? 'text-[#999]' : 'text-gray-500'}`}>已生成的图片</span>
+                <span className={`text-xs font-medium ${isGold ? 'text-muted-foreground' : 'text-gray-500'}`}>已生成的图片</span>
                 <span className={`text-xs ${themeClasses.textMuted}`}>{canvasImages.length} 张图片</span>
               </div>
               {canvasImages.length === 0 ? (
@@ -1928,7 +1928,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                     <div
                       key={img.id}
                       className={`aspect-square rounded-lg overflow-hidden border cursor-pointer transition-all hover:scale-105 ${
-                        isGold ? 'border-white/[0.06] hover:border-[#d4af37]/40' : 'border-gray-200 hover:border-gray-400'
+                        isGold ? 'border-white/[0.04] hover:border-gold/40' : 'border-gray-200 hover:border-gray-400'
                       }`}
                       onClick={() => {
                         if (onAddToPrompt && img.prompt) {
@@ -2025,7 +2025,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                 onClick={() => setShowThirdPartyDialog(true)}
                 className={`shrink-0 p-1 rounded-md border transition-all ${
                   isGold
-                    ? 'border-[#d4af37]/30 hover:border-[#d4af37]/60 hover:bg-[#d4af37]/10 text-[#d4af37]/70 hover:text-[#d4af37]'
+                    ? 'border-gold/30 hover:border-gold/60 hover:bg-gold/10 text-gold/70 hover:text-gold'
                     : 'border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-400 hover:text-gray-700'
                 }`}
                 title="第三方模型调用"
@@ -2040,7 +2040,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                   className="scale-75 origin-center"
                 />
                 <Label htmlFor="thinking-mode" className={`text-xs ${themeClasses.textMuted} cursor-pointer select-none flex items-center gap-0.5`}>
-                  <Sparkles size={10} className={isThinkingMode ? (isGold ? 'text-[#d4af37]' : 'text-gray-700') : (isGold ? 'text-[#555]' : 'text-gray-400')} />
+                  <Sparkles size={10} className={isThinkingMode ? (isGold ? 'text-gold' : 'text-gray-700') : (isGold ? 'text-gold-muted/50' : 'text-gray-400')} />
                   思考
                 </Label>
               </div>
@@ -2054,7 +2054,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                   className={`group relative flex flex-col items-center justify-center py-1.5 px-1 rounded-md transition-all duration-150 border ${
                     systemPrompt === agent.id
                       ? 'border-[var(--agent-color)] shadow-[0_0_8px_var(--agent-color-20)]'
-                      : `border-transparent ${isGold ? 'hover:bg-[#1a1a1a]/70' : 'hover:bg-[#f0f0f0]'}`
+                      : `border-transparent ${isGold ? 'hover:bg-white/[0.06]' : 'hover:bg-[#f0f0f0]'}`
                   } ${isGold ? 'bg-[#0d0d0d]' : 'bg-[#fafafa]'}`}
                   style={{
                     '--agent-color': agent.color,
@@ -2064,8 +2064,8 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                   <span className="text-xs shrink-0">{agent.icon}</span>
                   <span className={`text-xs font-medium leading-tight truncate w-full text-center mt-0.5 ${
                     systemPrompt === agent.id 
-                      ? (isGold ? 'text-[#d4af37]' : 'text-gray-900') 
-                      : (isGold ? 'text-[#888]' : 'text-[#555]')
+                      ? (isGold ? 'text-gold' : 'text-gray-900') 
+                      : (isGold ? 'text-gold-muted' : 'text-gold-muted/50')
                   }`}>
                     {agent.name}
                   </span>
@@ -2078,11 +2078,11 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
               <button
                 onClick={() => { setEditingAgent(null); setShowAgentBuilder(true); }}
                 className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-md transition-all duration-150 border border-dashed ${
-                  isGold ? 'border-white/[0.06] hover:border-[#d4af37]/40 hover:bg-[#1a1a1a]/70' : 'border-gray-200 hover:border-gray-400 hover:bg-[#f0f0f0]'
+                  isGold ? 'border-white/[0.04] hover:border-gold/40 hover:bg-white/[0.06]' : 'border-gray-200 hover:border-gray-400 hover:bg-[#f0f0f0]'
                 }`}
               >
-                <Plus size={11} className={isGold ? 'text-[#d4af37]/50' : 'text-gray-400'} />
-                <span className={`text-xs font-medium mt-0.5 ${isGold ? 'text-[#555]' : 'text-gray-400'}`}>新增</span>
+                <Plus size={11} className={isGold ? 'text-gold/50' : 'text-gray-400'} />
+                <span className={`text-xs font-medium mt-0.5 ${isGold ? 'text-gold-muted/50' : 'text-gray-400'}`}>新增</span>
               </button>
             </div>
             {systemPrompt && (() => {
@@ -2093,14 +2093,14 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                 <div className={`flex items-center gap-1 px-1.5 py-1 rounded-md ${isGold ? 'bg-[#0d0d0d]' : 'bg-[#f5f5f5]'}`}>
                   <div className="w-0.5 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: selectedAgent.color }} />
                   <div className="flex-1 min-w-0">
-                    <span className={`text-xs font-medium ${isGold ? 'text-[#d4af37]' : 'text-gray-900'}`}>{selectedAgent.name}</span>
-                    <span className={`text-xs ${isGold ? 'text-[#888]' : 'text-gray-500'} ml-1`}>{selectedAgent.nameEn}</span>
+                    <span className={`text-xs font-medium ${isGold ? 'text-gold' : 'text-gray-900'}`}>{selectedAgent.name}</span>
+                    <span className={`text-xs ${isGold ? 'text-gold-muted' : 'text-gray-500'} ml-1`}>{selectedAgent.nameEn}</span>
                   </div>
                   {isCustom && (
                     <div className="flex items-center gap-0.5 shrink-0">
                       <button
                         onClick={(e) => { e.stopPropagation(); setEditingAgent(selectedAgent); setShowAgentBuilder(true); }}
-                        className={`p-0.5 rounded transition-colors ${isGold ? 'hover:bg-[#333] text-[#888]' : 'hover:bg-gray-200 text-gray-500'}`}
+                        className={`p-0.5 rounded transition-colors ${isGold ? 'hover:bg-[#333] text-gold-muted' : 'hover:bg-gray-200 text-gray-500'}`}
                         title="编辑"
                       >
                         <Settings size={10} />
@@ -2113,7 +2113,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                           localStorage.setItem('custom-agents', JSON.stringify(updated));
                           setSystemPrompt('');
                         }}
-                        className={`p-0.5 rounded transition-colors ${isGold ? 'hover:bg-[#333] text-[#888]' : 'hover:bg-gray-200 text-gray-500'}`}
+                        className={`p-0.5 rounded transition-colors ${isGold ? 'hover:bg-[#333] text-gold-muted' : 'hover:bg-gray-200 text-gray-500'}`}
                         title="删除"
                       >
                         <Trash2 size={10} />
@@ -2132,8 +2132,8 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
         <div className={`flex-1 min-h-0 overflow-y-auto p-3 space-y-3 ${isGold ? 'bg-[#090909]' : 'bg-gray-50/50'}`}>
           {messages.length === 0 && !pendingImage ? (
             <div className="flex flex-col items-center justify-center h-full text-center">
-              <div className={`w-16 h-16 rounded-2xl ${isGold ? 'bg-[#d4af37]/10 border border-[#d4af37]/20' : 'bg-gray-100 border border-gray-200'} flex items-center justify-center mb-3`}>
-                <Bot size={32} className={isGold ? 'text-[#d4af37]' : 'text-gray-400'} />
+              <div className={`w-16 h-16 rounded-2xl ${isGold ? 'bg-gold/10 border border-gold/20' : 'bg-gray-100 border border-gray-200'} flex items-center justify-center mb-3`}>
+                <Bot size={32} className={isGold ? 'text-gold' : 'text-gray-400'} />
               </div>
               <h3 className={`text-lg font-medium ${themeClasses.text} mb-2`}>开始对话</h3>
               <p className={`text-sm ${themeClasses.textMuted} mb-4`}>选择模型并发送消息开始聊天</p>
@@ -2150,14 +2150,14 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
               >
                 {message.role === 'assistant' && (
                   <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 shadow-sm ${
-                    isGold ? 'bg-[#d4af37]/10 text-[#d4af37] ring-1 ring-[#d4af37]/20' : 'bg-gray-100 text-gray-600'
+                    isGold ? 'bg-gold/10 text-gold ring-1 ring-[#d4af37]/20' : 'bg-gray-100 text-gray-600'
                   }`}>
                     <Bot size={14} />
                   </div>
                 )}
                 <div className={`max-w-[82%] ${message.role === 'user' ? 'order-2' : ''}`}>
                   {message.imageUrl && (
-                    <div className={`rounded-xl overflow-hidden mb-0.5 ${isGold ? 'border border-white/[0.06]' : 'border border-gray-200'}`}>
+                    <div className={`rounded-xl overflow-hidden mb-0.5 ${isGold ? 'border border-white/[0.04]' : 'border border-gray-200'}`}>
                       <img src={message.imageUrl} alt="上传的图片" className="max-w-full max-h-40 object-contain" />
                     </div>
                   )}
@@ -2198,10 +2198,10 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                   <div className={`rounded-2xl px-3.5 py-2.5 ${
                     message.role === 'user'
                       ? isGold
-                        ? 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-black shadow-sm'
+                        ? 'bg-gold/15 text-text-bright border border-gold/20'
                         : 'bg-blue-500 text-white shadow-sm'
                       : isGold
-                        ? 'bg-[#1a1a1a]/85 text-[#e0e0e0] border border-white/[0.06]'
+                        ? 'bg-white/5 text-text-bright border border-white/[0.04]'
                         : 'bg-white text-gray-800 border border-gray-100 shadow-sm'
                   }`}>
                     <div className="text-xs leading-relaxed">
@@ -2227,7 +2227,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                       <button
                         onClick={() => handleAddMessageToGeneration(message.content)}
                         className={`text-xs flex items-center gap-1 transition-colors ${
-                          isGold ? 'text-[#d4af37]/70 hover:text-[#d4af37]' : 'text-blue-400 hover:text-blue-600'
+                          isGold ? 'text-gold/70 hover:text-gold' : 'text-blue-400 hover:text-blue-600'
                         }`}
                       >
                         <Send size={12} />
@@ -2238,7 +2238,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                 </div>
                 {message.role === 'user' && (
                   <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
-                    isGold ? 'bg-gradient-to-br from-[#d4af37] to-[#b8860b] text-black' : 'bg-blue-500 text-white'
+                    isGold ? 'bg-gradient-to-br from-gold to-gold-dark text-black' : 'bg-blue-500 text-white'
                   }`}>
                     <User size={14} />
                   </div>
@@ -2249,14 +2249,14 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
           {isLoading && (
             <div className="flex gap-2.5 justify-start">
               <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
-                isGold ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'bg-gray-100 text-gray-600'
+                isGold ? 'bg-gold/15 text-gold' : 'bg-gray-100 text-gray-600'
               }`}>
                 <Bot size={14} />
               </div>
               <div className={`rounded-xl px-3 py-2 flex items-center gap-2 ${
-                isGold ? 'bg-[#1a1a1a]/85 border border-white/[0.08]' : 'bg-white border border-gray-200'
+                isGold ? 'bg-white/5 border border-white/[0.04]' : 'bg-white border border-gray-200'
               }`}>
-                <Loader2 className={`h-5 w-5 animate-spin ${isGold ? 'text-[#d4af37]' : 'text-blue-500'}`} />
+                <Loader2 className={`h-5 w-5 animate-spin ${isGold ? 'text-gold' : 'text-blue-500'}`} />
                 <span className={`text-sm ${themeClasses.textMuted}`}>思考中...</span>
               </div>
             </div>
@@ -2266,7 +2266,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
           {pendingImage && (
             <div className="flex gap-2.5 justify-end">
               <div className="max-w-[82%] order-2">
-                <div className={`rounded-xl overflow-hidden relative ${isGold ? 'border border-white/[0.06]' : 'border border-gray-200'}`}>
+                <div className={`rounded-xl overflow-hidden relative ${isGold ? 'border border-white/[0.04]' : 'border border-gray-200'}`}>
                   <img src={pendingImage} alt="待分析的图片" className="max-w-full max-h-40 object-contain" />
                   <button
                     onClick={() => setPendingImage(null)}
@@ -2280,7 +2280,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                       disabled={isAnalyzingImage}
                       className={`w-full h-9 text-sm font-medium rounded-lg ${
                         isGold
-                          ? 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-black hover:opacity-90'
+                          ? 'bg-gradient-to-r from-gold to-gold-dark text-black hover:opacity-90'
                           : 'bg-blue-500 text-white hover:bg-blue-600'
                       }`}
                     >
@@ -2300,7 +2300,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                 </div>
               </div>
               <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
-                isGold ? 'bg-gradient-to-br from-[#d4af37] to-[#b8860b] text-black' : 'bg-blue-500 text-white'
+                isGold ? 'bg-gradient-to-br from-gold to-gold-dark text-black' : 'bg-blue-500 text-white'
               }`}>
                 <User size={14} />
               </div>
@@ -2324,20 +2324,20 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
               onClick={() => fileInputRef.current?.click()}
               className={`shrink-0 h-8 w-8 rounded-lg flex items-center justify-center transition-colors ${
                 isGold
-                  ? 'bg-[#1a1a1a]/80 border border-white/[0.08] text-[#888] hover:text-[#d4af37] hover:border-[#d4af37]/40'
+                  ? 'bg-white/[0.04] border border-white/[0.04] text-gold-muted hover:text-gold hover:border-gold/40'
                   : 'bg-gray-100 border border-gray-200 text-gray-400 hover:text-gray-700 hover:border-gray-300'
               }`}
               title="上传图片"
             >
               <ImageIcon size={14} />
             </button>
-            <div className={`flex-1 relative rounded-xl overflow-hidden ${isGold ? 'bg-[#111]/85 border border-white/[0.08] focus-within:border-[#d4af37]/40 focus-within:shadow-[0_0_12px_rgba(212,175,55,0.1)]' : 'bg-white border border-gray-200 focus-within:border-gray-400 focus-within:shadow-sm'} transition-all`}>
+            <div className={`flex-1 relative rounded-xl overflow-hidden ${isGold ? 'bg-white/[0.03] border border-white/[0.04] focus-within:border-gold/40 focus-within:shadow-gold/10' : 'bg-white border border-gray-200 focus-within:border-gray-400 focus-within:shadow-sm'} transition-all`}>
               <Textarea
                 ref={textareaRef}
                 value={input}
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setInput(e.target.value)}
                 placeholder="输入消息... (Ctrl+V 粘贴图片)"
-                className={`w-full resize-none min-h-[32px] max-h-[120px] border-0 bg-transparent px-3 py-1.5 text-xs focus:outline-none focus:ring-0 ${themeClasses.text} placeholder:${isGold ? 'text-[#555]' : 'text-gray-400'}`}
+                className={`w-full resize-none min-h-[32px] max-h-[120px] border-0 bg-transparent px-3 py-1.5 text-xs focus:outline-none focus:ring-0 ${themeClasses.text} placeholder:${isGold ? 'text-gold-muted/50' : 'text-gray-400'}`}
                 onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
@@ -2356,7 +2356,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                     ? 'bg-[#1a1a1a]/60 border border-white/[0.05] text-[#444] cursor-not-allowed'
                     : 'bg-gray-100 border border-gray-200 text-gray-300 cursor-not-allowed'
                   : isGold
-                    ? 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-black hover:opacity-90 shadow-lg shadow-[#d4af37]/20'
+                    ? 'bg-gradient-to-r from-gold to-gold-dark text-black hover:opacity-90 shadow-lg shadow-gold/20'
                     : 'bg-blue-500 text-white hover:bg-blue-600 shadow-md'
               }`}
             >
@@ -2407,10 +2407,10 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                     className={`flex-1 py-1.5 px-1 rounded-md transition-all flex items-center justify-center gap-0.5 ${
                       optimizerMode === m.value
                         ? isGold
-                          ? 'bg-[#d4af37]/15 text-[#d4af37] border border-[#d4af37]/40'
+                          ? 'bg-gold/15 text-gold border border-gold/40'
                           : 'bg-blue-500 text-white border border-blue-600'
                         : isGold
-                          ? 'bg-[#1a1a1a]/80 text-[#666] border border-white/[0.08] hover:text-[#999] hover:border-white/[0.14]'
+                          ? 'bg-white/[0.04] text-gold-muted/70 border border-white/[0.04] hover:text-muted-foreground hover:border-white/[0.14]'
                           : 'bg-gray-50 text-gray-500 border border-gray-200 hover:text-gray-700'
                     }`}
                   >
@@ -2420,7 +2420,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                 ))}
               </div>
               {hoveredMode && (
-                <div className="flex items-center gap-1 px-2 py-1.5 rounded-md bg-[#1a1a1a]/85 text-xs text-[#999]">
+                <div className="flex items-center gap-1 px-2 py-1.5 rounded-md bg-white/5 text-xs text-gold-muted">
                   <span style={{ color: hoveredMode === 'enhance' ? '#f59e0b' : hoveredMode === 'expand' ? '#3b82f6' : '#10b981' }}>
                     {hoveredMode === 'enhance' ? '✦' : hoveredMode === 'expand' ? '↗' : '↓'}
                   </span>
@@ -2450,7 +2450,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
               disabled={!optimizerInput.trim() || isOptimizing}
               className={`w-full h-10 font-medium text-sm rounded-lg ${
                 isGold
-                  ? 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-black hover:opacity-90 shadow-md shadow-[#d4af37]/15'
+                  ? 'bg-gradient-to-r from-gold to-gold-dark text-black hover:opacity-90 shadow-md shadow-gold/15'
                   : 'bg-white border border-gray-300 text-gray-900 hover:bg-gray-50'
               } transition-all`}
             >
@@ -2469,7 +2469,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
 
             {/* Optimized Result - 紧凑版式 */}
             {(optimizerOutputEn || optimizerOutputCn) && (
-              <div className={`rounded-lg ${isGold ? 'bg-[#d4af37]/8 border border-[#d4af37]/20' : 'bg-gray-50 border border-gray-200'}`}>
+              <div className={`rounded-lg ${isGold ? 'bg-gold/8 border border-gold/20' : 'bg-gray-50 border border-gray-200'}`}>
                 {/* 语言切换行 */}
                 <div className="px-3 pt-3 pb-2 flex items-center gap-1">
                   <button
@@ -2477,10 +2477,10 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                     className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
                       selectedOutputLang === 'en'
                         ? isGold
-                          ? 'bg-[#d4af37] text-black'
+                          ? 'bg-gold text-black'
                           : 'bg-blue-500 text-white'
                         : isGold
-                          ? 'bg-[#1a1a1a]/80 text-[#666] border border-white/[0.08] hover:text-[#999]'
+                          ? 'bg-white/[0.04] text-gold-muted/70 border border-white/[0.04] hover:text-muted-foreground'
                           : 'bg-white text-gray-500 border border-gray-200'
                     }`}
                   >
@@ -2491,10 +2491,10 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                     className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
                       selectedOutputLang === 'cn'
                         ? isGold
-                          ? 'bg-[#d4af37] text-black'
+                          ? 'bg-gold text-black'
                           : 'bg-blue-500 text-white'
                         : isGold
-                          ? 'bg-[#1a1a1a]/80 text-[#666] border border-white/[0.08] hover:text-[#999]'
+                          ? 'bg-white/[0.04] text-gold-muted/70 border border-white/[0.04] hover:text-muted-foreground'
                           : 'bg-white text-gray-500 border border-gray-200'
                     }`}
                   >
@@ -2514,7 +2514,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                       if (text && onAddToPrompt) onAddToPrompt(text);
                     }}
                     className={`p-1 rounded transition-colors ${
-                      isGold ? 'text-[#d4af37]/70 hover:text-[#d4af37]' : 'text-blue-400 hover:text-blue-600'
+                      isGold ? 'text-gold/70 hover:text-gold' : 'text-blue-400 hover:text-blue-600'
                     }`}
                     title="发送到生图"
                   >
@@ -2536,7 +2536,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                     disabled={!optimizerOutputEn}
                     className={`flex-1 h-9 font-medium text-sm rounded-lg ${
                       isGold
-                        ? 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-black hover:opacity-90'
+                        ? 'bg-gradient-to-r from-gold to-gold-dark text-black hover:opacity-90'
                         : 'bg-blue-500 text-white hover:bg-blue-600'
                     } transition-all flex items-center justify-center gap-1`}
                   >
@@ -2548,7 +2548,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                     disabled={!optimizerOutputCn}
                     className={`flex-1 h-9 font-medium text-sm rounded-lg ${
                       isGold
-                        ? 'bg-[#d4af37]/15 text-[#d4af37] border border-[#d4af37]/30 hover:bg-[#d4af37]/20'
+                        ? 'bg-gold/15 text-gold border border-gold/30 hover:bg-gold/20'
                         : 'bg-white text-gray-900 border border-gray-300 hover:bg-gray-50'
                     } transition-all flex items-center justify-center gap-1`}
                   >
@@ -2575,7 +2575,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                   {optimizerHistory.map((item, idx) => (
                     <div
                       key={idx}
-                      className={`p-2 rounded-lg ${isGold ? 'bg-[#1a1a1a]/85 border border-white/[0.10]' : 'bg-gray-50 border border-gray-100'} cursor-pointer hover:opacity-80 transition-opacity`}
+                      className={`p-2 rounded-lg ${isGold ? 'bg-white/5 border border-white/[0.04]' : 'bg-gray-50 border border-gray-100'} cursor-pointer hover:opacity-80 transition-opacity`}
                       onClick={() => {
                         setOptimizerInput(item.input);
                         setOptimizerOutputEn(item.outputEn);
