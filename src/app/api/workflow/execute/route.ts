@@ -13,6 +13,7 @@ import {
   topologicalSort,
   getNodeInputs,
   buildNodeExecutionRequest,
+  replaceLoopVariables,
   type WorkflowNode,
   type WorkflowConnection,
   type ExecutionResult,
@@ -102,7 +103,14 @@ export async function POST(request: NextRequest) {
     }
 
     const executionIdNew = `exec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const execState: typeof executionCache extends Map<string, infer V> ? V : never = {
+    const execState: {
+      status: 'running' | 'completed' | 'failed' | 'cancelled';
+      results: Record<string, ExecutionResult>;
+      currentNodeId: string | null;
+      startedAt: number;
+      completedAt: number | null;
+      error?: string;
+    } = {
       status: 'running',
       results: {},
       currentNodeId: null,
@@ -141,7 +149,14 @@ export async function POST(request: NextRequest) {
  */
 async function executeWorkflow(
   executionId: string,
-  execState: NonNullable<typeof executionCache extends Map<string, infer V> ? V : never>,
+  execState: {
+    status: 'running' | 'completed' | 'failed' | 'cancelled';
+    results: Record<string, ExecutionResult>;
+    currentNodeId: string | null;
+    startedAt: number;
+    completedAt: number | null;
+    error?: string;
+  },
   nodes: WorkflowNode[],
   connections: WorkflowConnection[],
 ) {
@@ -150,6 +165,9 @@ async function executeWorkflow(
   // 1. DAG拓扑排序
   const sorted = topologicalSort(nodes, connections);
   const resultMap = new Map<string, ExecutionResult>();
+
+  // P1: 循环上下文栈 — 跟踪嵌套循环节点
+  const loopContextStack: Array<{ loopNodeId: string; index: number; total: number }> = [];
 
   // 2. 构建上游映射 (用于串行等待检测)
   const upstreamMap = new Map<string, string[]>();
@@ -197,12 +215,36 @@ async function executeWorkflow(
     execState.currentNodeId = node.id;
     const nodeStart = Date.now();
 
+    // P1: 循环计数器变量 — 获取当前循环上下文
+    const currentLoopContext = loopContextStack.length > 0 ? loopContextStack[loopContextStack.length - 1] : null;
+
     try {
       // P0: 真实数据传递 — 从上游节点获取输入
       const inputs = getNodeInputs(node, connections, resultMap);
 
+      // P1: 对输入文本应用循环变量替换
+      if (currentLoopContext) {
+        const { index, total } = currentLoopContext;
+        for (const key of Object.keys(inputs)) {
+          if (typeof inputs[key] === 'string') {
+            inputs[key] = replaceLoopVariables(inputs[key] as string, index, total);
+          }
+        }
+      }
+
       // 构建执行请求
       const req = buildNodeExecutionRequest(node, inputs);
+
+      // P1: 对请求中的提示词字段应用循环变量替换
+      if (currentLoopContext && req) {
+        const { index, total } = currentLoopContext;
+        const body = req.body as Record<string, unknown>;
+        for (const key of Object.keys(body)) {
+          if (typeof body[key] === 'string') {
+            body[key] = replaceLoopVariables(body[key] as string, index, total);
+          }
+        }
+      }
 
       // 逻辑节点/输出节点不需要外部API调用
       if (!req) {
@@ -215,6 +257,12 @@ async function executeWorkflow(
         if (node.type === 'input-image' && !outputData.imageUrl && node.config.imageUrl) {
           outputData.imageUrl = node.config.imageUrl;
         }
+        // P1: loop-for 节点 — 设置循环上下文供下游使用
+        if (node.type === 'loop-for') {
+          const loopCount = Math.max(1, Math.min(100, Number(node.config.loopCount) || 1));
+          outputData.loopCount = loopCount;
+          outputData._loopNodeId = node.id;
+        }
         const result: ExecutionResult = {
           nodeId: node.id,
           status: 'success',
@@ -223,6 +271,92 @@ async function executeWorkflow(
         };
         resultMap.set(node.id, result);
         execState.results[node.id] = result;
+
+        // P1: loop-for 节点 — 迭代执行下游节点
+        if (node.type === 'loop-for') {
+          const loopCount = Math.max(1, Math.min(100, Number(node.config.loopCount) || 1));
+          // 找到直接下游节点
+          const downstreamNodes = sorted.filter(n =>
+            connections.some(c => c.fromNodeId === node.id && c.toNodeId === n.id)
+          );
+          for (let loopIdx = 1; loopIdx <= loopCount; loopIdx++) {
+            loopContextStack.push({ loopNodeId: node.id, index: loopIdx, total: loopCount });
+            for (const dsNode of downstreamNodes) {
+              if ((execState.status as string) === 'cancelled') break;
+              const dsInputs = getNodeInputs(dsNode, connections, resultMap);
+              // P1: 对下游输入应用循环变量替换
+              const loopCtx = loopContextStack[loopContextStack.length - 1];
+              for (const key of Object.keys(dsInputs)) {
+                if (typeof dsInputs[key] === 'string') {
+                  dsInputs[key] = replaceLoopVariables(dsInputs[key] as string, loopCtx.index, loopCtx.total);
+                }
+              }
+              const dsReq = buildNodeExecutionRequest(dsNode, dsInputs);
+              // P1: 对下游请求体应用循环变量替换
+              if (dsReq) {
+                const body = dsReq.body as Record<string, unknown>;
+                for (const key of Object.keys(body)) {
+                  if (typeof body[key] === 'string') {
+                    body[key] = replaceLoopVariables(body[key] as string, loopCtx.index, loopCtx.total);
+                  }
+                }
+              }
+              // 执行下游节点
+              if (dsReq) {
+                try {
+                  const dsModelName = String(dsInputs.model || dsNode.config.model || '');
+                  let dsApiKey = '';
+                  let dsBaseUrl = '';
+                  if (dsModelName) {
+                    const provider = await findProviderForModel(dsModelName);
+                    if (provider) {
+                      dsApiKey = provider.apiKey;
+                      dsBaseUrl = provider.baseUrl;
+                    }
+                  }
+                  if (!dsApiKey || !dsBaseUrl) {
+                    const feature = getFeatureForNodeType(dsNode.type as NodeType);
+                    const anyProvider = await findProviderForFeature(feature);
+                    if (anyProvider) {
+                      dsApiKey = anyProvider.apiKey;
+                      dsBaseUrl = anyProvider.baseUrl;
+                    }
+                  }
+                  // 内部API走本地fetch，外部API走完整URL
+                  const isInternal = dsReq.endpoint.startsWith('/api/');
+                  const apiUrl = isInternal
+                    ? `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${dsReq.endpoint}`
+                    : dsBaseUrl
+                      ? `${dsBaseUrl.replace(/\/+$/, '')}${dsReq.endpoint}`
+                      : dsReq.endpoint;
+
+                  const dsRes = await fetch(apiUrl, {
+                    method: dsReq.method,
+                    headers: {
+                      'Content-Type': 'application/json',
+                      ...(dsApiKey ? { 'Authorization': `Bearer ${dsApiKey}` } : {}),
+                    },
+                    body: JSON.stringify(dsReq.body),
+                    signal: AbortSignal.timeout(300000),
+                  });
+                  if (dsRes.ok) {
+                    const dsData = await dsRes.json();
+                    resultMap.set(dsNode.id, {
+                      nodeId: dsNode.id,
+                      status: 'success',
+                      output: { ...dsData, _type: dsNode.type, _loopIteration: loopIdx },
+                      durationMs: Date.now() - nodeStart,
+                    });
+                  }
+                } catch {
+                  // 下游节点执行失败，继续下一轮
+                }
+              }
+            }
+            loopContextStack.pop();
+            if ((execState.status as string) === 'cancelled') break;
+          }
+        }
         continue;
       }
 

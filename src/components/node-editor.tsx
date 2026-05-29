@@ -18,7 +18,7 @@ import {
   Settings, Upload, X, Check, AlertCircle, Loader2, BoxSelect, Group,
   Search, ScanSearch, Eye, Pause, SkipForward, Workflow as WorkflowIcon, Timer,
   ArrowLeft, LayoutGrid, Sparkles, MessageCircle, Rotate3d, Box, ShoppingBag, Zap,
-  Copy, Clipboard, Package, Film,
+  Copy, Clipboard, Package, Film, Bookmark, Grid3X3, ArrowLeftFromLine,
 } from 'lucide-react';
 
 // ==================== 图标映射 ====================
@@ -86,7 +86,9 @@ interface DraggingConn {
 interface CanvasImageRef {
   id: string;
   url: string;
+  name: string;
   description: string;
+  label?: string;
 }
 
 interface MentionPopup {
@@ -360,6 +362,7 @@ const nodeThemes = {
     // 卡片
     cardBg: '#1c2333',
     cardBorder: 'rgba(212,175,55,0.15)',
+    border: 'rgba(212,175,55,0.15)',
     text: '#e5e5e5',
     textMuted: '#888',
     // 输入框
@@ -427,6 +430,7 @@ const nodeThemes = {
     // 卡片
     cardBg: '#ffffff',
     cardBorder: '#e2e8f0',
+    border: '#e2e8f0',
     text: '#1e293b',
     textMuted: '#64748b',
     // 输入框
@@ -681,6 +685,24 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport; // 始终保持最新值，避免拖动时stale closure
   const { models, loading: modelsLoading } = useModelList();
+  const chatModels = useMemo(() => models.filter(m => m.type === 'chat'), [models]);
+
+  // 工作流节点图片列表 (用于 @mention 引用和输入引用阻断)
+  // 合并: 画布传入的图片 + 工作流内节点输出的图片
+  const allCanvasImages = useMemo(() => {
+    const nodeImages = wf.nodes
+      .filter(n => n.type === 'input-image' || n.type === 'ai-generate' || n.type === 'output-image' || n.type === 'output-image-group')
+      .map(n => {
+        const cfg = n.config as Record<string, unknown>;
+        const url = (cfg?.imageUrl as string) || (cfg?.outputUrl as string) || '';
+        const name = (cfg?.label as string) || n.label || n.type;
+        return { id: n.id, url, name, label: name, description: name };
+      })
+      .filter(img => img.url);
+    // 合并外部传入的画布图片
+    const external = (canvasImages || []).map(img => ({ ...img, name: img.name || img.description || img.label || '', label: img.label || img.description || img.name || '' }));
+    return [...external, ...nodeImages];
+  }, [wf.nodes, canvasImages]);
 
   // 框选状态
   const [boxSelect, setBoxSelect] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
@@ -739,6 +761,99 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
       }),
     }));
   }, []);
+
+  // P0: LLM优化提示词
+  const handleLlmOptimize = useCallback(async (nodeId: string, _prompt: string, model: string, systemPrompt: string, instruction: string) => {
+    const node = wf.nodes.find(n => n.id === nodeId);
+    if (!node) return;
+    const currentText = node.config?.promptText || '';
+    handleNodeUpdate(nodeId, { config: { ...node.config, llmOptimizing: true } });
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            { role: 'system', content: systemPrompt || instruction || '你是一个专业的AI图像提示词优化助手。请优化用户提供的提示词，使其更加详细、精确，适合AI图像生成。直接输出优化后的提示词，不要添加任何解释。' },
+            { role: 'user', content: currentText },
+          ],
+          model: model || node.config?.llmModel || '',
+        }),
+      });
+      if (!res.ok) throw new Error('LLM请求失败');
+      const data = await res.json();
+      const optimized = data.choices?.[0]?.message?.content || data.content || currentText;
+      handleNodeUpdate(nodeId, { config: { ...node.config, promptText: optimized, llmOptimizing: false } });
+    } catch {
+      handleNodeUpdate(nodeId, { config: { ...node.config, llmOptimizing: false } });
+    }
+  }, [wf.nodes, handleNodeUpdate]);
+
+  // P0: 级联一键运行 — 找到当前节点的整条链，从上游到下游依次执行
+  const handleCascadeRun = useCallback(async (startNodeId: string) => {
+    // 找到链尾（最下游的图片输出节点）
+    const findChainTail = (nodeId: string, visited: Set<string>): string => {
+      if (visited.has(nodeId)) return nodeId;
+      visited.add(nodeId);
+      const downstream = wf.connections.filter(c => c.fromNodeId === nodeId);
+      if (downstream.length === 0) return nodeId;
+      return findChainTail(downstream[0].toNodeId, visited);
+    };
+    const tailId = findChainTail(startNodeId, new Set());
+    // 直接调用工作流执行API
+    try {
+      await fetch('/api/workflow/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'start', startNodeId, tailNodeId: tailId, nodes: wf.nodes, connections: wf.connections }),
+      });
+    } catch (e) { console.error('Cascade run failed:', e); }
+  }, [wf.connections, wf.nodes]);
+
+  // P0: 节点字段变更（用于节点上直接编辑）
+  const handleNodeFieldChange = useCallback((nodeId: string, field: string, value: unknown) => {
+    const node = wf.nodes.find(n => n.id === nodeId);
+    if (!node) return;
+    handleNodeUpdate(nodeId, { config: { ...node.config, [field]: value } });
+  }, [wf.nodes, handleNodeUpdate]);
+
+  // P2: 抽取图片到上游源节点
+  const handleExtractToSource = useCallback((nodeId: string) => {
+    const node = wf.nodes.find(n => n.id === nodeId);
+    if (!node || node.type !== 'input-image') return;
+    const imageUrl = node.config?.imageUrl;
+    if (!imageUrl) return;
+    // 创建新的源节点
+    const sourceNode = createWorkflowNode('input-image', node.x - 280, node.y);
+    sourceNode.config = { ...sourceNode.config, imageUrl, label: '源图' };
+    // 清空当前节点的图片
+    handleNodeUpdate(nodeId, { config: { ...node.config, imageUrl: '', label: '输出' } });
+    // 添加源节点和连线
+    setWf(prev => ({
+      ...prev,
+      nodes: [...prev.nodes, sourceNode],
+      connections: [...prev.connections, createConnection(sourceNode.id, 'output-image', nodeId, 'input-image', 'image')],
+    }));
+  }, [wf.nodes, handleNodeUpdate]);
+
+  // P2: 宫格切分
+  const handleGridSplit = useCallback((nodeId: string, cols: number, rows: number) => {
+    // 在画布上创建 rows*cols 个新的图片节点
+    const node = wf.nodes.find(n => n.id === nodeId);
+    if (!node) return;
+    const newNodes: WorkflowNode[] = [];
+    const newConns: WorkflowConnection[] = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const idx = r * cols + c + 1;
+        const newNode = createWorkflowNode('input-image', node.x + (c - 1) * 260, node.y + 260 + r * 200);
+        newNode.config = { ...newNode.config, label: `切分 ${idx}`, gridIndex: idx, gridRow: r + 1, gridCol: c + 1 };
+        newNodes.push(newNode);
+        newConns.push(createConnection(nodeId, 'output-image', newNode.id, 'input-image', 'image'));
+      }
+    }
+    setWf(prev => ({ ...prev, nodes: [...prev.nodes, ...newNodes], connections: [...prev.connections, ...newConns] }));
+  }, [wf.nodes]);
 
   // P1: 键盘快捷键 (复制/粘贴/删除)
   useEffect(() => {
@@ -1270,7 +1385,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
             onUpdate={handleNodeUpdate}
             onDelete={handleDeleteNode}
             onImageUpload={handleImageUpload}
-            canvasImages={canvasImages}
+            canvasImages={allCanvasImages}
           />
         )}
 
@@ -1940,6 +2055,13 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 onPortMouseUp={handlePortMouseUp}
                 onDelete={() => handleDeleteNode(node.id)}
                 onPreviewImage={(url) => setImagePreviewUrl(url)}
+                onLlmOptimize={handleLlmOptimize}
+                onCascadeRun={handleCascadeRun}
+                onNodeFieldChange={handleNodeFieldChange}
+                onExtractToSource={handleExtractToSource}
+                onGridSplit={handleGridSplit}
+                llmModels={chatModels}
+                canvasImages={canvasImages}
               />
             ))}
           </g>
@@ -2122,6 +2244,13 @@ interface NodeCardProps {
   execResult?: { status: string; output?: Record<string, unknown>; error?: string };
   isRunning: boolean;
   theme: NodeThemeType;
+  canvasImages?: CanvasImageRef[];
+  llmModels?: ModelOption[];
+  onNodeFieldChange?: (nodeId: string, fieldId: string, value: unknown) => void;
+  onLlmOptimize?: (nodeId: string, prompt: string, model: string, systemPrompt: string, instruction: string) => void;
+  onCascadeRun?: (nodeId: string) => void;
+  onExtractToSource?: (nodeId: string) => void;
+  onGridSplit?: (nodeId: string, cols: number, rows: number) => void;
   onSelect: (e?: React.MouseEvent) => void;
   onHover: (id: string | null) => void;
   onDragStart: (e: React.MouseEvent) => void;
@@ -2131,13 +2260,15 @@ interface NodeCardProps {
   onPreviewImage: (url: string) => void;
 }
 
-function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, theme, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onPreviewImage }: NodeCardProps) {
+function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, theme, canvasImages, llmModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onPreviewImage }: NodeCardProps) {
   const T = theme;
   const cat = getNodeCategory(node.type);
   const color = NODE_TYPE_COLORS[cat];
   const inputPorts = node.ports.filter(p => p.direction === 'in');
   const outputPorts = node.ports.filter(p => p.direction === 'out');
   const isCondition = node.type.startsWith('condition-');
+  const isInputText = node.type === 'input-text';
+  const isInputImage = node.type === 'input-image';
 
   const statusColor = execResult?.status === 'success' ? T.statusSuccess
     : execResult?.status === 'failed' ? T.statusError
@@ -2146,6 +2277,37 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
   const hasImageOutput = execResult?.output?.imageUrl as string | undefined;
   // 画布模式专用节点标记
   const isCanvasFeature = ['ai-font-design', 'ai-refine-engine', 'ai-brand-ecommerce', 'ai-segment', 'ai-multi-angle', 'ai-3d-model'].includes(node.type);
+
+  // P0: input-text 节点内嵌功能状态
+  const llmEnabled = node.config?.llmEnabled as boolean ?? false;
+  const llmModel = node.config?.llmModel as string ?? '';
+  const llmInstruction = node.config?.llmInstruction as string ?? '';
+  const llmSystemEnabled = node.config?.llmSystemEnabled as boolean ?? false;
+  const llmSystemPrompt = node.config?.llmSystemPrompt as string ?? '';
+  const textContent = node.config?.textContent as string ?? '';
+
+  // P0: 解析文本中的 [img:id] 引用，渲染为缩略图
+  const renderTextWithMentions = (text: string) => {
+    if (!canvasImages?.length) return text;
+    const parts = text.split(/(\[img:[^\]]+\])/g);
+    return parts.map((part, i) => {
+      const match = part.match(/^\[img:(.+)\]$/);
+      if (match) {
+        const imgId = match[1];
+        const img = canvasImages.find(ci => ci.id === imgId);
+        if (img) {
+          return <img key={i} src={img.url} alt={img.name || 'ref'} className="inline-block max-w-[20px] max-h-[20px] rounded mx-0.5 align-middle object-cover border border-border/50" title={img.name || imgId} />;
+        }
+      }
+      return <span key={i}>{part}</span>;
+    });
+  };
+
+  // P1: 提示词预设列表 (localStorage)
+  const [presetList] = useState<{ id: string; name: string; text: string }[]>(() => {
+    try { return JSON.parse(localStorage.getItem('wujie-node-presets') || '[]'); } catch { return []; }
+  });
+  const [presetOpen, setPresetOpen] = useState(false);
 
   return (
     <g
@@ -2212,6 +2374,186 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
             <foreignObject x={node.x + 8} y={node.y + 32} width={node.width - 16} height={node.height - 44}>
               <div className="w-full h-full relative group cursor-pointer" onClick={() => onPreviewImage(hasImageOutput)}>
                 <img src={hasImageOutput} alt="" className="w-full h-full object-cover rounded opacity-70 group-hover:opacity-100 transition-opacity" />
+              </div>
+            </foreignObject>
+          )}
+
+          {/* ===== P0: input-text 节点直接编辑 + LLM 优化 + 预设 ===== */}
+          {isInputText && (
+            <foreignObject x={node.x + 6} y={node.y + 32} width={node.width - 12} height={node.height - 38}>
+              <div className="flex flex-col gap-1 overflow-hidden" style={{ color: T.nodeTitle, fontSize: 11 }}>
+                {/* 可编辑文本区域 */}
+                <div
+                  contentEditable
+                  suppressContentEditableWarning
+                  className="w-full min-h-[32px] max-h-[120px] overflow-y-auto rounded px-2 py-1 text-[11px] leading-tight outline-none focus:ring-1 focus:ring-[var(--ne-accent)] resize-y"
+                  style={{ background: T.inputBg, color: T.text, borderColor: T.border }}
+                  onBlur={(e) => {
+                    const text = e.currentTarget.innerText || '';
+                    onNodeFieldChange?.(node.id, 'textContent', text);
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  {textContent || ''}
+                </div>
+
+                {/* @mention 缩略图预览行 */}
+                {canvasImages?.length && textContent.includes('[img:') && (
+                  <div className="flex gap-0.5 flex-wrap mt-0.5">
+                    {textContent.split(/(\[img:[^\]]+\])/g).filter(p => p.match(/^\[img:/)).map((ref, i) => {
+                      const id = ref.match(/^\[img:(.+)\]$/)?.[1];
+                      const img = canvasImages.find(ci => ci.id === id);
+                      return img ? (
+                        <img key={i} src={img.url} alt="" className="w-5 h-5 rounded object-cover border border-border/50"
+                          title={img.name || id} onClick={(e) => { e.stopPropagation(); onPreviewImage(img.url); }} />
+                      ) : null;
+                    })}
+                  </div>
+                )}
+
+                {/* 工具栏: LLM + 预设 + 级联运行 */}
+                <div className="flex items-center gap-1 mt-0.5">
+                  {/* LLM 优化开关 */}
+                  <button
+                    className={`px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer transition-colors flex items-center gap-0.5 ${llmEnabled ? 'bg-[var(--ne-accent)] text-white' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}
+                    onClick={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmEnabled', !llmEnabled); }}
+                    title="LLM 提示词优化"
+                  >
+                    <Sparkles size={9} /> LLM
+                  </button>
+
+                  {/* 预设按钮 */}
+                  <div className="relative">
+                    <button
+                      className="px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer transition-colors bg-muted text-muted-foreground hover:bg-muted/80 flex items-center gap-0.5"
+                      onClick={(e) => { e.stopPropagation(); setPresetOpen(!presetOpen); }}
+                      title="提示词预设"
+                    >
+                      <Bookmark size={9} /> 预设
+                    </button>
+                    {presetOpen && presetList.length > 0 && (
+                      <div className="absolute left-0 top-full mt-0.5 z-50 bg-popover border border-border rounded shadow-lg min-w-[120px] max-h-[100px] overflow-y-auto"
+                        onMouseDown={(e) => e.stopPropagation()}>
+                        {presetList.map(p => (
+                          <button key={p.id} className="block w-full text-left px-2 py-1 text-[10px] hover:bg-muted truncate"
+                            onClick={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'textContent', p.text); setPresetOpen(false); }}>
+                            {p.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 级联运行按钮 */}
+                  <button
+                    className="px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer transition-colors bg-muted text-muted-foreground hover:bg-muted/80 flex items-center gap-0.5"
+                    onClick={(e) => { e.stopPropagation(); onCascadeRun?.(node.id); }}
+                    title="运行此链"
+                  >
+                    <Play size={9} /> 运行链
+                  </button>
+                </div>
+
+                {/* LLM 展开区域 */}
+                {llmEnabled && (
+                  <div className="mt-1 flex flex-col gap-1 p-1.5 rounded" style={{ background: T.inputBg, border: `1px solid ${T.border}` }}>
+                    {/* LLM 模型选择 */}
+                    <select
+                      className="w-full text-[9px] rounded px-1 py-0.5 outline-none"
+                      style={{ background: T.nodeBody, color: T.text, border: `1px solid ${T.border}` }}
+                      value={llmModel}
+                      onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmModel', e.target.value); }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
+                      <option value="">选择模型</option>
+                      {(llmModels ?? []).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                    {/* LLM 指令 */}
+                    <input
+                      type="text"
+                      className="w-full text-[9px] rounded px-1 py-0.5 outline-none"
+                      style={{ background: T.nodeBody, color: T.text, border: `1px solid ${T.border}` }}
+                      placeholder="优化指令 (如: 优化为英文)"
+                      value={llmInstruction}
+                      onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmInstruction', e.target.value); }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                    />
+                    {/* 系统提示词开关 */}
+                    <div className="flex items-center gap-1">
+                      <button
+                        className={`text-[8px] cursor-pointer ${llmSystemEnabled ? 'text-[var(--ne-accent)]' : 'text-muted-foreground'}`}
+                        onClick={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmSystemEnabled', !llmSystemEnabled); }}
+                      >
+                        {llmSystemEnabled ? '●' : '○'} 系统提示
+                      </button>
+                      <button
+                        className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer bg-[var(--ne-accent)] text-white hover:opacity-80 flex items-center gap-0.5"
+                        onClick={(e) => { e.stopPropagation(); onLlmOptimize?.(node.id, String(node.config?.text || ''), String(node.config?.llmModel || ''), String(node.config?.llmSystemPrompt || ''), String(node.config?.llmInstruction || '')); }}
+                        disabled={isRunning}
+                        title="运行 LLM 优化"
+                      >
+                        <Sparkles size={9} /> 优化
+                      </button>
+                    </div>
+                    {/* 系统提示词输入 */}
+                    {llmSystemEnabled && (
+                      <input
+                        type="text"
+                        className="w-full text-[9px] rounded px-1 py-0.5 outline-none"
+                        style={{ background: T.nodeBody, color: T.text, border: `1px solid ${T.border}` }}
+                        placeholder="系统提示词"
+                        value={llmSystemPrompt}
+                        onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmSystemPrompt', e.target.value); }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+            </foreignObject>
+          )}
+
+          {/* ===== P2: input-image 节点操作按钮 ===== */}
+          {isInputImage && hasImageOutput && (
+            <foreignObject x={node.x + 6} y={node.y + node.height - 24} width={node.width - 12} height={18}>
+              <div className="flex gap-0.5 items-center">
+                <button
+                  className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5"
+                  onClick={(e) => { e.stopPropagation(); onExtractToSource?.(node.id); }}
+                  title="抽取为源节点"
+                >
+                  <ArrowLeftFromLine size={8} /> 抽取
+                </button>
+                <button
+                  className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5"
+                  onClick={(e) => { e.stopPropagation(); onGridSplit?.(node.id, Number(node.config?.gridCols || 2), Number(node.config?.gridRows || 2)); }}
+                  title="宫格切分"
+                >
+                  <Grid3X3 size={8} /> 切分
+                </button>
+                {/* P0: 级联运行 */}
+                <button
+                  className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5 ml-auto"
+                  onClick={(e) => { e.stopPropagation(); onCascadeRun?.(node.id); }}
+                  title="运行此链"
+                >
+                  <Play size={8} /> 运行链
+                </button>
+              </div>
+            </foreignObject>
+          )}
+
+          {/* ===== P0: 非input-text/input-image节点也显示级联运行 ===== */}
+          {!isInputText && !isInputImage && !hasImageOutput && !isCondition && (
+            <foreignObject x={node.x + 6} y={node.y + node.height - 18} width={node.width - 12} height={14}>
+              <div className="flex justify-end">
+                <button
+                  className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5"
+                  onClick={(e) => { e.stopPropagation(); onCascadeRun?.(node.id); }}
+                  title="运行此链"
+                >
+                  <Play size={8} /> 运行链
+                </button>
               </div>
             </foreignObject>
           )}

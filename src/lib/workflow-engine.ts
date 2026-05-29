@@ -1129,6 +1129,19 @@ export function buildNodeExecutionRequest(
   }
 }
 
+// ==================== 循环节点变量替换 ====================
+
+/** 替换循环变量 {{index}}/{{total}}/{{progress}} 为实际值 */
+export function replaceLoopVariables(text: string, index: number, total: number): string {
+  return text
+    .replace(/\{\{index\}\}/g, String(index))
+    .replace(/\{\{total\}\}/g, String(total))
+    .replace(/\{\{progress\}\}/g, `${index}/${total}`)
+    .replace(/《计数》/g, String(index))
+    .replace(/《总数》/g, String(total))
+    .replace(/《进度》/g, `${index}/${total}`);
+}
+
 // ==================== 节点自动布局 ====================
 
 /** 自动布局：按DAG层级排列节点 */
