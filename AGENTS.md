@@ -10,7 +10,7 @@
 - **语言**: TypeScript 5
 - **AI 集成**: 通用 API 兼容层（支持 OpenAI / Gemini / 任意兼容格式 API）
 - **图像生成**: DALL-E 3、Midjourney、Stable Diffusion 等多种模型
-- **特色功能**: 无限画布、图生图、PSD/SVG 导出、3D 模型预览、语言修图、SVG智能描摹、Agent编排、Ctrl+Z 撤回
+- **特色功能**: 无限画布、图生图、PSD/SVG 导出、3D 模型预览、语言修图、SVG智能描摹、Agent编排、工作流节点模式、Ctrl+Z 撤回
 
 ### 项目结构
 ```
@@ -42,6 +42,11 @@ src/
 │       │   ├── plan/route.ts        # 字境大师-设计方案+风格库API (GET风格库, POST生成方案+提示词)
 │       │   ├── prompt/route.ts      # 字境大师-即梦提示词API (完整版/精简版/增强版/黑底白字/透明Logo)
 │       │   └── generate-image/route.ts # 字境大师-图片生成API (异步提交+轮询, 复用poll-task)
+│       ├── workflow/
+│       │   ├── execute/route.ts     # 工作流执行API (start/status/cancel, DAG拓扑排序, 异步执行)
+│       │   ├── models/route.ts      # 工作流模型列表API (动态加载管理员配置的模型)
+│       │   ├── save/route.ts        # 工作流保存API (持久化到数据库)
+│       │   └── ai-build/route.ts    # AI自然语言建图API (LLM解析→自动生成节点图)
 │       ├── upscayl/route.ts        # [旧] 无损放大 API (向后兼容)
 │       ├── image/
 │       │   ├── health/route.ts     # 本地图像工具健康检测 API
@@ -59,6 +64,7 @@ src/
 │   ├── image-editor.tsx             # 语言修图编辑器组件 (自然语言描述修改图片)
 │   ├── agent-editor.tsx             # Agent编排编辑器组件 (智能选择工具，多轮编辑)
 │   ├── font-design-panel.tsx        # 字境大师Pro字体设计面板 (黑金/单色双主题, 左右分栏)
+│   ├── node-editor.tsx              # 节点编辑器组件 (工作流DAG编辑, AI建图, 提示词库, 画布助手, 撤销重做)
 │   ├── model-viewer-3d.tsx         # 3D 模型预览组件
 │   ├── image-editor/
 │   │   ├── ImageEditPanel.tsx      # 擦除/蒙版修图浮窗面板 (黑金UI)
@@ -72,6 +78,7 @@ src/
 │   ├── task-registry.ts            # 任务注册中心（统一任务管理、SSE推送、取消、队列）
 │   ├── task-events-client.ts       # SSE任务事件客户端（前端连接SSE、取消任务）
 │   ├── agent-engine.ts             # Agent编排引擎（工具注册表、Agent循环、多轮决策）
+│   ├── workflow-engine.ts          # 工作流引擎（DAG拓扑排序, 节点输入解析, 执行请求构建, 25+节点类型定义, AI建图结果解析, 自动布局）
 │   ├── image-compress.ts           # 图片压缩工具（前端canvas压缩+尺寸限制）
 │   ├── remove-bg-postprocess.ts   # RemoveBG后处理（保存RGBA+蒙版PNG，Python端处理）
 │   ├── api-helpers.ts              # API 辅助函数（fetchWithV1Retry 智能 /v1 重试）
@@ -389,6 +396,43 @@ scripts/
 - **结果处理**:
   - 编辑完成后替换原图（URL和prompt更新）
   - 编辑结果自动保存到画布
+
+### 19. 工作流节点模式 (workflow-engine.ts + node-editor.tsx + api/workflow)
+
+基于 DAG 拓扑排序的可视化工作流编排系统，支持自然语言建图、连线语义类型、节点间数据传递。
+
+- **核心架构**:
+  - `workflow-engine.ts`: DAG 拓扑排序 (Kahn 算法)、节点输入解析 (`getNodeInputs`)、执行请求构建 (`buildNodeExecutionRequest`)、25+ 节点类型定义
+  - `node-editor.tsx`: 前端节点编辑器（SVG 画布 + 侧边栏属性面板）
+  - `api/workflow/`: 执行/模型/保存/AI建图 4 个 API 端点
+- **P0 核心功能**:
+  - **AI 自然语言建图**: 用户输入自然语言描述 → LLM 解析 → 自动生成完整节点图（nodes+edges+layout），复用管理员配置的 chat 模型
+  - **连线语义类型**: 连线区分 prompt(提示词)/image(图片)/reference(参考图)/mask(蒙版) 类型，端口类型约束（image 只能接 image）
+  - **节点间数据传递**: 上游节点 output 自动流入下游节点 input，`getNodeInputs` 从已完成节点获取输入
+  - **画布模式专用节点**: 字境大师(ai-font-design)、精修引擎(ai-refine-engine)、品牌电商(ai-brand-ecommerce)、元素分层(ai-segment)、多角度(ai-multi-angle)、3D模型(ai-3d-model)
+- **P1 增强功能**:
+  - **专业预设工作流**: 8 种预设模板（文生图/图生图/精修/品牌/字境/元素分层/多角度/3D模型），一键加载
+  - **节点自动布局**: `autoLayoutWorkflow` — DAG 拓扑排序 → 自动计算 grid 位置，输入左输出右
+  - **图片组节点**: output-image-group 类型，支持叠卡预览和设主图
+  - **节点复制粘贴**: Ctrl+C/V 复制节点+连线关系，自动偏移位置
+  - **连线高亮**: 选中节点时自动高亮所有上下游节点和连线
+  - **执行日志面板**: 底部右侧实时显示每个节点的执行状态、耗时、错误信息
+- **P2 扩展功能**:
+  - **提示词库**: 提示词 CRUD、标签管理、分类筛选、一键填入节点，localStorage 持久化
+  - **画布助手 (节点感知)**: 选中节点后助手自动读取上下文，对话+建议，调用 `/api/chat`
+  - **撤销重做 (节点级)**: 50 步历史栈，Ctrl+Z 撤销 / Ctrl+Shift+Z 重做
+  - **节点 JSON 编辑器**: 右键或工具栏 → 查看/编辑工作流原始 JSON，高级用户可直接编辑
+- **25+ 节点类型**:
+  - 输入: input-text, input-image
+  - AI图像: ai-generate, ai-remove-bg, ai-upscale, ai-retouch, ai-font-design, ai-refine-engine, ai-brand-ecommerce, ai-segment, ai-multi-angle, ai-3d-model
+  - 控制: condition, loop, agent
+  - 输出: output-image, output-export, output-image-group
+  - 每种类型含完整 fields 定义（text/textarea/number/select/toggle/slider/model-select/color）
+- **API 接口**:
+  - POST `/api/workflow/execute` - 执行工作流 (action: start/status/cancel)
+  - GET `/api/workflow/models` - 获取模型列表 (type: image/chat/all)
+  - POST `/api/workflow/save` - 保存工作流
+  - POST `/api/workflow/ai-build` - AI 自然语言建图
 
 ## 构建和测试命令
 

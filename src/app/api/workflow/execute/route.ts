@@ -1,3 +1,12 @@
+/**
+ * 工作流执行 API
+ * POST /api/workflow/execute
+ * 
+ * 执行工作流：DAG拓扑排序 → 逐节点调度 → API调用 → 真实数据传递
+ * 支持: start(启动) / status(查询) / cancel(取消)
+ * 
+ * P0: 连线语义类型约束 + 节点间真实数据传递 + 画布模式专用节点
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import {
   topologicalSort,
@@ -6,6 +15,7 @@ import {
   type WorkflowNode,
   type WorkflowConnection,
   type ExecutionResult,
+  type NodeType,
 } from '@/lib/workflow-engine';
 import { findProviderForModel, findProviderForFeature } from '@/lib/server-api-config';
 
@@ -31,17 +41,18 @@ setInterval(() => {
 }, 5 * 60 * 1000);
 
 /**
- * POST /api/workflow/execute
- * 执行工作流：DAG拓扑排序 → 逐节点调度 → API调用 → 结果传递
- * 
- * 请求体:
- * {
- *   action: 'start' | 'status' | 'cancel',
- *   executionId?: string,      // 查询/取消时需要
- *   nodes: WorkflowNode[],      // start时需要
- *   connections: WorkflowConnection[]
- * }
+ * 节点类型 → 所需API功能映射
  */
+function getFeatureForNodeType(type: NodeType): 'imageEdit' | 'chat' | 'vectorize' | 'layer' | '3d' {
+  if (type === 'ai-analyze') return 'chat';
+  if (type === 'ai-vectorize') return 'vectorize';
+  if (type === 'ai-segment') return 'layer';
+  if (type === 'ai-3d-model') return '3d';
+  if (type === 'agent-auto' || type === 'agent-chat') return 'chat';
+  // 图像生成/编辑/修图/字境/精修/品牌 → imageEdit
+  return 'imageEdit';
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -124,6 +135,7 @@ export async function POST(request: NextRequest) {
 
 /**
  * 执行工作流核心逻辑
+ * DAG排序 → 逐节点调度 → API调用 → 结果传递到下游
  */
 async function executeWorkflow(
   executionId: string,
@@ -149,13 +161,13 @@ async function executeWorkflow(
     const nodeStart = Date.now();
 
     try {
-      // 获取输入
+      // P0: 真实数据传递 — 从上游节点获取输入
       const inputs = getNodeInputs(node, connections, resultMap);
 
       // 构建执行请求
       const req = buildNodeExecutionRequest(node, inputs);
 
-      // 逻辑节点不需要API调用
+      // 逻辑节点/输出节点不需要外部API调用
       if (!req) {
         const result: ExecutionResult = {
           nodeId: node.id,
@@ -168,8 +180,8 @@ async function executeWorkflow(
         continue;
       }
 
-      // 查找API密钥
-      const modelName = (inputs.model || node.config.model) as string;
+      // 查找API密钥 (P0: 按节点类型智能匹配功能)
+      const modelName = String(inputs.model || node.config.model || '');
       let apiKey = '';
       let baseUrl = '';
 
@@ -181,11 +193,9 @@ async function executeWorkflow(
         }
       }
 
-      // 如果没找到对应模型的提供商，尝试按功能查找
+      // 如果没找到对应模型的提供商，按功能类型查找
       if (!apiKey) {
-        const feature: 'imageEdit' | 'chat' | 'vectorize' | 'layer' | '3d' =
-          node.type.startsWith('ai-generate') || node.type === 'ai-style-transfer' ? 'imageEdit' :
-          node.type === 'ai-analyze' || node.type === 'ai-retouch' ? 'chat' : 'imageEdit';
+        const feature = getFeatureForNodeType(node.type as NodeType);
         const provider = await findProviderForFeature(feature);
         if (provider) {
           apiKey = provider.apiKey;
@@ -193,10 +203,15 @@ async function executeWorkflow(
         }
       }
 
-      // 调用API
-      const apiUrl = baseUrl
-        ? `${baseUrl}${req.endpoint}`
-        : req.endpoint;
+      // 决定调用方式
+      // 内部API (以/api/开头) → 走本地fetch
+      // 外部API → 走完整URL
+      const isInternalApi = req.endpoint.startsWith('/api/');
+      const apiUrl = isInternalApi
+        ? `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${req.endpoint}`
+        : baseUrl
+          ? `${baseUrl}${req.endpoint}`
+          : req.endpoint;
 
       console.log(`[Workflow] 执行节点 ${node.label}(${node.type}) → ${req.endpoint}`);
 
@@ -212,9 +227,11 @@ async function executeWorkflow(
         fetchOptions.body = JSON.stringify(req.body);
       }
 
-      // 对于生成类API，使用提交+轮询模式
-      if (req.endpoint === '/api/generate' || req.endpoint === '/api/image-edit') {
-        const result = await executeAsyncTask(apiUrl, req.body, fetchOptions, node.id);
+      // 对于异步API (generate, image-edit, edit, agent-edit)，使用提交+轮询模式
+      const isAsyncApi = ['/api/generate', '/api/image-edit', '/api/edit', '/api/agent-edit'].includes(req.endpoint);
+
+      if (isAsyncApi) {
+        const result = await executeAsyncTask(apiUrl, req.body, fetchOptions, node.id, node.type as NodeType);
         resultMap.set(node.id, result);
         execState.results[node.id] = result;
       } else {
@@ -228,7 +245,7 @@ async function executeWorkflow(
         const result: ExecutionResult = {
           nodeId: node.id,
           status: response.ok ? 'success' : 'failed',
-          output: response.ok ? parseApiOutput(node.type, data) : undefined,
+          output: response.ok ? parseApiOutput(node.type as NodeType, data) : undefined,
           error: response.ok ? undefined : (data.error || `HTTP ${response.status}`),
           durationMs: Date.now() - nodeStart,
         };
@@ -237,7 +254,6 @@ async function executeWorkflow(
 
         if (!response.ok) {
           console.warn(`[Workflow] 节点 ${node.label} 执行失败: ${result.error}`);
-          // 不中断整个工作流，继续执行后续节点
         }
       }
 
@@ -273,6 +289,7 @@ async function executeAsyncTask(
   body: Record<string, unknown>,
   fetchOptions: RequestInit,
   nodeId: string,
+  nodeType: NodeType,
 ): Promise<ExecutionResult> {
   const start = Date.now();
 
@@ -298,11 +315,11 @@ async function executeAsyncTask(
   // 获取taskId
   const taskId = submitData.taskId || submitData.taskIds?.[0];
   if (!taskId) {
-    // 如果是同步返回的结果
+    // 同步返回结果
     return {
       nodeId,
       status: 'success',
-      output: parseApiOutput('ai-generate', submitData),
+      output: parseApiOutput(nodeType, submitData),
       durationMs: Date.now() - start,
     };
   }
@@ -311,12 +328,13 @@ async function executeAsyncTask(
   const maxPollTime = 180000; // 最多轮询3分钟
   const pollInterval = 2000;
   const pollStart = Date.now();
+  const port = process.env.DEPLOY_RUN_PORT || 5000;
 
   while (Date.now() - pollStart < maxPollTime) {
     await new Promise(r => setTimeout(r, pollInterval));
 
     try {
-      const pollRes = await fetch('/api/poll-task', {
+      const pollRes = await fetch(`http://localhost:${port}/api/poll-task`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ taskId }),
@@ -329,7 +347,7 @@ async function executeAsyncTask(
         return {
           nodeId,
           status: 'success',
-          output: parseApiOutput('ai-generate', pollData),
+          output: parseApiOutput(nodeType, pollData),
           durationMs: Date.now() - start,
         };
       }
@@ -358,12 +376,12 @@ async function executeAsyncTask(
 }
 
 /**
- * 解析API输出为统一格式
+ * 解析API输出为统一格式 (P0: 支持所有节点类型的输出)
  */
-function parseApiOutput(nodeType: string, data: Record<string, unknown>): Record<string, unknown> {
+function parseApiOutput(nodeType: NodeType, data: Record<string, unknown>): Record<string, unknown> {
   const output: Record<string, unknown> = {};
 
-  // 图片URL
+  // 图片URL (多种来源)
   if (data.imageUrl) output.imageUrl = data.imageUrl;
   if (data.url) output.imageUrl = data.url;
   if (data.image_url) output.imageUrl = data.image_url;
@@ -372,12 +390,18 @@ function parseApiOutput(nodeType: string, data: Record<string, unknown>): Record
     if (first.url) output.imageUrl = first.url;
     if (first.b64_json) output.imageUrl = `data:image/png;base64,${first.b64_json}`;
   }
+  // poll-task 返回的 imageUrl 在 result 内
+  if (data.result && typeof data.result === 'object') {
+    const result = data.result as Record<string, unknown>;
+    if (result.imageUrl && !output.imageUrl) output.imageUrl = result.imageUrl;
+    if (result.url && !output.imageUrl) output.imageUrl = result.url;
+  }
 
   // SVG数据
   if (data.svgDataUrl) output.svgDataUrl = data.svgDataUrl;
   if (data.svgUrl) output.svgUrl = data.svgUrl;
 
-  // 蒙版
+  // 蒙版 (removebg输出)
   if (data.maskUrl) output.maskUrl = data.maskUrl;
 
   // 文本/分析结果
@@ -386,6 +410,24 @@ function parseApiOutput(nodeType: string, data: Record<string, unknown>): Record
   if (data.analysisResult) output.analysisResult = data.analysisResult;
   if (data.keywords) output.analysisResult = data.keywords;
   if (data.description) output.analysisResult = data.description;
+
+  // 字境大师输出
+  if (data.fontDesignPlan) output.fontDesignPlan = data.fontDesignPlan;
+  if (data.styleLibrary) output.styleLibrary = data.styleLibrary;
+
+  // 品牌电商输出
+  if (data.brandKit) output.brandKit = data.brandKit;
+
+  // 元素分层输出
+  if (data.layers) output.layers = data.layers;
+  if (data.psdUrl) output.psdUrl = data.psdUrl;
+
+  // 多角度输出
+  if (data.angles) output.angles = data.angles;
+
+  // 3D模型输出
+  if (data.modelUrl) output.modelUrl = data.modelUrl;
+  if (data.modelData) output.modelData = data.modelData;
 
   // 条件评估结果
   if (nodeType.startsWith('condition-')) {

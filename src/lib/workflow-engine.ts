@@ -2,6 +2,13 @@
  * 工作流引擎 — 节点模式数据模型 + 执行引擎
  * 支持节点图(DAG)、连线、条件分支、循环节点、Agent节点、子图
  * 执行引擎：DAG拓扑排序 → 逐节点调度 → API调用 → 结果传递
+ * 
+ * P0升级:
+ * - 连线语义类型约束 (image→image, prompt→prompt)
+ * - 节点间真实数据传递 (上游output→下游input)
+ * - 画布模式专用节点 (字境大师/精修引擎/品牌电商/元素分层/多角度/3D)
+ * - AI自然语言建图支持
+ * - 节点自动布局
  */
 
 // ==================== 节点类型 ====================
@@ -9,10 +16,11 @@
 export type NodeType =
   | 'input-image' | 'input-text' | 'input-param'
   | 'ai-generate' | 'ai-edit' | 'ai-retouch' | 'ai-upscale' | 'ai-removebg' | 'ai-vectorize' | 'ai-style-transfer' | 'ai-color-adjust' | 'ai-analyze'
+  | 'ai-font-design' | 'ai-refine-engine' | 'ai-brand-ecommerce' | 'ai-segment' | 'ai-multi-angle' | 'ai-3d-model'
   | 'condition-if' | 'condition-switch' | 'loop-for' | 'loop-while' | 'loop-each' | 'parallel'
   | 'agent-auto' | 'agent-chat'
   | 'subgraph' | 'group'
-  | 'output-image' | 'output-save' | 'output-export';
+  | 'output-image' | 'output-save' | 'output-export' | 'output-image-group';
 
 export type NodeCategory = 'input' | 'ai' | 'logic' | 'agent' | 'subgraph' | 'output';
 
@@ -61,6 +69,12 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   'ai-color-adjust': '调色',
   'ai-analyze': 'AI分析',
   'ai-retouch': 'AI修图',
+  'ai-font-design': '字境大师',
+  'ai-refine-engine': '精修引擎',
+  'ai-brand-ecommerce': '品牌电商',
+  'ai-segment': '元素分层',
+  'ai-multi-angle': '多角度生成',
+  'ai-3d-model': '3D模型',
   'condition-if': '条件分支',
   'condition-switch': '开关分支',
   'loop-for': '循环',
@@ -74,6 +88,7 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   'output-image': '图片输出',
   'output-save': '保存',
   'output-export': '导出',
+  'output-image-group': '图片组',
 };
 
 /** 节点类型 → 图标名 */
@@ -90,6 +105,12 @@ export const NODE_TYPE_ICONS: Record<NodeType, string> = {
   'ai-color-adjust': 'Sun',
   'ai-analyze': 'ScanSearch',
   'ai-retouch': 'Wand2',
+  'ai-font-design': 'Type',
+  'ai-refine-engine': 'Sparkles',
+  'ai-brand-ecommerce': 'ShoppingBag',
+  'ai-segment': 'Layers',
+  'ai-multi-angle': 'Rotate3d',
+  'ai-3d-model': 'Box',
   'condition-if': 'GitBranch',
   'condition-switch': 'GitMerge',
   'loop-for': 'Repeat',
@@ -103,11 +124,12 @@ export const NODE_TYPE_ICONS: Record<NodeType, string> = {
   'output-image': 'ImageDown',
   'output-save': 'Save',
   'output-export': 'Download',
+  'output-image-group': 'Layers',
 };
 
 // ==================== 端口类型 ====================
 
-export type PortType = 'image' | 'mask' | 'prompt' | 'condition' | 'any' | 'video' | 'audio' | 'data';
+export type PortType = 'image' | 'mask' | 'prompt' | 'condition' | 'any' | 'data';
 
 export const PORT_COLORS: Record<PortType, string> = {
   image: '#3b82f6',
@@ -115,10 +137,23 @@ export const PORT_COLORS: Record<PortType, string> = {
   prompt: '#a78bfa',
   condition: '#f59e0b',
   any: '#7d8590',
-  video: '#ef4444',
-  audio: '#f97316',
   data: '#22d3ee',
 };
+
+/** 端口类型兼容矩阵：哪些输出类型可以连到哪些输入类型 */
+export const PORT_COMPATIBILITY: Record<PortType, PortType[]> = {
+  image: ['image', 'any'],
+  mask: ['mask', 'any'],
+  prompt: ['prompt', 'any'],
+  condition: ['condition', 'any'],
+  any: ['any'],
+  data: ['data', 'any', 'prompt', 'image'],
+};
+
+/** 检查两个端口是否可以连线 */
+export function canConnectPorts(fromPortType: PortType, toPortType: PortType): boolean {
+  return PORT_COMPATIBILITY[fromPortType]?.includes(toPortType) ?? false;
+}
 
 // ==================== 数据模型 ====================
 
@@ -149,6 +184,8 @@ export interface WorkflowNode {
   subgraphId?: string;
   /** 调试断点 */
   breakpoint?: boolean;
+  /** 执行结果 (运行时填充) */
+  execResult?: { status: string; output?: Record<string, unknown>; error?: string };
 }
 
 export interface WorkflowConnection {
@@ -195,6 +232,14 @@ export const NODE_TEMPLATES: { type: NodeType; category: NodeCategory; label: st
   { type: 'ai-vectorize', category: 'ai', label: '矢量化', desc: '位图转矢量图' },
   { type: 'ai-style-transfer', category: 'ai', label: '风格转换', desc: '图生图风格迁移' },
   { type: 'ai-color-adjust', category: 'ai', label: '调色', desc: '亮度/对比度/饱和度' },
+  { type: 'ai-retouch', category: 'ai', label: 'AI修图', desc: '自然语言修图' },
+  { type: 'ai-analyze', category: 'ai', label: 'AI分析', desc: '图像内容分析' },
+  { type: 'ai-font-design', category: 'ai', label: '字境大师', desc: 'AI字体设计与生成' },
+  { type: 'ai-refine-engine', category: 'ai', label: '精修引擎', desc: '产品商业级精修' },
+  { type: 'ai-brand-ecommerce', category: 'ai', label: '品牌电商', desc: '电商视觉内容生成' },
+  { type: 'ai-segment', category: 'ai', label: '元素分层', desc: '智能分层+PSD导出' },
+  { type: 'ai-multi-angle', category: 'ai', label: '多角度生成', desc: '多视角旋转生成' },
+  { type: 'ai-3d-model', category: 'ai', label: '3D模型', desc: '图片转3D模型预览' },
   { type: 'condition-if', category: 'logic', label: '条件分支', desc: 'If/Else 条件判断' },
   { type: 'condition-switch', category: 'logic', label: '开关分支', desc: '多路选择器' },
   { type: 'loop-for', category: 'logic', label: '循环', desc: '固定次数循环' },
@@ -208,6 +253,7 @@ export const NODE_TEMPLATES: { type: NodeType; category: NodeCategory; label: st
   { type: 'output-image', category: 'output', label: '图片输出', desc: '输出图片结果' },
   { type: 'output-save', category: 'output', label: '保存', desc: '保存到项目/本地' },
   { type: 'output-export', category: 'output', label: '导出', desc: 'PSD/SVG/PNG导出' },
+  { type: 'output-image-group', category: 'output', label: '图片组', desc: '批量图片叠卡预览' },
 ];
 
 /** 创建默认端口 */
@@ -217,6 +263,7 @@ function createDefaultPorts(type: NodeType): NodePort[] {
 
   if (cat !== 'input') {
     if (type.startsWith('ai-')) {
+      // AI节点都有图片输入和提示词输入
       ports.push({ id: 'in-image', label: '图片', type: 'image', direction: 'in' });
       ports.push({ id: 'in-prompt', label: '提示词', type: 'prompt', direction: 'in' });
     } else if (cat === 'logic') {
@@ -226,6 +273,11 @@ function createDefaultPorts(type: NodeType): NodePort[] {
       ports.push({ id: 'in-prompt', label: '指令', type: 'prompt', direction: 'in' });
     } else if (cat === 'output') {
       ports.push({ id: 'in-image', label: '图片', type: 'image', direction: 'in' });
+      if (type === 'output-image-group') {
+        ports.push({ id: 'in-image-2', label: '图片2', type: 'image', direction: 'in' });
+        ports.push({ id: 'in-image-3', label: '图片3', type: 'image', direction: 'in' });
+        ports.push({ id: 'in-image-4', label: '图片4', type: 'image', direction: 'in' });
+      }
     }
   }
 
@@ -235,9 +287,21 @@ function createDefaultPorts(type: NodeType): NodePort[] {
         ports.push({ id: 'out-image', label: '图片', type: 'image', direction: 'out' });
       } else {
         ports.push({ id: 'out-data', label: '数据', type: 'data', direction: 'out' });
+        if (type === 'input-text') {
+          ports.push({ id: 'out-prompt', label: '提示词', type: 'prompt', direction: 'out' });
+        }
       }
     } else if (type.startsWith('ai-')) {
       ports.push({ id: 'out-image', label: '图片', type: 'image', direction: 'out' });
+      if (type === 'ai-analyze' || type === 'ai-font-design') {
+        ports.push({ id: 'out-text', label: '文本', type: 'prompt', direction: 'out' });
+      }
+      if (type === 'ai-segment') {
+        ports.push({ id: 'out-layers', label: '图层', type: 'data', direction: 'out' });
+      }
+      if (type === 'ai-removebg') {
+        ports.push({ id: 'out-mask', label: '蒙版', type: 'mask', direction: 'out' });
+      }
     } else if (type === 'condition-if') {
       ports.push({ id: 'out-true', label: 'True', type: 'condition', direction: 'out' });
       ports.push({ id: 'out-false', label: 'False', type: 'condition', direction: 'out' });
@@ -327,7 +391,7 @@ export function createEmptyWorkflow(name: string): Workflow {
 export interface PropertyField {
   key: string;
   label: string;
-  type: 'text' | 'textarea' | 'number' | 'select' | 'slider' | 'toggle' | 'model-select' | 'image-upload';
+  type: 'text' | 'textarea' | 'number' | 'select' | 'slider' | 'toggle' | 'model-select' | 'image-upload' | 'color';
   options?: { label: string; value: string }[];
   min?: number;
   max?: number;
@@ -366,84 +430,177 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
     fields.push({ key: 'max', label: '最大值', type: 'number' });
   }
 
-  // ─── AI节点 ───
+  // ─── AI节点 (通用) ───
   if (cat === 'ai') {
-    fields.push({ key: 'model', label: '模型', type: 'model-select' });
+    // 不为有专用model字段的节点添加通用model
+    if (type !== 'ai-removebg' && type !== 'ai-font-design' && type !== 'ai-refine-engine' && type !== 'ai-brand-ecommerce') {
+      fields.push({ key: 'model', label: '模型', type: 'model-select' });
+    }
     fields.push({ key: 'prompt', label: '提示词', type: 'textarea', placeholder: '描述你想要的图像效果' });
     fields.push({ key: 'negativePrompt', label: '反向提示词', type: 'textarea', placeholder: '低质量, 模糊, 变形...' });
+  }
 
-    if (type === 'ai-generate') {
-      fields.push({ key: 'quality', label: '质量', type: 'select', options: [
-        { label: '标准', value: 'standard' }, { label: '高清', value: 'hd' }
-      ], defaultValue: 'standard' });
-      fields.push({ key: 'size', label: '尺寸', type: 'select', options: [
-        { label: '1024×1024', value: '1024x1024' }, { label: '1152×864', value: '1152x864' },
-        { label: '1280×720', value: '1280x720' }, { label: '720×1280', value: '720x1280' },
-        { label: '864×1152', value: '864x1152' }, { label: '1792×1024', value: '1792x1024' }
-      ], defaultValue: '1024x1024' });
-      fields.push({ key: 'seed', label: '随机种子', type: 'number', min: -1, max: 2147483647, defaultValue: -1, placeholder: '-1为随机' });
-      fields.push({ key: 'n', label: '生成数量', type: 'number', min: 1, max: 4, defaultValue: 1 });
-    }
+  // ─── AI节点 (各类型特定字段) ───
+  if (type === 'ai-generate') {
+    fields.push({ key: 'quality', label: '质量', type: 'select', options: [
+      { label: '标准', value: 'standard' }, { label: '高清', value: 'hd' }
+    ], defaultValue: 'standard' });
+    fields.push({ key: 'size', label: '尺寸', type: 'select', options: [
+      { label: '1024×1024', value: '1024x1024' }, { label: '1152×864', value: '1152x864' },
+      { label: '1280×720', value: '1280x720' }, { label: '720×1280', value: '720x1280' },
+      { label: '864×1152', value: '864x1152' }, { label: '1792×1024', value: '1792x1024' }
+    ], defaultValue: '1024x1024' });
+    fields.push({ key: 'seed', label: '随机种子', type: 'number', min: -1, max: 2147483647, defaultValue: -1, placeholder: '-1为随机' });
+    fields.push({ key: 'n', label: '生成数量', type: 'number', min: 1, max: 4, defaultValue: 1 });
+  }
 
-    if (type === 'ai-edit') {
-      fields.push({ key: 'action', label: '操作类型', type: 'select', options: [
-        { label: '擦除', value: 'erase' }, { label: '蒙版修图', value: 'mask' },
-        { label: '扩展画面', value: 'extend' }, { label: '语言修图', value: 'edit' }
-      ], defaultValue: 'edit' });
-      fields.push({ key: 'strength', label: '强度', type: 'slider', min: 0, max: 100, step: 5, defaultValue: 75 });
-    }
+  if (type === 'ai-edit') {
+    fields.push({ key: 'action', label: '操作类型', type: 'select', options: [
+      { label: '擦除', value: 'erase' }, { label: '蒙版修图', value: 'mask' },
+      { label: '扩展画面', value: 'extend' }, { label: '语言修图', value: 'edit' }
+    ], defaultValue: 'edit' });
+    fields.push({ key: 'strength', label: '强度', type: 'slider', min: 0, max: 100, step: 5, defaultValue: 75 });
+  }
 
-    if (type === 'ai-upscale') {
-      fields.push({ key: 'scale', label: '放大倍率', type: 'select', options: [
-        { label: '2×', value: '2' }, { label: '4×', value: '4' }
-      ], defaultValue: '2' });
-      fields.push({ key: 'format', label: '输出格式', type: 'select', options: [
-        { label: 'PNG', value: 'png' }, { label: 'JPG', value: 'jpg' }, { label: 'WebP', value: 'webp' }
-      ], defaultValue: 'png' });
-    }
+  if (type === 'ai-upscale') {
+    fields.push({ key: 'scale', label: '放大倍率', type: 'select', options: [
+      { label: '2×', value: '2' }, { label: '4×', value: '4' }
+    ], defaultValue: '2' });
+    fields.push({ key: 'format', label: '输出格式', type: 'select', options: [
+      { label: 'PNG', value: 'png' }, { label: 'JPG', value: 'jpg' }, { label: 'WebP', value: 'webp' }
+    ], defaultValue: 'png' });
+  }
 
-    if (type === 'ai-removebg') {
-      fields.push({ key: 'model', label: '模型', type: 'select', options: [
-        { label: 'BiRefNet 通用（推荐）', value: 'birefnet-general-lite' },
-        { label: 'U2Net 轻量快速', value: 'u2net' },
-        { label: 'Silueta 轻量人像', value: 'silueta' }
-      ], defaultValue: 'birefnet-general-lite' });
-    }
+  if (type === 'ai-removebg') {
+    fields.push({ key: 'model', label: '模型', type: 'select', options: [
+      { label: 'BiRefNet 通用（推荐）', value: 'birefnet-general-lite' },
+      { label: 'U2Net 轻量快速', value: 'u2net' },
+      { label: 'Silueta 轻量人像', value: 'silueta' }
+    ], defaultValue: 'birefnet-general-lite' });
+  }
 
-    if (type === 'ai-style-transfer') {
-      fields.push({ key: 'strength', label: '风格强度', type: 'slider', min: 0, max: 100, step: 5, defaultValue: 50 });
-      fields.push({ key: 'stylePrompt', label: '风格描述', type: 'textarea', placeholder: '如: 赛博朋克, 水彩画...' });
-    }
+  if (type === 'ai-style-transfer') {
+    fields.push({ key: 'strength', label: '风格强度', type: 'slider', min: 0, max: 100, step: 5, defaultValue: 50 });
+    fields.push({ key: 'stylePrompt', label: '风格描述', type: 'textarea', placeholder: '如: 赛博朋克, 水彩画...' });
+  }
 
-    if (type === 'ai-color-adjust') {
-      fields.push({ key: 'brightness', label: '亮度', type: 'slider', min: -100, max: 100, step: 1, defaultValue: 0 });
-      fields.push({ key: 'contrast', label: '对比度', type: 'slider', min: -100, max: 100, step: 1, defaultValue: 0 });
-      fields.push({ key: 'saturation', label: '饱和度', type: 'slider', min: -100, max: 100, step: 1, defaultValue: 0 });
-    }
+  if (type === 'ai-color-adjust') {
+    fields.push({ key: 'brightness', label: '亮度', type: 'slider', min: -100, max: 100, step: 1, defaultValue: 0 });
+    fields.push({ key: 'contrast', label: '对比度', type: 'slider', min: -100, max: 100, step: 1, defaultValue: 0 });
+    fields.push({ key: 'saturation', label: '饱和度', type: 'slider', min: -100, max: 100, step: 1, defaultValue: 0 });
+  }
 
-    if (type === 'ai-vectorize') {
-      fields.push({ key: 'mode', label: '模式', type: 'select', options: [
-        { label: '彩色矢量化', value: 'color' }, { label: '黑白轮廓', value: 'bw' }
-      ], defaultValue: 'color' });
-      fields.push({ key: 'quality', label: '质量', type: 'select', options: [
-        { label: '快速 (64色)', value: 'fast' }, { label: '均衡 (256色)', value: 'balanced' },
-        { label: '高清 (1024色)', value: 'hd' }, { label: '极致 (4096色)', value: 'ultra' }
-      ], defaultValue: 'balanced' });
-    }
+  if (type === 'ai-vectorize') {
+    fields.push({ key: 'mode', label: '模式', type: 'select', options: [
+      { label: '彩色矢量化', value: 'color' }, { label: '黑白轮廓', value: 'bw' }
+    ], defaultValue: 'color' });
+    fields.push({ key: 'quality', label: '质量', type: 'select', options: [
+      { label: '快速 (64色)', value: 'fast' }, { label: '均衡 (256色)', value: 'balanced' },
+      { label: '高清 (1024色)', value: 'hd' }, { label: '极致 (4096色)', value: 'ultra' }
+    ], defaultValue: 'balanced' });
+  }
 
-    if (type === 'ai-analyze') {
-      fields.push({ key: 'analysisType', label: '分析类型', type: 'select', options: [
-        { label: '内容描述', value: 'describe' }, { label: '风格识别', value: 'style' },
-        { label: '元素识别', value: 'elements' }, { label: '关键词提取', value: 'keywords' }
-      ], defaultValue: 'describe' });
-    }
+  if (type === 'ai-analyze') {
+    fields.push({ key: 'analysisType', label: '分析类型', type: 'select', options: [
+      { label: '内容描述', value: 'describe' }, { label: '风格识别', value: 'style' },
+      { label: '元素识别', value: 'elements' }, { label: '关键词提取', value: 'keywords' }
+    ], defaultValue: 'describe' });
+  }
 
-    if (type === 'ai-retouch') {
-      fields.push({ key: 'editModel', label: '修图模型', type: 'model-select' });
-      fields.push({ key: 'size', label: '输出尺寸', type: 'select', options: [
-        { label: '1024', value: '1024' }, { label: '1536', value: '1536' }, { label: '2048', value: '2048' }
-      ], defaultValue: '1024' });
-    }
+  if (type === 'ai-retouch') {
+    fields.push({ key: 'editModel', label: '修图模型', type: 'model-select' });
+    fields.push({ key: 'size', label: '输出尺寸', type: 'select', options: [
+      { label: '1024', value: '1024' }, { label: '1536', value: '1536' }, { label: '2048', value: '2048' }
+    ], defaultValue: '1024' });
+  }
+
+  // ─── 画布模式专用节点 ───
+  if (type === 'ai-font-design') {
+    fields.push({ key: 'model', label: '生图模型', type: 'model-select' });
+    fields.push({ key: 'textContent', label: '文字内容', type: 'text', placeholder: '如: 无界AI' });
+    fields.push({ key: 'styleCategory', label: '字体风格', type: 'select', options: [
+      { label: '书法行楷', value: 'calligraphy' }, { label: '科技未来', value: 'tech' },
+      { label: '文艺清新', value: 'artsy' }, { label: '国潮新中式', value: 'guochao' },
+      { label: '立体3D', value: '3d' }, { label: '手写涂鸦', value: 'handwrite' },
+      { label: '像素复古', value: 'pixel' }, { label: '霓虹灯效', value: 'neon' },
+      { label: '金属质感', value: 'metal' }
+    ], defaultValue: 'calligraphy' });
+    fields.push({ key: 'scene', label: '使用场景', type: 'select', options: [
+      { label: '品牌Logo', value: 'logo' }, { label: '海报标题', value: 'poster' },
+      { label: '包装设计', value: 'package' }, { label: '社交媒体', value: 'social' }
+    ], defaultValue: 'logo' });
+    fields.push({ key: 'mode', label: '提示词模式', type: 'select', options: [
+      { label: '完整版', value: 'full' }, { label: '黑底白字', value: 'dark' }, { label: '透明Logo', value: 'transparent' }
+    ], defaultValue: 'full' });
+  }
+
+  if (type === 'ai-refine-engine') {
+    fields.push({ key: 'model', label: '生图模型', type: 'model-select' });
+    fields.push({ key: 'mode', label: '精修模式', type: 'select', options: [
+      { label: '标准模式', value: 'standard' }, { label: '专家模式', value: 'expert' }
+    ], defaultValue: 'standard' });
+    fields.push({ key: 'category', label: '产品类型', type: 'select', options: [
+      { label: '电子产品', value: 'electronics' }, { label: '美妆护肤', value: 'beauty' },
+      { label: '食品饮料', value: 'food' }, { label: '服装配饰', value: 'fashion' },
+      { label: '家居用品', value: 'home' }, { label: '珠宝首饰', value: 'jewelry' }
+    ], defaultValue: 'electronics' });
+    fields.push({ key: 'lighting', label: '灯光预设', type: 'select', options: [
+      { label: '影棚灯光', value: 'studio' }, { label: '自然光线', value: 'natural' },
+      { label: '窗口侧光', value: 'window' }, { label: '柔光箱', value: 'softbox' },
+      { label: '戏剧性打光', value: 'dramatic' }
+    ], defaultValue: 'studio' });
+    fields.push({ key: 'viewAngle', label: '视角', type: 'select', options: [
+      { label: '正面', value: 'front' }, { label: '45度角', value: 'angle45' },
+      { label: '俯视', value: 'top' }, { label: '侧面', value: 'side' }
+    ], defaultValue: 'front' });
+    fields.push({ key: 'background', label: '背景', type: 'select', options: [
+      { label: '纯白', value: 'white' }, { label: '渐变', value: 'gradient' },
+      { label: '场景', value: 'scene' }, { label: '透明', value: 'transparent' }
+    ], defaultValue: 'white' });
+  }
+
+  if (type === 'ai-brand-ecommerce') {
+    fields.push({ key: 'model', label: '生图模型', type: 'model-select' });
+    fields.push({ key: 'templateType', label: '模板类型', type: 'select', options: [
+      { label: '商品场景图', value: 'product-scene' }, { label: '模特展示', value: 'model-show' },
+      { label: '营销Banner', value: 'banner' }, { label: '详情页', value: 'detail' },
+      { label: '社交媒体', value: 'social' }, { label: '节日营销', value: 'holiday' }
+    ], defaultValue: 'product-scene' });
+    fields.push({ key: 'brandName', label: '品牌名', type: 'text', placeholder: '输入品牌名称' });
+    fields.push({ key: 'brandStyle', label: '品牌风格', type: 'select', options: [
+      { label: '简约现代', value: 'minimal' }, { label: '轻奢优雅', value: 'luxury' },
+      { label: '活力时尚', value: 'vibrant' }, { label: '温馨亲和', value: 'warm' }
+    ], defaultValue: 'minimal' });
+    fields.push({ key: 'productCategory', label: '商品类别', type: 'select', options: [
+      { label: '服装', value: 'clothing' }, { label: '美妆', value: 'beauty' },
+      { label: '食品', value: 'food' }, { label: '数码', value: 'digital' },
+      { label: '家居', value: 'home' }, { label: '配饰', value: 'accessories' }
+    ], defaultValue: 'clothing' });
+  }
+
+  if (type === 'ai-segment') {
+    fields.push({ key: 'model', label: '分层模型', type: 'model-select' });
+    fields.push({ key: 'exportFormat', label: '导出格式', type: 'select', options: [
+      { label: 'PSD (Pro)', value: 'psd-pro' }, { label: 'PSD (Studio)', value: 'psd-studio' },
+      { label: 'SVG', value: 'svg' }, { label: '仅分层', value: 'layers-only' }
+    ], defaultValue: 'psd-pro' });
+  }
+
+  if (type === 'ai-multi-angle') {
+    fields.push({ key: 'model', label: '生图模型', type: 'model-select' });
+    fields.push({ key: 'angles', label: '视角选择', type: 'select', options: [
+      { label: '四宫格 (正/侧/后/俯)', value: 'quad' },
+      { label: '前后对比', value: 'front-back' },
+      { label: '360度旋转', value: '360' }
+    ], defaultValue: 'quad' });
+    fields.push({ key: 'characterRef', label: '角色一致性', type: 'toggle', defaultValue: true });
+  }
+
+  if (type === 'ai-3d-model') {
+    fields.push({ key: 'model', label: '3D模型', type: 'model-select' });
+    fields.push({ key: 'quality', label: '模型质量', type: 'select', options: [
+      { label: '标准', value: 'standard' }, { label: '高清', value: 'hd' }
+    ], defaultValue: 'standard' });
   }
 
   // ─── 逻辑控制节点 ───
@@ -491,6 +648,12 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
     fields.push({ key: 'quality', label: '质量', type: 'select', options: [
       { label: '基础', value: 'basic' }, { label: '专业', value: 'pro' }, { label: '工作室', value: 'studio' }
     ], defaultValue: 'basic' });
+  }
+  if (type === 'output-image-group') {
+    fields.push({ key: 'layout', label: '排列方式', type: 'select', options: [
+      { label: '叠卡翻页', value: 'stack' }, { label: '网格', value: 'grid' }, { label: '横向滚动', value: 'horizontal' }
+    ], defaultValue: 'stack' });
+    fields.push({ key: 'columns', label: '列数(网格)', type: 'number', defaultValue: 3, min: 1, max: 6 });
   }
   if (type === 'output-save') {
     fields.push({ key: 'saveTo', label: '保存位置', type: 'select', options: [
@@ -570,8 +733,8 @@ export function topologicalSort(nodes: WorkflowNode[], connections: WorkflowConn
 }
 
 /**
- * 获取节点的上游输入数据
- * 根据连线从已完成节点中提取输入
+ * 获取节点的上游输入数据 (P0: 真实数据传递)
+ * 根据连线从已完成节点中提取输入，区分端口类型
  */
 export function getNodeInputs(
   node: WorkflowNode,
@@ -585,31 +748,53 @@ export function getNodeInputs(
     if (val !== undefined && val !== '') inputs[key] = val;
   }
 
-  // 从上游连线中获取输入
+  // 从上游连线中获取输入 (按端口类型映射)
   const incomingConns = connections.filter(c => c.toNodeId === node.id);
   for (const conn of incomingConns) {
     const upstreamResult = results.get(conn.fromNodeId);
-    if (upstreamResult?.output) {
-      // 将上游输出映射到当前节点输入
-      const fromPort = conn.fromPortId;
-      const toPort = conn.toPortId;
+    if (!upstreamResult?.output) continue;
 
-      // 尝试从上游输出中获取对应端口数据
-      if (upstreamResult.output.imageUrl) {
-        inputs.imageUrl = upstreamResult.output.imageUrl;
+    const upstreamOutput = upstreamResult.output;
+
+    // 根据连线类型和目标端口ID智能映射
+    switch (conn.type) {
+      case 'image':
+        // 图片连线: 优先传递imageUrl
+        if (upstreamOutput.imageUrl) inputs.imageUrl = upstreamOutput.imageUrl;
+        break;
+      case 'prompt':
+        // 提示词连线: 传递prompt或text
+        if (upstreamOutput.prompt) {
+          inputs.prompt = inputs.prompt ? `${inputs.prompt}, ${upstreamOutput.prompt}` : upstreamOutput.prompt;
+        }
+        if (upstreamOutput.text) {
+          inputs.prompt = inputs.prompt ? `${inputs.prompt}, ${upstreamOutput.text}` : upstreamOutput.text;
+        }
+        break;
+      case 'mask':
+        // 蒙版连线
+        if (upstreamOutput.maskUrl) inputs.maskUrl = upstreamOutput.maskUrl;
+        break;
+      case 'data':
+        // 数据连线: 传递所有输出
+        if (upstreamOutput.imageUrl) inputs.imageUrl = upstreamOutput.imageUrl;
+        if (upstreamOutput.prompt || upstreamOutput.text) {
+          inputs.prompt = inputs.prompt || upstreamOutput.prompt || upstreamOutput.text;
+        }
+        if (upstreamOutput.analysisResult) inputs.analysisResult = upstreamOutput.analysisResult;
+        if (upstreamOutput.layers) inputs.layers = upstreamOutput.layers;
+        break;
+      default: {
+        // any类型: 智能推断
+        if (upstreamOutput.imageUrl) inputs.imageUrl = upstreamOutput.imageUrl;
+        if (upstreamOutput.prompt || upstreamOutput.text) {
+          inputs.prompt = inputs.prompt || upstreamOutput.prompt || upstreamOutput.text;
+        }
+        if (upstreamOutput.maskUrl) inputs.maskUrl = upstreamOutput.maskUrl;
+        if (upstreamOutput.analysisResult) inputs.analysisResult = upstreamOutput.analysisResult;
+        if (upstreamOutput.layers) inputs.layers = upstreamOutput.layers;
+        break;
       }
-      if (upstreamResult.output.text || upstreamResult.output.prompt) {
-        inputs.prompt = inputs.prompt || upstreamResult.output.text || upstreamResult.output.prompt;
-      }
-      if (upstreamResult.output.maskUrl) {
-        inputs.maskUrl = upstreamResult.output.maskUrl;
-      }
-      if (upstreamResult.output.analysisResult) {
-        inputs.analysisResult = upstreamResult.output.analysisResult;
-      }
-      // 记录端口映射
-      if (!inputs._portMap) inputs._portMap = {};
-      (inputs._portMap as Record<string, string>)[toPort] = fromPort;
     }
   }
 
@@ -635,7 +820,7 @@ export function buildNodeExecutionRequest(
       return {
         endpoint: '/api/save-image',
         method: 'POST',
-        body: { imageUrl: config.imageUrl || config.source === 'canvas' ? config.canvasImageUrl : '', action: 'passthrough' }
+        body: { imageUrl: config.imageUrl || '', action: 'passthrough' }
       };
 
     case 'input-text':
@@ -754,6 +939,82 @@ export function buildNodeExecutionRequest(
         }
       };
 
+    // ─── 画布模式专用节点 ───
+    case 'ai-font-design':
+      return {
+        endpoint: '/api/font-design/generate-image',
+        method: 'POST',
+        body: {
+          textContent: config.textContent || '',
+          styleCategory: config.styleCategory || 'calligraphy',
+          scene: config.scene || 'logo',
+          mode: config.mode || 'full',
+          model: config.model || '',
+          prompt: config.prompt || '',
+        }
+      };
+
+    case 'ai-refine-engine':
+      return {
+        endpoint: '/api/edit',
+        method: 'POST',
+        body: {
+          image: config.imageUrl || '',
+          prompt: config.prompt || `Professional product photography, ${config.lighting || 'studio'} lighting, ${config.viewAngle || 'front'} view, ${config.background || 'white'} background, ${config.category || 'electronics'} product, commercial quality, 8k`,
+          model: config.model || '',
+          size: '1024',
+        }
+      };
+
+    case 'ai-brand-ecommerce':
+      return {
+        endpoint: '/api/generate',
+        method: 'POST',
+        body: {
+          prompt: config.prompt || `E-commerce product photo for ${config.brandName || 'brand'}, ${config.templateType || 'product-scene'} style, ${config.brandStyle || 'minimal'} aesthetic, ${config.productCategory || 'clothing'} category, professional lighting, commercial quality`,
+          negativePrompt: config.negativePrompt || 'low quality, blurry, watermark, text, signature',
+          model: config.model || '',
+          quality: 'hd',
+          size: '1024x1024',
+        }
+      };
+
+    case 'ai-segment':
+      return {
+        endpoint: '/api/segment-elements',
+        method: 'POST',
+        body: {
+          imageUrl: config.imageUrl || '',
+          model: config.model || '',
+          exportFormat: config.exportFormat || 'psd-pro',
+        }
+      };
+
+    case 'ai-multi-angle':
+      return {
+        endpoint: '/api/generate',
+        method: 'POST',
+        body: {
+          prompt: config.prompt || `Multi-angle view, ${config.angles || 'quad'} layout, same subject from different angles, consistent style`,
+          negativePrompt: config.negativePrompt || '',
+          model: config.model || '',
+          imageUrl: config.imageUrl || '',
+          quality: 'hd',
+          size: '1024x1024',
+        }
+      };
+
+    case 'ai-3d-model':
+      return {
+        endpoint: '/api/poll-3d-task',
+        method: 'POST',
+        body: {
+          imageUrl: config.imageUrl || '',
+          model: config.model || '',
+          quality: config.quality || 'standard',
+        }
+      };
+
     case 'agent-auto':
       return {
         endpoint: '/api/agent-edit',
@@ -788,6 +1049,18 @@ export function buildNodeExecutionRequest(
         }
       };
 
+    case 'output-image-group':
+      return {
+        endpoint: '/api/save-image',
+        method: 'POST',
+        body: {
+          imageUrl: config.imageUrl || '',
+          imageUrls: config.imageUrls || [],
+          format: config.format || 'png',
+          quality: config.quality || 'basic',
+        }
+      };
+
     // 逻辑节点不需要API调用，由引擎内部处理
     case 'condition-if':
     case 'condition-switch':
@@ -804,6 +1077,197 @@ export function buildNodeExecutionRequest(
     default:
       return null;
   }
+}
+
+// ==================== 节点自动布局 ====================
+
+/** 自动布局：按DAG层级排列节点 */
+export function autoLayoutWorkflow(wf: Workflow): Workflow {
+  const sorted = topologicalSort(wf.nodes, wf.connections);
+  if (sorted.length === 0) return wf;
+
+  // 计算每个节点的层级（最长路径）
+  const levels = new Map<string, number>();
+  const adjacency = new Map<string, string[]>();
+  for (const n of wf.nodes) adjacency.set(n.id, []);
+  for (const c of wf.connections) {
+    adjacency.get(c.fromNodeId)?.push(c.toNodeId);
+  }
+
+  // BFS分层
+  const nodeMap = new Map(wf.nodes.map(n => [n.id, n]));
+  for (const node of sorted) {
+    let maxLevel = 0;
+    // 找所有上游节点
+    for (const c of wf.connections.filter(c => c.toNodeId === node.id)) {
+      const upLevel = levels.get(c.fromNodeId) ?? 0;
+      maxLevel = Math.max(maxLevel, upLevel + 1);
+    }
+    levels.set(node.id, maxLevel);
+  }
+
+  // 按层分组
+  const layerGroups = new Map<number, WorkflowNode[]>();
+  for (const node of sorted) {
+    const level = levels.get(node.id) ?? 0;
+    if (!layerGroups.has(level)) layerGroups.set(level, []);
+    layerGroups.get(level)!.push(node);
+  }
+
+  // 计算位置
+  const H_GAP = 280;
+  const V_GAP = 120;
+  const START_X = 80;
+  const START_Y = 80;
+
+  const newNodes = wf.nodes.map(n => {
+    const level = levels.get(n.id) ?? 0;
+    const group = layerGroups.get(level) || [];
+    const indexInGroup = group.findIndex(g => g.id === n.id);
+    return {
+      ...n,
+      x: START_X + level * H_GAP,
+      y: START_Y + indexInGroup * V_GAP,
+    };
+  });
+
+  return { ...wf, nodes: newNodes };
+}
+
+// ==================== AI自然语言建图 ====================
+
+/** AI建图请求的Prompt模板 */
+export const AI_BUILD_PROMPT = `你是一个AI图像工作流设计助手。用户会描述他们想要的图像处理需求，你需要根据需求生成一个节点工作流。
+
+可用节点类型:
+- input-image: 图片输入（来源: upload/url/canvas）
+- input-text: 文本输入（文本内容、反向提示词）
+- ai-generate: AI图像生成（模型、尺寸、质量、数量）
+- ai-edit: 图像编辑（擦除/蒙版/扩展/语言修图）
+- ai-upscale: 无损放大（2x/4x，输出格式）
+- ai-removebg: 移除背景（BiRefNet/U2Net/Silueta）
+- ai-vectorize: 矢量化（彩色/黑白，质量）
+- ai-style-transfer: 风格转换（风格描述、强度）
+- ai-color-adjust: 调色（亮度/对比度/饱和度）
+- ai-retouch: AI修图（自然语言描述修图）
+- ai-analyze: AI分析（内容描述/风格识别/元素识别/关键词提取）
+- ai-font-design: 字境大师（文字内容、字体风格、场景、模式）
+- ai-refine-engine: 精修引擎（精修模式、产品类型、灯光、视角、背景）
+- ai-brand-ecommerce: 品牌电商（模板类型、品牌名、品牌风格、商品类别）
+- ai-segment: 元素分层（导出PSD/SVG）
+- ai-multi-angle: 多角度生成（视角选择、角色一致性）
+- ai-3d-model: 3D模型生成
+- agent-auto: Agent自动编排
+- output-image: 图片输出
+- output-save: 保存
+- output-export: 导出（PNG/SVG/PSD）
+- condition-if: 条件分支
+- loop-for: 循环
+
+请根据用户需求，输出JSON格式的工作流定义，严格遵循以下格式:
+{
+  "name": "工作流名称",
+  "description": "简短描述",
+  "nodes": [
+    {
+      "id": "node-1",
+      "type": "节点类型",
+      "label": "节点名称",
+      "config": { "key": "value", ... }
+    }
+  ],
+  "connections": [
+    {
+      "fromNodeId": "node-1",
+      "fromPortId": "端口ID",
+      "toNodeId": "node-2",
+      "toPortId": "端口ID",
+      "type": "image|prompt|mask|condition|data"
+    }
+  ]
+}
+
+规则:
+1. 端口ID格式: 输入端口 in-image/in-prompt/in-data, 输出端口 out-image/out-prompt/out-text/out-data/out-mask/out-layers/out-true/out-false/out-loop/out-done
+2. 连线类型必须与端口类型匹配: image→image, prompt→prompt, data→any
+3. 条件节点有两个输出: out-true 和 out-false
+4. 循环节点有: out-loop（循环体）和 out-done（完成）
+5. 每个工作流必须至少有一个输入节点
+6. 尽量减少节点数量，保持工作流简洁
+7. 只输出JSON，不要其他文本`;
+
+/** 解析AI建图响应 */
+export function parseAIBuildResponse(response: string): { name: string; description: string; nodes: { id: string; type: NodeType; label: string; config: Record<string, unknown> }[]; connections: { fromNodeId: string; fromPortId: string; toNodeId: string; toPortId: string; type: PortType }[] } | null {
+  try {
+    // 提取JSON块
+    const jsonMatch = response.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!parsed.nodes || !Array.isArray(parsed.nodes)) return null;
+
+    // 验证节点类型
+    const validTypes = new Set<string>(Object.keys(NODE_TYPE_LABELS));
+    const validNodes = parsed.nodes.filter((n: { type: string }) => validTypes.has(n.type));
+    if (validNodes.length === 0) return null;
+
+    return {
+      name: parsed.name || 'AI生成工作流',
+      description: parsed.description || '',
+      nodes: validNodes,
+      connections: parsed.connections || [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** 从AI建图结果创建完整工作流 */
+export function createWorkflowFromAIResult(result: NonNullable<ReturnType<typeof parseAIBuildResponse>>): Workflow {
+  const wf = createEmptyWorkflow(result.name);
+  wf.description = result.description;
+
+  // 创建节点 (自动布局)
+  const H_GAP = 280;
+  const V_GAP = 120;
+  const START_X = 80;
+  const START_Y = 80;
+
+  // 先创建所有节点
+  for (let i = 0; i < result.nodes.length; i++) {
+    const n = result.nodes[i];
+    const node = createWorkflowNode(n.type as NodeType, START_X, START_Y + i * V_GAP, n.label);
+    node.id = n.id; // 保持AI指定的ID，以便连线匹配
+    node.config = { ...node.config, ...n.config };
+    wf.nodes.push(node);
+  }
+
+  // 自动布局
+  const layouted = autoLayoutWorkflow(wf);
+  wf.nodes = layouted.nodes;
+
+  // 创建连线
+  for (const c of result.connections) {
+    const fromNode = wf.nodes.find(n => n.id === c.fromNodeId);
+    const toNode = wf.nodes.find(n => n.id === c.toNodeId);
+    if (fromNode && toNode) {
+      // 查找匹配的端口
+      const fromPort = fromNode.ports.find(p => p.id === c.fromPortId && p.direction === 'out')
+        || fromNode.ports.find(p => p.direction === 'out');
+      const toPort = toNode.ports.find(p => p.id === c.toPortId && p.direction === 'in')
+        || toNode.ports.find(p => p.direction === 'in');
+
+      if (fromPort && toPort) {
+        wf.connections.push(createConnection(
+          fromNode.id, fromPort.id,
+          toNode.id, toPort.id,
+          c.type as PortType
+        ));
+      }
+    }
+  }
+
+  return wf;
 }
 
 // ==================== 演示工作流 ====================
@@ -829,8 +1293,8 @@ export function createDemoWorkflow(): Workflow {
     { id: n3, type: 'output-image', x: 620, y: 80, width: 180, height: 80, label: '结果图片', config: {}, ports: [makePort(n3, 'in', 1, '图片', 'image')] },
   );
   wf.connections.push(
-    { id: 'dc-1', fromNodeId: n1, fromPortId: `${n1}-output-1`, toNodeId: n2, toPortId: `${n2}-input-1`, type: 'data' },
-    { id: 'dc-2', fromNodeId: n2, fromPortId: `${n2}-output-1`, toNodeId: n3, toPortId: `${n3}-input-1`, type: 'data' },
+    { id: 'dc-1', fromNodeId: n1, fromPortId: `${n1}-output-1`, toNodeId: n2, toPortId: `${n2}-input-1`, type: 'prompt' },
+    { id: 'dc-2', fromNodeId: n2, fromPortId: `${n2}-output-1`, toNodeId: n3, toPortId: `${n3}-input-1`, type: 'image' },
   );
 
   // ─── 链2: 条件分支链 ───
@@ -838,15 +1302,15 @@ export function createDemoWorkflow(): Workflow {
   wf.nodes.push(
     { id: n4, type: 'input-image', x: 80, y: 260, width: 180, height: 80, label: '图片输入', config: { source: 'canvas' }, ports: [makePort(n4, 'out', 1, '图片', 'image')] },
     { id: n5, type: 'ai-analyze', x: 340, y: 240, width: 200, height: 100, label: '风格分析', config: { analysisType: 'style' }, ports: [makePort(n5, 'in', 1, '图片', 'image'), makePort(n5, 'out', 1, '分析结果', 'prompt')] },
-    { id: n6, type: 'condition-if', x: 620, y: 230, width: 160, height: 120, label: '风格=写实？', config: { condition: 'style === "realistic"' }, condition: 'style === "realistic"', ports: [makePort(n6, 'in', 1, '输入', 'any'), makePort(n6, 'out', 1, 'True', 'any'), makePort(n6, 'out', 2, 'False', 'any')] },
+    { id: n6, type: 'condition-if', x: 620, y: 230, width: 160, height: 120, label: '风格=写实？', config: { condition: 'style === "realistic"' }, condition: 'style === "realistic"', ports: [makePort(n6, 'in', 1, '输入', 'any'), makePort(n6, 'out', 1, 'True', 'condition'), makePort(n6, 'out', 2, 'False', 'condition')] },
     { id: n7, type: 'output-image', x: 880, y: 190, width: 180, height: 80, label: '写实增强', config: {}, ports: [makePort(n7, 'in', 1, '图片', 'image')] },
     { id: n8, type: 'output-image', x: 880, y: 320, width: 180, height: 80, label: '风格化处理', config: {}, ports: [makePort(n8, 'in', 1, '图片', 'image')] },
   );
   wf.connections.push(
-    { id: 'dc-3', fromNodeId: n4, fromPortId: `${n4}-output-1`, toNodeId: n5, toPortId: `${n5}-input-1`, type: 'data' },
+    { id: 'dc-3', fromNodeId: n4, fromPortId: `${n4}-output-1`, toNodeId: n5, toPortId: `${n5}-input-1`, type: 'image' },
     { id: 'dc-4', fromNodeId: n5, fromPortId: `${n5}-output-1`, toNodeId: n6, toPortId: `${n6}-input-1`, type: 'data' },
     { id: 'dc-5', fromNodeId: n6, fromPortId: `${n6}-output-1`, toNodeId: n7, toPortId: `${n7}-input-1`, type: 'condition' },
-    { id: 'dc-6', fromNodeId: n6, fromPortId: `${n6}-output-2`, toNodeId: n8, toPortId: `${n8}-input-1`, type: 'data' },
+    { id: 'dc-6', fromNodeId: n6, fromPortId: `${n6}-output-2`, toNodeId: n8, toPortId: `${n8}-input-1`, type: 'condition' },
   );
 
   // ─── 链3: 循环处理链 ───
@@ -859,10 +1323,10 @@ export function createDemoWorkflow(): Workflow {
     { id: n13, type: 'output-image', x: 1140, y: 500, width: 180, height: 80, label: '结果集合', config: {}, ports: [makePort(n13, 'in', 1, '图片', 'image')] },
   );
   wf.connections.push(
-    { id: 'dc-7', fromNodeId: n9, fromPortId: `${n9}-output-1`, toNodeId: n10, toPortId: `${n10}-input-1`, type: 'data' },
+    { id: 'dc-7', fromNodeId: n9, fromPortId: `${n9}-output-1`, toNodeId: n10, toPortId: `${n10}-input-1`, type: 'image' },
     { id: 'dc-8', fromNodeId: n10, fromPortId: `${n10}-output-1`, toNodeId: n11, toPortId: `${n11}-input-1`, type: 'data' },
     { id: 'dc-9', fromNodeId: n11, fromPortId: `${n11}-output-1`, toNodeId: n12, toPortId: `${n12}-input-1`, type: 'data' },
-    { id: 'dc-10', fromNodeId: n12, fromPortId: `${n12}-output-1`, toNodeId: n13, toPortId: `${n13}-input-1`, type: 'data' },
+    { id: 'dc-10', fromNodeId: n12, fromPortId: `${n12}-output-1`, toNodeId: n13, toPortId: `${n13}-input-1`, type: 'image' },
   );
 
   // ─── 链4: Agent自主链 ───
