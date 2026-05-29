@@ -497,3 +497,51 @@ body {
                 0 0 12px rgba(212, 175, 55, 0.1);
   }
 }
+
+/* 9. NodeEditor 双主题覆盖 - 单色模式 */
+.theme-monochrome .node-editor-root {
+  --ne-accent: #3b82f6;
+  --ne-accent-rgb: 59, 130, 246;
+  --ne-bg-primary: #ffffff;
+  --ne-bg-secondary: #f8fafc;
+  --ne-bg-tertiary: #f1f5f9;
+  --ne-bg-input: #f1f5f9;
+  --ne-bg-hover: #e2e8f0;
+  --ne-text-primary: #0f172a;
+  --ne-text-secondary: #475569;
+  --ne-text-muted: #94a3b8;
+  --ne-border: #e2e8f0;
+  --ne-border-strong: #cbd5e1;
+  --ne-shadow: rgba(0, 0, 0, 0.08);
+  --ne-canvas-bg: #f0f4f8;
+  --ne-node-bg: #ffffff;
+  --ne-node-border: #cbd5e1;
+  --ne-node-selected: #3b82f6;
+  --ne-port-stroke: #94a3b8;
+  --ne-scrollbar-thumb: #cbd5e1;
+  --ne-scrollbar-track: transparent;
+}
+
+.theme-gold .node-editor-root,
+.node-editor-root {
+  --ne-accent: #d4af37;
+  --ne-accent-rgb: 212, 175, 55;
+  --ne-bg-primary: #0e1117;
+  --ne-bg-secondary: #141820;
+  --ne-bg-tertiary: #1a1f2e;
+  --ne-bg-input: #0e1117;
+  --ne-bg-hover: #1c2333;
+  --ne-text-primary: #e2e8f0;
+  --ne-text-secondary: #94a3b8;
+  --ne-text-muted: #64748b;
+  --ne-border: rgba(255, 255, 255, 0.08);
+  --ne-border-strong: rgba(255, 255, 255, 0.15);
+  --ne-shadow: rgba(0, 0, 0, 0.4);
+  --ne-canvas-bg: #0a0e17;
+  --ne-node-bg: #1a1f2e;
+  --ne-node-border: rgba(212, 175, 55, 0.2);
+  --ne-node-selected: #d4af37;
+  --ne-port-stroke: #64748b;
+  --ne-scrollbar-thumb: #334155;
+  --ne-scrollbar-track: transparent;
+}

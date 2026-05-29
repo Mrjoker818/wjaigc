@@ -6,6 +6,8 @@ import {
   createEmptyWorkflow, getNodeCategory,
 } from '@/lib/workflow-engine';
 
+// ==================== 双主题 ====================
+
 // ==================== Mock 数据 ====================
 
 const MOCK_WORKFLOWS: Workflow[] = [
@@ -97,41 +99,41 @@ interface WorkflowCardProps {
   onToggleFav: (id: string) => void;
 }
 
-function WorkflowCard({ wf, onEdit, onRun, onToggleFav }: WorkflowCardProps) {
+function WorkflowCard({ wf, onEdit, onRun, onToggleFav, theme }: WorkflowCardProps & { theme: Record<string, string> }) {
   const statusColors: Record<string, string> = {
-    idle: '#7d8590', running: '#d4af37', completed: '#2ea043', failed: '#f85149', paused: '#d29922',
+    idle: theme.dimText, running: theme.accent, completed: '#2ea043', failed: '#f85149', paused: '#d29922',
   };
 
   return (
-    <div className="bg-[#1c2333] border border-[#30363d] rounded-lg p-4 hover:border-[#d4af37]/30 transition-colors group">
+    <div className="rounded-lg p-4 transition-colors group" style={{ backgroundColor: theme.cardBg, border: '1px solid ' + theme.border }}>
       <div className="flex items-start gap-3">
         <MiniFlowSVG count={Math.min(wf.stats?.totalRuns ? 5 : 3, 6)} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-medium text-[#e6edf3] truncate">{wf.name}</h3>
+            <h3 className="text-sm font-medium truncate" style={{ color: theme.primaryText }}>{wf.name}</h3>
             <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: `${statusColors[wf.status]}20`, color: statusColors[wf.status] }}>
               {wf.version}
             </span>
           </div>
-          <p className="text-xs text-[#7d8590] mt-1 line-clamp-1">{wf.description}</p>
-          <div className="flex items-center gap-3 mt-2 text-[10px] text-[#7d8590]">
+          <p className="text-xs mt-1 line-clamp-1" style={{ color: theme.dimText }}>{wf.description}</p>
+          <div className="flex items-center gap-3 mt-2 text-[10px]" style={{ color: theme.dimText }}>
             <span>{wf.stats?.totalRuns ?? 0} 次执行</span>
             <span>{wf.stats?.successRate ? `${Math.round(wf.stats.successRate * 100)}%` : '0%'} 成功</span>
             <span>{formatTime(wf.updatedAt)}</span>
           </div>
         </div>
       </div>
-      <div className="flex items-center gap-2 mt-3 pt-2 border-t border-[#30363d]">
+      <div className="flex items-center gap-2 mt-3 pt-2" style={{ borderTop: '1px solid ' + theme.border }}>
         <button onClick={() => onEdit(wf.id)}
-          className="px-2.5 py-1 rounded-md text-[10px] text-[#e6edf3] bg-[#1c2333] border border-[#30363d] hover:border-[#d4af37]/30 transition-colors">
+          className="px-2.5 py-1 rounded-md text-[10px] transition-colors" style={{ color: theme.primaryText, backgroundColor: theme.cardBg, border: '1px solid ' + theme.border }}>
           编辑
         </button>
         <button onClick={() => onRun(wf.id)}
-          className="px-2.5 py-1 rounded-md text-[10px] font-medium text-[#0e1117] bg-[#d4af37] hover:opacity-90 transition-opacity">
+          className="px-2.5 py-1 rounded-md text-[10px] font-medium hover:opacity-90 transition-opacity" style={{ color: theme.accentBtnText, backgroundColor: theme.accent }}>
           运行
         </button>
         <button onClick={() => onToggleFav(wf.id)}
-          className={`ml-auto p-1 rounded transition-colors ${wf.favorited ? 'text-[#d4af37]' : 'text-[#7d8590] hover:text-[#d4af37]'}`}>
+          className="ml-auto p-1 rounded transition-colors" style={{ color: wf.favorited ? theme.accent : theme.dimText }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill={wf.favorited ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
           </svg>
@@ -153,9 +155,52 @@ function formatTime(ts: number): string {
 interface WorkflowHubProps {
   onBack: () => void;
   onEditWorkflow: (wf: Workflow) => void;
+  themeStyle?: 'gold' | 'monochrome';
 }
 
-export default function WorkflowHub({ onBack, onEditWorkflow }: WorkflowHubProps) {
+const hubThemes: Record<string, Record<string, string>> = {
+  gold: {
+    pageBg: '#0a0e17',
+    headerBg: '#0e1117',
+    cardBg: '#1c2333',
+    cardBgHover: '#243044',
+    border: '#2d3a4d',
+    accent: '#d4af37',
+    accentDim: 'rgba(212,175,55,0.15)',
+    accentBtnText: '#0e1117',
+    primaryText: '#e2e8f0',
+    text: '#e2e8f0',
+    dimText: '#94a3b8',
+    textDim: '#94a3b8',
+    inputBg: '#0e1117',
+    categoryBg: '#141820',
+    categoryActive: '#1c2333',
+    badgeBg: 'rgba(212,175,55,0.2)',
+    statsText: '#64748b',
+  },
+  monochrome: {
+    pageBg: '#f8fafc',
+    headerBg: '#ffffff',
+    cardBg: '#ffffff',
+    cardBgHover: '#f1f5f9',
+    border: '#e2e8f0',
+    accent: '#3b82f6',
+    accentDim: 'rgba(59,130,246,0.1)',
+    accentBtnText: '#ffffff',
+    primaryText: '#0f172a',
+    text: '#0f172a',
+    dimText: '#475569',
+    textDim: '#475569',
+    inputBg: '#f1f5f9',
+    categoryBg: '#f1f5f9',
+    categoryActive: '#e0e7ff',
+    badgeBg: 'rgba(59,130,246,0.1)',
+    statsText: '#64748b',
+  },
+};
+
+export default function WorkflowHub({ onBack, onEditWorkflow, themeStyle = 'gold' }: WorkflowHubProps) {
+  const T = hubThemes[themeStyle];
   const [workflows, setWorkflows] = useState(MOCK_WORKFLOWS);
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState('全部');
@@ -196,22 +241,22 @@ export default function WorkflowHub({ onBack, onEditWorkflow }: WorkflowHubProps
   const totalFavs = workflows.filter(wf => wf.favorited).length;
 
   return (
-    <div className="fixed inset-0 bg-[#0e1117] z-[100] flex flex-col">
+    <div className="fixed inset-0 z-[100] flex flex-col node-editor-root" style={{ backgroundColor: T.bg }}>
       {/* 顶部导航 */}
-      <div className="h-12 bg-[#161b22] border-b border-[#30363d] flex items-center px-4 shrink-0">
+      <div className="h-12 flex items-center px-4 shrink-0" style={{ backgroundColor: T.headerBg, borderBottom: `1px solid ${T.border}` }}>
         <div className="flex items-center gap-2">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#d4af37" strokeWidth="2">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={T.accent} strokeWidth="2">
             <path d="M12 2L2 7l10 5 10-5-10-5ZM2 17l10 5 10-5M2 12l10 5 10-5" />
           </svg>
-          <span className="text-sm font-bold text-[#e6edf3]">无界AI</span>
-          <span className="text-xs text-[#7d8590]">Studio</span>
+          <span className="text-sm font-bold" style={{ color: T.primaryText }}>无界AI</span>
+          <span className="text-xs" style={{ color: T.dimText }}>Studio</span>
         </div>
         <div className="flex items-center gap-4 ml-8">
-          <button onClick={onBack} className="text-xs text-[#7d8590] hover:text-[#e6edf3] transition-colors">画布</button>
-          <span className="text-xs text-[#d4af37] font-medium">收藏与分享</span>
+          <button onClick={onBack} className="text-xs transition-colors hover:opacity-80" style={{ color: T.dimText }}>画布</button>
+          <span className="text-xs font-medium" style={{ color: T.accent }}>收藏与分享</span>
         </div>
         <div className="flex-1" />
-        <button className="p-1.5 rounded-md text-[#7d8590] hover:text-[#e6edf3] hover:bg-[#1c2333] transition-colors">
+        <button className="p-1.5 rounded-md transition-colors hover:opacity-80" style={{ color: T.dimText }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>
         </button>
       </div>
@@ -222,15 +267,15 @@ export default function WorkflowHub({ onBack, onEditWorkflow }: WorkflowHubProps
           {/* 标题区 */}
           <div className="flex items-end justify-between">
             <div>
-              <h1 className="text-xl font-bold text-[#e6edf3]">工作流中心</h1>
-              <p className="text-sm text-[#7d8590] mt-1">管理、分享和发现AI工作流模板</p>
+              <h1 className="text-xl font-bold" style={{ color: T.primaryText }}>工作流中心</h1>
+              <p className="text-sm mt-1" style={{ color: T.dimText }}>管理、分享和发现AI工作流模板</p>
             </div>
             <div className="flex items-center gap-2">
-              <button className="px-3 py-1.5 rounded-md text-xs text-[#e6edf3] border border-[#30363d] hover:border-[#d4af37]/30 transition-colors">
+              <button className="px-3 py-1.5 rounded-md text-xs transition-colors" style={{ color: T.primaryText, border: `1px solid ${T.border}` }}>
                 导入工作流
               </button>
               <button onClick={handleCreate}
-                className="px-4 py-1.5 rounded-md text-xs font-medium text-[#0e1117] bg-[#d4af37] hover:opacity-90 transition-opacity">
+                className="px-4 py-1.5 rounded-md text-xs font-medium hover:opacity-90 transition-opacity" style={{ color: T.accentBtnText, backgroundColor: T.accent }}>
                 新建工作流
               </button>
             </div>
@@ -243,12 +288,12 @@ export default function WorkflowHub({ onBack, onEditWorkflow }: WorkflowHubProps
               { label: '已收藏', value: totalFavs, icon: '⭐' },
               { label: '本周执行', value: totalRuns, icon: '🚀' },
             ].map(stat => (
-              <div key={stat.label} className="bg-[#1c2333] border border-[#30363d] rounded-lg p-4">
+              <div key={stat.label} className="rounded-lg p-4" style={{ backgroundColor: T.cardBg, border: `1px solid ${T.border}` }}>
                 <div className="flex items-center gap-2">
                   <span className="text-lg">{stat.icon}</span>
-                  <span className="text-xs text-[#7d8590]">{stat.label}</span>
+                  <span className="text-xs" style={{ color: T.dimText }}>{stat.label}</span>
                 </div>
-                <p className="text-2xl font-bold text-[#e6edf3] mt-1">{stat.value}</p>
+                <p className="text-2xl font-bold mt-1" style={{ color: T.primaryText }}>{stat.value}</p>
               </div>
             ))}
           </div>
@@ -256,13 +301,13 @@ export default function WorkflowHub({ onBack, onEditWorkflow }: WorkflowHubProps
           {/* 我的工作流 */}
           <section>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-medium text-[#e6edf3]">我的工作流</h2>
+              <h2 className="text-base font-medium" style={{ color: T.primaryText }}>我的工作流</h2>
               <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="搜索..."
-                className="w-40 bg-[#1c2333] border border-[#30363d] rounded-md px-2.5 py-1 text-xs text-[#e6edf3] placeholder:text-[#7d8590]/50 focus:outline-none focus:ring-1 focus:ring-[#d4af37]/50" />
+                className="w-40 rounded-md px-2.5 py-1 text-xs focus:outline-none" style={{ backgroundColor: T.cardBg, border: `1px solid ${T.border}`, color: T.primaryText }} />
             </div>
             <div className="grid grid-cols-2 gap-4">
               {filtered.map(wf => (
-                <WorkflowCard key={wf.id} wf={wf} onEdit={handleEdit} onRun={handleRun} onToggleFav={handleToggleFav} />
+                <WorkflowCard key={wf.id} wf={wf} onEdit={handleEdit} onRun={handleRun} onToggleFav={handleToggleFav} theme={T} />
               ))}
             </div>
           </section>
@@ -270,11 +315,12 @@ export default function WorkflowHub({ onBack, onEditWorkflow }: WorkflowHubProps
           {/* 工作流市场 */}
           <section>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-medium text-[#e6edf3]">工作流市场</h2>
+              <h2 className="text-base font-medium" style={{ color: T.primaryText }}>工作流市场</h2>
               <div className="flex items-center gap-1">
                 {['全部', 'AI修图', '批量处理', '创意生成', '自动化'].map(cat => (
                   <button key={cat} onClick={() => setActiveCategory(cat)}
-                    className={`px-2.5 py-1 rounded-md text-[10px] transition-colors ${activeCategory === cat ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'text-[#7d8590] hover:text-[#e6edf3]'}`}>
+                    className="px-2.5 py-1 rounded-md text-[10px] transition-colors"
+                    style={activeCategory === cat ? { backgroundColor: `${T.accent}20`, color: T.accent } : { color: T.dimText }}>
                     {cat}
                   </button>
                 ))}
@@ -282,14 +328,14 @@ export default function WorkflowHub({ onBack, onEditWorkflow }: WorkflowHubProps
             </div>
             <div className="grid grid-cols-3 gap-4">
               {MOCK_TEMPLATES.map(tpl => (
-                <div key={tpl.id} className="bg-[#1c2333] border border-[#30363d] rounded-lg overflow-hidden hover:border-[#d4af37]/30 transition-colors">
+                <div key={tpl.id} className="rounded-lg overflow-hidden transition-colors" style={{ backgroundColor: T.cardBg, border: `1px solid ${T.border}` }}>
                   {/* 封面 */}
-                  <div className="h-24 bg-gradient-to-br from-[#1c2333] to-[#0e1117] flex items-center justify-center">
+                  <div className="h-24 flex items-center justify-center" style={{ background: `linear-gradient(to bottom right, ${T.cardBg}, ${T.bg})` }}>
                     <MiniFlowSVG count={4} />
                   </div>
                   <div className="p-3">
-                    <h3 className="text-sm font-medium text-[#e6edf3]">{tpl.name}</h3>
-                    <p className="text-[10px] text-[#7d8590] mt-1">{tpl.desc}</p>
+                    <h3 className="text-sm font-medium" style={{ color: T.primaryText }}>{tpl.name}</h3>
+                    <p className="text-[10px] mt-1" style={{ color: T.dimText }}>{tpl.desc}</p>
                     <div className="flex items-center gap-2 mt-2">
                       {tpl.tags.map(tag => (
                         <span key={tag} className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: `${TAG_COLORS[tag]}20`, color: TAG_COLORS[tag] }}>
@@ -298,8 +344,8 @@ export default function WorkflowHub({ onBack, onEditWorkflow }: WorkflowHubProps
                       ))}
                     </div>
                     <div className="flex items-center justify-between mt-3">
-                      <span className="text-[10px] text-[#7d8590]">{tpl.users} 人使用</span>
-                      <button className="px-2.5 py-1 rounded-md text-[10px] text-[#e6edf3] border border-[#30363d] hover:border-[#d4af37]/30 transition-colors">
+                      <span className="text-[10px]" style={{ color: T.dimText }}>{tpl.users} 人使用</span>
+                      <button className="px-2.5 py-1 rounded-md text-[10px] transition-colors" style={{ color: T.primaryText, border: `1px solid ${T.border}` }}>
                         使用模板
                       </button>
                     </div>
@@ -311,35 +357,35 @@ export default function WorkflowHub({ onBack, onEditWorkflow }: WorkflowHubProps
 
           {/* 分享与导入 */}
           <section>
-            <h2 className="text-base font-medium text-[#e6edf3] mb-4">分享与导入</h2>
+            <h2 className="text-base font-medium mb-4" style={{ color: T.primaryText }}>分享与导入</h2>
             <div className="grid grid-cols-2 gap-4">
               {/* 分享 */}
-              <div className="bg-[#1c2333] border border-[#30363d] rounded-lg p-4">
-                <h3 className="text-sm font-medium text-[#e6edf3] mb-3">分享工作流</h3>
+              <div className="rounded-lg p-4" style={{ backgroundColor: T.cardBg, border: `1px solid ${T.border}` }}>
+                <h3 className="text-sm font-medium mb-3" style={{ color: T.primaryText }}>分享工作流</h3>
                 <div className="flex items-center gap-2">
                   <input type="text" readOnly value={shareUrl}
-                    className="flex-1 bg-[#0e1117] border border-[#30363d] rounded-md px-2.5 py-1.5 text-xs text-[#7d8590] focus:outline-none" />
+                    className="flex-1 rounded-md px-2.5 py-1.5 text-xs focus:outline-none" style={{ backgroundColor: T.inputBg, border: `1px solid ${T.border}`, color: T.dimText }} />
                   <button onClick={handleCopyLink}
-                    className="px-3 py-1.5 rounded-md text-xs text-[#0e1117] bg-[#d4af37] hover:opacity-90 transition-opacity shrink-0">
+                    className="px-3 py-1.5 rounded-md text-xs hover:opacity-90 transition-opacity shrink-0" style={{ color: T.accentBtnText, backgroundColor: T.accent }}>
                     {copied ? '已复制' : '复制'}
                   </button>
                 </div>
                 <div className="flex items-center gap-3 mt-3">
-                  <span className="text-xs text-[#7d8590]">权限:</span>
-                  <select className="bg-[#0e1117] border border-[#30363d] rounded-md px-2 py-1 text-xs text-[#e6edf3] focus:outline-none">
+                  <span className="text-xs" style={{ color: T.dimText }}>权限:</span>
+                  <select className="rounded-md px-2 py-1 text-xs focus:outline-none" style={{ backgroundColor: T.inputBg, border: `1px solid ${T.border}`, color: T.primaryText }}>
                     <option>仅查看</option>
                     <option>可编辑</option>
                   </select>
                 </div>
               </div>
               {/* 导入 */}
-              <div className="bg-[#1c2333] border border-[#30363d] rounded-lg p-4">
-                <h3 className="text-sm font-medium text-[#e6edf3] mb-3">导入工作流</h3>
-                <div className="border-2 border-dashed border-[#30363d] rounded-lg p-4 text-center hover:border-[#d4af37]/30 transition-colors cursor-pointer">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7d8590" strokeWidth="2" className="mx-auto">
+              <div className="rounded-lg p-4" style={{ backgroundColor: T.cardBg, border: `1px solid ${T.border}` }}>
+                <h3 className="text-sm font-medium mb-3" style={{ color: T.primaryText }}>导入工作流</h3>
+                <div className="border-2 border-dashed rounded-lg p-4 text-center transition-colors cursor-pointer" style={{ borderColor: T.border }}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={T.dimText} strokeWidth="2" className="mx-auto">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
                   </svg>
-                  <p className="text-xs text-[#7d8590] mt-2">拖拽 JSON 文件到这里</p>
+                  <p className="text-xs mt-2" style={{ color: T.dimText }}>拖拽 JSON 文件到这里</p>
                 </div>
               </div>
             </div>
@@ -347,27 +393,27 @@ export default function WorkflowHub({ onBack, onEditWorkflow }: WorkflowHubProps
 
           {/* 执行统计 */}
           <section>
-            <h2 className="text-base font-medium text-[#e6edf3] mb-4">执行统计</h2>
+            <h2 className="text-base font-medium mb-4" style={{ color: T.primaryText }}>执行统计</h2>
             <div className="grid grid-cols-3 gap-4">
               {[
-                { label: '总执行次数', value: '1,247', color: '#d4af37' },
+                { label: '总执行次数', value: '1,247', color: T.accent },
                 { label: '平均耗时', value: '3.2s', color: '#3b82f6' },
                 { label: '成功率', value: '94.7%', color: '#2ea043' },
               ].map(stat => (
-                <div key={stat.label} className="bg-[#1c2333] border border-[#30363d] rounded-lg p-4">
-                  <span className="text-xs text-[#7d8590]">{stat.label}</span>
+                <div key={stat.label} className="rounded-lg p-4" style={{ backgroundColor: T.cardBg, border: `1px solid ${T.border}` }}>
+                  <span className="text-xs" style={{ color: T.dimText }}>{stat.label}</span>
                   <p className="text-xl font-bold mt-1" style={{ color: stat.color }}>{stat.value}</p>
                 </div>
               ))}
             </div>
             {/* 简易7天柱状图 */}
-            <div className="mt-4 bg-[#1c2333] border border-[#30363d] rounded-lg p-4">
-              <p className="text-xs text-[#7d8590] mb-3">近7天执行量</p>
+            <div className="mt-4 rounded-lg p-4" style={{ backgroundColor: T.cardBg, border: `1px solid ${T.border}` }}>
+              <p className="text-xs mb-3" style={{ color: T.dimText }}>近7天执行量</p>
               <div className="flex items-end gap-2 h-20">
                 {[45, 62, 38, 78, 55, 89, 72].map((v, i) => (
                   <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                    <div className="w-full rounded-t" style={{ height: `${(v / 89) * 60}px`, backgroundColor: `${i === 5 ? '#d4af37' : '#d4af3740'}` }} />
-                    <span className="text-[9px] text-[#7d8590]">{['一', '二', '三', '四', '五', '六', '日'][i]}</span>
+                    <div className="w-full rounded-t" style={{ height: `${(v / 89) * 60}px`, backgroundColor: i === 5 ? T.accent : `${T.accent}40` }} />
+                    <span className="text-[9px]" style={{ color: T.dimText }}>{['一', '二', '三', '四', '五', '六', '日'][i]}</span>
                   </div>
                 ))}
               </div>

@@ -2053,11 +2053,12 @@ function CanvasApp() {
         onWorkflowChange={setNodeWorkflow}
         onOpenWorkflowHub={() => setAppMode('workflow-hub')}
         canvasImages={images.map(img => ({ id: img.id, url: img.url, description: img.prompt || '' }))}
+        themeStyle={themeStyle}
       />
     );
   }
   if (appMode === 'workflow-hub') {
-    return <WorkflowHub onBack={() => setAppMode('canvas')} onEditWorkflow={(wf) => { setNodeWorkflow(wf); setAppMode('node'); }} />;
+    return <WorkflowHub onBack={() => setAppMode('canvas')} onEditWorkflow={(wf) => { setNodeWorkflow(wf); setAppMode('node'); }} themeStyle={themeStyle} />;
   }
 
   return (
