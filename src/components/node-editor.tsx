@@ -18,7 +18,7 @@ import {
   Settings, Upload, X, Check, AlertCircle, Loader2, BoxSelect, Group,
   Search, ScanSearch, Eye, Pause, SkipForward, Workflow as WorkflowIcon, Timer,
   ArrowLeft, LayoutGrid, Sparkles, MessageCircle, Rotate3d, Box, ShoppingBag, Zap,
-  Copy, Clipboard, Package, Film, Bookmark, BookmarkPlus, GitCompare, Grid3X3, ArrowLeftFromLine,
+  Copy, Clipboard, Package, Film, Bookmark, BookmarkPlus, GitCompare, Grid3X3, ArrowLeftFromLine, ImagePlus,
 } from 'lucide-react';
 
 // ==================== 图标映射 ====================
@@ -2477,7 +2477,8 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
     : execResult?.status === 'failed' ? T.statusError
     : isRunning ? 'var(--ne-accent)' : 'transparent';
 
-  const hasImageOutput = execResult?.output?.imageUrl as string | undefined;
+  // 图片URL: 优先执行结果, 其次节点配置(input-image节点)
+  const hasImageOutput = (execResult?.output?.imageUrl || node.config?.imageUrl) as string | undefined;
   // 画布模式专用节点标记
   const isCanvasFeature = ['ai-font-design', 'ai-refine-engine', 'ai-brand-ecommerce', 'ai-segment', 'ai-multi-angle', 'ai-3d-model'].includes(node.type);
 
@@ -2529,10 +2530,36 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
     localStorage.setItem('wujie-node-presets', JSON.stringify(newList));
   };
 
+  // 拖拽上传处理 (input-image 节点)
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!isInputImage) return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  const handleDrop = async (e: React.DragEvent) => {
+    if (!isInputImage) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const file = e.dataTransfer.files?.[0];
+    if (!file || !file.type.startsWith('image/')) return;
+    const formData = new FormData();
+    formData.append('image', file);
+    try {
+      const res = await fetch('/api/save-image', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.url) {
+        onNodeFieldChange?.(node.id, 'imageUrl', data.url);
+        onNodeFieldChange?.(node.id, 'source', 'upload');
+      }
+    } catch (err) { console.error('拖拽上传失败:', err); }
+  };
+
   return (
     <g
       onMouseEnter={() => onHover(node.id)}
       onMouseLeave={() => onHover(null)}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
     >
       {/* 高亮光晕 */}
       {isHighlighted && !isSelected && (
@@ -2589,8 +2616,86 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
           <text x={node.x + 30} y={node.y + 23} fill={T.nodeTitle} fontSize={13} fontWeight={500} className="pointer-events-none" clipPath={`url(#title-clip-${node.id})`}>
             {node.label}
           </text>
-          {/* 图片缩略图 — 自适应内容展示，不裁切 */}
-          {hasImageOutput && (
+          {/* ===== input-image 节点: 图片预览 + 拖拽上传区 ===== */}
+          {isInputImage && (
+            <foreignObject x={node.x + 6} y={node.y + 32} width={node.width - 12} height={node.height - 38}>
+              <div className="w-full h-full flex flex-col gap-1" style={{ color: T.nodeTitle, fontSize: 11 }}>
+                {hasImageOutput ? (
+                  /* 有图片时显示缩略图 */
+                  <div
+                    className="flex-1 relative group cursor-pointer flex items-center justify-center rounded overflow-hidden"
+                    style={{ background: T.nodeBg === '#1a1a1a' ? '#252525' : '#f0f0f0' }}
+                    onClick={() => onPreviewImage(hasImageOutput)}
+                  >
+                    <img src={hasImageOutput} alt="" className="max-w-full max-h-full object-contain transition-opacity opacity-80 group-hover:opacity-100" />
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                      <span className="opacity-0 group-hover:opacity-100 text-white text-xs bg-black/50 px-2 py-0.5 rounded transition-opacity">预览</span>
+                    </div>
+                  </div>
+                ) : (
+                  /* 无图片时显示上传区 */
+                  <div
+                    className="flex-1 flex flex-col items-center justify-center gap-1 rounded border border-dashed cursor-pointer transition-colors"
+                    style={{
+                      borderColor: T.accent + '60',
+                      background: T.nodeBg === '#1a1a1a' ? '#222222' : '#f5f5f5',
+                      color: T.nodeBody === '#1a1a1a' ? '#888' : '#666'
+                    }}
+                    onClick={() => {
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.accept = 'image/*';
+                      input.onchange = async (e) => {
+                        const file = (e.target as HTMLInputElement).files?.[0];
+                        if (!file) return;
+                        const formData = new FormData();
+                        formData.append('image', file);
+                        try {
+                          const res = await fetch('/api/save-image', { method: 'POST', body: formData });
+                          const data = await res.json();
+                          if (data.url) {
+                            onNodeFieldChange?.(node.id, 'imageUrl', data.url);
+                            onNodeFieldChange?.(node.id, 'source', 'upload');
+                          }
+                        } catch (err) { console.error('上传失败:', err); }
+                      };
+                      input.click();
+                    }}
+                  >
+                    <ImagePlus size={20} style={{ color: T.accent, opacity: 0.6 }} />
+                    <span className="text-[10px]">点击上传图片</span>
+                    <span className="text-[9px] opacity-60">或拖拽到节点</span>
+                  </div>
+                )}
+                {/* URL 快捷输入 */}
+                {!hasImageOutput && (
+                  <input
+                    type="text"
+                    placeholder="粘贴图片 URL..."
+                    className="w-full px-2 py-0.5 rounded text-[10px] border outline-none transition-colors"
+                    style={{
+                      background: T.nodeBg === '#1a1a1a' ? '#252525' : '#fff',
+                      borderColor: T.cardBorder,
+                      color: T.nodeTitle,
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const url = (e.target as HTMLInputElement).value.trim();
+                        if (url) {
+                          onNodeFieldChange?.(node.id, 'imageUrl', url);
+                          onNodeFieldChange?.(node.id, 'source', 'url');
+                          (e.target as HTMLInputElement).value = '';
+                        }
+                      }
+                    }}
+                  />
+                )}
+              </div>
+            </foreignObject>
+          )}
+
+          {/* 图片缩略图 — 非input-image节点(如ai-generate)执行后显示结果 */}
+          {!isInputImage && hasImageOutput && (
             <foreignObject x={node.x + 8} y={node.y + 32} width={node.width - 16} height={node.height - 44}>
               <div className="w-full h-full relative group cursor-pointer flex items-center justify-center" onClick={() => onPreviewImage(hasImageOutput)}>
                 <img src={hasImageOutput} alt="" className="max-w-full max-h-full object-contain rounded opacity-70 group-hover:opacity-100 transition-opacity" />
