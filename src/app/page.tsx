@@ -628,8 +628,20 @@ function CanvasApp() {
 
       const data = await response.json();
 
+      // === 提交失败处理 ===
+      if (!data.success) {
+        console.error('[生成] API提交失败:', data.error, data);
+        setImages(prev => prev.filter(img => !img.isProcessingPlaceholder || !placeholderIds.includes(img.id)));
+        toast.error('生成失败', {
+          description: data.error || 'API提交失败，请检查模型和提示词后重试',
+          className: 'bg-[#141414] border border-red-900 text-white',
+          duration: 5000,
+        });
+        return;
+      }
+
       // === 直接返回模式：API 直接返回图片URL ===
-      if (data.success && data.mode === 'direct') {
+      if (data.mode === 'direct') {
         const { imageUrls, model, prompt: enhancedPrompt, originalPrompt, category, style } = data;
         
         for (let i = 0; i < imageUrls.length; i++) {
@@ -689,8 +701,8 @@ function CanvasApp() {
         return;
       }
 
-      // === 新模式：前端轮询 ===
-      if (data.success && data.mode === 'polling') {
+      // === 轮询模式：API返回任务ID，前端轮询结果 ===
+      if (data.mode === 'polling') {
         const { taskIds, estimatedTime, prompt: enhancedPrompt, originalPrompt, category, style } = data;
         
         // 自适应轮询间隔策略（优化版）
@@ -717,6 +729,7 @@ function CanvasApp() {
           while (!taskCompleted) {
             // 检查是否超时
             if (Date.now() - pollStartTime > maxPollTime) {
+              console.warn(`[生成轮询] 超时退出 taskId=${currentTaskId}, 耗时=${Math.round((Date.now() - pollStartTime) / 1000)}s, maxPollTime=${maxPollTime / 1000}s`);
               toast.error('生成超时', {
                 description: `${data.modelName} 生成时间过长（已等待${Math.round((Date.now() - pollStartTime) / 1000)}秒）。可能原因：API排队中、模型负载高、提示词复杂度高。请稍后重试或降低分辨率`,
                 className: 'bg-[#141414] border border-red-900 text-white',
@@ -737,9 +750,11 @@ function CanvasApp() {
               });
 
               const pollData = await pollResponse.json();
+              console.log(`[poll] #${pollCount} taskId=${currentTaskId} success=${pollData.success} status=${pollData.status} retryable=${pollData.retryable} progress=${pollData.progress} elapsed=${Math.round((Date.now()-pollStartTime)/1000)}s`);
 
               if (!pollData.success && !pollData.retryable) {
                 // 不可重试的错误
+                console.error(`[poll] taskId=${currentTaskId} NON-RETRYABLE error after ${Math.round((Date.now()-pollStartTime)/1000)}s, pollCount=${pollCount}`, pollData.error);
                 toast.error('生成失败', {
                   description: pollData.error || '任务执行失败',
                   className: 'bg-[#141414] border border-red-900 text-white',
@@ -748,14 +763,21 @@ function CanvasApp() {
                 break;
               }
 
-              // 可重试的错误（如模型返回文本而非图像），超过一定次数后放弃
-              if (!pollData.success && pollData.retryable && pollCount > 15) {
+              // 可重试的错误（如模型返回文本而非图像、API临时429/500等）
+              // 根据最大轮询时间动态计算最大重试次数（间隔按3s估算），确保不会过早放弃
+              if (!pollData.success && pollData.retryable && pollCount > Math.floor(maxPollTime / 3)) {
+                console.warn(`[生成] 可重试错误已达 ${pollCount} 次 (上限 ${Math.floor(maxPollTime / 3)})，最后错误: ${pollData.error}`);
                 toast.error('生成失败', {
-                  description: pollData.error || '多次重试后仍未生成图像',
+                  description: pollData.error || '多次重试后仍未生成图像，建议稍后在画布查看',
                   className: 'bg-[#141414] border border-red-900 text-white',
                 });
                 taskCompleted = true;
                 break;
+              }
+              // 可重试错误时短暂等待后继续（不消耗正常轮询间隔）
+              if (!pollData.success && pollData.retryable) {
+                await new Promise(r => setTimeout(r, 3000));
+                continue;
               }
 
               if (pollData.status === 'completed' && pollData.imageUrl) {
@@ -789,6 +811,7 @@ function CanvasApp() {
                 }
 
               } else if (pollData.status === 'failed') {
+                console.warn(`[poll] taskId=${currentTaskId} FAILED after ${Math.round((Date.now()-pollStartTime)/1000)}s, pollCount=${pollCount}`, pollData.error);
                 // 移除对应的占位框
                 const failedPhId = placeholderIds[taskIdx];
                 if (failedPhId) {
