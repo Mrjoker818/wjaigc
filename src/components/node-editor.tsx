@@ -688,15 +688,26 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
 
   const selectedNode = useMemo(() => wf.nodes.find(n => n.id === selectedNodeId) || null, [wf.nodes, selectedNodeId]);
 
-  // 同步外部workflow变化 (拖动期间跳过，避免循环更新导致闪烁)
+  // 避免循环更新：记录最近一次传出的 wf 引用，跳过自身回写
+  const lastEmittedRef = useRef<WorkflowData | null>(null);
+
+  // 同步外部workflow变化 (仅当外部真正改变时才同步，跳过自身回写)
   useEffect(() => {
-    if (workflow && !isDraggingRef.current) setWf(workflow);
+    if (!workflow) return;
+    // 如果是自身回写（引用相同），跳过
+    if (workflow === lastEmittedRef.current) return;
+    if (!isDraggingRef.current) setWf(workflow);
   }, [workflow]);
 
-  // 通知外部 (拖动期间跳过，mouseup时统一通知)
+  // 通知外部 (拖动期间跳过)
+  const onWorkflowChangeRef = useRef(onWorkflowChange);
+  onWorkflowChangeRef.current = onWorkflowChange;
   useEffect(() => {
-    if (!isDraggingRef.current) onWorkflowChange?.(wf);
-  }, [wf, onWorkflowChange]);
+    if (!isDraggingRef.current) {
+      lastEmittedRef.current = wf;
+      onWorkflowChangeRef.current?.(wf);
+    }
+  }, [wf]);
 
   // ─── 节点操作 ───
 
@@ -2287,6 +2298,9 @@ interface PropertyPanelProps {
 function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImageUpload, canvasImages }: PropertyPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({ basic: true, advanced: true, canvas: true });
+  // 文本输入本地缓存：避免每次按键触发 onUpdate → setWf → 重渲染 → 闪烁
+  const [localTextValues, setLocalTextValues] = useState<Record<string, string>>({});
+  const [focusedField, setFocusedField] = useState<string | null>(null);
   // P0: @图片引用弹窗状态 (移到PropertyPanel内部管理)
   const [mentionPopup, setMentionPopup] = useState<MentionPopup>({ visible: false, nodeId: '', fieldKey: '', filter: '', position: { top: 0, left: 0 } });
 
@@ -2326,10 +2340,33 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
   const toggleSection = (key: string) => setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
 
   const renderField = (field: PropertyField) => {
-    const value = node.config?.[field.key] ?? (node as unknown as Record<string, unknown>)[field.key] ?? field.defaultValue ?? '';
+    const externalValue = node.config?.[field.key] ?? (node as unknown as Record<string, unknown>)[field.key] ?? field.defaultValue ?? '';
+    // 聚焦时使用本地缓存值，避免每次按键触发 onUpdate → 重渲染 → 闪烁
+    const isFocused = focusedField === `${node.id}:${field.key}`;
+    const displayValue = isFocused ? (localTextValues[field.key] ?? String(externalValue)) : String(externalValue);
 
-    const onChange = (val: unknown) => {
-      onUpdate(node.id, { config: { [field.key]: val } });
+    const onChangeText = (val: string) => {
+      // 更新本地缓存
+      setLocalTextValues(prev => ({ ...prev, [field.key]: val }));
+    };
+
+    const onFocusField = () => {
+      setFocusedField(`${node.id}:${field.key}`);
+      setLocalTextValues(prev => ({ ...prev, [field.key]: String(externalValue) }));
+    };
+
+    const onBlurField = () => {
+      setFocusedField(null);
+      // 失焦时同步到父组件
+      const localVal = localTextValues[field.key];
+      if (localVal !== undefined && localVal !== String(externalValue)) {
+        onUpdate(node.id, { config: { [field.key]: localVal } });
+      }
+      setLocalTextValues(prev => {
+        const next = { ...prev };
+        delete next[field.key];
+        return next;
+      });
     };
 
     switch (field.type) {
@@ -2337,8 +2374,10 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
         return (
           <input
             type="text"
-            value={String(value)}
-            onChange={e => onChange(e.target.value)}
+            value={displayValue}
+            onChange={e => onChangeText(e.target.value)}
+            onFocus={onFocusField}
+            onBlur={onBlurField}
             placeholder={field.placeholder}
             className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50"
           />
@@ -2350,9 +2389,9 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
         return (
           <div className="relative">
             <textarea
-              value={String(value)}
+              value={displayValue}
               onChange={e => {
-                onChange(e.target.value);
+                onChangeText(e.target.value);
                 // P0: 检测@符号触发图片引用弹窗
                 if (isPromptField && canvasImages && canvasImages.length > 0) {
                   const text = e.target.value;
@@ -2374,6 +2413,8 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
                   }
                 }
               }}
+              onFocus={onFocusField}
+              onBlur={onBlurField}
               placeholder={isPromptField && canvasImages && canvasImages.length > 0 ? `${field.placeholder} (输入@引用画布图片)` : field.placeholder}
               rows={3}
               className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50 resize-y"
@@ -2394,15 +2435,19 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
                     <button
                       key={img.id}
                       className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-[var(--ne-accent)]/10 hover:text-[var(--ne-accent)] flex items-center gap-2 cursor-pointer"
-                      onClick={() => {
+                      onMouseDown={e => {
+                        // 用 onMouseDown 替代 onClick，在 blur 之前触发
+                        e.preventDefault();
                         // 在@位置插入图片引用
-                        const currentValue = String(value);
+                        const currentValue = displayValue;
                         const cursorPos = currentValue.length;
                         const beforeAt = currentValue.slice(0, cursorPos).replace(/@[^\s@]*$/, '');
                         const afterCursor = currentValue.slice(cursorPos);
                         const ref = `[img:${img.id}]`;
                         const newValue = beforeAt + ref + afterCursor;
-                        onChange(newValue);
+                        onChangeText(newValue);
+                        // 立即同步到父组件
+                        onUpdate(node.id, { config: { [field.key]: newValue } });
                         setMentionPopup(prev => ({ ...prev, visible: false }));
                       }}
                     >
@@ -2429,8 +2474,8 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
         return (
           <input
             type="number"
-            value={value !== undefined && value !== '' ? Number(value) : (field.defaultValue != null ? Number(field.defaultValue) : '')}
-            onChange={e => onChange(e.target.value === '' ? '' : Number(e.target.value))}
+            value={externalValue !== undefined && externalValue !== '' ? Number(externalValue) : (field.defaultValue != null ? Number(field.defaultValue) : '')}
+            onChange={e => onUpdate(node.id, { config: { [field.key]: e.target.value === '' ? '' : Number(e.target.value) } })}
             min={field.min}
             max={field.max}
             step={field.step || 1}
@@ -2442,8 +2487,8 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
       case 'select':
         return (
           <select
-            value={String(value)}
-            onChange={e => onChange(e.target.value)}
+            value={String(externalValue)}
+            onChange={e => onUpdate(node.id, { config: { [field.key]: e.target.value } })}
             className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-[var(--ne-accent)]/50"
           >
             {field.options?.map(opt => (
@@ -2453,13 +2498,13 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
         );
 
       case 'slider': {
-        const numVal = Number(value) || Number(field.defaultValue) || 0;
+        const numVal = Number(externalValue) || Number(field.defaultValue) || 0;
         return (
           <div className="flex items-center gap-2">
             <input
               type="range"
               value={numVal}
-              onChange={e => onChange(Number(e.target.value))}
+              onChange={e => onUpdate(node.id, { config: { [field.key]: Number(e.target.value) } })}
               min={field.min || 0}
               max={field.max || 100}
               step={field.step || 1}
@@ -2471,10 +2516,10 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
       }
 
       case 'toggle': {
-        const boolVal = Boolean(value) || value === 'true';
+        const boolVal = Boolean(externalValue) || externalValue === 'true';
         return (
           <button
-            onClick={() => onChange(!boolVal)}
+            onClick={() => onUpdate(node.id, { config: { [field.key]: !boolVal } })}
             className={`relative w-9 h-5 rounded-full transition-colors cursor-pointer ${boolVal ? 'bg-[var(--ne-accent)]' : 'bg-muted'}`}
           >
             <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${boolVal ? 'translate-x-4' : ''}`} />
@@ -2486,8 +2531,8 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
         const modelFilterType = field.modelFilter || 'image'; // 默认只显示图像模型
         return (
           <select
-            value={String(value || '')}
-            onChange={e => onChange(e.target.value)}
+            value={String(externalValue || '')}
+            onChange={e => onUpdate(node.id, { config: { [field.key]: e.target.value } })}
             disabled={modelsLoading}
             className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-[var(--ne-accent)]/50 disabled:opacity-50"
           >
@@ -2505,7 +2550,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
             {node.config?.imageUrl ? (
               <div className="relative group">
                 <img src={String(node.config.imageUrl)} alt="预览" className="w-full h-24 object-cover rounded border border-border" />
-                <button onClick={() => onChange('')} className="absolute top-1 right-1 p-0.5 bg-black/70 rounded text-muted-foreground hover:text-red-400 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onClick={() => onUpdate(node.id, { config: { [field.key]: '' } })} className="absolute top-1 right-1 p-0.5 bg-black/70 rounded text-muted-foreground hover:text-red-400 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity">
                   <X size={10} />
                 </button>
               </div>
@@ -2536,8 +2581,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
                           key={img.id}
                           className="w-full px-3 py-2 text-left text-xs text-foreground hover:bg-[var(--ne-accent)]/10 hover:text-[var(--ne-accent)] cursor-pointer truncate transition-colors"
                           onClick={() => {
-                            onChange(img.url);
-                            onUpdate(node.id, { config: { ...node.config, source: 'canvas' } });
+                            onUpdate(node.id, { config: { [field.key]: img.url, source: 'canvas' } });
                             const dropdown = document.querySelector('.group\\/canvas > div:last-child') as HTMLElement;
                             if (dropdown) dropdown.style.display = 'none';
                           }}
@@ -2557,8 +2601,8 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
             }} />
             <input
               type="text"
-              value={String(value || '')}
-              onChange={e => onChange(e.target.value)}
+              value={String(externalValue || '')}
+              onChange={e => onUpdate(node.id, { config: { [field.key]: e.target.value } })}
               placeholder="或输入图片URL"
               className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50"
             />
@@ -2569,8 +2613,8 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
         return (
           <input
             type="text"
-            value={String(value)}
-            onChange={e => onChange(e.target.value)}
+            value={String(externalValue)}
+            onChange={e => onUpdate(node.id, { config: { [field.key]: e.target.value } })}
             placeholder={field.placeholder}
             className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50"
           />
