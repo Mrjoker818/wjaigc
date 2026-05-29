@@ -5,9 +5,10 @@ import { getSessionUser } from '@/lib/server-auth';
 import { resolveCompatProfile, buildPollUrl, type ApiCompatProfile } from '@/lib/api-compatibility';
 import { postProcessAIRemoveBG } from '@/lib/remove-bg-postprocess';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
-import { getEditTask, deleteEditTask } from '@/lib/edit-task-store';
+import { getEditTask, deleteEditTask, setEditTask, failEditTask } from '@/lib/edit-task-store';
 import { isTaskCancelled, updateTaskProgress, getTaskInfo, releaseQueueSlot } from '@/lib/task-registry';
 import { translateApiError } from '@/lib/api-error-translate';
+import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getRefineResult } from '@/app/api/refine-engine/route';
 import { getBrandResult } from '@/app/api/brand-ecommerce/route';
 
@@ -94,6 +95,107 @@ export async function POST(request: NextRequest) {
           error: translateApiError(task.error || '处理失败'),
           retryable: false,
         }, { status: 200 });
+      }
+
+      // ★ 远程轮询支持：当 edit 任务包含 remotePollInfo 时，查询远程 API 获取状态
+      const remotePollInfo = task.remotePollInfo;
+
+      if (remotePollInfo && task.status === 'processing') {
+        try {
+          const { taskId: remoteTaskId, apiBaseUrl, apiKey, model: remoteModel } = remotePollInfo;
+          const pollUrl = `${apiBaseUrl}/tasks/${remoteTaskId}`;
+          const pollResp = await fetchWithV1Retry(
+            apiBaseUrl,
+            `/tasks/${remoteTaskId}`,
+            {
+              method: 'GET',
+              headers: { 'Authorization': `Bearer ${apiKey}` },
+              signal: AbortSignal.timeout(30000),
+            },
+          );
+
+          if (pollResp.ok) {
+            const pollData = await pollResp.json() as Record<string, unknown>;
+            const taskData = (pollData.data as Record<string, unknown>) || pollData;
+            const taskStatus = String(taskData.status || '').toLowerCase();
+
+            if (taskStatus === 'succeeded' || taskStatus === 'completed' || taskStatus === 'success') {
+              // 远程任务完成，提取图片
+              const images: Array<{ url: string }> = [];
+              const dataItems = taskData.images || taskData.results || taskData.output;
+              if (Array.isArray(dataItems)) {
+                for (const item of dataItems) {
+                  const url = item.url || item.image_url || item;
+                  if (typeof url === 'string' && url.startsWith('http')) {
+                    images.push({ url });
+                  }
+                }
+              } else if (typeof taskData.image_url === 'string') {
+                images.push({ url: taskData.image_url });
+              } else if (typeof taskData.url === 'string' && taskData.url.startsWith('http')) {
+                images.push({ url: taskData.url });
+              }
+
+              if (images.length > 0) {
+                updateTaskProgress(taskId, { status: 'completed', progress: 100 });
+                setEditTask(taskId, {
+                  id: taskId,
+                  status: 'completed',
+                  progress: 100,
+                  stage: '完成',
+                  result: {
+                    success: true,
+                    image: images[0],
+                    images,
+                    model: remoteModel,
+                    provider: apiBaseUrl || 'unknown',
+                    llmInstruction: remotePollInfo.prompt,
+                    editRegions: [],
+                    autoMaskGenerated: false,
+                  },
+                  createdAt: task.createdAt || Date.now(),
+                  completedAt: Date.now(),
+                });
+                return NextResponse.json({
+                  success: true,
+                  status: 'completed',
+                  stage: '完成',
+                  result: {
+                    success: true,
+                    image: images[0],
+                    images,
+                    model: remoteModel,
+                    provider: apiBaseUrl || 'unknown',
+                  },
+                }, { status: 200 });
+              }
+            } else if (taskStatus === 'failed' || taskStatus === 'error') {
+              const taskError = (taskData.error as Record<string, unknown>) || {};
+              const rawError = (typeof taskError === 'object' && taskError.message)
+                ? String(taskError.message)
+                : String(taskData.error_message || taskData.message || '远程任务失败');
+              failEditTask(taskId, translateApiError(rawError));
+              return NextResponse.json({
+                success: false,
+                status: 'failed',
+                error: translateApiError(rawError),
+                retryable: true,
+              }, { status: 200 });
+            } else {
+              // 仍在处理中
+              const progress = typeof taskData.progress === 'number' ? taskData.progress : task.progress;
+              return NextResponse.json({
+                success: true,
+                status: 'processing',
+                stage: task.stage,
+                progress: Math.max(progress, 15),
+              }, { status: 200 });
+            }
+          }
+        } catch (remoteErr) {
+          console.warn('[poll-task] edit remote poll error:', remoteErr instanceof Error ? remoteErr.message : remoteErr);
+          // 远程轮询失败，返回当前本地状态
+        }
       }
 
       return NextResponse.json({

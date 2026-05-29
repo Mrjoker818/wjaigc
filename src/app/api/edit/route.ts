@@ -8,6 +8,7 @@ import { getEditTask, deleteEditTask, setEditTask, updateTaskStage, failEditTask
 import type { EditTask } from '@/lib/edit-task-store';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 import { translateApiError } from '@/lib/api-error-translate';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, extractImageUrl } from '@/lib/api-compatibility';
 
 // 允许大请求体（base64图片可能很大，50MB限制）
 export const runtime = 'nodejs';
@@ -298,23 +299,24 @@ export async function POST(request: NextRequest) {
     // ========== 1. 获取 API 凭证（与 /api/generate 一致） ==========
     let effectiveApiKey = apiKey || '';
     let effectiveBaseUrl = '';
+    let imageProvider: ApiProvider | null = null; // 保留 provider 对象用于 API 兼容层
 
     if (!effectiveApiKey && providerId) {
       try {
-        const provider = await findProviderById(providerId);
-        if (provider?.apiKey) {
-          effectiveApiKey = provider.apiKey;
-          effectiveBaseUrl = normalizeApiBaseUrl(provider.baseUrl || '');
+        imageProvider = await findProviderById(providerId);
+        if (imageProvider?.apiKey) {
+          effectiveApiKey = imageProvider.apiKey;
+          effectiveBaseUrl = normalizeApiBaseUrl(imageProvider.baseUrl || '');
         }
       } catch { /* 忽略 */ }
     }
 
     if (!effectiveApiKey) {
       try {
-        const provider = await findProviderForModel(model);
-        if (provider?.apiKey) {
-          effectiveApiKey = provider.apiKey;
-          effectiveBaseUrl = normalizeApiBaseUrl(provider.baseUrl || '');
+        imageProvider = await findProviderForModel(model);
+        if (imageProvider?.apiKey) {
+          effectiveApiKey = imageProvider.apiKey;
+          effectiveBaseUrl = normalizeApiBaseUrl(imageProvider.baseUrl || '');
         }
       } catch { /* 忽略 */ }
     }
@@ -727,8 +729,199 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       }
     }
 
-    // 路径B: chat/completions 多模态端点（全兼容，适用于所有第三方代理）
-    // 所有模型（Gemini/OpenAI/其他）通过第三方代理时，统一走此路径
+    // 路径B-1: images/generations 端点（优先，适用于 editEndpoint=/images/generations 的提供商）
+    // 当提供商的兼容层配置 editEndpoint 为 /images/generations 时（如 APImart），
+    // 必须走此路径，因为 /chat/completions 不支持图片生成
+    const compatProfile = resolveCompatProfile(imageProvider);
+    if (compatProfile.editEndpoint === '/images/generations') {
+      try {
+        console.info(`[edit] Provider editEndpoint=/images/generations, using images/generations for model ${model}`);
+
+        // 先将原图保存为可访问的 URL（images/generations 需要 URL，不支持 base64）
+        let imageUrlForApi = `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
+        // 如果原图太大，先压缩
+        if (imageBuffer.length > 4 * 1024 * 1024) {
+          try {
+            const compressed = await sharp(imageBuffer)
+              .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
+              .jpeg({ quality: 85 })
+              .toBuffer();
+            imageUrlForApi = `data:image/jpeg;base64,${compressed.toString('base64')}`;
+          } catch { /* 压缩失败就用原图 */ }
+        }
+
+        // 构建 images/generations 请求体
+        const genRequestBody: Record<string, unknown> = {
+          model,
+          prompt: editInstruction,
+          size: size || '1024x1024',
+          quality: quality || 'standard',
+          n: 1,
+        };
+
+        // 使用 adjustRequestForProfile 自动调整请求体（size格式转换等）
+        const { body: adjustedBody, endpoint: resolvedEndpoint } = adjustRequestForProfile(genRequestBody, compatProfile, {
+          hasImage: true,
+          isEditEndpoint: true,
+        });
+
+        // 添加参考图：原图 + 参考图都作为 image_urls
+        const imageUrls: string[] = [imageUrlForApi];
+        if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
+          for (const refUrl of referenceImages) {
+            try {
+              const ref = await resolveImageToBuffer(refUrl);
+              let refDataUrl = `data:${ref.mimeType};base64,${ref.buffer.toString('base64')}`;
+              if (ref.buffer.length > 4 * 1024 * 1024) {
+                try {
+                  const compressed = await sharp(ref.buffer)
+                    .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
+                    .jpeg({ quality: 85 })
+                    .toBuffer();
+                  refDataUrl = `data:image/jpeg;base64,${compressed.toString('base64')}`;
+                } catch { /* 压缩失败就用原图 */ }
+              }
+              imageUrls.push(refDataUrl);
+            } catch { /* 参考图获取失败，跳过 */ }
+          }
+        }
+        adjustedBody.image_urls = imageUrls;
+
+        // 增强 prompt：确保 AI 将参考图作为编辑基础
+        if (imageUrls.length > 0) {
+          adjustedBody.prompt = `[IMAGE-TO-IMAGE MODE] You MUST use the provided reference image as the mandatory source/base for editing. Do NOT generate from scratch. ${String(adjustedBody.prompt || '')}`;
+        }
+
+        const genResponse = await fetchWithV1Retry(
+          effectiveBaseUrl,
+          resolvedEndpoint,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${effectiveApiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(adjustedBody),
+            signal: AbortSignal.timeout(120000),
+          },
+        );
+
+        if (genResponse.ok) {
+          const responseText = await genResponse.text();
+          let responseData: Record<string, unknown>;
+
+          // 处理 SSE 流式响应
+          if (responseText.trimStart().startsWith('data:')) {
+            responseData = parseSSEToJSON(responseText);
+          } else {
+            try { responseData = JSON.parse(responseText); } catch {
+              throw new Error('API 响应解析失败');
+            }
+          }
+
+          // 使用 parseResponseForProfile 解析响应
+          const parsed = parseResponseForProfile(responseData, compatProfile);
+
+          if (parsed.mode === 'direct' && parsed.directImageUrls.length > 0) {
+            // 直接返回图片 URL
+            const images: Array<{ url: string; revisedPrompt: string }> = parsed.directImageUrls.map(url => ({
+              url,
+              revisedPrompt: effectivePrompt,
+            }));
+
+            // count > 1 时额外并行生成
+            if (count > 1) {
+              const extraPromises = Array.from({ length: count - 1 }, () =>
+                fetchWithV1Retry(effectiveBaseUrl, resolvedEndpoint, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${effectiveApiKey}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({ ...adjustedBody, n: 1 }),
+                  signal: AbortSignal.timeout(120000),
+                })
+                .then(async r => {
+                  if (!r.ok) return null;
+                  const t = await r.text();
+                  let d: Record<string, unknown>;
+                  if (t.trimStart().startsWith('data:')) d = parseSSEToJSON(t);
+                  else try { d = JSON.parse(t); } catch { return null; }
+                  const p = parseResponseForProfile(d, compatProfile);
+                  return p.mode === 'direct' && p.directImageUrls[0]
+                    ? { url: p.directImageUrls[0], revisedPrompt: effectivePrompt }
+                    : null;
+                })
+                .catch(() => null)
+              );
+              const extraResults = await Promise.all(extraPromises);
+              for (const r of extraResults) { if (r) images.push(r); }
+            }
+
+            updateTaskProgress(taskId, { status: 'completed', progress: 100 });
+            setEditTask(taskId, {
+              id: taskId,
+              status: 'completed',
+              progress: 100,
+              stage: '完成',
+              result: {
+                success: true,
+                image: images[0],
+                images,
+                model,
+                provider: effectiveBaseUrl || 'unknown',
+                llmInstruction,
+                editRegions: llmEditRegions,
+                autoMaskGenerated: llmEditRegions.length > 0,
+              },
+              createdAt: getEditTask(taskId)?.createdAt || Date.now(),
+              completedAt: Date.now(),
+            });
+            return; // 成功，退出
+          }
+
+          if (parsed.mode === 'polling' && parsed.taskIds.length > 0) {
+            // 异步轮询模式：将 taskIds 存储到任务中，由 poll-task 路由处理
+            const remoteTaskId = parsed.taskIds[0];
+            console.info(`[edit] images/generations returned task_id: ${remoteTaskId}, delegating to poll-task`);
+
+            // 将远程 taskId 写入 editTask，让 /api/poll-task 的远程轮询逻辑接管
+            updateTaskProgress(taskId, { status: 'processing', progress: 10, label: '已提交，等待生成' });
+            setEditTask(taskId, {
+              id: taskId,
+              status: 'processing',
+              progress: 10,
+              stage: '已提交',
+              result: undefined,
+              createdAt: getEditTask(taskId)?.createdAt || Date.now(),
+              // 附加远程轮询信息
+              remotePollInfo: {
+                taskId: remoteTaskId,
+                apiBaseUrl: effectiveBaseUrl,
+                apiKey: effectiveApiKey,
+                model,
+                prompt: effectivePrompt,
+                allTaskIds: parsed.taskIds,
+                compatProfile,
+              },
+            } as EditTask);
+            return; // 轮询将由前端驱动
+          }
+
+          // 响应中既没有图片也没有 task_id
+          console.warn('[edit] images/generations response has no images or task_ids, falling back to chat/completions');
+        } else {
+          // images/generations 失败，记录日志后回退到 chat/completions
+          const errText = await genResponse.text().catch(() => '');
+          console.warn(`[edit] images/generations failed (${genResponse.status}): ${errText.substring(0, 200)}, falling back to chat/completions`);
+        }
+      } catch (genErr) {
+        console.warn('[edit] images/generations error, falling back to chat/completions:', genErr instanceof Error ? genErr.message : genErr);
+      }
+    }
+
+    // 路径B: chat/completions 多模态端点（兜底，适用于支持图片输出的 LLM）
+    // 仅在 images/generations 不可用或失败时使用
     const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
 
     // 主图

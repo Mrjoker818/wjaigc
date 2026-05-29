@@ -233,6 +233,17 @@ async function executeWorkflow(
       }
 
       // 构建执行请求
+      if (node.type === 'ai-generate') {
+        console.log('[workflow-execute] ai-generate inputs:', JSON.stringify(inputs));
+        console.log('[workflow-execute] ai-generate node.config:', JSON.stringify(node.config));
+        // 找出所有连到此节点的连线
+        const incomingConns = connections.filter(c => c.toNodeId === node.id);
+        console.log('[workflow-execute] ai-generate incoming connections:', JSON.stringify(incomingConns));
+        for (const c of incomingConns) {
+          const upResult = resultMap.get(c.fromNodeId);
+          console.log(`[workflow-execute] upstream ${c.fromNodeId} result:`, JSON.stringify(upResult?.output));
+        }
+      }
       const req = buildNodeExecutionRequest(node, inputs);
 
       // P1: 对请求中的提示词字段应用循环变量替换
@@ -249,9 +260,13 @@ async function executeWorkflow(
       // 逻辑节点/输出节点不需要外部API调用
       if (!req) {
         const outputData: Record<string, unknown> = { ...inputs, _type: node.type };
-        // input-text 节点: text → prompt 映射，供下游节点读取
-        if (node.type === 'input-text' && outputData.text && !outputData.prompt) {
-          outputData.prompt = outputData.text;
+        // input-text 节点: text/contentEditable → prompt 映射，供下游节点读取
+        if (node.type === 'input-text') {
+          const textValue = outputData.textContent || outputData.text;
+          if (textValue && !outputData.prompt) {
+            outputData.prompt = textValue;
+            outputData.text = textValue;
+          }
         }
         // input-image 节点: 确保有 imageUrl
         if (node.type === 'input-image' && !outputData.imageUrl && node.config.imageUrl) {

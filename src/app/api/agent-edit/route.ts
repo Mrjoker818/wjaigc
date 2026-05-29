@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature, findProviderById } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
 import { executeAgentLoop, getToolsForLLM, type AgentContext, type AgentResult } from '@/lib/agent-engine';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { translateApiError } from '@/lib/api-error-translate';
@@ -447,10 +448,12 @@ async function performImageEdit(
     return { success: false, error: '图像提供商配置不完整' };
   }
 
-  // 判断是否使用 OpenAI 格式（支持 edit + mask）
-  const isOpenAI = baseUrl.includes('openai') || baseUrl.includes('api.openai');
+  // 使用 API 兼容层确定正确的端点
+  const profile = resolveCompatProfile(provider);
+  const resolvedEndpoint = profile.editEndpoint || '/images/edits';
 
-  if (isOpenAI) {
+  // Path A: 支持 /images/edits 端点的提供商（OpenAI 官方等）
+  if (resolvedEndpoint === '/images/edits') {
     // OpenAI images/edits 路径
     const headers: Record<string, string> = {
       'Authorization': `Bearer ${apiKey}`,
@@ -498,6 +501,123 @@ async function performImageEdit(
     }
 
     return { success: false, error: 'OpenAI 未返回图片' };
+  }
+
+  // Path B: /images/generations 端点（APImart 等兼容 API）
+  if (resolvedEndpoint === '/images/generations') {
+    try {
+      // 解析图片为 base64
+      let imageBase64 = '';
+      let imageMimeType = 'image/png';
+      if (imageUrl.startsWith('data:')) {
+        const commaIdx = imageUrl.indexOf(',');
+        const header = imageUrl.substring(0, commaIdx);
+        const mimeMatch = header.match(/data:([^;]+)/);
+        imageMimeType = mimeMatch?.[1] || 'image/png';
+        imageBase64 = imageUrl.substring(commaIdx + 1);
+      } else {
+        const imgResp = await fetch(imageUrl.startsWith('/') ? `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}` : imageUrl, {
+          signal: AbortSignal.timeout(30000),
+        });
+        if (!imgResp.ok) return { success: false, error: `无法下载图片: ${imgResp.status}` };
+        const imgBuffer = Buffer.from(await imgResp.arrayBuffer());
+        imageBase64 = imgBuffer.toString('base64');
+        imageMimeType = imgResp.headers.get('content-type') || 'image/png';
+      }
+
+      // 构建 images/generations 请求体
+      const { body: genBody, endpoint: _resolvedEp } = adjustRequestForProfile(
+        {
+          model: imageModel,
+          prompt: editPrompt,
+          n: 1,
+          size: '1024x1024',
+          image_urls: [`data:${imageMimeType};base64,${imageBase64}`],
+        },
+        profile,
+        { hasImage: true, isEditEndpoint: false }
+      );
+
+      const genHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      };
+
+      const genResp = await fetchWithV1Retry(baseUrl, '/images/generations', {
+        method: 'POST',
+        headers: genHeaders,
+        body: JSON.stringify(genBody),
+        signal: AbortSignal.timeout(120000),
+      });
+
+      if (!genResp.ok) {
+        const errText = await genResp.text().catch(() => '');
+        const parsed = translateApiError(`编辑请求失败 (${genResp.status}): ${errText.slice(0, 200)}`);
+        return { success: false, error: parsed };
+      }
+
+      // 解析响应 JSON
+      const genData = await genResp.json() as Record<string, unknown>;
+      const parsedResult = parseResponseForProfile(genData, profile);
+
+      if (parsedResult.mode === 'polling' && parsedResult.taskIds.length > 0) {
+        // 异步任务 - 轮询等待结果
+        const remoteTaskId = parsedResult.taskIds[0];
+        let pollAttempts = 0;
+        const maxPollAttempts = 60;
+        const pollInterval = 5000;
+        const pollUrl = (profile.pollPathTemplate || '/tasks/{taskId}').replace('{taskId}', remoteTaskId);
+
+        while (pollAttempts < maxPollAttempts) {
+          await new Promise(r => setTimeout(r, pollInterval));
+          pollAttempts++;
+
+          const pollResp = await fetchWithV1Retry(baseUrl, pollUrl, {
+            headers: { 'Authorization': `Bearer ${apiKey}` },
+            signal: AbortSignal.timeout(30000),
+          });
+
+          if (!pollResp.ok) continue;
+
+          const pollData = await pollResp.json() as Record<string, unknown>;
+          const status = String(pollData.status || '').toLowerCase();
+
+          if (status === 'completed' || status === 'success' || status === 'succeeded') {
+            const resultsRaw = pollData.results || pollData.images || pollData.data;
+            if (Array.isArray(resultsRaw) && resultsRaw.length > 0) {
+              const first = resultsRaw[0] as Record<string, unknown>;
+              const resultUrl = String(first.url || first.b64_json || '');
+              if (resultUrl) return { success: true, imageUrl: resultUrl.startsWith('data:') ? resultUrl : resultUrl };
+            } else if (resultsRaw && typeof resultsRaw === 'object' && !Array.isArray(resultsRaw)) {
+              const dataObj = resultsRaw as Record<string, unknown>;
+              const imagesArr = dataObj.images || dataObj.results;
+              if (Array.isArray(imagesArr) && imagesArr.length > 0) {
+                const first = imagesArr[0] as Record<string, unknown>;
+                const resultUrl = String(first.url || first.b64_json || '');
+                if (resultUrl) return { success: true, imageUrl: resultUrl.startsWith('data:') ? resultUrl : resultUrl };
+              }
+            }
+            break;
+          }
+
+          if (status === 'failed' || status === 'error') {
+            const errMsg = String((pollData.error as Record<string, unknown>)?.message || pollData.message || '远程任务失败');
+            return { success: false, error: translateApiError(errMsg) };
+          }
+        }
+
+        return { success: false, error: '编辑任务轮询超时' };
+      }
+
+      // 直接返回结果
+      if (parsedResult.directImageUrls.length > 0) {
+        return { success: true, imageUrl: parsedResult.directImageUrls[0] };
+      }
+
+      return { success: false, error: '模型未返回编辑后的图片' };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? translateApiError(err.message) : '编辑请求失败' };
+    }
   }
 
   // 非 OpenAI: 使用 chat/completions + 图片输入 (Gemini / 兼容 API)

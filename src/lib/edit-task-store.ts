@@ -14,6 +14,15 @@ export interface EditTask {
   result?: Record<string, unknown>;
   createdAt: number;
   completedAt?: number;
+  /** 远程轮询信息（当 edit 走 /images/generations 异步模式时） */
+  remotePollInfo?: {
+    taskId: string;
+    apiBaseUrl: string;
+    apiKey: string;
+    model: string;
+    prompt: string;
+    allTaskIds: string[];
+  };
 }
 
 const MAX_EDIT_TASKS = 100;
