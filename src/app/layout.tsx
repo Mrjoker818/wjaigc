@@ -8,6 +8,9 @@ export const metadata: Metadata = {
   },
   description:
     '无界AI - 智能图片生成工具，基于无限画布的AI创作平台',
+  icons: {
+    icon: '/favicon.png',
+  },
 };
 
 export default function RootLayout({

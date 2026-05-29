@@ -2202,6 +2202,7 @@ function CanvasApp() {
             themeStyle === 'monochrome' ? 'bg-gradient-to-r from-blue-50/50 to-purple-50/30' : ''
           }`}>
             <div className="flex items-center gap-3">
+              <img src="/logo.png" alt="无界AI" className="w-7 h-7 object-contain rounded flex-shrink-0" />
               <div className="flex flex-col">
                 <div className="flex items-center gap-2">
                   <h1 className={`text-lg font-bold leading-tight tracking-tight ${

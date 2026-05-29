@@ -773,7 +773,10 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
           字
         </div>
         <div className="flex-1 min-w-0">
-          <h1 className="text-sm font-semibold" style={{ color: textColor }}>字境大师 Pro</h1>
+          <div className="flex items-center gap-1.5">
+            <img src="/logo.png" alt="" className="w-4 h-4 object-contain rounded" />
+            <h1 className="text-sm font-semibold" style={{ color: textColor }}>字境大师 Pro</h1>
+          </div>
           <p className="text-[11px] mt-0.5" style={{ color: subTextColor }}>中文标题字 / KV文字 / 封面字 / 文字Logo 设计器</p>
         </div>
         <div className="flex items-center gap-2">

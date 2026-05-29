@@ -1697,6 +1697,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages }: BrandFactory
         <div className={`${th.header} flex items-center gap-2 cursor-grab active:cursor-grabbing select-none relative ${isMinimized ? 'rounded-2xl border-b-0' : ''}`}
           onMouseDown={handleDragStart}>
           <GripVertical className="w-4 h-4 text-gray-500" />
+          <img src="/logo.png" alt="" className="w-4 h-4 object-contain rounded" />
           <Building2 className="w-4 h-4 text-[#d4af37]" />
           <span className={th.title + ' text-sm flex-1'}>品牌工厂</span>
           {currentProject && <span className="text-[10px] text-[#d4af37] bg-[#d4af37]/10 px-2 py-0.5 rounded">{currentProject.brandName}</span>}

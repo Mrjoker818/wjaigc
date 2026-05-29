@@ -5882,23 +5882,30 @@ export function InfiniteCanvas({
 
         {/* Collapsible toolbar - top left */}
         <div className="absolute top-3 left-3 z-50 group/toolbar">
-          {/* Collapsed: minimal icon dot */}
+          {/* Collapsed: logo icon */}
           <div className="group-hover/toolbar:hidden">
             <button
-              className={`flex items-center justify-center w-7 h-7 rounded-md transition-all ${
+              className={`flex items-center justify-center w-7 h-7 rounded-md transition-all overflow-hidden ${
                 isMonochrome
-                  ? 'bg-white/60 text-blue-500 hover:bg-white/80 hover:text-blue-700'
-                  : 'bg-[#181818]/80 text-[#666] hover:bg-[#252525] hover:text-[#aaa]'
+                  ? 'bg-white/60 hover:bg-white/80'
+                  : 'bg-[#181818]/80 hover:bg-[#252525]'
               }`}
               title="展开工具栏"
             >
-              <Wrench size={13} />
+              <img src="/logo.png" alt="" className="w-5 h-5 object-contain" />
             </button>
           </div>
           {/* Expanded: show all buttons */}
           <div className={`hidden group-hover/toolbar:flex flex-col gap-1 min-w-[130px] p-1.5 rounded-xl ${
             isMonochrome ? 'bg-white/95 border border-gray-100 shadow-lg' : 'bg-[#181818]/95'
           }`}>
+            {/* Logo header */}
+            <div className="flex items-center gap-2 px-2 py-1.5">
+              <img src="/logo.png" alt="无界AI" className="w-5 h-5 object-contain rounded" />
+              <span className={`text-xs font-bold ${isMonochrome ? 'text-gray-700' : 'text-[#ccc]'}`}>无界AI</span>
+            </div>
+            {/* Divider */}
+            <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-[#333]'}`} />
             {/* OMP Toggle */}
             <button
               onClick={() => {

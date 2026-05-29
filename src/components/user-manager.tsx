@@ -287,8 +287,8 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
       <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ background: isGold ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.9)', backdropFilter: 'blur(20px)' }}>
         <div className={`w-full max-w-md rounded-2xl overflow-hidden shadow-2xl ${isGold ? 'bg-[#111] border border-[#2a2a2a]' : 'bg-white border border-gray-200'}`}>
           <div className={`px-6 pt-6 pb-4 text-center ${isGold ? 'bg-gradient-to-b from-[#1a1a1a] to-[#111]' : 'bg-gradient-to-b from-gray-50 to-white'}`}>
-            <div className={`w-16 h-16 rounded-2xl mx-auto mb-3 flex items-center justify-center ${isGold ? 'bg-gradient-to-br from-[#d4af37] to-[#b8860b]' : 'bg-gradient-to-br from-gray-700 to-gray-900'}`}>
-              <UserIcon className="w-8 h-8 text-white" />
+            <div className="w-16 h-16 mx-auto mb-3">
+              <img src="/logo.png" alt="无界AI" className="w-full h-full object-contain rounded-2xl" />
             </div>
             <h2 className={`text-xl font-bold ${isGold ? 'text-white' : 'text-gray-900'}`}>无界AI 登录</h2>
             <p className={`text-sm mt-1 ${isGold ? 'text-[#888]' : 'text-gray-500'}`}>请选择用户并输入密码</p>

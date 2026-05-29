@@ -247,9 +247,7 @@ export default function WorkflowHub({ onBack, onEditWorkflow, themeStyle = 'gold
       {/* 顶部导航 */}
       <div className="h-12 flex items-center px-4 shrink-0" style={{ backgroundColor: T.headerBg, borderBottom: `1px solid ${T.border}` }}>
         <div className="flex items-center gap-2">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={T.accent} strokeWidth="2">
-            <path d="M12 2L2 7l10 5 10-5-10-5ZM2 17l10 5 10-5M2 12l10 5 10-5" />
-          </svg>
+          <img src="/logo.png" alt="无界AI" className="w-5 h-5 object-contain rounded" />
           <span className="text-sm font-bold" style={{ color: T.primaryText }}>无界AI</span>
           <span className="text-xs" style={{ color: T.dimText }}>Studio</span>
         </div>

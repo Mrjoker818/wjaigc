@@ -714,9 +714,12 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 backdrop-blur-xl p-4">
       <div className={`w-full max-w-5xl max-h-[88vh] rounded-2xl border shadow-2xl flex flex-col overflow-hidden ${panelClass}`}>
         <div className={`px-5 py-4 border-b flex items-center justify-between ${isGold ? 'border-[#2a2a2a]' : 'border-gray-100'}`}>
-          <div>
-            <h2 className="text-lg font-semibold">管理员系统</h2>
-            <p className={`text-xs mt-1 ${isGold ? 'text-[#777]' : 'text-gray-500'}`}>用户、权限、模型 API 与项目数据统一管理</p>
+          <div className="flex items-center gap-3">
+            <img src="/logo.png" alt="无界AI" className="w-7 h-7 object-contain rounded flex-shrink-0" />
+            <div>
+              <h2 className="text-lg font-semibold">管理员系统</h2>
+              <p className={`text-xs mt-1 ${isGold ? 'text-[#777]' : 'text-gray-500'}`}>用户、权限、模型 API 与项目数据统一管理</p>
+            </div>
           </div>
           <button aria-label="关闭管理员系统" onClick={onClose} className={`p-2 rounded-lg ${isGold ? 'hover:bg-[#222] text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`}>
             <X className="w-4 h-4" />

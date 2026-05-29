@@ -1833,6 +1833,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
         {/* 顶部工具栏 */}
         <div className="absolute top-3 left-3 right-3 z-20 flex items-center justify-between">
           <div className="flex items-center gap-2">
+            <img src="/logo.png" alt="无界AI" className="w-5 h-5 object-contain rounded flex-shrink-0" />
             {onBack && (
               <button onClick={onBack} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer" title="返回画布">
                 <ArrowLeft size={16} />
