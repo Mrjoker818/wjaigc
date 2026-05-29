@@ -336,7 +336,7 @@ export function createWorkflowNode(type: NodeType, x: number, y: number, label?:
   const defaultLabel = label || NODE_TYPE_LABELS[type];
 
   const isCondition = type.startsWith('condition-');
-  const width = isCondition ? 110 : 180;
+  const width = isCondition ? 120 : 220;
   // 动态计算高度：根据端口数量确保端口之间有足够间距
   const ports = createDefaultPorts(type);
   const maxInPorts = Math.max(1, ports.filter(p => p.direction === 'in').length);

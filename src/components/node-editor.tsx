@@ -1034,7 +1034,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
             <button
               key={tab.key}
               onClick={() => setSidebarTab(tab.key)}
-              className={`flex-1 py-2 text-[10px] font-medium transition-colors cursor-pointer min-w-0 ${sidebarTab === tab.key ? 'text-[#d4af37] border-b-2 border-[#d4af37]' : 'text-gray-500 hover:text-gray-300'}`}
+              className={`flex-1 py-2.5 text-[11px] font-medium transition-colors cursor-pointer min-w-0 ${sidebarTab === tab.key ? 'text-[#d4af37] border-b-2 border-[#d4af37]' : 'text-gray-500 hover:text-gray-300'}`}
             >
               {tab.label}
             </button>
@@ -1051,13 +1051,13 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   placeholder="搜索节点..."
-                  className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-7 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
+                  className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-7 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
                 />
               </div>
             </div>
             {Object.entries(groupedTemplates).map(([cat, templates]) => (
               <div key={cat} className="mb-2">
-                <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-500 font-semibold flex items-center gap-1.5">
+                <div className="px-3 py-2 text-[11px] uppercase tracking-wider text-gray-500 font-semibold flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full" style={{ backgroundColor: NODE_TYPE_COLORS[cat as NodeCategory] }} />
                   {NODE_CATEGORY_LABELS[cat as NodeCategory]}
                 </div>
@@ -1065,16 +1065,16 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                   <button
                     key={t.type}
                     onClick={() => handleAddNode(t.type)}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-white/5 transition-colors cursor-pointer group"
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-white/5 transition-colors cursor-pointer group"
                   >
                     <span className="text-gray-400 group-hover:text-[#d4af37] transition-colors">
-                      {getNodeIcon(t.type, 14)}
+                      {getNodeIcon(t.type, 16)}
                     </span>
                     <div className="flex-1 text-left">
-                      <div className="text-gray-300 group-hover:text-white">{t.label}</div>
-                      <div className="text-[10px] text-gray-600">{t.desc}</div>
+                      <div className="text-gray-300 group-hover:text-white text-[13px]">{t.label}</div>
+                      <div className="text-[11px] text-gray-600">{t.desc}</div>
                     </div>
-                    <Plus size={12} className="text-gray-600 group-hover:text-[#d4af37] opacity-0 group-hover:opacity-100 transition-all" />
+                    <Plus size={14} className="text-gray-600 group-hover:text-[#d4af37] opacity-0 group-hover:opacity-100 transition-all" />
                   </button>
                 ))}
               </div>
@@ -1100,36 +1100,36 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
           <div className="flex-1 flex flex-col p-3">
             <div className="mb-3">
               <div className="flex items-center gap-1.5 mb-2">
-                <Sparkles size={14} className="text-[#d4af37]" />
-                <span className="text-xs font-semibold text-[#d4af37]">AI 自然语言建图</span>
+                <Sparkles size={16} className="text-[#d4af37]" />
+                <span className="text-sm font-semibold text-[#d4af37]">AI 自然语言建图</span>
               </div>
-              <p className="text-[10px] text-gray-500 mb-2">描述你想要的图像处理需求，AI自动生成完整工作流</p>
+              <p className="text-sm text-gray-500 mb-3">描述你想要的图像处理需求，AI自动生成完整工作流</p>
             </div>
             <textarea
               value={aiBuildInput}
               onChange={e => setAiBuildInput(e.target.value)}
               placeholder={"例如:\n帮我生成一张赛博朋克风格的城市夜景图，然后去除背景，再放大2倍\n\n或者:\n我要给产品图做商业精修，影棚灯光，白色背景，然后导出PNG"}
-              className="flex-1 min-h-[140px] bg-[#1a1a1a] border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50 resize-none"
+              className="flex-1 min-h-[140px] bg-[#1a1a1a] border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50 resize-none"
               onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAIBuild(); }}
             />
             {aiBuildError && (
-              <div className="mt-2 text-[10px] text-red-400 bg-red-900/20 rounded px-2 py-1">{aiBuildError}</div>
+              <div className="mt-2 text-sm text-red-400 bg-red-900/20 rounded px-2 py-1">{aiBuildError}</div>
             )}
             <button
               onClick={handleAIBuild}
               disabled={aiBuildLoading || !aiBuildInput.trim()}
-              className="mt-2 w-full py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed bg-[#d4af37]/20 text-[#d4af37] hover:bg-[#d4af37]/30"
+              className="mt-3 w-full py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed bg-[#d4af37]/20 text-[#d4af37] hover:bg-[#d4af37]/30"
             >
-              {aiBuildLoading ? <><Loader2 size={12} className="animate-spin" /> 生成中...</> : <><Sparkles size={12} /> 生成工作流</>}
+              {aiBuildLoading ? <><Loader2 size={14} className="animate-spin" /> 生成中...</> : <><Sparkles size={14} /> 生成工作流</>}
             </button>
-            <div className="mt-3 text-[10px] text-gray-600">
-              <p className="mb-1">快捷示例:</p>
+            <div className="mt-3 text-sm text-gray-600">
+              <p className="mb-1.5">快捷示例:</p>
               <div className="space-y-1">
                 {['生成产品精修图，影棚灯光', '去背景+放大2倍导出PNG', '字境大师生成书法字体Logo', '多角度生成产品四视图'].map(ex => (
                   <button
                     key={ex}
                     onClick={() => setAiBuildInput(ex)}
-                    className="block w-full text-left px-2 py-1 rounded bg-[#1a1a1a] hover:bg-white/5 text-gray-500 hover:text-gray-300 transition-colors cursor-pointer"
+                    className="block w-full text-left px-2.5 py-2 rounded bg-[#1a1a1a] hover:bg-white/5 text-gray-400 hover:text-gray-300 transition-colors cursor-pointer text-sm"
                   >
                     {ex}
                   </button>
@@ -1154,14 +1154,14 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                     <IconComp size={14} className="text-gray-500 group-hover:text-[#d4af37] transition-colors" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium text-gray-300 group-hover:text-white">{preset.name}</div>
-                    <div className="text-[10px] text-gray-600">{preset.description}</div>
+                    <div className="text-sm font-medium text-gray-300 group-hover:text-white">{preset.name}</div>
+                    <div className="text-xs text-gray-500">{preset.description}</div>
                     <div className="flex flex-wrap gap-1 mt-0.5">
                       {preset.tags.map(tag => (
-                        <span key={tag} className="text-[8px] px-1 py-0.5 rounded bg-[#1a1a1a] text-gray-500">{tag}</span>
+                        <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded bg-[#1a1a1a] text-gray-400">{tag}</span>
                       ))}
                     </div>
-                    <div className="text-[9px] text-gray-700 mt-0.5">{preset.nodes.length} 节点 · {preset.connections.length} 连线</div>
+                    <div className="text-[10px] text-gray-500 mt-1">{preset.nodes.length} 节点 · {preset.connections.length} 连线</div>
                   </div>
                 </button>
               );
@@ -1179,7 +1179,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                   value={promptSearch}
                   onChange={e => setPromptSearch(e.target.value)}
                   placeholder="搜索提示词..."
-                  className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-6 py-1 text-[10px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
+                  className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-6 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
                 />
               </div>
             </div>
@@ -1188,19 +1188,19 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 value={newSnippetText}
                 onChange={e => setNewSnippetText(e.target.value)}
                 placeholder="输入新提示词..."
-                className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-2 py-1 text-[10px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50 resize-none h-14"
+                className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-3 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50 resize-none h-14"
               />
               <div className="flex gap-1">
                 <input
                   value={newSnippetTags}
                   onChange={e => setNewSnippetTags(e.target.value)}
                   placeholder="标签(逗号分隔)"
-                  className="flex-1 bg-[#1a1a1a] border border-gray-700 rounded px-2 py-0.5 text-[10px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
+                  className="flex-1 bg-[#1a1a1a] border border-gray-700 rounded px-3 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
                 />
                 <select
                   value={newSnippetCategory}
                   onChange={e => setNewSnippetCategory(e.target.value)}
-                  className="bg-[#1a1a1a] border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 focus:outline-none"
+                  className="bg-[#1a1a1a] border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none"
                 >
                   <option value="通用">通用</option>
                   <option value="人物">人物</option>
@@ -1228,11 +1228,11 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 .filter(s => !promptSearch || s.text.toLowerCase().includes(promptSearch.toLowerCase()) || s.tags.some(t => t.toLowerCase().includes(promptSearch.toLowerCase())))
                 .map(snippet => (
                   <div key={snippet.id} className="px-2 py-1.5 border-b border-gray-800/50 hover:bg-white/5 group">
-                    <div className="text-[10px] text-gray-300 line-clamp-2">{snippet.text}</div>
+                    <div className="text-xs text-gray-300 line-clamp-2">{snippet.text}</div>
                     <div className="flex items-center gap-1 mt-0.5">
-                      <span className="text-[8px] px-1 py-0.5 rounded bg-[#1a1a1a] text-gray-500">{snippet.category}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#1a1a1a] text-gray-400">{snippet.category}</span>
                       {snippet.tags.map(t => (
-                        <span key={t} className="text-[8px] text-gray-600">#{t}</span>
+                        <span key={t} className="text-[10px] text-gray-400">#{t}</span>
                       ))}
                       <div className="flex-1" />
                       <button
@@ -1243,7 +1243,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                             handleNodeUpdate(node.id, { config: { text: currentText + (currentText ? ', ' : '') + snippet.text, prompt: currentText + (currentText ? ', ' : '') + snippet.text } });
                           }
                         }}
-                        className="text-[8px] text-[#d4af37] opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                        className="text-[10px] text-[#d4af37] opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                       >
                         填入
                       </button>
@@ -1255,7 +1255,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                             return next;
                           });
                         }}
-                        className="text-[8px] text-red-400 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                        className="text-[10px] text-red-400 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                       >
                         删除
                       </button>
@@ -1263,7 +1263,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                   </div>
                 ))}
               {promptSnippets.length === 0 && (
-                <div className="p-4 text-center text-[10px] text-gray-600">暂无保存的提示词<br />在上方输入框添加</div>
+                <div className="p-4 text-center text-xs text-gray-600">暂无保存的提示词<br />在上方输入框添加</div>
               )}
             </div>
           </div>
@@ -1291,7 +1291,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                   }
                 }
                 return upstreamNodes.length > 0 ? (
-                  <div className="text-[9px] px-2 py-1.5 rounded bg-[#d4af37]/10 text-[#d4af37]/80 border border-[#d4af37]/20">
+                  <div className="text-[10px] px-2 py-1.5 rounded bg-[#d4af37]/10 text-[#d4af37]/80 border border-[#d4af37]/20">
                     感知节点: [{selectedNode.type}] {selectedNode.label}
                     <div className="mt-1 text-[#d4af37]/60">
                       上游链路: {upstreamNodes.map(n => `[${n.type}]${n.label}`).join(' → ')} → [{selectedNode.type}]{selectedNode.label}
@@ -1304,7 +1304,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 );
               })()}
               {assistantMessages.length === 0 && (
-                <div className="text-center text-[10px] text-gray-600 py-8">
+                <div className="text-center text-xs text-gray-600 py-8">
                   <MessageCircle size={20} className="mx-auto mb-2 text-gray-700" />
                   工作流助手
                   <br />
@@ -1312,13 +1312,13 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 </div>
               )}
               {assistantMessages.map((msg, i) => (
-                <div key={i} className={`text-[10px] px-2 py-1.5 rounded ${msg.role === 'user' ? 'bg-[#1a1a1a] text-gray-300 ml-4' : 'bg-[#d4af37]/10 text-gray-300 mr-4'}`}>
-                  <div className="text-[8px] text-gray-600 mb-0.5">{msg.role === 'user' ? '你' : '助手'}</div>
+                <div key={i} className={`text-xs px-2 py-1.5 rounded ${msg.role === 'user' ? 'bg-[#1a1a1a] text-gray-300 ml-4' : 'bg-[#d4af37]/10 text-gray-300 mr-4'}`}>
+                  <div className="text-[10px] text-gray-400 mb-0.5">{msg.role === 'user' ? '你' : '助手'}</div>
                   {msg.content}
                 </div>
               ))}
               {assistantLoading && (
-                <div className="text-[10px] px-2 py-1.5 rounded bg-[#d4af37]/10 text-gray-400 mr-4">
+                <div className="text-xs px-2 py-1.5 rounded bg-[#d4af37]/10 text-gray-400 mr-4">
                   <Loader2 size={10} className="animate-spin inline mr-1" />思考中...
                 </div>
               )}
@@ -1329,7 +1329,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 onChange={e => setAssistantInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAssistantMessage(); } }}
                 placeholder="输入问题..."
-                className="flex-1 bg-[#1a1a1a] border border-gray-700 rounded px-2 py-1 text-[10px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
+                className="flex-1 bg-[#1a1a1a] border border-gray-700 rounded px-3 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
               />
               <button onClick={sendAssistantMessage} disabled={assistantLoading || !assistantInput.trim()} className="p-1 rounded bg-[#d4af37]/20 text-[#d4af37] hover:bg-[#d4af37]/30 transition-colors cursor-pointer disabled:opacity-30">
                 <Zap size={12} />
@@ -1345,27 +1345,27 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
               <div className="flex gap-1 mb-2">
                 {(['all', 'prompt', 'image', 'color'] as const).map(t => (
                   <button key={t} onClick={() => setMaterialFilter(t)}
-                    className={`px-2 py-0.5 rounded text-[9px] transition-colors cursor-pointer ${materialFilter === t ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-[#1a1a1a] text-gray-500 hover:text-gray-300'}`}>
+                    className={`px-2.5 py-1.5 rounded text-sm transition-colors cursor-pointer ${materialFilter === t ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-[#1a1a1a] text-gray-500 hover:text-gray-300'}`}>
                     {t === 'all' ? '全部' : t === 'prompt' ? '提示词' : t === 'image' ? '图片' : '颜色'}
                   </button>
                 ))}
               </div>
               <div className="flex gap-1">
                 <select value={materialType} onChange={e => setMaterialType(e.target.value as 'image' | 'prompt' | 'color')}
-                  className="bg-[#1a1a1a] border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-300 focus:outline-none">
+                  className="bg-[#1a1a1a] border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-300 focus:outline-none">
                   <option value="prompt">提示词</option>
                   <option value="image">图片URL</option>
                   <option value="color">颜色</option>
                 </select>
                 <input value={materialLabel} onChange={e => setMaterialLabel(e.target.value)} placeholder="名称"
-                  className="flex-1 bg-[#1a1a1a] border border-gray-700 rounded px-1.5 py-0.5 text-[9px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50" />
+                  className="flex-1 bg-[#1a1a1a] border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50" />
               </div>
-              <div className="flex gap-1 mt-1">
+              <div className="flex gap-1 mt-1.5">
                 <input value={materialInput} onChange={e => setMaterialInput(e.target.value)}
                   placeholder={materialType === 'color' ? '#ff6600' : materialType === 'image' ? '图片URL' : '提示词内容'}
-                  className="flex-1 bg-[#1a1a1a] border border-gray-700 rounded px-1.5 py-0.5 text-[9px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50" />
+                  className="flex-1 bg-[#1a1a1a] border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50" />
                 <input value={materialTags} onChange={e => setMaterialTags(e.target.value)} placeholder="标签(逗号分隔)"
-                  className="w-20 bg-[#1a1a1a] border border-gray-700 rounded px-1.5 py-0.5 text-[9px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50" />
+                  className="w-24 bg-[#1a1a1a] border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50" />
               </div>
               <button
                 onClick={() => {
@@ -1383,32 +1383,32 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                   localStorage.setItem('wujie-workflow-materials', JSON.stringify(next));
                   setMaterialInput(''); setMaterialLabel(''); setMaterialTags('');
                 }}
-                className="w-full mt-1.5 py-1 rounded bg-[#d4af37]/20 text-[#d4af37] text-[10px] font-medium hover:bg-[#d4af37]/30 transition-colors cursor-pointer"
+                className="w-full mt-2 py-2 rounded bg-[#d4af37]/20 text-[#d4af37] text-sm font-medium hover:bg-[#d4af37]/30 transition-colors cursor-pointer"
               >
                 添加素材
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
               {materials.filter(m => materialFilter === 'all' || m.type === materialFilter).length === 0 && (
-                <div className="text-center text-[10px] text-gray-600 py-8">
-                  <Package size={20} className="mx-auto mb-2 text-gray-700" />
+                <div className="text-center text-sm text-gray-600 py-8">
+                  <Package size={24} className="mx-auto mb-2 text-gray-700" />
                   素材库
                   <br />
                   <span className="text-gray-700">保存常用提示词、图片和颜色</span>
                 </div>
               )}
               {materials.filter(m => materialFilter === 'all' || m.type === materialFilter).map(mat => (
-                <div key={mat.id} className="bg-[#1a1a1a] border border-gray-800 rounded p-2 group">
+                <div key={mat.id} className="bg-[#1a1a1a] border border-gray-800 rounded p-2.5 group">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5 min-w-0">
                       {mat.type === 'color' ? (
-                        <div className="w-3 h-3 rounded-sm border border-gray-700 flex-shrink-0" style={{ backgroundColor: mat.value }} />
+                        <div className="w-4 h-4 rounded-sm border border-gray-700 flex-shrink-0" style={{ backgroundColor: mat.value }} />
                       ) : mat.type === 'image' ? (
-                        <ImageIcon size={10} className="text-blue-400 flex-shrink-0" />
+                        <ImageIcon size={12} className="text-blue-400 flex-shrink-0" />
                       ) : (
-                        <Type size={10} className="text-green-400 flex-shrink-0" />
+                        <Type size={12} className="text-green-400 flex-shrink-0" />
                       )}
-                      <span className="text-[9px] text-gray-300 truncate">{mat.label}</span>
+                      <span className="text-sm text-gray-300 truncate">{mat.label}</span>
                     </div>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
@@ -1420,9 +1420,9 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                             handleNodeUpdate(selectedNodeId, { config: { prompt: currentPrompt ? `${currentPrompt}, ${mat.value}` : mat.value } });
                           }
                         }}
-                        className="p-0.5 rounded text-[#d4af37] hover:bg-[#d4af37]/10 cursor-pointer" title="填入节点"
+                        className="p-1 rounded text-[#d4af37] hover:bg-[#d4af37]/10 cursor-pointer" title="填入节点"
                       >
-                        <Zap size={8} />
+                        <Zap size={10} />
                       </button>
                       <button
                         onClick={() => {
@@ -1430,17 +1430,17 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                           setMaterials(next);
                           localStorage.setItem('wujie-workflow-materials', JSON.stringify(next));
                         }}
-                        className="p-0.5 rounded text-red-400 hover:bg-red-400/10 cursor-pointer" title="删除"
+                        className="p-1 rounded text-red-400 hover:bg-red-400/10 cursor-pointer" title="删除"
                       >
-                        <X size={8} />
+                        <X size={10} />
                       </button>
                     </div>
                   </div>
-                  <div className="text-[8px] text-gray-500 mt-0.5 truncate">{mat.value}</div>
+                  <div className="text-[11px] text-gray-500 mt-1 truncate">{mat.value}</div>
                   {mat.tags.length > 0 && (
-                    <div className="flex gap-0.5 mt-1 flex-wrap">
+                    <div className="flex gap-0.5 mt-1.5 flex-wrap">
                       {mat.tags.map((tag, i) => (
-                        <span key={i} className="px-1 py-0 rounded bg-gray-800 text-[7px] text-gray-500">{tag}</span>
+                        <span key={i} className="px-2 py-0.5 rounded bg-gray-800 text-xs text-gray-400">{tag}</span>
                       ))}
                     </div>
                   )}
@@ -1457,18 +1457,18 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
         <div className="absolute top-3 left-3 right-3 z-20 flex items-center justify-between">
           <div className="flex items-center gap-2">
             {onBack && (
-              <button onClick={onBack} className="p-1.5 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer" title="返回画布">
-                <ArrowLeft size={14} />
+              <button onClick={onBack} className="p-2 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer" title="返回画布">
+                <ArrowLeft size={16} />
               </button>
             )}
-            <span className="text-sm font-semibold text-[#d4af37]">{wf.name}</span>
-            <span className="text-[10px] text-gray-600">v{wf.version}</span>
-            <span className="text-[10px] text-gray-700">|</span>
-            <span className="text-[10px] text-gray-500">{wf.nodes.length} 节点 · {wf.connections.length} 连线</span>
+            <span className="text-base font-semibold text-[#d4af37]">{wf.name}</span>
+            <span className="text-sm text-gray-500">v{wf.version}</span>
+            <span className="text-sm text-gray-700">|</span>
+            <span className="text-sm text-gray-400">{wf.nodes.length} 节点 · {wf.connections.length} 连线</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <button onClick={handleAutoLayout} className="p-1.5 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer" title="自动布局">
-              <LayoutGrid size={14} />
+            <button onClick={handleAutoLayout} className="p-2 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer" title="自动布局">
+              <LayoutGrid size={16} />
             </button>
             {/* P1: 复制粘贴按钮 */}
             <button
@@ -1481,10 +1481,10 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 }
               }}
               disabled={!selectedNodeId}
-              className="p-1.5 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              className="p-2 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
               title="复制节点 (Ctrl+C)"
             >
-              <Copy size={14} />
+              <Copy size={16} />
             </button>
             <button
               onClick={() => {
@@ -1507,20 +1507,20 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 if (newNodes.length > 0) { setSelectedNodeId(newNodes[0].id); setSidebarTab('props'); }
               }}
               disabled={!clipboard}
-              className="p-1.5 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              className="p-2 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
               title="粘贴节点 (Ctrl+V)"
             >
-              <Clipboard size={14} />
+              <Clipboard size={16} />
             </button>
-            <button onClick={() => setViewport(v => ({ ...v, zoom: Math.min(3, v.zoom * 1.2) }))} className="p-1.5 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer">
-              <ZoomIn size={14} />
+            <button onClick={() => setViewport(v => ({ ...v, zoom: Math.min(3, v.zoom * 1.2) }))} className="p-2 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer">
+              <ZoomIn size={16} />
             </button>
-            <span className="text-[10px] text-gray-500 w-10 text-center">{Math.round(viewport.zoom * 100)}%</span>
-            <button onClick={() => setViewport(v => ({ ...v, zoom: Math.max(0.2, v.zoom * 0.8) }))} className="p-1.5 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer">
-              <ZoomOut size={14} />
+            <span className="text-xs text-gray-500 w-12 text-center">{Math.round(viewport.zoom * 100)}%</span>
+            <button onClick={() => setViewport(v => ({ ...v, zoom: Math.max(0.2, v.zoom * 0.8) }))} className="p-2 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer">
+              <ZoomOut size={16} />
             </button>
-            <button onClick={() => setViewport({ x: 0, y: 0, zoom: 0.8 })} className="p-1.5 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer">
-              <RotateCcw size={14} />
+            <button onClick={() => setViewport({ x: 0, y: 0, zoom: 0.8 })} className="p-2 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer">
+              <RotateCcw size={16} />
             </button>
             {/* P2: ComfyUI导入 */}
             <button
@@ -1549,18 +1549,18 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 };
                 input.click();
               }}
-              className="p-1.5 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer"
+              className="p-2 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer"
               title="导入ComfyUI工作流"
             >
-              <FileInput size={14} />
+              <FileInput size={16} />
             </button>
-            <div className="w-px h-4 bg-gray-800 mx-1" />
+            <div className="w-px h-5 bg-gray-800 mx-1" />
             {/* P2: 撤销重做按钮 */}
-            <button onClick={handleUndo} disabled={historyIndex <= 0} className="p-1.5 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="撤销 (Ctrl+Z)">
-              <RotateCcw size={14} />
+            <button onClick={handleUndo} disabled={historyIndex <= 0} className="p-2 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="撤销 (Ctrl+Z)">
+              <RotateCcw size={16} />
             </button>
-            <button onClick={handleRedo} disabled={historyIndex >= historyStack.length - 1} className="p-1.5 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="重做 (Ctrl+Shift+Z)">
-              <RotateCcw size={14} className="scale-x-[-1]" />
+            <button onClick={handleRedo} disabled={historyIndex >= historyStack.length - 1} className="p-2 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="重做 (Ctrl+Shift+Z)">
+              <RotateCcw size={16} className="scale-x-[-1]" />
             </button>
             {/* P2: JSON编辑器（build_mode下隐藏） */}
             {!isBuildMode && (
@@ -1569,19 +1569,19 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 setJsonEditContent(JSON.stringify({ nodes: wf.nodes, connections: wf.connections }, null, 2));
                 setJsonEditorOpen(true);
               }}
-              className="p-1.5 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer"
+              className="p-2 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer"
               title="查看/编辑JSON"
             >
-              <Settings size={14} />
+              <Settings size={16} />
             </button>
             )}
-            <div className="w-px h-4 bg-gray-800 mx-1" />
-            <button onClick={handleSaveWorkflow} disabled={saveStatus === 'saving'} className={`px-3 py-1.5 rounded text-xs font-medium transition-colors cursor-pointer flex items-center gap-1 ${saveStatus === 'saved' ? 'bg-green-900/30 text-green-400' : saveStatus === 'error' ? 'bg-red-900/30 text-red-400' : 'bg-[#1a1a1a] hover:bg-[#222] text-gray-300'}`}>
-              {saveStatus === 'saving' ? <Loader2 size={12} className="animate-spin" /> : saveStatus === 'saved' ? <Check size={12} /> : <Save size={12} />}
+            <div className="w-px h-5 bg-gray-800 mx-1" />
+            <button onClick={handleSaveWorkflow} disabled={saveStatus === 'saving'} className={`px-3 py-2 rounded text-sm font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${saveStatus === 'saved' ? 'bg-green-900/30 text-green-400' : saveStatus === 'error' ? 'bg-red-900/30 text-red-400' : 'bg-[#1a1a1a] hover:bg-[#222] text-gray-300'}`}>
+              {saveStatus === 'saving' ? <Loader2 size={14} className="animate-spin" /> : saveStatus === 'saved' ? <Check size={14} /> : <Save size={14} />}
               {saveStatus === 'saving' ? '保存中...' : saveStatus === 'saved' ? '已保存' : '保存'}
             </button>
-            <button onClick={execStatus === 'running' ? handleStopWorkflow : handleRunWorkflow} className={`px-3 py-1.5 rounded text-xs font-medium transition-colors cursor-pointer flex items-center gap-1 ${execStatus === 'running' ? 'bg-red-900/30 text-red-400 hover:bg-red-900/50' : 'bg-[#d4af37]/20 text-[#d4af37] hover:bg-[#d4af37]/30'}`}>
-              {execStatus === 'running' ? <><Square size={12} /> 停止</> : <><Play size={12} /> 运行</>}
+            <button onClick={execStatus === 'running' ? handleStopWorkflow : handleRunWorkflow} className={`px-3 py-2 rounded text-sm font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${execStatus === 'running' ? 'bg-red-900/30 text-red-400 hover:bg-red-900/50' : 'bg-[#d4af37]/20 text-[#d4af37] hover:bg-[#d4af37]/30'}`}>
+              {execStatus === 'running' ? <><Square size={14} /> 停止</> : <><Play size={14} /> 运行</>}
             </button>
           </div>
         </div>
@@ -1677,7 +1677,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                       y={(from.y + to.y) / 2 - 6}
                       textAnchor="middle"
                       fill={color}
-                      fontSize={8}
+                      fontSize={10}
                       fillOpacity={0.7}
                       className="pointer-events-none"
                     >
@@ -1755,11 +1755,11 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
         </svg>
 
         {/* 端口类型图例 */}
-        <div className="absolute bottom-3 left-3 bg-[#111]/90 border border-gray-800 rounded px-2 py-1.5 flex items-center gap-3 text-[9px]">
+        <div className="absolute bottom-3 left-3 bg-[#111]/90 border border-gray-800 rounded px-3 py-2 flex items-center gap-3 text-xs">
           {Object.entries(PORT_COLORS).map(([type, color]) => (
-            <div key={type} className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
-              <span className="text-gray-500">{type}</span>
+            <div key={type} className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
+              <span className="text-gray-400">{type}</span>
             </div>
           ))}
         </div>
@@ -1833,7 +1833,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
 
         {/* 执行状态栏 */}
         {execStatus !== 'idle' && (
-          <div className="absolute bottom-12 left-3 bg-[#111]/95 border border-gray-800 rounded px-3 py-2 flex items-center gap-3 text-xs">
+          <div className="absolute bottom-12 left-3 bg-[#111]/95 border border-gray-800 rounded px-3 py-2 flex items-center gap-3 text-sm">
             {execStatus === 'running' && <Loader2 size={14} className="animate-spin text-[#d4af37]" />}
             {execStatus === 'completed' && <Check size={14} className="text-green-400" />}
             {execStatus === 'failed' && <AlertCircle size={14} className="text-red-400" />}
@@ -1853,7 +1853,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
         {execLogs.length > 0 && (
           <div className="absolute bottom-12 right-3 w-[320px] max-h-[240px] bg-[#111]/95 border border-gray-800 rounded overflow-hidden flex flex-col">
             <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-800">
-              <span className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">执行日志</span>
+              <span className="text-xs text-gray-500 font-semibold uppercase tracking-wider">执行日志</span>
               <button onClick={() => setExecLogs([])} className="text-gray-600 hover:text-gray-400 cursor-pointer"><X size={10} /></button>
             </div>
             <div className="flex-1 overflow-y-auto text-[10px]">
@@ -1887,7 +1887,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center" onClick={() => setJsonEditorOpen(false)}>
           <div className="w-[640px] max-h-[80vh] bg-[#111] border border-gray-800 rounded-lg flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-2 border-b border-gray-800">
-              <span className="text-xs font-semibold text-[#d4af37]">工作流 JSON 编辑器</span>
+              <span className="text-sm font-semibold text-[#d4af37]">工作流 JSON 编辑器</span>
               <button onClick={() => setJsonEditorOpen(false)} className="text-gray-500 hover:text-white cursor-pointer"><X size={14} /></button>
             </div>
             <textarea
@@ -1897,7 +1897,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
               spellCheck={false}
             />
             <div className="flex justify-end gap-2 px-4 py-2 border-t border-gray-800">
-              <button onClick={() => setJsonEditorOpen(false)} className="px-3 py-1 text-[10px] rounded bg-gray-800 text-gray-400 hover:text-white cursor-pointer">取消</button>
+              <button onClick={() => setJsonEditorOpen(false)} className="px-3 py-1.5 text-xs rounded bg-gray-800 text-gray-400 hover:text-white cursor-pointer">取消</button>
               <button
                 onClick={() => {
                   try {
@@ -1989,8 +1989,8 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, onSe
       {/* 画布模式专用标记 (右上角小徽章) */}
       {isCanvasFeature && !isCondition && (
         <g>
-          <circle cx={node.x + node.width - 8} cy={node.y + 8} r={5} fill={color} fillOpacity={0.8} />
-          <text x={node.x + node.width - 8} y={node.y + 10.5} textAnchor="middle" fill="#000" fontSize={6} fontWeight={700} className="pointer-events-none">
+          <circle cx={node.x + node.width - 10} cy={node.y + 10} r={6} fill={color} fillOpacity={0.8} />
+          <text x={node.x + node.width - 10} y={node.y + 13} textAnchor="middle" fill="#000" fontSize={7} fontWeight={700} className="pointer-events-none">
             {node.type === 'ai-font-design' ? '字' : node.type === 'ai-refine-engine' ? '精' : node.type === 'ai-brand-ecommerce' ? '品' : node.type === 'ai-segment' ? '层' : node.type === 'ai-multi-angle' ? '角' : '3D'}
           </text>
         </g>
@@ -2002,12 +2002,12 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, onSe
           {/* 色条 */}
           <rect x={node.x} y={node.y} width={node.width} height={3} rx={8} fill={color} fillOpacity={0.8} />
           {/* 图标 */}
-          <foreignObject x={node.x + 8} y={node.y + 10} width={16} height={16}>
-            <div className="flex items-center justify-center" style={{ color }}>{getNodeIcon(node.type, 12)}</div>
+          <foreignObject x={node.x + 8} y={node.y + 10} width={18} height={18}>
+            <div className="flex items-center justify-center" style={{ color }}>{getNodeIcon(node.type, 14)}</div>
           </foreignObject>
           {/* 标题 */}
-          <text x={node.x + 28} y={node.y + 22} fill="#ccc" fontSize={11} fontWeight={500} className="pointer-events-none">
-            {node.label.length > 12 ? node.label.slice(0, 12) + '...' : node.label}
+          <text x={node.x + 30} y={node.y + 23} fill="#ccc" fontSize={13} fontWeight={500} className="pointer-events-none">
+            {node.label.length > 14 ? node.label.slice(0, 14) + '...' : node.label}
           </text>
           {/* 图片缩略图 */}
           {hasImageOutput && (
@@ -2022,7 +2022,7 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, onSe
 
       {/* 条件节点: 菱形内文字 */}
       {isCondition && (
-        <text x={node.x + node.width / 2} y={node.y + node.height / 2 + 4} textAnchor="middle" fill="#ccc" fontSize={10} fontWeight={500}>
+        <text x={node.x + node.width / 2} y={node.y + node.height / 2 + 4} textAnchor="middle" fill="#ccc" fontSize={12} fontWeight={500}>
           {node.label.length > 8 ? node.label.slice(0, 8) + '..' : node.label}
         </text>
       )}
@@ -2033,8 +2033,8 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, onSe
         const portColor = PORT_COLORS[port.type] || '#555';
         return (
           <g key={port.id} onMouseUp={() => onPortMouseUp(node.id, port)}>
-            <circle cx={node.x} cy={py} r={5} fill="#161616" stroke={portColor} strokeWidth={1.5} className="cursor-pointer" />
-            <text x={node.x + 8} y={py + 3} fill="#888" fontSize={8} className="pointer-events-none">{port.label}</text>
+            <circle cx={node.x} cy={py} r={6} fill="#161616" stroke={portColor} strokeWidth={1.5} className="cursor-pointer" />
+            <text x={node.x + 10} y={py + 4} fill="#999" fontSize={10} className="pointer-events-none">{port.label}</text>
           </g>
         );
       })}
@@ -2045,8 +2045,8 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, onSe
         const portColor = PORT_COLORS[port.type] || '#555';
         return (
           <g key={port.id} onMouseDown={(e) => onPortMouseDown(e as unknown as React.MouseEvent, node.id, port)}>
-            <circle cx={node.x + node.width} cy={py} r={5} fill={portColor} stroke="none" className="cursor-pointer hover:r-[7px]" />
-            <text x={node.x + node.width - 8} y={py + 3} fill="#888" fontSize={8} textAnchor="end" className="pointer-events-none">{port.label}</text>
+            <circle cx={node.x + node.width} cy={py} r={6} fill={portColor} stroke="none" className="cursor-pointer hover:r-[8px]" />
+            <text x={node.x + node.width - 10} y={py + 4} fill="#999" fontSize={10} textAnchor="end" className="pointer-events-none">{port.label}</text>
           </g>
         );
       })}
@@ -2058,13 +2058,13 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, onSe
 
       {/* 删除按钮 (选中时显示) */}
       {isSelected && (
-        <foreignObject x={node.x + node.width + 1} y={node.y - 12} width={18} height={18}>
+        <foreignObject x={node.x + node.width + 2} y={node.y - 14} width={22} height={22}>
           <button
             onClick={(e) => { e.stopPropagation(); onDelete(); }}
             className="w-full h-full rounded-full bg-[#1a1a1a] border border-gray-600 flex items-center justify-center text-gray-400 hover:text-red-400 hover:border-red-400 cursor-pointer transition-colors"
             style={{ fontSize: 0, lineHeight: 0 }}
           >
-            <X size={10} />
+            <X size={12} />
           </button>
         </foreignObject>
       )}
@@ -2072,7 +2072,7 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, onSe
       {/* 执行错误提示 */}
       {execResult?.error && (
         <foreignObject x={node.x} y={node.y + node.height + 2} width={node.width} height={20}>
-          <div className="text-[9px] text-red-400 truncate px-1">{execResult.error}</div>
+          <div className="text-[10px] text-red-400 truncate px-1">{execResult.error}</div>
         </foreignObject>
       )}
     </g>
@@ -2100,7 +2100,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
 
   if (!node) {
     return (
-      <div className="flex-1 flex items-center justify-center text-gray-600 text-xs">
+      <div className="flex-1 flex items-center justify-center text-gray-500 text-sm">
         <div className="text-center">
           <Settings size={24} className="mx-auto mb-2 opacity-30" />
           <p>选择节点查看属性</p>
@@ -2148,7 +2148,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
             value={String(value)}
             onChange={e => onChange(e.target.value)}
             placeholder={field.placeholder}
-            className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
+            className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
           />
         );
 
@@ -2184,7 +2184,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
               }}
               placeholder={isPromptField && canvasImages && canvasImages.length > 0 ? `${field.placeholder} (输入@引用画布图片)` : field.placeholder}
               rows={3}
-              className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50 resize-y"
+              className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50 resize-y"
             />
             {/* P0: @图片引用弹窗 */}
             {isPromptField && mentionPopup.visible && mentionPopup.nodeId === node.id && mentionPopup.fieldKey === field.key && (
@@ -2201,7 +2201,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
                   .map(img => (
                     <button
                       key={img.id}
-                      className="w-full text-left px-2 py-1.5 text-xs text-gray-300 hover:bg-[#d4af37]/10 hover:text-[#d4af37] flex items-center gap-2 cursor-pointer"
+                      className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-[#d4af37]/10 hover:text-[#d4af37] flex items-center gap-2 cursor-pointer"
                       onClick={() => {
                         // 在@位置插入图片引用
                         const currentValue = String(value);
@@ -2225,7 +2225,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
                   const desc = img.description || img.url;
                   return !mentionPopup.filter || desc.toLowerCase().includes(mentionPopup.filter);
                 }).length === 0) && (
-                  <div className="px-2 py-1.5 text-xs text-gray-500">无匹配图片</div>
+                  <div className="px-3 py-2 text-sm text-gray-500">无匹配图片</div>
                 )}
               </div>
             )}
@@ -2243,7 +2243,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
             max={field.max}
             step={field.step || 1}
             placeholder={field.placeholder}
-            className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
+            className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
           />
         );
 
@@ -2252,7 +2252,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
           <select
             value={String(value)}
             onChange={e => onChange(e.target.value)}
-            className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-[#d4af37]/50"
+            className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-[#d4af37]/50"
           >
             {field.options?.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -2273,7 +2273,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
               step={field.step || 1}
               className="flex-1 h-1 accent-[#d4af37]"
             />
-            <span className="text-[10px] text-gray-400 w-8 text-right">{numVal}</span>
+            <span className="text-xs text-gray-400 w-8 text-right">{numVal}</span>
           </div>
         );
       }
@@ -2296,7 +2296,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
             value={String(value || '')}
             onChange={e => onChange(e.target.value)}
             disabled={modelsLoading}
-            className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-[#d4af37]/50 disabled:opacity-50"
+            className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-[#d4af37]/50 disabled:opacity-50"
           >
             <option value="">{modelsLoading ? '加载中...' : '选择模型'}</option>
             {models.filter(m => m.type === 'image' || m.type === 'chat').map(m => (
@@ -2322,7 +2322,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
                   className="flex-1 h-16 border-2 border-dashed border-gray-700 rounded flex flex-col items-center justify-center cursor-pointer hover:border-[#d4af37]/50 transition-colors text-gray-600 hover:text-gray-400"
                 >
                   <Upload size={14} />
-                  <span className="text-[9px] mt-0.5">上传</span>
+                  <span className="text-[10px] mt-0.5">上传</span>
                 </div>
                 {canvasImages && canvasImages.length > 0 && (
                   <div className="relative group/canvas">
@@ -2334,13 +2334,13 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
                       }}
                     >
                       <ImageIcon size={14} />
-                      <span className="text-[9px] mt-0.5">画布</span>
+                      <span className="text-[10px] mt-0.5">画布</span>
                     </div>
                     <div style={{ display: 'none' }} className="absolute left-0 top-full mt-1 w-full max-h-40 overflow-y-auto bg-[#1a1a1a] border border-gray-700 rounded shadow-lg z-50">
                       {canvasImages.map((img, idx) => (
                         <button
                           key={img.id}
-                          className="w-full px-2 py-1.5 text-left text-[10px] text-gray-300 hover:bg-[#d4af37]/10 hover:text-[#d4af37] cursor-pointer truncate transition-colors"
+                          className="w-full px-3 py-2 text-left text-xs text-gray-300 hover:bg-[#d4af37]/10 hover:text-[#d4af37] cursor-pointer truncate transition-colors"
                           onClick={() => {
                             onChange(img.url);
                             onUpdate(node.id, { config: { ...node.config, source: 'canvas' } });
@@ -2366,7 +2366,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
               value={String(value || '')}
               onChange={e => onChange(e.target.value)}
               placeholder="或输入图片URL"
-              className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
+              className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
             />
           </div>
         );
@@ -2378,7 +2378,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
             value={String(value)}
             onChange={e => onChange(e.target.value)}
             placeholder={field.placeholder}
-            className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
+            className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50"
           />
         );
     }
@@ -2393,18 +2393,18 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
             {getNodeIcon(node.type, 14)}
           </span>
           <div>
-            <div className="text-xs font-medium text-gray-200">{NODE_TYPE_LABELS[node.type]}</div>
-            <div className="text-[10px] text-gray-600">{NODE_CATEGORY_LABELS[cat]}</div>
+            <div className="text-sm font-medium text-gray-200">{NODE_TYPE_LABELS[node.type]}</div>
+            <div className="text-xs text-gray-500">{NODE_CATEGORY_LABELS[cat]}</div>
           </div>
           {isCanvasFeature && (
-            <span className="text-[8px] px-1.5 py-0.5 rounded bg-[#d4af37]/10 text-[#d4af37] font-medium ml-auto">画布专用</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#d4af37]/10 text-[#d4af37] font-medium ml-auto">画布专用</span>
           )}
         </div>
       </div>
 
       {/* 基础属性 */}
       <div className="border-b border-gray-800">
-        <button onClick={() => toggleSection('basic')} className="w-full flex items-center gap-1 px-3 py-2 text-[10px] uppercase tracking-wider text-gray-500 font-semibold hover:text-gray-300 cursor-pointer">
+        <button onClick={() => toggleSection('basic')} className="w-full flex items-center gap-1 px-3 py-2 text-xs uppercase tracking-wider text-gray-400 font-semibold hover:text-gray-200 cursor-pointer">
           {expandedSections.basic ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
           基础属性
         </button>
@@ -2412,13 +2412,13 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
           <div className="px-3 pb-3 space-y-2">
             {basicFields.map(field => (
               <div key={field.key}>
-                <label className="block text-[10px] text-gray-500 mb-0.5">{field.label}</label>
+                <label className="block text-xs text-gray-400 mb-1">{field.label}</label>
                 {renderField(field)}
               </div>
             ))}
             {/* 断点开关 */}
             <div className="flex items-center justify-between">
-              <label className="text-[10px] text-gray-500">断点</label>
+              <label className="text-xs text-gray-400">断点</label>
               <button
                 onClick={() => onUpdate(node.id, { breakpoint: !node.breakpoint })}
                 className={`relative w-9 h-5 rounded-full transition-colors cursor-pointer ${node.breakpoint ? 'bg-red-500' : 'bg-gray-700'}`}
@@ -2441,7 +2441,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
             <div className="px-3 pb-3 space-y-2">
               {canvasFields.map(field => (
                 <div key={field.key}>
-                  <label className="block text-[10px] text-gray-500 mb-0.5">{field.label}</label>
+                  <label className="block text-xs text-gray-400 mb-1">{field.label}</label>
                   {renderField(field)}
                 </div>
               ))}
@@ -2453,7 +2453,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
       {/* 高级属性 */}
       {advancedFields.length > 0 && (
         <div className="border-b border-gray-800">
-          <button onClick={() => toggleSection('advanced')} className="w-full flex items-center gap-1 px-3 py-2 text-[10px] uppercase tracking-wider text-gray-500 font-semibold hover:text-gray-300 cursor-pointer">
+          <button onClick={() => toggleSection('advanced')} className="w-full flex items-center gap-1 px-3 py-2 text-xs uppercase tracking-wider text-gray-400 font-semibold hover:text-gray-200 cursor-pointer">
             {expandedSections.advanced ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
             高级属性
           </button>
@@ -2461,7 +2461,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
             <div className="px-3 pb-3 space-y-2">
               {advancedFields.map(field => (
                 <div key={field.key}>
-                  <label className="block text-[10px] text-gray-500 mb-0.5">{field.label}</label>
+                  <label className="block text-xs text-gray-400 mb-1">{field.label}</label>
                   {renderField(field)}
                 </div>
               ))}
@@ -2472,7 +2472,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
 
       {/* 端口信息 */}
       <div className="px-3 py-2">
-        <div className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold mb-1">端口</div>
+        <div className="text-xs uppercase tracking-wider text-gray-400 font-semibold mb-1">端口</div>
         <div className="space-y-1">
           {node.ports.filter(p => p.direction === 'in').map(p => (
             <div key={p.id} className="flex items-center gap-1.5 text-[10px]">
@@ -2496,7 +2496,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
       <div className="p-3 border-t border-gray-800">
         <button
           onClick={() => onDelete(node.id)}
-          className="w-full py-1.5 rounded text-xs text-red-400 hover:bg-red-900/20 transition-colors cursor-pointer flex items-center justify-center gap-1"
+          className="w-full py-2 rounded text-sm text-red-400 hover:bg-red-900/20 transition-colors cursor-pointer flex items-center justify-center gap-1"
         >
           <Trash2 size={12} /> 删除节点
         </button>
