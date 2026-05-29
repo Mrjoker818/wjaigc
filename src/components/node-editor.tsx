@@ -7,26 +7,27 @@ import {
   PORT_COLORS, NodePort, PortType, PropertyField,
   createWorkflowNode, createConnection, createEmptyWorkflow, createDemoWorkflow,
   getNodePropertyFields, getNodeCategory, NODE_TEMPLATES,
-  canConnectPorts, autoLayoutWorkflow,
+  canConnectPorts, autoLayoutWorkflow, parseComfyUIWorkflow,
 } from '@/lib/workflow-engine';
 import {
-  Image, Type, SlidersHorizontal, Wand2, Pencil, Maximize, Scissors,
+  Image as ImageIcon, Type, SlidersHorizontal, Wand2, Pencil, Maximize, Scissors,
   PenTool, Palette, Sun, GitBranch, GitMerge, Repeat, RefreshCw, Layers,
   Bot, MessageSquare, ImageDown, Save, Download, Play, Square,
+  FileInput,
   ChevronRight, ChevronDown, Plus, Trash2, ZoomIn, ZoomOut, RotateCcw,
   Settings, Upload, X, Check, AlertCircle, Loader2, BoxSelect, Group,
   Search, ScanSearch, Eye, Pause, SkipForward, Workflow as WorkflowIcon, Timer,
   ArrowLeft, LayoutGrid, Sparkles, MessageCircle, Rotate3d, Box, ShoppingBag, Zap,
-  Copy, Clipboard,
+  Copy, Clipboard, Package, Film,
 } from 'lucide-react';
 
 // ==================== 图标映射 ====================
 
 const ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
-  Image, Type, SlidersHorizontal, Wand2, Pencil, Maximize, Scissors,
+  Image: ImageIcon, Type, SlidersHorizontal, Wand2, Pencil, Maximize, Scissors,
   PenTool, Palette, Sun, GitBranch, GitMerge, Repeat, RefreshCw, Layers,
   Bot, MessageSquare, ImageDown, Save, Download, BoxSelect, Group,
-  ScanSearch, Sparkles, Rotate3d, Box, ShoppingBag,
+  ScanSearch, Sparkles, Rotate3d, Box, ShoppingBag, Film,
 };
 
 function getNodeIcon(type: NodeType, size = 14, className = '') {
@@ -38,6 +39,15 @@ function getNodeIcon(type: NodeType, size = 14, className = '') {
 // ==================== 模型列表 Hook ====================
 
 interface ModelOption { id: string; name: string; type: string; provider: string; }
+
+interface MaterialItem {
+  id: string;
+  type: 'image' | 'prompt' | 'color';
+  value: string;
+  label: string;
+  tags: string[];
+  createdAt: number;
+}
 
 function useModelList() {
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -69,6 +79,22 @@ interface DraggingConn {
   toX: number;
   toY: number;
   portType: PortType;
+}
+
+// ==================== P0: @图片引用 ====================
+
+interface CanvasImageRef {
+  id: string;
+  url: string;
+  description: string;
+}
+
+interface MentionPopup {
+  visible: boolean;
+  nodeId: string;
+  fieldKey: string;
+  filter: string;
+  position: { top: number; left: number };
 }
 
 // ==================== P2: 提示词库 ====================
@@ -293,9 +319,11 @@ interface NodeEditorProps {
   onBack?: () => void;
   onWorkflowChange?: (wf: WorkflowData | null) => void;
   onOpenWorkflowHub?: () => void;
+  /** P0: 画布图片列表，用于@图片引用 */
+  canvasImages?: CanvasImageRef[];
 }
 
-export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenWorkflowHub }: NodeEditorProps) {
+export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenWorkflowHub, canvasImages }: NodeEditorProps) {
   const [wf, setWf] = useState<WorkflowData>(workflow || createDemoWorkflow());
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [draggingNode, setDraggingNode] = useState<string | null>(null);
@@ -304,7 +332,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 0.8 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0, vx: 0, vy: 0 });
-  const [sidebarTab, setSidebarTab] = useState<'nodes' | 'props' | 'ai-build' | 'presets' | 'prompts' | 'assistant' | 'json'>('nodes');
+  const [sidebarTab, setSidebarTab] = useState<'nodes' | 'props' | 'ai-build' | 'presets' | 'prompts' | 'assistant' | 'materials'>('nodes');
   const [searchQuery, setSearchQuery] = useState('');
   const [executionId, setExecutionId] = useState<string | null>(null);
   const [execStatus, setExecStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
@@ -313,6 +341,9 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   const [showMinimap, setShowMinimap] = useState(true);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [highlightNodeId, setHighlightNodeId] = useState<string | null>(null);
+
+  // P2: build_mode检测 — 生产环境禁用部分开发功能
+  const isBuildMode = typeof process !== 'undefined' && process.env?.COZE_PROJECT_ENV === 'PROD';
 
   // AI建图状态
   const [aiBuildInput, setAiBuildInput] = useState('');
@@ -324,6 +355,19 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
 
   // P1: 节点复制粘贴
   const [clipboard, setClipboard] = useState<{ nodes: WorkflowNode[]; connections: WorkflowConnection[] } | null>(null);
+
+  // P1: 素材库
+  const [materials, setMaterials] = useState<MaterialItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('wujie-workflow-materials');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const [materialInput, setMaterialInput] = useState('');
+  const [materialLabel, setMaterialLabel] = useState('');
+  const [materialType, setMaterialType] = useState<'image' | 'prompt' | 'color'>('prompt');
+  const [materialTags, setMaterialTags] = useState('');
+  const [materialFilter, setMaterialFilter] = useState<'all' | 'image' | 'prompt' | 'color'>('all');
 
   // P2: 提示词库
   const [promptSnippets, setPromptSnippets] = useState<PromptSnippet[]>(() => {
@@ -391,7 +435,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
     });
   }, []);
 
-  // P2: 画布助手发送消息
+  // P2: 画布助手发送消息 (P1增强: 上游节点自动引用)
   const sendAssistantMessage = useCallback(async () => {
     if (!assistantInput.trim()) return;
     const userMsg = assistantInput.trim();
@@ -400,9 +444,34 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
     setAssistantLoading(true);
     try {
       const node = wf.nodes.find(n => n.id === selectedNodeId);
-      const contextInfo = node
-        ? `当前选中节点: [${node.type}] ${node.label}, 配置: ${JSON.stringify(node.config).slice(0, 200)}`
-        : '未选中任何节点';
+      // P1: 自动遍历上游节点构建上下文
+      let contextInfo = '';
+      if (node) {
+        const upstreamChain: string[] = [];
+        const visited = new Set<string>();
+        const queue = [node.id];
+        visited.add(node.id);
+        while (queue.length > 0) {
+          const currentId = queue.shift()!;
+          const upstreamConns = wf.connections.filter(c => c.toNodeId === currentId);
+          for (const conn of upstreamConns) {
+            if (!visited.has(conn.fromNodeId)) {
+              visited.add(conn.fromNodeId);
+              const upNode = wf.nodes.find(n => n.id === conn.fromNodeId);
+              if (upNode) {
+                upstreamChain.push(`  → [${upNode.type}] ${upNode.label}: ${JSON.stringify(upNode.config).slice(0, 150)}`);
+                queue.push(conn.fromNodeId);
+              }
+            }
+          }
+        }
+        contextInfo = `当前选中节点: [${node.type}] ${node.label}, 配置: ${JSON.stringify(node.config).slice(0, 200)}`;
+        if (upstreamChain.length > 0) {
+          contextInfo += `\n上游节点链路:\n${upstreamChain.join('\n')}`;
+        }
+      } else {
+        contextInfo = '未选中任何节点';
+      }
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -860,6 +929,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
             { key: 'presets', label: '预设' },
             { key: 'prompts', label: '词库' },
             { key: 'assistant', label: '助手' },
+            { key: 'materials', label: '素材' },
           ] as const).map(tab => (
             <button
               key={tab.key}
@@ -921,6 +991,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
             onUpdate={handleNodeUpdate}
             onDelete={handleDeleteNode}
             onImageUpload={handleImageUpload}
+            canvasImages={canvasImages}
           />
         )}
 
@@ -1102,11 +1173,36 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
         {sidebarTab === 'assistant' && (
           <div className="flex-1 flex flex-col">
             <div className="flex-1 overflow-y-auto p-2 space-y-2">
-              {selectedNode && (
-                <div className="text-[9px] px-2 py-1 rounded bg-[#d4af37]/10 text-[#d4af37]/80 border border-[#d4af37]/20">
-                  感知节点: [{selectedNode.type}] {selectedNode.label}
-                </div>
-              )}
+              {selectedNode && (() => {
+                // P1: 计算上游节点链
+                const upstreamNodes: WorkflowNode[] = [];
+                const visited = new Set<string>();
+                const queue = [selectedNode.id];
+                visited.add(selectedNode.id);
+                while (queue.length > 0) {
+                  const currentId = queue.shift()!;
+                  const upstreamConns = wf.connections.filter(c => c.toNodeId === currentId);
+                  for (const conn of upstreamConns) {
+                    if (!visited.has(conn.fromNodeId)) {
+                      visited.add(conn.fromNodeId);
+                      const upNode = wf.nodes.find(n => n.id === conn.fromNodeId);
+                      if (upNode) { upstreamNodes.push(upNode); queue.push(conn.fromNodeId); }
+                    }
+                  }
+                }
+                return upstreamNodes.length > 0 ? (
+                  <div className="text-[9px] px-2 py-1.5 rounded bg-[#d4af37]/10 text-[#d4af37]/80 border border-[#d4af37]/20">
+                    感知节点: [{selectedNode.type}] {selectedNode.label}
+                    <div className="mt-1 text-[#d4af37]/60">
+                      上游链路: {upstreamNodes.map(n => `[${n.type}]${n.label}`).join(' → ')} → [{selectedNode.type}]{selectedNode.label}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-[9px] px-2 py-1 rounded bg-[#d4af37]/10 text-[#d4af37]/80 border border-[#d4af37]/20">
+                    感知节点: [{selectedNode.type}] {selectedNode.label}
+                  </div>
+                );
+              })()}
               {assistantMessages.length === 0 && (
                 <div className="text-center text-[10px] text-gray-600 py-8">
                   <MessageCircle size={20} className="mx-auto mb-2 text-gray-700" />
@@ -1138,6 +1234,118 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
               <button onClick={sendAssistantMessage} disabled={assistantLoading || !assistantInput.trim()} className="p-1 rounded bg-[#d4af37]/20 text-[#d4af37] hover:bg-[#d4af37]/30 transition-colors cursor-pointer disabled:opacity-30">
                 <Zap size={12} />
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* P1: 素材库 Tab */}
+        {sidebarTab === 'materials' && (
+          <div className="flex-1 flex flex-col">
+            <div className="p-2 border-b border-gray-800">
+              <div className="flex gap-1 mb-2">
+                {(['all', 'prompt', 'image', 'color'] as const).map(t => (
+                  <button key={t} onClick={() => setMaterialFilter(t)}
+                    className={`px-2 py-0.5 rounded text-[9px] transition-colors cursor-pointer ${materialFilter === t ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-[#1a1a1a] text-gray-500 hover:text-gray-300'}`}>
+                    {t === 'all' ? '全部' : t === 'prompt' ? '提示词' : t === 'image' ? '图片' : '颜色'}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-1">
+                <select value={materialType} onChange={e => setMaterialType(e.target.value as 'image' | 'prompt' | 'color')}
+                  className="bg-[#1a1a1a] border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-300 focus:outline-none">
+                  <option value="prompt">提示词</option>
+                  <option value="image">图片URL</option>
+                  <option value="color">颜色</option>
+                </select>
+                <input value={materialLabel} onChange={e => setMaterialLabel(e.target.value)} placeholder="名称"
+                  className="flex-1 bg-[#1a1a1a] border border-gray-700 rounded px-1.5 py-0.5 text-[9px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50" />
+              </div>
+              <div className="flex gap-1 mt-1">
+                <input value={materialInput} onChange={e => setMaterialInput(e.target.value)}
+                  placeholder={materialType === 'color' ? '#ff6600' : materialType === 'image' ? '图片URL' : '提示词内容'}
+                  className="flex-1 bg-[#1a1a1a] border border-gray-700 rounded px-1.5 py-0.5 text-[9px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50" />
+                <input value={materialTags} onChange={e => setMaterialTags(e.target.value)} placeholder="标签(逗号分隔)"
+                  className="w-20 bg-[#1a1a1a] border border-gray-700 rounded px-1.5 py-0.5 text-[9px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50" />
+              </div>
+              <button
+                onClick={() => {
+                  if (!materialInput.trim()) return;
+                  const newMat: MaterialItem = {
+                    id: `mat-${Date.now()}`,
+                    type: materialType,
+                    value: materialInput.trim(),
+                    label: materialLabel.trim() || (materialType === 'prompt' ? '提示词' : materialType === 'image' ? '图片' : '颜色'),
+                    tags: materialTags.split(',').map(t => t.trim()).filter(Boolean),
+                    createdAt: Date.now(),
+                  };
+                  const next = [...materials, newMat];
+                  setMaterials(next);
+                  localStorage.setItem('wujie-workflow-materials', JSON.stringify(next));
+                  setMaterialInput(''); setMaterialLabel(''); setMaterialTags('');
+                }}
+                className="w-full mt-1.5 py-1 rounded bg-[#d4af37]/20 text-[#d4af37] text-[10px] font-medium hover:bg-[#d4af37]/30 transition-colors cursor-pointer"
+              >
+                添加素材
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+              {materials.filter(m => materialFilter === 'all' || m.type === materialFilter).length === 0 && (
+                <div className="text-center text-[10px] text-gray-600 py-8">
+                  <Package size={20} className="mx-auto mb-2 text-gray-700" />
+                  素材库
+                  <br />
+                  <span className="text-gray-700">保存常用提示词、图片和颜色</span>
+                </div>
+              )}
+              {materials.filter(m => materialFilter === 'all' || m.type === materialFilter).map(mat => (
+                <div key={mat.id} className="bg-[#1a1a1a] border border-gray-800 rounded p-2 group">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {mat.type === 'color' ? (
+                        <div className="w-3 h-3 rounded-sm border border-gray-700 flex-shrink-0" style={{ backgroundColor: mat.value }} />
+                      ) : mat.type === 'image' ? (
+                        <ImageIcon size={10} className="text-blue-400 flex-shrink-0" />
+                      ) : (
+                        <Type size={10} className="text-green-400 flex-shrink-0" />
+                      )}
+                      <span className="text-[9px] text-gray-300 truncate">{mat.label}</span>
+                    </div>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => {
+                          // 填入当前选中节点的prompt字段
+                          const node = wf.nodes.find(n => n.id === selectedNodeId);
+                          if (node && selectedNodeId && (node.config.prompt !== undefined || mat.type === 'prompt')) {
+                            const currentPrompt = (node.config.prompt as string) || '';
+                            handleNodeUpdate(selectedNodeId, { config: { prompt: currentPrompt ? `${currentPrompt}, ${mat.value}` : mat.value } });
+                          }
+                        }}
+                        className="p-0.5 rounded text-[#d4af37] hover:bg-[#d4af37]/10 cursor-pointer" title="填入节点"
+                      >
+                        <Zap size={8} />
+                      </button>
+                      <button
+                        onClick={() => {
+                          const next = materials.filter(m => m.id !== mat.id);
+                          setMaterials(next);
+                          localStorage.setItem('wujie-workflow-materials', JSON.stringify(next));
+                        }}
+                        className="p-0.5 rounded text-red-400 hover:bg-red-400/10 cursor-pointer" title="删除"
+                      >
+                        <X size={8} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="text-[8px] text-gray-500 mt-0.5 truncate">{mat.value}</div>
+                  {mat.tags.length > 0 && (
+                    <div className="flex gap-0.5 mt-1 flex-wrap">
+                      {mat.tags.map((tag, i) => (
+                        <span key={i} className="px-1 py-0 rounded bg-gray-800 text-[7px] text-gray-500">{tag}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -1214,6 +1422,38 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
             <button onClick={() => setViewport({ x: 0, y: 0, zoom: 0.8 })} className="p-1.5 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer">
               <RotateCcw size={14} />
             </button>
+            {/* P2: ComfyUI导入 */}
+            <button
+              onClick={() => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = '.json';
+                input.onchange = async (e) => {
+                  const file = (e.target as HTMLInputElement).files?.[0];
+                  if (!file) return;
+                  try {
+                    const text = await file.text();
+                    const result = parseComfyUIWorkflow(text);
+                    if (!result || result.nodes.length === 0) {
+                      alert('未能识别有效的ComfyUI工作流节点');
+                      return;
+                    }
+                    setWf(prev => ({
+                      ...prev,
+                      nodes: [...prev.nodes, ...result.nodes],
+                      connections: [...prev.connections, ...result.connections],
+                    }));
+                  } catch (err) {
+                    alert('导入失败: ' + (err instanceof Error ? err.message : '无效的JSON文件'));
+                  }
+                };
+                input.click();
+              }}
+              className="p-1.5 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer"
+              title="导入ComfyUI工作流"
+            >
+              <FileInput size={14} />
+            </button>
             <div className="w-px h-4 bg-gray-800 mx-1" />
             {/* P2: 撤销重做按钮 */}
             <button onClick={handleUndo} disabled={historyIndex <= 0} className="p-1.5 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="撤销 (Ctrl+Z)">
@@ -1222,7 +1462,8 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
             <button onClick={handleRedo} disabled={historyIndex >= historyStack.length - 1} className="p-1.5 rounded bg-[#1a1a1a] hover:bg-[#222] text-gray-400 hover:text-white transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="重做 (Ctrl+Shift+Z)">
               <RotateCcw size={14} className="scale-x-[-1]" />
             </button>
-            {/* P2: JSON编辑器 */}
+            {/* P2: JSON编辑器（build_mode下隐藏） */}
+            {!isBuildMode && (
             <button
               onClick={() => {
                 setJsonEditContent(JSON.stringify({ nodes: wf.nodes, connections: wf.connections }, null, 2));
@@ -1233,6 +1474,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
             >
               <Settings size={14} />
             </button>
+            )}
             <div className="w-px h-4 bg-gray-800 mx-1" />
             <button onClick={handleSaveWorkflow} disabled={saveStatus === 'saving'} className={`px-3 py-1.5 rounded text-xs font-medium transition-colors cursor-pointer flex items-center gap-1 ${saveStatus === 'saved' ? 'bg-green-900/30 text-green-400' : saveStatus === 'error' ? 'bg-red-900/30 text-red-400' : 'bg-[#1a1a1a] hover:bg-[#222] text-gray-300'}`}>
               {saveStatus === 'saving' ? <Loader2 size={12} className="animate-spin" /> : saveStatus === 'saved' ? <Check size={12} /> : <Save size={12} />}
@@ -1398,28 +1640,72 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
           ))}
         </div>
 
-        {/* 小地图 */}
-        {showMinimap && (
-          <div className="absolute bottom-3 right-3 w-[160px] h-[100px] bg-[#111]/90 border border-gray-800 rounded overflow-hidden">
-            <svg viewBox="0 0 1200 800" className="w-full h-full">
-              {wf.connections.map(conn => {
-                const from = wf.nodes.find(n => n.id === conn.fromNodeId);
-                const to = wf.nodes.find(n => n.id === conn.toNodeId);
-                if (!from || !to) return null;
-                return <line key={conn.id} x1={from.x + from.width / 2} y1={from.y + from.height / 2} x2={to.x + to.width / 2} y2={to.y + to.height / 2} stroke={PORT_COLORS[conn.type] || '#444'} strokeWidth={1} opacity={0.6} />;
-              })}
-              {wf.nodes.map(n => (
-                <rect key={n.id} x={n.x} y={n.y} width={n.width} height={n.height} rx={4}
-                  fill={selectedNodeId === n.id ? '#d4af37' : NODE_TYPE_COLORS[getNodeCategory(n.type)]}
-                  fillOpacity={0.6} stroke="none"
-                />
-              ))}
-            </svg>
-            <button onClick={() => setShowMinimap(false)} className="absolute top-0.5 right-0.5 text-gray-600 hover:text-gray-400 cursor-pointer">
-              <X size={10} />
-            </button>
-          </div>
-        )}
+        {/* 小地图（P2增强：视口指示+点击导航） */}
+        {showMinimap && (() => {
+          const padding = 100;
+          const allX = wf.nodes.map(n => n.x);
+          const allY = wf.nodes.map(n => n.y);
+          const minX = Math.min(0, ...allX) - padding;
+          const minY = Math.min(0, ...allY) - padding;
+          const maxX = Math.max(1200, ...allX.map((x, i) => x + wf.nodes[i].width)) + padding;
+          const maxY = Math.max(800, ...allY.map((y, i) => y + wf.nodes[i].height)) + padding;
+          const vw = maxX - minX;
+          const vh = maxY - minY;
+          const scale = Math.min(160 / vw, 100 / vh);
+          // 视口框坐标（相对于小地图）
+          const vpScreenW = (typeof window !== 'undefined' ? window.innerWidth * 0.65 : 800) / viewport.zoom;
+          const vpScreenH = (typeof window !== 'undefined' ? window.innerHeight * 0.85 : 600) / viewport.zoom;
+          const vpX = (-viewport.x / viewport.zoom - minX) * scale;
+          const vpY = (-viewport.y / viewport.zoom - minY) * scale;
+          const vpW = vpScreenW * scale;
+          const vpH = vpScreenH * scale;
+          return (
+            <div
+              className="absolute bottom-3 right-3 w-[160px] h-[100px] bg-[#111]/90 border border-gray-800 rounded overflow-hidden cursor-pointer"
+              onClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const clickY = e.clientY - rect.top;
+                // 点击位置对应的画布坐标
+                const canvasX = clickX / scale + minX;
+                const canvasY = clickY / scale + minY;
+                setViewport(v => ({
+                  ...v,
+                  x: -(canvasX * v.zoom - (typeof window !== 'undefined' ? window.innerWidth * 0.65 : 800) / 2),
+                  y: -(canvasY * v.zoom - (typeof window !== 'undefined' ? window.innerHeight * 0.85 : 600) / 2),
+                }));
+              }}
+            >
+              <svg viewBox={`${minX} ${minY} ${vw} ${vh}`} className="w-full h-full">
+                {wf.connections.map(conn => {
+                  const from = wf.nodes.find(n => n.id === conn.fromNodeId);
+                  const to = wf.nodes.find(n => n.id === conn.toNodeId);
+                  if (!from || !to) return null;
+                  return <line key={conn.id} x1={from.x + from.width / 2} y1={from.y + from.height / 2} x2={to.x + to.width / 2} y2={to.y + to.height / 2} stroke={PORT_COLORS[conn.type] || '#444'} strokeWidth={2} opacity={0.6} />;
+                })}
+                {wf.nodes.map(n => (
+                  <rect key={n.id} x={n.x} y={n.y} width={n.width} height={n.height} rx={4}
+                    fill={selectedNodeId === n.id ? '#d4af37' : NODE_TYPE_COLORS[getNodeCategory(n.type)]}
+                    fillOpacity={0.6} stroke="none"
+                  />
+                ))}
+              </svg>
+              {/* 视口指示框 */}
+              <div
+                className="absolute border border-[#d4af37]/60 bg-[#d4af37]/10 rounded-sm pointer-events-none"
+                style={{
+                  left: Math.max(0, vpX),
+                  top: Math.max(0, vpY),
+                  width: Math.min(160, vpW),
+                  height: Math.min(100, vpH),
+                }}
+              />
+              <button onClick={(e) => { e.stopPropagation(); setShowMinimap(false); }} className="absolute top-0.5 right-0.5 text-gray-600 hover:text-gray-400 cursor-pointer z-10">
+                <X size={10} />
+              </button>
+            </div>
+          );
+        })()}
 
         {/* 执行状态栏 */}
         {execStatus !== 'idle' && (
@@ -1675,11 +1961,15 @@ interface PropertyPanelProps {
   onUpdate: (nodeId: string, updates: Partial<WorkflowNode>) => void;
   onDelete: (nodeId: string) => void;
   onImageUpload: (nodeId: string, file: File) => void;
+  /** P0: 画布图片列表，用于@图片引用 */
+  canvasImages?: CanvasImageRef[];
 }
 
-function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImageUpload }: PropertyPanelProps) {
+function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImageUpload, canvasImages }: PropertyPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({ basic: true, advanced: true, canvas: true });
+  // P0: @图片引用弹窗状态 (移到PropertyPanel内部管理)
+  const [mentionPopup, setMentionPopup] = useState<MentionPopup>({ visible: false, nodeId: '', fieldKey: '', filter: '', position: { top: 0, left: 0 } });
 
   if (!node) {
     return (
@@ -1735,16 +2025,86 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
           />
         );
 
-      case 'textarea':
+      case 'textarea': {
+        // P0: 提示词字段支持@图片引用
+        const isPromptField = field.key === 'prompt' || field.key === 'text' || field.key === 'stylePrompt' || field.key === 'negativePrompt';
         return (
-          <textarea
-            value={String(value)}
-            onChange={e => onChange(e.target.value)}
-            placeholder={field.placeholder}
-            rows={3}
-            className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50 resize-y"
-          />
+          <div className="relative">
+            <textarea
+              value={String(value)}
+              onChange={e => {
+                onChange(e.target.value);
+                // P0: 检测@符号触发图片引用弹窗
+                if (isPromptField && canvasImages && canvasImages.length > 0) {
+                  const text = e.target.value;
+                  const cursorPos = e.target.selectionStart || text.length;
+                  const textBeforeCursor = text.slice(0, cursorPos);
+                  const atMatch = textBeforeCursor.match(/@([^\s@]*)$/);
+                  if (atMatch) {
+                    const textarea = e.target;
+                    const rect = textarea.getBoundingClientRect();
+                    setMentionPopup({
+                      visible: true,
+                      nodeId: node.id,
+                      fieldKey: field.key,
+                      filter: atMatch[1].toLowerCase(),
+                      position: { top: rect.bottom - rect.top + 4, left: 16 },
+                    });
+                  } else {
+                    if (mentionPopup.visible) setMentionPopup(prev => ({ ...prev, visible: false }));
+                  }
+                }
+              }}
+              placeholder={isPromptField && canvasImages && canvasImages.length > 0 ? `${field.placeholder} (输入@引用画布图片)` : field.placeholder}
+              rows={3}
+              className="w-full bg-[#1a1a1a] border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-[#d4af37]/50 resize-y"
+            />
+            {/* P0: @图片引用弹窗 */}
+            {isPromptField && mentionPopup.visible && mentionPopup.nodeId === node.id && mentionPopup.fieldKey === field.key && (
+              <div
+                className="absolute z-50 bg-[#222] border border-[#d4af37]/30 rounded shadow-lg max-h-40 overflow-y-auto"
+                style={{ top: mentionPopup.position.top, left: mentionPopup.position.left, minWidth: 180 }}
+              >
+                {canvasImages
+                  ?.filter(img => {
+                    const desc = img.description || img.url;
+                    return !mentionPopup.filter || desc.toLowerCase().includes(mentionPopup.filter);
+                  })
+                  .slice(0, 6)
+                  .map(img => (
+                    <button
+                      key={img.id}
+                      className="w-full text-left px-2 py-1.5 text-xs text-gray-300 hover:bg-[#d4af37]/10 hover:text-[#d4af37] flex items-center gap-2 cursor-pointer"
+                      onClick={() => {
+                        // 在@位置插入图片引用
+                        const currentValue = String(value);
+                        const cursorPos = currentValue.length;
+                        const beforeAt = currentValue.slice(0, cursorPos).replace(/@[^\s@]*$/, '');
+                        const afterCursor = currentValue.slice(cursorPos);
+                        const ref = `[img:${img.id}]`;
+                        const newValue = beforeAt + ref + afterCursor;
+                        onChange(newValue);
+                        setMentionPopup(prev => ({ ...prev, visible: false }));
+                      }}
+                    >
+                      <span className="w-6 h-6 rounded bg-[#333] flex-shrink-0 overflow-hidden">
+                        {img.url && <img src={img.url} alt="" className="w-full h-full object-cover" />}
+                      </span>
+                      <span className="truncate">{img.description || img.url.slice(-20)}</span>
+                    </button>
+                  ))
+                }
+                {(!canvasImages || canvasImages.filter(img => {
+                  const desc = img.description || img.url;
+                  return !mentionPopup.filter || desc.toLowerCase().includes(mentionPopup.filter);
+                }).length === 0) && (
+                  <div className="px-2 py-1.5 text-xs text-gray-500">无匹配图片</div>
+                )}
+              </div>
+            )}
+          </div>
         );
+      }
 
       case 'number':
         return (

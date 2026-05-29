@@ -6,6 +6,7 @@
  * 支持: start(启动) / status(查询) / cancel(取消)
  * 
  * P0: 连线语义类型约束 + 节点间真实数据传递 + 画布模式专用节点
+ * P0升级: 串行等待执行 — 上游节点失败时跳过下游节点
  */
 import { NextRequest, NextResponse } from 'next/server';
 import {
@@ -136,6 +137,7 @@ export async function POST(request: NextRequest) {
 /**
  * 执行工作流核心逻辑
  * DAG排序 → 逐节点调度 → API调用 → 结果传递到下游
+ * P0升级: 串行等待执行 — 检查上游节点是否都成功，失败则跳过下游
  */
 async function executeWorkflow(
   executionId: string,
@@ -149,12 +151,47 @@ async function executeWorkflow(
   const sorted = topologicalSort(nodes, connections);
   const resultMap = new Map<string, ExecutionResult>();
 
-  // 2. 逐节点执行
+  // 2. 构建上游映射 (用于串行等待检测)
+  const upstreamMap = new Map<string, string[]>();
+  for (const node of nodes) {
+    const upstreamIds = connections
+      .filter(c => c.toNodeId === node.id)
+      .map(c => c.fromNodeId);
+    if (upstreamIds.length > 0) {
+      upstreamMap.set(node.id, [...new Set(upstreamIds)]);
+    }
+  }
+
+  // 3. 逐节点执行
   for (const node of sorted) {
     // 检查是否被取消
     if (execState.status === 'cancelled') {
       console.log(`[Workflow] 执行被取消: ${executionId}`);
       break;
+    }
+
+    // P0: 串行等待 — 检查上游节点是否全部成功
+    const upstreamIds = upstreamMap.get(node.id) || [];
+    const upstreamFailed = upstreamIds.some(uid => {
+      const upResult = resultMap.get(uid);
+      return !upResult || upResult.status === 'failed';
+    });
+
+    if (upstreamFailed && upstreamIds.length > 0) {
+      // 上游有失败节点，跳过当前节点
+      const failedUpstream = upstreamIds
+        .filter(uid => { const r = resultMap.get(uid); return !r || r.status === 'failed'; })
+        .map(uid => nodes.find(n => n.id === uid)?.label || uid);
+      console.log(`[Workflow] 跳过节点 ${node.label}: 上游节点失败 [${failedUpstream.join(', ')}]`);
+      const result: ExecutionResult = {
+        nodeId: node.id,
+        status: 'skipped',
+        error: `上游节点失败: ${failedUpstream.join(', ')}`,
+        durationMs: 0,
+      };
+      resultMap.set(node.id, result);
+      execState.results[node.id] = result;
+      continue;
     }
 
     execState.currentNodeId = node.id;
@@ -230,7 +267,59 @@ async function executeWorkflow(
       // 对于异步API (generate, image-edit, edit, agent-edit)，使用提交+轮询模式
       const isAsyncApi = ['/api/generate', '/api/image-edit', '/api/edit', '/api/agent-edit'].includes(req.endpoint);
 
-      if (isAsyncApi) {
+      // P1: 分镜串行 — 多场景按序生成
+      if (node.type === 'storyboard-sequence' && req.body._storyboard) {
+        const storyboard = req.body._storyboard as { scenes: string[]; character: string; style: string; continueMode: string; strength: number };
+        const scenes = storyboard.scenes || [];
+        delete req.body._storyboard;
+
+        if (scenes.length === 0) {
+          const result: ExecutionResult = { nodeId: node.id, status: 'failed', error: '场景列表为空', durationMs: Date.now() - nodeStart };
+          resultMap.set(node.id, result);
+          execState.results[node.id] = result;
+          continue;
+        }
+
+        // 逐场景串行执行
+        const sceneResults: { sceneIndex: number; imageUrl?: string; prompt: string }[] = [];
+        let lastImageUrl = inputs.imageUrl as string || '';
+
+        for (let si = 0; si < scenes.length; si++) {
+          if ((execState.status as string) === 'cancelled') break;
+
+          const sceneDesc = scenes[si].trim();
+          const fullPrompt = [storyboard.style && `${storyboard.style} style,`, storyboard.character && `character: ${storyboard.character},`, sceneDesc].filter(Boolean).join(' ');
+
+          const sceneReqBody = {
+            ...req.body,
+            prompt: fullPrompt,
+            ...(storyboard.continueMode === 'img2img' && lastImageUrl ? { imageUrl: lastImageUrl, strength: storyboard.strength } : {}),
+          };
+
+          const sceneResult = await executeAsyncTask(apiUrl, sceneReqBody, fetchOptions, node.id, node.type as NodeType);
+
+          if (sceneResult.status === 'success' && sceneResult.output?.imageUrl) {
+            lastImageUrl = sceneResult.output.imageUrl as string;
+            sceneResults.push({ sceneIndex: si, imageUrl: lastImageUrl, prompt: fullPrompt });
+          } else {
+            sceneResults.push({ sceneIndex: si, prompt: fullPrompt });
+          }
+        }
+
+        const result: ExecutionResult = {
+          nodeId: node.id,
+          status: sceneResults.every(r => r.imageUrl) ? 'success' : 'failed',
+          output: {
+            sceneResults,
+            imageUrls: sceneResults.filter(r => r.imageUrl).map(r => r.imageUrl),
+            totalScenes: scenes.length,
+            completedScenes: sceneResults.filter(r => r.imageUrl).length,
+          },
+          durationMs: Date.now() - nodeStart,
+        };
+        resultMap.set(node.id, result);
+        execState.results[node.id] = result;
+      } else if (isAsyncApi) {
         const result = await executeAsyncTask(apiUrl, req.body, fetchOptions, node.id, node.type as NodeType);
         resultMap.set(node.id, result);
         execState.results[node.id] = result;

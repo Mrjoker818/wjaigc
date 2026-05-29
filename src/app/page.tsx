@@ -2016,6 +2016,7 @@ function CanvasApp() {
         onBack={() => setAppMode('canvas')}
         onWorkflowChange={setNodeWorkflow}
         onOpenWorkflowHub={() => setAppMode('workflow-hub')}
+        canvasImages={images.map(img => ({ id: img.id, url: img.url, description: img.prompt || '' }))}
       />
     );
   }

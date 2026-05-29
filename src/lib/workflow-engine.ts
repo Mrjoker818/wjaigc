@@ -19,7 +19,7 @@ export type NodeType =
   | 'ai-font-design' | 'ai-refine-engine' | 'ai-brand-ecommerce' | 'ai-segment' | 'ai-multi-angle' | 'ai-3d-model'
   | 'condition-if' | 'condition-switch' | 'loop-for' | 'loop-while' | 'loop-each' | 'parallel'
   | 'agent-auto' | 'agent-chat'
-  | 'subgraph' | 'group'
+  | 'subgraph' | 'group' | 'storyboard-sequence'
   | 'output-image' | 'output-save' | 'output-export' | 'output-image-group';
 
 export type NodeCategory = 'input' | 'ai' | 'logic' | 'agent' | 'subgraph' | 'output';
@@ -85,6 +85,7 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   'agent-chat': 'Agent 对话',
   'subgraph': '子图',
   'group': '组合',
+  'storyboard-sequence': '分镜串行',
   'output-image': '图片输出',
   'output-save': '保存',
   'output-export': '导出',
@@ -121,6 +122,7 @@ export const NODE_TYPE_ICONS: Record<NodeType, string> = {
   'agent-chat': 'MessageSquare',
   'subgraph': 'BoxSelect',
   'group': 'Group',
+  'storyboard-sequence': 'Film',
   'output-image': 'ImageDown',
   'output-save': 'Save',
   'output-export': 'Download',
@@ -250,6 +252,7 @@ export const NODE_TEMPLATES: { type: NodeType; category: NodeCategory; label: st
   { type: 'agent-chat', category: 'agent', label: 'Agent 对话', desc: '对话式Agent交互' },
   { type: 'subgraph', category: 'subgraph', label: '子图', desc: '嵌套工作流' },
   { type: 'group', category: 'subgraph', label: '组合', desc: '节点编组' },
+  { type: 'storyboard-sequence', category: 'logic', label: '分镜串行', desc: '多场景按序串行生成，每步可指定角色/场景/动作' },
   { type: 'output-image', category: 'output', label: '图片输出', desc: '输出图片结果' },
   { type: 'output-save', category: 'output', label: '保存', desc: '保存到项目/本地' },
   { type: 'output-export', category: 'output', label: '导出', desc: 'PSD/SVG/PNG导出' },
@@ -639,6 +642,23 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
     fields.push({ key: 'temperature', label: '创造性', type: 'slider', min: 0, max: 100, step: 5, defaultValue: 70 });
   }
 
+  // ─── 分镜串行节点 ───
+  if (type === 'storyboard-sequence') {
+    fields.push({ key: 'model', label: '生图模型', type: 'model-select' });
+    fields.push({ key: 'scenes', label: '场景列表', type: 'textarea', placeholder: '每行一个场景描述，如:\n场景1: 角色A站在山顶\n场景2: 角色A走向远方\n场景3: 角色A回眸微笑' });
+    fields.push({ key: 'character', label: '角色描述', type: 'textarea', placeholder: '角色外观/服饰/特征描述，保持角色一致性' });
+    fields.push({ key: 'style', label: '整体风格', type: 'text', placeholder: '如: 日系动漫/写实摄影/水墨画' });
+    fields.push({ key: 'aspectRatio', label: '画面比例', type: 'select', options: [
+      { label: '16:9 横屏', value: '16:9' }, { label: '9:16 竖屏', value: '9:16' },
+      { label: '1:1 方形', value: '1:1' }, { label: '4:3 标准', value: '4:3' }
+    ], defaultValue: '16:9' });
+    fields.push({ key: 'negativePrompt', label: '反向提示词', type: 'textarea', placeholder: '低质量, 模糊, 变形...' });
+    fields.push({ key: 'continueMode', label: '续图策略', type: 'select', options: [
+      { label: '独立生成', value: 'independent' }, { label: '图生图续接', value: 'img2img' }
+    ], defaultValue: 'independent' });
+    fields.push({ key: 'strength', label: '续接强度', type: 'slider', min: 0, max: 100, step: 5, defaultValue: 50 });
+  }
+
   // ─── 输出节点 ───
   if (type === 'output-export') {
     fields.push({ key: 'format', label: '导出格式', type: 'select', options: [
@@ -735,6 +755,7 @@ export function topologicalSort(nodes: WorkflowNode[], connections: WorkflowConn
 /**
  * 获取节点的上游输入数据 (P0: 真实数据传递)
  * 根据连线从已完成节点中提取输入，区分端口类型
+ * P0升级: 解析[img:xxx]引用 — 在prompt字段中替换为上游图片URL
  */
 export function getNodeInputs(
   node: WorkflowNode,
@@ -748,6 +769,15 @@ export function getNodeInputs(
     if (val !== undefined && val !== '') inputs[key] = val;
   }
 
+  // 构建图片URL映射 (用于[img:xxx]引用解析)
+  const imageUrlMap = new Map<string, string>();
+  for (const [, result] of results) {
+    if (result.output?.imageUrl) {
+      // nodeId → imageUrl
+      imageUrlMap.set(result.nodeId, result.output.imageUrl as string);
+    }
+  }
+
   // 从上游连线中获取输入 (按端口类型映射)
   const incomingConns = connections.filter(c => c.toNodeId === node.id);
   for (const conn of incomingConns) {
@@ -755,6 +785,11 @@ export function getNodeInputs(
     if (!upstreamResult?.output) continue;
 
     const upstreamOutput = upstreamResult.output;
+
+    // P0: 记录上游节点的imageUrl到映射
+    if (upstreamOutput.imageUrl) {
+      imageUrlMap.set(conn.fromNodeId, upstreamOutput.imageUrl as string);
+    }
 
     // 根据连线类型和目标端口ID智能映射
     switch (conn.type) {
@@ -795,6 +830,16 @@ export function getNodeInputs(
         if (upstreamOutput.layers) inputs.layers = upstreamOutput.layers;
         break;
       }
+    }
+  }
+
+  // P0: 解析[img:xxx]引用 — 替换为实际的图片URL
+  for (const [key, val] of Object.entries(inputs)) {
+    if (typeof val === 'string' && val.includes('[img:')) {
+      inputs[key] = val.replace(/\[img:([^\]]+)\]/g, (match, refId) => {
+        const url = imageUrlMap.get(refId);
+        return url || match; // 找到URL则替换，否则保留原文
+      });
     }
   }
 
@@ -1015,6 +1060,29 @@ export function buildNodeExecutionRequest(
         }
       };
 
+    case 'storyboard-sequence':
+      return {
+        endpoint: '/api/generate',
+        method: 'POST',
+        body: {
+          prompt: config.scenes || config.prompt || '',
+          negativePrompt: config.negativePrompt || '',
+          model: config.model || '',
+          quality: 'hd',
+          size: config.aspectRatio === '16:9' ? '1792x1024' : config.aspectRatio === '9:16' ? '1024x1792' : config.aspectRatio === '4:3' ? '1152x864' : '1024x1024',
+          // 分镜串行元数据
+          _storyboard: {
+            scenes: (config.scenes as string || '').split('\n').filter((s: string) => s.trim()),
+            character: config.character || '',
+            style: config.style || '',
+            continueMode: config.continueMode || 'independent',
+            strength: config.strength || 50,
+          },
+          imageUrl: config.imageUrl || '',
+          strength: config.continueMode === 'img2img' ? (config.strength || 50) : undefined,
+        }
+      };
+
     case 'agent-auto':
       return {
         endpoint: '/api/agent-edit',
@@ -1196,6 +1264,14 @@ export const AI_BUILD_PROMPT = `你是一个AI图像工作流设计助手。用�
 6. 尽量减少节点数量，保持工作流简洁
 7. 只输出JSON，不要其他文本`;
 
+/** P0: AI建图二次修正追问提示词 */
+export const AI_BUILD_REFINE_PROMPT = `你上次生成的工作流节点太少，不够完整。请重新设计一个更详细的工作流，要求:
+1. 至少包含3个节点（输入→处理→输出）
+2. 根据用户需求，增加必要的中间处理步骤
+3. 填充每个节点的config配置（如模型、参数等）
+4. 确保连线完整，数据能从输入流到输出
+5. 只输出JSON，不要其他文本`;
+
 /** 解析AI建图响应 */
 export function parseAIBuildResponse(response: string): { name: string; description: string; nodes: { id: string; type: NodeType; label: string; config: Record<string, unknown> }[]; connections: { fromNodeId: string; fromPortId: string; toNodeId: string; toPortId: string; type: PortType }[] } | null {
   try {
@@ -1268,6 +1344,265 @@ export function createWorkflowFromAIResult(result: NonNullable<ReturnType<typeof
   }
 
   return wf;
+}
+
+// ==================== ComfyUI 工作流导入 ====================
+
+/** ComfyUI节点 → 无界节点类型映射 */
+const COMFYUI_NODE_MAP: Record<string, NodeType> = {
+  'KSampler': 'ai-generate',
+  'KSamplerAdvanced': 'ai-generate',
+  'SamplerCustom': 'ai-generate',
+  'SamplerCustomAdvanced': 'ai-generate',
+  'CLIPTextEncode': 'input-text',
+  'CLIPTextEncodePositive': 'input-text',
+  'CLIPTextEncodeNegative': 'input-text',
+  'CheckpointLoaderSimple': 'input-param',
+  'CheckpointLoader': 'input-param',
+  'UNETLoader': 'input-param',
+  'CLIPLoader': 'input-param',
+  'VAELoader': 'input-param',
+  'VAEDecode': 'ai-generate',
+  'VAEEncode': 'ai-edit',
+  'SaveImage': 'output-save',
+  'PreviewImage': 'output-image',
+  'LoadImage': 'input-image',
+  'ImageScale': 'ai-upscale',
+  'ImageScaleBy': 'ai-upscale',
+  'InpaintModelConditioning': 'ai-edit',
+  'SetLatentNoiseMask': 'ai-edit',
+  'CLIPVisionEncode': 'ai-style-transfer',
+  'StyleModelLoader': 'ai-style-transfer',
+};
+
+/** 从ComfyUI类名推断无界节点类型 */
+function comfyToWujieType(classType: string): NodeType {
+  // 精确匹配
+  if (COMFYUI_NODE_MAP[classType]) return COMFYUI_NODE_MAP[classType];
+  // 模糊匹配
+  const lower = classType.toLowerCase();
+  if (lower.includes('sampler') || lower.includes('generate')) return 'ai-generate';
+  if (lower.includes('text') || lower.includes('prompt') || lower.includes('clip_encode')) return 'input-text';
+  if (lower.includes('load') && lower.includes('image')) return 'input-image';
+  if (lower.includes('load') && (lower.includes('model') || lower.includes('checkpoint') || lower.includes('lora'))) return 'input-param';
+  if (lower.includes('save') || lower.includes('preview')) return 'output-image';
+  if (lower.includes('scale') || lower.includes('upscale')) return 'ai-upscale';
+  if (lower.includes('inpaint') || lower.includes('mask')) return 'ai-edit';
+  if (lower.includes('controlnet')) return 'ai-style-transfer';
+  if (lower.includes('style')) return 'ai-style-transfer';
+  return 'ai-generate'; // 默认
+}
+
+/** ComfyUI widgets_values 中提取关键字段 */
+function extractComfyFields(classType: string, widgetsValues: unknown[]): Record<string, unknown> {
+  const config: Record<string, unknown> = {};
+  const lower = classType.toLowerCase();
+
+  // KSampler类: [seed, control_after_generate, steps, cfg, sampler_name, scheduler, denoise]
+  if (lower.includes('sampler')) {
+    if (widgetsValues[0] !== undefined) config.seed = widgetsValues[0];
+    if (widgetsValues[2] !== undefined) config.steps = widgetsValues[2];
+    if (widgetsValues[3] !== undefined) config.cfg = widgetsValues[3];
+    if (widgetsValues[6] !== undefined) config.strength = Math.round((widgetsValues[6] as number) * 100);
+  }
+
+  // CLIPTextEncode: [text]
+  if (lower.includes('text') || lower.includes('prompt') || lower.includes('clip_encode')) {
+    if (widgetsValues[0] !== undefined) {
+      const text = String(widgetsValues[0]);
+      if (lower.includes('negative')) {
+        config.negativePrompt = text;
+        config.label = '反向提示词';
+      } else {
+        config.prompt = text;
+        config.text = text;
+      }
+    }
+  }
+
+  // CheckpointLoader: [ckpt_name]
+  if (lower.includes('checkpoint') || lower.includes('loader')) {
+    if (widgetsValues[0] !== undefined) config.model = String(widgetsValues[0]);
+  }
+
+  // ImageScale: [upscale_method, width, height, crop]
+  if (lower.includes('scale')) {
+    if (widgetsValues[1] !== undefined) config.targetWidth = widgetsValues[1];
+    if (widgetsValues[2] !== undefined) config.targetHeight = widgetsValues[2];
+  }
+
+  return config;
+}
+
+/** 解析ComfyUI工作流JSON，生成无界工作流 */
+export function parseComfyUIWorkflow(json: string): Workflow | null {
+  try {
+    const data = JSON.parse(json);
+
+    // ComfyUI格式检测: 顶层是 {nodeId: {class_type, inputs, ...}}
+    const isComfyAPIFormat = !data.nodes && typeof data === 'object';
+    // ComfyUI前端格式检测: 顶层有 {nodes: [...], links: [...]}
+    const isComfyFrontendFormat = Array.isArray(data.nodes) && Array.isArray(data.links);
+
+    if (!isComfyAPIFormat && !isComfyFrontendFormat) return null;
+
+    const wf = createEmptyWorkflow('ComfyUI导入工作流');
+    const nodeIdMap = new Map<string, string>(); // comfyId → wujieId
+
+    if (isComfyFrontendFormat) {
+      // 前端格式: nodes数组 + links数组
+      for (const comfyNode of data.nodes) {
+        const wujieType = comfyToWujieType(comfyNode.type || '');
+        const wujieId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        nodeIdMap.set(String(comfyNode.id), wujieId);
+
+        const config: Record<string, unknown> = {
+          color: NODE_TYPE_COLORS[getNodeCategory(wujieType)],
+          comfyType: comfyNode.type,
+        };
+
+        // 提取widgets_values中的字段
+        if (comfyNode.widgets_values) {
+          Object.assign(config, extractComfyFields(comfyNode.type, comfyNode.widgets_values));
+        }
+
+        const node: WorkflowNode = {
+          id: wujieId,
+          type: wujieType,
+          label: config.label as string || comfyNode.title || comfyNode.type || NODE_TYPE_LABELS[wujieType],
+          x: comfyNode.pos?.[0] || 100,
+          y: comfyNode.pos?.[1] || 100,
+          width: comfyNode.size?.[0] || 180,
+          height: comfyNode.size?.[1] || 60,
+          config,
+          ports: createDefaultPorts(wujieType),
+          condition: undefined,
+          loopCount: undefined,
+          agentRound: 0,
+          breakpoint: false,
+        };
+        wf.nodes.push(node);
+      }
+
+      // 解析links: [link_id, from_node, from_slot, to_node, to_slot, type]
+      if (data.links) {
+        for (const link of data.links) {
+          const fromWujieId = nodeIdMap.get(String(link[1]));
+          const toWujieId = nodeIdMap.get(String(link[3]));
+          if (!fromWujieId || !toWujieId) continue;
+
+          const fromNode = wf.nodes.find(n => n.id === fromWujieId);
+          const toNode = wf.nodes.find(n => n.id === toWujieId);
+          const fromPort = fromNode?.ports.find(p => p.direction === 'out');
+          const toPort = toNode?.ports.find(p => p.direction === 'in');
+
+          if (fromPort && toPort) {
+            wf.connections.push(createConnection(
+              fromWujieId, fromPort.id,
+              toWujieId, toPort.id,
+              'any'
+            ));
+          }
+        }
+      }
+    } else {
+      // API格式: {nodeId: {class_type, inputs, _meta}}
+      let yOffset = 0;
+      for (const [comfyId, nodeData] of Object.entries(data)) {
+        const nd = nodeData as { class_type?: string; inputs?: Record<string, unknown>; _meta?: { title?: string } };
+        if (!nd.class_type) continue;
+
+        const wujieType = comfyToWujieType(nd.class_type);
+        const wujieId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        nodeIdMap.set(comfyId, wujieId);
+
+        const config: Record<string, unknown> = {
+          color: NODE_TYPE_COLORS[getNodeCategory(wujieType)],
+          comfyType: nd.class_type,
+        };
+
+        // 从inputs中提取prompt等字段
+        if (nd.inputs) {
+          if (nd.inputs.text) config.prompt = String(nd.inputs.text);
+          if (nd.inputs.prompt) config.prompt = String(nd.inputs.prompt);
+          if (nd.inputs.negative_prompt || nd.inputs.negative) config.negativePrompt = String(nd.inputs.negative_prompt || nd.inputs.negative);
+          if (nd.inputs.ckpt_name || nd.inputs.checkpoint) config.model = String(nd.inputs.ckpt_name || nd.inputs.checkpoint);
+          if (nd.inputs.seed !== undefined) config.seed = nd.inputs.seed;
+          if (nd.inputs.steps) config.steps = nd.inputs.steps;
+          if (nd.inputs.cfg) config.cfg = nd.inputs.cfg;
+          if (nd.inputs.denoise) config.strength = Math.round((nd.inputs.denoise as number) * 100);
+          if (nd.inputs.image) config.imageUrl = String(nd.inputs.image);
+        }
+
+        const node: WorkflowNode = {
+          id: wujieId,
+          type: wujieType,
+          label: nd._meta?.title || nd.class_type || NODE_TYPE_LABELS[wujieType],
+          x: 80,
+          y: yOffset,
+          width: 180,
+          height: 60,
+          config,
+          ports: createDefaultPorts(wujieType),
+          condition: undefined,
+          loopCount: undefined,
+          agentRound: 0,
+          breakpoint: false,
+        };
+        wf.nodes.push(node);
+        yOffset += 100;
+      }
+
+      // 从inputs中解析连线 (引用格式的 ["nodeId", slotIndex])
+      for (const [comfyId, nodeData] of Object.entries(data)) {
+        const nd = nodeData as { inputs?: Record<string, unknown> };
+        if (!nd.inputs) continue;
+        const toWujieId = nodeIdMap.get(comfyId);
+        if (!toWujieId) continue;
+
+        for (const [inputName, inputValue] of Object.entries(nd.inputs)) {
+          if (Array.isArray(inputValue) && typeof inputValue[0] === 'string' && typeof inputValue[1] === 'number') {
+            const fromWujieId = nodeIdMap.get(inputValue[0]);
+            if (!fromWujieId) continue;
+
+            const fromNode = wf.nodes.find(n => n.id === fromWujieId);
+            const toNode = wf.nodes.find(n => n.id === toWujieId);
+            const fromPort = fromNode?.ports.find(p => p.direction === 'out');
+            const toPort = toNode?.ports.find(p => p.direction === 'in');
+
+            if (fromPort && toPort) {
+              const existing = wf.connections.find(c => c.fromNodeId === fromWujieId && c.toNodeId === toWujieId);
+              if (!existing) {
+                wf.connections.push(createConnection(fromWujieId, fromPort.id, toWujieId, toPort.id, 'any'));
+              }
+            }
+          }
+        }
+      }
+
+      // 自动布局
+      if (wf.nodes.length > 0) {
+        autoLayoutWorkflow(wf);
+      }
+    }
+
+    wf.description = '从ComfyUI工作流导入';
+    return wf.nodes.length > 0 ? wf : null;
+  } catch {
+    return null;
+  }
+}
+
+// ==================== build_mode 检测 ====================
+
+/** 检测当前是否运行在构建/生产环境 */
+export function isBuildMode(): boolean {
+  return (process.env.COZE_PROJECT_ENV || '').toUpperCase() === 'PROD';
+}
+
+/** 检测当前是否运行在开发环境 */
+export function isDevMode(): boolean {
+  return (process.env.COZE_PROJECT_ENV || '').toUpperCase() !== 'PROD';
 }
 
 // ==================== 演示工作流 ====================

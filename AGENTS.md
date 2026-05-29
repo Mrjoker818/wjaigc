@@ -402,13 +402,16 @@ scripts/
 基于 DAG 拓扑排序的可视化工作流编排系统，支持自然语言建图、连线语义类型、节点间数据传递。
 
 - **核心架构**:
-  - `workflow-engine.ts`: DAG 拓扑排序 (Kahn 算法)、节点输入解析 (`getNodeInputs`)、执行请求构建 (`buildNodeExecutionRequest`)、25+ 节点类型定义
-  - `node-editor.tsx`: 前端节点编辑器（SVG 画布 + 侧边栏属性面板）
+  - `workflow-engine.ts`: DAG 拓扑排序 (Kahn 算法)、节点输入解析 (`getNodeInputs`)、执行请求构建 (`buildNodeExecutionRequest`)、27+ 节点类型定义、ComfyUI工作流导入
+  - `node-editor.tsx`: 前端节点编辑器（SVG 画布 + 侧边栏属性面板 + 素材库 + 画布助手 + 小地图）
   - `api/workflow/`: 执行/模型/保存/AI建图 4 个 API 端点
 - **P0 核心功能**:
   - **AI 自然语言建图**: 用户输入自然语言描述 → LLM 解析 → 自动生成完整节点图（nodes+edges+layout），复用管理员配置的 chat 模型
+  - **AI 建图二次修正**: AI首次输出nodes<2时自动追问重新生成，确保生成有意义的多节点工作流
   - **连线语义类型**: 连线区分 prompt(提示词)/image(图片)/reference(参考图)/mask(蒙版) 类型，端口类型约束（image 只能接 image）
   - **节点间数据传递**: 上游节点 output 自动流入下游节点 input，`getNodeInputs` 从已完成节点获取输入
+  - **串行等待执行**: `waitForUpstreamCompletion` 确保节点等待上游节点实际完成后才执行
+  - **@图片引用**: 提示词输入框输入@符号弹出画布图片列表，选中后插入`[img:id]`引用，执行时自动解析为图片URL
   - **画布模式专用节点**: 字境大师(ai-font-design)、精修引擎(ai-refine-engine)、品牌电商(ai-brand-ecommerce)、元素分层(ai-segment)、多角度(ai-multi-angle)、3D模型(ai-3d-model)
 - **P1 增强功能**:
   - **专业预设工作流**: 8 种预设模板（文生图/图生图/精修/品牌/字境/元素分层/多角度/3D模型），一键加载
@@ -417,15 +420,21 @@ scripts/
   - **节点复制粘贴**: Ctrl+C/V 复制节点+连线关系，自动偏移位置
   - **连线高亮**: 选中节点时自动高亮所有上下游节点和连线
   - **执行日志面板**: 底部右侧实时显示每个节点的执行状态、耗时、错误信息
+  - **素材库系统**: 双层（本地+服务器）素材管理，支持图片/提示词/颜色素材，分类筛选，一键填入节点，localStorage 持久化
+  - **画布助手上游自动引用**: 选中节点后自动遍历上游节点作为上下文，连同当前节点信息一起发送给AI助手
+  - **分镜串行工作流**: storyboard-sequence 节点类型，支持多场景描述+串行执行，每个场景依次生成图片
 - **P2 扩展功能**:
   - **提示词库**: 提示词 CRUD、标签管理、分类筛选、一键填入节点，localStorage 持久化
   - **画布助手 (节点感知)**: 选中节点后助手自动读取上下文，对话+建议，调用 `/api/chat`
   - **撤销重做 (节点级)**: 50 步历史栈，Ctrl+Z 撤销 / Ctrl+Shift+Z 重做
-  - **节点 JSON 编辑器**: 右键或工具栏 → 查看/编辑工作流原始 JSON，高级用户可直接编辑
-- **25+ 节点类型**:
+  - **节点 JSON 编辑器**: 右键或工具栏 → 查看/编辑工作流原始 JSON，高级用户可直接编辑（build_mode下隐藏）
+  - **小地图增强**: 视口指示框（金色半透明矩形），点击小地图直接跳转到对应画布位置
+  - **build_mode 检测**: 检测生产环境 `COZE_PROJECT_ENV=PROD`，自动隐藏开发工具（JSON编辑器等）
+  - **ComfyUI 工作流导入**: 解析 ComfyUI 前端格式（nodes+links）和 API 格式（class_type+inputs），自动映射节点类型，工具栏一键导入 .json 文件
+- **27+ 节点类型**:
   - 输入: input-text, input-image
   - AI图像: ai-generate, ai-remove-bg, ai-upscale, ai-retouch, ai-font-design, ai-refine-engine, ai-brand-ecommerce, ai-segment, ai-multi-angle, ai-3d-model
-  - 控制: condition, loop, agent
+  - 控制: condition, loop, agent, storyboard-sequence
   - 输出: output-image, output-export, output-image-group
   - 每种类型含完整 fields 定义（text/textarea/number/select/toggle/slider/model-select/color）
 - **API 接口**:
