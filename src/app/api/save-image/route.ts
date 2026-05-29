@@ -54,9 +54,13 @@ export async function POST(request: NextRequest) {
         await writeFile(filePath, buffer);
 
         if (isProd) {
-          const publicDir = path.join(process.cwd(), 'public', 'uploads');
-          if (!existsSync(publicDir)) await mkdir(publicDir, { recursive: true });
-          try { await copyFile(filePath, path.join(publicDir, filename)); } catch { /* ignore */ }
+          // 生产环境通过 /api/serve-upload 路由提供文件，不需要 public/uploads 副本
+          // 如果 /opt/bytefaas/public 不可写，mkdir 会抛 ENOENT，因此跳过
+          try {
+            const publicDir = path.join(process.cwd(), 'public', 'uploads');
+            if (!existsSync(publicDir)) await mkdir(publicDir, { recursive: true });
+            await copyFile(filePath, path.join(publicDir, filename));
+          } catch { /* 生产环境无需 public 副本，serve-upload API 足够 */ }
         }
 
         // S3 backup
@@ -167,11 +171,13 @@ export async function POST(request: NextRequest) {
       const filename = `gen-${timestamp}-${random}.${ext}`;
       const filePath = path.join(uploadDir, filename);
       await writeFile(filePath, finalBuffer);
-      // 开发环境也写入 public/uploads 以便 Next.js 静态服务
+      // 生产环境通过 /api/serve-upload 路由提供文件，不需要 public/uploads 副本
       if (isProd) {
-        const publicDir = path.join(process.cwd(), 'public', 'uploads');
-        if (!existsSync(publicDir)) await mkdir(publicDir, { recursive: true });
-        try { await copyFile(filePath, path.join(publicDir, filename)); } catch { /* ignore */ }
+        try {
+          const publicDir = path.join(process.cwd(), 'public', 'uploads');
+          if (!existsSync(publicDir)) await mkdir(publicDir, { recursive: true });
+          await copyFile(filePath, path.join(publicDir, filename));
+        } catch { /* 生产环境无需 public 副本，serve-upload API 足够 */ }
       }
 
       // 上传到 S3 对象存储（持久化，重部署不丢失）
@@ -218,9 +224,12 @@ export async function POST(request: NextRequest) {
         const filePath = path.join(uploadDir, filename);
         await writeFile(filePath, buffer);
         if (isProd) {
-          const publicDir = path.join(process.cwd(), 'public', 'uploads');
-          if (!existsSync(publicDir)) await mkdir(publicDir, { recursive: true });
-          try { await copyFile(filePath, path.join(publicDir, filename)); } catch { /* ignore */ }
+          // 生产环境通过 /api/serve-upload 路由提供文件，不需要 public/uploads 副本
+          try {
+            const publicDir = path.join(process.cwd(), 'public', 'uploads');
+            if (!existsSync(publicDir)) await mkdir(publicDir, { recursive: true });
+            await copyFile(filePath, path.join(publicDir, filename));
+          } catch { /* 生产环境无需 public 副本，serve-upload API 足够 */ }
         }
         // S3 backup
         let s3Key: string | null = null;
@@ -268,9 +277,12 @@ export async function POST(request: NextRequest) {
         await writeFile(filePath, buffer);
         // 开发环境也写入 public/uploads
         if (isProd) {
-          const publicDir = path.join(process.cwd(), 'public', 'uploads');
-          if (!existsSync(publicDir)) await mkdir(publicDir, { recursive: true });
-          try { await copyFile(filePath, path.join(publicDir, filename)); } catch { /* ignore */ }
+          // 生产环境通过 /api/serve-upload 路由提供文件，不需要 public/uploads 副本
+          try {
+            const publicDir = path.join(process.cwd(), 'public', 'uploads');
+            if (!existsSync(publicDir)) await mkdir(publicDir, { recursive: true });
+            await copyFile(filePath, path.join(publicDir, filename));
+          } catch { /* 生产环境无需 public 副本，serve-upload API 足够 */ }
         }
 
         // 上传到 S3 对象存储（持久化，重部署不丢失）

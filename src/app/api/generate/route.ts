@@ -713,18 +713,66 @@ export async function POST(request: NextRequest) {
               const multipartController = new AbortController();
               const multipartTimeoutId = setTimeout(() => multipartController.abort(), timeoutMs);
 
-              submitResponse = await fetchWithV1Retry(
-                currentApiBaseUrl,
-                endpoint,
-                {
-                  method: 'POST',
-                  headers: {
-                    'Authorization': `Bearer ${currentApiKey}`,
-                  },
-                  body: buildMultipartBody(),
-                  signal: multipartController.signal,
+              // 使用 form-data npm 包替代浏览器 FormData，确保 boundary 正确传输
+              try {
+                const FD = (await import('form-data')).default;
+                const fd = new FD();
+                for (const [key, value] of Object.entries(adjustedBody)) {
+                  if (value === undefined || value === null) continue;
+                  if (key === 'image') {
+                    const imgVal = String(value);
+                    if (imgVal.startsWith('data:')) {
+                      const match = imgVal.match(/^data:([^;]+);base64,(.+)$/);
+                      if (match) {
+                        const mimeType = match[1];
+                        const base64Data = match[2];
+                        const binaryData = Buffer.from(base64Data, 'base64');
+                        const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
+                        fd.append('image', binaryData, { filename: `image.${ext}`, contentType: mimeType });
+                      }
+                    } else {
+                      const binaryData = Buffer.from(imgVal, 'base64');
+                      fd.append('image', binaryData, { filename: 'image.png', contentType: 'image/png' });
+                    }
+                  } else if (Array.isArray(value)) {
+                    for (const item of value) {
+                      fd.append(key, String(item));
+                    }
+                  } else {
+                    fd.append(key, String(value));
+                  }
                 }
-              );
+                // form-data 包需转为 Buffer 发送，Node.js fetch 不能正确流式传输
+                const fdBuffer = fd.getBuffer();
+                submitResponse = await fetchWithV1Retry(
+                  currentApiBaseUrl,
+                  endpoint,
+                  {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${currentApiKey}`,
+                      ...fd.getHeaders(),
+                      'Content-Length': String(fdBuffer.length),
+                    },
+                    body: fdBuffer as unknown as BodyInit,
+                    signal: multipartController.signal,
+                  }
+                );
+              } catch {
+                // form-data 包不可用时，回退到浏览器 FormData
+                submitResponse = await fetchWithV1Retry(
+                  currentApiBaseUrl,
+                  endpoint,
+                  {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${currentApiKey}`,
+                    },
+                    body: buildMultipartBody(),
+                    signal: multipartController.signal,
+                  }
+                );
+              }
 
               clearTimeout(multipartTimeoutId);
             } else {

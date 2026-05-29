@@ -625,6 +625,11 @@ async function submitImageTask(
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${apiKey}`,
+              ...(() => {
+                // Node.js 原生 fetch + 浏览器 FormData 需要手动设置 Content-Type
+                // 让 fetch 自动处理 boundary
+                return {};
+              })(),
             },
             body: formData,
             signal: controller.signal,

@@ -670,6 +670,11 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           form.append('n', String(Math.min(count, 4)));
         }
 
+        // Node.js 原生 fetch 不能正确流式传输 form-data，
+        // 需要将 form 转为 Buffer 发送，确保 boundary 完整传输
+        const formBuffer = form.getBuffer();
+        const formHeaders = form.getHeaders();
+
         const editResponse = await fetchWithV1Retry(
           effectiveBaseUrl,
           '/images/edits',
@@ -677,9 +682,10 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${effectiveApiKey}`,
-              ...form.getHeaders(),
+              ...formHeaders,
+              'Content-Length': String(formBuffer.length),
             },
-            body: form as unknown as BodyInit,
+            body: formBuffer as unknown as BodyInit,
             signal: AbortSignal.timeout(120000),
           },
         );
