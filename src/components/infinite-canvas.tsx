@@ -694,6 +694,19 @@ export function InfiniteCanvas({
   const [showCropRatios, setShowCropRatios] = useState(false);
   // 图片工具栏折叠状态
   const [toolbarExpanded, setToolbarExpanded] = useState(false);
+  const [leftToolbarExpanded, setLeftToolbarExpanded] = useState(false);
+  const leftToolbarRef = useRef<HTMLDivElement>(null);
+
+  // 点击外部关闭左侧工具栏
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (leftToolbarExpanded && leftToolbarRef.current && !leftToolbarRef.current.contains(e.target as Node)) {
+        setLeftToolbarExpanded(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [leftToolbarExpanded]);
   const [showToolbarCustomize, setShowToolbarCustomize] = useState(false);
   // 工具栏自定义排序/可见性（从 localStorage 读取）
   const [toolbarItemOrder, setToolbarItemOrder] = useState<string[]>(() => {
@@ -5880,41 +5893,11 @@ export function InfiniteCanvas({
           }
         />
 
-        {/* Collapsible toolbar - top left */}
-        <div className="absolute top-4 left-4 z-50 group/toolbar">
-          {/* Collapsed: icon column */}
-          <div className="group-hover/toolbar:hidden flex flex-col items-center py-2 gap-1 rounded-xl bg-background/85 border border-white/[0.06]" style={{ width: 48, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
-            <button className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-gold/20 text-gold" title="选择 (V)">
-              <MousePointer2 className="w-4 h-4" />
-            </button>
-            <button className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright" title="平移 (H)">
-              <Hand className="w-4 h-4" />
-            </button>
-            <button className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright" title="上传图片">
-              <ImagePlus className="w-4 h-4" />
-            </button>
-            <div className="w-5 my-1 h-px bg-white/[0.06]" />
-            <button
-              onClick={onSwitchToNodeMode}
-              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
-              title="节点模式"
-            >
-              <Workflow className="w-4 h-4" />
-            </button>
-            <button
-              onClick={onSwitchToWorkflowHub}
-              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
-              title="工作流中心"
-            >
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-            <div className="w-5 my-1 h-px bg-white/[0.06]" />
-            <button className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright" title="展开工具栏">
-              <ChevronsRight className="w-4 h-4" />
-            </button>
-          </div>
-          {/* Expanded: full toolbar */}
-          <div className="hidden group-hover/toolbar:flex flex-col gap-1 min-w-[160px] p-2 rounded-xl bg-background/85 border border-white/[0.06]" style={{ backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+        {/* Collapsible toolbar - top left (click to toggle) */}
+        <div ref={leftToolbarRef}>
+        {leftToolbarExpanded ? (
+          /* Expanded: full toolbar */
+          <div className="absolute top-4 left-4 z-50 flex flex-col gap-1 min-w-[160px] p-2 rounded-xl bg-background/85 border border-white/[0.06] transition-all duration-200" style={{ backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
             {/* Logo header */}
             <div className="flex items-center gap-2 px-2 py-1.5">
               <img src="/logo.png" alt="无界AI" className="w-6 h-6 object-contain rounded" />
@@ -5924,6 +5907,33 @@ export function InfiniteCanvas({
             <div className="mx-2 h-px bg-white/[0.06]" />
             {/* Section: Canvas tools */}
             <div className="text-xs font-semibold mb-1 px-2 text-gold-muted">画布操作</div>
+            {/* Select Tool */}
+            <button
+              onClick={() => { /* Select tool active by default */ }}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-gold/20 text-gold"
+              title="选择 (V)"
+            >
+              <MousePointer2 className="h-3.5 w-3.5" />
+              <span>选择</span>
+            </button>
+            {/* Pan Tool */}
+            <button
+              onClick={() => { /* Pan tool */ }}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              title="平移 (H)"
+            >
+              <Hand className="h-3.5 w-3.5" />
+              <span>平移</span>
+            </button>
+            {/* Upload Image */}
+            <button
+              onClick={() => uploadFileInputRef.current?.click()}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              title="上传图片"
+            >
+              <ImagePlus className="h-3.5 w-3.5" />
+              <span>上传图片</span>
+            </button>
             {/* OMP Toggle */}
             <button
               onClick={() => {
@@ -6049,11 +6059,60 @@ export function InfiniteCanvas({
             {/* Divider */}
             <div className="mx-2 h-px bg-white/[0.06]" />
             {/* Collapse button */}
-            <button className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright" title="收起工具栏">
+            <button
+              onClick={() => setLeftToolbarExpanded(false)}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              title="收起工具栏"
+            >
               <ChevronsLeft className="h-3.5 w-3.5" />
               <span>收起</span>
             </button>
           </div>
+        ) : (
+          /* Collapsed: icon column */
+          <div className="absolute top-4 left-4 z-50 flex flex-col items-center py-2 gap-1 rounded-xl bg-background/85 border border-white/[0.06] transition-all duration-200" style={{ width: 48, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+            <button
+              onClick={() => { /* Select tool active by default */ }}
+              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-gold/20 text-gold" title="选择 (V)"
+            >
+              <MousePointer2 className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => { /* Pan tool */ }}
+              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright" title="平移 (H)"
+            >
+              <Hand className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => uploadFileInputRef.current?.click()}
+              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright" title="上传图片"
+            >
+              <ImagePlus className="w-4 h-4" />
+            </button>
+            <div className="w-5 my-1 h-px bg-white/[0.06]" />
+            <button
+              onClick={onSwitchToNodeMode}
+              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              title="节点模式"
+            >
+              <Workflow className="w-4 h-4" />
+            </button>
+            <button
+              onClick={onSwitchToWorkflowHub}
+              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              title="工作流中心"
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+            <div className="w-5 my-1 h-px bg-white/[0.06]" />
+            <button
+              onClick={() => setLeftToolbarExpanded(true)}
+              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright" title="展开工具栏"
+            >
+              <ChevronsRight className="w-4 h-4" />
+            </button>
+          </div>
+        )}
         </div>
 
         {/* Oh My Prompt Panel - floating window from toolbar */}
