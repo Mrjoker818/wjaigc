@@ -69,6 +69,7 @@ const MODEL_HINTS: Record<string, string> = {
 
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { MODEL_ASPECT_RATIOS, MODEL_QUALITIES, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, QUALITY_DISPLAY_NAMES, findModelConfig } from '@/lib/canvas-generation-group';
+import { taskEventsClient } from '@/lib/task-events-client';
 
 function getModelHint(modelId: string): string {
   for (const [key, hint] of Object.entries(MODEL_HINTS)) {
@@ -575,6 +576,12 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   useEffect(() => {
     onParamsChange?.({ aspectRatio, quality, count: outputCount });
   }, [aspectRatio, quality, outputCount, onParamsChange]);
+
+  // ★ 连接SSE任务事件推送
+  useEffect(() => {
+    taskEventsClient.connect();
+    return () => { /* 单例不主动断开 */ };
+  }, []);
 
   // 初始化图片和Canvas
   useEffect(() => {
@@ -1110,9 +1117,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       let collectedLlmInstruction = '';
       let collectedEditRegions: Array<{ label: string; bounds: { x: number; y: number; width: number; height: number } }> = [];
       const completedTasks = new Set<string>();
-      const maxPollTime = 300000; // 5分钟超时
+      const maxPollTime = 600000; // ★ 10分钟超时（与后端 EDIT_GLOBAL_TIMEOUT_MS 对齐）
       const pollStart = Date.now();
-      const pollInterval = 2000; // 2秒轮询间隔
+      let pollCount = 0;
 
       // 等待500ms让后端完成任务创建，避免首次轮询时任务尚未存储
       await new Promise(r => setTimeout(r, 500));
@@ -1177,7 +1184,10 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
         // 如果还有未完成的任务，等待后继续轮询
         if (completedTasks.size < taskIds.length) {
-          await new Promise(resolve => setTimeout(resolve, pollInterval));
+          pollCount++;
+          // ★ 动态轮询间隔：前10次1秒，10-25次1.5秒，之后2秒
+          const waitMs = pollCount <= 10 ? 1000 : pollCount <= 25 ? 1500 : 2000;
+          await new Promise(resolve => setTimeout(resolve, waitMs));
         }
       }
 

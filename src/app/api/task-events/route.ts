@@ -1,7 +1,20 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { subscribeToTaskEvents, type TaskEvent } from '@/lib/task-registry';
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * POST /api/task-events
+ * 兼容处理：部分代理/CDN 可能将 GET SSE 请求转为 POST
+ * 返回 JSON 提示使用 GET 连接 SSE，避免 405 错误
+ */
+export async function POST() {
+  return NextResponse.json({
+    success: false,
+    error: 'SSE endpoint requires GET method. Use EventSource or fetch with GET to connect.',
+    hint: 'new EventSource("/api/task-events")',
+  }, { status: 200 });
+}
 
 /**
  * GET /api/task-events

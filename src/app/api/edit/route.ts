@@ -335,8 +335,8 @@ export async function POST(request: NextRequest) {
     // ★ 注册到统一任务中心（SSE推送 + 取消支持）
     registerTask(taskId, 'edit', '语言修图');
 
-    // 后台异步执行编辑流程（5分钟全局超时兜底）
-    const EDIT_GLOBAL_TIMEOUT_MS = 5 * 60 * 1000;
+    // 后台异步执行编辑流程（10分钟全局超时兜底，因为 LLM协作+串行回退可能耗时较长）
+    const EDIT_GLOBAL_TIMEOUT_MS = 10 * 60 * 1000;
     (async () => {
       // 全局超时：确保 IIFE 不会无限运行
       const timeoutId = setTimeout(() => {
@@ -471,7 +471,13 @@ export async function POST(request: NextRequest) {
 
     // ===== 单次 LLM 协作：合并分析+指令生成为1次调用 =====
     try {
+      // ★ 检查任务是否已被取消
+      if (isTaskCancelled(taskId)) {
+        failTask(taskId, '任务已被取消');
+        return;
+      }
       updateTaskStage(taskId, '分析中');
+      console.info(`[edit] taskId=${taskId} 开始LLM协作, prompt="${prompt.substring(0, 60)}..."`);
       // 查找 LLM 提供商：优先使用 llmProviderId，否则查找 chat 类型提供商
       let llmProvider: Awaited<ReturnType<typeof findProviderById>> = null;
       if (llmModelId && llmProviderId) {
@@ -568,7 +574,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
             max_tokens: 2000,
             temperature: 0.7,
           }),
-          signal: AbortSignal.timeout(60000),
+          signal: AbortSignal.timeout(45000),
         });
 
         if (collabResp.ok) {
@@ -641,7 +647,13 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     const editInstruction = `Edit this image according to the following instruction: ${effectivePrompt}. Maintain the overall composition and style while making the requested changes.${size ? ` Output image size: ${size}.` : ''}${quality ? ` Output quality: ${quality}.` : ''}`;
 
     // ========== 6. 调用 API（全兼容模式） ==========
+    // ★ 检查任务是否已被取消
+    if (isTaskCancelled(taskId)) {
+      failTask(taskId, '任务已被取消');
+      return;
+    }
     updateTaskStage(taskId, '编辑中');
+    console.info(`[edit] taskId=${taskId} 开始图像编辑, model=${model}, path=${isOpenaiImageModel && supportsNativeMask && maskBuffer ? 'images.edit' : 'chat/completions(fallback)'}`);
 
     // 路径A: OpenAI images.edit 端点（仅 OpenAI 官方 + 支持 mask 的场景）
     // 第三方代理即使模型名是 gpt-image-2，也不走 images.edit（因为代理通常不支持）
@@ -689,7 +701,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               'Content-Length': String(formBuffer.length),
             },
             body: formBuffer as unknown as BodyInit,
-            signal: AbortSignal.timeout(120000),
+            signal: AbortSignal.timeout(90000),
           },
         );
 
@@ -727,6 +739,12 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       } catch (editErr) {
         console.warn('images.edit error, falling back to chat/completions:', editErr instanceof Error ? editErr.message : editErr);
       }
+    }
+
+    // ★ 检查任务是否已被取消（images.edit 之后）
+    if (isTaskCancelled(taskId)) {
+      failTask(taskId, '任务已被取消');
+      return;
     }
 
     // 路径B-1: images/generations 端点（优先，适用于 editEndpoint=/images/generations 的提供商）
@@ -802,7 +820,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               'Content-Type': 'application/json',
             },
             body: JSON.stringify(adjustedBody),
-            signal: AbortSignal.timeout(120000),
+            signal: AbortSignal.timeout(90000),
           },
         );
 
@@ -839,7 +857,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                     'Content-Type': 'application/json',
                   },
                   body: JSON.stringify({ ...adjustedBody, n: 1 }),
-                  signal: AbortSignal.timeout(120000),
+                  signal: AbortSignal.timeout(90000),
                 })
                 .then(async r => {
                   if (!r.ok) return null;
@@ -918,6 +936,12 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       } catch (genErr) {
         console.warn('[edit] images/generations error, falling back to chat/completions:', genErr instanceof Error ? genErr.message : genErr);
       }
+    }
+
+    // ★ 检查任务是否已被取消（images/generations 之后）
+    if (isTaskCancelled(taskId)) {
+      failTask(taskId, '任务已被取消');
+      return;
     }
 
     // 路径B: chat/completions 多模态端点（兜底，适用于支持图片输出的 LLM）
@@ -1001,7 +1025,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(chatRequestBody),
-        signal: AbortSignal.timeout(120000),
+        signal: AbortSignal.timeout(90000),
       },
     );
 
@@ -1147,7 +1171,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                 ...(outputSize ? { size: outputSize } : {}),
                 ...(quality ? { quality } : {}),
               }),
-              signal: AbortSignal.timeout(120000),
+              signal: AbortSignal.timeout(90000),
             });
             if (extraResp.ok) {
               const extraText = await extraResp.text();
@@ -1176,6 +1200,8 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
 
     // 存储成功结果到任务
     // ★ 更新任务注册中心
+    const elapsedSec = Math.round((Date.now() - (getEditTask(taskId)?.createdAt || Date.now())) / 1000);
+    console.info(`[edit] taskId=${taskId} 编辑完成, 耗时=${elapsedSec}s, images=${images.length}`);
     updateTaskProgress(taskId, { status: 'completed', progress: 100 });
     setEditTask(taskId, {
       id: taskId,

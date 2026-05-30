@@ -29,7 +29,7 @@ class TaskEventsClient {
   private handlers: Set<TaskEventHandler> = new Set();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 10;
+  private maxReconnectAttempts = 30; // ★ 提高重连次数（FaaS 平台可能频繁断开 SSE）
   private connected = false;
 
   /** 连接SSE */
@@ -42,11 +42,13 @@ class TaskEventsClient {
 
       this.eventSource.onopen = () => {
         this.connected = true;
-        this.reconnectAttempts = 0;
+        this.reconnectAttempts = 0; // ★ 重置重连计数器
+        console.info('[TaskEventsClient] SSE connected');
       };
 
       this.eventSource.onmessage = (e) => {
-        if (e.data === 'heartbeat') return;
+        // 跳过 SSE 心跳注释行（`:heartbeat`）和心跳 data 行
+        if (!e.data || e.data === 'heartbeat') return;
         try {
           const event = JSON.parse(e.data) as TaskEvent;
           this.handlers.forEach(h => {
@@ -61,6 +63,10 @@ class TaskEventsClient {
         this.connected = false;
         this.eventSource?.close();
         this.eventSource = null;
+        // ★ FaaS 平台会定期断开 SSE 连接（~4分钟），这是正常行为，立即重连
+        if (this.reconnectAttempts === 0) {
+          console.info('[TaskEventsClient] SSE disconnected, reconnecting...');
+        }
         this.scheduleReconnect();
       };
     } catch {
