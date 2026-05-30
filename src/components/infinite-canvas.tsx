@@ -698,12 +698,46 @@ export function InfiniteCanvas({
   const [toolbarExpanded, setToolbarExpanded] = useState(false);
   const [leftToolbarExpanded, setLeftToolbarExpanded] = useState(false);
   const toolBtnCls = isMonochrome
-    ? 'p-2 rounded-xl transition-all relative group text-gray-600 hover:text-gray-800 hover:bg-gray-100'
+    ? 'p-2 rounded-xl transition-all relative group text-gray-500 hover:text-gray-700 hover:bg-gray-100'
     : 'p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10';
   const toolBtnActiveCls = isMonochrome
     ? 'bg-emerald-500 text-white'
     : 'bg-gold/20 text-gold';
   const separatorCls = isMonochrome ? 'w-px h-5 bg-gray-200' : 'w-px h-5 bg-white/[0.06]';
+
+  // Left toolbar styles (expanded & collapsed)
+  const ltContainerCls = isMonochrome
+    ? 'bg-white/90 border border-gray-200 shadow-lg'
+    : 'bg-background/85 border border-white/[0.06]';
+  const ltExpandedBtnCls = isMonochrome
+    ? 'flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-gray-50 text-gray-700 hover:bg-gray-100'
+    : 'flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright';
+  const ltActiveBtnCls = isMonochrome
+    ? 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+    : 'bg-gold/20 text-gold hover:bg-gold/30';
+  const ltDividerCls = isMonochrome
+    ? 'mx-2 h-px bg-gray-200'
+    : 'mx-2 h-px bg-white/[0.06]';
+  const ltSectionTitleCls = isMonochrome
+    ? 'text-xs font-semibold mb-1 px-2 text-gray-400'
+    : 'text-xs font-semibold mb-1 px-2 text-gold-muted';
+  const ltAdminBtnCls = isMonochrome
+    ? 'flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-red-50 text-red-600 hover:bg-red-100'
+    : 'flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-gold/15 text-gold hover:bg-gold/25';
+
+  // Colorful icons for monochrome mode
+  const mIcon: Record<string, string> = isMonochrome ? {
+    ohMyPrompt: 'text-amber-500', refFusion: 'text-orange-500', users: 'text-blue-500',
+    folder: 'text-emerald-500', palette: 'text-violet-500', contrast: 'text-violet-500',
+    workflow: 'text-pink-500', layoutGrid: 'text-teal-500', settings: 'text-slate-500',
+    shield: 'text-red-500', heart: 'text-rose-500', helpCircle: 'text-sky-500',
+    chevronsLeft: 'text-gray-400', chevronsRight: 'text-gray-400',
+    generator: 'text-emerald-600', pencil: 'text-violet-500', bot: 'text-fuchsia-500',
+    shoppingBag: 'text-orange-500', scan: 'text-teal-500', fontDesign: 'text-amber-600',
+    building: 'text-cyan-500', fileImage: 'text-indigo-500', hexCube: 'text-rose-500',
+    maximize: 'text-gray-500', mousePointer: 'text-gray-500', hand: 'text-gray-500',
+    upload: 'text-gray-500',
+  } : {};
   const leftToolbarRef = useRef<HTMLDivElement>(null);
 
   // 点击外部关闭左侧工具栏
@@ -5906,14 +5940,14 @@ export function InfiniteCanvas({
         <div ref={leftToolbarRef}>
         {leftToolbarExpanded ? (
           /* Expanded: full toolbar */
-          <div className="absolute top-4 left-4 z-50 flex flex-col gap-1 min-w-[160px] p-2 rounded-xl bg-background/85 border border-white/[0.06] transition-all duration-200" style={{ backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+          <div className={`absolute top-4 left-4 z-50 flex flex-col gap-1 min-w-[160px] p-2 rounded-xl ${ltContainerCls} transition-all duration-200`} style={{ backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
             {/* Logo header */}
             <div className="flex items-center gap-2 px-2 py-1.5">
               <img src="/logo.png" alt="无界AI" className="w-6 h-6 object-contain rounded" />
-              <span className="text-sm font-bold text-foreground">无界AI</span>
+              <span className={`text-sm font-bold ${isMonochrome ? 'text-gray-900' : 'text-foreground'}`}>无界AI</span>
             </div>
             {/* Divider */}
-            <div className="mx-2 h-px bg-white/[0.06]" />
+            <div className={ltDividerCls} />
             {/* OMP Toggle */}
             <button
               onClick={() => {
@@ -5921,15 +5955,15 @@ export function InfiniteCanvas({
               }}
               className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all ${
                 ohMyPromptOpen
-                  ? 'bg-gold/20 text-gold'
-                  : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'
+                  ? ltActiveBtnCls
+                  : ltExpandedBtnCls
               }`}
               title="Oh My Prompt - 提示词管理与图片识词"
             >
-              <Sparkles className="h-3.5 w-3.5" />
+              <Sparkles className={`h-3.5 w-3.5 ${mIcon.ohMyPrompt}`} />
               <span>Oh My Prompt</span>
               {ohMyPromptOpen && (
-                <span className="ml-auto w-1.5 h-1.5 rounded-full animate-pulse bg-gold" />
+                <span className={`ml-auto w-1.5 h-1.5 rounded-full animate-pulse ${isMonochrome ? 'bg-blue-500' : 'bg-gold'}`} />
               )}
             </button>
             {/* Ctrl+Click Reference Fusion Toggle */}
@@ -5937,167 +5971,167 @@ export function InfiniteCanvas({
               onClick={() => setShowRefFusion(prev => !prev)}
               className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all ${
                 showRefFusion
-                  ? 'bg-gold/20 text-gold'
-                  : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'
+                  ? ltActiveBtnCls
+                  : ltExpandedBtnCls
               }`}
               title="Ctrl+Click 画布图片选择参考融合"
             >
-              <GitMerge className="h-3.5 w-3.5" />
+              <GitMerge className={`h-3.5 w-3.5 ${mIcon.refFusion}`} />
               <span>参考融合</span>
               {showRefFusion && (
-                <span className="ml-auto w-1.5 h-1.5 rounded-full animate-pulse bg-gold" />
+                <span className={`ml-auto w-1.5 h-1.5 rounded-full animate-pulse ${isMonochrome ? 'bg-blue-500' : 'bg-gold'}`} />
               )}
             </button>
             {/* Divider */}
-            <div className="mx-2 h-px bg-white/[0.06]" />
+            <div className={ltDividerCls} />
             {/* Section: Mode switching */}
-            <div className="text-xs font-semibold mb-1 px-2 text-gold-muted">模式切换</div>
+            <div className={ltSectionTitleCls}>模式切换</div>
             {/* Settings */}
             <button
               onClick={onToggleSettings}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              className={ltExpandedBtnCls}
               title="设置"
             >
-              <Settings className="h-3.5 w-3.5" />
+              <Settings className={`h-3.5 w-3.5 ${mIcon.settings}`} />
               <span>设置</span>
             </button>
             {/* UI Theme Toggle */}
             <button
               onClick={onToggleTheme}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              className={ltExpandedBtnCls}
               title="UI 主题切换"
             >
-              <Palette className="h-3.5 w-3.5" />
+              {isMonochrome ? <Palette className={`h-3.5 w-3.5 ${mIcon.palette}`} /> : <Contrast className={`h-3.5 w-3.5 ${mIcon.contrast}`} />}
               <span>{isMonochrome ? '彩色模式' : '黑白模式'}</span>
             </button>
             {/* User Manager */}
             <button
               onClick={onToggleUserManager}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              className={ltExpandedBtnCls}
               title="用户管理"
             >
-              <Users className="h-3.5 w-3.5" />
+              <Users className={`h-3.5 w-3.5 ${mIcon.users}`} />
               <span>用户管理</span>
             </button>
             {/* Project Data */}
             <button
               onClick={onToggleProjectData}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              className={ltExpandedBtnCls}
               title="项目数据"
             >
-              <FolderOpen className="h-3.5 w-3.5" />
+              <FolderOpen className={`h-3.5 w-3.5 ${mIcon.folder}`} />
               <span>项目数据</span>
             </button>
             {isAdmin && (
               <button
                 onClick={onToggleAdminSystem}
-                className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-gold/15 text-gold hover:bg-gold/25"
+                className={ltAdminBtnCls}
                 title="管理员系统"
               >
-                <Shield className="h-3.5 w-3.5" />
+                <Shield className={`h-3.5 w-3.5 ${mIcon.shield}`} />
                 <span>管理员系统</span>
               </button>
             )}
             {/* Favorites */}
             <button
               onClick={onToggleFavorites}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              className={ltExpandedBtnCls}
               title="收藏夹"
             >
-              <Heart className="h-3.5 w-3.5" />
+              <Heart className={`h-3.5 w-3.5 ${mIcon.heart}`} />
               <span>收藏夹</span>
             </button>
             {/* Help */}
             <button
               onClick={onToggleHelp}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              className={ltExpandedBtnCls}
               title="使用说明"
             >
-              <HelpCircle className="h-3.5 w-3.5" />
+              <HelpCircle className={`h-3.5 w-3.5 ${mIcon.helpCircle}`} />
               <span>使用说明</span>
             </button>
             {/* Divider */}
-            <div className="mx-2 h-px bg-white/[0.06]" />
+            <div className={ltDividerCls} />
             {/* Node Mode */}
             <button
               onClick={onSwitchToNodeMode}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              className={ltExpandedBtnCls}
               title="节点模式"
             >
-              <Workflow className="h-3.5 w-3.5" />
+              <Workflow className={`h-3.5 w-3.5 ${mIcon.workflow}`} />
               <span>节点模式</span>
             </button>
             {/* Workflow Hub */}
             <button
               onClick={onSwitchToWorkflowHub}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              className={ltExpandedBtnCls}
               title="工作流中心"
             >
-              <LayoutGrid className="h-3.5 w-3.5" />
+              <LayoutGrid className={`h-3.5 w-3.5 ${mIcon.layoutGrid}`} />
               <span>工作流中心</span>
             </button>
             {/* Divider */}
-            <div className="mx-2 h-px bg-white/[0.06]" />
+            <div className={ltDividerCls} />
             {/* Collapse button */}
             <button
               onClick={() => setLeftToolbarExpanded(false)}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              className={ltExpandedBtnCls}
               title="收起工具栏"
             >
-              <ChevronsLeft className="h-3.5 w-3.5" />
+              <ChevronsLeft className={`h-3.5 w-3.5 ${mIcon.chevronsLeft}`} />
               <span>收起</span>
             </button>
           </div>
         ) : (
           /* Collapsed: icon column */
-          <div className="absolute top-4 left-4 z-50 flex flex-col items-center py-2 gap-1 rounded-xl bg-background/85 border border-white/[0.06] transition-all duration-200" style={{ width: 48, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+          <div className={`absolute top-4 left-4 z-50 flex flex-col items-center py-2 gap-1 rounded-xl ${ltContainerCls} transition-all duration-200`} style={{ width: 48, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
             <button
               onClick={() => { if (onToggleVisionPrompt) onToggleVisionPrompt(); }}
-              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${ohMyPromptOpen ? 'bg-gold/20 text-gold' : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
+              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${ohMyPromptOpen ? ltActiveBtnCls : isMonochrome ? `bg-gray-50 ${mIcon.ohMyPrompt} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
               title="Oh My Prompt"
             >
               <Sparkles className="w-4 h-4" />
             </button>
             <button
               onClick={onToggleUserManager}
-              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.users} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
               title="用户管理"
             >
               <Users className="w-4 h-4" />
             </button>
             <button
               onClick={onToggleProjectData}
-              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.folder} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
               title="项目数据"
             >
               <FolderOpen className="w-4 h-4" />
             </button>
             <button
               onClick={onToggleTheme}
-              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.palette} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
               title={isMonochrome ? '切换彩色模式' : '切换黑白模式'}
             >
               {isMonochrome ? <Palette className="w-4 h-4" /> : <Contrast className="w-4 h-4" />}
             </button>
-            <div className="w-5 my-1 h-px bg-white/[0.06]" />
+            <div className={`w-5 my-1 h-px ${isMonochrome ? 'bg-gray-200' : 'bg-white/[0.06]'}`} />
             <button
               onClick={onSwitchToNodeMode}
-              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.workflow} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
               title="节点模式"
             >
-              <Workflow className="w-4 h-4" />
+              <Workflow className={`w-4 h-4 ${mIcon.workflow}`} />
             </button>
             <button
               onClick={onSwitchToWorkflowHub}
-              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.layoutGrid} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
               title="工作流中心"
             >
               <LayoutGrid className="w-4 h-4" />
             </button>
-            <div className="w-5 my-1 h-px bg-white/[0.06]" />
+            <div className={`w-5 my-1 h-px ${isMonochrome ? 'bg-gray-200' : 'bg-white/[0.06]'}`} />
             <button
               onClick={() => setLeftToolbarExpanded(true)}
-              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright" title="展开工具栏"
+              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.chevronsRight} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`} title="展开工具栏"
             >
               <ChevronsRight className="w-4 h-4" />
             </button>
@@ -6539,7 +6573,7 @@ export function InfiniteCanvas({
                     }}
                     title="生成双语提示词"
                   >
-                    <Sparkles className="h-4 w-4" />
+                    <Sparkles className={`h-4 w-4 ${mIcon.generator}`} />
                   </button>
                 )}
                 {/* Oh My Prompt - Analyzing indicator */}
@@ -10626,7 +10660,7 @@ export function InfiniteCanvas({
       <div data-toolbar="bottom-toolbar" className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 rounded-2xl px-3 py-2 flex items-center gap-1.5 ${isMonochrome ? 'bg-white/90 border border-gray-200 shadow-lg' : 'bg-background/85 border border-white/[0.06] shadow-2xl'}`} style={{ backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
         {/* Select tool */}
         <button
-          className={`tool-btn ${isMonochrome ? 'p-2 rounded-xl transition-all relative group text-gray-600 hover:text-gray-800 hover:bg-gray-100' : 'p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+          className={`tool-btn ${isMonochrome ? `p-2 rounded-xl transition-all relative group ${mIcon.mousePointer} hover:text-gray-700 hover:bg-gray-100` : 'p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
           title="选择工具"
         >
           <MousePointer2 className="h-4 w-4" />
@@ -10650,7 +10684,7 @@ export function InfiniteCanvas({
             window.addEventListener('mouseup', handleUp);
           }}
         >
-          <Hand className="h-4 w-4" />
+          <Hand className={`h-4 w-4 ${mIcon.hand}`} />
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">抓手工具</span>
         </button>
 
@@ -10663,7 +10697,7 @@ export function InfiniteCanvas({
           className={`${toolBtnCls}`}
           title="图片上传"
         >
-          <Upload className="h-4 w-4" />
+          <Upload className={`h-4 w-4 ${mIcon.upload}`} />
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">图片上传</span>
         </button>
 
@@ -10672,7 +10706,7 @@ export function InfiniteCanvas({
         {/* Image Generator - gold accent */}
         <button
           onClick={handleOpenCanvasGenerator}
-          className={`p-2 rounded-xl transition-all shadow-lg relative group ${showCanvasGenerator ? 'bg-gradient-to-r from-gold to-gold-dark text-black ring-2 ring-gold/50' : 'bg-gradient-to-r from-gold to-gold-dark hover:from-gold-light hover:to-gold text-black'}`}
+          className={`p-2 rounded-xl transition-all shadow-lg relative group ${showCanvasGenerator ? (isMonochrome ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white ring-2 ring-blue-500/50' : 'bg-gradient-to-r from-gold to-gold-dark text-black ring-2 ring-gold/50') : (isMonochrome ? 'bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-400 hover:to-indigo-400 text-white' : 'bg-gradient-to-r from-gold to-gold-dark hover:from-gold-light hover:to-gold text-black')}`}
           title="图像生成器"
         >
           <Sparkles className="h-4 w-4" />
@@ -10687,7 +10721,7 @@ export function InfiniteCanvas({
           className={`${toolBtnCls}`}
           title="语言修图"
         >
-          <Pencil className="h-4 w-4" />
+          <Pencil className={`h-4 w-4 ${mIcon.pencil}`} />
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">修图</span>
         </button>
 
@@ -10697,7 +10731,7 @@ export function InfiniteCanvas({
           className={`${toolBtnCls}`}
           title="Agent编排"
         >
-          <Bot className="h-4 w-4" />
+          <Bot className={`h-4 w-4 ${mIcon.bot}`} />
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">Agent</span>
         </button>
 
@@ -10707,7 +10741,7 @@ export function InfiniteCanvas({
           className={`${toolBtnCls}`}
           title="品牌电商"
         >
-          <ShoppingBag className="h-4 w-4" />
+          <ShoppingBag className={`h-4 w-4 ${mIcon.shoppingBag}`} />
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">品牌电商</span>
         </button>
 
@@ -10776,7 +10810,7 @@ export function InfiniteCanvas({
             className="p-1.5 rounded-lg transition-all text-gold-muted hover:text-text-bright hover:bg-white/10"
             title="缩小"
           >
-            <ZoomOut className="h-3.5 w-3.5" />
+            <ZoomOut className={`h-3.5 w-3.5 ${mIcon.zoomOut}`} />
           </button>
           <span className="text-xs font-mono w-10 text-center text-gold">
             {Math.round(zoom * 100)}%
@@ -10786,7 +10820,7 @@ export function InfiniteCanvas({
             className="p-1.5 rounded-lg transition-all text-gold-muted hover:text-text-bright hover:bg-white/10"
             title="放大"
           >
-            <ZoomIn className="h-3.5 w-3.5" />
+            <ZoomIn className={`h-3.5 w-3.5 ${mIcon.zoomIn}`} />
           </button>
         </div>
 

@@ -970,7 +970,7 @@ export function GenerationPanel(
                                         // Use composite key (modelId::providerId) to distinguish same-name models from different providers
                                         const compositeValue = `${dm.providerId}::${dm.id}`;
                                         return (
-                                        <option key={compositeValue} value={compositeValue} className="bg-[#1a1d26] text-text-bright">
+                                        <option key={compositeValue} value={compositeValue} className={mc ? "bg-white text-gray-900" : "bg-[#1a1d26] text-text-bright"}>
                                             {dm.is3DProvider ? `[3D] ${dm.displayLabel || getModelDisplayName(dm.id)}` : getModelDisplayName(dm.id)}
                                         </option>
                                         );

@@ -2196,42 +2196,42 @@ function CanvasApp() {
         {/* Vertical collapse strip */}
         <button
           onClick={() => setPanelCollapsed(prev => !prev)}
-          className="w-5 flex items-center justify-center cursor-pointer transition-all duration-200 shrink-0 bg-[#0F1117] hover:bg-[#1a1d26] border-r border-white/[0.06]"
+          className={`w-5 flex items-center justify-center cursor-pointer transition-all duration-200 shrink-0 ${themeStyle === 'monochrome' ? 'bg-gray-100 hover:bg-gray-200 border-r border-gray-200' : 'bg-[#0F1117] hover:bg-[#1a1d26] border-r border-white/[0.06]'}`}
           style={{ borderRadius: '4px 0 0 4px' }}
           title={panelCollapsed ? '展开面板' : '收起面板'}
         >
           {panelCollapsed ? (
-            <ChevronLeft size={14} className="text-gold-muted" />
+            <ChevronLeft size={14} className={themeStyle === 'monochrome' ? 'text-gray-500' : 'text-gold-muted'} />
           ) : (
-            <ChevronRight size={14} className="text-gold-muted" />
+            <ChevronRight size={14} className={themeStyle === 'monochrome' ? 'text-gray-500' : 'text-gold-muted'} />
           )}
         </button>
 
         {/* Panel Content */}
         {!panelCollapsed && (
-        <div className="flex-1 flex flex-col bg-[#141418] border-l border-white/[0.06] overflow-hidden">
+        <div className={`flex-1 flex flex-col ${themeStyle === 'monochrome' ? 'bg-white border-l border-gray-200' : 'bg-[#141418] border-l border-white/[0.06]'} overflow-hidden`}>
           {/* 软件标题 - 版本号在下方，项目名在右侧 */}
           <div className="px-4 py-2.5 flex-shrink-0 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="flex flex-col">
                 <div className="flex items-center gap-2">
-                  <h1 className="text-lg font-bold leading-tight tracking-tight text-foreground">
+                  <h1 className={`text-lg font-bold leading-tight tracking-tight ${themeStyle === 'monochrome' ? 'text-gray-900' : 'text-foreground'}`}>
                     {APP_NAME}
                   </h1>
-                  <div className="w-1.5 h-1.5 rounded-full bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]" />
+                  <div className={`w-1.5 h-1.5 rounded-full ${themeStyle === 'monochrome' ? 'bg-emerald-500' : 'bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]'}`} />
                 </div>
-                <span className="text-[10px] leading-tight font-mono text-gold-muted">
+                <span className={`text-[10px] leading-tight font-mono ${themeStyle === 'monochrome' ? 'text-gray-400' : 'text-gold-muted'}`}>
                   {APP_FULL_VERSION_LABEL}
                 </span>
               </div>
               {currentProject && (
-                <span className="text-xs px-2.5 py-0.5 rounded-lg font-medium transition-colors bg-gold/10 text-gold border border-gold/20 hover:bg-gold/15">
+                <span className={`text-xs px-2.5 py-0.5 rounded-lg font-medium transition-colors ${themeStyle === 'monochrome' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100' : 'bg-gold/10 text-gold border border-gold/20 hover:bg-gold/15'}`}>
                   {currentProject.name}
                 </span>
               )}
             </div>
           </div>
-          <div className="panel-divider" />
+          <div className={`h-px ${themeStyle === 'monochrome' ? 'bg-gray-200' : 'bg-gradient-to-r from-transparent via-gold/15 to-transparent'}`} />
 
           {/* Panel Tabs - 紧凑化 */}
           <div className="flex flex-shrink-0">
@@ -2239,32 +2239,32 @@ function CanvasApp() {
               onClick={() => setActivePanel('chat')}
               className={`flex-1 py-2 px-3 flex items-center justify-center gap-1.5 transition-all text-sm relative ${
                 activePanel === 'chat'
-                  ? 'text-gold font-semibold'
-                  : 'text-gold-muted hover:text-text-bright hover:bg-white/5'
+                  ? themeStyle === 'monochrome' ? 'text-emerald-600 font-semibold' : 'text-gold font-semibold'
+                  : themeStyle === 'monochrome' ? 'text-gray-500 hover:text-gray-800 hover:bg-gray-50' : 'text-gold-muted hover:text-text-bright hover:bg-white/5'
               }`}
             >
               <MessageSquare size={15} />
               <span className="text-sm">AI聊天</span>
               {activePanel === 'chat' && (
-                <span className="absolute bottom-0 left-2 right-2 h-[2px] rounded-full bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]" />
+                <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-emerald-500' : 'bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]'}`} />
               )}
             </button>
             <button
               onClick={() => setActivePanel('generate')}
               className={`flex-1 py-2 px-3 flex items-center justify-center gap-1.5 transition-all text-sm relative ${
                 activePanel === 'generate'
-                  ? 'text-gold font-semibold'
-                  : 'text-gold-muted hover:text-text-bright hover:bg-white/5'
+                  ? themeStyle === 'monochrome' ? 'text-emerald-600 font-semibold' : 'text-gold font-semibold'
+                  : themeStyle === 'monochrome' ? 'text-gray-500 hover:text-gray-800 hover:bg-gray-50' : 'text-gold-muted hover:text-text-bright hover:bg-white/5'
               }`}
             >
               <ImageIcon size={15} />
               <span className="text-sm">图像生成</span>
               {activePanel === 'generate' && (
-                <span className="absolute bottom-0 left-2 right-2 h-[2px] rounded-full bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]" />
+                <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-emerald-500' : 'bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]'}`} />
               )}
             </button>
           </div>
-          <div className="panel-divider" />
+          <div className={`h-px ${themeStyle === 'monochrome' ? 'bg-gray-200' : 'bg-gradient-to-r from-transparent via-gold/15 to-transparent'}`} />
 
           {/* Panel Content */}
           <div className="flex-1 overflow-hidden flex flex-col">
@@ -2309,10 +2309,10 @@ function CanvasApp() {
             {/* 固定在底部的开始生成按钮 */}
             {activePanel === 'generate' && (
               <div className="px-4 py-3 flex-shrink-0">
-                <div className="panel-divider mb-3" />
+                <div className={`h-px mb-3 ${themeStyle === 'monochrome' ? 'bg-gray-200' : 'bg-gradient-to-r from-transparent via-gold/15 to-transparent'}`} />
                 <button
                   onClick={() => document.dispatchEvent(new CustomEvent('trigger-generate'))}
-                  className="btn-press w-full py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all bg-gradient-to-r from-gold to-gold-dark text-black hover:from-gold-light hover:to-gold shadow-md hover:shadow-lg active:shadow-sm"
+                  className={`btn-press w-full py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${themeStyle === 'monochrome' ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:from-emerald-600 hover:to-emerald-700 shadow-md hover:shadow-lg active:shadow-sm' : 'bg-gradient-to-r from-gold to-gold-dark text-black hover:from-gold-light hover:to-gold shadow-md hover:shadow-lg active:shadow-sm'}`}
                 >
                   <Sparkles className="h-4 w-4" />
                   <span>开始生成</span>
