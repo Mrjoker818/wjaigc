@@ -6947,7 +6947,7 @@ export function InfiniteCanvas({
                               }}
                             >
                               <span
-                                className="flex-shrink-0 w-7 text-[9px] font-medium select-none cursor-pointer transition-colors"
+                                className="flex-shrink-0 w-8 text-[11px] font-medium select-none cursor-pointer transition-colors"
                                 style={{
                                   color: isSelected
                                     ? accentColor
@@ -7004,7 +7004,7 @@ export function InfiniteCanvas({
                                 onClick={(e) => e.stopPropagation()}
                               />
                               <span
-                                className="flex-shrink-0 w-6 text-right text-[9px] font-semibold tabular-nums"
+                                className="flex-shrink-0 w-6 text-right text-[11px] font-semibold tabular-nums"
                                 style={{
                                   color: isSelected
                                     ? accentColor
@@ -7186,7 +7186,7 @@ export function InfiniteCanvas({
                       return (
                     <div className="flex items-center gap-2">
                       <select
-                        className={`flex-1 text-sm px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-white/5 border-white/[0.14] text-text-bright'}`}
+                        className={`flex-1 text-[13px] px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-white/5 border-white/[0.14] text-text-bright'}`}
                         value={group.toolbar.aspectRatio}
                         onChange={(e) => {
                           const newAr = e.target.value;
@@ -7197,11 +7197,11 @@ export function InfiniteCanvas({
                         }}
                       >
                         {supportedRatios.map(r => (
-                          <option key={r} value={r}>{r} ({calculateActualPixels(r, group.toolbar.quality, group.toolbar.model)})</option>
+                          <option key={r} value={r} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{r} ({calculateActualPixels(r, group.toolbar.quality, group.toolbar.model)})</option>
                         ))}
                       </select>
                       <select
-                        className={`text-sm px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-white/5 border-white/[0.14] text-text-bright'}`}
+                        className={`text-[13px] px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-white/5 border-white/[0.14] text-text-bright'}`}
                         value={group.toolbar.quality}
                         onChange={(e) => {
                           const newQ = e.target.value;
@@ -7212,11 +7212,11 @@ export function InfiniteCanvas({
                         }}
                       >
                         {supportedQualities.map(q => (
-                          <option key={q} value={q}>{QUALITY_DISPLAY_NAMES[q] || q} ({calculateActualPixels(group.toolbar.aspectRatio, q, group.toolbar.model)})</option>
+                          <option key={q} value={q} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{QUALITY_DISPLAY_NAMES[q] || q} ({calculateActualPixels(group.toolbar.aspectRatio, q, group.toolbar.model)})</option>
                         ))}
                       </select>
                       <select
-                        className={`text-sm px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-white/5 border-white/[0.14] text-text-bright'}`}
+                        className={`text-[13px] px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-white/5 border-white/[0.14] text-text-bright'}`}
                         value={group.toolbar.outputCount || group.toolbar.n || 1}
                         onChange={(e) => {
                           const val = Number(e.target.value);
@@ -7226,7 +7226,7 @@ export function InfiniteCanvas({
                         }}
                       >
                         {[1,2,3,4].map(n => (
-                          <option key={n} value={n}>{n}张</option>
+                          <option key={n} value={n} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{n}张</option>
                         ))}
                       </select>
                     </div>
