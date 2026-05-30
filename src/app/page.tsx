@@ -2213,7 +2213,6 @@ function CanvasApp() {
           {/* 软件标题 - 版本号在下方，项目名在右侧 */}
           <div className="px-4 py-2.5 flex-shrink-0 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <img src="/logo.png" alt="无界AI" className="w-7 h-7 object-contain rounded flex-shrink-0" />
               <div className="flex flex-col">
                 <div className="flex items-center gap-2">
                   <h1 className="text-lg font-bold leading-tight tracking-tight text-foreground">
