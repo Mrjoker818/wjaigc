@@ -3012,7 +3012,8 @@ export function InfiniteCanvas({
         // 轮询模式 — 与生成面板一致的动态轮询策略
         const taskId = data.taskIds[0];
         const estimatedTime = data.estimatedTime || 30;
-        const maxPollTime = Math.min(600, Math.max(60, estimatedTime * 3 + 30)) * 1000;
+        // 单任务最大10分钟，兼容需要2分钟以上的慢速API
+        const maxPollTime = Math.min(600, Math.max(180, estimatedTime * 4 + 120)) * 1000;
         const startTime = Date.now();
         let pollCount = 0;
 
@@ -4019,7 +4020,7 @@ export function InfiniteCanvas({
   ): Promise<string | null> => {
     // apiKeyOrModel was previously apiKey, now we pass the model name for server-side key lookup
     const currentModelInfo = getCurrentModel();
-    const maxAttempts = 150; // 150次 × 动态间隔 ≈ 600秒，兼容token link等慢速API
+    const maxAttempts = 300; // 300次 × 动态间隔 ≈ 900秒，兼容token link等极慢API
     const getEditPollInterval = (attempt: number) => {
       if (attempt <= 5) return 200;
       if (attempt <= 15) return 500;
@@ -4599,7 +4600,7 @@ export function InfiniteCanvas({
         // AI RemoveBG 异步轮询：APImart 代理可能需要 60-120 秒
         // 轮询次数增加到 60 次（约 120 秒），适应 AI 模型处理时间
         const isAIRemoveBg = String(data.engine || '').includes('ai-background-remove');
-        const maxRemoveBgAttempts = isAIRemoveBg ? 60 : 30;
+        const maxRemoveBgAttempts = isAIRemoveBg ? 120 : 60;
         const asyncResult = await (async () => {
           const taskId = data.taskId as string;
           const modelInfo = getCurrentModel();

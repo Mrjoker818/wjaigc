@@ -537,7 +537,7 @@ async function submitImageTask(
 
   const controller = new AbortController();
   const isDirectMode = profile.responseMode === 'direct';
-  const timeoutMs = isDirectMode ? 600000 : 60000; // 直接模式600s(兼容token link等慢速API), 异步模式60s
+  const timeoutMs = isDirectMode ? 600000 : 300000; // 直接模式600s(兼容token link等慢速API), 异步模式300s
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   // Debug: log key params for image-to-image verification

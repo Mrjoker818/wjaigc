@@ -572,8 +572,8 @@ async function executeAsyncTask(
   }
 
   // 轮询任务状态
-  const maxPollTime = 180000; // 最多轮询3分钟
-  const pollInterval = 2000;
+  const maxPollTime = 600000; // 最多轮询10分钟，兼容极慢API
+  const pollInterval = 1500;
   const pollStart = Date.now();
   const port = process.env.DEPLOY_RUN_PORT || 5000;
 

@@ -742,9 +742,13 @@ function CanvasApp() {
           return baseInterval;
         };
 
-        // 最大轮询时间：预估时间 * 4 + 60秒（兜底），最少120秒，最多900秒（15分钟，兼容慢速API）
-        const maxPollTime = Math.min(900, Math.max(120, estimatedTime * 4 + 60)) * 1000;
-        const pollStartTime = Date.now();
+        // 最大轮询时间：预估时间 * 6 + 120秒（兜底），最少180秒，最多1800秒（30分钟，兼容极慢API如token link）
+        // ★ 每个任务独立计算超时：避免串行任务时前期任务消耗掉后期任务的时间预算
+        // 全局最大时间：预估时间 * 6 + 120秒（兜底），最少180秒，最多1800秒（30分钟）
+        // 单任务最大时间：预估时间 * 4 + 120秒，最少120秒，最多600秒（10分钟）
+        const globalMaxPollTime = Math.min(1800, Math.max(180, estimatedTime * 6 + 120)) * 1000;
+        const perTaskMaxPollTime = Math.min(600, Math.max(120, estimatedTime * 4 + 120)) * 1000;
+        const globalStartTime = Date.now();
 
         const completedImages: Array<{ id: string; url: string; prompt: string; model?: string; quality?: string; aspectRatio?: string; stylePreset?: string; category?: string; size?: string; sourceUrl?: string }> = [];        let consecutiveErrors = 0;
 
@@ -752,13 +756,16 @@ function CanvasApp() {
           const currentTaskId = taskIds[taskIdx];
           let pollCount = 0;
           let taskCompleted = false;
+          const taskStartTime = Date.now(); // ★ 每个任务独立的开始时间
 
           while (!taskCompleted) {
-            // 检查是否超时
-            if (Date.now() - pollStartTime > maxPollTime) {
-              console.warn(`[生成轮询] 超时退出 taskId=${currentTaskId}, 耗时=${Math.round((Date.now() - pollStartTime) / 1000)}s, maxPollTime=${maxPollTime / 1000}s`);
+            const taskElapsed = Date.now() - taskStartTime;
+            const globalElapsed = Date.now() - globalStartTime;
+            // 检查是否超时：单任务超时 或 全局超时
+            if (taskElapsed > perTaskMaxPollTime || globalElapsed > globalMaxPollTime) {
+              console.warn(`[生成轮询] 超时退出 taskId=${currentTaskId}, 任务耗时=${Math.round(taskElapsed / 1000)}s, 全局耗时=${Math.round(globalElapsed / 1000)}s, perTaskMax=${perTaskMaxPollTime / 1000}s, globalMax=${globalMaxPollTime / 1000}s`);
               toast.error('生成超时', {
-                description: `${data.modelName} 生成时间过长（已等待${Math.round((Date.now() - pollStartTime) / 1000)}秒）。可能原因：API排队中、模型负载高、提示词复杂度高。请稍后重试或降低分辨率`,
+                description: `${data.modelName} 生成时间过长（已等待${Math.round(taskElapsed / 1000)}秒）。可能原因：API排队中、模型负载高、提示词复杂度高。请稍后重试或降低分辨率`,
                 className: 'bg-[#141414] border border-red-900 text-white',
                 duration: 10000,
               });
@@ -791,11 +798,11 @@ function CanvasApp() {
               });
 
               const pollData = await pollResponse.json();
-              console.log(`[poll] #${pollCount} taskId=${currentTaskId} success=${pollData.success} status=${pollData.status} retryable=${pollData.retryable} progress=${pollData.progress} elapsed=${Math.round((Date.now()-pollStartTime)/1000)}s`);
+              console.log(`[poll] #${pollCount} taskId=${currentTaskId} success=${pollData.success} status=${pollData.status} retryable=${pollData.retryable} progress=${pollData.progress} taskElapsed=${Math.round((Date.now()-taskStartTime)/1000)}s`);
 
               if (!pollData.success && !pollData.retryable) {
                 // 不可重试的错误
-                console.error(`[poll] taskId=${currentTaskId} NON-RETRYABLE error after ${Math.round((Date.now()-pollStartTime)/1000)}s, pollCount=${pollCount}`, pollData.error);
+                console.error(`[poll] taskId=${currentTaskId} NON-RETRYABLE error after ${Math.round((Date.now()-taskStartTime)/1000)}s, pollCount=${pollCount}`, pollData.error);
                 toast.error('生成失败', {
                   description: pollData.error || '任务执行失败',
                   className: 'bg-[#141414] border border-red-900 text-white',
@@ -805,9 +812,9 @@ function CanvasApp() {
               }
 
               // 可重试的错误（如模型返回文本而非图像、API临时429/500等）
-              // 根据最大轮询时间动态计算最大重试次数（间隔按3s估算），确保不会过早放弃
-              if (!pollData.success && pollData.retryable && pollCount > Math.floor(maxPollTime / 3)) {
-                console.warn(`[生成] 可重试错误已达 ${pollCount} 次 (上限 ${Math.floor(maxPollTime / 3)})，最后错误: ${pollData.error}`);
+              // 根据单任务最大轮询时间动态计算最大重试次数（间隔按3s估算），确保不会过早放弃
+              if (!pollData.success && pollData.retryable && pollCount > Math.floor(perTaskMaxPollTime / 3000)) {
+                console.warn(`[生成] 可重试错误已达 ${pollCount} 次 (上限 ${Math.floor(perTaskMaxPollTime / 3000)})，最后错误: ${pollData.error}`);
                 toast.error('生成失败', {
                   description: pollData.error || '多次重试后仍未生成图像，建议稍后在画布查看',
                   className: 'bg-[#141414] border border-red-900 text-white',
@@ -852,7 +859,7 @@ function CanvasApp() {
                 }
 
               } else if (pollData.status === 'failed') {
-                console.warn(`[poll] taskId=${currentTaskId} FAILED after ${Math.round((Date.now()-pollStartTime)/1000)}s, pollCount=${pollCount}`, pollData.error);
+                console.warn(`[poll] taskId=${currentTaskId} FAILED after ${Math.round((Date.now()-taskStartTime)/1000)}s, pollCount=${pollCount}`, pollData.error);
                 // 移除对应的占位框
                 const failedPhId = placeholderIds[taskIdx];
                 if (failedPhId) {
@@ -1390,8 +1397,12 @@ function CanvasApp() {
           return baseInterval;
         };
 
-        const maxPollTime = Math.min(300, Math.max(60, estimatedTime * 3 + 30)) * 1000;
-        const pollStartTime = Date.now();
+        // ★ 每个任务独立计算超时：避免串行任务时前期任务消耗掉后期任务的时间预算
+        // 全局最大时间：预估时间 * 5 + 120秒，最少180秒，最多1800秒（30分钟）
+        // 单任务最大时间：预估时间 * 4 + 120秒，最少120秒，最多600秒（10分钟）
+        const globalMaxPollTime = Math.min(1800, Math.max(180, estimatedTime * 5 + 120)) * 1000;
+        const perTaskMaxPollTime = Math.min(600, Math.max(120, estimatedTime * 4 + 120)) * 1000;
+        const globalStartTime = Date.now();
 
         const completedImages: Array<{ id: string; url: string; prompt: string; model?: string; quality?: string; aspectRatio?: string; stylePreset?: string; category?: string; size?: string; sourceUrl?: string }> = [];        let consecutiveErrors = 0;
 
@@ -1399,11 +1410,14 @@ function CanvasApp() {
           const currentTaskId = taskIds[taskIdx];
           let pollCount = 0;
           let taskCompleted = false;
+          const taskStartTime = Date.now(); // ★ 每个任务独立的开始时间
 
           while (!taskCompleted) {
-            if (Date.now() - pollStartTime > maxPollTime) {
+            const taskElapsed = Date.now() - taskStartTime;
+            const globalElapsed = Date.now() - globalStartTime;
+            if (taskElapsed > perTaskMaxPollTime || globalElapsed > globalMaxPollTime) {
               toast.error('生成超时', {
-                description: '请尝试降低分辨率或简化提示词后重试',
+                description: `已等待${Math.round(taskElapsed / 1000)}秒，请尝试降低分辨率或简化提示词后重试`,
                 className: 'bg-[#141414] border border-red-900 text-white',
               });
               break;

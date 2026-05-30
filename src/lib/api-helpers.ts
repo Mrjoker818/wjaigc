@@ -49,7 +49,7 @@ export async function fetchWithV1Retry(
   path: string,
   options: RequestInit,
   retryWithV1 = true,
-  defaultTimeoutMs = 180_000 // 3min default timeout for all external API calls
+  defaultTimeoutMs = 300_000 // 5min default timeout for all external API calls (some models take >2min)
 ): Promise<Response> {
   const cleanBase = baseUrl.replace(/\/+$/, '');
   const url = `${cleanBase}${path}`;
@@ -105,8 +105,8 @@ export async function fetchWithV1Retry(
 export const API_TIMEOUTS = {
   /** Chat/completions: 60s */
   chat: 60_000,
-  /** Image generation: 180s (some models take >2min) */
-  imageGeneration: 180_000,
+  /** Image generation: 300s (some models take >2min, token link can take 3+ min) */
+  imageGeneration: 300_000,
   /** Image editing (inpaint/mask): 120s */
   imageEdit: 120_000,
   /** Vision/analyze: 60s */

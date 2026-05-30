@@ -141,7 +141,7 @@ export async function POST(request: NextRequest) {
     // 2. 异步轮询任务状态
     console.log(`[Universal API] 任务已提交: ${taskId}`);
 
-    const maxPolls = 80;
+    const maxPolls = 200; // 兼容需要2分钟以上的慢速API
     for (let i = 0; i < maxPolls; i++) {
       const interval = i <= 2 ? 800 : i <= 5 ? 1000 : i < 10 ? 1500 : 2000;
       await new Promise(resolve => setTimeout(resolve, interval));

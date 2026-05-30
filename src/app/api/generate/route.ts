@@ -519,10 +519,10 @@ export async function POST(request: NextRequest) {
       });
 
       // 根据兼容性档案确定超时时间
-      // ★ 异步模式（polling）提交请求也需要足够时间（图生图含大量 base64 数据）
+      // ★ 异步模式提交请求也需要足够时间（部分API提交本身可能耗时长）
       const isDirectMode = profile.responseMode === 'direct';
       const controller = new AbortController();
-      const timeoutMs = isDirectMode ? 600000 : 60000;
+      const timeoutMs = isDirectMode ? 600000 : 300000; // 直接模式10分钟，异步提交5分钟
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
       let timeoutCleared = false;
       const clearTimeoutSafely = () => {
