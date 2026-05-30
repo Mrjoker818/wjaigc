@@ -828,14 +828,14 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
     textMuted: 'text-gray-400',
     border: 'border-gray-200',
     borderLight: 'border-gray-100',
-    input: 'bg-white border border-gray-200 rounded-lg px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-emerald-400',
-    btn: 'bg-emerald-600 text-white font-semibold rounded-lg px-4 py-2 hover:bg-emerald-700 transition-colors disabled:opacity-50',
+    input: 'bg-white border border-gray-200 rounded-lg px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-400',
+    btn: 'bg-blue-600 text-white font-semibold rounded-lg px-4 py-2 hover:bg-blue-700 transition-colors disabled:opacity-50',
     btnGhost: 'text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-lg px-3 py-1.5 transition-colors',
     card: 'bg-gray-50 border border-gray-100 rounded-lg',
-    select: 'bg-white border border-gray-200 rounded-lg px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-emerald-400 appearance-none cursor-pointer',
+    select: 'bg-white border border-gray-200 rounded-lg px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-400 appearance-none cursor-pointer',
     sidebar: 'bg-gray-50 border-r border-gray-200',
     sidebarItem: 'flex items-center gap-2 px-3 py-2 text-[11px] rounded-lg cursor-pointer transition-colors',
-    sidebarItemActive: 'bg-emerald-50 text-emerald-700 font-medium',
+    sidebarItemActive: 'bg-blue-50 text-blue-700 font-medium',
     sidebarItemInactive: 'text-gray-500 hover:text-gray-700 hover:bg-gray-100',
     optionBg: 'bg-white',
   } : {
@@ -861,16 +861,16 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
 
   // Accent color class tokens (fully static for Tailwind JIT)
   const ac = isMonochrome ? {
-    textAccent: 'text-emerald-600',
-    textAccentHover: 'hover:text-emerald-700',
-    bgAccent: 'bg-emerald-600',
-    bgAccentHover: 'hover:bg-emerald-700',
-    bgAccent10: 'bg-emerald-50',
-    bgAccent15: 'bg-emerald-100',
-    bgAccent20: 'bg-emerald-100',
-    borderAccent30: 'border-emerald-300',
-    borderAccent50: 'border-emerald-400',
-    ringAccent30: 'ring-emerald-300',
+    textAccent: 'text-blue-600',
+    textAccentHover: 'hover:text-blue-700',
+    bgAccent: 'bg-blue-600',
+    bgAccentHover: 'hover:bg-blue-700',
+    bgAccent10: 'bg-blue-50',
+    bgAccent15: 'bg-blue-100',
+    bgAccent20: 'bg-blue-100',
+    borderAccent30: 'border-blue-300',
+    borderAccent50: 'border-blue-400',
+    ringAccent30: 'ring-blue-300',
     accentColor: '#059669',
     accentColorLight: '#d1fae5',
   } : {
@@ -988,7 +988,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
                       onClick={() => setCurrentProject(p => p ? { ...p, [field]: '' } : p)}><X className="w-3 h-3" /></button>
                   </div>
                 ) : (
-                  <label className={`flex flex-col items-center justify-center h-32 border-2 border-dashed ${th.borderLight} rounded-lg cursor-pointer hover:border-emerald-300 transition-colors`}>
+                  <label className={`flex flex-col items-center justify-center h-32 border-2 border-dashed ${th.borderLight} rounded-lg cursor-pointer hover:border-blue-300 transition-colors`}>
                     <Upload className="w-5 h-5 text-gray-500 mb-1" />
                     <span className="text-xs text-gray-500">点击上传</span>
                     <input type="file" className="hidden" accept="image/*" onChange={async e => {
@@ -1037,7 +1037,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
                     }}><X className="w-2.5 h-2.5" /></button>
                 </div>
               ))}
-              <label className={`flex items-center justify-center h-20 border-2 border-dashed ${th.borderLight} rounded cursor-pointer hover:border-emerald-300`}>
+              <label className={`flex items-center justify-center h-20 border-2 border-dashed ${th.borderLight} rounded cursor-pointer hover:border-blue-300`}>
                 <Plus className="w-4 h-4 text-gray-500" />
                 <input type="file" className="hidden" accept="image/*" onChange={async e => {
                   const file = e.target.files?.[0];
@@ -1066,7 +1066,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
               <BookOpen className="w-4 h-4" />
               <span className={`${th.text} text-sm font-medium`}>品牌手册</span>
             </div>
-            <label className={`flex items-center justify-center h-16 border-2 border-dashed ${th.borderLight} rounded cursor-pointer hover:border-emerald-300`}>
+            <label className={`flex items-center justify-center h-16 border-2 border-dashed ${th.borderLight} rounded cursor-pointer hover:border-blue-300`}>
               <Upload className="w-4 h-4 text-gray-500 mr-2" />
               <span className="text-xs text-gray-500">上传品牌手册（PDF/图片）</span>
               <input type="file" className="hidden" accept="image/*,.pdf" onChange={() => {}} />
@@ -1118,7 +1118,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
               <div className={`${th.card} p-3`}>
                 <div className={`${th.textSec} text-xs mb-1`}>品牌关键词</div>
                 <div className="flex flex-wrap gap-1">{dnaResult.brandKeywords.map((k, i) => (
-                  <span key={i} className="bg-emerald-100 text-emerald-700 text-xs px-2 py-0.5 rounded">{k}</span>
+                  <span key={i} className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded">{k}</span>
                 ))}</div>
               </div>
               <div className={`${th.card} p-3`}>
@@ -1317,7 +1317,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
             <div className="grid grid-cols-3 gap-1.5 max-h-48 overflow-y-auto">
               {MATERIAL_PACKAGES[selectedPkg]?.items.map(item => (
                 <label key={item.name} className={`flex items-center gap-1.5 p-1.5 rounded cursor-pointer transition-colors ${selectedMats.has(item.name) ? `${ac.bgAccent10} border ${ac.borderAccent30}` : `hover:bg-white/[0.03] border border-transparent`}`}>
-                  <input type="checkbox" className="accent-emerald-600 w-3 h-3" checked={selectedMats.has(item.name)}
+                  <input type="checkbox" className="accent-blue-600 w-3 h-3" checked={selectedMats.has(item.name)}
                     onChange={() => {
                       setSelectedMats(prev => {
                         const next = new Set(prev);
@@ -1435,7 +1435,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
             {versions.map((v, i) => (
               <div key={v.id} className={`${th.card} p-3 flex items-start gap-3`}>
                 <div className="flex flex-col items-center">
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold bg-emerald-100 text-emerald-700`}>{i + 1}</div>
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold bg-blue-100 text-blue-700`}>{i + 1}</div>
                   {i < versions.length - 1 && <div className="w-px h-4 bg-white/[0.06]" />}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -1538,7 +1538,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
         <h3 className={th.title + ' text-sm mb-3'}>模板中心</h3>
         <div className="grid grid-cols-3 gap-2">
           {TEMPLATE_CATEGORIES.map(cat => (
-            <button key={cat} className={`${th.btnGhost} text-xs border ${th.borderLight} py-2 text-left hover:border-emerald-300`}>
+            <button key={cat} className={`${th.btnGhost} text-xs border ${th.borderLight} py-2 text-left hover:border-blue-300`}>
               <BookOpen className="w-3 h-3 inline mr-1" />{cat}
             </button>
           ))}
@@ -1587,7 +1587,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
               <h4 className={`${th.textSec} text-xs font-medium mb-2`}>批注类型</h4>
               <div className="flex flex-wrap gap-1.5">
                 {COMMENT_TYPES.map(type => (
-                  <button key={type} className={`text-[10px] px-2 py-0.5 rounded ${commentType === type ? 'bg-emerald-100 text-emerald-700' : 'bg-white/[0.06] text-gray-400'}`}
+                  <button key={type} className={`text-[10px] px-2 py-0.5 rounded ${commentType === type ? 'bg-blue-100 text-blue-700' : 'bg-white/[0.06] text-gray-400'}`}
                     onClick={() => setCommentType(type)}>{type}</button>
                 ))}
               </div>
@@ -1611,7 +1611,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
             {comments.map(c => (
               <div key={c.id} className={`${th.card} p-3`}>
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">{c.type}</span>
+                  <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">{c.type}</span>
                   <span className="text-[10px] text-gray-600">{new Date(c.createdAt).toLocaleString()}</span>
                 </div>
                 <p className={`${th.text} text-xs`}>{c.content}</p>
@@ -1640,7 +1640,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
             <div className="space-y-1 max-h-72 overflow-y-auto">
               {PROPOSAL_SECTIONS.map(section => (
                 <label key={section} className="flex items-center gap-2 p-1.5 rounded cursor-pointer hover:bg-white/[0.03]">
-                  <input type="checkbox" className="accent-emerald-600 w-3 h-3"
+                  <input type="checkbox" className="accent-blue-600 w-3 h-3"
                     checked={exportSections.has(section)}
                     onChange={() => {
                       setExportSections(prev => {

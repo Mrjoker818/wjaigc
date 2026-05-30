@@ -2218,14 +2218,14 @@ function CanvasApp() {
                   <h1 className={`text-lg font-bold leading-tight tracking-tight ${themeStyle === 'monochrome' ? 'text-gray-900' : 'text-foreground'}`}>
                     {APP_NAME}
                   </h1>
-                  <div className={`w-1.5 h-1.5 rounded-full ${themeStyle === 'monochrome' ? 'bg-emerald-500' : 'bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]'}`} />
+                  <div className={`w-1.5 h-1.5 rounded-full ${themeStyle === 'monochrome' ? 'bg-blue-500' : 'bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]'}`} />
                 </div>
                 <span className={`text-[10px] leading-tight font-mono ${themeStyle === 'monochrome' ? 'text-gray-400' : 'text-gold-muted'}`}>
                   {APP_FULL_VERSION_LABEL}
                 </span>
               </div>
               {currentProject && (
-                <span className={`text-xs px-2.5 py-0.5 rounded-lg font-medium transition-colors ${themeStyle === 'monochrome' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100' : 'bg-gold/10 text-gold border border-gold/20 hover:bg-gold/15'}`}>
+                <span className={`text-xs px-2.5 py-0.5 rounded-lg font-medium transition-colors ${themeStyle === 'monochrome' ? 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100' : 'bg-gold/10 text-gold border border-gold/20 hover:bg-gold/15'}`}>
                   {currentProject.name}
                 </span>
               )}
@@ -2239,28 +2239,28 @@ function CanvasApp() {
               onClick={() => setActivePanel('chat')}
               className={`flex-1 py-2 px-3 flex items-center justify-center gap-1.5 transition-all text-sm relative ${
                 activePanel === 'chat'
-                  ? themeStyle === 'monochrome' ? 'text-emerald-600 font-semibold' : 'text-gold font-semibold'
+                  ? themeStyle === 'monochrome' ? 'text-blue-600 font-semibold' : 'text-gold font-semibold'
                   : themeStyle === 'monochrome' ? 'text-gray-500 hover:text-gray-800 hover:bg-gray-50' : 'text-gold-muted hover:text-text-bright hover:bg-white/5'
               }`}
             >
               <MessageSquare size={15} />
               <span className="text-sm">AI聊天</span>
               {activePanel === 'chat' && (
-                <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-emerald-500' : 'bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]'}`} />
+                <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-blue-500' : 'bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]'}`} />
               )}
             </button>
             <button
               onClick={() => setActivePanel('generate')}
               className={`flex-1 py-2 px-3 flex items-center justify-center gap-1.5 transition-all text-sm relative ${
                 activePanel === 'generate'
-                  ? themeStyle === 'monochrome' ? 'text-emerald-600 font-semibold' : 'text-gold font-semibold'
+                  ? themeStyle === 'monochrome' ? 'text-blue-600 font-semibold' : 'text-gold font-semibold'
                   : themeStyle === 'monochrome' ? 'text-gray-500 hover:text-gray-800 hover:bg-gray-50' : 'text-gold-muted hover:text-text-bright hover:bg-white/5'
               }`}
             >
               <ImageIcon size={15} />
               <span className="text-sm">图像生成</span>
               {activePanel === 'generate' && (
-                <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-emerald-500' : 'bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]'}`} />
+                <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-blue-500' : 'bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]'}`} />
               )}
             </button>
           </div>
@@ -2312,7 +2312,7 @@ function CanvasApp() {
                 <div className={`h-px mb-3 ${themeStyle === 'monochrome' ? 'bg-gray-200' : 'bg-gradient-to-r from-transparent via-gold/15 to-transparent'}`} />
                 <button
                   onClick={() => document.dispatchEvent(new CustomEvent('trigger-generate'))}
-                  className={`btn-press w-full py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${themeStyle === 'monochrome' ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:from-emerald-600 hover:to-emerald-700 shadow-md hover:shadow-lg active:shadow-sm' : 'bg-gradient-to-r from-gold to-gold-dark text-black hover:from-gold-light hover:to-gold shadow-md hover:shadow-lg active:shadow-sm'}`}
+                  className={`btn-press w-full py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${themeStyle === 'monochrome' ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-md hover:shadow-lg active:shadow-sm' : 'bg-gradient-to-r from-gold to-gold-dark text-black hover:from-gold-light hover:to-gold shadow-md hover:shadow-lg active:shadow-sm'}`}
                 >
                   <Sparkles className="h-4 w-4" />
                   <span>开始生成</span>

@@ -2378,7 +2378,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
         <div className={`px-4 pt-3 pb-2 border-b ${themeClasses.border} shrink-0`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className={`w-1.5 h-1.5 rounded-full ${discoveredChatModels.length > 0 ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+              <div className={`w-1.5 h-1.5 rounded-full ${discoveredChatModels.length > 0 ? 'bg-blue-400' : 'bg-amber-400'}`} />
               <span className={`text-sm font-medium ${themeClasses.text}`}>
                 {discoveredChatModels.find(m => m.id === model)?.name || getModelDisplayName(model)}
               </span>

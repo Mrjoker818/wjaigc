@@ -701,7 +701,7 @@ export function InfiniteCanvas({
     ? 'p-2 rounded-xl transition-all relative group text-gray-500 hover:text-gray-700 hover:bg-gray-100'
     : 'p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10';
   const toolBtnActiveCls = isMonochrome
-    ? 'bg-emerald-500 text-white'
+    ? 'bg-blue-500 text-white'
     : 'bg-gold/20 text-gold';
   const separatorCls = isMonochrome ? 'w-px h-5 bg-gray-200' : 'w-px h-5 bg-white/[0.06]';
 
@@ -710,7 +710,7 @@ export function InfiniteCanvas({
     ? 'bg-white/90 border border-gray-200 shadow-lg'
     : 'bg-background/85 border border-white/[0.06]';
   const ltExpandedBtnCls = isMonochrome
-    ? 'flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-gray-50 text-gray-700 hover:bg-gray-100'
+    ? 'flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-blue-50 text-blue-700 hover:bg-blue-100'
     : 'flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright';
   const ltActiveBtnCls = isMonochrome
     ? 'bg-blue-50 text-blue-600 hover:bg-blue-100'
@@ -728,11 +728,11 @@ export function InfiniteCanvas({
   // Colorful icons for monochrome mode
   const mIcon: Record<string, string> = isMonochrome ? {
     ohMyPrompt: 'text-amber-500', refFusion: 'text-orange-500', users: 'text-blue-500',
-    folder: 'text-emerald-500', palette: 'text-violet-500', contrast: 'text-violet-500',
+    folder: 'text-blue-500', palette: 'text-violet-500', contrast: 'text-violet-500',
     workflow: 'text-pink-500', layoutGrid: 'text-teal-500', settings: 'text-slate-500',
     shield: 'text-red-500', heart: 'text-rose-500', helpCircle: 'text-sky-500',
     chevronsLeft: 'text-gray-400', chevronsRight: 'text-gray-400',
-    generator: 'text-emerald-600', pencil: 'text-violet-500', bot: 'text-fuchsia-500',
+    generator: 'text-blue-600', pencil: 'text-violet-500', bot: 'text-fuchsia-500',
     shoppingBag: 'text-orange-500', scan: 'text-teal-500', fontDesign: 'text-amber-600',
     building: 'text-cyan-500', fileImage: 'text-indigo-500', hexCube: 'text-rose-500',
     maximize: 'text-gray-500', mousePointer: 'text-gray-500', hand: 'text-gray-500',
@@ -5686,7 +5686,7 @@ export function InfiniteCanvas({
 
   // Action toolbar items with distinct monochrome colors
   const monoColors: Record<string, string> = {
-    '放大': 'text-blue-600', '移除背景': 'text-pink-500', 'SVG智能描摹': 'text-emerald-500',
+    '放大': 'text-blue-600', '移除背景': 'text-pink-500', 'SVG智能描摹': 'text-blue-500',
     '擦除': 'text-orange-500', '蒙版': 'text-violet-500', '编辑元素': 'text-cyan-500',
     '多角度': 'text-teal-500', '转3D': 'text-indigo-500', '扩展': 'text-amber-500',
     '裁切': 'text-rose-500', '精修引擎': 'text-violet-500', '语言修图': 'text-sky-500', 'Agent编排': 'text-fuchsia-500',
@@ -10026,14 +10026,14 @@ export function InfiniteCanvas({
                       onClick={(e) => { e.stopPropagation(); action.action(); }}
                       className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-all ${
                         isMonochrome
-                          ? 'text-gray-700 hover:bg-gray-50'
+                          ? 'text-blue-600 hover:bg-blue-50'
                           : 'text-gold-muted hover:text-text-bright hover:bg-white/10'
                       }`}
                       title={action.desc || action.label}
                     >
                       <span className={`${
                         isMonochrome
-                          ? action.label === '放大' ? 'text-emerald-500' : action.label === '移除背景' ? 'text-violet-500' : action.label === 'SVG智能描摹' || action.label === 'SVG描摹' ? 'text-pink-500' : action.label === '擦除' ? 'text-orange-500' : action.label === '蒙版' ? 'text-cyan-500' : action.label === '编辑元素' ? 'text-amber-500' : action.label === '扩展' ? 'text-blue-500' : action.label === '裁切' ? 'text-rose-500' : action.label === '精修引擎' ? 'text-violet-500' : action.label === '下载' ? 'text-teal-500' : action.label === 'Agent编排' ? 'text-purple-500' : action.label === '语言修图' ? 'text-fuchsia-500' : 'text-blue-500'
+                          ? action.label === '放大' ? 'text-blue-500' : action.label === '移除背景' ? 'text-violet-500' : action.label === 'SVG智能描摹' || action.label === 'SVG描摹' ? 'text-pink-500' : action.label === '擦除' ? 'text-orange-500' : action.label === '蒙版' ? 'text-cyan-500' : action.label === '编辑元素' ? 'text-amber-500' : action.label === '扩展' ? 'text-blue-500' : action.label === '裁切' ? 'text-rose-500' : action.label === '精修引擎' ? 'text-violet-500' : action.label === '下载' ? 'text-teal-500' : action.label === 'Agent编排' ? 'text-purple-500' : action.label === '语言修图' ? 'text-fuchsia-500' : 'text-blue-500'
                           : ''
                       }`}>{action.icon}</span>
                       <span>{action.label}</span>
