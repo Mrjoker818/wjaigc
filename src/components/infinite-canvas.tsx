@@ -333,6 +333,7 @@ interface InfiniteCanvasProps {
   onToggleVisionPrompt?: () => void;
   ohMyPromptOpen?: boolean;
   onCloseOhMyPrompt?: () => void;
+  onToggleOhMyPrompt?: () => void;
   onInsertPrompt?: (prompt: string) => void;
   ohMyPromptThemeStyle?: string;
   isVisionAnalyzing?: boolean;
@@ -424,6 +425,7 @@ export function InfiniteCanvas({
   onToggleVisionPrompt,
   ohMyPromptOpen = false,
   onCloseOhMyPrompt,
+  onToggleOhMyPrompt,
   onInsertPrompt,
   ohMyPromptThemeStyle = 'gold',
   isVisionAnalyzing = false,
@@ -695,6 +697,13 @@ export function InfiniteCanvas({
   // 图片工具栏折叠状态
   const [toolbarExpanded, setToolbarExpanded] = useState(false);
   const [leftToolbarExpanded, setLeftToolbarExpanded] = useState(false);
+  const toolBtnCls = isMonochrome
+    ? 'p-2 rounded-xl transition-all relative group text-gray-600 hover:text-gray-800 hover:bg-gray-100'
+    : 'p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10';
+  const toolBtnActiveCls = isMonochrome
+    ? 'bg-emerald-500 text-white'
+    : 'bg-gold/20 text-gold';
+  const separatorCls = isMonochrome ? 'w-px h-5 bg-gray-200' : 'w-px h-5 bg-white/[0.06]';
   const leftToolbarRef = useRef<HTMLDivElement>(null);
 
   // 点击外部关闭左侧工具栏
@@ -5905,35 +5914,6 @@ export function InfiniteCanvas({
             </div>
             {/* Divider */}
             <div className="mx-2 h-px bg-white/[0.06]" />
-            {/* Section: Canvas tools */}
-            <div className="text-xs font-semibold mb-1 px-2 text-gold-muted">画布操作</div>
-            {/* Select Tool */}
-            <button
-              onClick={() => { /* Select tool active by default */ }}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-gold/20 text-gold"
-              title="选择 (V)"
-            >
-              <MousePointer2 className="h-3.5 w-3.5" />
-              <span>选择</span>
-            </button>
-            {/* Pan Tool */}
-            <button
-              onClick={() => { /* Pan tool */ }}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
-              title="平移 (H)"
-            >
-              <Hand className="h-3.5 w-3.5" />
-              <span>平移</span>
-            </button>
-            {/* Upload Image */}
-            <button
-              onClick={() => uploadFileInputRef.current?.click()}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
-              title="上传图片"
-            >
-              <ImagePlus className="h-3.5 w-3.5" />
-              <span>上传图片</span>
-            </button>
             {/* OMP Toggle */}
             <button
               onClick={() => {
@@ -6072,22 +6052,32 @@ export function InfiniteCanvas({
           /* Collapsed: icon column */
           <div className="absolute top-4 left-4 z-50 flex flex-col items-center py-2 gap-1 rounded-xl bg-background/85 border border-white/[0.06] transition-all duration-200" style={{ width: 48, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
             <button
-              onClick={() => { /* Select tool active by default */ }}
-              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-gold/20 text-gold" title="选择 (V)"
+              onClick={() => { if (onToggleVisionPrompt) onToggleVisionPrompt(); }}
+              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${ohMyPromptOpen ? 'bg-gold/20 text-gold' : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
+              title="Oh My Prompt"
             >
-              <MousePointer2 className="w-4 h-4" />
+              <Sparkles className="w-4 h-4" />
             </button>
             <button
-              onClick={() => { /* Pan tool */ }}
-              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright" title="平移 (H)"
+              onClick={onToggleUserManager}
+              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              title="用户管理"
             >
-              <Hand className="w-4 h-4" />
+              <Users className="w-4 h-4" />
             </button>
             <button
-              onClick={() => uploadFileInputRef.current?.click()}
-              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright" title="上传图片"
+              onClick={onToggleProjectData}
+              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              title="项目数据"
             >
-              <ImagePlus className="w-4 h-4" />
+              <FolderOpen className="w-4 h-4" />
+            </button>
+            <button
+              onClick={onToggleTheme}
+              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright"
+              title={isMonochrome ? '切换彩色模式' : '切换黑白模式'}
+            >
+              {isMonochrome ? <Palette className="w-4 h-4" /> : <Contrast className="w-4 h-4" />}
             </button>
             <div className="w-5 my-1 h-px bg-white/[0.06]" />
             <button
@@ -10047,7 +10037,7 @@ export function InfiniteCanvas({
               {/* 工具栏自定义弹窗 */}
               {showToolbarCustomize && (
                 <div
-                  className={`absolute top-full mt-2 left-1/2 -translate-x-1/2 w-72 p-3 rounded-xl border shadow-2xl z-50 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-white/[0.06]/85 border-white/[0.12]'}`}
+                  className={`absolute top-full mt-2 left-1/2 -translate-x-1/2 w-72 p-3 rounded-xl border shadow-2xl z-50 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#141418] border-white/[0.12]'}`}
                   onMouseDown={(e) => e.stopPropagation()}
                   data-popup="toolbar-customize"
                 >
@@ -10633,10 +10623,10 @@ export function InfiniteCanvas({
       })()}
 
       {/* Floating pill toolbar - always on top (z-50) */}
-      <div data-toolbar="bottom-toolbar" className="absolute bottom-5 left-1/2 -translate-x-1/2 z-50 rounded-2xl px-3 py-2 flex items-center gap-1.5 bg-background/85 border border-white/[0.06] shadow-2xl" style={{ backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+      <div data-toolbar="bottom-toolbar" className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 rounded-2xl px-3 py-2 flex items-center gap-1.5 ${isMonochrome ? 'bg-white/90 border border-gray-200 shadow-lg' : 'bg-background/85 border border-white/[0.06] shadow-2xl'}`} style={{ backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
         {/* Select tool */}
         <button
-          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
+          className={`tool-btn ${isMonochrome ? 'p-2 rounded-xl transition-all relative group text-gray-600 hover:text-gray-800 hover:bg-gray-100' : 'p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
           title="选择工具"
         >
           <MousePointer2 className="h-4 w-4" />
@@ -10645,10 +10635,10 @@ export function InfiniteCanvas({
 
         {/* Hand/Pan tool */}
         <button
-          className={`tool-btn p-2 rounded-xl transition-all relative group ${
+          className={`${toolBtnCls} ${
             isPanning || isSpacePressed
-              ? 'bg-gold/20 text-gold'
-              : 'text-gold-muted hover:text-text-bright hover:bg-white/10'
+              ? toolBtnActiveCls
+              : ''
           }`}
           title="抓手工具"
           onClick={() => {
@@ -10664,20 +10654,20 @@ export function InfiniteCanvas({
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">抓手工具</span>
         </button>
 
-        <div className="w-px h-5 bg-white/[0.06]" />
+        <div className={`w-px h-5 ${separatorCls}`} />
 
         {/* Upload */}
         <input ref={uploadFileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleCanvasImageUpload} />
         <button
           onClick={() => uploadFileInputRef.current?.click()}
-          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
+          className={`${toolBtnCls}`}
           title="图片上传"
         >
           <Upload className="h-4 w-4" />
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">图片上传</span>
         </button>
 
-        <div className="w-px h-5 bg-white/[0.06]" />
+        <div className={`w-px h-5 ${separatorCls}`} />
 
         {/* Image Generator - gold accent */}
         <button
@@ -10689,12 +10679,12 @@ export function InfiniteCanvas({
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">图像生成器</span>
         </button>
 
-        <div className="w-px h-5 bg-white/[0.06]" />
+        <div className={`w-px h-5 ${separatorCls}`} />
 
         {/* Language Edit - 修图 */}
         <button
           onClick={() => { onEditImage?.(null); }}
-          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
+          className={`${toolBtnCls}`}
           title="语言修图"
         >
           <Pencil className="h-4 w-4" />
@@ -10704,7 +10694,7 @@ export function InfiniteCanvas({
         {/* Agent Edit - Agent编排 */}
         <button
           onClick={() => { setAgentEditImage(null); setShowAgentEditor(true); }}
-          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
+          className={`${toolBtnCls}`}
           title="Agent编排"
         >
           <Bot className="h-4 w-4" />
@@ -10714,7 +10704,7 @@ export function InfiniteCanvas({
         {/* Brand E-commerce - 品牌电商 */}
         <button
           onClick={() => setShowBrandEcommerce(true)}
-          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
+          className={`${toolBtnCls}`}
           title="品牌电商"
         >
           <ShoppingBag className="h-4 w-4" />
@@ -10724,7 +10714,7 @@ export function InfiniteCanvas({
         {/* Refine Engine - 精修引擎 */}
         <button
           onClick={() => { setRefineEngineImageUrl(''); setShowRefineEngine(true); }}
-          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
+          className={`${toolBtnCls}`}
           title="精修引擎"
         >
           <Scan className="h-4 w-4" />
@@ -10744,7 +10734,7 @@ export function InfiniteCanvas({
         {/* Brand Factory - 品牌工厂 */}
         <button
           onClick={() => setShowBrandFactory(true)}
-          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
+          className={`${toolBtnCls}`}
           title="品牌工厂"
         >
           <Building2 className="h-4 w-4" />
@@ -10754,19 +10744,19 @@ export function InfiniteCanvas({
         {/* AI PSD Generator - AI PSD生成器 */}
         <button
           onClick={() => setShowAiPsd(true)}
-          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
+          className={`${toolBtnCls}`}
           title="AI PSD生成器"
         >
           <FileImage className="h-4 w-4" />
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">AI PSD</span>
         </button>
 
-        <div className="w-px h-5 bg-white/[0.06]" />
+        <div className={`w-px h-5 ${separatorCls}`} />
 
         {/* HexCube 六面体 */}
         <button
           onClick={handleCreateHexCube}
-          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
+          className={`${toolBtnCls}`}
           title="六面体"
         >
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
@@ -10777,7 +10767,7 @@ export function InfiniteCanvas({
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">六面体</span>
         </button>
 
-        <div className="w-px h-5 bg-white/[0.06]" />
+        <div className={`w-px h-5 ${separatorCls}`} />
 
         {/* Zoom controls */}
         <div className="flex items-center gap-1 px-1">
@@ -10800,12 +10790,12 @@ export function InfiniteCanvas({
           </button>
         </div>
 
-        <div className="w-px h-5 bg-white/[0.06]" />
+        <div className={`w-px h-5 ${separatorCls}`} />
 
         {/* Reset view */}
         <button
           onClick={() => { setZoom(1); setViewOffset({ x: 0, y: 0 }); }}
-          className="tool-btn p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10"
+          className={`${toolBtnCls}`}
           title="重置视图"
         >
           <Maximize2 className="h-4 w-4" />
@@ -10815,7 +10805,7 @@ export function InfiniteCanvas({
         {/* Generating progress */}
         {isGenerating && (
           <>
-            <div className="w-px h-5 bg-white/[0.06]" />
+            <div className={`w-px h-5 ${separatorCls}`} />
             <div className="flex items-center gap-1.5">
               <div className="w-14 h-1.5 rounded-full overflow-hidden bg-white/[0.06]">
                 <div className="h-full rounded-full progress-bar shimmer" style={{ 

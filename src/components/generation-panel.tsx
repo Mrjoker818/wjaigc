@@ -896,7 +896,7 @@ export function GenerationPanel(
     // Input/Select style - comfortable padding
     const inputStl = mc
         ? "w-full px-3 py-2 rounded-lg text-sm bg-white text-gray-900 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:shadow-sm transition-all hover:border-blue-300"
-        : "w-full px-3 py-2 rounded-lg text-sm bg-white/5 text-text-bright border border-white/[0.06] focus:outline-none focus:ring-2 focus:ring-gold/30 focus:shadow-gold/8 transition-all hover:border-white/[0.10]";
+        : "w-full px-3 py-2 rounded-lg text-sm bg-[#1a1d26] text-text-bright border border-white/[0.06] focus:outline-none focus:ring-2 focus:ring-gold/30 focus:shadow-gold/8 transition-all hover:border-white/[0.10]";
     // Grid button unselected/selected
     const gridBtnBase = "py-1.5 px-2 text-xs rounded-md transition-all duration-200 border";
     const gridBtnOff = mc
@@ -970,7 +970,7 @@ export function GenerationPanel(
                                         // Use composite key (modelId::providerId) to distinguish same-name models from different providers
                                         const compositeValue = `${dm.providerId}::${dm.id}`;
                                         return (
-                                        <option key={compositeValue} value={compositeValue}>
+                                        <option key={compositeValue} value={compositeValue} className="bg-[#1a1d26] text-text-bright">
                                             {dm.is3DProvider ? `[3D] ${dm.displayLabel || getModelDisplayName(dm.id)}` : getModelDisplayName(dm.id)}
                                         </option>
                                         );

@@ -1757,7 +1757,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
 
   const themeClasses = themeStyle === 'gold'
     ? {
-        bg: 'bg-transparent',
+        bg: 'bg-[#1a1d26] border border-white/[0.06]',
         border: 'border-white/[0.04]',
         text: 'text-white',
         textMuted: 'text-gold-muted',

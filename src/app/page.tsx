@@ -2090,6 +2090,7 @@ function CanvasApp() {
           }}
           ohMyPromptOpen={ohMyPromptOpen}
           onCloseOhMyPrompt={() => { setOhMyPromptOpen(false); setVisionPromptEnabled(false); }}
+          onToggleOhMyPrompt={() => setOhMyPromptOpen(prev => !prev)}
           onInsertPrompt={(prompt: string) => setExternalPrompt(prompt)}
           ohMyPromptThemeStyle={themeStyle}
           isVisionAnalyzing={isVisionAnalyzing}
@@ -2195,7 +2196,7 @@ function CanvasApp() {
         {/* Vertical collapse strip */}
         <button
           onClick={() => setPanelCollapsed(prev => !prev)}
-          className="w-5 flex items-center justify-center cursor-pointer transition-all duration-200 shrink-0 bg-toolbar-bg hover:bg-toolbar-hover border-r border-white/[0.06]"
+          className="w-5 flex items-center justify-center cursor-pointer transition-all duration-200 shrink-0 bg-[#0F1117] hover:bg-[#1a1d26] border-r border-white/[0.06]"
           style={{ borderRadius: '4px 0 0 4px' }}
           title={panelCollapsed ? '展开面板' : '收起面板'}
         >
@@ -2208,7 +2209,7 @@ function CanvasApp() {
 
         {/* Panel Content */}
         {!panelCollapsed && (
-        <div className="flex-1 flex flex-col bg-panel-bg border-l border-white/[0.06] overflow-hidden">
+        <div className="flex-1 flex flex-col bg-[#141418] border-l border-white/[0.06] overflow-hidden">
           {/* 软件标题 - 版本号在下方，项目名在右侧 */}
           <div className="px-4 py-2.5 flex-shrink-0 flex items-center justify-between">
             <div className="flex items-center gap-3">
