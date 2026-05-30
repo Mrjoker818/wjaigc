@@ -19,6 +19,7 @@ import {
   Search, ScanSearch, Eye, Pause, SkipForward, Workflow as WorkflowIcon, Timer,
   ArrowLeft, LayoutGrid, Sparkles, MessageCircle, Rotate3d, Box, ShoppingBag, Zap,
   Copy, Clipboard, Package, Film, Bookmark, BookmarkPlus, GitCompare, Grid3X3, ArrowLeftFromLine, ImagePlus,
+  Shapes, BookOpen,
 } from 'lucide-react';
 
 // ==================== 图标映射 ====================
@@ -370,6 +371,9 @@ const nodeThemes = {
     inputBorder: 'rgba(212,175,55,0.2)',
     inputText: '#e5e5e5',
     inputPlaceholder: '#666',
+    // 下拉选项（原生option需要不透明背景）
+    optionBg: '#2a2a2a',
+    optionText: '#e5e5e5',
     // 按钮 — 与窗口模式按钮统一
     btnBg: 'rgba(212,175,55,0.1)',
     btnHoverBg: 'rgba(212,175,55,0.2)',
@@ -438,6 +442,9 @@ const nodeThemes = {
     inputBorder: '#e2e8f0',
     inputText: '#1e293b',
     inputPlaceholder: '#94a3b8',
+    // 下拉选项（原生option需要不透明背景）
+    optionBg: '#ffffff',
+    optionText: '#1e293b',
     // 按钮
     btnBg: 'rgba(59,130,246,0.08)',
     btnHoverBg: 'rgba(59,130,246,0.15)',
@@ -482,6 +489,8 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
     '--ne-text-muted': T.textMuted,
     '--ne-input-bg': T.inputBg,
     '--ne-input-border': T.inputBorder,
+    '--ne-option-bg': T.optionBg,
+    '--ne-option-text': T.optionText,
     '--ne-canvas-bg': T.canvasBg,
     '--ne-toolbar-bg': T.toolbarBg,
     '--ne-toolbar-border': T.toolbarBorder,
@@ -750,6 +759,10 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   // 避免循环更新：记录最近一次传出的 wf 引用，跳过自身回写
   const lastEmittedRef = useRef<WorkflowData | null>(null);
 
+  // 图片上传: 全局文件输入框 (foreignObject内动态input.click()不可靠)
+  const imageFileInputRef = useRef<HTMLInputElement>(null);
+  const pendingImageUploadNodeId = useRef<string | null>(null);
+
   // 同步外部workflow变化 (仅当外部真正改变时才同步，跳过自身回写)
   useEffect(() => {
     if (!workflow) return;
@@ -831,7 +844,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   const handleLlmOptimize = useCallback(async (nodeId: string, _prompt: string, model: string, systemPrompt: string, instruction: string) => {
     const node = wf.nodes.find(n => n.id === nodeId);
     if (!node) return;
-    const currentText = node.config?.promptText || '';
+    const currentText = node.config?.textContent || node.config?.promptText || '';
     handleNodeUpdate(nodeId, { config: { ...node.config, llmOptimizing: true } });
     try {
       const res = await fetch('/api/chat', {
@@ -848,7 +861,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
       if (!res.ok) throw new Error('LLM请求失败');
       const data = await res.json();
       const optimized = data.choices?.[0]?.message?.content || data.content || currentText;
-      handleNodeUpdate(nodeId, { config: { ...node.config, promptText: optimized, llmOptimizing: false } });
+      handleNodeUpdate(nodeId, { config: { ...node.config, textContent: optimized, promptText: optimized, llmOptimizing: false } });
     } catch {
       handleNodeUpdate(nodeId, { config: { ...node.config, llmOptimizing: false } });
     }
@@ -1246,6 +1259,31 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
 
   // ─── 图片上传 ───
 
+  const triggerNodeImageUpload = useCallback((nodeId: string) => {
+    pendingImageUploadNodeId.current = nodeId;
+    imageFileInputRef.current?.click();
+  }, []);
+
+  const handleGlobalImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const nodeId = pendingImageUploadNodeId.current;
+    if (!file || !nodeId) return;
+    // 清空 input value 以支持重复选择同一文件
+    e.target.value = '';
+    pendingImageUploadNodeId.current = null;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch('/api/save-image', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.url) {
+        handleNodeUpdate(nodeId, { config: { imageUrl: data.url, source: 'upload' } });
+      }
+    } catch (err) {
+      console.error('[NodeEditor] 节点图片上传失败:', err);
+    }
+  }, [handleNodeUpdate]);
+
   const handleImageUpload = useCallback(async (nodeId: string, file: File) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -1393,29 +1431,42 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
 
   return (
     <div className="node-editor-root h-screen w-screen flex text-foreground overflow-hidden select-none" data-theme={themeStyle === 'monochrome' ? 'monochrome' : 'gold'} style={{ ...neVars, background: T.canvasBg }}>
-      {/* 左侧栏 */}
-      <div className="w-[280px] flex flex-col border-r flex-shrink-0" style={{ background: T.sidebarBg, borderColor: T.sidebarBorder }}>
-        {/* 标签切换 */}
-        <div className="flex border-b border-border flex-wrap">
+      {/* 全局图片上传 (foreignObject内input.click()不可靠, 统一由外部触发) */}
+      <input ref={imageFileInputRef} type="file" accept="image/*" className="hidden" onChange={handleGlobalImageUpload} />
+      {/* 左侧栏：竖排图标导航 + 内容区 */}
+      <div className="flex flex-shrink-0 border-r" style={{ borderColor: T.sidebarBorder }}>
+        {/* 竖排图标导航 */}
+        <div className="w-[46px] flex flex-col items-center py-2 gap-0.5 border-r" style={{ background: T.sidebarBg, borderColor: T.sidebarBorder }}>
           {([
-            { key: 'nodes', label: '节点库' },
-            { key: 'props', label: '属性' },
-            { key: 'ai-build', label: 'AI建图' },
-            { key: 'presets', label: '预设' },
-            { key: 'prompts', label: '词库' },
-            { key: 'assistant', label: '助手' },
-            { key: 'materials', label: '素材' },
+            { key: 'nodes', label: '节点库', icon: <Shapes size={16} /> },
+            { key: 'props', label: '属性', icon: <Settings size={16} /> },
+            { key: 'ai-build', label: 'AI建图', icon: <Sparkles size={16} /> },
+            { key: 'presets', label: '预设', icon: <LayoutGrid size={16} /> },
+            { key: 'prompts', label: '词库', icon: <BookOpen size={16} /> },
+            { key: 'assistant', label: '助手', icon: <MessageCircle size={16} /> },
+            { key: 'materials', label: '素材', icon: <Package size={16} /> },
           ] as const).map(tab => (
             <button
               key={tab.key}
               onClick={() => setSidebarTab(tab.key)}
-              className={`flex-1 py-2.5 text-[11px] font-medium transition-colors cursor-pointer min-w-0 ${sidebarTab === tab.key ? 'border-b-2' : ''}`}
-              style={sidebarTab === tab.key ? { color: T.accent, borderBottomColor: T.accent } : { color: T.tabInactiveText }}
+              className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors cursor-pointer relative group ${sidebarTab === tab.key ? '' : ''}`}
+              style={sidebarTab === tab.key ? { color: T.accent, background: `${T.accent}18` } : { color: T.tabInactiveText }}
+              title={tab.label}
             >
-              {tab.label}
+              {tab.icon}
+              {/* tooltip */}
+              <span className="absolute left-full ml-2 px-2 py-1 rounded text-[11px] whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50" style={{ background: T.cardBg, color: T.sidebarText, border: `1px solid ${T.sidebarBorder}` }}>
+                {tab.label}
+              </span>
+              {/* 活跃指示条 */}
+              {sidebarTab === tab.key && (
+                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full" style={{ background: T.accent }} />
+              )}
             </button>
           ))}
         </div>
+        {/* 内容区 */}
+        <div className="w-[234px] flex flex-col" style={{ background: T.sidebarBg }}>
 
         {/* 节点库 Tab */}
         {sidebarTab === 'nodes' && (
@@ -1826,7 +1877,8 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
             </div>
           </div>
         )}
-      </div>
+        </div>{/* 内容区 end */}
+      </div>{/* 左侧栏外层 end */}
 
       {/* 主画布 */}
       <div className="flex-1 relative">
@@ -1834,10 +1886,15 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
         <div className="absolute top-3 left-3 right-3 z-20 flex items-center justify-between">
           <div className="flex items-center gap-2">
             {onBack && (
-              <button onClick={onBack} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer" title="返回画布">
-                <ArrowLeft size={16} />
+              <button onClick={onBack} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--ne-accent)]/15 hover:bg-[var(--ne-accent)]/25 text-[var(--ne-accent)] transition-colors cursor-pointer text-sm font-medium" title="切换到画布模式">
+                <ArrowLeft size={15} />
+                <span>画布模式</span>
               </button>
             )}
+            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer text-sm" title="工作流中心">
+              <WorkflowIcon size={15} />
+              <span>工作流中心</span>
+            </button>
             <span className="text-base font-semibold text-[var(--ne-accent)]">{wf.name}</span>
             <span className="text-sm text-muted-foreground">v{wf.version}</span>
             <span className="text-sm text-muted-foreground">|</span>
@@ -2184,6 +2241,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 onPortMouseDown={handlePortMouseDown}
                 onPortMouseUp={handlePortMouseUp}
                 onDelete={() => handleDeleteNode(node.id)}
+                onDeselect={() => setSelectedNodeIds(new Set())}
                 onPreviewImage={(url) => setImagePreviewUrl(url)}
                 onLlmOptimize={handleLlmOptimize}
                 onCascadeRun={handleCascadeRun}
@@ -2191,6 +2249,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 onExtractToSource={handleExtractToSource}
                 onGridSplit={handleGridSplit}
                 onCompare={handleCompare}
+                onTriggerImageUpload={triggerNodeImageUpload}
                 upstreamImageUrl={(() => {
                   const upConn = wf.connections.find(c => c.toNodeId === node.id && (c.type === 'image' || c.type === 'data'));
                   if (!upConn) return undefined;
@@ -2453,6 +2512,7 @@ interface NodeCardProps {
   onExtractToSource?: (nodeId: string) => void;
   onGridSplit?: (nodeId: string, cols: number, rows: number) => void;
   onCompare?: (nodeId: string) => void;
+  onTriggerImageUpload?: (nodeId: string) => void;
   upstreamImageUrl?: string;
   onSelect: (e?: React.MouseEvent) => void;
   onHover: (id: string | null) => void;
@@ -2460,10 +2520,11 @@ interface NodeCardProps {
   onPortMouseDown: (e: React.MouseEvent, nodeId: string, port: NodePort) => void;
   onPortMouseUp: (nodeId: string, port: NodePort) => void;
   onDelete: () => void;
+  onDeselect: () => void;
   onPreviewImage: (url: string) => void;
 }
 
-function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, theme, canvasImages, llmModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onPreviewImage }: NodeCardProps) {
+function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, theme, canvasImages, llmModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onDeselect, onPreviewImage }: NodeCardProps) {
   const T = theme;
   const cat = getNodeCategory(node.type);
   const color = NODE_TYPE_COLORS[cat];
@@ -2543,7 +2604,7 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
     const file = e.dataTransfer.files?.[0];
     if (!file || !file.type.startsWith('image/')) return;
     const formData = new FormData();
-    formData.append('image', file);
+    formData.append('file', file);
     try {
       const res = await fetch('/api/save-image', { method: 'POST', body: formData });
       const data = await res.json();
@@ -2642,24 +2703,7 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
                       color: T.nodeBody === '#1a1a1a' ? '#888' : '#666'
                     }}
                     onClick={() => {
-                      const input = document.createElement('input');
-                      input.type = 'file';
-                      input.accept = 'image/*';
-                      input.onchange = async (e) => {
-                        const file = (e.target as HTMLInputElement).files?.[0];
-                        if (!file) return;
-                        const formData = new FormData();
-                        formData.append('image', file);
-                        try {
-                          const res = await fetch('/api/save-image', { method: 'POST', body: formData });
-                          const data = await res.json();
-                          if (data.url) {
-                            onNodeFieldChange?.(node.id, 'imageUrl', data.url);
-                            onNodeFieldChange?.(node.id, 'source', 'upload');
-                          }
-                        } catch (err) { console.error('上传失败:', err); }
-                      };
-                      input.click();
+                      onTriggerImageUpload?.(node.id);
                     }}
                   >
                     <ImagePlus size={20} style={{ color: T.accent, opacity: 0.6 }} />
@@ -2818,7 +2862,7 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
                       onMouseDown={(e) => e.stopPropagation()}
                     >
                       <option value="">选择模型</option>
-                      {(llmModels ?? []).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      {(llmModels ?? []).map(m => <option key={m.id} value={m.id} style={{ background: T.optionBg, color: T.optionText }}>{m.name}{m.provider ? ` (${m.provider})` : ''}</option>)}
                     </select>
                     {/* LLM 指令 */}
                     <input
@@ -2840,7 +2884,7 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
                       </button>
                       <button
                         className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer bg-[var(--ne-accent)] text-white hover:opacity-80 flex items-center gap-0.5"
-                        onClick={(e) => { e.stopPropagation(); onLlmOptimize?.(node.id, String(node.config?.text || ''), String(node.config?.llmModel || ''), String(node.config?.llmSystemPrompt || ''), String(node.config?.llmInstruction || '')); }}
+                        onClick={(e) => { e.stopPropagation(); onLlmOptimize?.(node.id, String(node.config?.textContent || ''), String(node.config?.llmModel || ''), String(node.config?.llmSystemPrompt || ''), String(node.config?.llmInstruction || '')); }}
                         disabled={isRunning}
                         title="运行 LLM 优化"
                       >
@@ -2963,12 +3007,13 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
         <circle cx={node.x + node.width - 8} cy={node.y + (isCanvasFeature ? 20 : 8)} r={4} fill={T.statusError} />
       )}
 
-      {/* 删除按钮 (选中时显示) */}
+      {/* 关闭编辑按钮 (选中时显示) */}
       {isSelected && (
         <foreignObject x={node.x + node.width + 2} y={node.y - 14} width={22} height={22}>
           <button
-            onClick={(e) => { e.stopPropagation(); onDelete(); }}
-            className="w-full h-full rounded-full bg-[var(--ne-input-bg)] border border-border flex items-center justify-center text-muted-foreground hover:text-red-400 hover:border-red-400 cursor-pointer transition-colors"
+            title="关闭编辑"
+            onClick={(e) => { e.stopPropagation(); onDeselect(); }}
+            className="w-full h-full rounded-full bg-[var(--ne-input-bg)] border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-foreground/30 cursor-pointer transition-colors"
             style={{ fontSize: 0, lineHeight: 0 }}
           >
             <X size={12} />

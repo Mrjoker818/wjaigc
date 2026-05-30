@@ -593,6 +593,8 @@ input[type="range"]::-moz-range-thumb {
   --ne-port-stroke: #94a3b8;
   --ne-scrollbar-thumb: #cbd5e1;
   --ne-scrollbar-track: transparent;
+  --ne-option-bg: #ffffff;
+  --ne-option-text: #1e293b;
 }
 
 /* Gold 主题：暗色背景 + 金色强调 - 覆盖 shadcn 变量 */
@@ -644,4 +646,12 @@ input[type="range"]::-moz-range-thumb {
   --ne-port-stroke: #64748b;
   --ne-scrollbar-thumb: #334155;
   --ne-scrollbar-track: transparent;
+  --ne-option-bg: #2a2a2a;
+  --ne-option-text: #e5e5e5;
+}
+
+/* 节点编辑器下拉菜单option文字可见性修复 */
+.node-editor-root select option {
+  background: var(--ne-option-bg);
+  color: var(--ne-option-text);
 }
