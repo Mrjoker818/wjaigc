@@ -3269,6 +3269,11 @@ export function InfiniteCanvas({
         }
       }; // 加载成功，更新真实尺寸
       testImg.onerror = () => {
+        // 已持久化到本地的URL不应该加载失败，如果失败说明文件系统有问题，直接跳过不做fallback
+        if (newUrl.startsWith('/api/serve-upload/') || newUrl.startsWith('/uploads/')) {
+          console.warn('[Canvas] Local persisted image URL failed to load (file system issue):', newUrl);
+          return;
+        }
         console.warn('[Canvas] Image URL failed to load, attempting save-image fallback:', newUrl);
         // 通过 /api/save-image 将图片持久化为可靠的 data URL
         fetch('/api/save-image', {

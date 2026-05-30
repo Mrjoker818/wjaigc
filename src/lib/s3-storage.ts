@@ -309,11 +309,10 @@ export async function persistRemoteImage(
     const baseName = subfolder ? `${subfolder.replace(/\//g, '_')}_${timestamp}` : `img_${timestamp}`;
     const filename = `${baseName}_${random}${ext}`;
     
-    // Save to local filesystem
-    const uploadsDir = path.join(dataRoot, 'public', 'uploads');
-    await fs.mkdir(uploadsDir, { recursive: true });
-    const localPath = path.join(uploadsDir, filename);
-    await fs.writeFile(localPath, imageBuffer);
+    // Save to local filesystem using saveImageFile for consistent directory layout
+    // (saveImageFile saves to {dataRoot}/{subfolder}/ which serve-upload can find)
+    const { saveImageFile } = await import('./server-data-root');
+    const localUrl = saveImageFile(imageBuffer, filename, subfolder || 'generate');
     
     // Upload to S3 (best-effort, don't block on failure)
     const s3Key = await uploadImageToS3(imageBuffer, filename, contentType).catch(e => {
@@ -323,8 +322,8 @@ export async function persistRemoteImage(
     
     console.log(`[s3-storage] Persisted image: ${filename} (${(imageBuffer.length / 1024).toFixed(0)}KB, S3: ${s3Key ? 'yes' : 'no'})`);
     
-    // Return stable local URL
-    return `/api/serve-upload/${filename}`;
+    // Return stable local URL (already in correct /api/serve-upload/{subDir}/{filename} format)
+    return localUrl;
   } catch (e) {
     console.error('[s3-storage] persistRemoteImage failed:', e);
     return null;
