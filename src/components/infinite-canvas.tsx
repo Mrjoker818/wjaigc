@@ -32,6 +32,7 @@ import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnecti
 import { getModelDisplayName } from '@/lib/model-name-map';
 import type { PsdLayerItem } from '@/types/psdLayer';
 import { toStableImageUrl } from '@/lib/stable-image-url';
+import { taskEventsClient } from '@/lib/task-events-client';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
 import OhMyPrompt from '@/components/oh-my-prompt';
 import dynamic from 'next/dynamic';
@@ -505,6 +506,13 @@ export function InfiniteCanvas({
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+
+  // ★ SSE连接：实时任务事件，加速轮询感知
+  useEffect(() => {
+    taskEventsClient.connect();
+    return () => { taskEventsClient.disconnect(); };
+  }, []);
+
   const visibleImages = useMemo(() => {
     if (canvasSize.width === 0 || canvasSize.height === 0) return images;
     // Visible area in canvas coordinates
@@ -3011,9 +3019,22 @@ export function InfiniteCanvas({
         const pollWithBackoff = async () => {
           while (Date.now() - startTime < maxPollTime) {
             pollCount++;
-            // 动态间隔：前5次1.5s，6-15次2s，16-30次3s，之后4s
-            const delay = pollCount <= 5 ? 1500 : pollCount <= 15 ? 2000 : pollCount <= 30 ? 3000 : 4000;
-            await new Promise(r => setTimeout(r, delay));
+            // 动态间隔：快速初始轮询，逐步增长
+            const delay = pollCount <= 5 ? 300 : pollCount <= 15 ? 600 : pollCount <= 30 ? 1200 : 2000;
+            // ★ SSE加速：同时等待定时器和SSE完成事件
+            await Promise.race([
+              new Promise(r => setTimeout(r, delay)),
+              new Promise(resolve => {
+                if (!taskEventsClient.isConnected()) { resolve(undefined); return; }
+                const unsub = taskEventsClient.onTaskEvent(event => {
+                  if (event.taskId === taskId && ['completed', 'failed', 'cancelled'].includes(event.type)) {
+                    unsub();
+                    resolve(undefined);
+                  }
+                });
+                setTimeout(() => { unsub(); resolve(undefined); }, delay + 2000);
+              })
+            ]);
 
             try {
               const pollRes = await fetch('/api/poll-task', {
@@ -4000,10 +4021,10 @@ export function InfiniteCanvas({
     const currentModelInfo = getCurrentModel();
     const maxAttempts = 150; // 150次 × 动态间隔 ≈ 600秒，兼容token link等慢速API
     const getEditPollInterval = (attempt: number) => {
-      if (attempt <= 2) return 500;
-      if (attempt <= 5) return 800;
-      if (attempt <= 15) return 1200;
-      return 2000;
+      if (attempt <= 5) return 200;
+      if (attempt <= 15) return 500;
+      if (attempt <= 30) return 1000;
+      return 1500;
     };
     lastPollErrorRef.current = '';
 
@@ -4022,7 +4043,21 @@ export function InfiniteCanvas({
         Math.min(95, 18 + Math.round((i / Math.max(1, maxAttempts - 1)) * 76)),
         i < 2 ? '任务已提交，等待模型响应...' : 'AI 正在生成结果...'
       );
-      await new Promise(r => setTimeout(r, getEditPollInterval(i)));
+      // ★ SSE加速：同时等待定时器和SSE完成事件
+      const pollDelay = getEditPollInterval(i);
+      await Promise.race([
+        new Promise(r => setTimeout(r, pollDelay)),
+        new Promise(resolve => {
+          if (!taskEventsClient.isConnected()) { resolve(undefined); return; }
+          const unsub = taskEventsClient.onTaskEvent(event => {
+            if (event.taskId === taskId && ['completed', 'failed', 'cancelled'].includes(event.type)) {
+              unsub();
+              resolve(undefined);
+            }
+          });
+          setTimeout(() => { unsub(); resolve(undefined); }, pollDelay + 2000);
+        })
+      ]);
       try {
         const res = await fetch('/api/poll-task', {
           method: 'POST',
@@ -4154,8 +4189,8 @@ export function InfiniteCanvas({
       // === 直接返回模式：API 直接返回图片 ===
       if (data.success && data.mode === 'direct') {
         const { imageUrls } = data;
-        const savedUrls: string[] = [];
-        for (const imageUrl of imageUrls) {
+        // 并行持久化所有图片URL
+        const savedUrls = await Promise.all(imageUrls.map(async (imageUrl: string) => {
           let savedUrl = imageUrl;
           try {
             const saveRes = await fetch('/api/save-image', {
@@ -4168,8 +4203,8 @@ export function InfiniteCanvas({
               if (saveData.success && saveData.url) savedUrl = saveData.url;
             }
           } catch {}
-          savedUrls.push(savedUrl);
-        }
+          return savedUrl;
+        }));
         // Replace the processing frame with the actual images
         const newImages: CanvasImage[] = [];
         for (let i = 0; i < savedUrls.length; i++) {
@@ -4217,15 +4252,28 @@ export function InfiniteCanvas({
       const pollForResult = async (taskId: string): Promise<string | null> => {
         const maxAttempts = 300; // 兼容慢速API
         const getPollInterval = (attempt: number) => {
-          if (attempt <= 2) return 500;   // 首次快速检查
-          if (attempt <= 5) return 700;
-          if (attempt <= 10) return 1000;
-          if (attempt <= 20) return 1500;
+          if (attempt <= 5) return 200;   // 快速检测任务完成
+          if (attempt <= 15) return 500;
+          if (attempt <= 30) return 1000;
+          if (attempt <= 50) return 1500;
           return 2000;
         };
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
-          // 动态间隔：首次快速检查，后续逐渐加长
-          await new Promise(r => setTimeout(r, getPollInterval(attempt)));
+          // ★ SSE加速：同时等待定时器和SSE完成事件
+          const pollDelay = getPollInterval(attempt);
+          await Promise.race([
+            new Promise(r => setTimeout(r, pollDelay)),
+            new Promise(resolve => {
+              if (!taskEventsClient.isConnected()) { resolve(undefined); return; }
+              const unsub = taskEventsClient.onTaskEvent(event => {
+                if (event.taskId === taskId && ['completed', 'failed', 'cancelled'].includes(event.type)) {
+                  unsub();
+                  resolve(undefined);
+                }
+              });
+              setTimeout(() => { unsub(); resolve(undefined); }, pollDelay + 2000);
+            })
+          ]);
           try {
             const pollRes = await fetch('/api/poll-task', {
               method: 'POST',
@@ -4556,16 +4604,27 @@ export function InfiniteCanvas({
           const taskId = data.taskId as string;
           const modelInfo = getCurrentModel();
           const getEditPollInterval = (attempt: number) => {
-            if (attempt <= 2) return 800;
-            if (attempt <= 5) return 1000;
-            return 2000;
+            if (attempt <= 5) return 300;
+            if (attempt <= 15) return 600;
+            return 1200;
           };
           for (let i = 0; i < maxRemoveBgAttempts; i++) {
             updateProcessingFrame(placeholderId, {
               progress: Math.min(90, 22 + Math.round((i / maxRemoveBgAttempts) * 68)),
               status: i < 3 ? '等待 AI 模型响应...' : isAIRemoveBg ? 'AI 正在识别主体并移除背景...' : 'AI 正在处理背景...'
             });
-            await new Promise(r => setTimeout(r, getEditPollInterval(i)));
+            await new Promise<string | undefined>(resolve => {
+              if (taskEventsClient.isConnected()) {
+                const unsub = taskEventsClient.onTaskEvent(event => {
+                  if (event.taskId === taskId && (event.type === 'completed' || event.type === 'failed')) {
+                    unsub(); resolve(undefined);
+                  }
+                });
+                setTimeout(() => { unsub(); resolve(undefined); }, getEditPollInterval(i));
+              } else {
+                setTimeout(() => resolve(undefined), getEditPollInterval(i));
+              }
+            });
             try {
               const res = await fetch('/api/poll-task', {
                 method: 'POST',
@@ -9978,8 +10037,8 @@ export function InfiniteCanvas({
                                       return;
                                     }
                                     setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, progress: Math.min(90, 10 + attempts * 2) } : g));
-                                    setTimeout(poll, 2000);
-                                  } catch { setTimeout(poll, 3000); }
+                                    setTimeout(poll, attempts <= 5 ? 300 : attempts <= 15 ? 600 : 1200);
+                                  } catch { setTimeout(poll, 1500); }
                                 };
                                 poll();
                               }

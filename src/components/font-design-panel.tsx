@@ -252,6 +252,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   // setInterval + useEffect to avoid stale closures, duplicate images, and loading stuck bugs.
   const startPolling = useCallback(() => {
     if (pollingTimerRef.current) return; // Already polling
+    let fontPollCount = 0;
 
     const poll = async () => {
       const taskIds = Array.from(activeTasksRef.current.keys());
@@ -291,8 +292,11 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
 
       // Check if there are still active tasks
       if (activeTasksRef.current.size > 0) {
-        pollingTimerRef.current = setTimeout(poll, 3000);
+        // 优化：初始快速轮询，逐步增长
+        pollingTimerRef.current = setTimeout(poll, fontPollCount <= 5 ? 500 : fontPollCount <= 15 ? 1000 : 2000);
+        fontPollCount++;
       } else {
+        fontPollCount = 0;
         setIsGeneratingImage(false); stopImageTimer();
         pollingTimerRef.current = null;
       }

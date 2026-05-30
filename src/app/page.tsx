@@ -19,6 +19,7 @@ import { ProjectDataPanel } from '@/components/project-data-panel';
 import { AdminSystem } from '@/components/admin-system';
 import { HelpGuide } from '@/components/help-guide';
 import { FavoritesPanel } from '@/components/favorites-panel';
+import { taskEventsClient } from '@/lib/task-events-client';
 
 interface FavoriteItem {
   id: number;
@@ -571,6 +572,12 @@ function CanvasApp() {
     return () => { if (typeof unsubscribe === 'function') unsubscribe(); };
   }, [currentUser, currentProject?.id]);
 
+  // ★ SSE 连接：实时推送任务完成事件，避免轮询延迟
+  useEffect(() => {
+    taskEventsClient.connect();
+    return () => { taskEventsClient.disconnect(); };
+  }, []);
+
   const handleGenerate = useCallback(async (params: GenerationParams) => {
     // 增加活跃任务计数
     setActiveGenerationCount(prev => prev + 1);
@@ -657,8 +664,8 @@ function CanvasApp() {
       if (data.mode === 'direct') {
         const { imageUrls, model, prompt: enhancedPrompt, originalPrompt, category, style } = data;
         
-        for (let i = 0; i < imageUrls.length; i++) {
-          const imageUrl = imageUrls[i];
+        // 并行持久化所有图片URL
+        const savedUrls = await Promise.all(imageUrls.map(async (imageUrl: string) => {
           let savedUrl = imageUrl;
           try {
             const saveRes = await fetch('/api/save-image', {
@@ -671,6 +678,11 @@ function CanvasApp() {
               if (saveData.success && saveData.savedUrl) savedUrl = saveData.savedUrl;
             }
           } catch {}
+          return savedUrl;
+        }));
+
+        for (let i = 0; i < savedUrls.length; i++) {
+          const savedUrl = savedUrls[i];
 
           let imgW = 1024, imgH = 1024;
           if (params.size?.includes('x') || params.size?.includes('×')) {
@@ -721,10 +733,12 @@ function CanvasApp() {
         // 自适应轮询间隔策略（优化版）
         // 前期更快探测，后期适度延长避免浪费请求
         const getPollInterval = (pollCount: number, estTime: number) => {
-          const baseInterval = estTime <= 20 ? 1000 : estTime <= 60 ? 1500 : 2000;
-          if (pollCount > 30) return baseInterval + 2000;
-          if (pollCount > 20) return baseInterval + 1000;
-          if (pollCount > 10) return baseInterval + 500;
+          // 优化：更激进的初始轮询（300ms起），快速检测任务完成
+          // 后端已完成时，前端应在 <1s 内感知到
+          const baseInterval = estTime <= 20 ? 300 : estTime <= 60 ? 500 : 800;
+          if (pollCount > 50) return baseInterval + 2000;
+          if (pollCount > 30) return baseInterval + 1000;
+          if (pollCount > 15) return baseInterval + 300;
           return baseInterval;
         };
 
@@ -752,7 +766,21 @@ function CanvasApp() {
             }
 
             const interval = getPollInterval(pollCount, estimatedTime);
-            await new Promise(resolve => setTimeout(resolve, interval));
+            // ★ SSE加速：同时等待定时器和SSE完成事件，任一先到即继续
+            await Promise.race([
+              new Promise(resolve => setTimeout(resolve, interval)),
+              new Promise(resolve => {
+                if (!taskEventsClient.isConnected()) { resolve(undefined); return; }
+                const unsub = taskEventsClient.onTaskEvent(event => {
+                  if (event.taskId === currentTaskId && ['completed', 'failed', 'cancelled'].includes(event.type)) {
+                    unsub();
+                    resolve(undefined);
+                  }
+                });
+                // 安全超时：确保不会永久等待SSE（SSE可能断连）
+                setTimeout(() => { unsub(); resolve(undefined); }, interval + 2000);
+              })
+            ]);
             pollCount++;
 
             try {
@@ -869,23 +897,24 @@ function CanvasApp() {
 
         // 处理完成的图片 - 自动排列布局
         if (completedImages.length > 0) {
-          // 持久化 data: URL（base64 图片保存到服务器，避免刷新丢失）
-          for (let i = 0; i < completedImages.length; i++) {
-            if (completedImages[i].url.startsWith('data:')) {
+          // 持久化 data: URL（base64 图片保存到服务器，避免刷新丢失）— 并行化
+          const persistPromises = completedImages
+            .filter(img => img.url.startsWith('data:'))
+            .map(async (img) => {
               try {
                 const saveResp = await fetch('/api/save-image', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ imageUrl: completedImages[i].url, userId: currentUser?.id, sourceUrl: completedImages[i].sourceUrl }),
+                  body: JSON.stringify({ imageUrl: img.url, userId: currentUser?.id, sourceUrl: img.sourceUrl }),
                 });
                 const saveData = await saveResp.json();
                 if (saveData.success && saveData.url) {
-                  completedImages[i].url = saveData.url;
-                  completedImages[i].sourceUrl = completedImages[i].sourceUrl || saveData.sourceUrl;
+                  img.url = saveData.url;
+                  img.sourceUrl = img.sourceUrl || saveData.sourceUrl;
                 }
               } catch { /* save failed, keep data URL */ }
-            }
-          }
+            });
+          await Promise.all(persistPromises);
 
           const getDisplaySize = (size: string) => {
             let originalWidth = 1024;
@@ -959,9 +988,10 @@ function CanvasApp() {
 
       // === 旧模式兼容：直接返回结果 - 自动排列布局 ===
       } else if (data.success && data.images) {
-        // 持久化 data: URL
-        for (const img of data.images as Array<{ url: string; sourceUrl?: string }>) {
-          if (img.url.startsWith('data:')) {
+        // 持久化 data: URL — 并行化
+        const persistPromises = (data.images as Array<{ url: string; sourceUrl?: string }>)
+          .filter(img => img.url.startsWith('data:'))
+          .map(async (img) => {
             try {
               const saveResp = await fetch('/api/save-image', {
                 method: 'POST',
@@ -974,8 +1004,8 @@ function CanvasApp() {
                 img.sourceUrl = img.sourceUrl || saveData.sourceUrl;
               }
             } catch { /* save failed, keep data URL */ }
-          }
-        }
+          });
+        await Promise.all(persistPromises);
 
         const getDisplaySize = (size: string) => {
           let originalWidth = 1024;
@@ -1352,9 +1382,11 @@ function CanvasApp() {
         const { taskIds, estimatedTime, prompt: enhancedPrompt } = data;
         
         const getPollInterval = (pollCount: number, estTime: number) => {
-          const baseInterval = estTime <= 20 ? 1500 : estTime <= 60 ? 2000 : 2500;
-          if (pollCount > 20) return baseInterval + 1500;
-          if (pollCount > 10) return baseInterval + 500;
+          // 优化：更激进的初始轮询
+          const baseInterval = estTime <= 20 ? 300 : estTime <= 60 ? 500 : 800;
+          if (pollCount > 50) return baseInterval + 2000;
+          if (pollCount > 30) return baseInterval + 1000;
+          if (pollCount > 15) return baseInterval + 300;
           return baseInterval;
         };
 
@@ -1378,7 +1410,20 @@ function CanvasApp() {
             }
 
             const interval = getPollInterval(pollCount, estimatedTime);
-            await new Promise(resolve => setTimeout(resolve, interval));
+            // ★ SSE加速：同时等待定时器和SSE完成事件
+            await Promise.race([
+              new Promise(resolve => setTimeout(resolve, interval)),
+              new Promise(resolve => {
+                if (!taskEventsClient.isConnected()) { resolve(undefined); return; }
+                const unsub = taskEventsClient.onTaskEvent(event => {
+                  if (event.taskId === currentTaskId && ['completed', 'failed', 'cancelled'].includes(event.type)) {
+                    unsub();
+                    resolve(undefined);
+                  }
+                });
+                setTimeout(() => { unsub(); resolve(undefined); }, interval + 2000);
+              })
+            ]);
             pollCount++;
 
             try {

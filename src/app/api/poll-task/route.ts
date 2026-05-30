@@ -416,8 +416,8 @@ export async function POST(request: NextRequest) {
     // 当任务仍在处理中时，在服务端内快速重试最多10次（间隔1秒）
     // 增加到10次以减少前端轮询往返次数，缓解慢速API和擦除等长时间任务的超时问题
     // 10次 * 1秒 = 最多10秒服务端等待，足够覆盖大多数模型的首轮返回
-    const MAX_QUICK_POLLS = 10;
-    const QUICK_POLL_INTERVAL = 1000;
+    const MAX_QUICK_POLLS = 20;
+    const QUICK_POLL_INTERVAL = 500;
 
     const doSinglePoll = async (): Promise<{ statusResult: Record<string, unknown>; statusResponse: Response } | null> => {
       const ctrl = new AbortController();
@@ -586,24 +586,52 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // ★ 持久化图片：下载远程/b64图片 → 保存本地 + 上传S3 → 返回持久化URL
+      // ★ 持久化图片：先返回源URL给前端（零延迟），后台异步持久化
+      // 关键优化：不在请求响应中等待持久化完成，避免S3上传等慢操作阻塞前端
       if (sourceImageUrl) {
-        try {
-          const { persistRemoteImage } = await import('@/lib/s3-storage');
-          const persistedUrl = await persistRemoteImage(sourceImageUrl, `generate/${taskId}`);
-          if (persistedUrl) {
-            pollResult.imageUrl = persistedUrl;
-            try {
-              const { saveImageDataMapping } = await import('@/lib/image-source-map');
-              const filename = persistedUrl.split('/').pop() || persistedUrl;
-              await saveImageDataMapping(filename, sourceImageUrl);
-            } catch {}
-          } else {
-            pollResult.imageUrl = sourceImageUrl;
+        // 1. 立即返回源URL给前端，确保图片能尽快显示
+        pollResult.imageUrl = sourceImageUrl;
+
+        // 2. data: URL 需要立即持久化（浏览器无法缓存大data URL），其他URL可以异步
+        const needsImmediatePersist = sourceImageUrl.startsWith('data:');
+
+        if (needsImmediatePersist) {
+          // data: URL 必须同步持久化，否则前端无法使用
+          try {
+            const { persistRemoteImage } = await import('@/lib/s3-storage');
+            const persistedUrl = await persistRemoteImage(sourceImageUrl, `generate/${taskId}`);
+            if (persistedUrl) {
+              pollResult.imageUrl = persistedUrl;
+              completedTaskCache.set(taskId, { imageUrl: persistedUrl, timestamp: Date.now() });
+            }
+          } catch (persistErr) {
+            console.warn('[poll-task] data: URL persist failed:', persistErr);
           }
-        } catch (persistErr) {
-          console.warn('[poll-task] persistRemoteImage failed, using raw URL:', persistErr);
-          pollResult.imageUrl = sourceImageUrl;
+        } else {
+          // HTTP/远程 URL：先写入完成缓存（避免重复查询远端），后台异步持久化
+          completedTaskCache.set(taskId, { imageUrl: sourceImageUrl, timestamp: Date.now() });
+
+          // 异步持久化：下载+保存本地+上传S3，完成后更新缓存
+          const bgTaskId = taskId;
+          const bgSourceUrl = sourceImageUrl;
+          (async () => {
+            try {
+              const { persistRemoteImage } = await import('@/lib/s3-storage');
+              const persistedUrl = await persistRemoteImage(bgSourceUrl, `generate/${bgTaskId}`);
+              if (persistedUrl) {
+                // 更新缓存为持久化URL
+                completedTaskCache.set(bgTaskId, { imageUrl: persistedUrl, timestamp: Date.now() });
+                try {
+                  const { saveImageDataMapping } = await import('@/lib/image-source-map');
+                  const filename = persistedUrl.split('/').pop() || persistedUrl;
+                  await saveImageDataMapping(filename, bgSourceUrl);
+                } catch {}
+                console.log(`[poll-task] Background persist completed: ${bgTaskId} → ${persistedUrl}`);
+              }
+            } catch (persistErr) {
+              console.warn('[poll-task] Background persist failed (source URL still works):', persistErr);
+            }
+          })();
         }
 
         // ★ Outpaint 扩展后处理：将原图合成到 AI 结果中心
