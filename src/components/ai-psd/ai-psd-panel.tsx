@@ -92,6 +92,7 @@ interface HistoryItem {
 interface AiPsdPanelProps {
   onClose: () => void;
   onAddImages: (urls: string[]) => void;
+  isMonochrome?: boolean;
 }
 
 // ─── Constants (aligned with dev doc) ─────────────────────────
@@ -178,7 +179,7 @@ const GENERATE_STEPS = [
 
 // ─── Theme tokens (consistent with brand-factory/refine-engine) ──
 
-const th = {
+const thDark = {
   panel: 'bg-[#1a1a1a] border border-white/[0.08] rounded-2xl shadow-2xl',
   header: 'bg-gradient-to-r from-[#1a1a1a] to-[#141414] border-b border-white/[0.08] rounded-t-2xl px-4 py-2.5',
   title: 'text-gray-100 font-semibold',
@@ -199,13 +200,71 @@ const th = {
   tag: 'px-2.5 py-1 rounded-lg text-xs cursor-pointer transition-colors select-none',
   tagActive: 'bg-[#d4af37]/15 text-[#d4af37] border border-[#d4af37]/30',
   tagInactive: 'bg-white/[0.04] text-gray-400 border border-white/[0.06] hover:border-white/[0.12] hover:text-gray-300',
+  optionBg: 'bg-[#1a1a1a]',
   gold: '#d4af37',
   goldLight: '#e5c44a',
+  accentText: 'text-[#d4af37]',
+  accentBg: 'bg-[#d4af37]',
+  accentBg15: 'bg-[#d4af37]/15',
+  accentBg10: 'bg-[#d4af37]/10',
+  accentBorder: 'border-[#d4af37]/30',
+  accentBorder50: 'border-[#d4af37]/50',
+  accentHover: 'hover:border-[#d4af37]/30',
+  accentProgress: 'bg-gradient-to-r from-[#d4af37] to-[#e5c44a]',
+  accentRing: 'ring-[#d4af37]/30 shadow-[0_0_30px_rgba(212,175,55,0.15)]',
+  accentAccent: 'accent-[#d4af37]',
+  bgSubtle: 'bg-white/[0.04]',
+  bgMuted: 'bg-white/[0.06]',
+  dividerH: 'bg-white/[0.08]',
+  progressTrack: 'bg-white/[0.06]',
+  hoverBg: 'hover:bg-white/[0.04]',
+};
+
+const thLight = {
+  panel: 'bg-white border border-gray-200 rounded-2xl shadow-2xl',
+  header: 'bg-gray-50 border-b border-gray-200 rounded-t-2xl px-4 py-2.5',
+  title: 'text-gray-900 font-semibold',
+  text: 'text-gray-900',
+  textSec: 'text-gray-500',
+  textMuted: 'text-gray-400',
+  border: 'border-gray-200',
+  borderLight: 'border-gray-100',
+  input: 'bg-white border border-gray-200 rounded-lg px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-emerald-400 w-full',
+  textarea: 'bg-white border border-gray-200 rounded-lg px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-emerald-400 w-full resize-y',
+  btn: 'bg-emerald-600 text-white font-semibold rounded-lg px-4 py-2 hover:bg-emerald-700 transition-colors disabled:opacity-50',
+  btnSm: 'bg-emerald-600 text-white font-semibold rounded-lg px-3 py-1.5 text-xs hover:bg-emerald-700 transition-colors disabled:opacity-50',
+  btnGhost: 'text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-lg px-3 py-1.5 transition-colors',
+  btnGhostSm: 'text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-md px-2 py-1 text-xs transition-colors',
+  card: 'bg-gray-50 border border-gray-100 rounded-lg',
+  select: 'bg-white border border-gray-200 rounded-lg px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-emerald-400 appearance-none cursor-pointer w-full',
+  sectionLabel: 'text-[11px] text-gray-400 uppercase tracking-wider mb-1.5',
+  tag: 'px-2.5 py-1 rounded-lg text-xs cursor-pointer transition-colors select-none',
+  tagActive: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+  tagInactive: 'bg-gray-50 text-gray-500 border border-gray-200 hover:border-gray-300 hover:text-gray-700',
+  optionBg: 'bg-white',
+  gold: '#059669',
+  goldLight: '#d1fae5',
+  accentText: 'text-emerald-600',
+  accentBg: 'bg-emerald-600',
+  accentBg15: 'bg-emerald-50',
+  accentBg10: 'bg-emerald-50/50',
+  accentBorder: 'border-emerald-200',
+  accentBorder50: 'border-emerald-400',
+  accentHover: 'hover:border-emerald-300',
+  accentProgress: 'bg-gradient-to-r from-emerald-500 to-emerald-400',
+  accentRing: 'ring-emerald-500/30 shadow-[0_0_30px_rgba(5,150,105,0.12)]',
+  accentAccent: 'accent-emerald-600',
+  bgSubtle: 'bg-gray-100',
+  bgMuted: 'bg-gray-100',
+  dividerH: 'bg-gray-200',
+  progressTrack: 'bg-gray-200',
+  hoverBg: 'hover:bg-gray-100',
 };
 
 // ─── Component ────────────────────────────────────────────────
 
-export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
+export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false }: AiPsdPanelProps) {
+  const th = isMonochrome ? thLight : thDark;
   // === Panel drag state ===
   const [panelPos, setPanelPos] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -637,9 +696,9 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
           <label className={th.sectionLabel}>图像模型</label>
           <select className={th.select} value={selectedImageModel}
             onChange={e => { setSelectedImageModel(e.target.value); localStorage.setItem('wujie_psd_image_model', e.target.value); }}>
-            <option value="">选择图像模型</option>
+            <option value="" className={th.optionBg}>选择图像模型</option>
             {imageModels.map(m => (
-              <option key={m.id} value={m.id}>{m.name}{m.providerName ? ` (${m.providerName})` : ''}</option>
+              <option key={m.id} value={m.id} className={th.optionBg}>{m.name}{m.providerName ? ` (${m.providerName})` : ''}</option>
             ))}
           </select>
         </div>
@@ -647,9 +706,9 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
           <label className={th.sectionLabel}>LLM 模型</label>
           <select className={th.select} value={selectedLlmModel}
             onChange={e => { setSelectedLlmModel(e.target.value); localStorage.setItem('wujie_psd_llm_model', e.target.value); }}>
-            <option value="">选择LLM模型</option>
+            <option value="" className={th.optionBg}>选择LLM模型</option>
             {llmModels.map(m => (
-              <option key={m.id} value={m.id}>{m.name}{m.providerName ? ` (${m.providerName})` : ''}</option>
+              <option key={m.id} value={m.id} className={th.optionBg}>{m.name}{m.providerName ? ` (${m.providerName})` : ''}</option>
             ))}
           </select>
         </div>
@@ -668,8 +727,8 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
             <button key={m.key}
               className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs transition-colors ${
                 generateMode === m.key
-                  ? 'bg-[#d4af37]/15 text-[#d4af37] border border-[#d4af37]/30'
-                  : 'bg-white/[0.04] text-gray-400 border border-white/[0.06] hover:text-gray-300'
+                  ? th.tagActive
+                  : th.tagInactive
               }`}
               onClick={() => setGenerateMode(m.key as 'text' | 'reference' | 'brand')}>
               <Icon className="w-3.5 h-3.5" />
@@ -840,7 +899,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
       {/* Reference image mode content */}
       {generateMode === 'reference' && (
         <div>
-          <label className={th.sectionLabel}>参考图 <span className="text-[#d4af37] normal-case">(上传后保留原图)</span></label>
+          <label className={th.sectionLabel}>参考图 <span className={`${th.accentText} normal-case`}>(上传后保留原图)</span></label>
           <div className="space-y-2">
             {referenceImages.map((img, i) => (
               <div key={i} className={`${th.card} p-2 flex items-center gap-2`}>
@@ -851,7 +910,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
                 </button>
               </div>
             ))}
-            <label className={`${th.card} p-3 flex items-center justify-center gap-2 cursor-pointer hover:border-[#d4af37]/30 transition-colors`}>
+            <label className={`${th.card} p-3 flex items-center justify-center gap-2 cursor-pointer ${th.accentHover} transition-colors`}>
               <Upload className="w-4 h-4 text-gray-500" />
               <span className="text-xs text-gray-400">上传参考图</span>
               <input type="file" className="hidden" accept="image/*" multiple
@@ -862,7 +921,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
                 <label className="text-[10px] text-gray-500">参考强度</label>
                 <div className="flex items-center gap-2">
                   <input type="range" min={0} max={100} value={referenceStrength}
-                    className="flex-1 accent-[#d4af37]"
+                    className={`flex-1 ${th.accentAccent}`}
                     onChange={e => setReferenceStrength(parseInt(e.target.value))} />
                   <span className="text-xs text-gray-400 w-8 text-right">{referenceStrength}%</span>
                 </div>
@@ -927,7 +986,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
 
       {/* Product image + Logo (all modes) */}
       <div>
-        <div className={th.sectionLabel}>产品图 <span className="text-[#d4af37] normal-case">(原图保留)</span></div>
+        <div className={th.sectionLabel}>产品图 <span className={`${th.accentText} normal-case`}>(原图保留)</span></div>
         {productImage ? (
           <div className={`${th.card} p-2 flex items-center gap-2`}>
             <img src={productImage.url} alt={productImage.name} className="w-10 h-10 rounded object-cover" />
@@ -937,7 +996,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
             </button>
           </div>
         ) : (
-          <label className={`${th.card} p-3 flex items-center justify-center gap-2 cursor-pointer hover:border-[#d4af37]/30 transition-colors`}>
+          <label className={`${th.card} p-3 flex items-center justify-center gap-2 cursor-pointer ${th.accentHover} transition-colors`}>
             <Upload className="w-4 h-4 text-gray-500" />
             <span className="text-xs text-gray-400">上传产品图</span>
             <input type="file" className="hidden" accept="image/*"
@@ -947,7 +1006,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
       </div>
 
       <div>
-        <div className={th.sectionLabel}>Logo <span className="text-[#d4af37] normal-case">(原图保留)</span></div>
+        <div className={th.sectionLabel}>Logo <span className={`${th.accentText} normal-case`}>(原图保留)</span></div>
         {logoImage ? (
           <div className={`${th.card} p-2 flex items-center gap-2`}>
             <img src={logoImage.url} alt={logoImage.name} className="w-10 h-10 rounded object-cover" />
@@ -957,7 +1016,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
             </button>
           </div>
         ) : (
-          <label className={`${th.card} p-3 flex items-center justify-center gap-2 cursor-pointer hover:border-[#d4af37]/30 transition-colors`}>
+          <label className={`${th.card} p-3 flex items-center justify-center gap-2 cursor-pointer ${th.accentHover} transition-colors`}>
             <Upload className="w-4 h-4 text-gray-500" />
             <span className="text-xs text-gray-400">上传 Logo</span>
             <input type="file" className="hidden" accept="image/*"
@@ -974,7 +1033,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
     if (isIdle && !taskData) {
       return (
         <div className="flex-1 min-w-0 flex flex-col items-center justify-center p-6">
-          <div className="w-16 h-16 rounded-2xl bg-white/[0.04] flex items-center justify-center mb-4">
+          <div className={`w-16 h-16 rounded-2xl ${th.bgSubtle} flex items-center justify-center mb-4`}>
             <Layers className="w-8 h-8 text-gray-600" />
           </div>
           <p className="text-sm text-gray-400 mb-2">AI PSD 分层生成器</p>
@@ -984,13 +1043,13 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
             {GENERATE_STEPS.map((step, i) => (
               <React.Fragment key={step.key}>
                 <div className="flex flex-col items-center">
-                  <div className="w-8 h-8 rounded-lg bg-white/[0.04] border border-white/[0.06] flex items-center justify-center">
+                  <div className={`w-8 h-8 rounded-lg ${th.bgSubtle} ${th.borderLight} flex items-center justify-center`}>
                     <span className="text-[10px] text-gray-500">{i + 1}</span>
                   </div>
                   <span className="text-[10px] text-gray-500 mt-1">{step.label}</span>
                 </div>
                 {i < GENERATE_STEPS.length - 1 && (
-                  <div className="w-6 h-px bg-white/[0.08] mb-4" />
+                  <div className={`w-6 h-px ${th.dividerH} mb-4`} />
                 )}
               </React.Fragment>
             ))}
@@ -1011,16 +1070,16 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
                   {i < currentStep ? (
                     <Check className="w-4 h-4 text-green-400" />
                   ) : i === currentStep ? (
-                    <Loader2 className="w-4 h-4 text-[#d4af37] animate-spin" />
+                    <Loader2 className={`w-4 h-4 ${th.accentText} animate-spin`} />
                   ) : (
                     <Clock className="w-4 h-4 text-gray-600" />
                   )}
-                  <span className={`text-xs ${i < currentStep ? 'text-green-400' : i === currentStep ? 'text-[#d4af37]' : 'text-gray-600'}`}>
+                  <span className={`text-xs ${i < currentStep ? 'text-green-400' : i === currentStep ? th.accentText : 'text-gray-600'}`}>
                     {step.label}
                   </span>
                 </div>
                 {i < GENERATE_STEPS.length - 1 && (
-                  <div className="flex-1 h-px bg-white/[0.08]" />
+                  <div className={`flex-1 h-px ${th.dividerH}`} />
                 )}
               </React.Fragment>
             ))}
@@ -1034,11 +1093,11 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
                 {elapsed > 0 && (
                   <span className="text-gray-500">已用 {formatTime(elapsed)}</span>
                 )}
-                <span className="text-[#d4af37]">{taskData?.progress || 0}%</span>
+                <span className={th.accentText}>{taskData?.progress || 0}%</span>
               </div>
             </div>
-            <div className="h-2 bg-white/[0.06] rounded-full overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-[#d4af37] to-[#e5c44a] rounded-full transition-all duration-500"
+            <div className={`h-2 ${th.progressTrack} rounded-full overflow-hidden`}>
+              <div className={`h-full ${th.accentProgress} rounded-full transition-all duration-500`}
                 style={{ width: `${taskData?.progress || 0}%` }} />
             </div>
           </div>
@@ -1069,7 +1128,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
           ) : (
             <div className="flex-1 flex items-center justify-center bg-black/20 rounded-lg">
               <div className="flex flex-col items-center">
-                <Loader2 className="w-8 h-8 text-[#d4af37] animate-spin mb-2" />
+                <Loader2 className={`w-8 h-8 ${th.accentText} animate-spin mb-2`} />
                 <p className="text-xs text-gray-500">正在生成预览...</p>
               </div>
             </div>
@@ -1138,14 +1197,14 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
   const renderRightPanel = () => (
     <div className="w-[220px] shrink-0 flex flex-col border-l border-white/[0.06] bg-[#141414]">
       {/* Tab switcher */}
-      <div className="flex border-b border-white/[0.06]">
+      <div className={`flex border-b ${th.borderLight}`}>
         <button className={`flex-1 py-2 text-xs transition-colors ${
-          rightTab === 'layers' ? 'text-[#d4af37] border-b-2 border-[#d4af37]' : 'text-gray-500 hover:text-gray-300'
+          rightTab === 'layers' ? `${th.accentText} border-b-2 ${th.accentBorder}` : `${th.textMuted} hover:${th.textSec}`
         }`} onClick={() => setRightTab('layers')}>
           图层
         </button>
         <button className={`flex-1 py-2 text-xs transition-colors ${
-          rightTab === 'report' ? 'text-[#d4af37] border-b-2 border-[#d4af37]' : 'text-gray-500 hover:text-gray-300'
+          rightTab === 'report' ? `${th.accentText} border-b-2 ${th.accentBorder}` : `${th.textMuted} hover:${th.textSec}`
         }`} onClick={() => setRightTab('report')}>
           报告
         </button>
@@ -1172,7 +1231,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
           const isCollapsed = collapsedGroups.has(group.key);
           return (
             <div key={group.key}>
-              <button className="w-full flex items-center gap-1.5 px-2 py-1.5 text-xs text-gray-300 hover:bg-white/[0.04] rounded transition-colors"
+              <button className={`w-full flex items-center gap-1.5 px-2 py-1.5 text-xs text-gray-300 ${th.hoverBg} rounded transition-colors`}
                 onClick={() => toggleGroup(group.key)}>
                 {isCollapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                 <Icon className="w-3 h-3 text-gray-500" />
@@ -1181,7 +1240,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
               </button>
               {!isCollapsed && group.layers.map(layer => (
                 <div key={layer.id}
-                  className="flex items-center gap-1.5 pl-7 pr-2 py-1.5 text-[11px] hover:bg-white/[0.04] rounded group transition-colors">
+                  className={`flex items-center gap-1.5 pl-7 pr-2 py-1.5 text-[11px] ${th.hoverBg} rounded group transition-colors`}>
                   {/* Visibility toggle */}
                   <button className="text-gray-500 hover:text-gray-300"
                     onClick={() => toggleLayerVisibility(layer.id)}>
@@ -1195,7 +1254,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
                   <span className="flex-1 truncate text-gray-400" title={layer.description || layer.name}>{layer.name}</span>
                   {/* Regenerate button (not for keepOriginal assets) */}
                   {!layer.keepOriginal && isCompleted && (
-                    <button className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-[#d4af37] transition-all"
+                    <button className={`opacity-0 group-hover:opacity-100 text-gray-500 hover:${th.accentText} transition-all`}
                       title="重新生成此层">
                       <RefreshCw className="w-3 h-3" />
                     </button>
@@ -1258,7 +1317,7 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
                     {item.value}
                   </span>
                 </div>
-                <div className="h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
+                <div className={`h-1.5 ${th.progressTrack} rounded-full overflow-hidden`}>
                   <div className="h-full rounded-full transition-all duration-500"
                     style={{
                       width: `${item.value}%`,
@@ -1296,9 +1355,9 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
       {isGenerating && (
         <>
           <div className="flex-1 flex items-center gap-2">
-            <Loader2 className="w-4 h-4 text-[#d4af37] animate-spin" />
+            <Loader2 className={`w-4 h-4 ${th.accentText} animate-spin`} />
             <span className="text-xs text-gray-400">{taskData?.label || '处理中...'}</span>
-            <span className="text-xs text-[#d4af37]">{taskData?.progress || 0}%</span>
+            <span className={`text-xs ${th.accentText}`}>{taskData?.progress || 0}%</span>
           </div>
           <button className={`${th.btnGhostSm} text-red-400 hover:text-red-300`}
             onClick={handleCancel}>
@@ -1356,24 +1415,24 @@ export default function AiPsdPanel({ onClose, onAddImages }: AiPsdPanelProps) {
     >
       <div
         data-floating-panel="true"
-        className={`${th.panel} flex flex-col overflow-hidden ${isDragging ? 'ring-2 ring-[#d4af37]/30 shadow-[0_0_30px_rgba(212,175,55,0.15)]' : ''}`}
+        className={`${th.panel} flex flex-col overflow-hidden ${isDragging ? `ring-2 ${th.accentRing}` : ''}`}
         style={{ maxHeight: isMinimized ? undefined : '85vh' }}
       >
         {/* Header with drag handle */}
         <div className={`${th.header} flex items-center gap-2 cursor-grab active:cursor-grabbing select-none ${isMinimized ? 'rounded-2xl border-b-0' : ''}`}
           onMouseDown={handleDragStart}>
           <GripVertical className="w-4 h-4 text-gray-500" />
-          <Layers className="w-4 h-4 text-[#d4af37]" />
+          <Layers className={`w-4 h-4 ${th.accentText}`} />
           <span className={`${th.title} text-sm flex-1`}>AI PSD 生成器</span>
-          {taskId && <span className="text-[10px] text-[#d4af37] bg-[#d4af37]/10 px-2 py-0.5 rounded font-mono">{taskId.slice(0, 12)}</span>}
+          {taskId && <span className={`text-[10px] ${th.accentText} ${th.accentBg10} px-2 py-0.5 rounded font-mono`}>{taskId.slice(0, 12)}</span>}
           {/* History button */}
-          <button className={`${th.btnGhost} flex items-center gap-1 text-[10px] ${showHistory ? 'text-[#d4af37]' : ''}`}
+          <button className={`${th.btnGhost} flex items-center gap-1 text-[10px] ${showHistory ? th.accentText : ''}`}
             onClick={e => { e.stopPropagation(); setShowHistory(!showHistory); }}>
             <Clock className="w-3 h-3" />
             <span>历史</span>
           </button>
           {/* Model toggle button */}
-          <button className={`${th.btnGhost} flex items-center gap-1 text-[10px] ${showModelPanel ? 'text-[#d4af37]' : ''}`}
+          <button className={`${th.btnGhost} flex items-center gap-1 text-[10px] ${showModelPanel ? th.accentText : ''}`}
             onClick={e => { e.stopPropagation(); setShowModelPanel(!showModelPanel); }}>
             <Box className="w-3 h-3" />
             <span>模型</span>

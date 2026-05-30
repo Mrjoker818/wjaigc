@@ -9425,6 +9425,7 @@ export function InfiniteCanvas({
               onAddImages={(urls: string[]) => {
                 onAddImages?.(urls);
               }}
+              isMonochrome={isMonochrome}
             />
           </Suspense>
         )}
@@ -9437,6 +9438,7 @@ export function InfiniteCanvas({
               onAddImages={(urls: string[]) => {
                 onAddImages?.(urls);
               }}
+              isMonochrome={isMonochrome}
             />
           </Suspense>
         )}
@@ -10080,7 +10082,7 @@ export function InfiniteCanvas({
                     <button onClick={() => setShowToolbarCustomize(false)} className={`p-1 rounded-lg ${isMonochrome ? 'text-blue-400 hover:text-blue-600' : 'text-gold-muted/70 hover:text-white'}`}><X size={14} /></button>
                   </div>
                   <div className="space-y-1 max-h-60 overflow-y-auto">
-                    {toolbarItemOrder.map(label => {
+                    {toolbarItemOrder.filter(label => allActionLabels.includes(label)).map(label => {
                       const isHidden = toolbarHiddenItems.has(label);
                       return (
                         <div key={label} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all ${isMonochrome ? 'hover:bg-gray-50' : 'hover:bg-[#252525]'}`}>
