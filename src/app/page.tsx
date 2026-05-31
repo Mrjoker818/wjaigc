@@ -2113,6 +2113,7 @@ function CanvasApp() {
         onOpenWorkflowHub={() => setAppMode('workflow-hub')}
         canvasImages={images.map(img => ({ id: img.id, url: img.url, name: img.prompt?.slice(0, 30) || '图片', description: img.prompt || '' }))}
         themeStyle={themeStyle}
+        onAddImages={handleAddImages}
       />
     );
   }

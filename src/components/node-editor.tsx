@@ -328,6 +328,8 @@ interface NodeEditorProps {
   canvasImages?: CanvasImageRef[];
   /** 主题风格: gold(黑金) / monochrome(单色) */
   themeStyle?: 'gold' | 'monochrome';
+  /** 生成图片后回调，将图片添加到项目 */
+  onAddImages?: (imageUrls: string[]) => void;
 }
 
 // ==================== 双主题配色 ====================
@@ -476,7 +478,65 @@ const nodeThemes = {
   },
 } as const;
 
-export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenWorkflowHub, canvasImages, themeStyle = 'gold' }: NodeEditorProps) {
+
+// 底部内容面板 - 显示项目图片，支持拖拽到画布创建节点
+function ContentPanel({ canvasImages, onDragImage, themeStyle }: { canvasImages?: CanvasImageRef[]; onDragImage: (url: string) => void; themeStyle: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const images = canvasImages || [];
+  const T = nodeThemes[themeStyle as keyof typeof nodeThemes];
+
+  const handleDragStart = (e: React.DragEvent, url: string) => {
+    e.dataTransfer.setData('text/uri-list', url);
+    e.dataTransfer.setData('text/plain', url);
+    e.dataTransfer.effectAllowed = 'copy';
+    onDragImage(url);
+  };
+
+  return (
+    <div className="border-t border-border bg-[var(--ne-sidebar-bg)]" data-popup="content-panel">
+      {/* 标题栏 - 点击折叠/展开 */}
+      <button
+        onClick={() => setExpanded(prev => !prev)}
+        className="w-full flex items-center gap-2 px-4 py-2 hover:bg-[var(--ne-input-bg)] transition-colors cursor-pointer"
+      >
+        <Layers size={14} className="text-[var(--ne-accent)]" />
+        <span className="text-xs font-medium text-foreground flex-1 text-left">内容</span>
+        {images.length > 0 && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--ne-accent)]/15 text-[var(--ne-accent)]">{images.length}</span>
+        )}
+        <ChevronDown size={14} className={`text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`} />
+      </button>
+
+      {/* 展开内容 */}
+      {expanded && (
+        <div className="px-3 pb-3 max-h-[200px] overflow-y-auto">
+          {images.length === 0 ? (
+            <div className="flex items-center justify-center h-16 text-xs text-muted-foreground">暂无图片，生成后将自动出现在此处</div>
+          ) : (
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-2">
+              {images.map((img, idx) => (
+                <div
+                  key={img.id || idx}
+                  draggable
+                  onDragStart={e => handleDragStart(e, img.url)}
+                  className="group relative aspect-square rounded-lg overflow-hidden border border-border hover:border-[var(--ne-accent)]/50 cursor-grab active:cursor-grabbing transition-colors"
+                  title={img.description || img.name || `图片 ${idx + 1} - 拖拽到画布添加节点`}
+                >
+                  <img src={img.url} alt="" className="w-full h-full object-cover" loading="lazy" />
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                    <ImagePlus size={16} className="text-white opacity-0 group-hover:opacity-80 transition-opacity" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenWorkflowHub, canvasImages, themeStyle = 'gold', onAddImages }: NodeEditorProps) {
   const T = nodeThemes[themeStyle];
   // CSS自定义属性，供Tailwind中 var(--ne-xxx) 引用
   const neVars = {
@@ -852,6 +912,25 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
       connections: prev.connections.filter(c => c.fromNodeId !== nodeId && c.toNodeId !== nodeId),
     }));
     setSelectedNodeIds(prev => { const next = new Set(prev); next.delete(nodeId); return next; });
+  }, []);
+
+  // 从内容面板拖拽图片到画布 → 创建 input-image 节点
+  const handleCanvasImageDrop = useCallback((e: React.DragEvent<SVGSVGElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const imageUrl = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+    if (!imageUrl) return;
+    const svgRect = svgRef.current?.getBoundingClientRect();
+    if (!svgRect) return;
+    const vp = viewportRef.current;
+    const cx = (e.clientX - svgRect.left - vp.x) / vp.zoom;
+    const cy = (e.clientY - svgRect.top - vp.y) / vp.zoom;
+    const node = createWorkflowNode('input-image', cx - 65, cy - 50);
+    node.config = { ...node.config, imageUrl, source: 'canvas-ref' };
+    node.width = 160;
+    node.height = 130;
+    setWf(prev => ({ ...prev, nodes: [...prev.nodes, node] }));
+    setSelectedNodeIds(new Set([node.id]));
   }, []);
 
   const handleNodeUpdate = useCallback((nodeId: string, updates: Partial<WorkflowNode>) => {
@@ -1269,6 +1348,24 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
             });
             setExecLogs(prev => [...prev, ...newLogs]);
           }
+          // 持久化: 将工作流生成的图片添加到项目
+          if (data.status === 'completed' && onAddImages && data.results) {
+            const generatedUrls: string[] = [];
+            for (const [, result] of Object.entries(data.results as Record<string, { status: string; output?: Record<string, unknown> }>)) {
+              if (result.status === 'success' && result.output) {
+                const imgUrls = result.output.imageUrls as string[] | undefined;
+                const imgUrl = result.output.imageUrl as string | undefined;
+                if (Array.isArray(imgUrls) && imgUrls.length > 0) {
+                  generatedUrls.push(...imgUrls);
+                } else if (imgUrl) {
+                  generatedUrls.push(imgUrl);
+                }
+              }
+            }
+            if (generatedUrls.length > 0) {
+              onAddImages(generatedUrls);
+            }
+          }
           return; // done, don't schedule next poll
         } else if (data.results) {
           setExecResults(data.results);
@@ -1485,13 +1582,15 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   // ─── 渲染 ───
 
   return (
-    <div className="node-editor-root h-screen w-screen flex text-foreground overflow-hidden select-none" data-theme={themeStyle === 'monochrome' ? 'monochrome' : 'gold'} style={{ ...neVars, background: T.canvasBg }}>
+    <div className="node-editor-root h-screen w-screen flex flex-col text-foreground overflow-hidden select-none" data-theme={themeStyle === 'monochrome' ? 'monochrome' : 'gold'} style={{ ...neVars, background: T.canvasBg }}>
       {/* 全局图片上传 (foreignObject内input.click()不可靠, 统一由外部触发) */}
       <input ref={imageFileInputRef} type="file" accept="image/*" className="hidden" onChange={handleGlobalImageUpload} />
+      {/* 主内容行 */}
+      <div className="flex flex-1 min-h-0">
       {/* 左侧栏：竖排图标导航 + 内容区 */}
-      <div className="flex flex-shrink-0 border-r" style={{ borderColor: T.sidebarBorder }}>
+      <div className="flex flex-shrink-0 h-screen overflow-hidden border-r" style={{ borderColor: T.sidebarBorder }}>
         {/* 竖排图标导航 */}
-        <div className="w-[46px] flex flex-col items-center py-2 gap-0.5 border-r" style={{ background: T.sidebarBg, borderColor: T.sidebarBorder }}>
+        <div className="w-[46px] flex flex-col items-center py-2 gap-0.5 border-r flex-shrink-0" style={{ background: T.sidebarBg, borderColor: T.sidebarBorder }}>
           {([
             { key: 'nodes', label: '节点库', icon: <Shapes size={16} /> },
             { key: 'props', label: '属性', icon: <Settings size={16} /> },
@@ -1521,7 +1620,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
           ))}
         </div>
         {/* 内容区 */}
-        <div className="w-[234px] flex flex-col" style={{ background: T.sidebarBg }}>
+        <div className="w-[234px] flex flex-col min-h-0" style={{ background: T.sidebarBg }}>
 
         {/* 节点库 Tab */}
         {sidebarTab === 'nodes' && (
@@ -1580,7 +1679,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
 
         {/* AI建图 Tab */}
         {sidebarTab === 'ai-build' && (
-          <div className="flex-1 flex flex-col p-3">
+          <div className="flex-1 flex flex-col p-3 min-h-0 overflow-hidden">
             <div className="mb-3">
               <div className="flex items-center gap-1.5 mb-2">
                 <Sparkles size={16} className="text-[var(--ne-accent)]" />
@@ -1654,7 +1753,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
 
         {/* P2: 提示词库 Tab */}
         {sidebarTab === 'prompts' && (
-          <div className="flex-1 overflow-y-auto flex flex-col">
+          <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
             <div className="p-2 border-b border-border">
               <div className="relative">
                 <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -1754,7 +1853,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
 
         {/* P2: 画布助手 (节点感知) Tab */}
         {sidebarTab === 'assistant' && (
-          <div className="flex-1 flex flex-col">
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             <div className="flex-1 overflow-y-auto p-2 space-y-2">
               {selectedNode && (() => {
                 // P1: 计算上游节点链
@@ -1823,7 +1922,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
 
         {/* P1: 素材库 Tab */}
         {sidebarTab === 'materials' && (
-          <div className="flex-1 flex flex-col">
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             <div className="p-2 border-b border-border">
               <div className="flex gap-1 mb-2">
                 {(['all', 'prompt', 'image', 'color'] as const).map(t => (
@@ -2082,6 +2181,8 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
           onMouseUp={handleCanvasMouseUp}
           onMouseLeave={handleCanvasMouseUp}
           onWheel={handleWheel}
+          onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+          onDrop={handleCanvasImageDrop}
           style={{ cursor: isPanning ? 'grabbing' : draggingConn ? 'crosshair' : 'default' }}
         >
           {/* 网格背景 */}
@@ -2457,7 +2558,11 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
             </div>
           </div>
         )}
-      </div>
+      </div>{/* 主画布 end */}
+      </div>{/* 主内容行 end */}
+
+      {/* 底部内容面板 - 用户项目图片 */}
+      <ContentPanel canvasImages={canvasImages} onDragImage={() => {}} themeStyle={themeStyle} />
 
       {/* 图片预览弹窗 */}
       {imagePreviewUrl && (

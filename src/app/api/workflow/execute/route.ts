@@ -639,6 +639,32 @@ async function executeAsyncTask(
       mergedOutput.imageUrls = allImageUrls;
     }
 
+    // 持久化图片URL（data:和http:转存到服务器，避免外部URL过期）
+    const allUrls = [mergedOutput.imageUrl, ...(Array.isArray(mergedOutput.imageUrls) ? mergedOutput.imageUrls as string[] : [])].filter(Boolean) as string[];
+    const persistedUrls: string[] = [];
+    for (const rawUrl of allUrls) {
+      if (rawUrl.startsWith('data:') || rawUrl.startsWith('http')) {
+        try {
+          const saveResp = await fetch(`${process.env.DEPLOY_RUN_PORT ? `http://localhost:${process.env.DEPLOY_RUN_PORT}` : 'http://localhost:5000'}/api/save-image`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageUrl: rawUrl }),
+          });
+          const saveData = await saveResp.json();
+          if (saveData.success && saveData.url) {
+            persistedUrls.push(saveData.url);
+            continue;
+          }
+        } catch { /* save failed */ }
+      }
+      persistedUrls.push(rawUrl);
+    }
+    // 用持久化后的URL替换
+    if (persistedUrls.length > 0) {
+      mergedOutput.imageUrl = persistedUrls[0];
+      mergedOutput.imageUrls = persistedUrls;
+    }
+
     return {
       nodeId,
       status: 'success',
