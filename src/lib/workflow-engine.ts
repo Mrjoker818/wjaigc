@@ -433,6 +433,7 @@ export interface PropertyField {
   defaultValue?: unknown;
   modelFilter?: 'image' | 'chat' | '3d' | 'vector' | 'segment'; // model-select 字段过滤模型类型
   placeholder?: string;
+  hint?: string; // 字段提示文字
 }
 
 /** 获取节点类型的属性面板字段 */
@@ -492,6 +493,11 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
     ], defaultValue: '1K' });
     fields.push({ key: 'seed', label: '随机种子', type: 'number', min: -1, max: 2147483647, defaultValue: -1, placeholder: '-1为随机' });
     fields.push({ key: 'n', label: '生成数量', type: 'number', min: 1, max: 4, defaultValue: 1 });
+    // 参考图/图生图相关字段（当有图片输入连接时生效）
+    fields.push({ key: 'referenceStrength', label: '参考强度', type: 'slider', min: 0, max: 100, step: 5, defaultValue: 70, hint: '连接图片输入后生效，值越高越接近参考图' });
+    fields.push({ key: 'referenceMode', label: '参考模式', type: 'select', options: [
+      { label: '参考', value: 'reference' }, { label: '融图', value: 'fusion' },
+    ], defaultValue: 'reference', hint: '连接图片输入后生效' });
   }
 
   if (type === 'ai-edit') {
@@ -922,19 +928,32 @@ export function buildNodeExecutionRequest(
       const modelId = (config.model as string) || '';
       // 使用模型专用像素映射计算实际尺寸
       const actualSize = calculateActualPixels(aspectRatio, quality, modelId);
+      const body: Record<string, unknown> = {
+        prompt: config.prompt || config.textContent || config.text || '',
+        negativePrompt: config.negativePrompt || '',
+        model: modelId,
+        quality,
+        aspectRatio,
+        size: actualSize || '1024x1024',
+        n: config.n || 1,
+        seed: config.seed || -1,
+      };
+      // 图生图：当有图片输入时，添加参考图参数（与画布模式img2img一致）
+      const refImageUrl = inputs.imageUrl as string | undefined;
+      if (refImageUrl) {
+        const refStrength = (config.referenceStrength as number) ?? 70;
+        const refMode = (config.referenceMode as string) || 'reference';
+        body.referenceImages = [refImageUrl];
+        body.referenceMode = refMode;
+        body.strength = refStrength / 100; // 转换为0-1范围
+        // 参考图类别和强度（与画布模式img2img格式一致）
+        body.referenceCategories = [['风格', '构图', '场景', '色彩', '主体', '细节']];
+        body.referenceStrengths = [[refStrength, refStrength, refStrength, refStrength, refStrength, refStrength]];
+      }
       return {
         endpoint: '/api/generate',
         method: 'POST',
-        body: {
-          prompt: config.prompt || config.textContent || config.text || '',
-          negativePrompt: config.negativePrompt || '',
-          model: modelId,
-          quality,
-          aspectRatio,
-          size: actualSize || '1024x1024',
-          n: config.n || 1,
-          seed: config.seed || -1,
-        }
+        body,
       };
     }
 
