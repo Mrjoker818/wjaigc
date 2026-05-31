@@ -681,8 +681,20 @@ function CanvasApp() {
           return savedUrl;
         }));
 
+        // 加载每张图片的真实像素尺寸（第三方API可能返回与请求不同的尺寸）
+        const loadActualSize = (url: string): Promise<{ w: number; h: number }> => {
+          return new Promise(resolve => {
+            const img = new window.Image();
+            img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+            img.onerror = () => resolve({ w: 0, h: 0 }); // 加载失败时返回0，后续使用fallback
+            img.src = url;
+          });
+        };
+        const actualSizes = await Promise.all(savedUrls.map(url => loadActualSize(url)));
+
         for (let i = 0; i < savedUrls.length; i++) {
           const savedUrl = savedUrls[i];
+          const actualSize = actualSizes[i];
 
           let imgW = 1024, imgH = 1024;
           if (params.size?.includes('x') || params.size?.includes('×')) {
@@ -690,6 +702,10 @@ function CanvasApp() {
             imgW = parseInt(sw) || 1024;
             imgH = parseInt(sh) || 1024;
           }
+          // 优先使用图片真实像素尺寸，fallback到请求尺寸
+          const finalW = actualSize.w > 0 ? actualSize.w : imgW;
+          const finalH = actualSize.h > 0 ? actualSize.h : imgH;
+
           // 替换对应的占位框
           const phId = placeholderIds[i];
           if (phId) {
@@ -705,8 +721,8 @@ function CanvasApp() {
                 stylePreset: style,
                 category: category,
                 size: params.size,
-                width: imgW * 0.5, height: imgH * 0.5,
-                originalWidth: imgW, originalHeight: imgH,
+                width: finalW * 0.5, height: finalH * 0.5,
+                originalWidth: finalW, originalHeight: finalH,
                 isProcessingPlaceholder: false,
                 processing: undefined,
                 createdAt: Date.now(),
@@ -934,9 +950,22 @@ function CanvasApp() {
             return { w: originalWidth, h: originalHeight };
           };
 
+          const loadActualSize = (url: string): Promise<{ w: number; h: number }> => {
+            return new Promise(resolve => {
+              const img = new window.Image();
+              img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+              img.onerror = () => resolve({ w: 0, h: 0 });
+              img.src = url;
+            });
+          };
+          const actualSizes = await Promise.all(completedImages.map(img => loadActualSize(img.url)));
+
           const displayScale = 0.5;
           const completedCanvasImages: CanvasImage[] = completedImages.map((img, idx) => {
             const displaySize = getDisplaySize(params.size);
+            // 优先使用图片真实像素尺寸，fallback到请求尺寸
+            const finalW = actualSizes[idx]?.w > 0 ? actualSizes[idx].w : displaySize.w;
+            const finalH = actualSizes[idx]?.h > 0 ? actualSizes[idx].h : displaySize.h;
             return {
               id: img.id,
               url: img.url,
@@ -950,10 +979,10 @@ function CanvasApp() {
               size: img.size,
               x: 0,
               y: 0,
-              width: displaySize.w * displayScale,
-              height: displaySize.h * displayScale,
-              originalWidth: displaySize.w,
-              originalHeight: displaySize.h,
+              width: finalW * displayScale,
+              height: finalH * displayScale,
+              originalWidth: finalW,
+              originalHeight: finalH,
               createdAt: Date.now(),
             };
           });
@@ -1025,9 +1054,24 @@ function CanvasApp() {
           return { w: originalWidth, h: originalHeight };
         };
 
+        // 加载每张图片的真实像素尺寸
+        const loadActualSize = (url: string): Promise<{ w: number; h: number }> => {
+          return new Promise(resolve => {
+            const img = new window.Image();
+            img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+            img.onerror = () => resolve({ w: 0, h: 0 });
+            img.src = url;
+          });
+        };
+        const legacyActualSizes = await Promise.all(
+          (data.images as Array<{ url: string }>).map((img: { url: string }) => loadActualSize(img.url))
+        );
+
         const displayScale = 0.5;
         const legacyImages: CanvasImage[] = data.images.map((img: { id: string; url: string; prompt: string }, idx: number) => {
           const displaySize = getDisplaySize(params.size);
+          const finalW = legacyActualSizes[idx]?.w > 0 ? legacyActualSizes[idx].w : displaySize.w;
+          const finalH = legacyActualSizes[idx]?.h > 0 ? legacyActualSizes[idx].h : displaySize.h;
           return {
             id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             url: img.url,
@@ -1040,10 +1084,10 @@ function CanvasApp() {
             size: params.size,
             x: 0,
             y: 0,
-            width: displaySize.w * displayScale,
-            height: displaySize.h * displayScale,
-            originalWidth: displaySize.w,
-            originalHeight: displaySize.h,
+            width: finalW * displayScale,
+            height: finalH * displayScale,
+            originalWidth: finalW,
+            originalHeight: finalH,
             createdAt: Date.now(),
           };
         });
