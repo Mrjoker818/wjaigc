@@ -600,7 +600,7 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
 
   // ===== Vision result rendering =====
   const renderVisionResult = () => {
-    if (!visionResult) {
+    if (!visionResult || (!visionResult.zh && !visionResult.en)) {
       return (
         <div className="p-6 flex flex-col items-center justify-center gap-3 min-h-[200px]">
           <div className={`w-16 h-16 rounded-full flex items-center justify-center ${isMonochrome ? 'bg-blue-500/10' : 'bg-[#d4af37]/10'}`}>
@@ -623,7 +623,7 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
     return (
       <div className="p-3 space-y-3">
         <div className="flex items-center justify-between">
-          <h4 className={`text-sm font-semibold ${tc.text}`}>{visionResult.zh.title || visionResult.en.title}</h4>
+          <h4 className={`text-sm font-semibold ${tc.text}`}>{visionResult.zh?.title || visionResult.en?.title || '图片识词结果'}</h4>
           <span className={`text-xs px-2 py-0.5 rounded-full ${visionResult.confidence >= 0.8 ? isMonochrome ? 'bg-green-100 text-green-700' : 'bg-green-900/30 text-green-400' : visionResult.confidence >= 0.5 ? isMonochrome ? 'bg-yellow-100 text-yellow-700' : 'bg-yellow-900/30 text-yellow-400' : isMonochrome ? 'bg-red-100 text-red-700' : 'bg-red-900/30 text-red-400'}`}>
             置信度 {Math.round(visionResult.confidence * 100)}%
           </span>
@@ -644,8 +644,8 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
         </div>
         {visionFormat === 'natural' ? (
           <div className="space-y-2">
-            {visionResult.zh.prompt && (<div><div className="flex items-center gap-1 mb-1"><Languages className={`w-3 h-3 ${tc.accent}`} /><span className={`text-xs font-medium ${tc.textSec}`}>中文提示词</span><button className={`ml-auto p-0.5 rounded ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-[#333]'}`} onClick={() => copyPrompt(visionResult.zh.prompt)}><Copy className={`w-3 h-3 ${tc.textMuted}`} /></button></div><div className={`text-xs leading-relaxed p-2 rounded-md ${isMonochrome ? 'bg-gray-50 text-gray-700 border border-gray-100' : 'bg-[#1a1a1a] text-[#ccc] border border-[#222]'}`}>{visionResult.zh.prompt}</div></div>)}
-            {visionResult.en.prompt && (<div><div className="flex items-center gap-1 mb-1"><Languages className={`w-3 h-3 ${tc.accent}`} /><span className={`text-xs font-medium ${tc.textSec}`}>英文提示词</span><button className={`ml-auto p-0.5 rounded ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-[#333]'}`} onClick={() => copyPrompt(visionResult.en.prompt)}><Copy className={`w-3 h-3 ${tc.textMuted}`} /></button></div><div className={`text-xs leading-relaxed p-2 rounded-md ${isMonochrome ? 'bg-gray-50 text-gray-700 border border-gray-100' : 'bg-[#1a1a1a] text-[#ccc] border border-[#222]'}`}>{visionResult.en.prompt}</div></div>)}
+            {visionResult.zh?.prompt && (<div><div className="flex items-center gap-1 mb-1"><Languages className={`w-3 h-3 ${tc.accent}`} /><span className={`text-xs font-medium ${tc.textSec}`}>中文提示词</span><button className={`ml-auto p-0.5 rounded ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-[#333]'}`} onClick={() => copyPrompt(visionResult.zh!.prompt)}><Copy className={`w-3 h-3 ${tc.textMuted}`} /></button></div><div className={`text-xs leading-relaxed p-2 rounded-md ${isMonochrome ? 'bg-gray-50 text-gray-700 border border-gray-100' : 'bg-[#1a1a1a] text-[#ccc] border border-[#222]'}`}>{visionResult.zh!.prompt}</div></div>)}
+            {visionResult.en?.prompt && (<div><div className="flex items-center gap-1 mb-1"><Languages className={`w-3 h-3 ${tc.accent}`} /><span className={`text-xs font-medium ${tc.textSec}`}>英文提示词</span><button className={`ml-auto p-0.5 rounded ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-[#333]'}`} onClick={() => copyPrompt(visionResult.en!.prompt)}><Copy className={`w-3 h-3 ${tc.textMuted}`} /></button></div><div className={`text-xs leading-relaxed p-2 rounded-md ${isMonochrome ? 'bg-gray-50 text-gray-700 border border-gray-100' : 'bg-[#1a1a1a] text-[#ccc] border border-[#222]'}`}>{visionResult.en!.prompt}</div></div>)}
           </div>
         ) : (
           <div className="space-y-2">
@@ -654,8 +654,8 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
           </div>
         )}
         <div className="flex gap-2">
-          {visionResult.zh.prompt && (<button className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-[#d4af37] text-black hover:bg-[#e5c147]'}`} onClick={() => onInsertPrompt(visionResult.zh.prompt!)}>插入中文</button>)}
-          {visionResult.en.prompt && (<button className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${isMonochrome ? 'bg-gray-200 text-gray-800 hover:bg-gray-300' : 'bg-[#333] text-[#ccc] hover:bg-[#444]'}`} onClick={() => onInsertPrompt(visionResult.en.prompt!)}>插入英文</button>)}
+          {visionResult.zh?.prompt && (<button className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-[#d4af37] text-black hover:bg-[#e5c147]'}`} onClick={() => onInsertPrompt(visionResult.zh!.prompt!)}>插入中文</button>)}
+          {visionResult.en?.prompt && (<button className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${isMonochrome ? 'bg-gray-200 text-gray-800 hover:bg-gray-300' : 'bg-[#333] text-[#ccc] hover:bg-[#444]'}`} onClick={() => onInsertPrompt(visionResult.en!.prompt!)}>插入英文</button>)}
         </div>
       </div>
     );
