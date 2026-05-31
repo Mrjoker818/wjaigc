@@ -57,12 +57,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '请先在管理员后台配置可用模型' }, { status: 400 });
     }
 
-    const requestBody = {
-      model,
+    // Detect thinking mode: model name ends with -thinking
+    const isThinkingModel = model.endsWith('-thinking');
+    const baseModel = isThinkingModel ? model.replace(/-thinking$/, '') : model;
+
+    // Use base model name for the API call (most providers don't support -thinking suffix)
+    // but send thinking-related parameters if the provider supports it
+    const requestModel = baseModel;
+
+    const requestBody: Record<string, unknown> = {
+      model: requestModel,
       messages,
       stream,
       temperature: 0.7,
     };
+
+    // For thinking mode, add reasoning parameters for compatible providers
+    if (isThinkingModel) {
+      // OpenAI-compatible: reasoning_effort
+      // Some providers support this, others ignore it
+      requestBody.reasoning_effort = 'medium';
+    }
 
     const response = await fetchWithV1Retry(
       chatBaseUrl,
@@ -74,17 +89,62 @@ export async function POST(request: NextRequest) {
           'Authorization': `Bearer ${chatApiKey}`,
         },
         body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(60000),
+        signal: AbortSignal.timeout(120000),
       }
     );
 
+    // If API call fails with the base model and thinking params, try the -thinking model name as fallback
+    if (!response.ok && isThinkingModel) {
+      const errorText = await response.text().catch(() => '');
+      console.warn(`[chat] Base model ${requestModel} with thinking params failed (${response.status}), trying ${model}...`);
+      
+      const retryBody = { model, messages, stream, temperature: 0.7 };
+      const retryResponse = await fetchWithV1Retry(
+        chatBaseUrl,
+        '/chat/completions',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${chatApiKey}`,
+          },
+          body: JSON.stringify(retryBody),
+          signal: AbortSignal.timeout(120000),
+        }
+      );
+      
+      if (!retryResponse.ok) {
+        const retryError = await retryResponse.text().catch(() => '');
+        console.error('Chat API error (both attempts):', errorText, retryError);
+        return NextResponse.json({ error: `API 调用失败: ${retryResponse.status}` }, { status: retryResponse.status });
+      }
+      
+      // Use retry response for streaming/non-streaming
+      if (stream && retryResponse.body) {
+        await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: true });
+        return new NextResponse(retryResponse.body, {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+          },
+        });
+      }
+      const retryData = await retryResponse.json();
+      await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: false });
+      return NextResponse.json(retryData);
+    }
+
+    // Primary response (non-thinking or thinking with base model succeeded)
+
+    // If response error
     if (!response.ok) {
-      const error = await response.text();
+      const error = await response.text().catch(() => '');
       console.error('Chat API error:', error);
       return NextResponse.json({ error: `API 调用失败: ${response.status}` }, { status: response.status });
     }
 
-    // 如果是流式响应，直接转发
+    // Stream response: forward directly
     if (stream && response.body) {
       await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: true });
       return new NextResponse(response.body, {
@@ -96,11 +156,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 非流式响应
-    if (!response.ok) {
-      const errText = await response.text().catch(() => '');
-      return NextResponse.json({ error: `LLM API 错误: ${response.status}`, detail: errText.slice(0, 200) }, { status: response.status });
-    }
+    // Non-stream response
     const data = await response.json();
     await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: false });
     return NextResponse.json(data);

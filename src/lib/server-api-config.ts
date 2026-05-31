@@ -583,12 +583,25 @@ export async function findProviderForModel(modelId: string, modelType?: ApiKind)
   const enabled = providers.filter(provider => provider.isEnabled);
   const isFlexibleType = !modelType || modelType === 'universal' || modelType === 'general';
   const matchesType = (p: ApiProvider) => isFlexibleType || p.modelType === modelType || p.modelType === 'universal' || p.modelType === 'general';
+
+  // 1. Exact match
   const exact = enabled.find(provider =>
     matchesType(provider) &&
     (provider.selectedModels || []).includes(modelId),
   );
   if (exact) return exact;
 
+  // 2. Strip -thinking suffix and retry (e.g. gemini-2.5-flash-thinking → gemini-2.5-flash)
+  if (modelId.endsWith('-thinking')) {
+    const baseModelId = modelId.replace(/-thinking$/, '');
+    const baseMatch = enabled.find(provider =>
+      matchesType(provider) &&
+      (provider.selectedModels || []).includes(baseModelId),
+    );
+    if (baseMatch) return baseMatch;
+  }
+
+  // 3. Default provider
   const byDefault = enabled.find(provider =>
     matchesType(provider) &&
     provider.isDefault,
