@@ -644,6 +644,27 @@ function parseApiOutput(nodeType: NodeType, data: Record<string, unknown>): Reco
     if (result.url && !output.imageUrl) output.imageUrl = result.url;
   }
 
+  // 多图URL (taskIds对应多个结果)
+  const allImageUrls: string[] = [];
+  if (Array.isArray(data.imageUrls)) {
+    for (const u of data.imageUrls as string[]) allImageUrls.push(u);
+  }
+  if (Array.isArray(data.data)) {
+    for (const item of data.data as Record<string, unknown>[]) {
+      if (item.url) allImageUrls.push(item.url as string);
+      if (item.b64_json) allImageUrls.push(`data:image/png;base64,${item.b64_json}`);
+    }
+  }
+  if (data.result && typeof data.result === 'object') {
+    const result = data.result as Record<string, unknown>;
+    if (Array.isArray(result.imageUrls)) {
+      for (const u of result.imageUrls as string[]) allImageUrls.push(u);
+    }
+  }
+  if (allImageUrls.length > 0) output.imageUrls = allImageUrls;
+  // 兼容：第一张图也作为imageUrl
+  if (allImageUrls.length > 0 && !output.imageUrl) output.imageUrl = allImageUrls[0];
+
   // SVG数据
   if (data.svgDataUrl) output.svgDataUrl = data.svgDataUrl;
   if (data.svgUrl) output.svgUrl = data.svgUrl;

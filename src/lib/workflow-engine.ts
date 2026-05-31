@@ -71,6 +71,32 @@ export function getNodeCategory(type: NodeType): NodeCategory {
   return 'ai';
 }
 
+/** 判断节点类型是否会输出图片（需要自动添加输出节点） */
+export function isImageGeneratingNode(type: NodeType): boolean {
+  return [
+    'ai-generate', 'ai-edit', 'ai-retouch', 'ai-upscale', 'ai-removebg',
+    'ai-font-design', 'ai-refine-engine', 'ai-brand-ecommerce', 'ai-segment',
+    'ai-multi-angle', 'ai-3d-model', 'ai-style-transfer', 'ai-color-adjust',
+    'ai-vectorize', 'storyboard-sequence',
+  ].includes(type);
+}
+
+/** 根据画面比例计算输出图片节点的尺寸 */
+export function getOutputNodeSize(aspectRatio?: string): { width: number; height: number } {
+  const BASE = 200; // 基准尺寸
+  // 宽高比 → width/height 比率
+  const ratioMap: Record<string, number> = {
+    '1:1': 1, '3:4': 3/4, '4:3': 4/3, '4:5': 4/5, '5:4': 5/4,
+    '2:3': 2/3, '3:2': 3/2, '9:16': 9/16, '16:9': 16/9,
+    '1:2': 1/2, '2:1': 2/1,
+  };
+  const whRatio = ratioMap[aspectRatio || ''] || 3/4; // 默认竖图 (3:4)
+  // 以高度为基准计算宽度，保持节点高度不超过 BASE
+  const h = BASE;
+  const w = Math.round(BASE * whRatio);
+  return { width: Math.max(w, 140), height: Math.max(h, 120) };
+}
+
 /** 节点类型 → 中文名 */
 export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   'input-image': '图片输入',
@@ -849,6 +875,8 @@ export function getNodeInputs(
       case 'image':
         // 图片连线: 优先传递imageUrl
         if (upstreamOutput.imageUrl) inputs.imageUrl = upstreamOutput.imageUrl;
+        // 多图URL传递
+        if (Array.isArray(upstreamOutput.imageUrls) && upstreamOutput.imageUrls.length > 0) inputs.imageUrls = upstreamOutput.imageUrls;
         break;
       case 'prompt':
         // 提示词连线: 传递prompt/text/textContent
@@ -864,6 +892,7 @@ export function getNodeInputs(
       case 'data':
         // 数据连线: 传递所有输出
         if (upstreamOutput.imageUrl) inputs.imageUrl = upstreamOutput.imageUrl;
+        if (Array.isArray(upstreamOutput.imageUrls) && upstreamOutput.imageUrls.length > 0) inputs.imageUrls = upstreamOutput.imageUrls;
         if (upstreamOutput.prompt || upstreamOutput.text) {
           inputs.prompt = inputs.prompt || upstreamOutput.prompt || upstreamOutput.text;
         }
@@ -873,6 +902,7 @@ export function getNodeInputs(
       default: {
         // any类型: 智能推断
         if (upstreamOutput.imageUrl) inputs.imageUrl = upstreamOutput.imageUrl;
+        if (Array.isArray(upstreamOutput.imageUrls) && upstreamOutput.imageUrls.length > 0) inputs.imageUrls = upstreamOutput.imageUrls;
         // 提示词传递: 支持prompt/text/textContent三种键名
         const defaultPrompt = upstreamOutput.prompt || upstreamOutput.text || upstreamOutput.textContent;
         if (defaultPrompt) {

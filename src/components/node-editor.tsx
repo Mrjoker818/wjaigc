@@ -7,7 +7,7 @@ import {
   PORT_COLORS, NodePort, PortType, PropertyField,
   createWorkflowNode, createConnection, createEmptyWorkflow, createDemoWorkflow,
   getNodePropertyFields, getNodeCategory, NODE_TEMPLATES,
-  canConnectPorts, autoLayoutWorkflow, parseComfyUIWorkflow,
+  canConnectPorts, autoLayoutWorkflow, parseComfyUIWorkflow, isImageGeneratingNode, getOutputNodeSize,
 } from '@/lib/workflow-engine';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { MODEL_QUALITIES, MODEL_ASPECT_RATIOS } from '@/lib/canvas-generation-group';
@@ -16,7 +16,7 @@ import {
   PenTool, Palette, Sun, GitBranch, GitMerge, Repeat, RefreshCw, Layers,
   Bot, MessageSquare, ImageDown, Save, Download, Play, Square,
   FileInput,
-  ChevronRight, ChevronDown, Plus, Trash2, ZoomIn, ZoomOut, RotateCcw,
+  ChevronRight, ChevronDown, ChevronLeft, Plus, Trash2, ZoomIn, ZoomOut, RotateCcw,
   Settings, Upload, X, Check, AlertCircle, Loader2, BoxSelect, Group,
   Search, ScanSearch, Eye, Pause, SkipForward, Workflow as WorkflowIcon, Timer,
   ArrowLeft, LayoutGrid, Sparkles, MessageCircle, Rotate3d, Box, ShoppingBag, Zap,
@@ -788,8 +788,31 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
 
   const handleAddNode = useCallback((type: NodeType) => {
     const node = createWorkflowNode(type, 300 + Math.random() * 200, 200 + Math.random() * 200);
+    // 生图节点自动创建输出图片节点并连接，尺寸与画面比例一致
+    const shouldAutoOutput = isImageGeneratingNode(type);
+    // 从属性面板配置获取默认画面比例
+    const defaultAspectRatio = shouldAutoOutput
+      ? (getNodePropertyFields(type).find(f => f.key === 'aspectRatio')?.defaultValue as string | undefined)
+      : undefined;
+    const outSize = shouldAutoOutput ? getOutputNodeSize(defaultAspectRatio) : null;
+    const outputNode = shouldAutoOutput
+      ? (() => {
+          const on = createWorkflowNode('output-image', node.x + node.width + 80, node.y);
+          on.width = Math.max(outSize!.width, 140);
+          on.height = Math.max(outSize!.height, 120);
+          return on;
+        })()
+      : null;
     setWf(prev => {
       let autoConns: WorkflowConnection[] = [];
+      // 生图节点 → 自动输出节点连线
+      if (outputNode) {
+        const genOutPort = node.ports.find(p => p.direction === 'out' && p.type === 'image');
+        const outInPort = outputNode.ports.find(p => p.direction === 'in' && p.type === 'image');
+        if (genOutPort && outInPort) {
+          autoConns.push(createConnection(node.id, genOutPort.id, outputNode.id, outInPort.id, 'image'));
+        }
+      }
       // P2: 拖拽自动连线 — 如果有选中节点，尝试自动连线
       const selectedNodes = prev.nodes.filter(n => selectedNodeIds.has(n.id));
       if (selectedNodes.length > 0) {
@@ -815,7 +838,8 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
           if (autoConns.length > 0) break; // 只连接第一个选中节点
         }
       }
-      return { ...prev, nodes: [...prev.nodes, node], connections: [...prev.connections, ...autoConns] };
+      const newNodes = outputNode ? [node, outputNode] : [node];
+      return { ...prev, nodes: [...prev.nodes, ...newNodes], connections: [...prev.connections, ...autoConns] };
     });
     setSelectedNodeIds(new Set([node.id]));
     setSidebarTab('props');
@@ -896,7 +920,24 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
     const node = wf.nodes.find(n => n.id === nodeId);
     if (!node) return;
     handleNodeUpdate(nodeId, { config: { ...node.config, [field]: value } });
-  }, [wf.nodes, handleNodeUpdate]);
+    // 当生图节点修改画面比例时，同步调整自动创建的输出图片节点尺寸
+    if (field === 'aspectRatio' && isImageGeneratingNode(node.type)) {
+      const outSize = getOutputNodeSize(value as string | undefined);
+      // 查找与此节点通过 image 连线直接相连的 output-image 节点
+      const outConn = wf.connections.find(c =>
+        c.fromNodeId === nodeId && c.type === 'image'
+      );
+      if (outConn) {
+        const outNode = wf.nodes.find(n => n.id === outConn.toNodeId);
+        if (outNode && (outNode.type === 'output-image' || outNode.type === 'output-image-group')) {
+          handleNodeUpdate(outNode.id, {
+            width: Math.max(outSize.width, 140),
+            height: Math.max(outSize.height, 120),
+          });
+        }
+      }
+    }
+  }, [wf.nodes, wf.connections, handleNodeUpdate]);
 
   // P2: 抽取图片到上游源节点
   const handleExtractToSource = useCallback((nodeId: string) => {
@@ -2537,6 +2578,71 @@ interface NodeCardProps {
   onPreviewImage: (url: string) => void;
 }
 
+/** output-image-group 节点内容: 多图分页浏览 */
+function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
+  imageUrls: string[];
+  theme: Record<string, string>;
+  onPreviewImage: (url: string) => void;
+}) {
+  const [page, setPage] = useState(0);
+  const total = imageUrls.length;
+  const currentUrl = total > 0 ? imageUrls[page] : '';
+
+  return (
+    <div className="w-full h-full flex flex-col gap-1" onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      {total > 0 && currentUrl ? (
+        /* 有图片时显示当前页图片 */
+        <div
+          className="flex-1 w-full relative group cursor-pointer flex items-center justify-center rounded overflow-hidden"
+          style={{ background: T.nodeBg === '#1a1a1a' ? '#252525' : '#f0f0f0' }}
+          onClick={() => onPreviewImage(currentUrl)}
+        >
+          <img src={currentUrl} alt={`图片 ${page + 1}`} className="max-w-full max-h-full object-contain transition-opacity opacity-90 group-hover:opacity-100" />
+          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+            <span className="opacity-0 group-hover:opacity-100 text-white text-xs bg-black/50 px-2 py-0.5 rounded transition-opacity">预览</span>
+          </div>
+        </div>
+      ) : (
+        /* 无图片时显示虚线占位框 */
+        <div
+          className="flex-1 w-full flex flex-col items-center justify-center gap-1.5 rounded border-2 border-dashed transition-colors"
+          style={{
+            borderColor: T.accent + '40',
+            background: T.nodeBg === '#1a1a1a' ? '#1f1f1f' : '#fafafa',
+          }}
+        >
+          <Layers size={22} style={{ color: T.accent, opacity: 0.35 }} />
+          <span className="text-[10px] font-medium" style={{ color: T.nodeBg === '#1a1a1a' ? '#555' : '#999' }}>等待图片组</span>
+        </div>
+      )}
+      {/* 分页控件 */}
+      {total > 1 && (
+        <div className="flex items-center justify-center gap-1 shrink-0">
+          <button
+            className="w-5 h-5 flex items-center justify-center rounded transition-colors cursor-pointer"
+            style={{ background: T.btnBg, color: T.btnText }}
+            onClick={(e) => { e.stopPropagation(); setPage(Math.max(0, page - 1)); }}
+            disabled={page === 0}
+          >
+            <ChevronLeft size={12} />
+          </button>
+          <span className="text-[9px] font-mono min-w-[28px] text-center" style={{ color: T.textMuted }}>
+            {page + 1}/{total}
+          </span>
+          <button
+            className="w-5 h-5 flex items-center justify-center rounded transition-colors cursor-pointer"
+            style={{ background: T.btnBg, color: T.btnText }}
+            onClick={(e) => { e.stopPropagation(); setPage(Math.min(total - 1, page + 1)); }}
+            disabled={page >= total - 1}
+          >
+            <ChevronRight size={12} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRunning, theme, canvasImages, llmModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onDeselect, onPreviewImage }: NodeCardProps) {
   const T = theme;
   const cat = getNodeCategory(node.type);
@@ -2546,6 +2652,8 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
   const isCondition = node.type.startsWith('condition-');
   const isInputText = node.type === 'input-text';
   const isInputImage = node.type === 'input-image';
+  const isOutputImage = node.type === 'output-image';
+  const isOutputImageGroup = node.type === 'output-image-group';
 
   const statusColor = execResult?.status === 'success' ? T.statusSuccess
     : execResult?.status === 'failed' ? T.statusError
@@ -2765,14 +2873,77 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
             </foreignObject>
           )}
 
-          {/* 图片缩略图 — 非input-image节点(如ai-generate)执行后显示结果 */}
-          {!isInputImage && hasImageOutput && (
+          {/* 图片缩略图 — 非input-image/output-image节点(如ai-generate)执行后显示结果 */}
+          {!isInputImage && !isOutputImage && !isOutputImageGroup && hasImageOutput && (
             <foreignObject x={node.x + 8} y={node.y + 32} width={node.width - 16} height={node.height - 44}>
               <div className="w-full h-full relative group cursor-pointer flex items-center justify-center" onClick={() => onPreviewImage(hasImageOutput)} onWheel={(e) => e.stopPropagation()}>
                 <img src={hasImageOutput} alt="" className="max-w-full max-h-full object-contain rounded opacity-70 group-hover:opacity-100 transition-opacity" />
               </div>
             </foreignObject>
           )}
+
+          {/* ===== output-image 节点: 图片输出占位 / 预览 (多图自动分页) ===== */}
+          {isOutputImage && (() => {
+            const imageUrls = (execResult?.output?.imageUrls as string[]) || [];
+            const singleUrl = hasImageOutput || '';
+            const allUrls = imageUrls.length > 0 ? imageUrls : (singleUrl ? [singleUrl] : []);
+            return (
+              <foreignObject x={node.x + 6} y={node.y + 32} width={node.width - 12} height={node.height - 38}>
+                {allUrls.length > 1 ? (
+                  /* 多图: 分页浏览 */
+                  <OutputImageGroupContent
+                    imageUrls={allUrls}
+                    theme={T}
+                    onPreviewImage={onPreviewImage}
+                  />
+                ) : singleUrl ? (
+                  /* 单图: 大图预览 */
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-1" onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                    <div
+                      className="flex-1 w-full relative group cursor-pointer flex items-center justify-center rounded overflow-hidden"
+                      style={{ background: T.nodeBg === '#1a1a1a' ? '#252525' : '#f0f0f0' }}
+                      onClick={() => onPreviewImage(singleUrl)}
+                    >
+                      <img src={singleUrl} alt="" className="max-w-full max-h-full object-contain transition-opacity opacity-90 group-hover:opacity-100" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                        <span className="opacity-0 group-hover:opacity-100 text-white text-xs bg-black/50 px-2 py-0.5 rounded transition-opacity">预览</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* 无图: 虚线占位框 */
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-1" onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                    <div
+                      className="flex-1 w-full flex flex-col items-center justify-center gap-1.5 rounded border-2 border-dashed transition-colors"
+                      style={{
+                        borderColor: T.accent + '40',
+                        background: T.nodeBg === '#1a1a1a' ? '#1f1f1f' : '#fafafa',
+                      }}
+                    >
+                      <ImagePlus size={22} style={{ color: T.accent, opacity: 0.35 }} />
+                      <span className="text-[10px] font-medium" style={{ color: T.nodeBg === '#1a1a1a' ? '#555' : '#999' }}>等待图片</span>
+                    </div>
+                  </div>
+                )}
+              </foreignObject>
+            );
+          })()}
+
+          {/* ===== output-image-group 节点: 多图输出 + 分页 ===== */}
+          {isOutputImageGroup && (() => {
+            const imageUrls = (execResult?.output?.imageUrls as string[]) || [];
+            const singleUrl = (execResult?.output?.imageUrl as string) || '';
+            const allUrls = imageUrls.length > 0 ? imageUrls : (singleUrl ? [singleUrl] : []);
+            return (
+              <foreignObject x={node.x + 6} y={node.y + 32} width={node.width - 12} height={node.height - 38}>
+                <OutputImageGroupContent
+                  imageUrls={allUrls}
+                  theme={T}
+                  onPreviewImage={onPreviewImage}
+                />
+              </foreignObject>
+            );
+          })()}
 
           {/* ===== P0: input-text 节点直接编辑 + LLM 优化 + 预设 ===== */}
           {isInputText && (
