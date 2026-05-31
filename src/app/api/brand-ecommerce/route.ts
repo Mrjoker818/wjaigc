@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { findProviderForModel, getPublicModels } from '@/lib/server-api-config';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl } from '@/lib/api-compatibility';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
@@ -652,8 +652,8 @@ export async function POST(request: NextRequest) {
       registerTask(taskId, 'brand-ecommerce', `品牌电商生成 (${selectedTemplates.length}模板×${variantsPerTemplate}变体)`);
 
       // ★ Async mode: return taskId immediately, process in background
-      // Fire-and-forget background processing
-      (async () => {
+      // 使用 after() 确保响应返回后 IIFE 仍可运行
+      after(async () => {
         try {
           const results: Array<{ templateId: string; templateName: string; imageUrl?: string; error?: string; variantIndex?: number; aspectRatio?: string }> = [];
           let completedCount = 0;
@@ -901,8 +901,7 @@ export async function POST(request: NextRequest) {
             error: errMsg,
           });
         }
-      })();
-
+      });
       // Return taskId immediately for frontend polling
       return NextResponse.json({
         success: true,

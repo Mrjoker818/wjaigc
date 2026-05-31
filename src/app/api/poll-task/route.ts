@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 
 export const maxDuration = 600; // 10分钟 - 支持长时间轮询慢速API（含语言修图等长任务）
 
@@ -70,6 +70,7 @@ export async function POST(request: NextRequest) {
     // 检查是否为本地语言修图任务
     if (taskId.startsWith('edit_')) {
       const task = getEditTask(taskId);
+      console.info(`[poll-task] edit任务查询: taskId=${taskId}, status=${task?.status}, stage=${task?.stage}, hasRemotePoll=${!!task?.remotePollInfo}`);
       if (!task) {
         return NextResponse.json({
           success: false,
@@ -645,7 +646,7 @@ export async function POST(request: NextRequest) {
 
           const bgTaskId = taskId;
           const bgSourceUrl = sourceImageUrl;
-          (async () => {
+          after(async () => {
             try {
               const { persistRemoteImage } = await import('@/lib/s3-storage');
               const persistedUrl = await persistRemoteImage(bgSourceUrl, `generate/${bgTaskId}`);
@@ -661,7 +662,7 @@ export async function POST(request: NextRequest) {
             } catch (persistErr) {
               console.warn('[poll-task] Background persist failed (source URL still works):', persistErr);
             }
-          })();
+          });
         }
 
         // ★ Outpaint 扩展后处理：将原图合成到 AI 结果中心

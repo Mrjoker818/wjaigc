@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { findProviderForModel } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
@@ -154,7 +154,8 @@ export async function POST(request: NextRequest) {
     registerTask(taskId, 'font-design', `字体设计: ${textStr || '生成图片'}`);
     updateTaskProgress(taskId, { status: 'processing', progress: 0, label: '正在生成字体设计图片...' });
 
-    (async () => {
+    // 使用 after() 确保响应返回后 IIFE 仍可运行
+    after(async () => {
       try {
         const requestBody: Record<string, unknown> = {
           model: usedModel,
@@ -207,7 +208,7 @@ export async function POST(request: NextRequest) {
           updateTaskProgress(taskId, { status: 'failed', error: msg });
         }
       }
-    })();
+    });
 
     return NextResponse.json({ taskId, prompt: finalPrompt, model: usedModel });
   } catch (error: unknown) {

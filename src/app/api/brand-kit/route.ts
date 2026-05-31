@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { findProviderForModel } from '@/lib/server-api-config';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
@@ -455,8 +455,8 @@ async function handleGenerate(body: {
 
   registerTask(taskId, 'brand-generate', `品牌延展设计 (${totalScenarios} 个场景)`);
 
-  // Start async generation
-  (async () => {
+  // Start async generation — 使用 after() 确保响应返回后 IIFE 仍可运行
+  after(async () => {
     const results: Array<{
       scenario: DesignScenario;
       images: string[];
@@ -556,7 +556,7 @@ async function handleGenerate(body: {
       label: '品牌延展设计完成',
       result: { scenarios: results },
     });
-  })();
+  });
 
   return NextResponse.json({
     taskId,

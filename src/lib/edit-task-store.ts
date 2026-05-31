@@ -30,12 +30,18 @@ export interface EditTask {
 
 const MAX_EDIT_TASKS = 100;
 
-/** 全局任务存储 —— 模块级单例，HMR 安全 */
-const editTaskStore = new Map<string, EditTask>();
+/** 全局任务存储 —— 使用 globalThis 确保 HMR / Turbopack 下路由间共享同一 Map 实例 */
+const _storeKey = '__wujie_edit_task_store__';
+if (!(globalThis as Record<string, unknown>)[_storeKey]) {
+  (globalThis as Record<string, unknown>)[_storeKey] = new Map<string, EditTask>();
+}
+const editTaskStore = (globalThis as Record<string, unknown>)[_storeKey] as Map<string, EditTask>;
 
 // 定期清理过期任务（>30分钟）
 // ★ 只清理终态任务（completed/failed），避免误删 processing 任务
-if (typeof setInterval !== 'undefined') {
+const _cleanupKey = '__wujie_edit_task_cleanup__';
+if (typeof setInterval !== 'undefined' && !(globalThis as Record<string, unknown>)[_cleanupKey]) {
+  (globalThis as Record<string, unknown>)[_cleanupKey] = true;
   setInterval(() => {
     const now = Date.now();
     for (const [id, task] of editTaskStore) {

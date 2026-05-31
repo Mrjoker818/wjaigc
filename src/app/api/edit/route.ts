@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import sharp from 'sharp';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl, getApiProviders } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
@@ -334,10 +334,12 @@ export async function POST(request: NextRequest) {
     setEditTask(taskId, { id: taskId, status: 'processing', progress: 0, stage: '初始化', createdAt: Date.now() });
     // ★ 注册到统一任务中心（SSE推送 + 取消支持）
     registerTask(taskId, 'edit', '语言修图');
+    console.info(`[edit] ★ taskId=${taskId} 创建成功, model=${model}, providerId=${providerId || 'auto'}`);
 
     // 后台异步执行编辑流程（5分钟全局超时兜底）
+    // ★ 使用 after() 确保 Next.js 不会在响应返回后终止 IIFE
     const EDIT_GLOBAL_TIMEOUT_MS = 5 * 60 * 1000;
-    (async () => {
+    after(async () => {
       // 全局超时：确保 IIFE 不会无限运行
       const timeoutId = setTimeout(() => {
         const task = getEditTask(taskId);
@@ -1245,17 +1247,20 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       createdAt: getEditTask(taskId)?.createdAt || Date.now(),
       completedAt: Date.now(),
     });
+    console.info(`[edit] ★ taskId=${taskId} 结果已存储到 edit-task-store, image[0]=${images[0]?.url?.substring(0, 80)}`);
 
       } catch (error: unknown) {
         const errMsg = error instanceof Error ? error.message : 'Unknown error';
-        console.error('Image edit error:', error);
+        console.error(`[edit] ★ taskId=${taskId} IIFE异常: ${errMsg}`, error);
+        const stack = error instanceof Error ? error.stack : '';
+        if (stack) console.error(`[edit] Stack: ${stack}`);
 
         const isNetworkError = errMsg.includes('fetch failed') || errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND');
         failTask(taskId, isNetworkError ? '网络连接失败：无法访问 API 服务' : (errMsg || '图片编辑失败'), isNetworkError);
       } finally {
         clearTimeout(timeoutId);
       }
-    })();
+    });
 
   // ========== 立即返回 taskId（提交+轮询模式） ==========
   return NextResponse.json({

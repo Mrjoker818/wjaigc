@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { findProviderForFeature, findProviderById } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
@@ -74,8 +74,8 @@ export async function POST(request: NextRequest) {
       createdAt: Date.now(),
     });
 
-    // 异步执行（后台处理）
-    (async () => {
+    // 异步执行（后台处理）— 使用 after() 确保响应返回后 IIFE 仍可运行
+    after(async () => {
       const EDIT_GLOBAL_TIMEOUT_MS = 5 * 60 * 1000;
       const timeout = setTimeout(() => {
         const task = localTaskStore.get(taskId);
@@ -354,7 +354,7 @@ export async function POST(request: NextRequest) {
       } finally {
         clearTimeout(timeout);
       }
-    })();
+    });
 
     // 立即返回 taskId
     return NextResponse.json({

@@ -281,6 +281,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       try { await fetch('/api/cancel-task', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: editTaskId }) }); } catch {}
     }
     setIsLoading(false);
+    setIsResultLoading(false); // ★ 修复：取消时也要重置结果加载状态，否则"生成中"不消失
     setLoadingProgress(0);
     if (editStartTime) setEditTotalTime(Math.floor((Date.now() - editStartTime) / 1000));
     setEditStartTime(null);
@@ -1145,6 +1146,12 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
         for (const { taskId, pollData } of pollResults) {
           if (!pollData) continue;
+
+          // ★ 调试日志：追踪轮询响应
+          pollCount++;
+          if (pollCount <= 5 || pollCount % 10 === 0) {
+            console.info(`[image-editor] poll #${pollCount} taskId=${taskId} status=${pollData.status} hasResult=${!!pollData.result} success=${pollData.success}`);
+          }
 
           if (pollData.status === 'completed' && pollData.result) {
             completedTasks.add(taskId);
