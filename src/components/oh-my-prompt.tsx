@@ -81,14 +81,15 @@ export interface ZhJsonPromptSchema {
 }
 
 export interface VisionApiResultData {
-  zh: { title: string; prompt: string; analysis: string; };
-  en: { title: string; prompt: string; analysis: string; };
-  zh_style_tags: string[];
-  en_style_tags: string[];
+  zh?: { title: string; prompt: string; analysis: string; };
+  en?: { title: string; prompt: string; analysis: string; };
+  zh_style_tags?: string[];
+  en_style_tags?: string[];
   zh_json?: ZhJsonPromptSchema;
   en_json?: JsonPromptSchema;
-  json_prompt: JsonPromptSchema;
-  confidence: number;
+  json_prompt?: JsonPromptSchema;
+  confidence?: number;
+  raw?: string;
 }
 
 export interface OmpSettings {
@@ -600,7 +601,7 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
 
   // ===== Vision result rendering =====
   const renderVisionResult = () => {
-    if (!visionResult || (!visionResult.zh && !visionResult.en)) {
+    if (!visionResult || ((!visionResult.zh?.title && !visionResult.en?.title) && !visionResult.raw)) {
       return (
         <div className="p-6 flex flex-col items-center justify-center gap-3 min-h-[200px]">
           <div className={`w-16 h-16 rounded-full flex items-center justify-center ${isMonochrome ? 'bg-blue-500/10' : 'bg-[#d4af37]/10'}`}>
@@ -620,15 +621,33 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
         </div>
       );
     }
+    // Raw content fallback (API returned unparsed text)
+    if (visionResult.raw && !visionResult.zh?.title && !visionResult.en?.title) {
+      return (
+        <div className="p-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className={`text-sm font-semibold ${tc.text}`}>图片识词结果</h4>
+            <span className={`text-xs px-2 py-0.5 rounded-full ${isMonochrome ? 'bg-yellow-100 text-yellow-700' : 'bg-yellow-900/30 text-yellow-400'}`}>原始输出</span>
+          </div>
+          <div className={`text-xs leading-relaxed p-2 rounded-md whitespace-pre-wrap max-h-[300px] overflow-y-auto ${isMonochrome ? 'bg-gray-50 text-gray-700 border border-gray-100' : 'bg-[#1a1a1a] text-[#ccc] border border-[#222]'}`}>
+            {String(visionResult.raw)}
+          </div>
+          <div className="flex gap-2">
+            <button className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-[#d4af37] text-black hover:bg-[#e5c147]'}`} onClick={() => onInsertPrompt(String(visionResult.raw))}>插入内容</button>
+          </div>
+        </div>
+      );
+    }
+    const confidence = visionResult.confidence ?? 0;
     return (
       <div className="p-3 space-y-3">
         <div className="flex items-center justify-between">
           <h4 className={`text-sm font-semibold ${tc.text}`}>{visionResult.zh?.title || visionResult.en?.title || '图片识词结果'}</h4>
-          <span className={`text-xs px-2 py-0.5 rounded-full ${visionResult.confidence >= 0.8 ? isMonochrome ? 'bg-green-100 text-green-700' : 'bg-green-900/30 text-green-400' : visionResult.confidence >= 0.5 ? isMonochrome ? 'bg-yellow-100 text-yellow-700' : 'bg-yellow-900/30 text-yellow-400' : isMonochrome ? 'bg-red-100 text-red-700' : 'bg-red-900/30 text-red-400'}`}>
-            置信度 {Math.round(visionResult.confidence * 100)}%
+          <span className={`text-xs px-2 py-0.5 rounded-full ${confidence >= 0.8 ? isMonochrome ? 'bg-green-100 text-green-700' : 'bg-green-900/30 text-green-400' : confidence >= 0.5 ? isMonochrome ? 'bg-yellow-100 text-yellow-700' : 'bg-yellow-900/30 text-yellow-400' : isMonochrome ? 'bg-red-100 text-red-700' : 'bg-red-900/30 text-red-400'}`}>
+            置信度 {Math.round(confidence * 100)}%
           </span>
         </div>
-        {(visionResult.zh_style_tags?.length > 0 || visionResult.en_style_tags?.length > 0) && (
+        {((visionResult.zh_style_tags?.length ?? 0) > 0 || (visionResult.en_style_tags?.length ?? 0) > 0) && (
           <div className="flex flex-wrap gap-1">
             {visionResult.zh_style_tags?.map((tag, i) => (<span key={`zh-${i}`} className={`text-xs px-1.5 py-0.5 rounded-full ${isMonochrome ? 'bg-blue-100 text-blue-700' : 'bg-[#d4af37]/15 text-[#d4af37]'}`}>{tag}</span>))}
             {visionResult.en_style_tags?.map((tag, i) => (<span key={`en-${i}`} className={`text-xs px-1.5 py-0.5 rounded-full ${isMonochrome ? 'bg-gray-100 text-gray-600' : 'bg-[#333] text-[#999]'}`}>{tag}</span>))}
