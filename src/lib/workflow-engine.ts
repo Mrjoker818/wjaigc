@@ -917,9 +917,9 @@ export function buildNodeExecutionRequest(
       return null;
 
     case 'ai-generate': {
-      const aspectRatio = config.aspectRatio || '1:1';
-      const quality = config.quality || '1K';
-      const modelId = config.model || '';
+      const aspectRatio = (config.aspectRatio as string) || '1:1';
+      const quality = (config.quality as string) || '1K';
+      const modelId = (config.model as string) || '';
       // 使用模型专用像素映射计算实际尺寸
       const actualSize = calculateActualPixels(aspectRatio, quality, modelId);
       return {
@@ -1021,9 +1021,9 @@ export function buildNodeExecutionRequest(
       };
 
     case 'ai-retouch': {
-      const retouchModel = config.editModel || config.model || '';
-      const retouchQuality = config.quality || '1K';
-      const retouchAspectRatio = config.aspectRatio || '1:1';
+      const retouchModel = (config.editModel as string) || (config.model as string) || '';
+      const retouchQuality = (config.quality as string) || '1K';
+      const retouchAspectRatio = (config.aspectRatio as string) || '1:1';
       const retouchSize = calculateActualPixels(retouchAspectRatio, retouchQuality, retouchModel);
       return {
         endpoint: '/api/edit',
@@ -1053,9 +1053,9 @@ export function buildNodeExecutionRequest(
       };
 
     case 'ai-refine-engine': {
-      const refineModel = config.model || '';
-      const refineQuality = config.quality || '1K';
-      const refineAspectRatio = config.aspectRatio || '1:1';
+      const refineModel = (config.model as string) || '';
+      const refineQuality = (config.quality as string) || '1K';
+      const refineAspectRatio = (config.aspectRatio as string) || '1:1';
       const refineSize = calculateActualPixels(refineAspectRatio, refineQuality, refineModel);
       return {
         endpoint: '/api/edit',
@@ -1070,9 +1070,9 @@ export function buildNodeExecutionRequest(
     }
 
     case 'ai-brand-ecommerce': {
-      const brandModel = config.model || '';
-      const brandQuality = config.quality || '1K';
-      const brandAspectRatio = config.aspectRatio || '1:1';
+      const brandModel = (config.model as string) || '';
+      const brandQuality = (config.quality as string) || '1K';
+      const brandAspectRatio = (config.aspectRatio as string) || '1:1';
       const brandSize = calculateActualPixels(brandAspectRatio, brandQuality, brandModel);
       return {
         endpoint: '/api/generate',
@@ -1099,9 +1099,9 @@ export function buildNodeExecutionRequest(
       };
 
     case 'ai-multi-angle': {
-      const maModel = config.model || '';
-      const maQuality = config.quality || '1K';
-      const maAspectRatio = config.aspectRatio || '1:1';
+      const maModel = (config.model as string) || '';
+      const maQuality = (config.quality as string) || '1K';
+      const maAspectRatio = (config.aspectRatio as string) || '1:1';
       const maSize = calculateActualPixels(maAspectRatio, maQuality, maModel);
       return {
         endpoint: '/api/generate',
@@ -1129,9 +1129,9 @@ export function buildNodeExecutionRequest(
       };
 
     case 'storyboard-sequence': {
-      const sbModel = config.model || '';
-      const sbQuality = config.quality || '1K';
-      const sbAspectRatio = config.aspectRatio || '1:1';
+      const sbModel = (config.model as string) || '';
+      const sbQuality = (config.quality as string) || '1K';
+      const sbAspectRatio = (config.aspectRatio as string) || '1:1';
       const sbSize = calculateActualPixels(sbAspectRatio, sbQuality, sbModel);
       return {
         endpoint: '/api/generate',
