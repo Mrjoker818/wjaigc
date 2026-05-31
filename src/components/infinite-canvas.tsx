@@ -46,6 +46,7 @@ const RefineEnginePanel = lazy(() => import('@/components/refine-engine-panel'))
 const FontDesignPanel = lazy(() => import('@/components/font-design-panel'));
 const BrandFactoryPanel = lazy(() => import('@/components/brand-factory-panel'));
 const AiPsdPanel = lazy(() => import('@/components/ai-psd/ai-psd-panel'));
+const ImageCompareDialog = lazy(() => import('@/components/image-compare-dialog').then(m => ({ default: m.ImageCompareDialog })));
 
 /* ====== Multi-Angle Sphere Preview (Canvas 2D) ====== */
 function MultiAngleSpherePreview({
@@ -473,6 +474,11 @@ export function InfiniteCanvas({
   const [showFontDesign, setShowFontDesign] = useState(false);
   const [showBrandFactory, setShowBrandFactory] = useState(false);
   const [showAiPsd, setShowAiPsd] = useState(false);
+
+  // Image compare state
+  const [showCompareDialog, setShowCompareDialog] = useState(false);
+  const [compareImages, setCompareImages] = useState<{ left: CanvasImage | null; right: CanvasImage | null }>({ left: null, right: null });
+  const [compareSelecting, setCompareSelecting] = useState(false); // selecting second image for compare
 
   // View state
   const [viewOffset, setViewOffset] = useState({ x: initialViewState?.offsetX ?? 0, y: initialViewState?.offsetY ?? 0 });
@@ -1332,6 +1338,11 @@ export function InfiniteCanvas({
         setIsSpacePressed(true);
       }
       if (e.code === 'Escape') {
+        // 退出图片对比选择模式
+        if (compareSelecting) {
+          setCompareSelecting(false);
+          setCompareImages({ left: null, right: null });
+        }
         // 退出Agent选择图片模式
         if (agentSelectingImage) {
           setAgentSelectingImage(false);
@@ -1792,6 +1803,16 @@ export function InfiniteCanvas({
 
     const hitId = hitTestImage(canvasPos.x, canvasPos.y);
     if (hitId) {
+      // Image compare: selecting second image
+      if (compareSelecting && compareImages.left && hitId !== compareImages.left.id) {
+        const rightImg = images.find(i => i.id === hitId);
+        if (rightImg) {
+          setCompareImages(prev => ({ ...prev, right: rightImg }));
+          setCompareSelecting(false);
+          setShowCompareDialog(true);
+          return;
+        }
+      }
       mouseDownOnImageRef.current = true;
       imageDragReadyRef.current = false;
       if (e.ctrlKey || e.metaKey) {
@@ -1820,7 +1841,7 @@ export function InfiniteCanvas({
       setBoxSelectStart({ x: e.clientX, y: e.clientY });
       setBoxSelectEnd({ x: e.clientX, y: e.clientY });
     }
-  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown]);
+  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (editMode !== 'none') {
@@ -5806,6 +5827,13 @@ export function InfiniteCanvas({
   };
 
   const imageContextMenuItems = selectedIds.size > 1 ? [
+    ...(selectedIds.size === 2 ? [{ label: '图片对比', shortcut: '', action: () => {
+      const selImgs = images.filter(i => selectedIds.has(i.id));
+      if (selImgs.length === 2) {
+        setCompareImages({ left: selImgs[0], right: selImgs[1] });
+        setShowCompareDialog(true);
+      }
+    } }] : []),
     { label: '创建组', shortcut: '', action: () => { handleCreateGroup(); } },
     { label: '对齐-左', action: () => {
       const selImgs = images.filter(i => selectedIds.has(i.id));
@@ -5918,6 +5946,7 @@ export function InfiniteCanvas({
     { label: '提取关键词', action: () => { const img = selectedImageData; if (img) onExtractKeywords(img); } },
     { label: '语言修图', action: () => { const img = selectedImageData; if (img) onEditImage?.(img); else onEditImage?.(null); } },
     { label: 'Agent编排', action: () => { const img = selectedImageData; if (img) { setAgentEditImage(img); setShowAgentEditor(true); } } },
+    { label: '图片对比', action: () => { const img = selectedImageData; if (img) { setCompareImages({ left: img, right: null }); setCompareSelecting(true); } } },
     { label: '加入收藏夹', action: () => { const img = selectedImageData; if (img && onAddToFavorites) onAddToFavorites(img); } },
   ];
 
@@ -6244,6 +6273,17 @@ export function InfiniteCanvas({
             <div className={`px-3 py-1 rounded-full text-xs font-medium shadow-lg flex items-center gap-1.5 ${isMonochrome ? 'bg-blue-500/90 text-white' : 'bg-gold/90 text-black'}`}>
               <Bot className="w-3 h-3" />
               <span>点击图片进行 Agent 编排</span>
+              <span className="opacity-70">· ESC 取消</span>
+            </div>
+          </div>
+        )}
+
+        {/* Image compare: selecting second image */}
+        {compareSelecting && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+            <div className={`px-3 py-1 rounded-full text-xs font-medium shadow-lg flex items-center gap-1.5 ${isMonochrome ? 'bg-blue-500/90 text-white' : 'bg-gold/90 text-black'}`}>
+              <Contrast className="w-3 h-3" />
+              <span>点击另一张图片进行对比</span>
               <span className="opacity-70">· ESC 取消</span>
             </div>
           </div>
@@ -9438,6 +9478,18 @@ export function InfiniteCanvas({
                 // 更换图片：进入画布选择模式
                 setAgentSelectingImage(true);
               }}
+            />
+          </Suspense>
+        )}
+
+        {/* ====== IMAGE COMPARE DIALOG ====== */}
+        {showCompareDialog && compareImages.left && compareImages.right && (
+          <Suspense fallback={null}>
+            <ImageCompareDialog
+              leftImage={{ url: compareImages.left.url, prompt: compareImages.left.prompt, modelName: compareImages.left.modelName }}
+              rightImage={{ url: compareImages.right.url, prompt: compareImages.right.prompt, modelName: compareImages.right.modelName }}
+              isMonochrome={isMonochrome}
+              onClose={() => { setShowCompareDialog(false); setCompareImages({ left: null, right: null }); }}
             />
           </Suspense>
         )}

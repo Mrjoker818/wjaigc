@@ -382,16 +382,17 @@ export async function POST(request: NextRequest) {
     const requestedSize = aspectRatio || '1:1';
     
     // 设置生成数量 - 不受模型maxN限制，因为我们逐个提交任务(n=1)
-    const count = outputCount && outputCount >= 1 ? Math.min(outputCount, 10) : 1;
+    const totalCount = outputCount && outputCount >= 1 ? Math.min(outputCount, 10) : 1;
 
-    // 构建提交单个任务的辅助函数（返回 taskId 或抛出可重试错误）
+    // 构建提交任务的辅助函数 — 单次提交可能返回多张图片/多个taskId
     const submitSingleTask = async (
       currentModelConfig: ModelConfig,
       currentApiKey: string,
       currentApiBaseUrl: string,
       currentProviderId: string,
+      requestN: number,
       currentProvider?: { baseUrl?: string; requestStyle?: string; advancedParams?: Record<string, string> } | null,
-    ): Promise<{ taskId: string; usedModel: string; usedProviderId: string; directImageUrl?: string }> => {
+    ): Promise<{ taskIds: string[]; directImageUrls: string[]; usedModel: string; usedProviderId: string }> => {
       // 解析兼容性档案 - 由提供商配置决定 API 调用方式
       const profile: ApiCompatProfile = resolveCompatProfile(currentProvider);
 
@@ -403,7 +404,7 @@ export async function POST(request: NextRequest) {
         model: currentModelConfig.modelId,
         prompt: enhancedPrompt,
         size: effectiveSize,
-        n: 1,
+        n: requestN,
       };
 
       // 根据模型参数类型添加质量/分辨率参数
@@ -534,7 +535,7 @@ export async function POST(request: NextRequest) {
       const hasImageField = !!adjustedBody.image;
 
       // 辅助函数：解析提交响应
-      const parseSubmitResponse = async (resp: Response): Promise<{ taskId: string; usedModel: string; usedProviderId: string; directImageUrl?: string }> => {
+      const parseSubmitResponse = async (resp: Response): Promise<{ taskIds: string[]; directImageUrls: string[]; usedModel: string; usedProviderId: string }> => {
         if (!resp.ok) {
           const errorText = await resp.text();
           console.error('API submit error:', resp.status, errorText);
@@ -586,20 +587,24 @@ export async function POST(request: NextRequest) {
         const parsed = parseResponseForProfile(submitResult, profile);
 
         if (parsed.mode === 'direct' && parsed.directImageUrls.length > 0) {
-          console.log('Direct image response (no polling needed), profile:', profile.id);
+          console.log('Direct image response (no polling needed), profile:', profile.id, 'images:', parsed.directImageUrls.length);
           return {
-            taskId: `direct_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            taskIds: [],
+            directImageUrls: parsed.directImageUrls,
             usedModel: currentModelConfig.modelId,
             usedProviderId: currentProviderId,
-            directImageUrl: parsed.directImageUrls[0],
           };
         }
 
-        // 异步任务格式
+        // 异步任务格式 — 返回所有 taskIds
         if (parsed.taskIds.length > 0) {
-          const taskId = parsed.taskIds[0];
-          console.log('Got task_id:', taskId, 'profile:', profile.id);
-          return { taskId, usedModel: currentModelConfig.modelId, usedProviderId: currentProviderId };
+          console.log('Got task_ids:', parsed.taskIds, 'profile:', profile.id);
+          return {
+            taskIds: parsed.taskIds,
+            directImageUrls: [],
+            usedModel: currentModelConfig.modelId,
+            usedProviderId: currentProviderId,
+          };
         }
 
         console.error('No task_id or direct image in response:', submitResult);
@@ -835,16 +840,17 @@ export async function POST(request: NextRequest) {
     let usedProviderId = provider?.id || 'env';
 
     // 提交所有生成任务（带自动重试逻辑）
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < totalCount; i++) {
       let submitted = false;
       
       // 先用当前模型尝试
       try {
-        const result = await submitSingleTask(modelConfig, serverApiKey, apiBaseUrl, provider?.id || 'env', provider);
-        if (result.directImageUrl) {
-          directImageUrls.push(result.directImageUrl);
-        } else if (result.taskId) {
-          taskIds.push(result.taskId);
+        const result = await submitSingleTask(modelConfig, serverApiKey, apiBaseUrl, provider?.id || 'env', 1, provider);
+        if (result.directImageUrls && result.directImageUrls.length > 0) {
+          directImageUrls.push(...result.directImageUrls);
+        }
+        if (result.taskIds && result.taskIds.length > 0) {
+          taskIds.push(...result.taskIds);
         }
         usedModelId = result.usedModel;
         usedProviderId = result.usedProviderId;
@@ -853,7 +859,7 @@ export async function POST(request: NextRequest) {
             type: 'submit',
             providerId: usedProviderId,
             model: usedModelId,
-            taskId: result.taskId,
+            taskId: result.taskIds?.[0] || 'direct',
             prompt: enhancedPrompt,
           });
         } catch (logErr) {
@@ -874,11 +880,12 @@ export async function POST(request: NextRequest) {
             
             try {
               console.log(`尝试备选模型 ${candidate.modelId} (${ci + 1}/${candidateModels.length})...`);
-              const result = await submitSingleTask(candidateConfig, candidate.apiKey, candidate.baseUrl, candidate.providerId, { baseUrl: candidate.baseUrl, advancedParams: candidate.advancedParams });
-              if (result.directImageUrl) {
-                directImageUrls.push(result.directImageUrl);
-              } else if (result.taskId) {
-                taskIds.push(result.taskId);
+              const result = await submitSingleTask(candidateConfig, candidate.apiKey, candidate.baseUrl, candidate.providerId, 1, { baseUrl: candidate.baseUrl, advancedParams: candidate.advancedParams });
+              if (result.directImageUrls && result.directImageUrls.length > 0) {
+                directImageUrls.push(...result.directImageUrls);
+              }
+              if (result.taskIds && result.taskIds.length > 0) {
+                taskIds.push(...result.taskIds);
               }
               usedModelId = result.usedModel;
               usedModelName = candidateConfig.name;
@@ -888,7 +895,7 @@ export async function POST(request: NextRequest) {
                   type: 'submit',
                   providerId: usedProviderId,
                   model: usedModelId,
-                  taskId: result.taskId || 'direct',
+                  taskId: result.taskIds?.[0] || 'direct',
                   prompt: enhancedPrompt,
                 });
               } catch (logErr) {
