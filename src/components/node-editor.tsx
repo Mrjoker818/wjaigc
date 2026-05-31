@@ -84,6 +84,8 @@ interface CanvasImageRef {
   name: string;
   description: string;
   label?: string;
+  width?: number;
+  height?: number;
 }
 
 interface MentionPopup {
@@ -904,13 +906,22 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
     const vp = viewportRef.current;
     const cx = (e.clientX - svgRect.left - vp.x) / vp.zoom;
     const cy = (e.clientY - svgRect.top - vp.y) / vp.zoom;
-    const node = createWorkflowNode('input-image', cx - 65, cy - 50);
+
+    // 根据图片宽高比计算节点大小
+    const refImage = canvasImages?.find(img => img.url === imageUrl);
+    const imgW = refImage?.width || 1024;
+    const imgH = refImage?.height || 1024;
+    const ratio = imgW / imgH;
+    const nodeW = Math.max(180, Math.min(320, 260 * Math.max(1, ratio)));
+    const nodeH = Math.max(140, Math.min(320, nodeW / ratio));
+
+    const node = createWorkflowNode('input-image', cx - nodeW / 2, cy - nodeH / 2);
     node.config = { ...node.config, imageUrl, source: 'canvas-ref' };
-    node.width = 160;
-    node.height = 130;
+    node.width = nodeW;
+    node.height = nodeH;
     setWf(prev => ({ ...prev, nodes: [...prev.nodes, node] }));
     setSelectedNodeIds(new Set([node.id]));
-  }, []);
+  }, [canvasImages]);
 
   const handleNodeUpdate = useCallback((nodeId: string, updates: Partial<WorkflowNode>) => {
     setWf(prev => ({
@@ -1395,6 +1406,27 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
     imageFileInputRef.current?.click();
   }, []);
 
+  // ─── 根据图片实际尺寸调整节点大小 ───
+  const resizeNodeForImageUrl = useCallback((nodeId: string, imageUrl: string) => {
+    const img = new Image();
+    img.onload = () => {
+      const imgW = img.naturalWidth;
+      const imgH = img.naturalHeight;
+      if (!imgW || !imgH) return;
+      const ratio = imgW / imgH;
+      const nodeW = 220;
+      const nodeH = Math.round(nodeW / ratio);
+      const clampedH = Math.max(120, Math.min(400, nodeH));
+      setWf(prev => ({
+        ...prev,
+        nodes: prev.nodes.map((n: WorkflowNode) =>
+          n.id === nodeId ? { ...n, width: nodeW, height: clampedH + 56 } : n
+        ),
+      }));
+    };
+    img.src = imageUrl;
+  }, [setWf]);
+
   const handleGlobalImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     const nodeId = pendingImageUploadNodeId.current;
@@ -1409,11 +1441,12 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
       const data = await res.json();
       if (data.url) {
         handleNodeUpdate(nodeId, { config: { imageUrl: data.url, source: 'upload' } });
+        resizeNodeForImageUrl(nodeId, data.url);
       }
     } catch (err) {
       console.error('[NodeEditor] 节点图片上传失败:', err);
     }
-  }, [handleNodeUpdate]);
+  }, [handleNodeUpdate, resizeNodeForImageUrl]);
 
   const handleImageUpload = useCallback(async (nodeId: string, file: File) => {
     const formData = new FormData();
@@ -1423,11 +1456,12 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
       const data = await res.json();
       if (data.url) {
         handleNodeUpdate(nodeId, { config: { imageUrl: data.url, source: 'upload' } });
+        resizeNodeForImageUrl(nodeId, data.url);
       }
     } catch (e) {
       console.error('[NodeEditor] 图片上传失败:', e);
     }
-  }, [handleNodeUpdate]);
+  }, [handleNodeUpdate, resizeNodeForImageUrl]);
 
   // ─── AI自然语言建图 ───
 
@@ -2285,6 +2319,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 })()}
                 llmModels={chatModels}
                 canvasImages={canvasImages}
+                onResizeNode={resizeNodeForImageUrl}
               />
             ))}
           </g>
@@ -2554,6 +2589,7 @@ interface NodeCardProps {
   onDelete: () => void;
   onDeselect: () => void;
   onPreviewImage: (url: string) => void;
+  onResizeNode?: (nodeId: string, imageUrl: string) => void;
 }
 
 /** output-image-group 节点内容: 多图分页浏览 */
@@ -2621,7 +2657,7 @@ function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
   );
 }
 
-function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRunning, theme, canvasImages, llmModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onDeselect, onPreviewImage }: NodeCardProps) {
+function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRunning, theme, canvasImages, llmModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onDeselect, onPreviewImage, onResizeNode }: NodeCardProps) {
   const T = theme;
   const cat = getNodeCategory(node.type);
   const color = NODE_TYPE_COLORS[cat];
@@ -2710,6 +2746,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
       if (data.url) {
         onNodeFieldChange?.(node.id, 'imageUrl', data.url);
         onNodeFieldChange?.(node.id, 'source', 'upload');
+        onResizeNode?.(node.id, data.url);
       }
     } catch (err) { console.error('拖拽上传失败:', err); }
   };
@@ -2841,6 +2878,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
                         if (url) {
                           onNodeFieldChange?.(node.id, 'imageUrl', url);
                           onNodeFieldChange?.(node.id, 'source', 'url');
+                          onResizeNode?.(node.id, url);
                           (e.target as HTMLInputElement).value = '';
                         }
                       }
