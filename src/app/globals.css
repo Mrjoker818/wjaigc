@@ -655,3 +655,30 @@ input[type="range"]::-moz-range-thumb {
   background: var(--ne-option-bg);
   color: var(--ne-option-text);
 }
+
+/* 节点编辑器动画 */
+@keyframes ne-edge-flow {
+  0% { stroke-dashoffset: 20; }
+  100% { stroke-dashoffset: 0; }
+}
+@keyframes ne-node-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+@keyframes ne-port-glow {
+  0%, 100% { r: 4; }
+  50% { r: 5.5; }
+}
+.ne-edge-flowing {
+  stroke-dasharray: 8 4;
+  animation: ne-edge-flow 0.8s linear infinite;
+}
+.ne-node-processing {
+  animation: ne-node-pulse 1.5s ease-in-out infinite;
+}
+.ne-port-animated {
+  animation: ne-port-glow 2s ease-in-out infinite;
+}
+.ne-node-transition {
+  transition: filter 0.2s ease, opacity 0.2s ease;
+}

@@ -561,6 +561,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   const [compareImages, setCompareImages] = useState<{ before: string; after: string } | null>(null);
   const [comparePosition, setComparePosition] = useState(50);
   const [highlightNodeId, setHighlightNodeId] = useState<string | null>(null);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
 
   // P2: build_mode检测 — 生产环境禁用部分开发功能
   const isBuildMode = typeof process !== 'undefined' && process.env?.COZE_PROJECT_ENV === 'PROD';
@@ -2105,11 +2106,12 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                         )}
                         <path
                           d={getConnPath(from.x, from.y, to.x, to.y)}
-                          fill="none" stroke={isBlocked ? '#666' : color} strokeWidth={2}
-                          strokeOpacity={isBlocked ? 0.3 : isHighlighted ? 1 : isRunning ? 0.9 : 0.4}
+                          fill="none" stroke={isBlocked ? '#666' : color} strokeWidth={isHighlighted ? 2.5 : 1.8}
+                          strokeOpacity={isBlocked ? 0.3 : isHighlighted ? 1 : isRunning ? 0.9 : 0.45}
+                          strokeLinecap="round"
                           strokeDasharray={isBlocked ? '4 4' : undefined}
                           markerEnd={isBlocked ? undefined : `url(#${markerId})`}
-                          className={isRunning && !isBlocked ? 'animate-pulse' : ''}
+                          className={isRunning && !isBlocked ? 'animate-pulse' : 'transition-all duration-200'}
                         />
                         {/* 数据流动画 (执行中, 未阻断) */}
                         {isRunning && !isBlocked && (
@@ -2216,6 +2218,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 node={node}
                 isSelected={selectedNodeIds.has(node.id)}
                 isHighlighted={getConnectedNodeIds.has(node.id)}
+                isHovered={hoveredNodeId === node.id}
                 execResult={execResults[node.id]}
                 isRunning={execStatus === 'running'}
                 theme={T}
@@ -2233,7 +2236,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                   }
                   setSidebarTab('props');
                 }}
-                onHover={setHighlightNodeId}
+                onHover={(id: string | null) => { setHighlightNodeId(id); setHoveredNodeId(id); }}
                 onDragStart={(e) => {
                   const svgRect = svgRef.current?.getBoundingClientRect();
                   if (!svgRect) return;
@@ -2510,6 +2513,7 @@ interface NodeCardProps {
   node: WorkflowNode;
   isSelected: boolean;
   isHighlighted: boolean;
+  isHovered: boolean;
   execResult?: { status: string; output?: Record<string, unknown>; error?: string };
   isRunning: boolean;
   theme: NodeThemeType;
@@ -2533,7 +2537,7 @@ interface NodeCardProps {
   onPreviewImage: (url: string) => void;
 }
 
-function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, theme, canvasImages, llmModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onDeselect, onPreviewImage }: NodeCardProps) {
+function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRunning, theme, canvasImages, llmModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onDeselect, onPreviewImage }: NodeCardProps) {
   const T = theme;
   const cat = getNodeCategory(node.type);
   const color = NODE_TYPE_COLORS[cat];
@@ -2638,21 +2642,35 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
         />
       )}
 
-      {/* 选中边框 */}
+      {/* 选中光晕 (外发光效果) */}
+      {isSelected && (
+        <rect x={node.x - 6} y={node.y - 6} width={node.width + 12} height={node.height + 12} rx={isCondition ? 55 : 14}
+          fill="none" stroke={color} strokeWidth={2} strokeOpacity={0.25} style={{ filter: `blur(4px)` }} />
+      )}
       {isSelected && (
         <rect x={node.x - 2} y={node.y - 2} width={node.width + 4} height={node.height + 4} rx={isCondition ? 55 : 10}
-          fill="none" stroke="var(--ne-accent)" strokeWidth={2} strokeDasharray="4 2" className="animate-pulse" />
+          fill="none" stroke={color} strokeWidth={1.5} strokeOpacity={0.7} />
       )}
 
-      {/* 节点主体 */}
-      <rect x={node.x} y={node.y} width={node.width} height={node.height} rx={isCondition ? 55 : 8}
+      {/* 节点主体 - 带阴影和渐变边框 */}
+      <defs>
+        <filter id={`node-shadow-${node.id}`} x="-10%" y="-10%" width="120%" height="130%">
+          <feDropShadow dx="0" dy={isSelected || isHovered ? 3 : 2} stdDeviation={isSelected ? 6 : isHovered ? 5 : 4} floodColor={T.cardBg.startsWith('#1') || T.cardBg.startsWith('#0') ? '#000' : color} floodOpacity={isSelected ? 0.3 : isHovered ? 0.2 : 0.12} />
+        </filter>
+      </defs>
+      <rect x={node.x} y={node.y} width={node.width} height={node.height} rx={isCondition ? 55 : 10}
         fill={isSelected ? T.nodeSelected : T.nodeBody}
-        stroke={execResult ? statusColor : color}
-        strokeWidth={execResult ? 2 : 1}
-        strokeOpacity={execResult ? 1 : isHighlighted ? 0.7 : 0.4}
+        stroke={execResult ? statusColor : (isHovered && !isSelected) ? color : color}
+        strokeWidth={execResult ? 2 : isSelected ? 2 : isHovered ? 1.5 : isHighlighted ? 1 : 0.5}
+        strokeOpacity={execResult ? 1 : isSelected ? 0.9 : isHovered ? 0.6 : isHighlighted ? 0.5 : 0.2}
+        filter={`url(#node-shadow-${node.id})`}
         onMouseDown={(e) => { e.stopPropagation(); onSelect(e); onDragStart(e as unknown as React.MouseEvent); }}
         className="cursor-move"
       />
+
+      {/* 分类色条 - 顶部4px色条标识节点类型 */}
+      <rect x={node.x + 1} y={node.y + 1} width={node.width - 2} height={4} rx={isCondition ? 55 : 10}
+        fill={color} fillOpacity={0.7} className="pointer-events-none" />
 
       {/* 执行成功光圈 (渐现后消失, 不持续闪烁) */}
       {execResult?.status === 'success' && (
@@ -2673,17 +2691,17 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
       {/* 节点标题区 */}
       {!isCondition && (
         <g>
-          {/* 色条 */}
-          <rect x={node.x} y={node.y} width={node.width} height={3} rx={8} fill={color} fillOpacity={0.8} />
-          {/* 图标 */}
-          <foreignObject x={node.x + 8} y={node.y + 10} width={18} height={18}>
-            <div className="flex items-center justify-center" style={{ color }}>{getNodeIcon(node.type, 14)}</div>
+          {/* 图标 - 带圆形背景 */}
+          <foreignObject x={node.x + 8} y={node.y + 10} width={22} height={22}>
+            <div className="flex items-center justify-center w-[22px] h-[22px] rounded-md" style={{ background: color + '18', color }}>
+              {getNodeIcon(node.type, 12)}
+            </div>
           </foreignObject>
           {/* 标题 - 使用clipPath裁剪防止溢出 */}
           <clipPath id={`title-clip-${node.id}`}>
-            <rect x={node.x + 30} y={node.y + 8} width={node.width - 40} height={20} />
+            <rect x={node.x + 34} y={node.y + 8} width={node.width - 44} height={20} />
           </clipPath>
-          <text x={node.x + 30} y={node.y + 23} fill={T.nodeTitle} fontSize={13} fontWeight={500} className="pointer-events-none" clipPath={`url(#title-clip-${node.id})`}>
+          <text x={node.x + 34} y={node.y + 24} fill={T.nodeTitle} fontSize={12.5} fontWeight={600} className="pointer-events-none select-none" clipPath={`url(#title-clip-${node.id})`}>
             {node.label}
           </text>
           {/* ===== input-image 节点: 图片预览 + 拖拽上传区 ===== */}
@@ -2994,21 +3012,33 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
         const py = node.y + (i + 1) * (node.height / (inputPorts.length + 1));
         const portColor = PORT_COLORS[port.type] || T.connColor;
         return (
-          <g key={port.id} onMouseUp={() => onPortMouseUp(node.id, port)}>
-            <circle cx={node.x} cy={py} r={6} fill={T.portFill} stroke={portColor} strokeWidth={1.5} className="cursor-pointer" />
-            <text x={node.x + 10} y={py + 4} fill={T.portLabel} fontSize={10} className="pointer-events-none">{port.label}</text>
+          <g key={port.id} onMouseUp={() => onPortMouseUp(node.id, port)} className="group/port">
+            {/* 端口发光背景 */}
+            <circle cx={node.x} cy={py} r={10} fill={portColor} opacity={0.12} className="group-hover/port:opacity-30 transition-opacity" />
+            {/* 端口外圈 */}
+            <circle cx={node.x} cy={py} r={5.5} fill={T.portFill} stroke={portColor} strokeWidth={1.5} className="cursor-pointer" />
+            {/* 端口内点 */}
+            <circle cx={node.x} cy={py} r={2} fill={portColor} opacity={0.6} className="pointer-events-none" />
+            {/* 端口标签 */}
+            <text x={node.x + 12} y={py + 3.5} fill={T.portLabel} fontSize={9} className="pointer-events-none select-none" style={{ fontWeight: 500 }}>{port.label}</text>
           </g>
         );
       })}
 
-      {/* 输出端口 (颜色按类型区分, 实心) */}
+      {/* 输出端口 (颜色按类型区分, 实心+发光) */}
       {outputPorts.map((port, i) => {
         const py = node.y + (i + 1) * (node.height / (outputPorts.length + 1));
         const portColor = PORT_COLORS[port.type] || T.connColor;
         return (
-          <g key={port.id} onMouseDown={(e) => onPortMouseDown(e as unknown as React.MouseEvent, node.id, port)}>
-            <circle cx={node.x + node.width} cy={py} r={6} fill={portColor} stroke="none" className="cursor-pointer hover:r-[8px]" />
-            <text x={node.x + node.width - 10} y={py + 4} fill={T.portLabel} fontSize={10} textAnchor="end" className="pointer-events-none">{port.label}</text>
+          <g key={port.id} onMouseDown={(e) => onPortMouseDown(e as unknown as React.MouseEvent, node.id, port)} className="group/port">
+            {/* 端口发光背景 */}
+            <circle cx={node.x + node.width} cy={py} r={10} fill={portColor} opacity={0.15} className="group-hover/port:opacity-35 transition-opacity" />
+            {/* 端口外圈 */}
+            <circle cx={node.x + node.width} cy={py} r={5.5} fill={portColor} opacity={0.9} className="cursor-pointer" />
+            {/* 端口内点(白色) */}
+            <circle cx={node.x + node.width} cy={py} r={2} fill="white" opacity={0.7} className="pointer-events-none" />
+            {/* 端口标签 */}
+            <text x={node.x + node.width - 12} y={py + 3.5} fill={T.portLabel} fontSize={9} textAnchor="end" className="pointer-events-none select-none" style={{ fontWeight: 500 }}>{port.label}</text>
           </g>
         );
       })}
