@@ -20,7 +20,7 @@ import {
   Settings, Upload, X, Check, AlertCircle, Loader2, BoxSelect, Group,
   Search, ScanSearch, Eye, Pause, SkipForward, Workflow as WorkflowIcon, Timer,
   ArrowLeft, LayoutGrid, Sparkles, MessageCircle, Rotate3d, Box, ShoppingBag, Zap,
-  Copy, Clipboard, Package, Film, Bookmark, BookmarkPlus, GitCompare, Grid3X3, ArrowLeftFromLine, ImagePlus,
+  Copy, Clipboard, Film, Bookmark, BookmarkPlus, GitCompare, Grid3X3, ArrowLeftFromLine, ImagePlus,
   Shapes, BookOpen,
 } from 'lucide-react';
 
@@ -43,14 +43,6 @@ function getNodeIcon(type: NodeType, size = 14, className = '') {
 
 interface ModelOption { id: string; name: string; type: string; provider: string; }
 
-interface MaterialItem {
-  id: string;
-  type: 'image' | 'prompt' | 'color';
-  value: string;
-  label: string;
-  tags: string[];
-  createdAt: number;
-}
 
 function useModelList() {
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -610,7 +602,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 0.8 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0, vx: 0, vy: 0 });
-  const [sidebarTab, setSidebarTab] = useState<'nodes' | 'props' | 'ai-build' | 'presets' | 'prompts' | 'assistant' | 'materials'>('nodes');
+  const [sidebarTab, setSidebarTab] = useState<'nodes' | 'props' | 'ai-build' | 'presets' | 'prompts' | 'assistant'>('nodes');
   const [searchQuery, setSearchQuery] = useState('');
   const [executionId, setExecutionId] = useState<string | null>(null);
   const [execStatus, setExecStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
@@ -634,19 +626,6 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   // P1: 执行日志
   const [execLogs, setExecLogs] = useState<{ time: number; nodeId: string; label: string; status: string; message: string; duration?: number; nodeType?: string }[]>([]);  // P1: 节点复制粘贴
   const [clipboard, setClipboard] = useState<{ nodes: WorkflowNode[]; connections: WorkflowConnection[] } | null>(null);
-
-  // P1: 素材库
-  const [materials, setMaterials] = useState<MaterialItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('wujie-workflow-materials');
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
-  const [materialInput, setMaterialInput] = useState('');
-  const [materialLabel, setMaterialLabel] = useState('');
-  const [materialType, setMaterialType] = useState<'image' | 'prompt' | 'color'>('prompt');
-  const [materialTags, setMaterialTags] = useState('');
-  const [materialFilter, setMaterialFilter] = useState<'all' | 'image' | 'prompt' | 'color'>('all');
 
   // P2: 提示词库
   const [promptSnippets, setPromptSnippets] = useState<PromptSnippet[]>(() => {
@@ -1598,7 +1577,6 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
             { key: 'presets', label: '预设', icon: <LayoutGrid size={16} /> },
             { key: 'prompts', label: '词库', icon: <BookOpen size={16} /> },
             { key: 'assistant', label: '助手', icon: <MessageCircle size={16} /> },
-            { key: 'materials', label: '素材', icon: <Package size={16} /> },
           ] as const).map(tab => (
             <button
               key={tab.key}
@@ -1919,123 +1897,13 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
             </div>
           </div>
         )}
-
-        {/* P1: 素材库 Tab */}
-        {sidebarTab === 'materials' && (
-          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-            <div className="p-2 border-b border-border">
-              <div className="flex gap-1 mb-2">
-                {(['all', 'prompt', 'image', 'color'] as const).map(t => (
-                  <button key={t} onClick={() => setMaterialFilter(t)}
-                    className={`px-2.5 py-1.5 rounded text-sm transition-colors cursor-pointer ${materialFilter === t ? 'bg-[var(--ne-accent)]/20 text-[var(--ne-accent)]' : 'bg-[var(--ne-input-bg)] text-muted-foreground hover:text-foreground'}`}>
-                    {t === 'all' ? '全部' : t === 'prompt' ? '提示词' : t === 'image' ? '图片' : '颜色'}
-                  </button>
-                ))}
-              </div>
-              <div className="flex gap-1">
-                <select value={materialType} onChange={e => setMaterialType(e.target.value as 'image' | 'prompt' | 'color')}
-                  className="bg-[var(--ne-input-bg)] border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none">
-                  <option value="prompt">提示词</option>
-                  <option value="image">图片URL</option>
-                  <option value="color">颜色</option>
-                </select>
-                <input value={materialLabel} onChange={e => setMaterialLabel(e.target.value)} placeholder="名称"
-                  className="flex-1 bg-[var(--ne-input-bg)] border border-border rounded px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50" />
-              </div>
-              <div className="flex gap-1 mt-1.5">
-                <input value={materialInput} onChange={e => setMaterialInput(e.target.value)}
-                  placeholder={materialType === 'color' ? '#ff6600' : materialType === 'image' ? '图片URL' : '提示词内容'}
-                  className="flex-1 bg-[var(--ne-input-bg)] border border-border rounded px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50" />
-                <input value={materialTags} onChange={e => setMaterialTags(e.target.value)} placeholder="标签(逗号分隔)"
-                  className="w-24 bg-[var(--ne-input-bg)] border border-border rounded px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--ne-accent)]/50" />
-              </div>
-              <button
-                onClick={() => {
-                  if (!materialInput.trim()) return;
-                  const newMat: MaterialItem = {
-                    id: `mat-${Date.now()}`,
-                    type: materialType,
-                    value: materialInput.trim(),
-                    label: materialLabel.trim() || (materialType === 'prompt' ? '提示词' : materialType === 'image' ? '图片' : '颜色'),
-                    tags: materialTags.split(',').map(t => t.trim()).filter(Boolean),
-                    createdAt: Date.now(),
-                  };
-                  const next = [...materials, newMat];
-                  setMaterials(next);
-                  localStorage.setItem('wujie-workflow-materials', JSON.stringify(next));
-                  setMaterialInput(''); setMaterialLabel(''); setMaterialTags('');
-                }}
-                className="w-full mt-2 py-2 rounded bg-[var(--ne-accent)]/20 text-[var(--ne-accent)] text-sm font-medium hover:bg-[var(--ne-accent)]/30 transition-colors cursor-pointer"
-              >
-                添加素材
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-              {materials.filter(m => materialFilter === 'all' || m.type === materialFilter).length === 0 && (
-                <div className="text-center text-sm text-muted-foreground py-8">
-                  <Package size={24} className="mx-auto mb-2 text-muted-foreground" />
-                  素材库
-                  <br />
-                  <span className="text-muted-foreground">保存常用提示词、图片和颜色</span>
-                </div>
-              )}
-              {materials.filter(m => materialFilter === 'all' || m.type === materialFilter).map(mat => (
-                <div key={mat.id} className="bg-[var(--ne-input-bg)] border border-border rounded p-2.5 group">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      {mat.type === 'color' ? (
-                        <div className="w-4 h-4 rounded-sm border border-border flex-shrink-0" style={{ backgroundColor: mat.value }} />
-                      ) : mat.type === 'image' ? (
-                        <ImageIcon size={12} className="text-blue-400 flex-shrink-0" />
-                      ) : (
-                        <Type size={12} className="text-green-400 flex-shrink-0" />
-                      )}
-                      <span className="text-sm text-foreground truncate">{mat.label}</span>
-                    </div>
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={() => {
-                          // 填入当前选中节点的prompt字段
-                          const node = wf.nodes.find(n => n.id === selectedNodeId);
-                          if (node && selectedNodeId && (node.config.prompt !== undefined || mat.type === 'prompt')) {
-                            const currentPrompt = (node.config.prompt as string) || '';
-                            handleNodeUpdate(selectedNodeId, { config: { prompt: currentPrompt ? `${currentPrompt}, ${mat.value}` : mat.value } });
-                          }
-                        }}
-                        className="p-1 rounded text-[var(--ne-accent)] hover:bg-[var(--ne-accent)]/10 cursor-pointer" title="填入节点"
-                      >
-                        <Zap size={10} />
-                      </button>
-                      <button
-                        onClick={() => {
-                          const next = materials.filter(m => m.id !== mat.id);
-                          setMaterials(next);
-                          localStorage.setItem('wujie-workflow-materials', JSON.stringify(next));
-                        }}
-                        className="p-1 rounded text-red-400 hover:bg-red-400/10 cursor-pointer" title="删除"
-                      >
-                        <X size={10} />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="text-[11px] text-muted-foreground mt-1 truncate">{mat.value}</div>
-                  {mat.tags.length > 0 && (
-                    <div className="flex gap-0.5 mt-1.5 flex-wrap">
-                      {mat.tags.map((tag, i) => (
-                        <span key={i} className="px-2 py-0.5 rounded bg-muted text-xs text-muted-foreground">{tag}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
         </div>{/* 内容区 end */}
       </div>{/* 左侧栏外层 end */}
 
+      {/* 画布+内容面板 垂直容器 */}
+      <div className="flex flex-col flex-1 min-h-0">
       {/* 主画布 */}
-      <div className="flex-1 relative">
+      <div className="flex-1 relative min-h-0">
         {/* 顶部工具栏 */}
         <div className="absolute top-3 left-3 right-3 z-20 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -2559,10 +2427,11 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
           </div>
         )}
       </div>{/* 主画布 end */}
-      </div>{/* 主内容行 end */}
 
       {/* 底部内容面板 - 用户项目图片 */}
       <ContentPanel canvasImages={canvasImages} onDragImage={() => {}} themeStyle={themeStyle} />
+      </div>{/* 画布+内容面板 垂直容器 end */}
+      </div>{/* 主内容行 end */}
 
       {/* 图片预览弹窗 */}
       {imagePreviewUrl && (
