@@ -559,9 +559,9 @@ async function executeAsyncTask(
     };
   }
 
-  // 获取taskId
-  const taskId = submitData.taskId || submitData.taskIds?.[0];
-  if (!taskId) {
+  // 获取taskId(s)
+  const taskIds: string[] = submitData.taskIds || (submitData.taskId ? [submitData.taskId] : []);
+  if (taskIds.length === 0) {
     // 同步返回结果
     return {
       nodeId,
@@ -571,53 +571,96 @@ async function executeAsyncTask(
     };
   }
 
-  // 轮询任务状态
+  // 轮询任务状态 — 支持多taskIds并行轮询(n>1时返回多个图片)
   const maxPollTime = 600000; // 最多轮询10分钟，兼容极慢API
   const pollInterval = 1500;
   const pollStart = Date.now();
   const port = process.env.DEPLOY_RUN_PORT || 5000;
 
-  while (Date.now() - pollStart < maxPollTime) {
+  // 跟踪每个taskId的完成结果
+  const completedResults: Record<string, unknown>[] = [];
+  const pendingTaskIds = new Set(taskIds);
+
+  while (Date.now() - pollStart < maxPollTime && pendingTaskIds.size > 0) {
     await new Promise(r => setTimeout(r, pollInterval));
 
-    try {
-      const pollRes = await fetch(`http://localhost:${port}/api/poll-task`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ taskId }),
-        signal: AbortSignal.timeout(10000),
-      });
+    // 并行轮询所有待完成的taskIds
+    const pollPromises = Array.from(pendingTaskIds).map(async (tid) => {
+      try {
+        const pollRes = await fetch(`http://localhost:${port}/api/poll-task`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskId: tid, model: body.model }),
+          signal: AbortSignal.timeout(10000),
+        });
+        const pollData = await pollRes.json();
 
-      const pollData = await pollRes.json();
-
-      if (pollData.status === 'completed') {
-        return {
-          nodeId,
-          status: 'success',
-          output: parseApiOutput(nodeType, pollData),
-          durationMs: Date.now() - start,
-        };
+        if (pollData.status === 'completed') {
+          pendingTaskIds.delete(tid);
+          completedResults.push(pollData);
+        } else if (pollData.status === 'failed') {
+          pendingTaskIds.delete(tid);
+          console.warn(`[workflow] taskId=${tid} 失败: ${pollData.error}`);
+        }
+        // processing / queued → 继续轮询
+      } catch {
+        // 轮询失败，继续尝试
       }
+    });
 
-      if (pollData.status === 'failed') {
-        return {
-          nodeId,
-          status: 'failed',
-          error: pollData.error || '任务执行失败',
-          durationMs: Date.now() - start,
-        };
+    await Promise.all(pollPromises);
+  }
+
+  // 合并所有完成的结果
+  if (completedResults.length > 0) {
+    // 合并所有图片URL到imageUrls数组
+    const allImageUrls: string[] = [];
+    let firstImageUrl = '';
+    let mergedOutput: Record<string, unknown> = {};
+
+    for (const result of completedResults) {
+      const parsed = parseApiOutput(nodeType, result);
+      if (parsed.imageUrl && !firstImageUrl) firstImageUrl = parsed.imageUrl as string;
+      if (Array.isArray(parsed.imageUrls)) {
+        allImageUrls.push(...(parsed.imageUrls as string[]));
+      } else if (parsed.imageUrl) {
+        allImageUrls.push(parsed.imageUrl as string);
       }
-
-      // 继续轮询 (processing / queued)
-    } catch {
-      // 轮询失败，继续尝试
+      // 合并其他字段（取第一个非空值）
+      for (const [k, v] of Object.entries(parsed)) {
+        if (k !== 'imageUrl' && k !== 'imageUrls' && v != null && !mergedOutput[k]) {
+          mergedOutput[k] = v;
+        }
+      }
     }
+
+    mergedOutput.imageUrl = firstImageUrl || allImageUrls[0] || '';
+    if (allImageUrls.length > 1) {
+      mergedOutput.imageUrls = allImageUrls;
+    }
+
+    return {
+      nodeId,
+      status: 'success',
+      output: mergedOutput,
+      durationMs: Date.now() - start,
+    };
+  }
+
+  // 检查是否有超时未完成的任务
+  if (pendingTaskIds.size > 0) {
+    return {
+      nodeId,
+      status: 'failed',
+      error: `${pendingTaskIds.size}个任务轮询超时`,
+      durationMs: Date.now() - start,
+    };
   }
 
   return {
     nodeId,
     status: 'failed',
-    error: '轮询超时',
+    error: '所有任务执行失败',
     durationMs: Date.now() - start,
   };
 }

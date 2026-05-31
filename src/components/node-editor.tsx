@@ -871,7 +871,8 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   const handleLlmOptimize = useCallback(async (nodeId: string, _prompt: string, model: string, systemPrompt: string, instruction: string) => {
     const node = wf.nodes.find(n => n.id === nodeId);
     if (!node) return;
-    const currentText = node.config?.textContent || node.config?.promptText || '';
+    const currentText = String(node.config?.textContent || node.config?.promptText || '');
+    if (!currentText.trim()) return; // 空文本不优化
     handleNodeUpdate(nodeId, { config: { ...node.config, llmOptimizing: true } });
     try {
       const res = await fetch('/api/chat', {
@@ -883,13 +884,16 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
             { role: 'user', content: currentText },
           ],
           model: model || node.config?.llmModel || '',
+          stream: false, // 非流式请求，直接获取JSON结果
         }),
       });
       if (!res.ok) throw new Error('LLM请求失败');
       const data = await res.json();
-      const optimized = data.choices?.[0]?.message?.content || data.content || currentText;
+      // 兼容多种响应格式
+      const optimized = data.choices?.[0]?.message?.content || data.content || data.text || data.output || currentText;
       handleNodeUpdate(nodeId, { config: { ...node.config, textContent: optimized, promptText: optimized, llmOptimizing: false } });
-    } catch {
+    } catch (err) {
+      console.error('LLM优化失败:', err);
       handleNodeUpdate(nodeId, { config: { ...node.config, llmOptimizing: false } });
     }
   }, [wf.nodes, handleNodeUpdate]);
@@ -2799,23 +2803,23 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
       {/* 节点标题区 */}
       {!isCondition && (
         <g>
-          {/* 图标 - 带圆形背景 */}
-          <foreignObject x={node.x + 8} y={node.y + 10} width={22} height={22}>
-            <div className="flex items-center justify-center w-[22px] h-[22px] rounded-md" style={{ background: color + '18', color }}>
-              {getNodeIcon(node.type, 12)}
+          {/* 图标 - 小圆形背景 */}
+          <foreignObject x={node.x + 6} y={node.y + 5} width={18} height={18}>
+            <div className="flex items-center justify-center w-[18px] h-[18px] rounded" style={{ background: color + '18', color }}>
+              {getNodeIcon(node.type, 10)}
             </div>
           </foreignObject>
           {/* 标题 - 使用clipPath裁剪防止溢出 */}
           <clipPath id={`title-clip-${node.id}`}>
-            <rect x={node.x + 34} y={node.y + 8} width={node.width - 44} height={20} />
+            <rect x={node.x + 28} y={node.y + 4} width={node.width - 36} height={18} />
           </clipPath>
-          <text x={node.x + 34} y={node.y + 24} fill={T.nodeTitle} fontSize={12.5} fontWeight={600} className="pointer-events-none select-none" clipPath={`url(#title-clip-${node.id})`}>
+          <text x={node.x + 28} y={node.y + 17} fill={T.nodeTitle} fontSize={10.5} fontWeight={600} className="pointer-events-none select-none" clipPath={`url(#title-clip-${node.id})`}>
             {node.label}
           </text>
           {/* ===== input-image 节点: 图片预览 + 拖拽上传区 ===== */}
           {isInputImage && (
-            <foreignObject x={node.x + 6} y={node.y + 32} width={node.width - 12} height={node.height - 38}>
-              <div className="w-full h-full flex flex-col gap-1" style={{ color: T.nodeTitle, fontSize: 11 }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+            <foreignObject x={node.x + 6} y={node.y + 26} width={node.width - 12} height={node.height - 30}>
+              <div className="w-full h-full flex flex-col gap-1" style={{ color: T.nodeTitle, fontSize: 10 }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                 {hasImageOutput ? (
                   /* 有图片时显示缩略图 */
                   <div
@@ -2875,7 +2879,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
 
           {/* 图片缩略图 — 非input-image/output-image节点(如ai-generate)执行后显示结果 */}
           {!isInputImage && !isOutputImage && !isOutputImageGroup && hasImageOutput && (
-            <foreignObject x={node.x + 8} y={node.y + 32} width={node.width - 16} height={node.height - 44}>
+            <foreignObject x={node.x + 8} y={node.y + 26} width={node.width - 16} height={node.height - 32}>
               <div className="w-full h-full relative group cursor-pointer flex items-center justify-center" onClick={() => onPreviewImage(hasImageOutput)} onWheel={(e) => e.stopPropagation()}>
                 <img src={hasImageOutput} alt="" className="max-w-full max-h-full object-contain rounded opacity-70 group-hover:opacity-100 transition-opacity" />
               </div>
@@ -2888,7 +2892,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
             const singleUrl = hasImageOutput || '';
             const allUrls = imageUrls.length > 0 ? imageUrls : (singleUrl ? [singleUrl] : []);
             return (
-              <foreignObject x={node.x + 6} y={node.y + 32} width={node.width - 12} height={node.height - 38}>
+              <foreignObject x={node.x + 6} y={node.y + 26} width={node.width - 12} height={node.height - 30}>
                 {allUrls.length > 1 ? (
                   /* 多图: 分页浏览 */
                   <OutputImageGroupContent
@@ -2935,7 +2939,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
             const singleUrl = (execResult?.output?.imageUrl as string) || '';
             const allUrls = imageUrls.length > 0 ? imageUrls : (singleUrl ? [singleUrl] : []);
             return (
-              <foreignObject x={node.x + 6} y={node.y + 32} width={node.width - 12} height={node.height - 38}>
+              <foreignObject x={node.x + 6} y={node.y + 26} width={node.width - 12} height={node.height - 30}>
                 <OutputImageGroupContent
                   imageUrls={allUrls}
                   theme={T}
@@ -2947,13 +2951,13 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
 
           {/* ===== P0: input-text 节点直接编辑 + LLM 优化 + 预设 ===== */}
           {isInputText && (
-            <foreignObject x={node.x + 6} y={node.y + 32} width={node.width - 12} height={node.height - 38}>
-              <div className="flex flex-col gap-1 h-full" style={{ color: T.nodeTitle, fontSize: 11 }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+            <foreignObject x={node.x + 6} y={node.y + 26} width={node.width - 12} height={node.height - 30}>
+              <div className="flex flex-col gap-1 h-full" style={{ color: T.nodeTitle, fontSize: 12 }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                 {/* 可编辑文本区域 — 自适应内容 */}
                 <div
                   contentEditable
                   suppressContentEditableWarning
-                  className="w-full flex-1 min-h-[32px] overflow-y-auto rounded px-2 py-1 text-[11px] leading-tight outline-none focus:ring-1 focus:ring-[var(--ne-accent)]"
+                  className="w-full flex-1 min-h-[32px] overflow-y-auto rounded px-2 py-1.5 text-[12px] leading-snug outline-none focus:ring-1 focus:ring-[var(--ne-accent)]"
                   style={{ background: T.inputBg, color: T.text, borderColor: T.border, wordBreak: 'break-word' }}
                   onBlur={(e) => {
                     const text = e.currentTarget.innerText || '';
@@ -3083,12 +3087,12 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
                         {llmSystemEnabled ? '●' : '○'} 系统提示
                       </button>
                       <button
-                        className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer bg-[var(--ne-accent)] text-white hover:opacity-80 flex items-center gap-0.5"
+                        className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer bg-[var(--ne-accent)] text-white hover:opacity-80 flex items-center gap-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
                         onClick={(e) => { e.stopPropagation(); onLlmOptimize?.(node.id, String(node.config?.textContent || ''), String(node.config?.llmModel || ''), String(node.config?.llmSystemPrompt || ''), String(node.config?.llmInstruction || '')); }}
-                        disabled={isRunning}
+                        disabled={isRunning || !!node.config?.llmOptimizing}
                         title="运行 LLM 优化"
                       >
-                        <Sparkles size={9} /> 优化
+                        {node.config?.llmOptimizing ? <Loader2 size={9} className="animate-spin" /> : <Sparkles size={9} />} {node.config?.llmOptimizing ? '优化中...' : '优化'}
                       </button>
                     </div>
                     {/* 系统提示词输入 */}
