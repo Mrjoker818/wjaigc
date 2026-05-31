@@ -925,6 +925,14 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
 
             // 将远程 taskId 写入 editTask，让 /api/poll-task 的远程轮询逻辑接管
             updateTaskProgress(taskId, { status: 'processing', progress: 10, label: '已提交，等待生成' });
+            // ★ 关键修复: 如果API返回了task_id（异步模式），但compatProfile是pollMode:'none'，
+            // 说明该提供商实际上支持异步轮询，需要升级compatProfile以确保poll-task能正确轮询
+            let effectiveCompatProfile = compatProfile;
+            if (compatProfile && compatProfile.pollMode === 'none' && parsed.taskIds?.length) {
+              effectiveCompatProfile = { ...compatProfile, pollMode: 'path', pollPathTemplate: '/tasks/{taskId}' };
+              console.info(`[edit] Upgrading compatProfile from pollMode:'none' to 'path' (API returned task_id=${remoteTaskId})`);
+            }
+
             setEditTask(taskId, {
               id: taskId,
               status: 'processing',
@@ -940,7 +948,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                 model,
                 prompt: effectivePrompt,
                 allTaskIds: parsed.taskIds,
-                compatProfile,
+                compatProfile: effectiveCompatProfile,
               },
             } as EditTask);
             return; // 轮询将由前端驱动

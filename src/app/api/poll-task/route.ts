@@ -5,7 +5,7 @@ export const maxDuration = 600; // 10分钟 - 支持长时间轮询慢速API（�
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
-import { resolveCompatProfile, buildPollUrl, type ApiCompatProfile } from '@/lib/api-compatibility';
+import { resolveCompatProfile, buildPollUrl, extractImageUrl, type ApiCompatProfile } from '@/lib/api-compatibility';
 import { postProcessAIRemoveBG } from '@/lib/remove-bg-postprocess';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { getEditTask, deleteEditTask, setEditTask, failEditTask } from '@/lib/edit-task-store';
@@ -113,9 +113,12 @@ export async function POST(request: NextRequest) {
           let pollBaseUrl = apiBaseUrl;
           let pollPath = `/tasks/${remoteTaskId}`;
           
+          console.info(`[poll-task] edit remote poll: taskId=${taskId}, remoteTaskId=${remoteTaskId}, apiBaseUrl=${apiBaseUrl}, hasCompat=${!!remoteCompat}, compatId=${remoteCompat ? (remoteCompat as ApiCompatProfile).id : 'none'}`);
+          
           if (remoteCompat) {
             const profile = remoteCompat as ApiCompatProfile;
             const built = buildPollUrl(apiBaseUrl, remoteTaskId, profile);
+            console.info(`[poll-task] buildPollUrl result: built=${built}, profile.pollMode=${profile.pollMode}, profile.pollPathTemplate=${profile.pollPathTemplate}`);
             if (built) {
               pollUrl = built;
               // 从 pollUrl 提取 baseUrl 和 path 供 fetchWithV1Retry 使用
@@ -131,6 +134,8 @@ export async function POST(request: NextRequest) {
             pollUrl = `${apiBaseUrl}/tasks/${remoteTaskId}`;
           }
           
+          console.info(`[poll-task] remote poll request: pollBaseUrl=${pollBaseUrl}, pollPath=${pollPath}, fullUrl=${pollUrl}`);
+          
           const pollResp = await fetchWithV1Retry(
             pollBaseUrl,
             pollPath,
@@ -141,29 +146,115 @@ export async function POST(request: NextRequest) {
             },
           );
 
+          console.info(`[poll-task] remote poll response: status=${pollResp.status}, ok=${pollResp.ok}`);
+
           if (pollResp.ok) {
             const pollData = await pollResp.json() as Record<string, unknown>;
-            const taskData = (pollData.data as Record<string, unknown>) || pollData;
+            // 递归解包嵌套的 data 字段 (APImart 等API可能多层嵌套: {code,data:{code,data:{status,images}}})
+            let taskData: Record<string, unknown> = pollData;
+            let unwrapDepth = 0;
+            while (taskData.data && typeof taskData.data === 'object' && !Array.isArray(taskData.data) && unwrapDepth < 3) {
+              const innerData = taskData.data as Record<string, unknown>;
+              // 只有当内层有 status/images/results 等任务字段时才解包
+              if (innerData.status || innerData.images || innerData.results || innerData.output || innerData.image_urls || innerData.image_urls_list || innerData.generated_images || innerData.url || innerData.image_url) {
+                taskData = innerData;
+                unwrapDepth++;
+              } else if (innerData.data && typeof innerData.data === 'object') {
+                // 内层还有嵌套 data，继续解包
+                taskData = innerData;
+                unwrapDepth++;
+              } else {
+                break;
+              }
+            }
             const taskStatus = String(taskData.status || '').toLowerCase();
+            
+            console.info(`[poll-task] remote poll data: taskStatus=${taskStatus}, unwrapDepth=${unwrapDepth}, hasImages=${!!taskData.images}, hasResults=${!!taskData.results}, hasOutput=${!!taskData.output}, hasImageUrls=${!!taskData.image_urls}, pollDataKeys=${Object.keys(pollData).join(',')}, taskDataKeys=${Object.keys(taskData).join(',')}`);
 
             if (taskStatus === 'succeeded' || taskStatus === 'completed' || taskStatus === 'success') {
               // 远程任务完成，提取图片
               const images: Array<{ url: string }> = [];
-              const dataItems = taskData.images || taskData.results || taskData.output;
+              
+              // 尝试多种数据字段名提取图片列表
+              const dataItems = taskData.images || taskData.results || taskData.output || taskData.image_urls || taskData.image_urls_list || taskData.generated_images;
               if (Array.isArray(dataItems)) {
                 for (const item of dataItems) {
-                  const url = item.url || item.image_url || item;
-                  if (typeof url === 'string' && url.startsWith('http')) {
-                    images.push({ url });
+                  const url = item.url || item.image_url || item.image_url_optimized || item;
+                  if (typeof url === 'string' && (url.startsWith('http') || url.startsWith('/'))) {
+                    images.push({ url: url.startsWith('/') ? `${apiBaseUrl}${url}` : url });
                   }
                 }
-              } else if (typeof taskData.image_url === 'string') {
-                images.push({ url: taskData.image_url });
-              } else if (typeof taskData.url === 'string' && taskData.url.startsWith('http')) {
-                images.push({ url: taskData.url });
+              }
+              // 单个图片字段
+              if (images.length === 0) {
+                const singleUrl = taskData.image_url || taskData.url || taskData.image_url_optimized
+                  || (taskData.result as Record<string, unknown>)?.url
+                  || (taskData.result as Record<string, unknown>)?.image_url;
+                if (typeof singleUrl === 'string' && (singleUrl.startsWith('http') || singleUrl.startsWith('/'))) {
+                  images.push({ url: singleUrl.startsWith('/') ? `${apiBaseUrl}${singleUrl}` : singleUrl });
+                }
+              }
+              // 从 result 对象中提取图片数组
+              if (images.length === 0 && taskData.result && typeof taskData.result === 'object') {
+                const resultObj = taskData.result as Record<string, unknown>;
+                const resultImages = resultObj.images || resultObj.results || resultObj.output || resultObj.image_urls || resultObj.generated_images;
+                if (Array.isArray(resultImages)) {
+                  for (const item of resultImages) {
+                    const url = item.url || item.image_url || item.image_url_optimized || item;
+                    if (typeof url === 'string' && (url.startsWith('http') || url.startsWith('/'))) {
+                      images.push({ url: url.startsWith('/') ? `${apiBaseUrl}${url}` : url });
+                    }
+                  }
+                }
+              }
+              // 从嵌套的 data.data 提取 (APImart双层嵌套格式: {code, data: {code, data: {images...}}})
+              if (images.length === 0 && taskData.data && typeof taskData.data === 'object') {
+                const innerData = taskData.data as Record<string, unknown>;
+                console.info(`[poll-task] edit remote trying nested taskData.data, keys=${Object.keys(innerData).join(',')}`);
+                const innerImages = innerData.images || innerData.results || innerData.output || innerData.image_urls || innerData.generated_images;
+                if (Array.isArray(innerImages)) {
+                  for (const item of innerImages) {
+                    const url = item.url || item.image_url || item.image_url_optimized || item;
+                    if (typeof url === 'string' && (url.startsWith('http') || url.startsWith('/'))) {
+                      images.push({ url: url.startsWith('/') ? `${apiBaseUrl}${url}` : url });
+                    }
+                  }
+                }
+                // 嵌套data的单图片字段
+                if (images.length === 0) {
+                  const innerSingleUrl = innerData.image_url || innerData.url || innerData.image_url_optimized;
+                  if (typeof innerSingleUrl === 'string' && (innerSingleUrl.startsWith('http') || innerSingleUrl.startsWith('/'))) {
+                    images.push({ url: innerSingleUrl.startsWith('/') ? `${apiBaseUrl}${innerSingleUrl}` : innerSingleUrl });
+                  }
+                }
+              }
+              // 从 data.images 提取 (APImart格式)
+              if (images.length === 0 && pollData.images && Array.isArray(pollData.images)) {
+                for (const item of pollData.images) {
+                  const url = item.url || item.image_url || item;
+                  if (typeof url === 'string' && (url.startsWith('http') || url.startsWith('/'))) {
+                    images.push({ url: url.startsWith('/') ? `${apiBaseUrl}${url}` : url });
+                  }
+                }
+              }
+              // 从 data.output 提取 (某些API格式)
+              if (images.length === 0 && pollData.output && typeof pollData.output === 'string' && pollData.output.startsWith('http')) {
+                images.push({ url: pollData.output });
+              }
+              // 最终兜底: 深度搜索整个响应中所有以http开头且包含图片扩展名的URL
+              if (images.length === 0) {
+                const fullJson = JSON.stringify(pollData);
+                const urlMatches = fullJson.match(/https?:\/\/[^\s"\\]+\.(png|jpg|jpeg|webp|gif)/gi);
+                if (urlMatches && urlMatches.length > 0) {
+                  console.info(`[poll-task] edit deep search found image URLs: ${urlMatches.slice(0, 3).join(', ')}`);
+                  for (const url of urlMatches.slice(0, 4)) {
+                    images.push({ url: url.replace(/[^a-zA-Z0-9+/.:_@&?=-]$/, '') });
+                  }
+                }
               }
 
               if (images.length > 0) {
+                console.info(`[poll-task] edit remote completed! images=${images.length}, firstUrl=${images[0].url?.substring(0, 80)}...`);
                 updateTaskProgress(taskId, { status: 'completed', progress: 100 });
                 setEditTask(taskId, {
                   id: taskId,
@@ -196,7 +287,53 @@ export async function POST(request: NextRequest) {
                   },
                 }, { status: 200 });
               }
+              // 状态成功但未能提取图片 — 尝试深度搜索
+              const isSuccessStatus = taskStatus === 'succeeded' || taskStatus === 'success' || taskStatus === 'completed';
+              if (isSuccessStatus && images.length === 0) {
+                console.warn(`[poll-task] edit remote SUCCESS but no images extracted, trying deep search. keys=${Object.keys(taskData).join(',')}`);
+                const { extractImageUrl: deepExtract } = await import('@/lib/api-compatibility');
+                const deepUrl = deepExtract(pollData) || deepExtract(taskData);
+                if (deepUrl) {
+                  console.info(`[poll-task] edit deep search found image: ${deepUrl.substring(0, 100)}...`);
+                  const existingTask = getEditTask(taskId);
+                  setEditTask(taskId, {
+                    ...(existingTask || { id: taskId, progress: 0, createdAt: Date.now() }),
+                    status: 'completed',
+                    stage: '完成',
+                    result: {
+                      success: true,
+                      image: { url: deepUrl },
+                      images: [{ url: deepUrl }],
+                      model: remotePollInfo.model || model,
+                      provider: remotePollInfo.apiBaseUrl || 'unknown',
+                    },
+                    completedAt: Date.now(),
+                  });
+                  return NextResponse.json({
+                    success: true,
+                    status: 'completed',
+                    stage: '完成',
+                    result: {
+                      success: true,
+                      image: { url: deepUrl },
+                      images: [{ url: deepUrl }],
+                      model: remotePollInfo.model || model,
+                      provider: remotePollInfo.apiBaseUrl || 'unknown',
+                    },
+                  }, { status: 200 });
+                }
+                // 深度搜索也没找到 — 标记失败避免无限轮询
+                console.error(`[poll-task] edit remote SUCCESS but NO image found anywhere. rawResponse=${JSON.stringify(pollData).substring(0, 500)}`);
+                failEditTask(taskId, '远程任务成功但未找到图片结果');
+                return NextResponse.json({
+                  success: false,
+                  status: 'failed',
+                  error: '远程任务成功但未找到图片结果',
+                  retryable: false,
+                }, { status: 200 });
+              }
             } else if (taskStatus === 'failed' || taskStatus === 'error') {
+              console.warn(`[poll-task] edit remote task FAILED: taskStatus=${taskStatus}, error=${JSON.stringify(taskData.error || taskData.error_message || taskData.message)}`);
               const taskError = (taskData.error as Record<string, unknown>) || {};
               const rawError = (typeof taskError === 'object' && taskError.message)
                 ? String(taskError.message)
@@ -210,6 +347,7 @@ export async function POST(request: NextRequest) {
               }, { status: 200 });
             } else {
               // 仍在处理中
+              console.info(`[poll-task] edit remote still processing: taskStatus=${taskStatus}, progress=${taskData.progress}`);
               const progress = typeof taskData.progress === 'number' ? taskData.progress : task.progress;
               return NextResponse.json({
                 success: true,
@@ -218,6 +356,9 @@ export async function POST(request: NextRequest) {
                 progress: Math.max(progress, 15),
               }, { status: 200 });
             }
+          } else {
+            const errorText = await pollResp.text().catch(() => '');
+            console.warn(`[poll-task] edit remote poll HTTP error: status=${pollResp.status}, body=${errorText.substring(0, 200)}`);
           }
         } catch (remoteErr) {
           console.warn('[poll-task] edit remote poll error:', remoteErr instanceof Error ? remoteErr.message : remoteErr);
