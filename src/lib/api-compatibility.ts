@@ -317,8 +317,189 @@ const ASPECT_RATIO_TO_PIXELS: Record<string, string> = {
 };
 
 /**
+ * Model-specific pixel size lookup for accurate API size parameter generation.
+ * Keyed by lowercase model substring → ratio → quality → pixel size string.
+ * This mirrors the MODEL_PIXEL_SIZES in canvas-generation-group.ts but is kept
+ * here to avoid circular dependency.
+ *
+ * Ref: https://www.volcengine.com/docs/6492/2172373
+ * Ref: https://docs.geekai.co/cn/docs/image/bytedance/doubao-seedream-5.0-lite
+ */
+const MODEL_SPECIFIC_PIXEL_SIZES: Record<string, Record<string, Record<string, string>>> = {
+  // Seedream 5.0 Lite — 官方: size="2K"|"3K"
+  // Ref: https://www.volcengine.com/docs/6492/2172373
+  // Ref: https://docs.geekai.co/cn/docs/image/bytedance/doubao-seedream-5.0-lite
+  'doubao-seedream-5-0-lite': {
+    '1:1': { '2K': '2048x2048', '3K': '3072x3072' },
+    '4:3': { '2K': '2304x1728', '3K': '3456x2592' },
+    '3:4': { '2K': '1728x2304', '3K': '2592x3456' },
+    '16:9': { '2K': '2848x1600', '3K': '4096x2304' },
+    '9:16': { '2K': '1600x2848', '3K': '2304x4096' },
+    '3:2': { '2K': '2496x1664', '3K': '3744x2496' },
+    '2:3': { '2K': '1664x2496', '3K': '2496x3744' },
+    '21:9': { '2K': '3136x1344', '3K': '4704x2016' },
+  },
+  'seedream-5-0-lite': {
+    '1:1': { '2K': '2048x2048', '3K': '3072x3072' },
+    '4:3': { '2K': '2304x1728', '3K': '3456x2592' },
+    '3:4': { '2K': '1728x2304', '3K': '2592x3456' },
+    '16:9': { '2K': '2848x1600', '3K': '4096x2304' },
+    '9:16': { '2K': '1600x2848', '3K': '2304x4096' },
+    '3:2': { '2K': '2496x1664', '3K': '3744x2496' },
+    '2:3': { '2K': '1664x2496', '3K': '2496x3744' },
+    '21:9': { '2K': '3136x1344', '3K': '4704x2016' },
+  },
+  // Seedream 5.0 (非lite) — 官方: size="2K"|"4K"
+  'doubao-seedream-5-0': {
+    '1:1': { '2K': '2048x2048', '4K': '4096x4096' },
+    '4:3': { '2K': '2304x1728', '4K': '4096x3072' },
+    '3:4': { '2K': '1728x2304', '4K': '3072x4096' },
+    '16:9': { '2K': '2848x1600', '4K': '4096x2304' },
+    '9:16': { '2K': '1600x2848', '4K': '2304x4096' },
+    '3:2': { '2K': '2496x1664', '4K': '4096x2730' },
+    '2:3': { '2K': '1664x2496', '4K': '2730x4096' },
+    '21:9': { '2K': '3136x1344', '4K': '4704x2016' },
+  },
+  'seedream-5': {
+    '1:1': { '2K': '2048x2048', '4K': '4096x4096' },
+    '4:3': { '2K': '2304x1728', '4K': '4096x3072' },
+    '3:4': { '2K': '1728x2304', '4K': '3072x4096' },
+    '16:9': { '2K': '2848x1600', '4K': '4096x2304' },
+    '9:16': { '2K': '1600x2848', '4K': '2304x4096' },
+    '3:2': { '2K': '2496x1664', '4K': '4096x2730' },
+    '2:3': { '2K': '1664x2496', '4K': '2730x4096' },
+    '21:9': { '2K': '3136x1344', '4K': '4704x2016' },
+  },
+  // Seedream 4.5 — 官方: size="2K"|"4K" (最小2K起步)
+  'doubao-seedream-4-5': {
+    '1:1': { '2K': '2048x2048', '4K': '4096x4096' },
+    '4:3': { '2K': '2304x1728', '4K': '4096x3072' },
+    '3:4': { '2K': '1728x2304', '4K': '3072x4096' },
+    '16:9': { '2K': '2560x1440', '4K': '4096x2304' },
+    '9:16': { '2K': '1440x2560', '4K': '2304x4096' },
+    '3:2': { '2K': '2496x1664', '4K': '4096x2730' },
+    '2:3': { '2K': '1664x2496', '4K': '2730x4096' },
+    '21:9': { '2K': '3024x1296', '4K': '4096x1756' },
+  },
+  'seedream-4-5': {
+    '1:1': { '2K': '2048x2048', '4K': '4096x4096' },
+    '4:3': { '2K': '2304x1728', '4K': '4096x3072' },
+    '3:4': { '2K': '1728x2304', '4K': '3072x4096' },
+    '16:9': { '2K': '2560x1440', '4K': '4096x2304' },
+    '9:16': { '2K': '1440x2560', '4K': '2304x4096' },
+    '3:2': { '2K': '2496x1664', '4K': '4096x2730' },
+    '2:3': { '2K': '1664x2496', '4K': '2730x4096' },
+    '21:9': { '2K': '3024x1296', '4K': '4096x1756' },
+  },
+  // Seedream 4.0 — 官方: size="1K"|"2K"|"4K"
+  'doubao-seedream-4': {
+    '1:1': { '1K': '1024x1024', '2K': '2048x2048', '4K': '4096x4096' },
+    '4:3': { '1K': '1152x864', '2K': '2304x1728', '4K': '4096x3072' },
+    '3:4': { '1K': '864x1152', '2K': '1728x2304', '4K': '3072x4096' },
+    '16:9': { '1K': '1280x720', '2K': '2560x1440', '4K': '4096x2304' },
+    '9:16': { '1K': '720x1280', '2K': '1440x2560', '4K': '2304x4096' },
+    '3:2': { '1K': '1248x832', '2K': '2496x1664', '4K': '4096x2730' },
+    '2:3': { '1K': '832x1248', '2K': '1664x2496', '4K': '2730x4096' },
+    '21:9': { '1K': '1512x648', '2K': '3024x1296', '4K': '4096x1756' },
+  },
+  'seedream-4': {
+    '1:1': { '1K': '1024x1024', '2K': '2048x2048', '4K': '4096x4096' },
+    '4:3': { '1K': '1152x864', '2K': '2304x1728', '4K': '4096x3072' },
+    '3:4': { '1K': '864x1152', '2K': '1728x2304', '4K': '3072x4096' },
+    '16:9': { '1K': '1280x720', '2K': '2560x1440', '4K': '4096x2304' },
+    '9:16': { '1K': '720x1280', '2K': '1440x2560', '4K': '2304x4096' },
+    '3:2': { '1K': '1248x832', '2K': '2496x1664', '4K': '4096x2730' },
+    '2:3': { '1K': '832x1248', '2K': '1664x2496', '4K': '2730x4096' },
+    '21:9': { '1K': '1512x648', '2K': '3024x1296', '4K': '4096x1756' },
+  },
+  // Seedream 3.0 — 官方: 仅像素值，最大2048x2048
+  'doubao-seedream-3': {
+    '1:1': { '1K': '1024x1024', '2K': '2048x2048' },
+    '4:3': { '1K': '1024x768', '2K': '2048x1536' },
+    '3:4': { '1K': '768x1024', '2K': '1536x2048' },
+    '16:9': { '1K': '1024x576', '2K': '2048x1152' },
+    '9:16': { '1K': '576x1024', '2K': '1152x2048' },
+    '3:2': { '1K': '1024x683', '2K': '2048x1365' },
+    '2:3': { '1K': '683x1024', '2K': '1365x2048' },
+    '21:9': { '1K': '1024x439', '2K': '2048x878' },
+  },
+  'seedream-3': {
+    '1:1': { '1K': '1024x1024', '2K': '2048x2048' },
+    '4:3': { '1K': '1024x768', '2K': '2048x1536' },
+    '3:4': { '1K': '768x1024', '2K': '1536x2048' },
+    '16:9': { '1K': '1024x576', '2K': '2048x1152' },
+    '9:16': { '1K': '576x1024', '2K': '1152x2048' },
+    '3:2': { '1K': '1024x683', '2K': '2048x1365' },
+    '2:3': { '1K': '683x1024', '2K': '1365x2048' },
+    '21:9': { '1K': '1024x439', '2K': '2048x878' },
+  },
+  // Seedance 4.5 — 官方: size="2K"|"4K"
+  'doubao-seedance-4-5': {
+    '1:1': { '1K': '1024x1024', '2K': '2048x2048', '4K': '4096x4096' },
+    '4:3': { '1K': '1024x768', '2K': '2048x1536', '4K': '3840x2880' },
+    '3:4': { '1K': '768x1024', '2K': '1536x2048', '4K': '2880x3840' },
+    '16:9': { '1K': '1280x720', '2K': '2048x1152', '4K': '3840x2160' },
+    '9:16': { '1K': '720x1280', '2K': '1152x2048', '4K': '2160x3840' },
+  },
+  'seedance': {
+    '1:1': { '1K': '1024x1024', '2K': '2048x2048', '4K': '4096x4096' },
+    '4:3': { '1K': '1024x768', '2K': '2048x1536', '4K': '3840x2880' },
+    '3:4': { '1K': '768x1024', '2K': '1536x2048', '4K': '2880x3840' },
+    '16:9': { '1K': '1280x720', '2K': '2048x1152', '4K': '3840x2160' },
+    '9:16': { '1K': '720x1280', '2K': '1152x2048', '4K': '2160x3840' },
+  },
+  // GPT Image 2 — 官方支持的尺寸
+  'gpt-image-2': {
+    '1:1':  { 'auto': '1024x1024', 'low': '1024x1024', 'medium': '1024x1024', 'high': '1024x1024' },
+    '3:2':  { 'auto': '1536x1024', 'low': '1536x1024', 'medium': '1536x1024', 'high': '1536x1024' },
+    '2:3':  { 'auto': '1024x1536', 'low': '1024x1536', 'medium': '1024x1536', 'high': '1024x1536' },
+    '16:9': { 'auto': '2048x1152', 'low': '2048x1152', 'medium': '2048x1152', 'high': '3840x2160' },
+    '9:16': { 'auto': '1152x2048', 'low': '1152x2048', 'medium': '1152x2048', 'high': '2160x3840' },
+  },
+  // DALL-E 3 — 官方支持的尺寸
+  'dall-e-3': {
+    '1:1': { 'standard': '1024x1024', 'hd': '1024x1024' },
+    '16:9': { 'standard': '1792x1024', 'hd': '1792x1024' },
+    '9:16': { 'standard': '1024x1792', 'hd': '1024x1792' },
+  },
+};
+
+/**
+ * Look up model-specific pixel size for a given ratio+quality combination.
+ * Returns undefined if no model-specific mapping exists.
+ */
+function getModelSpecificPixelSize(ratio: string, quality: string, modelId: string): string | undefined {
+  const lowerModel = modelId.toLowerCase();
+  // Find the best matching model key (longest match = most specific)
+  let matchedKey: string | undefined;
+  let matchedLen = 0;
+  for (const key of Object.keys(MODEL_SPECIFIC_PIXEL_SIZES)) {
+    if (lowerModel.includes(key) && key.length > matchedLen) {
+      matchedKey = key;
+      matchedLen = key.length;
+    }
+  }
+  if (!matchedKey) return undefined;
+
+  const modelSizes = MODEL_SPECIFIC_PIXEL_SIZES[matchedKey];
+  const ratioSizes = modelSizes[ratio];
+  if (!ratioSizes) return undefined;
+
+  // Try exact quality match
+  if (ratioSizes[quality]) return ratioSizes[quality];
+  // Try 'standard' fallback
+  if (ratioSizes['standard']) return ratioSizes['standard'];
+  // Return first available
+  return Object.values(ratioSizes)[0];
+}
+
+/**
  * Convert an aspect-ratio string ("1:1", "16:9") to a pixel-size string
  * ("1024x1024", "1536x1024") suitable for OpenAI-compatible APIs.
+ *
+ * When modelId and quality are provided, uses the model-specific pixel mapping
+ * from calculateActualPixels (which has per-model official API pixel sizes).
+ * Falls back to generic ASPECT_RATIO_TO_PIXELS mapping for unknown models.
  *
  * For GPT Image 2, quality affects the actual pixel dimensions:
  * - high quality + 16:9 → 3840x2160 (4K)
@@ -327,6 +508,14 @@ const ASPECT_RATIO_TO_PIXELS: Record<string, string> = {
  * For ratios not in the lookup table, dynamically calculates based on 2048 max edge.
  */
 export function convertAspectRatioToSize(ratio: string, quality?: string, modelId?: string): string {
+  // Priority 1: Use model-specific pixel mapping when modelId is provided
+  // This ensures accurate pixel sizes per official API docs
+  // (e.g., Seedream 5.0 Lite 2K 16:9 = 2848x1600 instead of generic 2048x1152)
+  if (modelId) {
+    const modelResult = getModelSpecificPixelSize(ratio, quality || 'standard', modelId);
+    if (modelResult) return modelResult;
+  }
+
   // GPT Image 2 with high quality uses 4K sizes for wide/tall ratios
   const lowerModel = (modelId || '').toLowerCase();
   const isGptImage2 = lowerModel.includes('gpt-image-2') || lowerModel.includes('gpt-image2');
@@ -425,7 +614,8 @@ export function adjustRequestForProfile(
   if (profile.sizeFormat === 'pixel' && body.size && typeof body.size === 'string') {
     const sizeStr = body.size as string;
     if (sizeStr.includes(':')) {
-      const quality = typeof body.quality === 'string' ? body.quality : undefined;
+      const quality = typeof body.quality === 'string' ? body.quality :
+                      typeof body.resolution === 'string' ? body.resolution : undefined;
       const modelId = typeof body.model === 'string' ? body.model : undefined;
       body.size = convertAspectRatioToSize(sizeStr, quality, modelId);
     }
