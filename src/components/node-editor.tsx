@@ -3244,18 +3244,37 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
           />
         );
 
-      case 'select':
+      case 'select': {
+        // 动态解析 quality 和 aspectRatio 选项
+        let dynamicOptions = field.options;
+        if (field.key === 'quality' && node.config?.model) {
+          const modelId = String(node.config.model);
+          const modelKey = Object.keys(MODEL_QUALITIES).find(k => modelId.includes(k));
+          const qualities = modelKey ? MODEL_QUALITIES[modelKey as keyof typeof MODEL_QUALITIES] : [];
+          if (qualities.length > 0) {
+            dynamicOptions = qualities.map(q => ({ value: q, label: q }));
+          }
+        }
+        if (field.key === 'aspectRatio' && node.config?.model) {
+          const modelId = String(node.config.model);
+          const modelKey = Object.keys(MODEL_ASPECT_RATIOS).find(k => modelId.includes(k));
+          const ratios = modelKey ? MODEL_ASPECT_RATIOS[modelKey as keyof typeof MODEL_ASPECT_RATIOS] : [];
+          if (ratios.length > 0) {
+            dynamicOptions = ratios.map(r => ({ value: r, label: r }));
+          }
+        }
         return (
           <select
             value={String(externalValue)}
             onChange={e => onUpdate(node.id, { config: { [field.key]: e.target.value } })}
             className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-[var(--ne-accent)]/50"
           >
-            {field.options?.map(opt => (
+            {dynamicOptions?.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
         );
+      }
 
       case 'slider': {
         const numVal = Number(externalValue) || Number(field.defaultValue) || 0;

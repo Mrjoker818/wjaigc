@@ -597,7 +597,7 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
       { label: '纯白', value: 'white' }, { label: '渐变', value: 'gradient' },
       { label: '场景', value: 'scene' }, { label: '透明', value: 'transparent' }
     ], defaultValue: 'white' });
-    fields.push({ key: 'aspectRatio', label: '画面比例', type: 'select', options: MODEL_ASPECT_RATIOS.map(r => ({ label: r.label, value: r.value })), defaultValue: '1:1' });
+    fields.push({ key: 'aspectRatio', label: '画面比例', type: 'select', options: SHARED_ASPECT_RATIOS, defaultValue: '1:1' });
     fields.push({ key: 'quality', label: '图片质量', type: 'select', options: [{ label: '自动', value: 'auto' }], defaultValue: 'auto' });
   }
 
@@ -618,7 +618,7 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
       { label: '食品', value: 'food' }, { label: '数码', value: 'digital' },
       { label: '家居', value: 'home' }, { label: '配饰', value: 'accessories' }
     ], defaultValue: 'clothing' });
-    fields.push({ key: 'aspectRatio', label: '画面比例', type: 'select', options: MODEL_ASPECT_RATIOS.map(r => ({ label: r.label, value: r.value })), defaultValue: '1:1' });
+    fields.push({ key: 'aspectRatio', label: '画面比例', type: 'select', options: SHARED_ASPECT_RATIOS, defaultValue: '1:1' });
     fields.push({ key: 'quality', label: '图片质量', type: 'select', options: [{ label: '自动', value: 'auto' }], defaultValue: 'auto' });
   }
 
@@ -638,7 +638,7 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
       { label: '360度旋转', value: '360' }
     ], defaultValue: 'quad' });
     fields.push({ key: 'characterRef', label: '角色一致性', type: 'toggle', defaultValue: true });
-    fields.push({ key: 'aspectRatio', label: '画面比例', type: 'select', options: MODEL_ASPECT_RATIOS.map(r => ({ label: r.label, value: r.value })), defaultValue: '1:1' });
+    fields.push({ key: 'aspectRatio', label: '画面比例', type: 'select', options: SHARED_ASPECT_RATIOS, defaultValue: '1:1' });
     fields.push({ key: 'quality', label: '图片质量', type: 'select', options: [{ label: '自动', value: 'auto' }], defaultValue: 'auto' });
   }
 
