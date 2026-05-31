@@ -11,6 +11,22 @@
  * - 节点自动布局
  */
 
+import { MODEL_QUALITIES, QUALITY_TO_SIZE, MODEL_ASPECT_RATIOS, calculateActualPixels } from './canvas-generation-group';
+
+/** 通用宽高比选项（用于节点字段定义） */
+const SHARED_ASPECT_RATIOS = [
+  { label: '1:1 (正方形)', value: '1:1' },
+  { label: '4:3 (横向)', value: '4:3' },
+  { label: '3:4 (纵向)', value: '3:4' },
+  { label: '16:9 (宽屏)', value: '16:9' },
+  { label: '9:16 (竖屏)', value: '9:16' },
+  { label: '3:2 (横向)', value: '3:2' },
+  { label: '2:3 (纵向)', value: '2:3' },
+  { label: '4:5 (纵向)', value: '4:5' },
+  { label: '5:4 (横向)', value: '5:4' },
+  { label: '21:9 (超宽)', value: '21:9' },
+];
+
 // ==================== 节点类型 ====================
 
 export type NodeType =
@@ -461,14 +477,19 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
 
   // ─── AI节点 (各类型特定字段) ───
   if (type === 'ai-generate') {
-    fields.push({ key: 'quality', label: '质量', type: 'select', options: [
-      { label: '标准', value: 'standard' }, { label: '高清', value: 'hd' }
-    ], defaultValue: 'standard' });
-    fields.push({ key: 'size', label: '尺寸', type: 'select', options: [
-      { label: '1024×1024', value: '1024x1024' }, { label: '1152×864', value: '1152x864' },
-      { label: '1280×720', value: '1280x720' }, { label: '720×1280', value: '720x1280' },
-      { label: '864×1152', value: '864x1152' }, { label: '1792×1024', value: '1792x1024' }
-    ], defaultValue: '1024x1024' });
+    // 画面比例（通用，所有模型共享）
+    const aspectRatioOptions = [
+      { label: '1:1', value: '1:1' }, { label: '4:3', value: '4:3' }, { label: '3:4', value: '3:4' },
+      { label: '16:9', value: '16:9' }, { label: '9:16', value: '9:16' }, { label: '3:2', value: '3:2' },
+      { label: '2:3', value: '2:3' }, { label: '21:9', value: '21:9' }, { label: '4:5', value: '4:5' },
+      { label: '5:4', value: '5:4' },
+    ];
+    fields.push({ key: 'aspectRatio', label: '画面比例', type: 'select', options: aspectRatioOptions, defaultValue: '1:1' });
+    // 图片质量（默认通用选项，节点编辑器会根据所选模型动态更新）
+    fields.push({ key: 'quality', label: '图片质量', type: 'select', options: [
+      { label: '1K', value: '1K' }, { label: '2K', value: '2K' }, { label: '4K', value: '4K' },
+      { label: '标准 standard', value: 'standard' }, { label: '高清 hd', value: 'hd' },
+    ], defaultValue: '1K' });
     fields.push({ key: 'seed', label: '随机种子', type: 'number', min: -1, max: 2147483647, defaultValue: -1, placeholder: '-1为随机' });
     fields.push({ key: 'n', label: '生成数量', type: 'number', min: 1, max: 4, defaultValue: 1 });
   }
@@ -528,9 +549,9 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
 
   if (type === 'ai-retouch') {
     fields.push({ key: 'editModel', label: '修图模型', type: 'model-select', modelFilter: 'image' });
-    fields.push({ key: 'size', label: '输出尺寸', type: 'select', options: [
-      { label: '1024', value: '1024' }, { label: '1536', value: '1536' }, { label: '2048', value: '2048' }
-    ], defaultValue: '1024' });
+    fields.push({ key: 'aspectRatio', label: '画面比例', type: 'select', options: SHARED_ASPECT_RATIOS, defaultValue: '1:1' });
+    // 质量选项由节点编辑器根据模型动态更新
+    fields.push({ key: 'quality', label: '图片质量', type: 'select', options: [{ label: '标准', value: 'standard' }], defaultValue: 'standard' });
   }
 
   // ─── 画布模式专用节点 ───
@@ -576,6 +597,8 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
       { label: '纯白', value: 'white' }, { label: '渐变', value: 'gradient' },
       { label: '场景', value: 'scene' }, { label: '透明', value: 'transparent' }
     ], defaultValue: 'white' });
+    fields.push({ key: 'aspectRatio', label: '画面比例', type: 'select', options: MODEL_ASPECT_RATIOS.map(r => ({ label: r.label, value: r.value })), defaultValue: '1:1' });
+    fields.push({ key: 'quality', label: '图片质量', type: 'select', options: [{ label: '自动', value: 'auto' }], defaultValue: 'auto' });
   }
 
   if (type === 'ai-brand-ecommerce') {
@@ -595,6 +618,8 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
       { label: '食品', value: 'food' }, { label: '数码', value: 'digital' },
       { label: '家居', value: 'home' }, { label: '配饰', value: 'accessories' }
     ], defaultValue: 'clothing' });
+    fields.push({ key: 'aspectRatio', label: '画面比例', type: 'select', options: MODEL_ASPECT_RATIOS.map(r => ({ label: r.label, value: r.value })), defaultValue: '1:1' });
+    fields.push({ key: 'quality', label: '图片质量', type: 'select', options: [{ label: '自动', value: 'auto' }], defaultValue: 'auto' });
   }
 
   if (type === 'ai-segment') {
@@ -613,6 +638,8 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
       { label: '360度旋转', value: '360' }
     ], defaultValue: 'quad' });
     fields.push({ key: 'characterRef', label: '角色一致性', type: 'toggle', defaultValue: true });
+    fields.push({ key: 'aspectRatio', label: '画面比例', type: 'select', options: MODEL_ASPECT_RATIOS.map(r => ({ label: r.label, value: r.value })), defaultValue: '1:1' });
+    fields.push({ key: 'quality', label: '图片质量', type: 'select', options: [{ label: '自动', value: 'auto' }], defaultValue: 'auto' });
   }
 
   if (type === 'ai-3d-model') {
@@ -889,20 +916,27 @@ export function buildNodeExecutionRequest(
       // 文本输入节点：直接输出文本，不需要调用API优化
       return null;
 
-    case 'ai-generate':
+    case 'ai-generate': {
+      const aspectRatio = config.aspectRatio || '1:1';
+      const quality = config.quality || '1K';
+      const modelId = config.model || '';
+      // 使用模型专用像素映射计算实际尺寸
+      const actualSize = calculateActualPixels(aspectRatio, quality, modelId);
       return {
         endpoint: '/api/generate',
         method: 'POST',
         body: {
           prompt: config.prompt || config.textContent || config.text || '',
           negativePrompt: config.negativePrompt || '',
-          model: config.model || '',
-          quality: config.quality || 'standard',
-          size: config.size || '1024x1024',
+          model: modelId,
+          quality,
+          aspectRatio,
+          size: actualSize || '1024x1024',
           n: config.n || 1,
           seed: config.seed || -1,
         }
       };
+    }
 
     case 'ai-edit':
       return {
@@ -986,17 +1020,22 @@ export function buildNodeExecutionRequest(
         }
       };
 
-    case 'ai-retouch':
+    case 'ai-retouch': {
+      const retouchModel = config.editModel || config.model || '';
+      const retouchQuality = config.quality || '1K';
+      const retouchAspectRatio = config.aspectRatio || '1:1';
+      const retouchSize = calculateActualPixels(retouchAspectRatio, retouchQuality, retouchModel);
       return {
         endpoint: '/api/edit',
         method: 'POST',
         body: {
           image: config.imageUrl || '',
           prompt: config.prompt || config.textContent || config.text || '',
-          model: config.editModel || config.model || '',
-          size: config.size || '1024',
+          model: retouchModel,
+          size: retouchSize || '1024x1024',
         }
       };
+    }
 
     // ─── 画布模式专用节点 ───
     case 'ai-font-design':
@@ -1013,30 +1052,40 @@ export function buildNodeExecutionRequest(
         }
       };
 
-    case 'ai-refine-engine':
+    case 'ai-refine-engine': {
+      const refineModel = config.model || '';
+      const refineQuality = config.quality || '1K';
+      const refineAspectRatio = config.aspectRatio || '1:1';
+      const refineSize = calculateActualPixels(refineAspectRatio, refineQuality, refineModel);
       return {
         endpoint: '/api/edit',
         method: 'POST',
         body: {
           image: config.imageUrl || '',
           prompt: config.prompt || `Professional product photography, ${config.lighting || 'studio'} lighting, ${config.viewAngle || 'front'} view, ${config.background || 'white'} background, ${config.category || 'electronics'} product, commercial quality, 8k`,
-          model: config.model || '',
-          size: '1024',
+          model: refineModel,
+          size: refineSize || '1024x1024',
         }
       };
+    }
 
-    case 'ai-brand-ecommerce':
+    case 'ai-brand-ecommerce': {
+      const brandModel = config.model || '';
+      const brandQuality = config.quality || '1K';
+      const brandAspectRatio = config.aspectRatio || '1:1';
+      const brandSize = calculateActualPixels(brandAspectRatio, brandQuality, brandModel);
       return {
         endpoint: '/api/generate',
         method: 'POST',
         body: {
           prompt: config.prompt || `E-commerce product photo for ${config.brandName || 'brand'}, ${config.templateType || 'product-scene'} style, ${config.brandStyle || 'minimal'} aesthetic, ${config.productCategory || 'clothing'} category, professional lighting, commercial quality`,
           negativePrompt: config.negativePrompt || 'low quality, blurry, watermark, text, signature',
-          model: config.model || '',
-          quality: 'hd',
-          size: '1024x1024',
+          model: brandModel,
+          quality: brandQuality,
+          size: brandSize || '1024x1024',
         }
       };
+    }
 
     case 'ai-segment':
       return {
@@ -1049,19 +1098,24 @@ export function buildNodeExecutionRequest(
         }
       };
 
-    case 'ai-multi-angle':
+    case 'ai-multi-angle': {
+      const maModel = config.model || '';
+      const maQuality = config.quality || '1K';
+      const maAspectRatio = config.aspectRatio || '1:1';
+      const maSize = calculateActualPixels(maAspectRatio, maQuality, maModel);
       return {
         endpoint: '/api/generate',
         method: 'POST',
         body: {
           prompt: config.prompt || `Multi-angle view, ${config.angles || 'quad'} layout, same subject from different angles, consistent style`,
           negativePrompt: config.negativePrompt || '',
-          model: config.model || '',
+          model: maModel,
           imageUrl: config.imageUrl || '',
-          quality: 'hd',
-          size: '1024x1024',
+          quality: maQuality,
+          size: maSize || '1024x1024',
         }
       };
+    }
 
     case 'ai-3d-model':
       return {
@@ -1074,16 +1128,20 @@ export function buildNodeExecutionRequest(
         }
       };
 
-    case 'storyboard-sequence':
+    case 'storyboard-sequence': {
+      const sbModel = config.model || '';
+      const sbQuality = config.quality || '1K';
+      const sbAspectRatio = config.aspectRatio || '1:1';
+      const sbSize = calculateActualPixels(sbAspectRatio, sbQuality, sbModel);
       return {
         endpoint: '/api/generate',
         method: 'POST',
         body: {
           prompt: config.scenes || config.prompt || '',
           negativePrompt: config.negativePrompt || '',
-          model: config.model || '',
-          quality: 'hd',
-          size: config.aspectRatio === '16:9' ? '1792x1024' : config.aspectRatio === '9:16' ? '1024x1792' : config.aspectRatio === '4:3' ? '1152x864' : '1024x1024',
+          model: sbModel,
+          quality: sbQuality,
+          size: sbSize || '1024x1024',
           // 分镜串行元数据
           _storyboard: {
             scenes: (config.scenes as string || '').split('\n').filter((s: string) => s.trim()),
@@ -1096,6 +1154,7 @@ export function buildNodeExecutionRequest(
           strength: config.continueMode === 'img2img' ? (config.strength || 50) : undefined,
         }
       };
+    }
 
     case 'agent-auto':
       return {

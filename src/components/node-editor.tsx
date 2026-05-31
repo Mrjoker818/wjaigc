@@ -9,6 +9,8 @@ import {
   getNodePropertyFields, getNodeCategory, NODE_TEMPLATES,
   canConnectPorts, autoLayoutWorkflow, parseComfyUIWorkflow,
 } from '@/lib/workflow-engine';
+import { getModelDisplayName } from '@/lib/model-name-map';
+import { MODEL_QUALITIES, MODEL_ASPECT_RATIOS } from '@/lib/canvas-generation-group';
 import {
   Image as ImageIcon, Type, SlidersHorizontal, Wand2, Pencil, Maximize, Scissors,
   PenTool, Palette, Sun, GitBranch, GitMerge, Repeat, RefreshCw, Layers,
@@ -2871,7 +2873,7 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
                       onMouseDown={(e) => e.stopPropagation()}
                     >
                       <option value="">选择模型</option>
-                      {(llmModels ?? []).map(m => <option key={m.id} value={m.id} style={{ background: T.optionBg, color: T.optionText }}>{m.name}{m.provider ? ` (${m.provider})` : ''}</option>)}
+                      {(llmModels ?? []).map(m => <option key={m.id} value={m.id} style={{ background: T.optionBg, color: T.optionText }}>{getModelDisplayName(m.id)}{m.provider ? ` (${m.provider})` : ''}</option>)}
                     </select>
                     {/* LLM 指令 */}
                     <input
@@ -3290,13 +3292,33 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
         return (
           <select
             value={String(externalValue || '')}
-            onChange={e => onUpdate(node.id, { config: { [field.key]: e.target.value } })}
+            onChange={e => {
+              const newModelId = e.target.value;
+              const configUpdate: Record<string, string> = { [field.key]: newModelId };
+              // 模型变更时，动态更新 quality 和 aspectRatio 为新模型的默认值
+              if (newModelId) {
+                const supportedQualities = MODEL_QUALITIES[newModelId as keyof typeof MODEL_QUALITIES] || [];
+                // 尝试找到匹配的模型配置
+                const modelKey = Object.keys(MODEL_QUALITIES).find(k => newModelId.includes(k));
+                const qualities = modelKey ? MODEL_QUALITIES[modelKey as keyof typeof MODEL_QUALITIES] : supportedQualities;
+                if (qualities.length > 0) {
+                  configUpdate.quality = qualities[0];
+                }
+                const supportedRatios = MODEL_ASPECT_RATIOS[newModelId as keyof typeof MODEL_ASPECT_RATIOS] || [];
+                const ratioKey = Object.keys(MODEL_ASPECT_RATIOS).find(k => newModelId.includes(k));
+                const ratios = ratioKey ? MODEL_ASPECT_RATIOS[ratioKey as keyof typeof MODEL_ASPECT_RATIOS] : supportedRatios;
+                if (ratios.length > 0) {
+                  configUpdate.aspectRatio = ratios[0];
+                }
+              }
+              onUpdate(node.id, { config: configUpdate });
+            }}
             disabled={modelsLoading}
             className="w-full bg-[var(--ne-input-bg)] border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-[var(--ne-accent)]/50 disabled:opacity-50"
           >
             <option value="">{modelsLoading ? '加载中...' : '选择模型'}</option>
             {models.filter(m => m.type === modelFilterType).map(m => (
-              <option key={`${m.id}-${m.provider}`} value={m.id}>{m.name} ({m.provider})</option>
+              <option key={`${m.id}-${m.provider}`} value={m.id}>{getModelDisplayName(m.id)} ({m.provider})</option>
             ))}
           </select>
         );
