@@ -1199,8 +1199,11 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   // 轮询执行状态
   useEffect(() => {
     if (execStatus !== 'running' || !executionId) return;
-    const interval = setInterval(async () => {
+    let pollCount = 0;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+    const poll = async () => {
       try {
+        pollCount++;
         const res = await fetch('/api/workflow/execute', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1218,7 +1221,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
             });
             setExecLogs(prev => [...prev, ...newLogs]);
           }
-          clearInterval(interval);
+          return; // done, don't schedule next poll
         } else if (data.results) {
           setExecResults(data.results);
           // P1: 记录运行中的日志
@@ -1232,10 +1235,14 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
         }
       } catch {
         setExecStatus('failed');
-        clearInterval(interval);
+        return; // error, don't schedule next poll
       }
-    });
-    return () => clearInterval(interval);
+      // ★ 动态间隔：前5次1秒，5-15次1.5秒，之后2秒
+      const delay = pollCount <= 5 ? 1000 : pollCount <= 15 ? 1500 : 2000;
+      timerId = setTimeout(poll, delay);
+    };
+    poll();
+    return () => { if (timerId) clearTimeout(timerId); };
   }, [execStatus, executionId]);
 
   // ─── 保存工作流 ───

@@ -419,8 +419,11 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false 
   // ─── Poll task status ─────────────────────────────────────
   useEffect(() => {
     if (!taskId || !isGenerating) return;
-    const interval = setInterval(async () => {
+    let pollCount = 0;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+    const poll = async () => {
       try {
+        pollCount++;
         const res = await fetch(`/api/ai-psd/status?taskId=${taskId}`);
         const data = await res.json();
         if (data.success && data.task) {
@@ -430,10 +433,12 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false 
             setIsGenerating(false);
             stopTimer();
             setCurrentStep(3);
+            return; // done, don't schedule next poll
           } else if (data.task.status === 'failed') {
             setIsGenerating(false);
             stopTimer();
             setError(data.task.error || '任务失败');
+            return; // done, don't schedule next poll
           } else {
             // Map progress to step
             const p = data.task.progress;
@@ -449,8 +454,12 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false 
           }
         }
       } catch { /* ignore polling errors */ }
-    }, 2000);
-    return () => clearInterval(interval);
+      // ★ 动态间隔：前5次1秒，5-15次1.5秒，之后2秒
+      const delay = pollCount <= 5 ? 1000 : pollCount <= 15 ? 1500 : 2000;
+      timerId = setTimeout(poll, delay);
+    };
+    poll();
+    return () => { if (timerId) clearTimeout(timerId); };
   }, [taskId, isGenerating]);
 
   // ─── File upload handler ───────────────────────────────────

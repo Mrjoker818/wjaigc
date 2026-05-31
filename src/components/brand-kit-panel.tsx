@@ -734,7 +734,8 @@ function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageMo
         } catch {}
       }
       if (completed.size < tIds.length) {
-        setTimeout(poll, 5000);
+        const delay = attempts < 5 ? 1000 : attempts < 15 ? 1500 : 2000;
+        setTimeout(poll, delay);
       } else {
         setGenerating(false); setPolling(false);
       }

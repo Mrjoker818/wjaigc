@@ -335,8 +335,8 @@ export async function POST(request: NextRequest) {
     // ★ 注册到统一任务中心（SSE推送 + 取消支持）
     registerTask(taskId, 'edit', '语言修图');
 
-    // 后台异步执行编辑流程（10分钟全局超时兜底，因为 LLM协作+串行回退可能耗时较长）
-    const EDIT_GLOBAL_TIMEOUT_MS = 10 * 60 * 1000;
+    // 后台异步执行编辑流程（5分钟全局超时兜底）
+    const EDIT_GLOBAL_TIMEOUT_MS = 5 * 60 * 1000;
     (async () => {
       // 全局超时：确保 IIFE 不会无限运行
       const timeoutId = setTimeout(() => {
@@ -465,11 +465,23 @@ export async function POST(request: NextRequest) {
     // ========== 5. LLM 协作：分析原图 + 优化 prompt + 蒙版语义 ==========
     // 核心思路：LLM 是"大脑"理解意图，图像模型是"手"执行修改
     // 协作流程：LLM 分析原图内容 → 理解用户意图 → 结合蒙版区域 → 生成精准编辑指令
+    // ★ 优化：如果 prompt 已经足够详细（>40字符），跳过 LLM 协作以节省时间
     let effectivePrompt = prompt;
     let llmInstruction = prompt; // LLM 生成的精准指令，无 LLM 参与时等于原始 prompt
     let llmEditRegions: Array<{ label: string; bounds: { x: number; y: number; width: number; height: number } }> = []; // LLM 识别的编辑区域
+    const llmStartTime = Date.now();
+
+    // ★ 跳过 LLM 协作的条件：prompt 足够详细（用户自己写了好的 prompt）
+    // 短 prompt（如"把背景换成蓝色"）由 LLM 扩展成详细指令价值更大
+    // 长 prompt（如详细描述）跳过 LLM 可节省 5-20 秒
+    const shouldSkipLlmCollaboration = prompt.length > 80;
+
+    if (shouldSkipLlmCollaboration) {
+      console.info(`[edit] taskId=${taskId} 跳过LLM协作 (prompt长度=${prompt.length} > 80), 节省 ${Date.now() - llmStartTime}ms`);
+    }
 
     // ===== 单次 LLM 协作：合并分析+指令生成为1次调用 =====
+    if (!shouldSkipLlmCollaboration) {
     try {
       // ★ 检查任务是否已被取消
       if (isTaskCancelled(taskId)) {
@@ -574,7 +586,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
             max_tokens: 2000,
             temperature: 0.7,
           }),
-          signal: AbortSignal.timeout(45000),
+          signal: AbortSignal.timeout(20000),
         });
 
         if (collabResp.ok) {
@@ -643,6 +655,9 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     } catch (llmErr) {
       console.warn('LLM collaboration failed, using original prompt:', llmErr);
     }
+    } // end of if (!shouldSkipLlmCollaboration)
+
+    console.info(`[edit] taskId=${taskId} LLM协作阶段耗时=${Date.now() - llmStartTime}ms, effectivePrompt长度=${effectivePrompt.length}`);
 
     const editInstruction = `Edit this image according to the following instruction: ${effectivePrompt}. Maintain the overall composition and style while making the requested changes.${size ? ` Output image size: ${size}.` : ''}${quality ? ` Output quality: ${quality}.` : ''}`;
 
@@ -653,6 +668,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       return;
     }
     updateTaskStage(taskId, '编辑中');
+    const editStartTime = Date.now();
     console.info(`[edit] taskId=${taskId} 开始图像编辑, model=${model}, path=${isOpenaiImageModel && supportsNativeMask && maskBuffer ? 'images.edit' : 'chat/completions(fallback)'}`);
 
     // 路径A: OpenAI images.edit 端点（仅 OpenAI 官方 + 支持 mask 的场景）
@@ -701,9 +717,11 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               'Content-Length': String(formBuffer.length),
             },
             body: formBuffer as unknown as BodyInit,
-            signal: AbortSignal.timeout(90000),
+            signal: AbortSignal.timeout(60000), // ★ 60秒超时
           },
         );
+
+        console.info(`[edit] taskId=${taskId} images.edit响应, 状态=${editResponse.status}, 耗时=${Date.now() - editStartTime}ms`);
 
         if (!editResponse.ok) {
           const errText = await editResponse.text().catch(() => '');
@@ -820,7 +838,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               'Content-Type': 'application/json',
             },
             body: JSON.stringify(adjustedBody),
-            signal: AbortSignal.timeout(90000),
+            signal: AbortSignal.timeout(60000), // ★ 60秒超时
           },
         );
 
@@ -857,7 +875,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                     'Content-Type': 'application/json',
                   },
                   body: JSON.stringify({ ...adjustedBody, n: 1 }),
-                  signal: AbortSignal.timeout(90000),
+                  signal: AbortSignal.timeout(60000), // ★ 60秒超时
                 })
                 .then(async r => {
                   if (!r.ok) return null;
@@ -1025,9 +1043,11 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(chatRequestBody),
-        signal: AbortSignal.timeout(90000),
+        signal: AbortSignal.timeout(60000),
       },
     );
+
+    console.info(`[edit] taskId=${taskId} chat/completions响应, 状态=${chatResponse.status}, 耗时=${Date.now() - editStartTime}ms`);
 
     if (!chatResponse.ok) {
       const errText = await chatResponse.text().catch(() => '');
@@ -1124,12 +1144,16 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     }
 
     let resultImageUrl = extractImageFromResponse(chatData);
+    console.info(`[edit] taskId=${taskId} chat/completions图片提取: ${resultImageUrl ? '成功' : '未找到'}, 耗时=${Date.now() - editStartTime}ms`);
 
-    // chat/completions 未提取到图片，尝试降级到 images/generations
+    // chat/completions 未提取到图片，尝试降级到 images/generations（★ 限时30秒，避免长时间等待）
     if (!resultImageUrl && (isOpenaiImageModel || isImageEditModel(model))) {
       try {
+        console.info(`[edit] taskId=${taskId} chat/completions未返回图片, 尝试images/generations降级`);
+        const fallbackStart = Date.now();
         const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, 1);
         if (genUrl) resultImageUrl = genUrl;
+        console.info(`[edit] taskId=${taskId} images/generations降级: ${genUrl ? '成功' : '失败'}, 耗时=${Date.now() - fallbackStart}ms`);
       } catch { /* 忽略 */ }
     }
 
@@ -1171,7 +1195,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                 ...(outputSize ? { size: outputSize } : {}),
                 ...(quality ? { quality } : {}),
               }),
-              signal: AbortSignal.timeout(90000),
+              signal: AbortSignal.timeout(60000), // ★ 60秒超时
             });
             if (extraResp.ok) {
               const extraText = await extraResp.text();
@@ -1238,7 +1262,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     success: true,
     mode: 'polling',
     taskId,
-    estimatedTime: 60,
+    estimatedTime: 30,
   });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
@@ -1287,6 +1311,7 @@ async function tryImagesGenerations(
         n: Math.min(count, 4),
         response_format: 'url',
       }),
+      signal: AbortSignal.timeout(60000), // ★ 60秒超时，避免无限等待
     },
   );
 

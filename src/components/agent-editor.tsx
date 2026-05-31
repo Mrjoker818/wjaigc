@@ -139,92 +139,75 @@ export function AgentEditor({
   const borderColor = isMonochrome ? MONO_BORDER : 'rgba(255,255,255,0.12)';
 
   // 轮询任务状态
-  const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollAttempts = useRef(0);
 
-  const startPolling = useCallback((tid: string) => {
-    if (pollInterval.current) clearInterval(pollInterval.current);
-    pollAttempts.current = 0;
+  const pollOnce = useCallback(async (tid: string) => {
+    pollAttempts.current++;
 
-    pollInterval.current = setInterval(async () => {
-      pollAttempts.current++;
-      if (pollAttempts.current > 180) {
-        // 180 * 2s = 360s = 6 分钟超时（留余量给后端 5 分钟全局超时）
-        if (pollInterval.current) clearInterval(pollInterval.current);
+    if (pollAttempts.current > 300) {
+      stopTimer();
+      setIsProcessing(false);
+      setError('任务超时，请重试');
+      return;
+    }
+
+    try {
+      const resp = await fetch(`/api/agent-edit?taskId=${encodeURIComponent(tid)}`);
+      if (!resp.ok) throw new Error('poll failed');
+
+      const data = await resp.json() as Record<string, unknown>;
+      const status = String(data.status || '');
+      const prog = Number(data.progress || 0);
+      const label = String(data.label || '');
+      const result = data.result as Record<string, unknown> | undefined;
+      const taskError = String(data.error || '');
+
+      setProgress(prog);
+      setProgressLabel(label);
+      if (result?.steps) setSteps(result.steps as AgentStep[]);
+
+      if (status === 'completed') {
         stopTimer();
+        setIsProcessing(false);
+        setProgress(100);
+        setProgressLabel('完成');
+        if (result?.imageUrl) setResultImageUrl(String(result.imageUrl));
+        if (result?.prompt) setResultPrompt(String(result.prompt));
+        const steps = (result?.steps || []) as AgentStep[];
+        const failedSteps = steps.filter((s: AgentStep) => !s.success);
+        if (failedSteps.length > 0) {
+          const errorDetails = failedSteps.map((s: AgentStep, i: number) =>
+            `步骤${i + 1}(${s.toolName}): ${s.result || '未知错误'}`
+          ).join('\n');
+          setError(errorDetails);
+        }
+        return;
+      } else if (status === 'failed') {
         setIsProcessing(false); stopTimer();
-        setError('任务超时，请重试');
+        const errorMsg = translateErrorFrontend(taskError || (result?.finalResponse ? String(result.finalResponse) : '') || '任务执行失败');
+        setError(errorMsg);
+        return;
+      } else if (status === 'cancelled') {
+        setIsProcessing(false); stopTimer();
+        setError('任务已取消');
         return;
       }
+    } catch {
+      // 轮询失败，继续重试
+    }
 
-      try {
-        // 使用 agent-edit 自己的 GET 端点查询任务状态
-        // （避免 Next.js dev 模式下不同路由内存不共享的问题）
-        const resp = await fetch(`/api/agent-edit?taskId=${encodeURIComponent(tid)}`);
-        if (!resp.ok) return;
+    // 动态间隔：前10次1s，10-30次1.5s，之后2s
+    const nextInterval = pollAttempts.current <= 10 ? 1000 :
+                         pollAttempts.current <= 30 ? 1500 : 2000;
+    pollTimer.current = setTimeout(() => pollOnce(tid), nextInterval);
+  }, [stopTimer]);
 
-        const data = await resp.json() as Record<string, unknown>;
-        const status = String(data.status || '');
-        const prog = Number(data.progress || 0);
-        const label = String(data.label || '');
-        const result = data.result as Record<string, unknown> | undefined;
-        const taskError = String(data.error || '');
-
-        // 更新进度
-        setProgress(prog);
-        setProgressLabel(label);
-
-        // 更新步骤
-        if (result?.steps) {
-          setSteps(result.steps as AgentStep[]);
-        }
-
-        if (status === 'completed') {
-          if (pollInterval.current) clearInterval(pollInterval.current);
-          stopTimer();
-          setIsProcessing(false); stopTimer();
-          setProgress(100);
-          setProgressLabel('完成');
-
-          if (result?.imageUrl) {
-            setResultImageUrl(String(result.imageUrl));
-          }
-          if (result?.prompt) {
-            setResultPrompt(String(result.prompt));
-          }
-          // 检查是否有步骤失败（后端标记为 completed 但 Agent 内部某些步骤可能失败）
-          const steps = (result?.steps || []) as AgentStep[];
-          const failedSteps = steps.filter((s: AgentStep) => !s.success);
-          if (failedSteps.length > 0) {
-            // 展示失败的步骤错误信息
-            const errorDetails = failedSteps.map((s: AgentStep, i: number) => 
-              `步骤${i + 1}(${s.toolName}): ${s.result || '未知错误'}`
-            ).join('\n');
-            setError(errorDetails);
-          }
-        } else if (status === 'failed') {
-          if (pollInterval.current) clearInterval(pollInterval.current);
-          setIsProcessing(false); stopTimer();
-          // 优先使用 result.finalResponse，它包含更详细的错误描述
-          const errorMsg = translateErrorFrontend(taskError || (result?.finalResponse ? String(result.finalResponse) : '') || '任务执行失败');
-          setError(errorMsg);
-        } else if (status === 'cancelled') {
-          if (pollInterval.current) clearInterval(pollInterval.current);
-          setIsProcessing(false); stopTimer();
-          setError('任务已取消');
-        }
-      } catch {
-        // 轮询失败，继续重试
-      }
-    }, 2000);
-  }, []);
-
-  // 清理轮询
-  useEffect(() => {
-    return () => {
-      if (pollInterval.current) clearInterval(pollInterval.current);
-    };
-  }, []);
+  const startPolling = useCallback((tid: string) => {
+    if (pollTimer.current) clearTimeout(pollTimer.current);
+    pollAttempts.current = 0;
+    pollOnce(tid);
+  }, [pollOnce]);
 
   // 提交任务
   const handleSubmit = async () => {
@@ -291,7 +274,7 @@ export function AgentEditor({
         await fetch(`/api/agent-edit?taskId=${encodeURIComponent(taskId)}&action=cancel`);
       } catch { /* ignore */ }
     }
-    if (pollInterval.current) clearInterval(pollInterval.current);
+    if (pollTimer.current) clearTimeout(pollTimer.current);
     setIsProcessing(false);
     setProgress(0);
     setError('任务已取消');

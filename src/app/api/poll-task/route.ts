@@ -105,11 +105,34 @@ export async function POST(request: NextRequest) {
 
       if (remotePollInfo && task.status === 'processing') {
         try {
-          const { taskId: remoteTaskId, apiBaseUrl, apiKey, model: remoteModel } = remotePollInfo;
-          const pollUrl = `${apiBaseUrl}/tasks/${remoteTaskId}`;
+          const { taskId: remoteTaskId, apiBaseUrl, apiKey, model: remoteModel, compatProfile: remoteCompat } = remotePollInfo;
+          
+          // 使用 compatProfile 构建正确的轮询 URL（而非硬编码 /tasks/{id}）
+          let pollUrl: string;
+          let pollBaseUrl = apiBaseUrl;
+          let pollPath = `/tasks/${remoteTaskId}`;
+          
+          if (remoteCompat) {
+            const profile = remoteCompat as ApiCompatProfile;
+            const built = buildPollUrl(apiBaseUrl, remoteTaskId, profile);
+            if (built) {
+              pollUrl = built;
+              // 从 pollUrl 提取 baseUrl 和 path 供 fetchWithV1Retry 使用
+              try {
+                const u = new URL(pollUrl);
+                pollBaseUrl = `${u.protocol}//${u.host}`;
+                pollPath = u.pathname + u.search;
+              } catch { /* fallback to defaults */ }
+            } else {
+              pollUrl = `${apiBaseUrl}/tasks/${remoteTaskId}`;
+            }
+          } else {
+            pollUrl = `${apiBaseUrl}/tasks/${remoteTaskId}`;
+          }
+          
           const pollResp = await fetchWithV1Retry(
-            apiBaseUrl,
-            `/tasks/${remoteTaskId}`,
+            pollBaseUrl,
+            pollPath,
             {
               method: 'GET',
               headers: { 'Authorization': `Bearer ${apiKey}` },

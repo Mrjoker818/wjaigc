@@ -420,12 +420,14 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
             }
             if (pollData.progress !== undefined) setProgress(pollData.progress);
             if (pollData.label) setProgressLabel(pollData.label);
-            setTimeout(poll, 3000);
+            const getPollDelay = () => pollAttempts <= 10 ? 1000 : pollAttempts <= 25 ? 1500 : 2000;
+            setTimeout(poll, getPollDelay());
           } catch {
-            setTimeout(poll, 3000);
+            const getPollDelay = () => pollAttempts <= 10 ? 1000 : pollAttempts <= 25 ? 1500 : 2000;
+            setTimeout(poll, getPollDelay());
           }
         };
-        setTimeout(poll, 3000);
+        setTimeout(poll, 1000);
       } else {
         setResults([{ templateId: 'error', templateName: '生成失败', error: 'API返回格式异常' }]);
         setIsGenerating(false);
@@ -502,7 +504,9 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         } else if (data.taskId) {
           // Poll for single template
           const pollId = data.taskId;
+          let pollCount = 0;
           const poll = async () => {
+            pollCount++;
             try {
               const pr = await fetch('/api/poll-task', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: pollId }) });
               const pd = await pr.json();
@@ -517,10 +521,11 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
                 stopTimer();
                 return;
               }
-              setTimeout(poll, 3000);
-            } catch { setTimeout(poll, 3000); }
+              const delay = pollCount <= 10 ? 1000 : pollCount <= 25 ? 1500 : 2000;
+              setTimeout(poll, delay);
+            } catch { setTimeout(poll, 1000); }
           };
-          setTimeout(poll, 2000);
+          setTimeout(poll, 1000);
         }
       })
       .catch(() => { setIsGenerating(false); stopTimer(); });

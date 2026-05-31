@@ -182,7 +182,18 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   // ─── Switch tab when image is first uploaded (not when user manually navigates) ───
   const switchToSettingsRef = useRef(false);
   const pollAttemptRef = useRef(0);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentTaskIdRef = useRef<string | null>(null);
+
+  // ─── Cleanup polling timer on unmount ───
+  useEffect(() => {
+    return () => {
+      if (pollTimerRef.current) {
+        clearTimeout(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, []);
   useEffect(() => {
     if (switchToSettingsRef.current && sourceImage) {
       setActiveTab('settings');
@@ -367,11 +378,10 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         currentTaskIdRef.current = data.taskId;
         pollAttemptRef.current = 0;
         setProgress(30);
-        const pollInterval = setInterval(async () => {
+        const pollRefine = async () => {
           pollAttemptRef.current++;
-          // Safety: stop polling after 7 minutes (210 attempts × 2s)
-          if (pollAttemptRef.current > 210) {
-            clearInterval(pollInterval);
+          // Safety: stop polling after 10 minutes (300+ dynamic attempts)
+          if (pollAttemptRef.current > 300) {
             setProgressLabel('超时，请重试');
             setIsProcessing(false);
             stopTimer();
@@ -387,7 +397,6 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
             console.log(`[refine-engine-panel] Poll #${pollAttemptRef.current}: status=${pollData.status}, progress=${pollData.progress}, hasResult=${!!pollData.result}`);
 
             if (pollData.status === 'completed') {
-              clearInterval(pollInterval);
               setProgress(100);
               setProgressLabel('精修完成');
               // Support two response formats:
@@ -412,13 +421,11 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
               setIsProcessing(false);
               stopTimer();
             } else if (pollData.status === 'failed') {
-              clearInterval(pollInterval);
               setProgressLabel(pollData.error || '精修失败');
               setIsProcessing(false);
               stopTimer();
               setResults([]);
             } else if (pollData.status === 'cancelled') {
-              clearInterval(pollInterval);
               setProgressLabel('任务已取消');
               setIsProcessing(false);
               stopTimer();
@@ -430,12 +437,21 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
               else if (pollData.status === 'processing' || pollData.status === 'queued') {
                 setProgressLabel(pollData.status === 'queued' ? '排队中...' : '精修处理中...');
               }
+              // Dynamic interval: first 10 polls 800ms, 10-25 1.2s, 25+ 2s
+              const delay = pollAttemptRef.current <= 10 ? 800 : pollAttemptRef.current <= 25 ? 1200 : 2000;
+              pollTimerRef.current = setTimeout(pollRefine, delay);
+              return; // Don't schedule another poll below
             }
           } catch (pollErr) {
             // Don't stop polling on transient network errors — just log and continue
             console.warn('[refine-engine-panel] Poll error (will retry):', pollErr);
           }
-        }, 2000);
+          // Schedule next poll with dynamic interval
+          const delay = pollAttemptRef.current <= 10 ? 800 : pollAttemptRef.current <= 25 ? 1200 : 2000;
+          pollTimerRef.current = setTimeout(pollRefine, delay);
+        };
+        // Start first poll immediately
+        pollRefine();
       } else {
         // No taskId and no directImageUrls — unknown response
         console.error('[refine-engine-panel] Unexpected response:', data);

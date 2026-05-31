@@ -727,9 +727,10 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
         setKvImageUrl(data.imageUrl);
       } else if (data?.taskId) {
         // 异步任务 - 轮询结果
-        const maxPolls = 60;
+        const maxPolls = 120;
         for (let i = 0; i < maxPolls; i++) {
-          await new Promise(r => setTimeout(r, 3000));
+          const delay = i < 10 ? 1000 : i < 25 ? 1500 : 2000;
+          await new Promise(r => setTimeout(r, delay));
           try {
             const pollRes = await fetch(`/api/poll-task`, {
               method: 'POST',

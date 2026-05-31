@@ -5,6 +5,8 @@
  * poll-task 通过 import此模块读取任务状态，确保与 edit route 使用同一个 Map 实例。
  */
 
+import type { ApiCompatProfile } from '@/lib/api-compatibility';
+
 export interface EditTask {
   id: string;
   status: 'processing' | 'completed' | 'failed';
@@ -22,6 +24,7 @@ export interface EditTask {
     model: string;
     prompt: string;
     allTaskIds: string[];
+    compatProfile?: ApiCompatProfile;
   };
 }
 
