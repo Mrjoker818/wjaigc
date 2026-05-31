@@ -965,7 +965,7 @@ export function buildNodeExecutionRequest(
         quality,
         aspectRatio,
         size: actualSize || '1024x1024',
-        n: config.n || 1,
+        outputCount: config.n || 1,
         seed: config.seed || -1,
       };
       // 图生图：当有图片输入时，添加参考图参数（与画布模式img2img一致）

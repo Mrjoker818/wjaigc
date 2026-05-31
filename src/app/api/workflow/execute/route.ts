@@ -635,7 +635,7 @@ async function executeAsyncTask(
     }
 
     mergedOutput.imageUrl = firstImageUrl || allImageUrls[0] || '';
-    if (allImageUrls.length > 1) {
+    if (allImageUrls.length > 0) {
       mergedOutput.imageUrls = allImageUrls;
     }
 
