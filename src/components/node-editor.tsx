@@ -880,7 +880,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: [
-            { role: 'system', content: systemPrompt || instruction || '你是一个专业的AI图像提示词优化助手。请优化用户提供的提示词，使其更加详细、精确，适合AI图像生成。直接输出优化后的提示词，不要添加任何解释。' },
+            { role: 'system', content: systemPrompt || instruction || '你是一个专业的AI图像提示词优化助手。请优化用户提供的提示词，使其更加详细、精确，适合AI图像生成。请用中文输出优化后的提示词，不要添加任何解释。' },
             { role: 'user', content: currentText },
           ],
           model: model || node.config?.llmModel || '',
