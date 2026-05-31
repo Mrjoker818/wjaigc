@@ -10201,7 +10201,7 @@ export function InfiniteCanvas({
         {/* Image context menu */}
         {showContextMenu && (
           <div
-            className={`fixed z-50 py-1.5 rounded-xl border shadow-2xl min-w-[160px] ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-white/[0.06]/95 border-[#2a2a2a]'}`}
+            className={`fixed z-50 py-1.5 rounded-xl border shadow-2xl min-w-[160px] ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-[#1e1e1e] border-[#333]'}`}
             data-popup="context-menu"
             style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
             onClick={(e) => e.stopPropagation()}
@@ -10225,7 +10225,7 @@ export function InfiniteCanvas({
         {/* Canvas context menu */}
         {showCanvasMenu && (
           <div
-            className={`fixed z-50 py-1.5 rounded-xl border shadow-2xl min-w-[200px] ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-white/[0.06]/95 border-[#2a2a2a]'}`}
+            className={`fixed z-50 py-1.5 rounded-xl border shadow-2xl min-w-[200px] ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-[#1e1e1e] border-[#333]'}`}
             style={{ left: canvasMenuPos.x, top: canvasMenuPos.y }}
             onClick={(e) => e.stopPropagation()}
           >
