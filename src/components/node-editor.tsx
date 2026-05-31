@@ -955,7 +955,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable) return;
 
       // Ctrl+C / Cmd+C 复制选中节点（支持多选）
       if ((e.metaKey || e.ctrlKey) && e.key === 'c' && selectedNodeIds.size > 0) {
@@ -2687,7 +2687,7 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
           {/* ===== input-image 节点: 图片预览 + 拖拽上传区 ===== */}
           {isInputImage && (
             <foreignObject x={node.x + 6} y={node.y + 32} width={node.width - 12} height={node.height - 38}>
-              <div className="w-full h-full flex flex-col gap-1" style={{ color: T.nodeTitle, fontSize: 11 }}>
+              <div className="w-full h-full flex flex-col gap-1" style={{ color: T.nodeTitle, fontSize: 11 }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                 {hasImageOutput ? (
                   /* 有图片时显示缩略图 */
                   <div
@@ -2748,7 +2748,7 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
           {/* 图片缩略图 — 非input-image节点(如ai-generate)执行后显示结果 */}
           {!isInputImage && hasImageOutput && (
             <foreignObject x={node.x + 8} y={node.y + 32} width={node.width - 16} height={node.height - 44}>
-              <div className="w-full h-full relative group cursor-pointer flex items-center justify-center" onClick={() => onPreviewImage(hasImageOutput)}>
+              <div className="w-full h-full relative group cursor-pointer flex items-center justify-center" onClick={() => onPreviewImage(hasImageOutput)} onWheel={(e) => e.stopPropagation()}>
                 <img src={hasImageOutput} alt="" className="max-w-full max-h-full object-contain rounded opacity-70 group-hover:opacity-100 transition-opacity" />
               </div>
             </foreignObject>
@@ -2757,7 +2757,7 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
           {/* ===== P0: input-text 节点直接编辑 + LLM 优化 + 预设 ===== */}
           {isInputText && (
             <foreignObject x={node.x + 6} y={node.y + 32} width={node.width - 12} height={node.height - 38}>
-              <div className="flex flex-col gap-1 h-full" style={{ color: T.nodeTitle, fontSize: 11 }}>
+              <div className="flex flex-col gap-1 h-full" style={{ color: T.nodeTitle, fontSize: 11 }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                 {/* 可编辑文本区域 — 自适应内容 */}
                 <div
                   contentEditable
@@ -2769,6 +2769,8 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
                     onNodeFieldChange?.(node.id, 'textContent', text);
                   }}
                   onMouseDown={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  onWheel={(e) => e.stopPropagation()}
                 >
                   {textContent || ''}
                 </div>
@@ -2919,7 +2921,7 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
           {/* ===== P2: input-image 节点操作按钮 ===== */}
           {isInputImage && hasImageOutput && (
             <foreignObject x={node.x + 6} y={node.y + node.height - 24} width={node.width - 12} height={18}>
-              <div className="flex gap-0.5 items-center">
+              <div className="flex gap-0.5 items-center" onWheel={(e) => e.stopPropagation()}>
                 <button
                   className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5"
                   onClick={(e) => { e.stopPropagation(); onExtractToSource?.(node.id); }}
@@ -2959,7 +2961,7 @@ function NodeCard({ node, isSelected, isHighlighted, execResult, isRunning, them
           {/* ===== P0: 非input-text/input-image节点也显示级联运行 ===== */}
           {!isInputText && !isInputImage && !hasImageOutput && !isCondition && (
             <foreignObject x={node.x + 6} y={node.y + node.height - 18} width={node.width - 12} height={14}>
-              <div className="flex justify-end">
+              <div className="flex justify-end" onWheel={(e) => e.stopPropagation()}>
                 <button
                   className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5"
                   onClick={(e) => { e.stopPropagation(); onCascadeRun?.(node.id); }}
