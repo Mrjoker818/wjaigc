@@ -1967,7 +1967,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                 <SelectTrigger className={`flex-1 h-7 text-xs ${themeClasses.inputBg} ${themeClasses.border} ${themeClasses.text}`}>
                   <SelectValue placeholder="选择模型" />
                 </SelectTrigger>
-                <SelectContent className={themeClasses.bg}>
+                <SelectContent position="popper" side="bottom" sideOffset={4} className={themeClasses.bg}>
                   {(() => {
                     // Group discovered server models by provider
                     const grouped: Record<string, typeof discoveredChatModels> = {};
