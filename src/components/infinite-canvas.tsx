@@ -7070,6 +7070,7 @@ export function InfiniteCanvas({
                         }}
                         onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => e.stopPropagation()}
+                        onWheel={(e) => e.stopPropagation()}
                       >
                         {REFERENCE_CATEGORIES.map((cat, idx) => {
                           const isSelected = imgCats.includes(cat);
@@ -7264,6 +7265,7 @@ export function InfiniteCanvas({
                       border: isMonochrome ? '1px solid rgba(200,200,200,0.5)' : `1px solid ${accentBorder}`,
                     }}
                     onMouseDown={(e) => e.stopPropagation()}
+                    onWheel={(e) => e.stopPropagation()}
                   >
                     {/* Row 1: Model selector — custom dropdown with highlight */}
                     <div className="relative">
@@ -7285,6 +7287,7 @@ export function InfiniteCanvas({
                           className="absolute left-0 right-0 top-full mt-1 rounded-lg shadow-xl overflow-hidden z-50 max-h-64 overflow-y-auto"
                           style={{ background: isMonochrome ? '#fff' : 'rgba(20,20,20,0.95)', border: isMonochrome ? '1px solid #ddd' : '1px solid #333' }}
                           onMouseDown={(e) => e.stopPropagation()}
+                          onWheel={(e) => e.stopPropagation()}
                         >
                           {canvasGenModels.map((m, mi) => {
                             const isSelected = group.toolbar.model === m.id && group.toolbar.providerId === m.providerId;
