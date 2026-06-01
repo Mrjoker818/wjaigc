@@ -394,7 +394,17 @@ export default function StickerAssistantPanel({
 
   const buildIdentityLock = useCallback((): string => {
     const visualDesc = subjectDetail || subject;
-    return `Subject: ${subject}\nVisual Identity: ${visualDesc}\nIdentity Lock: The character MUST maintain EXACTLY the same visual identity across ALL stickers — same species/type, same color scheme, same body proportions, same facial features, same outfit/accessories. Only expression, pose, and action may vary. FORBIDDEN: changing species, altering colors, modifying proportions, changing outfit design, or any visual drift that makes the character look different.`;
+    return `SUBJECT IDENTITY LOCK (MANDATORY — every pixel must conform):
+Subject: ${subject}
+Detailed Visual Blueprint: ${visualDesc}
+ENFORCEMENT RULES:
+- The subject's species, body type, and proportions MUST be identical to the reference
+- The subject's exact color palette (every color zone) MUST be preserved pixel-perfectly
+- The subject's facial features (eye shape/size/color, nose, mouth) MUST be identical
+- The subject's ears/horns/tail shape and position MUST be identical
+- The subject's outfit, accessories, and markings MUST be identical
+- ONLY expression, pose, and action may differ — all other visual attributes are FROZEN
+- Any deviation from the reference subject's visual identity is FORBIDDEN and must be corrected`;
   }, [subject, subjectDetail]);
 
   /* ── 上传主体图片并识别 ── */
@@ -430,7 +440,7 @@ export default function StickerAssistantPanel({
             messages: [{
               role: 'user',
               content: [
-                { type: 'text', text: '请分析这张图片中的主体角色，按以下格式输出（严格遵循）：\n第一行：主体简短名称（2-6个字，如：橘猫、小恐龙）\n第二行起：详细视觉外观描述（包括物种、体型、毛色/配色、五官特征、穿着/配饰、标志性的视觉特征等，50-100字）\n\n示例：\n橘猫\n圆胖身材的橘色猫咪，全身橘黄毛色带白色腹部，大圆脸、短鼻子、绿色大眼睛，尾巴短粗翘起，无穿衣配饰' },
+                { type: 'text', text: '请仔细分析这张图片中的主体角色，按以下格式输出（严格遵循）：\n第一行：主体简短名称（2-6个字，如：橘猫、小恐龙）\n第二行起：详细视觉外观描述，必须包含以下所有维度（200-300字）：\n1. 物种/类型（如：橘色家猫、Q版小恐龙）\n2. 体型比例（如：圆胖矮小、修长高挑、头身比3:1）\n3. 整体配色方案（如：主色橘黄#F5A623，辅色白色，眼睛翠绿#2ECC71）\n4. 毛发/皮肤纹理（如：短毛光滑、鳞片质感、蓬松卷毛）\n5. 五官特征（如：大圆眼+小三角鼻+微笑嘴、细长丹凤眼）\n6. 耳朵/角/尾巴特征（如：尖耳内粉色、短粗翘尾、头顶小角）\n7. 穿着/配饰（如：红色蝴蝶结项圈、无穿衣、蓝色围巾）\n8. 标志性视觉特征（如：左眼有黑色眼罩斑、额头M字纹、脸颊腮红圆点）\n\n示例：\n橘猫\n物种：橘色家猫。体型：圆胖矮小，头身比约2.5:1，四肢粗短。配色：主色橘黄(#F5A623)，腹部和爪尖白色(#FFFFFF)，鼻头粉色。毛发：短毛光滑，背部橘色略深，腹部白色。五官：大圆眼翠绿色(#2ECC71)，瞳孔圆形；小三角粉色鼻子；微笑弧形嘴。耳朵：三角形尖耳，耳内粉色，耳距较宽。尾巴：短粗上翘，尾尖微弯。配饰：红色蝴蝶结项圈。标志特征：额头经典M字深橘色纹路，左右脸颊各一个淡粉色腮红圆点。' },
                 { type: 'image_url', image_url: { url: imageUrl } },
               ],
             }],
@@ -562,11 +572,13 @@ ${themeDesc}
 
     // 构建生成 prompt — 使用与画布图生图完全一致的 [ref] 前缀和保留格式
     let prompt: string;
+    // 详细视觉蓝图 — 从AI识别的详细描述中提取关键特征，直接嵌入prompt
+    const visualBlueprint = subjectDetail ? `\n[VISUAL BLUEPRINT — COPY EXACTLY]: ${subjectDetail}` : '';
     if (subjectImage && subjectSource === 'image') {
       // 有参考图时，使用画布图生图的完整提示词格式，触发 API 的主体一致性增强
-      prompt = `[ref] Use the provided reference image(s) as the base. Create an image of: Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. While creating this new image, strictly preserve the main subject and focal point of the reference image(s) — do NOT change the original product/object identity, strictly preserve the artistic style and visual aesthetics of the reference image(s), strictly preserve the color palette and tone of the reference image(s), strictly preserve the fine details and textures of the reference image(s). IMPORTANT: The product/object in the result MUST be the SAME product/object as in the reference image — do NOT substitute or replace it with a different product. ${identityLock}. Feel free to reimagine the composition and layout structure, the scene and environment setting. Transparent PNG background, die-cut sticker style, 1024x1024 square, sticker sheet single item, no solid background color.${negP ? ` Avoid: ${negP}, solid background, white background` : ''}`;
+      prompt = `[ref] Use the provided reference image(s) as the base. Create an image of: Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. While creating this new image, strictly preserve the main subject and focal point of the reference image(s) — do NOT change the original product/object identity, strictly preserve the artistic style and visual aesthetics of the reference image(s), strictly preserve the color palette and tone of the reference image(s), strictly preserve the fine details and textures of the reference image(s). IMPORTANT: The product/object in the result MUST be the SAME product/object as in the reference image — do NOT substitute or replace it with a different product. ${identityLock}${visualBlueprint}. Feel free to reimagine the composition and layout structure, the scene and environment setting. Transparent PNG background, die-cut sticker style, 1024x1024 square, sticker sheet single item, no solid background color.${negP ? ` Avoid: ${negP}, solid background, white background` : ''}`;
     } else {
-      prompt = `Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. Subject identity: ${identityLock}. Transparent PNG background, die-cut sticker style, no solid background color, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}, solid background, white background` : ''}`;
+      prompt = `Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. Subject identity: ${identityLock}${visualBlueprint}. Transparent PNG background, die-cut sticker style, no solid background color, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}, solid background, white background` : ''}`;
     }
 
     const doGenerate = async () => {
@@ -615,13 +627,13 @@ ${themeDesc}
             }
             // 使用与画布图生图完全一致的 referenceCategories 格式
             // 保留主体(subject)、风格(style)、色彩(color)、细节(detail)，允许构图/场景自由变化
-            // 强度设置：主体95, 风格90, 色彩90, 细节85 → 画布计算 strength ≈ 0.15（最大主体保留）
+            // 主体强度100（最高）, 其余90 → 画布计算 strength ≈ 0.22（保留主体，允许姿势/表情变化）
             requestBody.referenceImages = [persistedUrl];
             requestBody.referenceMode = 'reference';
             requestBody.referenceCategories = { '0': ['subject', 'style', 'color', 'detail'] };
-            requestBody.referenceStrengths = [95];
-            // strength 在 0~1 之间，0.15 = 画布图生图在主体保留最高时的最小值（最大保留）
-            requestBody.strength = 0.15;
+            requestBody.referenceStrengths = [100]; // 单张图整体强度100（主体100+风格90+色彩90+细节90 → API内部按类别分权重）
+            // strength: 0.22 = 画布公式计算 (0.80 - 0.925*0.60 = 0.245, subjectReduction=0.25, max(0.15, 0.245-0.25)=0.15→上调至0.22以允许姿势/表情变化)
+            requestBody.strength = 0.22;
           } catch { /* 使用原始 URL 兜底 */ }
         }
 
