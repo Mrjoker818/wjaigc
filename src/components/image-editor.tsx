@@ -308,13 +308,14 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   const selectedModel = currentImageModel ? `${currentImageModel.name || currentImageModel.id}` : '';
 
   // 当前选中的图像模型是否支持蒙版涂抹
-  // - supportsMask=true: OpenAI/Flux/SD 系列，支持原生 mask 或可靠理解蒙版参考图
+  // 后端统一使用 images/generations + 视觉参考蒙版路径（通用，不针对特定供应商）
+  // - supportsMask=true: 绝大多数图像模型，蒙版作为视觉参考图 + prompt 语义描述
   // - supportsMask=false: Gemini 系列，AI 无法可靠理解蒙版语义，仅支持文字修图
   const currentModelSupportsMask = (() => {
     if (!currentImageModel) return false;
     if (currentImageModel.supportsMask !== undefined) return currentImageModel.supportsMask;
-    // 降级判断：默认不支持（需后端明确告知）
-    return false;
+    // 降级判断：默认支持（后端通用蒙版方案）
+    return true;
   })();
 
   // 当前选中的图像模型名称（始终显示供应商名称）

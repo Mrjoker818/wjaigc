@@ -755,21 +755,20 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     console.info(`[edit] taskId=${taskId} 开始图像编辑, model=${model}, hasMask=${!!maskBuffer}, count=${count}`);
 
     // 路径选择策略（通用，不针对任何模型或供应商）：
-    // - 有mask时：跳过images.edit（第三方代理可能不支持原生mask参数），
-    //   统一走images/generations或chat/completions（mask作为视觉参考+prompt描述）
+    // - 有mask时：直接走images/generations（mask作为视觉参考图+prompt语义描述），
+    //   因为第三方代理可能不正确转发images.edit的mask参数
     // - 无mask时：优先images.edit → fallback images/generations → chat/completions
     // - 所有路径都在 prompt 中描述蒙版语义（通用增强）
-    const useMaskVisualRef = !!maskBuffer; // 有mask时走视觉参考路径
+    const skipImagesEdit = !!maskBuffer; // 有mask时跳过images.edit，走视觉参考路径
 
+    // ★ 路径A: images/edits 端点（仅无mask时尝试）
+    if (!skipImagesEdit) {
     try {
         const FormData = (await import('form-data')).default;
         const form = new FormData();
         form.append('model', model);
         form.append('image', imageBuffer, { filename: 'image.png', contentType: mimeType });
         form.append('prompt', editInstruction);
-        if (openaiMaskBuffer) {
-          form.append('mask', openaiMaskBuffer, { filename: 'mask.png', contentType: 'image/png' });
-        }
 
         // 比例到像素尺寸映射
         const sizeMap: Record<string, string> = {
@@ -877,6 +876,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       } catch (editErr) {
         console.warn('images.edit error, falling back to images/generations:', editErr instanceof Error ? editErr.message : editErr);
       }
+    } // end if (!skipImagesEdit)
 
     // ★ 检查任务是否已被取消（images.edit 之后）
     if (isTaskCancelled(taskId)) {
@@ -884,13 +884,15 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       return;
     }
 
-    // 路径B: images/generations 端点（fallback 路径）
-    // 当 images.edit 失败或 editEndpoint=/images/generations 时使用
+    // 路径B: images/generations 端点
+    // - 有mask时：直接走此路径（mask作为视觉参考图+prompt语义描述，通用不针对供应商）
+    // - 无mask时：images/edit 失败后 fallback 到此路径
     const compatProfile = resolveCompatProfile(imageProvider);
-    const useGenerationsPath = compatProfile.editEndpoint === '/images/generations';
+    // ★ 有mask时强制走images/generations路径，或editEndpoint=/images/generations时走此路径
+    const useGenerationsPath = skipImagesEdit || compatProfile.editEndpoint === '/images/generations';
     if (useGenerationsPath) {
       try {
-        console.info(`[edit] taskId=${taskId} 使用images/generations路径, 原因: ${useMaskVisualRef ? '有mask走视觉参考' : 'editEndpoint=/images/generations'}, model=${model}`);
+        console.info(`[edit] taskId=${taskId} 使用images/generations路径, 原因: ${skipImagesEdit ? '有mask走视觉参考' : 'editEndpoint=/images/generations'}, model=${model}`);
 
         // 先将原图保存为可访问的 URL（images/generations 需要 URL，不支持 base64）
         let imageUrlForApi = `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
@@ -1497,21 +1499,14 @@ export async function GET() {
         // 排除不支持编辑的模型类型
         if (id.includes('3d') || id.includes('vectoriz') || id.includes('layer') || id.includes('segment')) continue;
 
-        // 涂抹支持判断：
-        // - OpenAI gpt-image-2 / dall-e-3：支持原生 images.edit mask 参数（仅 api.openai.com）
-        // - 第三方代理的 gpt-image-2 / dall-e-3：不支持原生 mask，但走 chat/completions 参考图模式
-        // - Gemini 系列：不支持涂抹（AI 无法可靠理解蒙版参考图语义）
-        // - 其他模型：不支持原生 mask，走 chat/completions 参考图模式（效果不稳定）
-        let supportsMask = false;
-        const providerBaseUrl = (provider.baseUrl || '').toLowerCase();
-        if (id.includes('gpt-image') || id.includes('dall-e')) {
-          // OpenAI 模型：官方端点原生支持，第三方代理参考图模式也基本可用
-          supportsMask = true;
-        } else if (id.includes('flux') || id.includes('sdxl') || id.includes('stable-diffusion')) {
-          // SD/Flux 系列：通过 img2img + 蒙版可以较好地支持
-          supportsMask = true;
+        // 涂抹支持判断（通用，不针对特定供应商）：
+        // 后端统一使用 images/generations + 视觉参考蒙版路径，不依赖 images.edit 原生 mask 参数
+        // - 绝大多数图像模型：支持涂抹（蒙版作为视觉参考图 + prompt 语义描述，通用方案）
+        // - Gemini 系列：不支持涂抹（AI 无法可靠理解蒙版参考图语义，仅文字修图）
+        let supportsMask = true; // ★ 默认支持（通用视觉参考蒙版方案）
+        if (id.includes('gemini')) {
+          supportsMask = false; // Gemini 系列无法可靠理解蒙版语义
         }
-        // Gemini 系列不支持涂抹（AI 无法可靠理解蒙版参考图）
 
         editModels.push({
           id: modelId,
@@ -1536,7 +1531,7 @@ export async function GET() {
         name: model,
         providerId: '',
         providerName: '',
-        supportsMask: model.includes('gpt-image') || model.includes('dall-e'),
+        supportsMask: !model.toLowerCase().includes('gemini'),
       })),
     });
   }
