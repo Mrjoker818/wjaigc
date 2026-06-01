@@ -158,27 +158,103 @@ async function callLLM(
   }
 }
 
-/** 从原始API响应中提取图片URL（兜底） */
+/** 从原始API响应中提取图片URL（兜底，兼容多种响应格式） */
 function extractImageUrlsFromRaw(data: Record<string, unknown>): string[] {
   const urls: string[] = [];
-  // 检查 data.images[].url
-  const images = data.images || (data.data as Record<string, unknown>)?.images;
+
+  // 1. data.data[].url / data.data[].b64_json（标准 OpenAI 格式）
+  const dataArr = data.data;
+  if (Array.isArray(dataArr)) {
+    for (const item of dataArr) {
+      if (typeof item === 'object' && item !== null) {
+        const url = (item as Record<string, unknown>).url;
+        const b64 = (item as Record<string, unknown>).b64_json;
+        if (typeof url === 'string') urls.push(url);
+        if (typeof b64 === 'string') urls.push(`data:image/png;base64,${b64}`);
+      } else if (typeof item === 'string') {
+        urls.push(item);
+      }
+    }
+  }
+
+  // 2. data.images[].url
+  const images = data.images || (typeof data.data === 'object' && data.data !== null && !Array.isArray(data.data) ? (data.data as Record<string, unknown>).images : null);
   if (Array.isArray(images)) {
     for (const img of images) {
       if (typeof img === 'object' && img !== null) {
         const url = (img as Record<string, unknown>).url || (img as Record<string, unknown>).b64_json;
-        if (typeof url === 'string') urls.push(url);
+        if (typeof url === 'string') urls.push(url.startsWith('data:') ? url : (url.match(/^data:image/) ? url : url));
       } else if (typeof img === 'string') {
         urls.push(img);
       }
     }
   }
-  // 检查 data.output.image_urls[]
-  const output = data.output || (data.data as Record<string, unknown>)?.output;
+
+  // 3. data.output.image_urls[] / data.data.output.image_urls[]
+  const output = data.output || (typeof data.data === 'object' && data.data !== null && !Array.isArray(data.data) ? (data.data as Record<string, unknown>).output : null);
   if (typeof output === 'object' && output !== null) {
-    const imageUrls = (output as Record<string, unknown>).image_urls;
+    const imageUrls = (output as Record<string, unknown>).image_urls || (output as Record<string, unknown>).images;
+    if (Array.isArray(imageUrls)) {
+      for (const u of imageUrls) {
+        if (typeof u === 'string') urls.push(u);
+        else if (typeof u === 'object' && u !== null) {
+          const url = (u as Record<string, unknown>).url;
+          if (typeof url === 'string') urls.push(url);
+        }
+      }
+    }
+    // 单个 url 字段
+    const singleUrl = (output as Record<string, unknown>).url;
+    if (typeof singleUrl === 'string' && !urls.includes(singleUrl)) urls.push(singleUrl);
+  }
+
+  // 4. data.data.image_urls[]（APImart 格式）
+  if (typeof data.data === 'object' && data.data !== null && !Array.isArray(data.data)) {
+    const dataObj = data.data as Record<string, unknown>;
+    const imageUrls = dataObj.image_urls;
     if (Array.isArray(imageUrls)) {
       for (const u of imageUrls) { if (typeof u === 'string') urls.push(u); }
+    }
+    // 单个 url 字段
+    const singleUrl = dataObj.url;
+    if (typeof singleUrl === 'string' && !urls.includes(singleUrl)) urls.push(singleUrl);
+    // data.data.image_url（单数字段）
+    const imageUrl = dataObj.image_url;
+    if (typeof imageUrl === 'string' && !urls.includes(imageUrl)) urls.push(imageUrl);
+  }
+
+  // 5. 顶层 url / image_url
+  const topUrl = data.url || data.image_url;
+  if (typeof topUrl === 'string' && !urls.includes(topUrl)) urls.push(topUrl);
+
+  // 6. data.result.url / data.result.image_url（某些代理格式）
+  const result = data.result;
+  if (typeof result === 'object' && result !== null) {
+    const resultUrl = (result as Record<string, unknown>).url || (result as Record<string, unknown>).image_url;
+    if (typeof resultUrl === 'string' && !urls.includes(resultUrl)) urls.push(resultUrl);
+  }
+
+  return urls;
+}
+
+/** 深度提取响应中所有以 http 开头的图片URL（最终兜底） */
+function deepExtractImageUrls(obj: unknown, depth = 0): string[] {
+  if (depth > 5) return []; // 防止无限递归
+  const urls: string[] = [];
+  if (typeof obj === 'string') {
+    // 匹配 http/https 开头、常见图片后缀或包含 /image/ 的 URL
+    if (/^https?:\/\/.+\.(png|jpg|jpeg|webp|gif|bmp|svg)/i.test(obj) ||
+        /^https?:\/\/.*\/image\//i.test(obj) ||
+        /^https?:\/\/.*\.(com|cn|io|net)\/.+\.(png|jpg|jpeg|webp)/i.test(obj)) {
+      urls.push(obj);
+    }
+  } else if (Array.isArray(obj)) {
+    for (const item of obj) {
+      urls.push(...deepExtractImageUrls(item, depth + 1));
+    }
+  } else if (typeof obj === 'object' && obj !== null) {
+    for (const value of Object.values(obj as Record<string, unknown>)) {
+      urls.push(...deepExtractImageUrls(value, depth + 1));
     }
   }
   return urls;
@@ -224,6 +300,8 @@ async function generateImage(
     }
 
     const data = await response.json();
+    // ★ 调试日志：记录生成响应结构
+    console.info(`[brand-factory] generateImage response keys=${Object.keys(data).join(',')}, dataIsArray=${Array.isArray(data.data)}`);
 
     if (data.data && Array.isArray(data.data)) {
       const firstItem = data.data[0] as Record<string, unknown> | undefined;
@@ -238,17 +316,35 @@ async function generateImage(
       }
     }
 
+    // ★ data.data 是对象（非数组）时，可能是 APImart 等格式
+    if (data.data && typeof data.data === 'object' && !Array.isArray(data.data)) {
+      const dataObj = data.data as Record<string, unknown>;
+      // 检查 task_id
+      if (dataObj.task_id) {
+        return { success: true, taskId: dataObj.task_id as string };
+      }
+      if (dataObj.id && !dataObj.task_id) {
+        return { success: true, taskId: dataObj.id as string };
+      }
+    }
+
     if (data.task_id || data.id) {
       return { success: true, taskId: (data.task_id || data.id) as string };
     }
 
-    if (data.images && Array.isArray(data.images)) {
-      const urls = data.images.map((img: Record<string, unknown>) => img.url || img).filter(Boolean) as string[];
-      if (urls.length > 0) {
-        return { success: true, imageUrl: urls[0], imageUrls: urls };
-      }
+    // ★ 使用增强版 extractImageUrlsFromRaw 兜底提取URL
+    const rawUrls = extractImageUrlsFromRaw(data);
+    if (rawUrls.length > 0) {
+      return { success: true, imageUrl: rawUrls[0], imageUrls: rawUrls };
     }
 
+    // ★ 最终兜底：使用复用 poll-task 逻辑的深度提取
+    const deepUrls = extractImageUrlsFromPollData(data, provider.baseUrl.replace(/\/+$/, ''));
+    if (deepUrls.length > 0) {
+      return { success: true, imageUrl: deepUrls[0], imageUrls: deepUrls };
+    }
+
+    console.warn(`[brand-factory] generateImage: 所有提取方式均未找到图片URL, data=${JSON.stringify(data).substring(0, 500)}`);
     return { success: false, error: '图像生成返回格式异常' };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -257,10 +353,136 @@ async function generateImage(
 }
 
 /** 轮询异步任务结果（最多60秒） */
+/**
+ * 从 API 响应中提取图片 URL（复用 /api/poll-task 已验证的多路径解析逻辑）
+ * 覆盖 APImart、OpenAI、各种第三方代理的响应格式
+ */
+function extractImageUrlsFromPollData(
+  pollData: Record<string, unknown>,
+  apiBaseUrl: string
+): string[] {
+  const urls: string[] = [];
+
+  // 1) 递归解包嵌套的 data 字段（APImart 多层嵌套: {code, data: {code, data: {status, images}}}）
+  let taskData: Record<string, unknown> = pollData;
+  let unwrapDepth = 0;
+  while (taskData.data && typeof taskData.data === 'object' && !Array.isArray(taskData.data) && unwrapDepth < 3) {
+    const innerData = taskData.data as Record<string, unknown>;
+    if (innerData.status || innerData.images || innerData.results || innerData.output || innerData.image_urls || innerData.image_urls_list || innerData.generated_images || innerData.url || innerData.image_url) {
+      taskData = innerData;
+      unwrapDepth++;
+    } else if (innerData.data && typeof innerData.data === 'object') {
+      taskData = innerData;
+      unwrapDepth++;
+    } else {
+      break;
+    }
+  }
+
+  // 2) 从解包后的 taskData 提取图片列表
+  const dataItems = taskData.images || taskData.results || taskData.output || taskData.image_urls || taskData.image_urls_list || taskData.generated_images;
+  if (Array.isArray(dataItems)) {
+    for (const item of dataItems) {
+      const url = (item as Record<string, unknown>)?.url || (item as Record<string, unknown>)?.image_url || (item as Record<string, unknown>)?.image_url_optimized || item;
+      if (typeof url === 'string' && (url.startsWith('http') || url.startsWith('/'))) {
+        urls.push(url.startsWith('/') ? `${apiBaseUrl}${url}` : url);
+      }
+    }
+  }
+
+  // 3) 单个图片字段
+  if (urls.length === 0) {
+    const resultObj = taskData.result as Record<string, unknown> | undefined;
+    const singleUrl = taskData.image_url || taskData.url || taskData.image_url_optimized
+      || resultObj?.url || resultObj?.image_url;
+    if (typeof singleUrl === 'string' && (singleUrl.startsWith('http') || singleUrl.startsWith('/'))) {
+      urls.push(singleUrl.startsWith('/') ? `${apiBaseUrl}${singleUrl}` : singleUrl);
+    }
+  }
+
+  // 4) 从 result 对象中提取图片数组
+  if (urls.length === 0 && taskData.result && typeof taskData.result === 'object') {
+    const resultObj = taskData.result as Record<string, unknown>;
+    const resultImages = resultObj.images || resultObj.results || resultObj.output || resultObj.image_urls || resultObj.generated_images;
+    if (Array.isArray(resultImages)) {
+      for (const item of resultImages) {
+        const url = (item as Record<string, unknown>)?.url || (item as Record<string, unknown>)?.image_url || (item as Record<string, unknown>)?.image_url_optimized || item;
+        if (typeof url === 'string' && (url.startsWith('http') || url.startsWith('/'))) {
+          urls.push(url.startsWith('/') ? `${apiBaseUrl}${url}` : url);
+        }
+      }
+    }
+  }
+
+  // 5) 从嵌套的 data.data 提取
+  if (urls.length === 0 && taskData.data && typeof taskData.data === 'object') {
+    const innerData = taskData.data as Record<string, unknown>;
+    const innerImages = innerData.images || innerData.results || innerData.output || innerData.image_urls || innerData.generated_images;
+    if (Array.isArray(innerImages)) {
+      for (const item of innerImages) {
+        const url = (item as Record<string, unknown>)?.url || (item as Record<string, unknown>)?.image_url || (item as Record<string, unknown>)?.image_url_optimized || item;
+        if (typeof url === 'string' && (url.startsWith('http') || url.startsWith('/'))) {
+          urls.push(url.startsWith('/') ? `${apiBaseUrl}${url}` : url);
+        }
+      }
+    }
+    if (urls.length === 0) {
+      const innerSingleUrl = innerData.image_url || innerData.url || innerData.image_url_optimized;
+      if (typeof innerSingleUrl === 'string' && (innerSingleUrl.startsWith('http') || innerSingleUrl.startsWith('/'))) {
+        urls.push(innerSingleUrl.startsWith('/') ? `${apiBaseUrl}${innerSingleUrl}` : innerSingleUrl);
+      }
+    }
+  }
+
+  // 6) 从顶层 pollData.images 提取
+  if (urls.length === 0 && pollData.images && Array.isArray(pollData.images)) {
+    for (const item of pollData.images) {
+      const url = (item as Record<string, unknown>)?.url || (item as Record<string, unknown>)?.image_url || item;
+      if (typeof url === 'string' && (url.startsWith('http') || url.startsWith('/'))) {
+        urls.push(url.startsWith('/') ? `${apiBaseUrl}${url}` : url);
+      }
+    }
+  }
+
+  // 7) 从顶层 pollData.output（字符串 URL）
+  if (urls.length === 0 && pollData.output && typeof pollData.output === 'string' && pollData.output.startsWith('http')) {
+    urls.push(pollData.output);
+  }
+
+  // 8) data 数组格式 (OpenAI: data[{url: "..."}])
+  if (urls.length === 0 && pollData.data && Array.isArray(pollData.data)) {
+    for (const item of pollData.data) {
+      const url = (item as Record<string, unknown>)?.url || (item as Record<string, unknown>)?.b64_json || (item as Record<string, unknown>)?.image_url;
+      if (typeof url === 'string') {
+        if (url.startsWith('http') || url.startsWith('/')) {
+          urls.push(url.startsWith('/') ? `${apiBaseUrl}${url}` : url);
+        } else if (url.startsWith('data:')) {
+          urls.push(url);
+        } else {
+          urls.push(`data:image/png;base64,${url}`);
+        }
+      }
+    }
+  }
+
+  // 9) 最终兜底: 深度搜索整个响应中所有以 http 开头且包含图片扩展名的 URL
+  if (urls.length === 0) {
+    const fullJson = JSON.stringify(pollData);
+    const urlMatches = fullJson.match(/https?:\/\/[^\s"\\]+\.(png|jpg|jpeg|webp|gif)/gi);
+    if (urlMatches && urlMatches.length > 0) {
+      for (const url of urlMatches.slice(0, 4)) {
+        urls.push(url.replace(/[^a-zA-Z0-9+/.:_@&?=-]$/, ''));
+      }
+    }
+  }
+
+  return urls;
+}
+
 async function pollTaskResult(
   taskId: string,
   providerInfo: { baseUrl: string; apiKey: string; profile: ApiCompatProfile },
-  maxMs = 60000
+  maxMs = 120000
 ): Promise<{ success: boolean; imageUrl?: string; imageUrls?: string[]; error?: string }> {
   const pollUrl = buildPollUrl(providerInfo.baseUrl, taskId, providerInfo.profile);
   if (!pollUrl) {
@@ -275,20 +497,45 @@ async function pollTaskResult(
       });
       if (!resp.ok) continue;
       const pollData = await resp.json() as Record<string, unknown>;
-      // 检查任务状态
-      const taskStatus = (pollData.status || pollData.data && typeof pollData.data === 'object' && (pollData.data as Record<string, unknown>).status) as string;
-      if (taskStatus === 'completed' || taskStatus === 'success') {
-        // 使用 parseResponseForProfile 提取图片URL
-        const parsed = parseResponseForProfile(pollData, providerInfo.profile);
-        const urls = parsed.directImageUrls;
-        if (urls && urls.length > 0) {
-          return { success: true, imageUrl: urls[0], imageUrls: urls };
+      // ★ 调试日志：记录轮询响应结构
+      console.info(`[brand-factory] pollTaskResult response keys=${Object.keys(pollData).join(',')}, status=${pollData.status}`);
+
+      // 使用与 /api/poll-task 相同的递归解包逻辑检查任务状态
+      let taskData: Record<string, unknown> = pollData;
+      let unwrapDepth = 0;
+      while (taskData.data && typeof taskData.data === 'object' && !Array.isArray(taskData.data) && unwrapDepth < 3) {
+        const innerData = taskData.data as Record<string, unknown>;
+        if (innerData.status || innerData.images || innerData.results || innerData.output || innerData.image_urls || innerData.image_urls_list || innerData.generated_images || innerData.url || innerData.image_url) {
+          taskData = innerData;
+          unwrapDepth++;
+        } else if (innerData.data && typeof innerData.data === 'object') {
+          taskData = innerData;
+          unwrapDepth++;
+        } else {
+          break;
         }
-        // 尝试从原始数据中手动提取URL
+      }
+      const taskStatus = String(taskData.status || '').toLowerCase();
+
+      if (taskStatus === 'completed' || taskStatus === 'success' || taskStatus === 'succeeded') {
+        // ★ 复用 /api/poll-task 已验证的完整 URL 提取逻辑
+        const extractedUrls = extractImageUrlsFromPollData(pollData, providerInfo.baseUrl.replace(/\/+$/, ''));
+        if (extractedUrls.length > 0) {
+          console.info(`[brand-factory] pollTaskResult: extracted ${extractedUrls.length} URLs, first=${extractedUrls[0].substring(0, 80)}`);
+          return { success: true, imageUrl: extractedUrls[0], imageUrls: extractedUrls };
+        }
+
+        // 额外兜底：parseResponseForProfile + extractImageUrlsFromRaw
+        const parsed = parseResponseForProfile(pollData, providerInfo.profile);
+        if (parsed.directImageUrls && parsed.directImageUrls.length > 0) {
+          return { success: true, imageUrl: parsed.directImageUrls[0], imageUrls: parsed.directImageUrls };
+        }
         const rawUrls = extractImageUrlsFromRaw(pollData);
         if (rawUrls.length > 0) {
           return { success: true, imageUrl: rawUrls[0], imageUrls: rawUrls };
         }
+
+        console.warn(`[brand-factory] pollTaskResult: 任务完成但所有提取方式均未找到图片URL, pollData=${JSON.stringify(pollData).substring(0, 500)}`);
         return { success: false, error: '任务完成但未返回图片URL' };
       }
       if (taskStatus === 'failed') {
