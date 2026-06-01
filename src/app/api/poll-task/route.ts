@@ -806,9 +806,10 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        // ★ Outpaint 扩展后处理：将原图合成到 AI 结果中心
-        // 当 image-edit 的 outpaint 动作返回 AI 异步 taskId 时，
-        // AI 返回的扩展图片尺寸可能与目标不匹配，需要：1) resize 到目标尺寸 2) 将原图叠在中心
+        // ★ Outpaint 扩展后处理：将原图合成到 AI 结果中心（带羽化边缘）
+        // AI 结果可能包含灰色填充区域（部分模型无法完美保留原图内容）
+        // 策略：将 AI 结果作为底层，再把原图按偏移位置合成上去（带羽化边缘），
+        // 确保原图区域像素级保留，扩展区域使用 AI 生成内容
         const registryInfo = getTaskInfo(taskId);
         const registryResult = (registryInfo?.result as Record<string, unknown>) || {};
         const outpaintInfo = registryResult.outpaintInfo as Record<string, number> | undefined;
@@ -819,48 +820,110 @@ export async function POST(request: NextRequest) {
             console.log(`[poll-task] Outpaint composite for task ${taskId}, originalUrl: ${originalImageUrl || 'N/A'}`);
 
             if (originalImageUrl) {
-              // 获取 AI 扩展结果和原图
-              // ★ 扩展画面：直接使用 AI 结果（AI 已基于参考图生成包含原图内容的完整画面）
-              // 不再做"原图覆盖到AI结果上"的合成，因为：
-              // 1. AI 接收了参考图，生成结果已包含原图内容
-              // 2. 硬覆盖原图会产生拼接痕迹和边界问题
-              // 3. 灰色块是因为原图覆盖位置/尺寸不匹配
               try {
-                const outpaintInfo = registryResult.outpaintInfo as Record<string, number> | undefined;
-                if (outpaintInfo) {
-                  const aiResultBuf = await fetchImageBuffer(pollResult.imageUrl as string);
-                  const targetW = outpaintInfo.targetW;
-                  const targetH = outpaintInfo.targetH;
+                const aiResultBuf = await fetchImageBuffer(pollResult.imageUrl as string);
+                const targetW = outpaintInfo.targetW;
+                const targetH = outpaintInfo.targetH;
+                const scaleFactor = outpaintInfo.scaleFactor || 1;
+                const scaledTargetW = outpaintInfo.scaledTargetW || targetW;
+                const scaledTargetH = outpaintInfo.scaledTargetH || targetH;
+                const refW = outpaintInfo.refW || scaledTargetW;
+                const refH = outpaintInfo.refH || scaledTargetH;
+                const needsDownscale = scaleFactor < 1;
+                const offsetX = outpaintInfo.offsetX || 0;
+                const offsetY = outpaintInfo.offsetY || 0;
+                const origW = outpaintInfo.origW || 0;
+                const origH = outpaintInfo.origH || 0;
 
-                  // 将 AI 结果 resize 到精确的目标尺寸（避免比例偏差）
-                  const aiMeta = await sharp(aiResultBuf).metadata();
-                  if (targetW && targetH && ((aiMeta.width || 0) !== targetW || (aiMeta.height || 0) !== targetH)) {
-                    const resizedBuf = await sharp(aiResultBuf)
-                      .resize(targetW, targetH, { fit: 'fill' })
+                // Step 1: Resize AI result to scaled target dimensions
+                // (AI generates at refW x refH which should match scaledTargetW x scaledTargetH,
+                //  but we resize to ensure consistency)
+                let finalBuf = aiResultBuf;
+                const aiMeta = await sharp(aiResultBuf).metadata();
+                const aiW = aiMeta.width || scaledTargetW;
+                const aiH = aiMeta.height || scaledTargetH;
+                if (aiW !== scaledTargetW || aiH !== scaledTargetH) {
+                  finalBuf = await sharp(aiResultBuf)
+                    .resize(scaledTargetW, scaledTargetH, { fit: 'fill' })
+                    .png()
+                    .toBuffer();
+                }
+
+                // Step 2: If downscaling was applied, upscale to original target dimensions
+                if (needsDownscale) {
+                  finalBuf = await sharp(finalBuf)
+                    .resize(targetW, targetH, { fit: 'fill' })
+                    .png()
+                    .toBuffer();
+                }
+
+                // Step 3: Composite original image at offset with feathered edges
+                if (origW > 0 && origH > 0) {
+                  try {
+                    const origBuf = await fetchImageBuffer(originalImageUrl);
+                    const feather = 4;
+
+                    const origRGBA = await sharp(origBuf)
+                      .resize(origW, origH, { fit: 'fill' })
+                      .ensureAlpha()
+                      .raw()
+                      .toBuffer();
+
+                    const innerW = Math.max(1, origW - feather * 4);
+                    const innerH = Math.max(1, origH - feather * 4);
+                    const alphaMask = await sharp({
+                      create: { width: innerW, height: innerH, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } }
+                    })
+                      .extend({
+                        top: feather * 2, bottom: feather * 2,
+                        left: feather * 2, right: feather * 2,
+                        background: { r: 0, g: 0, b: 0, alpha: 0 }
+                      })
+                      .resize(origW, origH)
+                      .blur(feather)
+                      .extractChannel(0)
+                      .raw()
+                      .toBuffer();
+
+                    for (let i = 0; i < origW * origH; i++) {
+                      origRGBA[i * 4 + 3] = alphaMask[i];
+                    }
+
+                    const origWithAlpha = await sharp(origRGBA, {
+                      raw: { width: origW, height: origH, channels: 4 }
+                    }).png().toBuffer();
+
+                    finalBuf = await sharp(finalBuf)
+                      .composite([{ input: origWithAlpha, left: offsetX, top: offsetY }])
                       .jpeg({ quality: 92 })
                       .toBuffer();
 
-                    const { saveImageFile } = await import('../../../lib/server-data-root');
-                    const timestamp = Date.now();
-                    const resizedFilename = `outpaint-${timestamp}.jpg`;
-                    const resizedUrl = saveImageFile(resizedBuf, resizedFilename, 'outpaint');
-                    if (resizedUrl) {
-                      pollResult.imageUrl = resizedUrl;
-                    } else {
-                      pollResult.imageUrl = `data:image/jpeg;base64,${resizedBuf.toString('base64')}`;
-                    }
+                    console.log(`[poll-task] Outpaint: composited original at (${offsetX},${offsetY}) with feathered edges, target: ${targetW}x${targetH}`);
+                  } catch (compositeErr) {
+                    console.warn('[poll-task] Outpaint original compositing failed:', compositeErr instanceof Error ? compositeErr.message : compositeErr);
+                    finalBuf = await sharp(finalBuf).jpeg({ quality: 92 }).toBuffer();
                   }
-
-                  // 传递目标尺寸给前端
-                  (pollResult as Record<string, unknown>).targetWidth = targetW;
-                  (pollResult as Record<string, unknown>).targetHeight = targetH;
-                  console.log(`[poll-task] Outpaint: using AI result directly (no composite), target: ${targetW}x${targetH}`);
+                } else {
+                  finalBuf = await sharp(finalBuf).jpeg({ quality: 92 }).toBuffer();
                 }
+
+                // Save the composited result
+                const { saveImageFile } = await import('../../../lib/server-data-root');
+                const ts = Date.now();
+                const resizedFilename = `outpaint-${ts}.jpg`;
+                const resizedUrl = saveImageFile(finalBuf, resizedFilename, 'outpaint');
+                if (resizedUrl) {
+                  pollResult.imageUrl = resizedUrl;
+                } else {
+                  pollResult.imageUrl = `data:image/jpeg;base64,${finalBuf.toString('base64')}`;
+                }
+
+                (pollResult as Record<string, unknown>).targetWidth = targetW;
+                (pollResult as Record<string, unknown>).targetHeight = targetH;
               } catch (outpaintErr) {
-                console.warn('[poll-task] Outpaint resize failed, using raw AI result:', outpaintErr instanceof Error ? outpaintErr.message : outpaintErr);
+                console.warn('[poll-task] Outpaint processing failed, using raw AI result:', outpaintErr instanceof Error ? outpaintErr.message : outpaintErr);
               }
             } else {
-              // 没有原图 URL，直接使用 AI 结果
               console.log(`[poll-task] Outpaint: no original URL, using AI result directly`);
             }
           } catch (outpaintCompositeErr) {

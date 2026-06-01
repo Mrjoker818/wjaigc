@@ -2728,18 +2728,53 @@ export async function POST(request: NextRequest) {
 
       console.log(`[outpaint] orig ${origW}x${origH} → target ${targetW}x${targetH}, offset (${offsetX},${offsetY})`);
 
-      // 使用 sharp 合成扩展画布
+      // ============================================================
+      // 即梦风格扩图策略
+      // 核心思路：如果目标画布超出模型支持尺寸，先缩小到模型尺寸生成，
+      // 然后将 AI 结果放大回原始尺寸，与原图羽化合成
+      // ============================================================
+
+      // 确定模型支持的最大尺寸（必须在合成参考图之前计算，以便使用正确的尺寸）
+      const firstModel = candidateModels[0]?.model || '';
+      let modelMaxPx = 1024;
+      if (firstModel.toLowerCase().includes('gpt-image')) {
+        modelMaxPx = 4096; // GPT Image 2 支持较大尺寸
+      } else if (firstModel.toLowerCase().includes('gemini')) {
+        modelMaxPx = 2048; // Gemini 支持中等尺寸
+      }
+      const needsDownscale = targetW > modelMaxPx || targetH > modelMaxPx;
+
+      // 计算缩小比例（如果目标超出模型限制）
+      const scaleFactor = needsDownscale ? Math.min(modelMaxPx / targetW, modelMaxPx / targetH) : 1;
+      const scaledTargetW = Math.max(8, Math.ceil(targetW * scaleFactor / 8) * 8);
+      const scaledTargetH = Math.max(8, Math.ceil(targetH * scaleFactor / 8) * 8);
+      const scaledOffsetX = Math.round(offsetX * scaleFactor);
+      const scaledOffsetY = Math.round(offsetY * scaleFactor);
+      const scaledSrcW = Math.round(srcW * scaleFactor);
+      const scaledSrcH = Math.round(srcH * scaleFactor);
+
+      // 有效尺寸：发送给 AI 的合成图和蒙版使用此尺寸（确保与 genSize 一致）
+      const effW = needsDownscale ? scaledTargetW : targetW;
+      const effH = needsDownscale ? scaledTargetH : targetH;
+      const effOffsetX = needsDownscale ? scaledOffsetX : offsetX;
+      const effOffsetY = needsDownscale ? scaledOffsetY : offsetY;
+      const effSrcW = needsDownscale ? scaledSrcW : srcW;
+      const effSrcH = needsDownscale ? scaledSrcH : srcH;
+
+      console.log(`[outpaint] ${needsDownscale ? 'DOWNSCALE' : 'DIRECT'}: target ${targetW}x${targetH}, scaled ${scaledTargetW}x${scaledTargetH}, scale=${scaleFactor.toFixed(3)}, eff ${effW}x${effH}`);
+
+      // 使用 sharp 合成扩展画布（使用有效尺寸，确保与 AI 生成尺寸一致）
       // 1. 创建背景画布（灰色填充表示需要扩展的区域）
-      // 2. 将原图贴到 offsetX, offsetY 位置
+      // 2. 将原图贴到 effOffsetX, effOffsetY 位置
       const resizedOriginal = await sharp(imageBuffer)
-        .resize(srcW, srcH, { fit: 'fill' })
+        .resize(effSrcW, effSrcH, { fit: 'fill' })
         .toBuffer();
 
       // 创建灰色背景
       const backgroundBuffer = await sharp({
         create: {
-          width: targetW,
-          height: targetH,
+          width: effW,
+          height: effH,
           channels: 3,
           background: { r: 128, g: 128, b: 128 },
         },
@@ -2749,8 +2784,8 @@ export async function POST(request: NextRequest) {
       const compositeImage = await sharp(backgroundBuffer)
         .composite([{
           input: resizedOriginal,
-          left: offsetX,
-          top: offsetY,
+          left: effOffsetX,
+          top: effOffsetY,
         }])
         .png()
         .toBuffer();
@@ -2758,8 +2793,8 @@ export async function POST(request: NextRequest) {
       // 创建蒙版：原图区域=黑(保留)，扩展区域=白(需要AI生成)
       const maskFullWhite = await sharp({
         create: {
-          width: targetW,
-          height: targetH,
+          width: effW,
+          height: effH,
           channels: 3,
           background: { r: 255, g: 255, b: 255 },
         },
@@ -2767,8 +2802,8 @@ export async function POST(request: NextRequest) {
 
       const maskBlackSrc = await sharp({
         create: {
-          width: srcW,
-          height: srcH,
+          width: effSrcW,
+          height: effSrcH,
           channels: 3,
           background: { r: 0, g: 0, b: 0 },
         },
@@ -2777,8 +2812,8 @@ export async function POST(request: NextRequest) {
       const finalMask = await sharp(maskFullWhite)
         .composite([{
           input: maskBlackSrc,
-          left: offsetX,
-          top: offsetY,
+          left: effOffsetX,
+          top: effOffsetY,
         }])
         .blur(8) // IOPaint sd_mask_blur 风格，确保衔接处无痕迹
         .png()
@@ -2795,14 +2830,36 @@ export async function POST(request: NextRequest) {
       await fs.writeFile(compositePath, compositeImage);
       await fs.writeFile(maskPath, finalMask);
 
-      // 构建发送给AI的参考图（使用JPEG压缩+尺寸限制，避免请求体过大被代理拒绝）
-      const maxRefEdge = 1024;
+      // ★ 关键修复：参考图和蒙版必须保持相同尺寸，且 genSize 必须与之匹配
+      // 否则：
+      // 1. OpenAI /images/edits 要求 image 和 mask 尺寸一致
+      // 2. AI 生成尺寸(genSize) 与参考图不匹配时，竖向扩展上方会出现灰色填充
+      // 
+      // 策略：参考图和蒙版统一使用 effW x effH，genSize 也使用 effW x effH
+      // 如果 effW x effH 总像素超过 maxTotalPixels（约 2MP），等比缩小
+      const maxTotalPixels = 2 * 1024 * 1024; // 2 megapixels
+      const effTotalPixels = effW * effH;
+      let refW = effW;
+      let refH = effH;
+      if (effTotalPixels > maxTotalPixels) {
+        const refScale = Math.sqrt(maxTotalPixels / effTotalPixels);
+        refW = Math.round(effW * refScale / 8) * 8;   // 对齐到 8 的倍数
+        refH = Math.round(effH * refScale / 8) * 8;
+      }
+
+      // 参考图：缩放到 refW x refH，JPEG 压缩
       const compositeRefBuffer = await sharp(compositeImage)
-        .resize(maxRefEdge, maxRefEdge, { fit: 'inside', withoutEnlargement: true })
+        .resize(refW, refH, { fit: 'fill' })
         .jpeg({ quality: 85 })
         .toBuffer();
       const compositeBase64 = `data:image/jpeg;base64,${compositeRefBuffer.toString('base64')}`;
-      const maskFileBase64 = `data:image/png;base64,${finalMask.toString('base64')}`;
+
+      // 蒙版：缩放到与参考图相同的 refW x refH
+      const maskRefBuffer = await sharp(finalMask)
+        .resize(refW, refH, { fit: 'fill' })
+        .png()
+        .toBuffer();
+      const maskFileBase64 = `data:image/png;base64,${maskRefBuffer.toString('base64')}`;
 
       // 构建扩图方向的提示词
       const directionHints: string[] = [];
@@ -2823,48 +2880,22 @@ export async function POST(request: NextRequest) {
         `Do not modify, crop, or alter the original center content in any way.`
       );
 
-      // ============================================================
-      // 即梦风格扩图策略
-      // 核心思路：如果目标画布超出模型支持尺寸，先缩小到模型尺寸生成，
-      // 然后提取 AI 生成的边缘内容，放大回原始尺寸，与原图合成
-      // ============================================================
-
-      // 确定模型支持的最大尺寸
-      const firstModel = candidateModels[0]?.model || '';
-      let modelMaxPx = 1024;
-      if (firstModel.toLowerCase().includes('gpt-image')) {
-        modelMaxPx = 4096; // GPT Image 2 支持较大尺寸
-      } else if (firstModel.toLowerCase().includes('gemini')) {
-        modelMaxPx = 2048; // Gemini 支持中等尺寸
-      }
-      const needsDownscale = targetW > modelMaxPx || targetH > modelMaxPx;
-
-      // 计算缩小比例（如果目标超出模型限制）
-      const scaleFactor = needsDownscale ? Math.min(modelMaxPx / targetW, modelMaxPx / targetH) : 1;
-      const scaledTargetW = Math.max(8, Math.ceil(targetW * scaleFactor / 8) * 8);
-      const scaledTargetH = Math.max(8, Math.ceil(targetH * scaleFactor / 8) * 8);
-      const scaledOffsetX = Math.round(offsetX * scaleFactor);
-      const scaledOffsetY = Math.round(offsetY * scaleFactor);
-      const scaledSrcW = Math.round(srcW * scaleFactor);
-      const scaledSrcH = Math.round(srcH * scaleFactor);
-
-      console.log(`[outpaint] ${needsDownscale ? 'DOWNSCALE' : 'DIRECT'}: target ${targetW}x${targetH}, scaled ${scaledTargetW}x${scaledTargetH}, scale=${scaleFactor.toFixed(3)}`);
-
       // 清理临时文件（延迟清理，异步任务需要文件存在）
       const cleanupFiles = async () => {
         try { await fs.unlink(compositePath); } catch (_) { /* ignore */ }
         try { await fs.unlink(maskPath); } catch (_) { /* ignore */ }
       };
 
-      // ★ 扩展画面：直接使用 AI 结果
-      // AI 已收到合成参考图（原图+灰色边框），生成的结果已包含原图内容+扩展内容
-      // 不再做硬覆盖合成，避免边界拼接痕迹和灰色块问题
+      // ★ 扩展画面：AI 结果 + 原图羽化合成
+      // AI 接收了合成参考图（原图+灰色边框）和蒙版，但部分模型无法完美保留原图内容
+      // 策略：将 AI 结果作为底层，再把原图按偏移位置合成上去（带羽化边缘），
+      // 确保原图区域像素级保留，扩展区域使用 AI 生成内容，过渡自然无灰块
       const persistOutpaintResult = async (resultBuffer: Buffer): Promise<{ url: string; w: number; h: number }> => {
         const resultMeta = await sharp(resultBuffer).metadata();
         const resultW = resultMeta.width || scaledTargetW;
         const resultH = resultMeta.height || scaledTargetH;
 
-        // 如果 AI 结果尺寸与缩放目标不同，resize 到缩放目标尺寸
+        // Step 1: Resize AI result to scaled target dimensions
         let finalBuf = resultBuffer;
         if (resultW !== scaledTargetW || resultH !== scaledTargetH) {
           finalBuf = await sharp(resultBuffer)
@@ -2873,13 +2904,59 @@ export async function POST(request: NextRequest) {
             .toBuffer();
         }
 
-        // 如果有缩放，放大到原始目标尺寸
-        if (scaleFactor > 1) {
+        // Step 2: If downscaling was applied, upscale to original target dimensions
+        if (needsDownscale) {
           finalBuf = await sharp(finalBuf)
             .resize(targetW, targetH, { fit: 'fill' })
+            .png()
+            .toBuffer();
+        }
+
+        // Step 3: Composite original image at offset with feathered edges
+        // This eliminates gray fill artifacts and ensures pixel-perfect original content
+        try {
+          const feather = 4; // Feather radius in pixels for smooth transition
+          const origRGBA = await sharp(imageBuffer)
+            .resize(origW, origH, { fit: 'fill' })
+            .ensureAlpha()
+            .raw()
+            .toBuffer();
+
+          // Create feathered alpha mask: solid white center fading to transparent at edges
+          const innerW = Math.max(1, origW - feather * 4);
+          const innerH = Math.max(1, origH - feather * 4);
+          const alphaMask = await sharp({
+            create: { width: innerW, height: innerH, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } }
+          })
+            .extend({
+              top: feather * 2, bottom: feather * 2,
+              left: feather * 2, right: feather * 2,
+              background: { r: 0, g: 0, b: 0, alpha: 0 }
+            })
+            .resize(origW, origH)
+            .blur(feather)
+            .extractChannel(0)
+            .raw()
+            .toBuffer();
+
+          // Apply alpha mask to original image
+          for (let i = 0; i < origW * origH; i++) {
+            origRGBA[i * 4 + 3] = alphaMask[i];
+          }
+
+          const origWithAlpha = await sharp(origRGBA, {
+            raw: { width: origW, height: origH, channels: 4 }
+          }).png().toBuffer();
+
+          // Composite original onto AI result at offset position
+          finalBuf = await sharp(finalBuf)
+            .composite([{ input: origWithAlpha, left: offsetX, top: offsetY }])
             .jpeg({ quality: 92 })
             .toBuffer();
-        } else {
+
+          console.log(`[outpaint] Composited original at (${offsetX},${offsetY}) with feathered edges, final: ${targetW}x${targetH}`);
+        } catch (compositeErr) {
+          console.warn('[outpaint] Original compositing failed, using AI result directly:', compositeErr instanceof Error ? compositeErr.message : compositeErr);
           finalBuf = await sharp(finalBuf).jpeg({ quality: 92 }).toBuffer();
         }
 
@@ -2894,8 +2971,11 @@ export async function POST(request: NextRequest) {
         return { url: resultUrl, w: targetW, h: targetH };
       };
 
-      // Build request body for AI generation using scaled target size
-      const genSize = `${scaledTargetW}x${scaledTargetH}`;
+      // ★ 关键修复：genSize 必须与参考图/蒙版尺寸 (refW x refH) 一致
+      // 竖向扩展时，如果 genSize 与参考图比例不同，AI 生成结果上方会出现灰色填充
+      // 因为 AI 看到的参考图是 refW x refH，但被要求生成 scaledTargetW x scaledTargetH，
+      // 两者的比例不同会导致 AI 结果布局与扩展需求不匹配
+      const genSize = `${refW}x${refH}`;
       const genBody: Record<string, unknown> = {
         model: modelStr,
         prompt: outpaintPrompt,
@@ -2958,7 +3038,8 @@ export async function POST(request: NextRequest) {
           status: 'processing',
           progress: 10,
           result: {
-            outpaintInfo: { targetW, targetH, scaleFactor, scaledTargetW, scaledTargetH },
+            outpaintInfo: { targetW, targetH, scaleFactor, scaledTargetW, scaledTargetH, refW, refH, offsetX, offsetY, origW, origH },
+            originalImageUrl: imageUrl,
             usedModel: cm?.model,
             apiBaseUrl: cm?.apiBaseUrl,
             apiKey: cm?.apiKey,
