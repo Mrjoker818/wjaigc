@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { GripVertical, X, Minus, Sparkles, Loader2, CheckCircle2, XCircle, Clock, RefreshCw, Download, ChevronRight, Smile, Upload, ImagePlus, ChevronDown } from 'lucide-react';
+import { GripVertical, X, Minus, Sparkles, Loader2, CheckCircle2, XCircle, Clock, RefreshCw, Download, ChevronRight, Smile, Upload, ImagePlus } from 'lucide-react';
+
 
 /* ──────────────────── 主题色 ──────────────────── */
 const themes = {
@@ -173,8 +174,6 @@ export default function StickerAssistantPanel({
   /* ── 模型选择 ── */
   const [models, setModels] = useState<ModelOption[]>([]);
   const [selectedModelId, setSelectedModelId] = useState('');
-  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
-  const [chatDropdownOpen, setChatDropdownOpen] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [chatModelId, setChatModelId] = useState('');
   const [chatModels, setChatModels] = useState<ModelOption[]>([]);
@@ -264,14 +263,6 @@ export default function StickerAssistantPanel({
     window.addEventListener('mouseup', up);
     return () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
   }, [dragging]);
-
-  /* ── 点击外部关闭模型下拉 ── */
-  useEffect(() => {
-    if (!modelDropdownOpen) return;
-    const handler = () => setModelDropdownOpen(false);
-    window.addEventListener('click', handler);
-    return () => window.removeEventListener('click', handler);
-  }, [modelDropdownOpen]);
 
   /* ── ESC ── */
   useEffect(() => {
@@ -758,84 +749,84 @@ ${themeDesc}
               </div>
 
               {/* 模型选择 */}
-              <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-2">
                 {/* LLM 计划模型 */}
-                <div>
-                  <label className="block text-xs mb-1.5 font-medium" style={{ color: t.textSub }}>计划模型</label>
-                  <div className="relative">
-                    <button
-                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-md text-xs transition-all duration-150 cursor-pointer"
-                      style={{ background: t.inputBg, color: chatModelId ? t.text : t.textDim, border: `1px solid ${t.border}` }}
-                      onClick={(e) => { e.stopPropagation(); setChatDropdownOpen(v => !v); setModelDropdownOpen(false); }}
-                    >
-                      <span className="truncate">
-                        {chatModels.length === 0 ? '暂无模型' : (chatModelId ? (chatModels.find(m => m.id === chatModelId)?.displayLabel || chatModelId) : '选择模型')}
-                      </span>
-                      <ChevronDown size={12} style={{ color: t.textDim }} />
-                    </button>
-                    {chatDropdownOpen && chatModels.length > 0 && (
-                      <div
-                        className="absolute left-0 right-0 top-full mt-1 rounded-md overflow-hidden z-10 max-h-40 overflow-y-auto"
-                        style={{ background: t.panelBg, border: `1px solid ${t.border}`, boxShadow: t.shadow }}
-                        onClick={e => e.stopPropagation()}
-                      >
-                        {chatModels.map(m => (
-                          <button
-                            key={m.id}
-                            className="w-full text-left px-2 py-1.5 text-[11px] transition-colors duration-100 cursor-pointer"
-                            style={{
-                              background: chatModelId === m.id ? t.accentBg : 'transparent',
-                              color: chatModelId === m.id ? t.accent : t.textSub,
-                            }}
-                            onMouseEnter={e => { if (chatModelId !== m.id) e.currentTarget.style.background = t.accentBg; }}
-                            onMouseLeave={e => { if (chatModelId !== m.id) e.currentTarget.style.background = 'transparent'; }}
-                            onClick={() => { setChatModelId(m.id); setChatDropdownOpen(false); }}
-                          >
-                            <div className="font-medium truncate">{m.displayLabel || m.id}</div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                <div className="space-y-1">
+                  <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider" style={{ color: t.textSub }}>
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0`} style={{ background: t.accent }} />
+                    计划模型
+                  </label>
+                  <select
+                    value={chatModelId}
+                    onChange={(e) => setChatModelId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg text-sm appearance-none cursor-pointer transition-all duration-150"
+                    style={{
+                      background: t.inputBg,
+                      color: t.text,
+                      border: `1px solid ${t.border}`,
+                    }}
+                  >
+                    {chatModels.length === 0 && <option value="">暂无模型</option>}
+                    {(() => {
+                      const grouped: Record<string, typeof chatModels> = {};
+                      chatModels.forEach(m => {
+                        const key = m.providerName || '未知';
+                        if (!grouped[key]) grouped[key] = [];
+                        grouped[key].push(m);
+                      });
+                      return Object.entries(grouped).map(([providerName, models]) => (
+                        <optgroup key={providerName} label={providerName}>
+                          {models.map(m => (
+                            <option key={m.id} value={m.id}>{m.displayLabel || m.id}</option>
+                          ))}
+                        </optgroup>
+                      ));
+                    })()}
+                  </select>
+                  {(() => {
+                    const cm = chatModels.find(m => m.id === chatModelId);
+                    if (cm) return <p className="text-xs mt-0.5" style={{ color: t.textDim }}>{cm.displayLabel || cm.id} · 来自 {cm.providerName}</p>;
+                    return null;
+                  })()}
                 </div>
                 {/* 生图模型 */}
-                <div>
-                  <label className="block text-xs mb-1.5 font-medium" style={{ color: t.textSub }}>生图模型</label>
-                  <div className="relative">
-                    <button
-                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-md text-xs transition-all duration-150 cursor-pointer"
-                      style={{ background: t.inputBg, color: selectedModel ? t.text : t.textDim, border: `1px solid ${t.border}` }}
-                      onClick={(e) => { e.stopPropagation(); setModelDropdownOpen(v => !v); setChatDropdownOpen(false); }}
-                    >
-                      <span className="truncate">
-                        {modelsLoading ? '加载中...' : (selectedModel ? `${selectedModel.displayLabel || selectedModel.id}` : (models.length === 0 ? '暂无模型' : '选择模型'))}
-                      </span>
-                      <ChevronDown size={12} style={{ color: t.textDim }} />
-                    </button>
-                    {modelDropdownOpen && models.length > 0 && (
-                      <div
-                        className="absolute left-0 right-0 top-full mt-1 rounded-md overflow-hidden z-10 max-h-40 overflow-y-auto"
-                        style={{ background: t.panelBg, border: `1px solid ${t.border}`, boxShadow: t.shadow }}
-                        onClick={e => e.stopPropagation()}
-                      >
-                        {models.map(m => (
-                          <button
-                            key={m.id}
-                            className="w-full text-left px-2 py-1.5 text-[11px] transition-colors duration-100 cursor-pointer"
-                            style={{
-                              background: selectedModelId === m.id ? t.accentBg : 'transparent',
-                              color: selectedModelId === m.id ? t.accent : t.textSub,
-                            }}
-                            onMouseEnter={e => { if (selectedModelId !== m.id) e.currentTarget.style.background = t.accentBg; }}
-                            onMouseLeave={e => { if (selectedModelId !== m.id) e.currentTarget.style.background = 'transparent'; }}
-                            onClick={() => { setSelectedModelId(m.id); setModelDropdownOpen(false); }}
-                          >
-                            <div className="font-medium truncate">{m.displayLabel || m.id}</div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                <div className="space-y-1">
+                  <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider" style={{ color: t.textSub }}>
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0`} style={{ background: t.accent }} />
+                    生图模型
+                  </label>
+                  <select
+                    value={selectedModelId}
+                    onChange={(e) => setSelectedModelId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg text-sm appearance-none cursor-pointer transition-all duration-150"
+                    style={{
+                      background: t.inputBg,
+                      color: t.text,
+                      border: `1px solid ${t.border}`,
+                    }}
+                  >
+                    {models.length === 0 && <option value="">暂无模型</option>}
+                    {(() => {
+                      const grouped: Record<string, typeof models> = {};
+                      models.forEach(m => {
+                        const key = m.providerName || '未知';
+                        if (!grouped[key]) grouped[key] = [];
+                        grouped[key].push(m);
+                      });
+                      return Object.entries(grouped).map(([providerName, ms]) => (
+                        <optgroup key={providerName} label={providerName}>
+                          {ms.map(m => (
+                            <option key={m.id} value={m.id}>{m.displayLabel || m.id}</option>
+                          ))}
+                        </optgroup>
+                      ));
+                    })()}
+                  </select>
+                  {(() => {
+                    const sm = models.find(m => m.id === selectedModelId);
+                    if (sm) return <p className="text-xs mt-0.5" style={{ color: t.textDim }}>{sm.displayLabel || sm.id} · 来自 {sm.providerName}</p>;
+                    return null;
+                  })()}
                 </div>
               </div>
 
