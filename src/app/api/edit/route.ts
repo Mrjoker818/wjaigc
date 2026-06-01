@@ -449,6 +449,67 @@ export async function POST(request: NextRequest) {
     let llmEditRegions: Array<{ label: string; bounds: { x: number; y: number; width: number; height: number } }> = []; // LLM 识别的编辑区域
     const llmStartTime = Date.now();
 
+    // ★ 预处理：将前端黑白mask转换为API所需格式（必须在 LLM 协作之前，因为 LLM 也需要看蒙版）
+    // 前端发送通用黑白格式（白色=编辑, 黑色=保留）
+    // 关键：mask 必须与 image 尺寸完全一致，否则 API 无法正确对齐编辑区域
+    let openaiMaskBuffer: Buffer | null = null;
+    let maskImageUrl: string | null = null; // 用于非 images.edit 路径的视觉参考
+    if (maskBuffer) {
+      try {
+        // 先获取原图尺寸
+        const imageMeta = await sharp(imageBuffer).metadata();
+        const imgW = imageMeta.width || 1;
+        const imgH = imageMeta.height || 1;
+
+        // ★ 将 mask resize 到与 image 完全一致的尺寸
+        const resizedMaskBuffer = await sharp(maskBuffer)
+          .resize(imgW, imgH, { fit: 'fill', kernel: 'nearest' })
+          .ensureAlpha()
+          .raw()
+          .toBuffer();
+
+        // 转换为 OpenAI 格式：白色(luminance>128)→透明=编辑, 黑色→不透明=保留
+        const converted = Buffer.alloc(imgW * imgH * 4);
+        for (let i = 0; i < imgW * imgH; i++) {
+          const r = resizedMaskBuffer[i * 4], g = resizedMaskBuffer[i * 4 + 1], b = resizedMaskBuffer[i * 4 + 2];
+          const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+          if (luminance > 128) {
+            // 白色→透明（编辑区域）
+            converted[i * 4] = 0; converted[i * 4 + 1] = 0; converted[i * 4 + 2] = 0; converted[i * 4 + 3] = 0;
+          } else {
+            // 黑色→不透明（保留区域）
+            converted[i * 4] = 255; converted[i * 4 + 1] = 255; converted[i * 4 + 2] = 255; converted[i * 4 + 3] = 255;
+          }
+        }
+        openaiMaskBuffer = await sharp(converted, { raw: { width: imgW, height: imgH, channels: 4 } }).png().toBuffer();
+        console.info(`[edit] taskId=${taskId} mask已转换, 尺寸=${imgW}x${imgH}(与原图一致), OpenAI格式=透明编辑`);
+
+        // 同时生成一个带标注的蒙版参考图（红色高亮编辑区域），用于 LLM 协作和非 images.edit 路径的视觉参考
+        const annotatedMask = await sharp(maskBuffer)
+          .resize(imgW, imgH, { fit: 'fill', kernel: 'nearest' })
+          .ensureAlpha()
+          .raw()
+          .toBuffer();
+        // 在蒙版上叠加红色高亮编辑区域，使AI更容易理解
+        const highlightedMask = Buffer.alloc(imgW * imgH * 4);
+        for (let i = 0; i < imgW * imgH; i++) {
+          const r = annotatedMask[i * 4], g = annotatedMask[i * 4 + 1], b = annotatedMask[i * 4 + 2];
+          const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+          if (lum > 128) {
+            // 编辑区域：红色高亮
+            highlightedMask[i * 4] = 255; highlightedMask[i * 4 + 1] = 60; highlightedMask[i * 4 + 2] = 60; highlightedMask[i * 4 + 3] = 255;
+          } else {
+            // 保留区域：深灰
+            highlightedMask[i * 4] = 40; highlightedMask[i * 4 + 1] = 40; highlightedMask[i * 4 + 2] = 40; highlightedMask[i * 4 + 3] = 255;
+          }
+        }
+        const highlightedMaskBuf = await sharp(highlightedMask, { raw: { width: imgW, height: imgH, channels: 4 } }).png().toBuffer();
+        maskImageUrl = `data:image/png;base64,${highlightedMaskBuf.toString('base64')}`;
+      } catch (maskConvErr) {
+        console.warn('[edit] mask格式转换失败:', maskConvErr instanceof Error ? maskConvErr.message : maskConvErr);
+      }
+    }
+
     // ★ 跳过 LLM 协作的条件：prompt 足够详细（用户自己写了好的 prompt）
     // 短 prompt（如"把背景换成蓝色"）由 LLM 扩展成详细指令价值更大
     // 长 prompt（如详细描述）跳过 LLM 可节省 5-20 秒
@@ -492,21 +553,24 @@ export async function POST(request: NextRequest) {
         const collaborationMessages: Array<Record<string, unknown>> = [];
         const contentParts: Array<Record<string, unknown>> = [];
 
-        // 构建多模态消息（原图 + 参考图）
+        // 构建多模态消息（原图 + 蒙版参考图 + 参考图）
         const promptText = `You are an expert image editing assistant. Analyze the provided image(s) and generate optimal editing instructions.
 
 TASK: User wants to "${prompt}" the image.
+${maskBuffer ? '\nMASK INFO: The user has painted a mask on the image to indicate the SPECIFIC REGION they want to modify. The red-highlighted area in the mask reference image shows where changes should be applied. You MUST focus your editInstruction on modifying ONLY the masked region, keeping everything else unchanged.' : ''}
 
 INSTRUCTIONS:
 1. Analyze the original image: describe its content, composition, style, colors, and key elements
-2. ${referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0 ? 'Analyze the reference image(s): describe how they relate to the editing goal and what aspects should be referenced (style, composition, character, etc.)' : 'No reference image provided.'}
-3. Generate a detailed editing instruction that will produce the best result for the user's request
+2. ${maskBuffer ? 'Analyze the mask: identify what is in the red-highlighted (masked) region that needs to be modified. Describe what content is currently there and what should replace it.' : 'No mask provided - the edit applies to the entire image or the AI should determine the best region.'}
+3. ${referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0 ? 'Analyze the reference image(s): describe how they relate to the editing goal and what aspects should be referenced (style, composition, character, etc.)' : 'No reference image provided.'}
+4. Generate a detailed editing instruction that will produce the best result for the user's request
 
 OUTPUT FORMAT (respond with ONLY a JSON object, no markdown):
 {
   "originalAnalysis": "Brief description of the original image",
+  "maskAnalysis": ${maskBuffer ? '"What is in the masked region and what should change there"' : 'null'},
   "referenceAnalysis": ${referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0 ? '"Brief description of reference image aspects to apply"' : 'null'},
-  "editInstruction": "Detailed editing instruction optimized for image generation AI",
+  "editInstruction": "Detailed editing instruction optimized for image generation AI${maskBuffer ? ', explicitly describing what to change in the masked region only' : ''}",
   "suggestedRegions": ["optional: regions that should be modified"],
   "autoMaskPrompt": "optional: description of regions to mask for precise editing"
 }
@@ -521,6 +585,14 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           contentParts.push({
             type: 'image_url',
             image_url: { url: imageBase64, detail: 'high' }
+          });
+        }
+
+        // ★ 添加蒙版参考图到消息（红色高亮编辑区域，让LLM理解蒙版位置）
+        if (maskImageUrl) {
+          contentParts.push({
+            type: 'image_url',
+            image_url: { url: maskImageUrl, detail: 'high' }
           });
         }
 
@@ -663,7 +735,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
 
     console.info(`[edit] taskId=${taskId} LLM协作阶段耗时=${Date.now() - llmStartTime}ms, effectivePrompt长度=${effectivePrompt.length}`);
 
-    const editInstruction = `Edit this image according to the following instruction: ${effectivePrompt}. Maintain the overall composition and style while making the requested changes.${aspectRatioExtendHint ? ` ${aspectRatioExtendHint}` : ''}${size ? ` Output image size: ${size}.` : ''}${quality ? ` Output quality: ${quality}.` : ''}`;
+    const editInstruction = `Edit this image according to the following instruction: ${effectivePrompt}. Maintain the overall composition and style while making the requested changes.${maskBuffer ? ' IMPORTANT: A mask is provided that indicates the specific area to edit. You MUST only modify the area indicated by the mask (the red-highlighted region in the reference). Do NOT alter areas outside the mask. Apply the requested changes ONLY within the masked region while keeping everything else identical.' : ''}${aspectRatioExtendHint ? ` ${aspectRatioExtendHint}` : ''}${size ? ` Output image size: ${size}.` : ''}${quality ? ` Output quality: ${quality}.` : ''}`;
 
     // ========== 6. 调用 API（全兼容模式） ==========
     // ★ 检查任务是否已被取消
@@ -674,32 +746,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     updateTaskStage(taskId, '编辑中');
     const editStartTime = Date.now();
 
-    // ★ 预处理：将前端黑白mask转换为OpenAI格式(透明=编辑)，供 images.edit 路径使用
-    // 前端发送通用黑白格式（白色=编辑, 黑色=保留）
-    // /images/edits 要求：透明=需要编辑, 不透明=保留
-    let openaiMaskBuffer: Buffer | null = null;
-    if (maskBuffer) {
-      try {
-        const maskSharp = sharp(maskBuffer);
-        const maskMeta = await maskSharp.metadata();
-        const maskPng = await maskSharp.ensureAlpha().raw().toBuffer();
-        const mw = maskMeta.width || 1;
-        const mh = maskMeta.height || 1;
-        const converted = Buffer.alloc(mw * mh * 4);
-        for (let i = 0; i < mw * mh; i++) {
-          const r = maskPng[i * 4], g = maskPng[i * 4 + 1], b = maskPng[i * 4 + 2];
-          const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-          if (luminance > 128) {
-            converted[i * 4] = 0; converted[i * 4 + 1] = 0; converted[i * 4 + 2] = 0; converted[i * 4 + 3] = 0;
-          } else {
-            converted[i * 4] = 255; converted[i * 4 + 1] = 255; converted[i * 4 + 2] = 255; converted[i * 4 + 3] = 255;
-          }
-        }
-        openaiMaskBuffer = await sharp(converted, { raw: { width: mw, height: mh, channels: 4 } }).png().toBuffer();
-      } catch (maskConvErr) {
-        console.warn('[edit] mask格式转换失败:', maskConvErr instanceof Error ? maskConvErr.message : maskConvErr);
-      }
-    }
+    // ★ mask 预处理已在 LLM 协作之前完成（openaiMaskBuffer / maskImageUrl 已就绪）
 
     console.info(`[edit] taskId=${taskId} 开始图像编辑, model=${model}, hasMask=${!!maskBuffer}, count=${count}`);
 
@@ -866,8 +913,13 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           isEditEndpoint: true,
         });
 
-        // 添加参考图：原图 + 参考图都作为 image_urls
+        // 添加参考图：原图 + 蒙版参考图（如有）+ 用户参考图都作为 image_urls
         const imageUrls: string[] = [imageUrlForApi];
+        // ★ 蒙版参考图：红色高亮标注编辑区域，让AI理解蒙版位置
+        if (maskImageUrl) {
+          imageUrls.push(maskImageUrl);
+          console.info(`[edit] taskId=${taskId} images/generations: 蒙版参考图已添加到image_urls`);
+        }
         if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
           for (const refUrl of referenceImages) {
             try {
@@ -1069,6 +1121,18 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       contentParts.push({
         type: 'text',
         text: `[System: There are ${referenceImages.length} reference image(s) above. Use them as style/composition/subject references when editing the main image.]`,
+      });
+    }
+
+    // ★ 蒙版参考图
+    if (maskImageUrl) {
+      contentParts.push({
+        type: 'image_url',
+        image_url: { url: maskImageUrl },
+      });
+      contentParts.push({
+        type: 'text',
+        text: '[System: The image above is a MASK overlay. The RED-highlighted area indicates the region you MUST modify. Only change content within the red/masked region, keep everything else identical.]',
       });
     }
 
