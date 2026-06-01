@@ -83,36 +83,36 @@ const STYLE_PRESETS: StylePreset[] = [
     key: 'general',
     label: '大众通用',
     icon: '😊',
-    positivePrompt: 'cute cartoon sticker, thick outlines, vivid solid colors, flat shading, simple clean background, sticker art style, expressive pose, white border outline, chibi proportions',
-    negativePrompt: 'photorealistic, 3d render, complex details, gradient, realistic texture, blurry, low quality, watermark, text',
+    positivePrompt: 'cute cartoon sticker, thick outlines, vivid solid colors, flat shading, transparent background, sticker art style, expressive pose, chibi proportions, die-cut sticker',
+    negativePrompt: 'photorealistic, 3d render, complex details, gradient, realistic texture, blurry, low quality, watermark, text, solid background, white background',
   },
   {
     key: 'comic',
     label: '漫画风格',
     icon: '💥',
-    positivePrompt: 'manga style sticker, screen tones, bold ink outlines, dynamic action lines, monochrome with spot color, speech bubble elements, dramatic expression, comic panel feel',
-    negativePrompt: 'photorealistic, watercolor, pastel, gradient, realistic shading, blurry, low quality, watermark',
+    positivePrompt: 'manga style sticker, screen tones, bold ink outlines, dynamic action lines, monochrome with spot color, speech bubble elements, dramatic expression, comic panel feel, transparent background, die-cut sticker',
+    negativePrompt: 'photorealistic, watercolor, pastel, gradient, realistic shading, blurry, low quality, watermark, solid background, white background',
   },
   {
     key: 'classic',
     label: '经典贴纸',
     icon: '⭐',
-    positivePrompt: 'die-cut sticker style, clean vector outline, solid bold colors, no background, whimsical character design, rounded shapes, professional sticker production, white stroke border',
-    negativePrompt: 'photorealistic, 3d, complex background, gradient, messy lines, blurry, low quality, watermark, photo',
+    positivePrompt: 'die-cut sticker style, clean vector outline, solid bold colors, transparent background, whimsical character design, rounded shapes, professional sticker production, no background',
+    negativePrompt: 'photorealistic, 3d, solid background, gradient, messy lines, blurry, low quality, watermark, photo, white background',
   },
   {
     key: 'flat',
     label: '平面设计',
     icon: '🎨',
-    positivePrompt: 'flat design sticker, minimal geometric shapes, limited color palette, clean vector art, bold solid fills, no shadows, modern graphic style, simple silhouettes',
-    negativePrompt: 'realistic, 3d, gradient, texture, complex details, watercolor, photorealistic, blurry',
+    positivePrompt: 'flat design sticker, minimal geometric shapes, limited color palette, clean vector art, bold solid fills, no shadows, modern graphic style, simple silhouettes, transparent background, die-cut sticker',
+    negativePrompt: 'realistic, 3d, gradient, texture, complex details, watercolor, photorealistic, blurry, solid background, white background',
   },
   {
     key: 'retro',
     label: '古早QQ风',
     icon: '🐧',
-    positivePrompt: 'early 2000s Chinese QQ sticker style, pixel-art influenced, simple round body, big head small body, bright saturated colors, cute kawaii expression, retro digital feel, simple gif-style pose',
-    negativePrompt: 'photorealistic, 3d render, complex shading, realistic, modern minimalist, gradient',
+    positivePrompt: 'early 2000s Chinese QQ sticker style, pixel-art influenced, simple round body, big head small body, bright saturated colors, cute kawaii expression, retro digital feel, simple gif-style pose, transparent background',
+    negativePrompt: 'photorealistic, 3d render, complex shading, realistic, modern minimalist, gradient, solid background, white background',
   },
   {
     key: 'custom',
@@ -139,6 +139,103 @@ interface StickerAssistantPanelProps {
   onClose: () => void;
   isMonochrome?: boolean;
   onAddImages?: (urls: string[]) => void;
+}
+
+/* ──────────────────── 白色/浅色背景移除（确保透明PNG） ──────────────────── */
+async function removeBackgroundToTransparent(imageUrl: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const { width, height } = img;
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(null); return; }
+
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const { data } = imageData;
+
+        // 1. 采样四边像素，计算背景色（取最常见的浅色）
+        const edgeSamples: number[] = [];
+        const sampleStep = Math.max(1, Math.floor(Math.min(width, height) / 50));
+        for (let x = 0; x < width; x += sampleStep) {
+          edgeSamples.push(x, 0); edgeSamples.push(x, height - 1);
+        }
+        for (let y = 0; y < height; y += sampleStep) {
+          edgeSamples.push(0, y); edgeSamples.push(width - 1, y);
+        }
+        // 计算四边平均色作为背景色
+        let bgR = 0, bgG = 0, bgB = 0, bgCount = 0;
+        for (let i = 0; i < edgeSamples.length; i += 2) {
+          const px = edgeSamples[i], py = edgeSamples[i + 1];
+          const idx = (py * width + px) * 4;
+          if (data[idx + 3] < 128) continue; // 跳过已透明像素
+          bgR += data[idx]; bgG += data[idx + 1]; bgB += data[idx + 2]; bgCount++;
+        }
+        if (bgCount === 0) { resolve(null); return; }
+        bgR = Math.round(bgR / bgCount);
+        bgG = Math.round(bgG / bgCount);
+        bgB = Math.round(bgB / bgCount);
+
+        // 2. 只处理浅色背景（亮度>200），避免误删深色内容
+        const bgBrightness = (bgR * 299 + bgG * 587 + bgB * 114) / 1000;
+        if (bgBrightness < 180) { resolve(null); return; }
+
+        // 3. 遍历像素，将接近背景色的像素设为透明
+        const tolerance = 35; // 颜色容差
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+          if (a < 128) continue; // 已透明跳过
+          const dist = Math.sqrt((r - bgR) ** 2 + (g - bgG) ** 2 + (b - bgB) ** 2);
+          if (dist < tolerance) {
+            // 完全透明
+            data[i + 3] = 0;
+          } else if (dist < tolerance * 2) {
+            // 边缘羽化：平滑过渡
+            const alpha = Math.round(((dist - tolerance) / tolerance) * 255);
+            data[i + 3] = Math.min(a, alpha);
+          }
+        }
+
+        ctx.putImageData(imageData, 0, 0);
+
+        // 4. 检查是否有实际变化（至少 5% 像素变透明）
+        let transparentCount = 0;
+        for (let i = 3; i < data.length; i += 4) {
+          if (data[i] < 128) transparentCount++;
+        }
+        const transparentRatio = transparentCount / (width * height);
+        if (transparentRatio < 0.05) { resolve(null); return; } // 变化太少，说明本来就是透明的
+
+        // 5. 导出为 PNG data URL 并通过 save-image 持久化
+        canvas.toBlob(async (blob) => {
+          if (!blob) { resolve(null); return; }
+          try {
+            const formData = new FormData();
+            formData.append('file', blob, 'sticker-transparent.png');
+            const res = await fetch('/api/save-image', { method: 'POST', body: formData });
+            if (res.ok) {
+              const result = await res.json();
+              resolve(result.url || null);
+            } else {
+              // 回退：使用 data URL
+              resolve(canvas.toDataURL('image/png'));
+            }
+          } catch {
+            resolve(canvas.toDataURL('image/png'));
+          }
+        }, 'image/png');
+      };
+      img.onerror = () => resolve(null);
+      img.src = imageUrl;
+    } catch {
+      resolve(null);
+    }
+  });
 }
 
 /* ──────────────────── 组件 ──────────────────── */
@@ -467,9 +564,9 @@ ${themeDesc}
     let prompt: string;
     if (subjectImage && subjectSource === 'image') {
       // 有参考图时，使用画布图生图的完整提示词格式，触发 API 的主体一致性增强
-      prompt = `[ref] Use the provided reference image(s) as the base. Create an image of: Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. While creating this new image, strictly preserve the main subject and focal point of the reference image(s) — do NOT change the original product/object identity, strictly preserve the artistic style and visual aesthetics of the reference image(s), strictly preserve the color palette and tone of the reference image(s), strictly preserve the fine details and textures of the reference image(s). IMPORTANT: The product/object in the result MUST be the SAME product/object as in the reference image — do NOT substitute or replace it with a different product. ${identityLock}. Feel free to reimagine the composition and layout structure, the scene and environment setting. White border, die-cut sticker style, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}` : ''}`;
+      prompt = `[ref] Use the provided reference image(s) as the base. Create an image of: Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. While creating this new image, strictly preserve the main subject and focal point of the reference image(s) — do NOT change the original product/object identity, strictly preserve the artistic style and visual aesthetics of the reference image(s), strictly preserve the color palette and tone of the reference image(s), strictly preserve the fine details and textures of the reference image(s). IMPORTANT: The product/object in the result MUST be the SAME product/object as in the reference image — do NOT substitute or replace it with a different product. ${identityLock}. Feel free to reimagine the composition and layout structure, the scene and environment setting. Transparent PNG background, die-cut sticker style, 1024x1024 square, sticker sheet single item, no solid background color.${negP ? ` Avoid: ${negP}, solid background, white background` : ''}`;
     } else {
-      prompt = `Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. Subject identity: ${identityLock}. White border, die-cut sticker style, no background elements, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}` : ''}`;
+      prompt = `Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. Subject identity: ${identityLock}. Transparent PNG background, die-cut sticker style, no solid background color, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}, solid background, white background` : ''}`;
     }
 
     const doGenerate = async () => {
@@ -577,6 +674,14 @@ ${themeDesc}
             if (saveData.url) imageUrl = saveData.url;
           }
         } catch { /* keep original URL */ }
+
+        // 自动移除白色/浅色背景，确保输出为透明PNG
+        try {
+          if (imageUrl) {
+            const transparentUrl = await removeBackgroundToTransparent(imageUrl);
+            if (transparentUrl) imageUrl = transparentUrl;
+          }
+        } catch { /* 保留原图 */ }
 
         setPlan(prev => prev.map(p => p.id === item.id ? { ...p, status: 'done' as const, imageUrl } : p));
       } catch (err: unknown) {
