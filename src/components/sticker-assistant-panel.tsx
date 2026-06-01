@@ -175,6 +175,8 @@ export default function StickerAssistantPanel({
   const [selectedModelId, setSelectedModelId] = useState('');
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
+  const [chatModelId, setChatModelId] = useState('');
+  const [chatModels, setChatModels] = useState<ModelOption[]>([]);
 
   /* ── 计划 ── */
   const [plan, setPlan] = useState<StickerItem[]>([]);
@@ -194,14 +196,20 @@ export default function StickerAssistantPanel({
     const loadModels = async () => {
       setModelsLoading(true);
       try {
-        const res = await fetch('/api/models?type=image');
-        if (res.ok) {
-          const data = await res.json();
-          const loaded: ModelOption[] = [];
+        // 并行加载图像模型和聊天模型
+        const [imgRes, chatRes] = await Promise.all([
+          fetch('/api/models?type=image'),
+          fetch('/api/models?type=chat'),
+        ]);
+        const loaded: ModelOption[] = [];
+        const chatLoaded: ModelOption[] = [];
+
+        if (imgRes.ok) {
+          const data = await imgRes.json();
           if (data.models && Array.isArray(data.models)) {
             for (const m of data.models) {
               loaded.push({
-                id: m.id || m.name,
+                id: m.providerId ? `${m.providerId}::${m.id || m.name}` : (m.id || m.name),
                 providerId: m.providerId || '',
                 providerName: m.providerName || '',
                 displayLabel: m.displayLabel,
@@ -211,6 +219,24 @@ export default function StickerAssistantPanel({
           setModels(loaded);
           if (loaded.length > 0 && !selectedModelId) {
             setSelectedModelId(loaded[0].id);
+          }
+        }
+
+        if (chatRes.ok) {
+          const data = await chatRes.json();
+          if (data.models && Array.isArray(data.models)) {
+            for (const m of data.models) {
+              chatLoaded.push({
+                id: m.providerId ? `${m.providerId}::${m.id || m.name}` : (m.id || m.name),
+                providerId: m.providerId || '',
+                providerName: m.providerName || '',
+                displayLabel: m.displayLabel,
+              });
+            }
+          }
+          setChatModels(chatLoaded);
+          if (chatLoaded.length > 0 && !chatModelId) {
+            setChatModelId(chatLoaded[0].id);
           }
         }
       } catch { /* ignore */ } finally {
@@ -332,7 +358,8 @@ export default function StickerAssistantPanel({
 
   /* ── Step 0 → 1: 生成计划 ── */
   const handleGeneratePlan = useCallback(async () => {
-    if (!subject.trim()) return;
+    const hasSubject = subject.trim() || (subjectSource === 'image' && subjectImage);
+    if (!hasSubject) return;
     setPlanLoading(true);
     setPlanError('');
     try {
@@ -343,9 +370,13 @@ export default function StickerAssistantPanel({
         ? customStyle
         : `风格:${selectedStyle.label}, 正向提示:${selectedStyle.positivePrompt}`;
 
+      const subjectDesc = subject.trim()
+        ? subject
+        : (subjectSource === 'image' && subjectImage ? '上传图片中的主体角色' : '未知主体');
+
       const prompt = `你是一个表情包策划专家。请根据以下要求生成表情包计划。
 
-主体: ${subject}
+主体: ${subjectDesc}
 ${styleDesc}
 ${themeDesc}
 数量: ${count}个
@@ -359,10 +390,13 @@ ${themeDesc}
 请严格以JSON格式输出, 不要添加任何其他文字:
 [{"id":1,"caption":"文案","action":"动作描述"},...]`;
 
+      const chatModel = chatModels.find(m => m.id === chatModelId);
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          model: chatModel?.id?.split('::').pop() || chatModelId,
+          providerId: chatModel?.providerId || undefined,
           messages: [{ role: 'user', content: prompt }],
           stream: false,
         }),
@@ -386,7 +420,7 @@ ${themeDesc}
     } finally {
       setPlanLoading(false);
     }
-  }, [subject, styleKey, themeKey, count, customStyle, customTheme, selectedStyle, selectedTheme]);
+  }, [subject, styleKey, themeKey, count, customStyle, customTheme, selectedStyle, selectedTheme, chatModelId, chatModels, subjectSource, subjectImage]);
 
   /* ── Step 1 → 2: 逐个生成贴纸 ── */
   const handleStartGeneration = useCallback(() => {
@@ -857,11 +891,11 @@ ${themeDesc}
                 className="w-full py-2.5 rounded-md text-sm font-medium transition-all duration-150 cursor-pointer flex items-center justify-center gap-2"
                 style={{
                   background: subject.trim() ? t.accent : t.border,
-                  color: subject.trim() ? (isMonochrome ? '#fff' : '#1a1a1a') : t.textDim,
+                  color: (subject.trim() || (subjectSource === 'image' && subjectImage)) ? (isMonochrome ? '#fff' : '#1a1a1a') : t.textDim,
                   opacity: planLoading ? 0.7 : 1,
                 }}
                 onClick={handleGeneratePlan}
-                disabled={!subject.trim() || planLoading}
+                disabled={(!subject.trim() && !(subjectSource === 'image' && subjectImage)) || planLoading}
               >
                 {planLoading ? (
                   <><Loader2 size={15} className="animate-spin" /> 生成计划中...</>
