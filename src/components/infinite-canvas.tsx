@@ -47,6 +47,7 @@ const FontDesignPanel = lazy(() => import('@/components/font-design-panel'));
 const BrandFactoryPanel = lazy(() => import('@/components/brand-factory-panel'));
 const AiPsdPanel = lazy(() => import('@/components/ai-psd/ai-psd-panel'));
 const ImageCompareDialog = lazy(() => import('@/components/image-compare-dialog').then(m => ({ default: m.ImageCompareDialog })));
+const StickerAssistantPanel = lazy(() => import('@/components/sticker-assistant-panel'));
 
 /* ====== Multi-Angle Sphere Preview (Canvas 2D) ====== */
 function MultiAngleSpherePreview({
@@ -474,6 +475,7 @@ export function InfiniteCanvas({
   const [showFontDesign, setShowFontDesign] = useState(false);
   const [showBrandFactory, setShowBrandFactory] = useState(false);
   const [showAiPsd, setShowAiPsd] = useState(false);
+  const [showStickerAssistant, setShowStickerAssistant] = useState(false);
 
   // Image compare state
   const [showCompareDialog, setShowCompareDialog] = useState(false);
@@ -4045,7 +4047,10 @@ export function InfiniteCanvas({
     engine?: string
   ): Promise<string | null> => {
     // apiKeyOrModel was previously apiKey, now we pass the model name for server-side key lookup
-    const currentModelInfo = getCurrentModel();
+    // ★ 使用传入的 model 参数（由后端 usedModel 返回），而非 getCurrentModel()，
+    // 避免用户在轮询期间切换模型导致查询错误的提供商
+    const pollModel = apiKeyOrModel || getCurrentModel().model;
+    const cachedProviderId = getCurrentProviderId(); // ★ 缓存 providerId，避免轮询期间用户切换模型导致查询错误的提供商
     const maxAttempts = 300; // 300次 × 动态间隔 ≈ 900秒，兼容token link等极慢API
     const getEditPollInterval = (attempt: number) => {
       if (attempt <= 5) return 200;
@@ -4089,7 +4094,7 @@ export function InfiniteCanvas({
         const res = await fetch('/api/poll-task', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ taskId, model: currentModelInfo.model, providerId: getCurrentProviderId(), engine }),
+          body: JSON.stringify({ taskId, model: pollModel, providerId: cachedProviderId, engine }),
           signal: abortController.signal,
         });
         if (!res.ok) throw new Error(`Poll HTTP ${res.status}`);
@@ -4126,7 +4131,7 @@ export function InfiniteCanvas({
     }
     lastPollErrorRef.current = '生成超时，AI 模型响应时间过长，请稍后重试或切换其他模型';
     return null;
-  }, [getCurrentModel]);
+  }, [getCurrentModel, getCurrentProviderId]);
 
   // ========================
   // TOOL IMPLEMENTATIONS
@@ -4441,24 +4446,52 @@ export function InfiniteCanvas({
       const apiKey = getApiKey();
       const modelInfo = getCurrentModel();
       updateProcessingFrame(placeholderId, { progress: 8, status: '正在提交到 AI 模型...' });
-      const res = await fetch('/api/image-edit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'upscale',
-          imageUrl: img.url,
-          prompt: img.prompt || img.modifyPrompt || '', // 传图片描述给后端，让AI知道原图内容
-          targetWidth: targetW,
-          targetHeight: targetH,
-          aspectRatio: findClosestStandardRatio(origW, origH),
-          model: modelInfo.model,
-          apiKey,
-          providerId: modelInfo.providerId || getCurrentProviderId(),
-          scale: upMultiplier,
-          originalWidth: origW,
-          originalHeight: origH,
-        }),
-      });
+      // ★ 放大操作可能耗时较长（如108s），设置5分钟超时与后端直接模式600s对齐
+      const upscaleController = new AbortController();
+      const upscaleTimeout = setTimeout(() => upscaleController.abort(), 300000);
+      let res: Response;
+      try {
+        res = await fetch('/api/image-edit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'upscale',
+            imageUrl: img.url,
+            prompt: img.prompt || img.modifyPrompt || '', // 传图片描述给后端，让AI知道原图内容
+            targetWidth: targetW,
+            targetHeight: targetH,
+            aspectRatio: findClosestStandardRatio(origW, origH),
+            model: modelInfo.model,
+            apiKey,
+            providerId: modelInfo.providerId || getCurrentProviderId(),
+            scale: upMultiplier,
+            originalWidth: origW,
+            originalHeight: origH,
+          }),
+          signal: upscaleController.signal,
+        });
+      } catch (fetchErr: unknown) {
+        clearTimeout(upscaleTimeout);
+        const err = fetchErr as Error;
+        if (err.name === 'AbortError') {
+          updateProcessingFrame(placeholderId, {
+            progress: -1,
+            status: '❌ 放大请求超时，AI模型响应时间过长，请稍后重试',
+            error: '放大请求超时',
+          });
+          setTimeout(() => removeProcessingFrame(placeholderId), 5000);
+        } else {
+          updateProcessingFrame(placeholderId, {
+            progress: -1,
+            status: `❌ 放大请求失败: ${err.message}`,
+            error: err.message,
+          });
+          setTimeout(() => removeProcessingFrame(placeholderId), 5000);
+        }
+        setIsEditProcessing(false);
+        return;
+      }
+      clearTimeout(upscaleTimeout);
 
       if (!res.ok) {
         const errorText = await res.text().catch(() => '');
@@ -4630,6 +4663,7 @@ export function InfiniteCanvas({
         const asyncResult = await (async () => {
           const taskId = data.taskId as string;
           const modelInfo = getCurrentModel();
+          const cachedProviderId = getCurrentProviderId(); // ★ 缓存 providerId
           const getEditPollInterval = (attempt: number) => {
             if (attempt <= 5) return 300;
             if (attempt <= 15) return 600;
@@ -4656,7 +4690,7 @@ export function InfiniteCanvas({
               const res = await fetch('/api/poll-task', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ taskId, model: modelInfo.model, providerId: getCurrentProviderId(), engine: data.engine }),
+                body: JSON.stringify({ taskId, model: modelInfo.model, providerId: cachedProviderId, engine: data.engine }),
               });
               if (!res.ok) throw new Error(`HTTP ${res.status}`);
               const pollData = await res.json();
@@ -4895,7 +4929,7 @@ export function InfiniteCanvas({
         return;
       }
       updateProcessingFrame(placeholderId, { progress: 24, status: 'AI 正在重建立体视角...' });
-      const resultUrl = data.imageUrl || await pollForResult(data.taskId, apiKey, (progress, status) => {
+      const resultUrl = data.imageUrl || await pollForResult(data.taskId, modelInfo.model, (progress, status) => {
         updateProcessingFrame(placeholderId, { progress, status });
       });
       if (!resultUrl) {
@@ -5438,7 +5472,7 @@ export function InfiniteCanvas({
           resultUrl = syncResultUrl;
         } else if (data.taskId) {
           updateProcessingFrame(placeholderId, { progress: 24, status: 'AI 正在重绘选区...' });
-          resultUrl = await pollForResult(data.taskId, apiKey, (progress, status) => {
+          resultUrl = await pollForResult(data.taskId, modelInfo.model, (progress, status) => {
             updateProcessingFrame(placeholderId, { progress, status });
           });
         } else {
@@ -5554,7 +5588,7 @@ export function InfiniteCanvas({
         } else if (data.taskId) {
           // 异步结果 - 需要轮询
           updateProcessingFrame(placeholderId, { progress: 24, status: 'AI 正在补全画面...' });
-          resultUrl = await pollForResult(data.taskId, apiKey, (progress, status) => {
+          resultUrl = await pollForResult(data.taskId, modelInfo.model, (progress, status) => {
             updateProcessingFrame(placeholderId, { progress, status });
           });
         } else {
@@ -9560,6 +9594,19 @@ export function InfiniteCanvas({
           </Suspense>
         )}
 
+        {/* Sticker Assistant */}
+        {showStickerAssistant && (
+          <Suspense fallback={null}>
+            <StickerAssistantPanel
+              onClose={() => setShowStickerAssistant(false)}
+              onAddImages={(urls: string[]) => {
+                onAddImages?.(urls);
+              }}
+              isMonochrome={isMonochrome}
+            />
+          </Suspense>
+        )}
+
         {/* ====== PSD LAYER EDITOR MODAL ====== */}
         {showPsdEditor && psdEditorImageUrl && (
           <div
@@ -10902,6 +10949,21 @@ export function InfiniteCanvas({
         >
           <FileImage className="h-4 w-4" />
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">AI PSD</span>
+        </button>
+
+        {/* Sticker Assistant - 表情助手 */}
+        <button
+          onClick={() => setShowStickerAssistant(true)}
+          className={`${toolBtnCls}`}
+          title="表情助手"
+        >
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+            <line x1="9" y1="9" x2="9.01" y2="9" strokeWidth="2.5" />
+            <line x1="15" y1="9" x2="15.01" y2="9" strokeWidth="2.5" />
+          </svg>
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">表情助手</span>
         </button>
 
         <div className={`w-px h-5 ${separatorCls}`} />

@@ -533,14 +533,30 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     loadModels();
   }, []);
 
-  // 初始化模型选择（优先恢复上次选择，否则默认选第一个）
+  // 初始化模型选择（优先恢复上次选择，其次使用生成面板当前模型，否则默认选第一个）
   useEffect(() => {
     if (imageModels.length === 0) return;
+    // 1. 优先恢复上次选择
     const saved = localStorage.getItem('wujie_edit_selected_model');
     if (saved && imageModels.some(m => `server::${m.providerId}::${m.id}` === saved)) {
       setSelectedModelKey(saved);
       return;
     }
+    // 2. 其次使用图像生成面板当前选择的模型
+    try {
+      const genModelRaw = localStorage.getItem('wujie_selected_model');
+      if (genModelRaw) {
+        const genModel = JSON.parse(genModelRaw);
+        if (genModel.providerId && genModel.model) {
+          const genKey = `server::${genModel.providerId}::${genModel.model}`;
+          if (imageModels.some(m => `server::${m.providerId}::${m.id}` === genKey)) {
+            setSelectedModelKey(genKey);
+            return;
+          }
+        }
+      }
+    } catch {}
+    // 3. 兜底：默认选第一个
     setSelectedModelKey(`server::${imageModels[0].providerId}::${imageModels[0].id}`);
   }, [imageModels]);
 

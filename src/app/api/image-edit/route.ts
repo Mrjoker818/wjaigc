@@ -520,7 +520,7 @@ async function submitImageTask(
   requestBody: Record<string, unknown>,
   endpoint: '/images/generations' | '/images/edits' = '/images/generations',
   providerInfo?: { baseUrl?: string; requestStyle?: string; advancedParams?: Record<string, string> } | null,
-): Promise<{ taskId?: string; directUrl?: string }> {
+): Promise<{ taskId?: string; directUrl?: string; apiBaseUrl?: string; apiKey?: string; advancedParams?: Record<string, string> }> {
   // 解析兼容性档案
   const profile = resolveCompatProfile(providerInfo);
 
@@ -757,11 +757,11 @@ async function submitImageTask(
   const parsed = parseResponseForProfile(submitResult, profile);
 
   if (parsed.mode === 'direct' && parsed.directImageUrls.length > 0) {
-    return { directUrl: parsed.directImageUrls[0] };
+    return { directUrl: parsed.directImageUrls[0], apiBaseUrl, apiKey, advancedParams: providerInfo?.advancedParams };
   }
 
   if (parsed.taskIds.length > 0) {
-    return { taskId: parsed.taskIds[0] };
+    return { taskId: parsed.taskIds[0], apiBaseUrl, apiKey, advancedParams: providerInfo?.advancedParams };
   }
 
   throw new Error('未获取到任务ID或图片数据');
@@ -916,7 +916,7 @@ async function autoTrySubmitImageTask(
   buildRequestBody: (model: string) => Record<string, unknown>,
   operation: string,
   endpoint: '/images/generations' | '/images/edits' = '/images/generations',
-): Promise<{ taskId?: string; directUrl?: string; usedModel?: string }> {
+): Promise<{ taskId?: string; directUrl?: string; usedModel?: string; apiBaseUrl?: string; apiKey?: string; advancedParams?: Record<string, string> }> {
   const errors: string[] = [];
   let ratioRetryDone = false;
   
@@ -1886,6 +1886,22 @@ export async function POST(request: NextRequest) {
           action,
           engine: 'ai-upscale-hq',
           usedModel: result.usedModel,
+        });
+      }
+
+      // ★ 注册异步放大任务到 task-registry，确保 poll-task 能正确查询第三方 API
+      if (result.taskId) {
+        const regTaskId = registerTask(result.taskId, 'upscale', 'AI放大');
+        updateTaskProgress(regTaskId.taskId, {
+          status: 'processing',
+          progress: 12,
+          label: 'AI模型放大中...',
+          result: {
+            apiBaseUrl: result.apiBaseUrl,
+            apiKey: result.apiKey,
+            advancedParams: result.advancedParams,
+            usedModel: result.usedModel,
+          },
         });
       }
 
