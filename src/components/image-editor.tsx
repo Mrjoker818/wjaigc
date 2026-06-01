@@ -740,7 +740,21 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     scaledCtx.imageSmoothingQuality = 'high';
     scaledCtx.drawImage(bwCanvas, 0, 0, targetW, targetH);
 
-    return scaledCanvas.toDataURL('image/png');
+    // ★ OpenAI /images/edits 要求 mask 格式：透明区域=需要编辑, 不透明区域=保留
+    // 生成符合 OpenAI 规范的 mask：画笔涂抹区域为透明(需要编辑), 其余为不透明白色(保留)
+    const openaiMaskCanvas = document.createElement('canvas');
+    openaiMaskCanvas.width = targetW;
+    openaiMaskCanvas.height = targetH;
+    const openaiMaskCtx = openaiMaskCanvas.getContext('2d');
+    if (!openaiMaskCtx) return null;
+    // 先填充白色不透明(保留区域)
+    openaiMaskCtx.fillStyle = '#ffffff';
+    openaiMaskCtx.fillRect(0, 0, targetW, targetH);
+    // 将涂抹区域(白色)绘制为透明(编辑区域) — 使用 destination-out 合成模式
+    openaiMaskCtx.globalCompositeOperation = 'destination-out';
+    openaiMaskCtx.drawImage(bwCanvas, 0, 0, targetW, targetH);
+
+    return openaiMaskCanvas.toDataURL('image/png');
   }, [image]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {

@@ -751,6 +751,42 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           const editData = await editResponse.json();
           const images = extractAllImagesFromResponse(editData, effectivePrompt);
           if (images.length > 0) {
+            // ★ count > 1 时，如果 API 返回的图片不够，额外并行生成
+            if (count > 1 && images.length < count) {
+              console.info(`[edit] taskId=${taskId} images.edit返回${images.length}张, 需要额外生成${count - images.length}张`);
+              const extraPromises = Array.from({ length: count - images.length }, () => {
+                const extraForm = new FormData();
+                extraForm.append('model', model);
+                extraForm.append('image', imageBuffer, { filename: 'image.png', contentType: mimeType });
+                extraForm.append('prompt', editInstruction);
+                if (maskBuffer) {
+                  extraForm.append('mask', maskBuffer, { filename: 'mask.png', contentType: 'image/png' });
+                }
+                extraForm.append('size', outputSize);
+                extraForm.append('quality', quality);
+                const extraFormBuffer = extraForm.getBuffer();
+                const extraFormHeaders = extraForm.getHeaders();
+                return fetchWithV1Retry(effectiveBaseUrl, '/images/edits', {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${effectiveApiKey}`,
+                    ...extraFormHeaders,
+                    'Content-Length': String(extraFormBuffer.length),
+                  },
+                  body: extraFormBuffer as unknown as BodyInit,
+                  signal: AbortSignal.timeout(120000),
+                })
+                .then(async r => {
+                  if (!r.ok) return null;
+                  const d = await r.json();
+                  const extra = extractAllImagesFromResponse(d, effectivePrompt);
+                  return extra[0] || null;
+                })
+                .catch(() => null);
+              });
+              const extraResults = await Promise.all(extraPromises);
+              for (const r of extraResults) { if (r) images.push(r); }
+            }
             // ★ 更新任务注册中心
             updateTaskProgress(taskId, { status: 'completed', progress: 100 });
             setEditTask(taskId, {
