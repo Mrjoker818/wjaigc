@@ -106,6 +106,37 @@ async function callLLM(
 
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
+      // 如果 /chat/completions 失败，尝试 /responses 端点（OpenAI Responses API 格式）
+      if (response.status === 403 || response.status === 404 || response.status === 405) {
+        console.log(`[brand-factory] /chat/completions returned ${response.status}, trying /responses endpoint`);
+        try {
+          const respResponse = await fetchWithV1Retry(baseUrl, '/responses', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${provider.apiKey}`,
+            },
+            body: JSON.stringify({
+              model,
+              input: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: prompt },
+              ],
+              max_output_tokens: options?.maxTokens ?? 4096,
+              temperature: options?.temperature ?? 0.7,
+            }),
+          });
+          if (respResponse.ok) {
+            const respData = await respResponse.json();
+            const content = respData.output_text || respData.output?.[0]?.content?.[0]?.text || '';
+            if (content) {
+              return { success: true, content };
+            }
+          }
+        } catch {
+          // /responses 也失败了，继续返回原始错误
+        }
+      }
       return { success: false, error: `LLM调用失败(${response.status}): ${errText.slice(0, 200)}` };
     }
 
@@ -492,9 +523,18 @@ async function pollTaskResult(
   while (Date.now() - start < maxMs) {
     await new Promise(r => setTimeout(r, 3000));
     try {
-      const resp = await fetch(pollUrl, {
+      // 从完整 pollUrl 中提取路径部分，使用 fetchWithV1Retry 支持 /v1 重试
+      let pollPath = pollUrl;
+      try {
+        const urlObj = new URL(pollUrl);
+        pollPath = urlObj.pathname + urlObj.search;
+      } catch {
+        // pollUrl 可能已经是相对路径
+        pollPath = pollUrl.replace(/^https?:\/\/[^/]+/, '');
+      }
+      const resp = await fetchWithV1Retry(providerInfo.baseUrl, pollPath, {
         headers: { 'Authorization': `Bearer ${providerInfo.apiKey}` },
-      });
+      }, false);
       if (!resp.ok) continue;
       const pollData = await resp.json() as Record<string, unknown>;
       // ★ 调试日志：记录轮询响应结构

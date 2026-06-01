@@ -101,6 +101,37 @@ export async function callLLM(
 
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
+      // 如果 /chat/completions 失败，尝试 /responses 端点（OpenAI Responses API 格式）
+      if (response.status === 403 || response.status === 404 || response.status === 405) {
+        console.log(`[ai-psd-model-router] /chat/completions returned ${response.status}, trying /responses endpoint`);
+        try {
+          const respResponse = await fetchWithV1Retry(baseUrl, '/responses', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${provider.apiKey}`,
+            },
+            body: JSON.stringify({
+              model,
+              input: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: prompt },
+              ],
+              max_output_tokens: options?.maxTokens ?? 4096,
+              temperature: options?.temperature ?? 0.7,
+            }),
+          });
+          if (respResponse.ok) {
+            const respData = await respResponse.json();
+            const content = respData.output_text || respData.output?.[0]?.content?.[0]?.text || '';
+            if (content) {
+              return { success: true, content };
+            }
+          }
+        } catch {
+          // /responses 也失败了，继续返回原始错误
+        }
+      }
       return { success: false, error: `LLM调用失败(${response.status}): ${errText.slice(0, 200)}` };
     }
 
@@ -178,6 +209,62 @@ export async function callLLM(
   }
 }
 
+/** 从任意嵌套数据对象中提取图片 URL（通用兜底） */
+function extractImageUrlsFromDataObj(obj: Record<string, unknown>, depth = 0): string[] {
+  if (depth > 3 || !obj || typeof obj !== 'object') return [];
+  const urls: string[] = [];
+
+  // 1. 直接包含的 URL 字段
+  for (const key of ['image_url', 'url', 'image_url_optimized', 'src']) {
+    const val = obj[key];
+    if (typeof val === 'string' && (val.startsWith('http') || val.startsWith('data:'))) {
+      urls.push(val);
+    } else if (Array.isArray(val)) {
+      for (const v of val) {
+        if (typeof v === 'string' && (v.startsWith('http') || v.startsWith('data:'))) urls.push(v);
+      }
+    }
+  }
+
+  // 2. image_urls / image_urls_list 数组
+  for (const key of ['image_urls', 'image_urls_list']) {
+    const arr = obj[key];
+    if (Array.isArray(arr)) {
+      for (const item of arr) {
+        if (typeof item === 'string' && item.startsWith('http')) urls.push(item);
+        else if (item && typeof item === 'object') {
+          const u = (item as Record<string, unknown>).url || (item as Record<string, unknown>).image_url;
+          if (typeof u === 'string' && u.startsWith('http')) urls.push(u);
+        }
+      }
+    }
+  }
+
+  // 3. images / results / output / generated_images 数组
+  for (const key of ['images', 'results', 'output', 'generated_images']) {
+    const arr = obj[key];
+    if (Array.isArray(arr)) {
+      for (const item of arr) {
+        if (typeof item === 'string' && (item.startsWith('http') || item.startsWith('data:'))) urls.push(item);
+        else if (item && typeof item === 'object') {
+          const u = (item as Record<string, unknown>).url || (item as Record<string, unknown>).image_url || (item as Record<string, unknown>).b64_json;
+          if (typeof u === 'string' && u) {
+            urls.push(u.startsWith('data:') ? u : (u.startsWith('http') ? u : `data:image/png;base64,${u}`));
+          }
+        }
+      }
+    }
+  }
+
+  // 4. 递归检查嵌套的 data 对象
+  if (obj.data && typeof obj.data === 'object' && !Array.isArray(obj.data) && depth < 2) {
+    urls.push(...extractImageUrlsFromDataObj(obj.data as Record<string, unknown>, depth + 1));
+  }
+
+  // 5. 去重
+  return [...new Set(urls)];
+}
+
 /** 调用图像模型生成图片 */
 export async function generateImage(
   prompt: string,
@@ -251,6 +338,19 @@ export async function generateImage(
       }
     }
 
+    // 异步任务模式: data.data 是对象时的 task_id 提取
+    if (data.data && typeof data.data === 'object' && !Array.isArray(data.data)) {
+      const dataObj = data.data as Record<string, unknown>;
+      if (dataObj.task_id || dataObj.id) {
+        return { success: true, taskId: (dataObj.task_id || dataObj.id) as string };
+      }
+      // data.data 中可能直接包含图片 URL（同步返回）
+      const urls = extractImageUrlsFromDataObj(dataObj);
+      if (urls.length > 0) {
+        return { success: true, imageUrl: urls[0], imageUrls: urls };
+      }
+    }
+
     // 异步任务模式 (顶层)
     if (data.task_id || data.id) {
       return { success: true, taskId: data.task_id || data.id };
@@ -262,6 +362,12 @@ export async function generateImage(
       if (urls.length > 0) {
         return { success: true, imageUrl: urls[0], imageUrls: urls };
       }
+    }
+
+    // 深度兜底：从任意嵌套结构中提取图片 URL
+    const deepUrls = extractImageUrlsFromDataObj(data);
+    if (deepUrls.length > 0) {
+      return { success: true, imageUrl: deepUrls[0], imageUrls: deepUrls };
     }
 
     console.warn('[ai-psd-model-router] Unexpected image API response:', JSON.stringify(data).slice(0, 500));
@@ -354,6 +460,12 @@ export async function pollImageTask(
       if (imageUrl) {
         return { success: true, imageUrl, imageUrls: [imageUrl] };
       }
+      // 兜底：使用深度 URL 提取函数
+      const deepUrls = extractImageUrlsFromDataObj(data);
+      if (deepUrls.length > 0) {
+        console.log(`[ai-psd-poll] Deep extract found ${deepUrls.length} URL(s): ${deepUrls[0].slice(0, 80)}`);
+        return { success: true, imageUrl: deepUrls[0], imageUrls: deepUrls };
+      }
       // Completed but no URL extracted — try to get from innerData.result directly
       if (innerStatus === 'completed' && innerData.result) {
         const result = innerData.result as Record<string, unknown>;
@@ -389,7 +501,7 @@ export async function pollImageTask(
       // 格式3: { error: { message } }
       const status = (data.status || data.state || innerData.status || innerData.state || '') as string;
       const errorObj = (data.error || innerData.error) as Record<string, unknown> | undefined;
-      const isCompleted = innerData.completed || data.completed;
+      const isCompleted = innerData.completed || data.completed || status === 'succeeded';
       const hasImageUrls = (innerData.image_urls || innerData.output || innerData.images);
       if (status === 'failed' || status === 'error' || (errorObj && !hasImageUrls)) {
         const errorMsg = (errorObj?.message as string) || (errorObj?.code as string) || (data.error as string) || (data.message as string) || '未知错误';
