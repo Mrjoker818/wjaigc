@@ -2653,7 +2653,10 @@ export async function POST(request: NextRequest) {
       // 支持两种模式：
       // 1. 即梦风格方向性扩展 (expandPadding): 指定 top/right/bottom/left 像素
       // 2. 传统比例扩展 (expandRatio + expandScale): 指定目标比例和倍率
-      // 策略：合成扩展画布(原图按偏移放置+灰色填充) + mask → API → 合成原图到结果
+      //
+      // ★ 核心策略：直接发送原图作为参考 + 方向提示词
+      // AI 模型收到原图后，根据提示词自然扩展画面内容
+      // 不再使用灰色填充合成图（AI 会复制灰色区域导致灰色填充问题）
       // ============================================================
 
       // 获取原始图片
@@ -2729,172 +2732,101 @@ export async function POST(request: NextRequest) {
       console.log(`[outpaint] orig ${origW}x${origH} → target ${targetW}x${targetH}, offset (${offsetX},${offsetY})`);
 
       // ============================================================
-      // 即梦风格扩图策略
-      // 核心思路：如果目标画布超出模型支持尺寸，先缩小到模型尺寸生成，
-      // 然后将 AI 结果放大回原始尺寸，与原图羽化合成
+      // ★ 新策略：直接发送原图 + 方向提示词
+      // 不再构建灰色填充合成图，避免 AI 复制灰色区域
       // ============================================================
 
-      // 确定模型支持的最大尺寸（必须在合成参考图之前计算，以便使用正确的尺寸）
+      // 确定模型支持的最大尺寸
       const firstModel = candidateModels[0]?.model || '';
       let modelMaxPx = 1024;
       if (firstModel.toLowerCase().includes('gpt-image')) {
-        modelMaxPx = 4096; // GPT Image 2 支持较大尺寸
+        modelMaxPx = 4096;
       } else if (firstModel.toLowerCase().includes('gemini')) {
-        modelMaxPx = 2048; // Gemini 支持中等尺寸
+        modelMaxPx = 2048;
       }
+
+      // 计算目标尺寸是否需要缩小
       const needsDownscale = targetW > modelMaxPx || targetH > modelMaxPx;
-
-      // 计算缩小比例（如果目标超出模型限制）
       const scaleFactor = needsDownscale ? Math.min(modelMaxPx / targetW, modelMaxPx / targetH) : 1;
-      const scaledTargetW = Math.max(8, Math.ceil(targetW * scaleFactor / 8) * 8);
-      const scaledTargetH = Math.max(8, Math.ceil(targetH * scaleFactor / 8) * 8);
-      const scaledOffsetX = Math.round(offsetX * scaleFactor);
-      const scaledOffsetY = Math.round(offsetY * scaleFactor);
-      const scaledSrcW = Math.round(srcW * scaleFactor);
-      const scaledSrcH = Math.round(srcH * scaleFactor);
 
-      // 有效尺寸：发送给 AI 的合成图和蒙版使用此尺寸（确保与 genSize 一致）
-      const effW = needsDownscale ? scaledTargetW : targetW;
-      const effH = needsDownscale ? scaledTargetH : targetH;
-      const effOffsetX = needsDownscale ? scaledOffsetX : offsetX;
-      const effOffsetY = needsDownscale ? scaledOffsetY : offsetY;
-      const effSrcW = needsDownscale ? scaledSrcW : srcW;
-      const effSrcH = needsDownscale ? scaledSrcH : srcH;
-
-      console.log(`[outpaint] ${needsDownscale ? 'DOWNSCALE' : 'DIRECT'}: target ${targetW}x${targetH}, scaled ${scaledTargetW}x${scaledTargetH}, scale=${scaleFactor.toFixed(3)}, eff ${effW}x${effH}`);
-
-      // 使用 sharp 合成扩展画布（使用有效尺寸，确保与 AI 生成尺寸一致）
-      // 1. 创建背景画布（灰色填充表示需要扩展的区域）
-      // 2. 将原图贴到 effOffsetX, effOffsetY 位置
-      const resizedOriginal = await sharp(imageBuffer)
-        .resize(effSrcW, effSrcH, { fit: 'fill' })
-        .toBuffer();
-
-      // 创建灰色背景
-      const backgroundBuffer = await sharp({
-        create: {
-          width: effW,
-          height: effH,
-          channels: 3,
-          background: { r: 128, g: 128, b: 128 },
-        },
-      }).png().toBuffer();
-
-      // 合成：原图覆盖在灰色背景上
-      const compositeImage = await sharp(backgroundBuffer)
-        .composite([{
-          input: resizedOriginal,
-          left: effOffsetX,
-          top: effOffsetY,
-        }])
-        .png()
-        .toBuffer();
-
-      // 创建蒙版：原图区域=黑(保留)，扩展区域=白(需要AI生成)
-      const maskFullWhite = await sharp({
-        create: {
-          width: effW,
-          height: effH,
-          channels: 3,
-          background: { r: 255, g: 255, b: 255 },
-        },
-      }).png().toBuffer();
-
-      const maskBlackSrc = await sharp({
-        create: {
-          width: effSrcW,
-          height: effSrcH,
-          channels: 3,
-          background: { r: 0, g: 0, b: 0 },
-        },
-      }).png().toBuffer();
-
-      const finalMask = await sharp(maskFullWhite)
-        .composite([{
-          input: maskBlackSrc,
-          left: effOffsetX,
-          top: effOffsetY,
-        }])
-        .blur(8) // IOPaint sd_mask_blur 风格，确保衔接处无痕迹
-        .png()
-        .toBuffer();
-
-      // 保存合成图和蒙版到临时目录（生产环境 public 目录可能只读，统一使用 /tmp）
-      const tmpDir = path.join('/tmp', 'outpaint');
-      await fs.mkdir(tmpDir, { recursive: true });
-      const timestamp = Date.now();
-      const compositeFileName = `composite_${timestamp}.png`;
-      const maskFileName = `mask_${timestamp}.png`;
-      const compositePath = path.join(tmpDir, compositeFileName);
-      const maskPath = path.join(tmpDir, maskFileName);
-      await fs.writeFile(compositePath, compositeImage);
-      await fs.writeFile(maskPath, finalMask);
-
-      // ★ 关键修复：参考图和蒙版必须保持相同尺寸，且 genSize 必须与之匹配
-      // 否则：
-      // 1. OpenAI /images/edits 要求 image 和 mask 尺寸一致
-      // 2. AI 生成尺寸(genSize) 与参考图不匹配时，竖向扩展上方会出现灰色填充
-      // 
-      // 策略：参考图和蒙版统一使用 effW x effH，genSize 也使用 effW x effH
-      // 如果 effW x effH 总像素超过 maxTotalPixels（约 2MP），等比缩小
-      const maxTotalPixels = 2 * 1024 * 1024; // 2 megapixels
-      const effTotalPixels = effW * effH;
-      let refW = effW;
-      let refH = effH;
-      if (effTotalPixels > maxTotalPixels) {
-        const refScale = Math.sqrt(maxTotalPixels / effTotalPixels);
-        refW = Math.round(effW * refScale / 8) * 8;   // 对齐到 8 的倍数
-        refH = Math.round(effH * refScale / 8) * 8;
+      // 计算生成尺寸（对齐到8的倍数，最大2MP）
+      const maxTotalPixels = 2 * 1024 * 1024;
+      let genW = needsDownscale ? Math.max(8, Math.ceil(targetW * scaleFactor / 8) * 8) : targetW;
+      let genH = needsDownscale ? Math.max(8, Math.ceil(targetH * scaleFactor / 8) * 8) : targetH;
+      if (genW * genH > maxTotalPixels) {
+        const refScale = Math.sqrt(maxTotalPixels / (genW * genH));
+        genW = Math.round(genW * refScale / 8) * 8;
+        genH = Math.round(genH * refScale / 8) * 8;
       }
 
-      // 参考图：缩放到 refW x refH，JPEG 压缩
-      const compositeRefBuffer = await sharp(compositeImage)
-        .resize(refW, refH, { fit: 'fill' })
-        .jpeg({ quality: 85 })
-        .toBuffer();
-      const compositeBase64 = `data:image/jpeg;base64,${compositeRefBuffer.toString('base64')}`;
+      console.log(`[outpaint] ${needsDownscale ? 'DOWNSCALE' : 'DIRECT'}: target ${targetW}x${targetH}, genSize ${genW}x${genH}`);
 
-      // 蒙版：缩放到与参考图相同的 refW x refH
-      const maskRefBuffer = await sharp(finalMask)
-        .resize(refW, refH, { fit: 'fill' })
-        .png()
+      // 构建原图参考（直接发送原图，不做灰色填充合成）
+      const originalRefBuffer = await sharp(imageBuffer)
+        .jpeg({ quality: 90 })
         .toBuffer();
-      const maskFileBase64 = `data:image/png;base64,${maskRefBuffer.toString('base64')}`;
+      const originalBase64 = `data:image/jpeg;base64,${originalRefBuffer.toString('base64')}`;
 
       // 构建扩图方向的提示词
-      const directionHints: string[] = [];
-      if (offsetY > 0) directionHints.push('above');
-      if (offsetY + srcH < targetH) directionHints.push('below');
-      if (offsetX > 0) directionHints.push('to the left');
-      if (offsetX + srcW < targetW) directionHints.push('to the right');
+      const directionParts: string[] = [];
+      const hasTop = offsetY > 0;
+      const hasBottom = (offsetY + srcH) < targetH;
+      const hasLeft = offsetX > 0;
+      const hasRight = (offsetX + srcW) < targetW;
 
-      const directionText = directionHints.length > 0
-        ? `Extend the scene ${directionHints.join(' and ')} of the original content.`
-        : 'Extend the scene outward in all directions.';
+      if (hasTop) directionParts.push('upward (above the current top edge)');
+      if (hasBottom) directionParts.push('downward (below the current bottom edge)');
+      if (hasLeft) directionParts.push('to the left');
+      if (hasRight) directionParts.push('to the right');
 
+      const directionText = directionParts.length > 0
+        ? `Expand the scene ${directionParts.join(' and ')}.`
+        : 'Expand the scene outward in all directions.';
+
+      // ★ 关键：提示词清晰说明这是扩展任务，AI 应自然延伸画面
       const outpaintPrompt = prompt || (
-        `Image outpainting / expansion. ${directionText} ` +
-        `The provided image has the original content in the center surrounded by a gray placeholder area. ` +
-        `Keep the center original content exactly as-is and only generate new content in the gray border areas. ` +
-        `The new content should seamlessly connect with the original scene, matching its style, lighting, colors, and perspective. ` +
-        `Do not modify, crop, or alter the original center content in any way.`
+        `Image outpainting / expansion task. ${directionText} ` +
+        `The provided image is the original content. Generate an expanded version at ${genW}x${genH} resolution ` +
+        `that extends the scene naturally. The original content should appear at position approximately (${Math.round(offsetX * genW / targetW)}, ${Math.round(offsetY * genH / targetH)}) ` +
+        `in the expanded image. Maintain the same style, lighting, colors, perspective, and atmosphere. ` +
+        `The extended areas must seamlessly connect with the original content - no visible borders or color shifts. ` +
+        `Generate rich, detailed content in all expanded areas that matches the original scene's context.`
       );
 
-      // 清理临时文件（延迟清理，异步任务需要文件存在）
-      const cleanupFiles = async () => {
-        try { await fs.unlink(compositePath); } catch (_) { /* ignore */ }
-        try { await fs.unlink(maskPath); } catch (_) { /* ignore */ }
+      const genSize = `${genW}x${genH}`;
+      const genBody: Record<string, unknown> = {
+        model: modelStr,
+        prompt: outpaintPrompt,
+        n: 1,
+        size: genSize,
       };
+      const outpaintNegPrompt = '(worst quality, low quality, normal quality:2), blurry, pixelated, jpeg artifacts, noise, grain, gray fill, solid gray, blank area, empty space, border, seam, visible edge';
+      if (outpaintNegPrompt) genBody.negative_prompt = outpaintNegPrompt;
 
-      // ★ 扩展画面：直接返回 API 扩展结果
-      // 不再合成原图到 AI 结果上，避免原图与扩展区域错位拼接和灰色填充问题
-      // AI 模型已经接收了合成参考图（原图+灰色边框），应该能直接输出完整的扩展结果
+      // ★ 关键：直接发送原图作为参考（不使用灰色填充合成图）
+      // AI 模型看到原图后，根据提示词中的方向和位置信息自然扩展
+      // 避免灰色填充参考图导致 AI 复制灰色区域的问题
+      genBody.image = originalBase64;
+      genBody.image_urls = [originalBase64];
+      genBody.strength = 0.65; // 保留原图风格，同时允许扩展
+
+      // Submit to AI model API
+      const cm = candidateModels[0];
+      const result = await submitImageTask(
+        cm.apiBaseUrl, cm.apiKey, genBody, '/images/edits',
+        { baseUrl: cm.apiBaseUrl, advancedParams: cm.advancedParams }
+      );
+
+      // ★ 扩展结果持久化：直接保存 AI 生成结果
+      // 不做原图合成，AI 已根据原图+方向提示词生成完整扩展图
       const persistOutpaintResult = async (resultBuffer: Buffer): Promise<{ url: string; w: number; h: number }> => {
         const resultMeta = await sharp(resultBuffer).metadata();
-        const resultW = resultMeta.width || refW;
-        const resultH = resultMeta.height || refH;
+        const resultW = resultMeta.width || genW;
+        const resultH = resultMeta.height || genH;
 
-        // Step 1: Resize AI result to target dimensions if needed
+        console.log(`[outpaint] AI result size: ${resultW}x${resultH}, target: ${targetW}x${targetH}, genSize: ${genW}x${genH}`);
+
+        // Resize AI result to target dimensions if needed
         let finalBuf = resultBuffer;
         if (resultW !== targetW || resultH !== targetH) {
           finalBuf = await sharp(resultBuffer)
@@ -2905,7 +2837,7 @@ export async function POST(request: NextRequest) {
           finalBuf = await sharp(resultBuffer).jpeg({ quality: 92 }).toBuffer();
         }
 
-        const resultFileName = `outpaint_${timestamp}.jpg`;
+        const resultFileName = `outpaint_${Date.now()}.jpg`;
         let resultUrl: string = '';
         if (isS3Available()) {
           resultUrl = (await uploadImageToS3(finalBuf, resultFileName, 'image/jpeg')) || '';
@@ -2916,74 +2848,29 @@ export async function POST(request: NextRequest) {
         return { url: resultUrl, w: targetW, h: targetH };
       };
 
-      // ★ 关键修复：genSize 必须与参考图/蒙版尺寸 (refW x refH) 一致
-      // 竖向扩展时，如果 genSize 与参考图比例不同，AI 生成结果上方会出现灰色填充
-      // 因为 AI 看到的参考图是 refW x refH，但被要求生成 scaledTargetW x scaledTargetH，
-      // 两者的比例不同会导致 AI 结果布局与扩展需求不匹配
-      const genSize = `${refW}x${refH}`;
-      const genBody: Record<string, unknown> = {
-        model: modelStr,
-        prompt: outpaintPrompt,
-        n: 1,
-        size: genSize,
-      };
-      const outpaintNegPrompt = '(worst quality, low quality, normal quality:2), blurry, pixelated, jpeg artifacts, noise, grain, changed content, new elements, different colors, altered composition, deformed';
-      if (outpaintNegPrompt) genBody.negative_prompt = outpaintNegPrompt;
-
-      // ★ 关键修复：将合成图（原图+灰色边框）作为参考图发送给 AI
-      // 如果不发送参考图，AI 不知道原图内容，会生成与原图完全无关的内容
-      //
-      // 对于 /images/edits 端点（标准 OpenAI）:
-      //   - `image` 字段是必须的（AI 必须编辑这张图）
-      //   - `mask` 字段告诉 AI 哪里需要生成（白色=生成区域）
-      //
-      // 对于 /images/generations 端点（代理适配器）:
-      //   - `image` 和 `mask` 会被兼容层自动移除（代理拒绝 "direct image relay"）
-      //   - 仅通过 `image_urls` 传递参考图
-      //   - 提示词中已包含扩展指引，AI 根据参考图+提示词理解任务
-      genBody.image = compositeBase64;
-      genBody.image_urls = [compositeBase64];
-      genBody.mask = maskFileBase64;
-      genBody.strength = 0.7;
-
-      // Submit to AI model API
-      // 兼容层会根据 profile 的 editEndpoint 决定最终端点:
-      //   - OpenAI profile → /images/edits（保留 image + mask）
-      //   - Proxy adapter profile → /images/generations（自动删除 image + mask，仅用 image_urls）
-      const cm = candidateModels[0];
-      const result = await submitImageTask(
-        cm.apiBaseUrl, cm.apiKey, genBody, '/images/edits',
-        { baseUrl: cm.apiBaseUrl, advancedParams: cm.advancedParams }
-      );
-
       if (result.directUrl) {
-        // 同步结果 - 直接使用 AI 结果（已包含原图内容+扩展内容）
+        // 同步结果
         try {
           const resultBuffer = await fetchImageBuffer(result.directUrl);
           const { url: compositeResultUrl } = await persistOutpaintResult(resultBuffer);
 
           console.log(`[outpaint] Sync result saved`);
 
-          // 清理临时文件
-          await cleanupFiles();
-
           return NextResponse.json({ success: true, imageUrl: compositeResultUrl, action, targetWidth: targetW, targetHeight: targetH });
         } catch (compositeErr) {
           console.error('[outpaint] Persist failed, using raw result:', compositeErr);
-          await cleanupFiles();
           return NextResponse.json({ success: true, imageUrl: result.directUrl, action, targetWidth: targetW, targetHeight: targetH });
         }
       }
 
-      // 异步结果 - 返回 taskId，前端轮询后直接使用 AI 结果（不再做合成）
-      // ★ 注册异步 outpaint 任务到 task-registry，存储提供商信息供 poll-task 使用
+      // 异步结果 - 返回 taskId，前端轮询后直接使用 AI 结果
       if (result.taskId) {
         registerTask(result.taskId, 'outpaint', '扩展画面');
         updateTaskProgress(result.taskId, {
           status: 'processing',
           progress: 10,
           result: {
-            outpaintInfo: { targetW, targetH, refW, refH },
+            outpaintInfo: { targetW, targetH, genW, genH },
             usedModel: cm?.model,
             apiBaseUrl: cm?.apiBaseUrl,
             apiKey: cm?.apiKey,

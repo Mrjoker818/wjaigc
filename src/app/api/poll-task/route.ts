@@ -815,14 +815,14 @@ export async function POST(request: NextRequest) {
             const sharp = (await import('sharp')).default;
             const targetW = outpaintInfo.targetW;
             const targetH = outpaintInfo.targetH;
-            const refW = outpaintInfo.refW || targetW;
-            const refH = outpaintInfo.refH || targetH;
+            const genW = outpaintInfo.genW || targetW;
+            const genH = outpaintInfo.genH || targetH;
 
             // Resize AI result to target dimensions if needed
             const aiResultBuf = await fetchImageBuffer(pollResult.imageUrl as string);
             const aiMeta = await sharp(aiResultBuf).metadata();
-            const aiW = aiMeta.width || targetW;
-            const aiH = aiMeta.height || targetH;
+            const aiW = aiMeta.width || genW;
+            const aiH = aiMeta.height || genH;
             let finalBuf = aiResultBuf;
 
             if (aiW !== targetW || aiH !== targetH) {
@@ -847,7 +847,7 @@ export async function POST(request: NextRequest) {
 
             (pollResult as Record<string, unknown>).targetWidth = targetW;
             (pollResult as Record<string, unknown>).targetHeight = targetH;
-            console.log(`[poll-task] Outpaint: returning AI result directly, ${targetW}x${targetH}, AI generated: ${aiW}x${aiH}`);
+            console.log(`[poll-task] Outpaint: returning AI result directly, target ${targetW}x${targetH}, genSize ${genW}x${genH}, AI generated: ${aiW}x${aiH}`);
           } catch (outpaintErr) {
             console.warn('[poll-task] Outpaint resize failed, using raw AI result:', outpaintErr instanceof Error ? outpaintErr.message : outpaintErr);
           }
