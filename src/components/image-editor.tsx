@@ -1172,16 +1172,18 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           if (pollData.status === 'completed' && pollData.result) {
             completedTasks.add(taskId);
             const data = pollData.result;
-            if (data.success && data.image?.url) {
-              collectedUrls.push(data.image.url);
+            // ★ 优先使用 images 数组（后端存储 image:images[0] + images:[all]，
+            //   count>1 时 images 数组包含所有生成结果，data.image 只是第一张）
+            if (data.images && Array.isArray(data.images) && data.images.length > 0) {
+              collectedUrls.push(...data.images.map((img: { url: string }) => img.url));
               if (!collectedLlmInstruction && data.llmInstruction) {
                 collectedLlmInstruction = data.llmInstruction;
               }
               if (collectedEditRegions.length === 0 && data.editRegions && Array.isArray(data.editRegions) && data.editRegions.length > 0) {
                 collectedEditRegions = data.editRegions;
               }
-            } else if (data.images) {
-              collectedUrls.push(...data.images.map((img: { url: string }) => img.url));
+            } else if (data.success && data.image?.url) {
+              collectedUrls.push(data.image.url);
               if (!collectedLlmInstruction && data.llmInstruction) {
                 collectedLlmInstruction = data.llmInstruction;
               }

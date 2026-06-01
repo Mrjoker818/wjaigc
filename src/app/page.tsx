@@ -140,6 +140,7 @@ function CanvasApp() {
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [activePanel, setActivePanel] = useState<ActivePanel>('generate');
   const [appMode, setAppMode] = useState<'canvas' | 'node' | 'workflow-hub'>('canvas');
+  const [pendingModeSwitch, setPendingModeSwitch] = useState<'node' | 'workflow-hub' | null>(null);
   const [showUserManager, setShowUserManager] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [showAdminSystem, setShowAdminSystem] = useState(false);
@@ -170,6 +171,31 @@ function CanvasApp() {
   const [currentChatModelInfo, setCurrentChatModelInfo] = useState<{
     model: string; providerId: string; providerPreset?: string;
   } | null>(null);
+
+  // ★ 检测画布中是否有进行中的生图任务
+  const hasActiveCanvasTasks = images.some(img => img.isProcessingPlaceholder || img.processing);
+
+  // 安全切换模式：有进行中任务时弹窗确认
+  const safeSwitchMode = useCallback((targetMode: 'node' | 'workflow-hub') => {
+    if (hasActiveCanvasTasks) {
+      setPendingModeSwitch(targetMode);
+    } else {
+      setAppMode(targetMode);
+    }
+  }, [hasActiveCanvasTasks]);
+
+  const confirmModeSwitch = useCallback(() => {
+    // 不移除占位框 — 轮询在后台继续运行，结果通过 setImages 持久化
+    // 切换回画布时即可看到已完成的结果
+    setPendingModeSwitch(null);
+    if (pendingModeSwitch) {
+      setAppMode(pendingModeSwitch);
+    }
+  }, [pendingModeSwitch]);
+
+  const cancelModeSwitch = useCallback(() => {
+    setPendingModeSwitch(null);
+  }, []);
 
   // Oh My Prompt - Vision Prompt state
   const [visionPromptEnabled, setVisionPromptEnabled] = useState(false);
@@ -2168,6 +2194,40 @@ function CanvasApp() {
 
   return (
     <div className={`h-screen w-screen relative overflow-hidden ${themeStyle === 'monochrome' ? 'bg-gradient-to-br from-blue-50 via-white to-purple-50/30' : 'bg-[#0a0a0a]'}`}>
+      {/* ★ 模式切换确认对话框：有进行中生图任务时弹出 */}
+      {pendingModeSwitch && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className={`max-w-md rounded-xl p-6 shadow-2xl ${themeStyle === 'monochrome' ? 'bg-white border border-blue-200' : 'bg-[#1a1a1a] border border-[#d4af37]/30'}`}>
+            <h3 className={`text-lg font-semibold mb-3 ${themeStyle === 'monochrome' ? 'text-gray-900' : 'text-white'}`}>
+              切换模式确认
+            </h3>
+            <p className={`text-sm mb-2 ${themeStyle === 'monochrome' ? 'text-gray-600' : 'text-gray-300'}`}>
+              当前画布有正在进行的生图任务，切换模式后进度显示将暂时隐藏。
+            </p>
+            <p className={`text-xs mb-5 ${themeStyle === 'monochrome' ? 'text-gray-500' : 'text-gray-400'}`}>
+              任务将在后台继续执行，切换回画布模式后可查看生成结果。
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={cancelModeSwitch}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  themeStyle === 'monochrome'
+                    ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    : 'bg-[#2a2a2a] text-gray-300 hover:bg-[#3a3a3a]'
+                }`}
+              >
+                继续等待
+              </button>
+              <button
+                onClick={confirmModeSwitch}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+              >
+                确认切换
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Canvas - 全屏 */}
       <div className="absolute inset-0">
         <InfiniteCanvas
@@ -2209,8 +2269,8 @@ function CanvasApp() {
           onToggleHelp={() => setShowHelpGuide(true)}
           onAddToFavorites={handleAddToFavorites}
           onToggleFavorites={() => setShowFavorites(true)}
-          onSwitchToNodeMode={() => setAppMode('node')}
-          onSwitchToWorkflowHub={() => setAppMode('workflow-hub')}
+          onSwitchToNodeMode={() => safeSwitchMode('node')}
+          onSwitchToWorkflowHub={() => safeSwitchMode('workflow-hub')}
           initialViewState={viewStateRef.current || undefined}
           isPanelCollapsed={panelCollapsed}
           navigateToImageId={navigateToImageId}

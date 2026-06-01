@@ -653,6 +653,9 @@ export function InfiniteCanvas({
     onGroupsChange?.(groups);
   }, [groups, onGroupsChange]);
 
+  // ★ 组件卸载时：不做 abort（轮询仍在后台继续，结果通过 setImages 持久化到父级状态）
+  // 切换回画布模式时，InfiniteCanvas 重新挂载即可看到已完成的结果
+
   // 当 initialGroups 从外部变化时同步更新 groups（项目切换、页面刷新加载）
   const prevInitialGroupsRef = useRef<string>('');
   useEffect(() => {

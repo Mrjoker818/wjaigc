@@ -419,9 +419,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ========== 3.5 裁切/填充原图匹配目标比例 ==========
-    // 语言修图：如果用户设置了不同的画面比例，先对原图做中心裁切使比例匹配，
-    // 避免 AI 为满足尺寸要求而变形拉伸原图内容
+    // ========== 3.5 填充原图匹配目标比例 ==========
+    // 语言修图：如果用户设置了不同的画面比例，对原图做填充（letterbox/pillarbox）
+    // 使比例匹配目标，避免裁切丢失画面内容
     if (size && size !== '1:1') {
       try {
         const sharpImg = sharp(imageBuffer);
@@ -435,27 +435,41 @@ export async function POST(request: NextRequest) {
         const targetRatio = parts.length === 2 && parts[0] > 0 && parts[1] > 0
           ? parts[0] / parts[1] : origRatio;
 
-        // 比例差异超过 5% 才做裁切
+        // 比例差异超过 5% 才做填充
         if (Math.abs(origRatio - targetRatio) / Math.max(origRatio, targetRatio) > 0.05) {
-          let cropW = origW;
-          let cropH = origH;
+          let canvasW = origW;
+          let canvasH = origH;
           if (origRatio > targetRatio) {
-            // 原图更宽，裁切左右
-            cropW = Math.round(origH * targetRatio);
+            // 原图更宽，需要上下加黑边（letterbox）
+            canvasH = Math.round(origW / targetRatio);
           } else {
-            // 原图更高，裁切上下
-            cropH = Math.round(origW / targetRatio);
+            // 原图更高，需要左右加黑边（pillarbox）
+            canvasW = Math.round(origH * targetRatio);
           }
-          const left = Math.round((origW - cropW) / 2);
-          const top = Math.round((origH - cropH) / 2);
-          imageBuffer = await sharp(imageBuffer)
-            .extract({ left, top, width: cropW, height: cropH })
+          // 用黑色填充（与AI生成扩展画面语义一致）
+          // sharp create 只支持 3 (RGB) 或 4 (RGBA) 通道
+          const channels = (meta.channels === 4 ? 4 : 3) as 3 | 4;
+          const hasAlpha = channels === 4;
+          imageBuffer = await sharp({
+            create: {
+              width: canvasW,
+              height: canvasH,
+              channels,
+              background: hasAlpha ? { r: 0, g: 0, b: 0, alpha: 0 } : { r: 0, g: 0, b: 0 },
+            }
+          })
+            .composite([{
+              input: imageBuffer,
+              left: Math.round((canvasW - origW) / 2),
+              top: Math.round((canvasH - origH) / 2),
+            }])
+            .png()
             .toBuffer();
-          console.log(`[edit] Cropped image from ${origW}x${origH} to ${cropW}x${cropH} for target ratio ${size}`);
+          console.log(`[edit] Padded image from ${origW}x${origH} to ${canvasW}x${canvasH} for target ratio ${size}`);
         }
-      } catch (cropErr) {
-        // 裁切失败不影响后续流程
-        console.warn('[edit] Failed to crop image for aspect ratio, using original:', cropErr);
+      } catch (padErr) {
+        // 填充失败不影响后续流程
+        console.warn('[edit] Failed to pad image for aspect ratio, using original:', padErr);
       }
     }
 
