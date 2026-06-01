@@ -198,14 +198,29 @@ async function preprocessForVTracer(
   const srcWidth = meta.width || 512;
   const srcHeight = meta.height || 512;
   const hasAlpha = meta.channels === 4;
+  const maxEdge = Math.max(srcWidth, srcHeight);
 
   // Adaptive max size: high quality presets can handle larger inputs
   const maxSize = params.colorPrecision >= 8 ? 4096 : 3072;
 
   let pipeline = sharp(inputBuffer);
 
-  // Step 1: Resize if too large (preserve quality, don't enlarge)
-  if (srcWidth > maxSize || srcHeight > maxSize) {
+  // Step 1: Upscale small images for better VTracer output
+  // Small images have too few pixels for accurate contour tracing.
+  // Upscaling with lanczos3 interpolation gives VTracer more data to work with.
+  // Reference: Figma-design preprocessImageForVectorization
+  const minEdgeForTrace = 384;
+  const upscaleTarget = 768;
+  if (maxEdge < minEdgeForTrace) {
+    const scale = upscaleTarget / maxEdge;
+    const newW = Math.round(srcWidth * scale);
+    const newH = Math.round(srcHeight * scale);
+    pipeline = pipeline.resize(newW, newH, {
+      kernel: 'lanczos3',  // Best quality for upscaling
+      fit: 'fill',
+    });
+  } else if (srcWidth > maxSize || srcHeight > maxSize) {
+    // Step 1b: Resize if too large (preserve quality, don't enlarge)
     pipeline = pipeline.resize(maxSize, maxSize, {
       fit: 'inside',
       withoutEnlargement: true,
@@ -219,7 +234,13 @@ async function preprocessForVTracer(
     pipeline = pipeline.flatten({ background: { r: 255, g: 255, b: 255 } });
   }
 
-  // Step 3: For low colorPrecision, pre-quantize with sharp to help VTracer
+  // Step 3: Denoise pipeline — median filter + light blur
+  // Median filter removes salt-and-pepper noise and small artifacts.
+  // Light gaussian blur smooths color gradients for cleaner quantization.
+  // Reference: Figma-design sharp median(1) + blur(0.18)
+  pipeline = pipeline.median(1).blur(0.3);
+
+  // Step 4: For low colorPrecision, pre-quantize with sharp to help VTracer
   // This dramatically reduces output path count for faster/balanced presets
   if (params.colorPrecision <= 5) {
     // Quantize to fewer colors: 2^(colorPrecision*0.8) approximate unique colors
@@ -833,6 +854,123 @@ function groupPathsByFill(svg: string): string {
 }
 
 /**
+ * Sanitize AI-generated SVG content for security.
+ * Rejects dangerous elements and attributes, validates structure.
+ * Returns { safe, reason?, sanitized? }
+ */
+function sanitizeAIGeneratedSvg(svg: string): { safe: boolean; reason?: string; sanitized?: string } {
+  let content = svg;
+
+  // Remove markdown code fences
+  content = content.replace(/^```(?:svg|xml|html)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+
+  // Must contain <svg> tag
+  if (!/<svg[\s>]/i.test(content)) {
+    return { safe: false, reason: '未检测到 <svg> 标签' };
+  }
+
+  // Reject dangerous elements
+  const dangerousElements = ['script', 'foreignObject', 'iframe', 'embed', 'object', 'applet'];
+  for (const tag of dangerousElements) {
+    const regex = new RegExp(`<${tag}[\\s>]`, 'i');
+    if (regex.test(content)) {
+      return { safe: false, reason: `包含不安全的 <${tag}> 元素` };
+    }
+  }
+
+  // Reject <image> with external href (data: URI is ok for some cases but we prefer no images)
+  const imageExternalMatch = content.match(/<image[^>]*href\s*=\s*["'](?!data:)[^"']*["']/i);
+  if (imageExternalMatch) {
+    return { safe: false, reason: '包含外部图片引用，仅支持纯矢量路径' };
+  }
+
+  // Reject event handlers (onclick, onload, onerror, etc.)
+  if (/\bon\w+\s*=/i.test(content)) {
+    return { safe: false, reason: '包含事件处理器脚本' };
+  }
+
+  // Reject javascript: URLs
+  if (/javascript\s*:/i.test(content)) {
+    return { safe: false, reason: '包含 JavaScript 链接' };
+  }
+
+  // Reject base64 embedded images in <image> tags (SVG should be pure vector)
+  if (/<image[^>]*href\s*=\s*["']data:image/i.test(content)) {
+    // Remove the image element rather than reject entirely
+    content = content.replace(/<image[^>]*>/gi, '');
+  }
+
+  // Validate viewBox exists
+  if (!/viewBox\s*=/i.test(content)) {
+    return { safe: false, reason: '缺少 viewBox 属性' };
+  }
+
+  // Count graphic elements
+  const pathCount = (content.match(/<path[\s>]/gi) || []).length;
+  const circleCount = (content.match(/<circle[\s>]/gi) || []).length;
+  const rectCount = (content.match(/<rect[\s>]/gi) || []).length;
+  const lineCount = (content.match(/<line[\s>]/gi) || []).length;
+  const polylineCount = (content.match(/<polyline[\s>]/gi) || []).length;
+  const polygonCount = (content.match(/<polygon[\s>]/gi) || []).length;
+  const ellipseCount = (content.match(/<ellipse[\s>]/gi) || []).length;
+  const totalElements = pathCount + circleCount + rectCount + lineCount + polylineCount + polygonCount + ellipseCount;
+
+  if (totalElements === 0) {
+    return { safe: false, reason: '没有检测到可转换的 SVG 路径' };
+  }
+
+  if (totalElements > 900) {
+    return { safe: false, reason: `路径数量过多(${totalElements}个)，建议保留 PNG 格式` };
+  }
+
+  if (totalElements > 400) {
+    console.warn(`[svg-trace] AI 生成 SVG 路径数量较多: ${totalElements}个，可能影响性能`);
+  }
+
+  return { safe: true, sanitized: content };
+}
+
+/**
+ * Normalize SVG dimensions: ensure width, height, viewBox are consistent
+ * with the original image dimensions.
+ */
+function normalizeVectorSvg(svg: string, width: number, height: number): string {
+  // Extract existing viewBox
+  const viewBoxMatch = svg.match(/viewBox\s*=\s*"([^"]*)"/i);
+  const existingViewBox = viewBoxMatch ? viewBoxMatch[1] : null;
+
+  // If no viewBox, add one based on width/height
+  if (!existingViewBox) {
+    const vb = `0 0 ${width} ${height}`;
+    svg = svg.replace(/<svg/i, `<svg viewBox="${vb}"`);
+  }
+
+  // Force width and height attributes to match original image
+  // Remove existing width/height first, then add new ones
+  let normalized = svg
+    .replace(/\s*width\s*=\s*"[^"]*"/i, '')
+    .replace(/\s*height\s*=\s*"[^"]*"/i, '');
+
+  // Insert width and height after <svg tag
+  normalized = normalized.replace(/<svg/i, `<svg width="${width}" height="${height}"`);
+
+  return normalized;
+}
+
+/**
+ * Count total graphic elements in an SVG string.
+ */
+function countSvgElements(svg: string): number {
+  const tags = ['path', 'circle', 'rect', 'line', 'polyline', 'polygon', 'ellipse'];
+  let count = 0;
+  for (const tag of tags) {
+    const regex = new RegExp(`<${tag}[\\s>]`, 'gi');
+    count += (svg.match(regex) || []).length;
+  }
+  return count;
+}
+
+/**
  * Round numeric values in path data to 2 decimal places.
  * Keeps SVG file size manageable while preserving visual precision.
  */
@@ -1124,7 +1262,16 @@ async function tryDesignVectorizeFallback(req: NextRequest, imageUrl: string, mo
     const data = await res.json().catch(() => null) as { success?: boolean; svg?: string; engine?: string; error?: string } | null;
     if (!res.ok || !data?.success || !data.svg) return null;
 
-    const svgContent = sanitizeSvgForIllustrator(String(data.svg));
+    let svgContent = sanitizeSvgForIllustrator(String(data.svg));
+    // AI 生成 SVG 安全过滤
+    const safetyResult = sanitizeAIGeneratedSvg(svgContent);
+    if (!safetyResult.safe) {
+      console.warn('[svg-trace] AI SVG 安全过滤拒绝:', safetyResult.reason);
+      return null;
+    }
+    svgContent = safetyResult.sanitized || svgContent;
+    // SVG 标准化
+    svgContent = normalizeVectorSvg(svgContent, 0, 0);
     const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
     let pngPreviewUrl: string | undefined;
     try {
@@ -1223,9 +1370,27 @@ export async function POST(req: NextRequest) {
         // Sanitize SVG for Adobe Illustrator compatibility
         svgContent = sanitizeSvgForIllustrator(svgContent, imgW, imgH);
 
-        // ─── 温和颜色合并：仅合并视觉上无法区分的近色 ───
-        // 参考Vector Magic：保留真实颜色，不做激进的暗色合并或颜色数限制
+        // 温和颜色合并：仅合并视觉上无法区分的近色
         svgContent = mergeSvgColors(svgContent);
+
+        // 标准化 SVG（统一 viewBox / width / height）
+        svgContent = normalizeVectorSvg(svgContent, imgW, imgH);
+
+        // 路径数质量控制：过多路径建议保留 PNG
+        const pathCountCheck = (svgContent.match(/<path/g) || []).length;
+        if (pathCountCheck === 0) {
+          return NextResponse.json({
+            success: false,
+            error: '没有检测到可转换的 SVG 路径，该素材不适合矢量化',
+          });
+        }
+        if (pathCountCheck > 900) {
+          return NextResponse.json({
+            success: false,
+            error: `路径数量过多(${pathCountCheck}条)，该素材更适合保留为 PNG 格式`,
+            stats: { pathCount: pathCountCheck },
+          });
+        }
 
         const filename = `svg-color-${uid}.svg`;
         const { url } = await saveResult(svgContent, filename, 'svg-trace', 'image/svg+xml');
@@ -1271,7 +1436,16 @@ export async function POST(req: NextRequest) {
 
       // ─── 黑白描摹：ImageMagick + Potrace + Illustrator清洗 ───
       case 'bw': {
-        const svgContent = await runPotrace(inputBuffer, {
+        // 获取原始图片尺寸用于 SVG 标准化
+        let bwImgW = 0, bwImgH = 0;
+        try {
+          const sharp = require('sharp');
+          const meta = await sharp(inputBuffer).metadata();
+          bwImgW = meta.width || 0;
+          bwImgH = meta.height || 0;
+        } catch { /* ignore metadata errors */ }
+
+        let svgContent = await runPotrace(inputBuffer, {
           threshold: body.threshold,
           turdSize: body.turdSize,
           alphaMax: body.alphaMax,
@@ -1279,6 +1453,25 @@ export async function POST(req: NextRequest) {
           optCurveVal: body.optCurveVal,
           invert: body.invert,
         });
+
+        // 标准化 SVG（统一 viewBox / width / height）
+        svgContent = normalizeVectorSvg(svgContent, bwImgW, bwImgH);
+
+        // 路径数质量控制
+        const bwPathCount = (svgContent.match(/<path/g) || []).length;
+        if (bwPathCount === 0) {
+          return NextResponse.json({
+            success: false,
+            error: '没有检测到可转换的 SVG 路径，该素材不适合黑白描摹',
+          });
+        }
+        if (bwPathCount > 700) {
+          return NextResponse.json({
+            success: false,
+            error: `路径数量过多(${bwPathCount}条)，该素材更适合保留为 PNG 格式`,
+            stats: { pathCount: bwPathCount },
+          });
+        }
 
         const filename = `svg-bw-${uid}.svg`;
         const { url } = await saveResult(svgContent, filename, 'svg-trace', 'image/svg+xml');

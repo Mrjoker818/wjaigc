@@ -25,6 +25,65 @@ function median(arr: number[]): number {
   return sorted.length % 2 !== 0 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
 }
 
+/**
+ * 边缘颜色修复（参考 Figma-design 的 paintEdgeBlendRepairPatch）
+ * 
+ * 对半透明边缘像素，用周围不透明像素的颜色进行修复，
+ * 消除去背景后的"晕边"（fringe/halo）伪影。
+ * 
+ * 原理：
+ * 1. 找出半透明像素（0 < alpha < 252）
+ * 2. 在其周围 5x5 区域内采样不透明像素（alpha >= 252）
+ * 3. 用不透明像素的中位数颜色替换该半透明像素的 RGB
+ * 4. 保留原始 alpha 通道不变
+ */
+function repairEdgeColors(rawData: Buffer, width: number, height: number, channels: number = 4): void {
+  const radius = 2; // 5x5 区域
+  let repairedCount = 0;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * channels;
+      const alpha = rawData[idx + 3];
+
+      // 只处理半透明像素（边缘区域）
+      if (alpha > 0 && alpha < 252) {
+        // 采样周围不透明像素的颜色
+        const nearbyR: number[] = [];
+        const nearbyG: number[] = [];
+        const nearbyB: number[] = [];
+
+        for (let dy = -radius; dy <= radius; dy++) {
+          for (let dx = -radius; dx <= radius; dx++) {
+            const ny = y + dy;
+            const nx = x + dx;
+            if (ny < 0 || ny >= height || nx < 0 || nx >= width) continue;
+            const nIdx = (ny * width + nx) * channels;
+            if (rawData[nIdx + 3] >= 252) {
+              nearbyR.push(rawData[nIdx]);
+              nearbyG.push(rawData[nIdx + 1]);
+              nearbyB.push(rawData[nIdx + 2]);
+            }
+          }
+        }
+
+        // 找到足够多的不透明邻居时才修复（至少3个，避免噪声）
+        if (nearbyR.length >= 3) {
+          // 用中位数颜色替换半透明像素的 RGB，保留 alpha
+          rawData[idx] = median(nearbyR);
+          rawData[idx + 1] = median(nearbyG);
+          rawData[idx + 2] = median(nearbyB);
+          repairedCount++;
+        }
+      }
+    }
+  }
+
+  if (repairedCount > 0) {
+    console.log(`[repairEdgeColors] Repaired ${repairedCount} edge pixels`);
+  }
+}
+
 /** RemoveBG 后处理结果 */
 export interface RemoveBGResult {
   /** 透明背景 PNG URL */
@@ -48,13 +107,29 @@ export async function postProcessLocalRemoveBG(
 ): Promise<RemoveBGResult | null> {
   try {
     // 解码 base64 → PNG Buffer
-    const rgbaBuffer = Buffer.from(rgbaBase64, 'base64');
+    let rgbaBuffer = Buffer.from(rgbaBase64, 'base64');
+
+    // 边缘颜色修复：修复半透明像素的色偏，减少"抠图感"
+    try {
+      const rawObj = await sharp(rgbaBuffer)
+        .ensureAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      const raw = rawObj.data;
+      const cw = rawObj.info.width;
+      const ch = rawObj.info.height;
+      repairEdgeColors(raw, cw, ch);
+      rgbaBuffer = await sharp(Buffer.from(raw as Uint8Array), { raw: { width: cw, height: ch, channels: 4 } })
+        .png()
+        .toBuffer() as Buffer<ArrayBuffer>;
+    } catch (repairErr) {
+      console.warn('[postProcessLocalRemoveBG] Edge color repair failed (non-fatal):', repairErr);
+    }
 
     // 将透明背景合成到白色背景上（用户要求：主体图不要透明背景，只显示主体）
     let subjectBuffer: Buffer;
     try {
-      const rgbaImage = sharp(rgbaBuffer);
-      const meta = await rgbaImage.metadata();
+      const meta = await sharp(rgbaBuffer).metadata();
       const w = meta.width || 1;
       const h = meta.height || 1;
       subjectBuffer = await sharp({ create: { width: w, height: h, channels: 3, background: { r: 255, g: 255, b: 255 } } })

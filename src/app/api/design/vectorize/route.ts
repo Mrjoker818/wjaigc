@@ -4,6 +4,7 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import fsSync from 'fs';
 import path from 'path';
+import sharp from 'sharp';
 
 function escapeXml(value: string) {
   return value
@@ -146,6 +147,92 @@ function extractSvgFromText(text: string): string | null {
   }
 
   return cleaned;
+}
+
+/**
+ * Sanitize AI-generated SVG for security and quality.
+ * Rejects dangerous or invalid SVG content.
+ * Returns { safe, reason? } — if safe=false, the SVG should be rejected.
+ */
+function sanitizeGeneratedSvg(svg: string): { safe: boolean; reason?: string } {
+  // Must contain <svg> tag
+  if (!/<svg[\s>]/i.test(svg)) {
+    return { safe: false, reason: 'Missing <svg> tag' };
+  }
+
+  // Security checks — reject dangerous content
+  const dangerousPatterns: Array<{ pattern: RegExp; label: string }> = [
+    { pattern: /<script[\s>]/i, label: '<script> tag' },
+    { pattern: /<foreignObject[\s>]/i, label: '<foreignObject> tag' },
+    { pattern: /<image[\s>]/i, label: '<image> tag (raster embedding)' },
+    { pattern: /\bon\w+\s*=/i, label: 'event handler (onclick, etc.)' },
+    { pattern: /xlink:href\s*=\s*["'](?!data:)[^"']+["']/i, label: 'external href' },
+    { pattern: /href\s*=\s*["'](?!data:|#)[^"']+["']/i, label: 'external href' },
+    { pattern: /<style[^>]*>[\s\S]*?url\s*\(/i, label: 'CSS with external url()' },
+  ];
+
+  for (const { pattern, label } of dangerousPatterns) {
+    if (pattern.test(svg)) {
+      return { safe: false, reason: `Dangerous content detected: ${label}` };
+    }
+  }
+
+  // Check base64 embedding
+  const base64Count = (svg.match(/data:[^;]+;base64,/g) || []).length;
+  if (base64Count > 2) {
+    return { safe: false, reason: `Too many base64 embeddings (${base64Count})` };
+  }
+
+  // Check viewBox exists
+  if (!/viewBox\s*=/.test(svg)) {
+    return { safe: false, reason: 'Missing viewBox attribute' };
+  }
+
+  // Check graphic element count
+  const graphicElements = svg.match(/<(?:path|circle|ellipse|rect|line|polyline|polygon|g|defs|linearGradient|radialGradient|stop|use|clipPath|mask)\b/gi) || [];
+  if (graphicElements.length === 0) {
+    return { safe: false, reason: 'No graphic elements found' };
+  }
+
+  // Path count quality control
+  const pathCount = (svg.match(/<path\b/gi) || []).length;
+  if (pathCount > 900) {
+    return { safe: false, reason: `Too many paths (${pathCount}), this asset is better kept as PNG` };
+  }
+
+  return { safe: true };
+}
+
+/**
+ * Normalize SVG: ensure consistent viewBox, width, height attributes.
+ * Returns the normalized SVG string.
+ */
+function normalizeVectorSvg(svg: string, targetWidth: number, targetHeight: number): string {
+  // Ensure viewBox exists and matches target dimensions
+  const viewBoxMatch = svg.match(/viewBox\s*=\s*["']([^"']+)["']/i);
+  let viewBox: string;
+
+  if (viewBoxMatch) {
+    // Use existing viewBox — it defines the coordinate space
+    viewBox = viewBoxMatch[1];
+  } else {
+    // Create viewBox from target dimensions
+    viewBox = `0 0 ${targetWidth} ${targetHeight}`;
+  }
+
+  // Remove existing width/height/viewBox attributes to rewrite them
+  let normalized = svg
+    .replace(/width\s*=\s*["'][^"']*["']/gi, '')
+    .replace(/height\s*=\s*["'][^"']*["']/gi, '')
+    .replace(/viewBox\s*=\s*["'][^"']*["']/gi, '');
+
+  // Insert normalized attributes into <svg> tag
+  normalized = normalized.replace(
+    /<svg\b/i,
+    `<svg width="${targetWidth}" height="${targetHeight}" viewBox="${viewBox}"`
+  );
+
+  return normalized;
 }
 
 /**
@@ -377,7 +464,38 @@ async function tryChatCompletionsVectorize(
     messages: [
       {
         role: 'system',
-        content: 'You are an expert SVG vector graphics designer. You convert raster images to clean, well-structured SVG code. Output ONLY the SVG code, no explanations, no markdown fences. Start with <svg and end with </svg>.',
+        content: `You are a senior SVG vectorization engineer and UI icon restoration expert.
+Your ONLY task: output a single, clean, production-ready SVG that faithfully reproduces the source image as scalable vector paths.
+
+CORE PRINCIPLE: 1:1 similarity is more important than making a prettier new icon. Do NOT redesign, stylize, or "improve" the source. Your goal is faithful vector restoration.
+
+ANALYSIS (internal — do NOT output this section):
+1. Identify the asset type (icon / logo / illustration / UI element)
+2. Count distinct closed shapes / outline blocks
+3. Locate the primary subject and its bounding center
+4. Determine outline direction (upright / angled / rotated)
+5. Map internal structure (fills, strokes, gradients, shadows)
+6. Establish layer order (back-to-front)
+7. Identify color relationships (primary / accent / neutral)
+
+OUTPUT RULES:
+- Output ONLY raw SVG code. Start with <svg and end with </svg>
+- NO markdown fences, NO explanations, NO comments
+- viewBox must exactly match the source image dimensions
+- Transparent background (no background rect unless the source has one)
+- Maximum 220 path elements — simplify small details if needed
+- Preserve original crop position and whitespace ratio
+- All paths must be closed (<path d="M...Z"/>)
+- Use hex colors matching the source as closely as possible
+- Preserve gradient directions if visible
+
+FORBIDDEN:
+- NO <image> tags (no raster embedding)
+- NO <foreignObject>
+- NO <script> or event handlers (onclick, onload, etc.)
+- NO external hrefs (xlink:href to URLs)
+- NO base64-encoded content
+- NO CSS <style> blocks with external references`,
       },
       {
         role: 'user',
@@ -385,14 +503,18 @@ async function tryChatCompletionsVectorize(
           ...imageContent,
           {
             type: 'text',
-            text: `Convert this ${modeDesc} to SVG vector graphics. Requirements:
-- Create clean, scalable vector paths
-- Use <path> elements with appropriate fill colors
-- Preserve the overall composition and key visual elements
-- Use reasonable color approximations
-- Set viewBox to match the image dimensions
-- Do NOT use <image> tags to embed the raster - create actual vector paths
-- Output only valid SVG code starting with <svg`,
+            text: `Convert this ${modeDesc} to SVG vector graphics with maximum fidelity.
+
+CRITICAL REQUIREMENTS:
+1. FAITHFUL REPRODUCTION — Match the source 1:1. Same shapes, same colors, same proportions.
+2. CLEAN PATHS — Use <path> elements with precise d attributes. Close all paths with Z.
+3. EXACT COLORS — Match source colors in hex. Preserve gradients if present.
+4. CORRECT VIEWBOX — Set viewBox to "0 0 [width] [height]" matching source dimensions.
+5. TRANSPARENT BACKGROUND — No background rectangle unless source has one.
+6. LAYER ORDER — Render back-to-front to match source visual stacking.
+7. PATH COUNT — Stay under 220 paths. Merge tiny adjacent same-color shapes if needed.
+
+Do NOT redesign or stylize. Reproduce faithfully.`,
           },
         ],
       },
@@ -435,6 +557,12 @@ async function tryChatCompletionsVectorize(
       if (content) {
         const svg = extractSvgFromText(content);
         if (svg) {
+          // Sanitize AI-generated SVG for security
+          const safetyCheck = sanitizeGeneratedSvg(svg);
+          if (!safetyCheck.safe) {
+            console.warn('[vectorize] AI SVG failed safety check:', safetyCheck.reason);
+            return null;
+          }
           return { svg, engine: `chat-vision-vectorize (${model || 'gpt-4o'})` };
         }
         console.warn('[vectorize] Chat completions returned content without SVG:', content.substring(0, 200));
@@ -599,9 +727,32 @@ export async function POST(req: NextRequest) {
     const imageBase64 = imageBuffer ? imageBuffer.toString('base64') : null;
     const publicImageUrl = imageUrl.startsWith('http') ? imageUrl : buildPublicImageUrl(imageUrl);
 
-    /** Build SVG response with automatic sanitization for AI compatibility */
-    const svgResponse = (svg: string, engine: string) =>
-      NextResponse.json({ success: true, svg: sanitizeSvgForAI(svg), engine });
+    // Get original image dimensions for SVG normalization
+    let origWidth = 0;
+    let origHeight = 0;
+    if (imageBuffer) {
+      try {
+        const meta = await sharp(imageBuffer).metadata();
+        origWidth = meta.width || 0;
+        origHeight = meta.height || 0;
+      } catch { /* ignore */ }
+    }
+
+    /** Build SVG response with automatic sanitization for AI compatibility + normalization + quality control */
+    const svgResponse = (svg: string, engine: string) => {
+      const processed = normalizeVectorSvg(sanitizeSvgForAI(svg), origWidth, origHeight);
+      // Quality control: check path count
+      const pathCount = (processed.match(/<path\b/g) || []).length;
+      if (pathCount > 900) {
+        console.warn(`[vectorize] SVG path count too high: ${pathCount}, this asset may be better as PNG`);
+        return NextResponse.json({
+          success: false,
+          error: `路径数量过多(${pathCount})，该素材更适合保留为 PNG 格式`,
+          pathCount,
+        });
+      }
+      return NextResponse.json({ success: true, svg: processed, engine, pathCount });
+    };
 
     // 1. 尝试管理员配置的矢量模型 API
     const vectorizeProvider = await findProviderForFeature('vectorize');
