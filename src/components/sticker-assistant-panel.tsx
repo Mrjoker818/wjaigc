@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { GripVertical, X, Minus, Sparkles, Loader2, CheckCircle2, XCircle, Clock, RefreshCw, Download, ChevronRight, Smile, Upload, ImagePlus } from 'lucide-react';
+import { GripVertical, X, Minus, Sparkles, Loader2, CheckCircle2, XCircle, Clock, RefreshCw, Download, ChevronRight, Smile, Upload, ImagePlus, Archive } from 'lucide-react';
+import JSZip from 'jszip';
 import { getModelDisplayName } from '@/lib/model-name-map';
 
 
@@ -602,22 +603,33 @@ ${themeDesc}
     if (urls.length > 0 && onAddImages) onAddImages(urls);
   }, [plan, onAddImages]);
 
-  /* ── 下载全部 ── */
+  /* ── 下载全部（ZIP 压缩包） ── */
+  const [downloadZipping, setDownloadZipping] = useState(false);
   const handleDownloadAll = useCallback(async () => {
     const done = plan.filter(p => p.status === 'done' && p.imageUrl);
-    for (const item of done) {
-      try {
-        const res = await fetch(item.imageUrl!);
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `sticker_${item.id}_${item.caption}.png`;
-        a.click();
-        URL.revokeObjectURL(url);
-      } catch { /* skip */ }
+    if (done.length === 0) return;
+    setDownloadZipping(true);
+    try {
+      const zip = new JSZip();
+      await Promise.all(done.map(async (item) => {
+        try {
+          const res = await fetch(item.imageUrl!);
+          const blob = await res.blob();
+          const ext = blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png';
+          zip.file(`sticker_${String(item.id).padStart(2, '0')}_${item.caption.replace(/[/\\?%*:|"<>]/g, '_')}.${ext}`, blob);
+        } catch { /* skip failed */ }
+      }));
+      const content = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(content);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `stickers_${subject || 'pack'}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloadZipping(false);
     }
-  }, [plan]);
+  }, [plan, subject]);
 
   /* ── 重置 ── */
   const handleReset = useCallback(() => {
@@ -1175,8 +1187,9 @@ ${themeDesc}
                     className="py-2 px-3 rounded-md text-xs font-medium cursor-pointer transition-all duration-150 flex items-center justify-center gap-1"
                     style={{ background: t.cardBg, color: t.textSub, border: `1px solid ${t.border}` }}
                     onClick={handleDownloadAll}
+                    disabled={downloadZipping}
                   >
-                    <Download size={13} />
+                    {downloadZipping ? <Loader2 size={13} className="animate-spin" /> : <Archive size={13} />}
                   </button>
                 </div>
               )}
