@@ -291,9 +291,13 @@ export default function StickerAssistantPanel({
   const selectedStyle = STYLE_PRESETS.find(s => s.key === styleKey)!;
   const selectedTheme = THEME_PRESETS.find(th => th.key === themeKey)!;
 
+  /* ── 主体详细描述（用于增强一致性） ── */
+  const [subjectDetail, setSubjectDetail] = useState('');
+
   const buildIdentityLock = useCallback((): string => {
-    return `Subject: ${subject}\nIdentity Lock: The character MUST maintain EXACTLY the same visual identity across ALL stickers — same species/type, same color scheme, same body proportions, same facial features, same outfit/accessories. Only expression, pose, and action may vary. FORBIDDEN: changing species, altering colors, modifying proportions, changing outfit design, or any visual drift that makes the character look different.`;
-  }, [subject]);
+    const visualDesc = subjectDetail || subject;
+    return `Subject: ${subject}\nVisual Identity: ${visualDesc}\nIdentity Lock: The character MUST maintain EXACTLY the same visual identity across ALL stickers — same species/type, same color scheme, same body proportions, same facial features, same outfit/accessories. Only expression, pose, and action may vary. FORBIDDEN: changing species, altering colors, modifying proportions, changing outfit design, or any visual drift that makes the character look different.`;
+  }, [subject, subjectDetail]);
 
   /* ── 上传主体图片并识别 ── */
   const handleSubjectImageUpload = useCallback(async (file: File) => {
@@ -320,7 +324,7 @@ export default function StickerAssistantPanel({
           }
         } catch { /* keep data URL */ }
 
-        // 使用 chat API + 图片识别主体
+        // 使用 chat API + 图片识别主体，获取简短名称和详细视觉描述
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -328,7 +332,7 @@ export default function StickerAssistantPanel({
             messages: [{
               role: 'user',
               content: [
-                { type: 'text', text: '请用简短中文描述这张图片中的主体（1-10个字），例如：橘猫、小恐龙、奶茶杯、穿西装的兔子。只输出主体名称，不要添加任何其他文字。' },
+                { type: 'text', text: '请分析这张图片中的主体角色，按以下格式输出（严格遵循）：\n第一行：主体简短名称（2-6个字，如：橘猫、小恐龙）\n第二行起：详细视觉外观描述（包括物种、体型、毛色/配色、五官特征、穿着/配饰、标志性的视觉特征等，50-100字）\n\n示例：\n橘猫\n圆胖身材的橘色猫咪，全身橘黄毛色带白色腹部，大圆脸、短鼻子、绿色大眼睛，尾巴短粗翘起，无穿衣配饰' },
                 { type: 'image_url', image_url: { url: imageUrl } },
               ],
             }],
@@ -340,9 +344,19 @@ export default function StickerAssistantPanel({
         if (res.ok) {
           const data = await res.json();
           const content = data.choices?.[0]?.message?.content ?? data.content ?? '';
-          const cleanSubject = content.replace(/["""\n\r]/g, '').trim();
-          if (cleanSubject) {
-            setSubject(cleanSubject);
+          const lines = content.split('\n').map((l: string) => l.trim()).filter((l: string) => l);
+          // 第一行是简短名称
+          const shortName = (lines[0] || '').replace(/["""\n\r]/g, '').trim();
+          // 第二行起是详细描述
+          const detail = lines.slice(1).join('，').replace(/["""\n\r]/g, '').trim();
+          if (shortName) {
+            setSubject(shortName);
+          }
+          if (detail) {
+            setSubjectDetail(detail);
+          } else if (shortName) {
+            // 如果没有详细描述，至少用简短名称作为描述
+            setSubjectDetail(shortName);
           }
         }
       } catch {
@@ -378,8 +392,8 @@ export default function StickerAssistantPanel({
         ? customStyle
         : `风格:${selectedStyle.label}, 正向提示:${selectedStyle.positivePrompt}`;
 
-      const subjectDesc = subject.trim()
-        ? subject
+      const subjectDesc = (subjectDetail || subject).trim()
+        ? `${subject}${subjectDetail ? `（${subjectDetail}）` : ''}`
         : (subjectSource === 'image' && subjectImage ? '上传图片中的主体角色' : '未知主体');
 
       const prompt = `你是一个表情包策划专家。请根据以下要求生成表情包计划。
@@ -429,7 +443,7 @@ ${themeDesc}
     } finally {
       setPlanLoading(false);
     }
-  }, [subject, styleKey, themeKey, count, customStyle, customTheme, selectedStyle, selectedTheme, chatModelId, chatModels, subjectSource, subjectImage]);
+  }, [subject, subjectDetail, styleKey, themeKey, count, customStyle, customTheme, selectedStyle, selectedTheme, chatModelId, chatModels, subjectSource, subjectImage]);
 
   /* ── Step 1 → 2: 逐个生成贴纸 ── */
   const handleStartGeneration = useCallback(() => {
@@ -470,9 +484,18 @@ ${themeDesc}
           quality: 'standard',
         };
 
-        // 如果选了模型，传递 model 参数
+        // 如果选了模型，拆解 providerId::modelId 分别传递（与画布图生图一致）
         if (selectedModelId) {
-          requestBody.model = selectedModelId;
+          const selModel = models.find(m => m.id === selectedModelId);
+          if (selModel) {
+            requestBody.model = selModel.id.includes('::') ? selModel.id.split('::').pop()! : selModel.id;
+            requestBody.providerId = selModel.providerId || undefined;
+          } else if (selectedModelId.includes('::')) {
+            requestBody.model = selectedModelId.split('::').pop()!;
+            requestBody.providerId = selectedModelId.split('::')[0];
+          } else {
+            requestBody.model = selectedModelId;
+          }
         }
 
         // 如果有主体图片，持久化后作为参考图传入（使用 referenceCategories 触发 API 主体一致性增强）
@@ -484,7 +507,7 @@ ${themeDesc}
               const saveRes = await fetch('/api/save-image', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ image: subjectImage }),
+                body: JSON.stringify({ imageUrl: subjectImage }),
               });
               if (saveRes.ok) {
                 const saveData = await saveRes.json();
@@ -517,12 +540,15 @@ ${themeDesc}
         } else if (data.taskIds?.length > 0) {
           // 轮询模式：通过 poll-task 等待结果
           const taskId = data.taskIds[0];
+          // 拆解 model 和 providerId 给 poll-task
+          const pollModelId = selectedModelId?.includes('::') ? selectedModelId.split('::').pop()! : (selectedModelId || undefined);
+          const pollProviderId = selectedModelId?.includes('::') ? selectedModelId.split('::')[0] : undefined;
           for (let attempt = 0; attempt < 120; attempt++) {
             await new Promise(r => setTimeout(r, 2000));
             const pollRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId, model: selectedModelId || undefined }),
+              body: JSON.stringify({ taskId, model: pollModelId, providerId: pollProviderId }),
             });
             if (!pollRes.ok) continue;
             const pollData = await pollRes.json();
@@ -555,7 +581,7 @@ ${themeDesc}
       }
     };
     doGenerate();
-  }, [generating, step, plan, styleKey, customStyle, selectedStyle, selectedTheme, buildIdentityLock, selectedModelId, subjectImage, subjectSource]);
+  }, [generating, step, plan, styleKey, customStyle, selectedStyle, selectedTheme, buildIdentityLock, selectedModelId, subjectImage, subjectSource, subjectDetail]);
 
   /* ── 重试失败项 ── */
   const handleRetry = useCallback((id: number) => {
@@ -598,6 +624,7 @@ ${themeDesc}
     setPlanError('');
     setGenerating(false);
     setGenIdx(-1);
+    setSubjectDetail('');
   }, []);
 
   if (!isOpen) return null;
@@ -740,7 +767,7 @@ ${themeDesc}
                         <button
                           className="absolute top-1 right-1 p-1 rounded-full transition-colors duration-150 cursor-pointer"
                           style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}
-                          onClick={() => { setSubjectImage(null); setSubject(''); }}
+                          onClick={() => { setSubjectImage(null); setSubject(''); setSubjectDetail(''); }}
                           aria-label="移除图片"
                         >
                           <X size={12} />
