@@ -185,25 +185,71 @@ async function removeBackgroundToTransparent(imageUrl: string): Promise<string |
         const bgBrightness = (bgR * 299 + bgG * 587 + bgB * 114) / 1000;
         if (bgBrightness < 180) { resolve(null); return; }
 
-        // 3. 遍历像素，将接近背景色的像素设为透明
-        const tolerance = 35; // 颜色容差
-        for (let i = 0; i < data.length; i += 4) {
-          const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+        // 3. Flood-fill 从四边开始，仅移除与边缘连通的背景像素
+        // 使用 BFS 避免误删主体内部的浅色区域
+        const tolerance = 18; // 颜色容差（降低避免误删主体浅色细节）
+        const visited = new Uint8Array(width * height);
+        const queue: number[] = []; // 存储像素索引 (y * width + x)
+
+        // 从四边入队
+        for (let x = 0; x < width; x++) {
+          queue.push(0 * width + x); // 顶边
+          queue.push((height - 1) * width + x); // 底边
+        }
+        for (let y = 1; y < height - 1; y++) {
+          queue.push(y * width + 0); // 左边
+          queue.push(y * width + (width - 1)); // 右边
+        }
+
+        // BFS flood fill
+        while (queue.length > 0) {
+          const idx = queue.shift()!;
+          if (visited[idx]) continue;
+          visited[idx] = 1;
+
+          const px = idx * 4;
+          const r = data[px], g = data[px + 1], b = data[px + 2], a = data[px + 3];
           if (a < 128) continue; // 已透明跳过
           const dist = Math.sqrt((r - bgR) ** 2 + (g - bgG) ** 2 + (b - bgB) ** 2);
-          if (dist < tolerance) {
-            // 完全透明
-            data[i + 3] = 0;
-          } else if (dist < tolerance * 2) {
-            // 边缘羽化：平滑过渡
-            const alpha = Math.round(((dist - tolerance) / tolerance) * 255);
-            data[i + 3] = Math.min(a, alpha);
+          if (dist > tolerance) continue; // 不属于背景，跳过
+
+          // 标记为透明
+          data[px + 3] = 0;
+
+          // 将四邻域加入队列
+          const x = idx % width, y = Math.floor(idx / width);
+          if (x > 0) queue.push(y * width + (x - 1));
+          if (x < width - 1) queue.push(y * width + (x + 1));
+          if (y > 0) queue.push((y - 1) * width + x);
+          if (y < height - 1) queue.push((y + 1) * width + x);
+        }
+
+        // 4. 边缘羽化：仅对紧邻透明区域的非透明像素做柔和过渡
+        for (let y = 1; y < height - 1; y++) {
+          for (let x = 1; x < width - 1; x++) {
+            const idx = y * width + x;
+            const px = idx * 4;
+            if (data[px + 3] < 128 || data[px + 3] === 0) continue; // 已透明跳过
+            // 检查四邻域是否有透明像素
+            const neighbors = [
+              (y - 1) * width + x, (y + 1) * width + x,
+              y * width + (x - 1), y * width + (x + 1),
+            ];
+            const hasTransparentNeighbor = neighbors.some(n => data[n * 4 + 3] === 0);
+            if (!hasTransparentNeighbor) continue;
+            // 如果这个像素接近背景色，做柔和过渡
+            const r = data[px], g = data[px + 1], b = data[px + 2];
+            const dist = Math.sqrt((r - bgR) ** 2 + (g - bgG) ** 2 + (b - bgB) ** 2);
+            if (dist < tolerance * 3) {
+              const alpha = Math.min(data[px + 3], Math.round((dist / (tolerance * 3)) * 255));
+              data[px + 3] = Math.max(0, alpha);
+            }
           }
         }
 
         ctx.putImageData(imageData, 0, 0);
 
-        // 4. 检查是否有实际变化（至少 5% 像素变透明）
+        // 5. 检查是否有实际变化（至少 5% 像素变透明）
         let transparentCount = 0;
         for (let i = 3; i < data.length; i += 4) {
           if (data[i] < 128) transparentCount++;
@@ -617,14 +663,14 @@ ${themeDesc}
                 if (saveData.url) persistedUrl = saveData.url;
               }
             }
-            // 使用 referenceCategories 触发 API [REFERENCE MODE] 主体一致性增强
-            // 与 03ea886 版本一致：referenceCategories 替代 prompt 中的 [ref] 指令
+            // referenceCategories 触发 API [REFERENCE MODE] 主体+风格+色彩+细节一致性增强
             // 不在 prompt 中写 [ref] 避免双重指令冲突
+            // 797e5df 版本的有效配置：4 个类别全覆盖 + strength 0.15
             requestBody.referenceImages = [persistedUrl];
-            requestBody.referenceCategories = { '0': ['subject'] };
-            requestBody.referenceStrengths = [85];
-            // strength 0.25 与 03ea886 版本一致
-            requestBody.strength = 0.25;
+            requestBody.referenceCategories = { '0': ['subject', 'style', 'color', 'detail'] };
+            requestBody.referenceStrengths = [95];
+            // strength 0.15 = 画布图生图在主体保留最高时的最小值（最大保留）
+            requestBody.strength = 0.15;
           } catch { /* 使用原始 URL 兜底 */ }
         }
 
