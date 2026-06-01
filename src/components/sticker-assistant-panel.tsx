@@ -141,7 +141,7 @@ interface StickerAssistantPanelProps {
   onAddImages?: (urls: string[]) => void;
 }
 
-/* ──────────────────── 白色/浅色背景移除（确保透明PNG） ──────────────────── */
+/* ──────────────────── 白色/浅色背景移除（确保透明PNG，保留白边，抗锯齿） ──────────────────── */
 async function removeBackgroundToTransparent(imageUrl: string): Promise<string | null> {
   return new Promise((resolve) => {
     try {
@@ -159,49 +159,51 @@ async function removeBackgroundToTransparent(imageUrl: string): Promise<string |
         const imageData = ctx.getImageData(0, 0, width, height);
         const { data } = imageData;
 
-        // 1. 采样四边像素，计算背景色（取最常见的浅色）
-        const edgeSamples: number[] = [];
+        // ── 1. 采样四边像素，计算背景色 ──
+        let bgR = 0, bgG = 0, bgB = 0, bgCount = 0;
         const sampleStep = Math.max(1, Math.floor(Math.min(width, height) / 50));
         for (let x = 0; x < width; x += sampleStep) {
-          edgeSamples.push(x, 0); edgeSamples.push(x, height - 1);
+          for (const yy of [0, height - 1]) {
+            const idx = (yy * width + x) * 4;
+            if (data[idx + 3] < 128) continue;
+            bgR += data[idx]; bgG += data[idx + 1]; bgB += data[idx + 2]; bgCount++;
+          }
         }
-        for (let y = 0; y < height; y += sampleStep) {
-          edgeSamples.push(0, y); edgeSamples.push(width - 1, y);
-        }
-        // 计算四边平均色作为背景色
-        let bgR = 0, bgG = 0, bgB = 0, bgCount = 0;
-        for (let i = 0; i < edgeSamples.length; i += 2) {
-          const px = edgeSamples[i], py = edgeSamples[i + 1];
-          const idx = (py * width + px) * 4;
-          if (data[idx + 3] < 128) continue; // 跳过已透明像素
-          bgR += data[idx]; bgG += data[idx + 1]; bgB += data[idx + 2]; bgCount++;
+        for (let y = sampleStep; y < height - sampleStep; y += sampleStep) {
+          for (const xx of [0, width - 1]) {
+            const idx = (y * width + xx) * 4;
+            if (data[idx + 3] < 128) continue;
+            bgR += data[idx]; bgG += data[idx + 1]; bgB += data[idx + 2]; bgCount++;
+          }
         }
         if (bgCount === 0) { resolve(null); return; }
         bgR = Math.round(bgR / bgCount);
         bgG = Math.round(bgG / bgCount);
         bgB = Math.round(bgB / bgCount);
 
-        // 2. 只处理浅色背景（亮度>200），避免误删深色内容
+        // 只处理浅色背景（亮度>180）
         const bgBrightness = (bgR * 299 + bgG * 587 + bgB * 114) / 1000;
         if (bgBrightness < 180) { resolve(null); return; }
 
-        // 3. Flood-fill 从四边开始，仅移除与边缘连通的背景像素
-        // 使用 BFS 避免误删主体内部的浅色区域
-        const tolerance = 18; // 颜色容差（降低避免误删主体浅色细节）
-        const visited = new Uint8Array(width * height);
-        const queue: number[] = []; // 存储像素索引 (y * width + x)
+        // ── 2. 创建浮点 alpha mask（0=透明, 1=不透明），初始化全1 ──
+        const mask = new Float32Array(width * height).fill(1.0);
 
-        // 从四边入队
+        // ── 3. BFS flood-fill 从四边标记背景区域 ──
+        // 使用高容差(45)彻底清除背景，但遇到明显非背景像素时停止
+        const bgTolerance = 45;
+        const visited = new Uint8Array(width * height);
+        const isBackground = new Uint8Array(width * height);
+        const queue: number[] = [];
+
         for (let x = 0; x < width; x++) {
-          queue.push(0 * width + x); // 顶边
-          queue.push((height - 1) * width + x); // 底边
+          queue.push(x);
+          queue.push((height - 1) * width + x);
         }
         for (let y = 1; y < height - 1; y++) {
-          queue.push(y * width + 0); // 左边
-          queue.push(y * width + (width - 1)); // 右边
+          queue.push(y * width);
+          queue.push(y * width + (width - 1));
         }
 
-        // BFS flood fill
         while (queue.length > 0) {
           const idx = queue.shift()!;
           if (visited[idx]) continue;
@@ -209,14 +211,13 @@ async function removeBackgroundToTransparent(imageUrl: string): Promise<string |
 
           const px = idx * 4;
           const r = data[px], g = data[px + 1], b = data[px + 2], a = data[px + 3];
-          if (a < 128) continue; // 已透明跳过
+          if (a < 128) { isBackground[idx] = 1; continue; } // 已透明视为背景
+
           const dist = Math.sqrt((r - bgR) ** 2 + (g - bgG) ** 2 + (b - bgB) ** 2);
-          if (dist > tolerance) continue; // 不属于背景，跳过
+          if (dist > bgTolerance) continue; // 非背景像素，BFS停止
 
-          // 标记为透明
-          data[px + 3] = 0;
+          isBackground[idx] = 1;
 
-          // 将四邻域加入队列
           const x = idx % width, y = Math.floor(idx / width);
           if (x > 0) queue.push(y * width + (x - 1));
           if (x < width - 1) queue.push(y * width + (x + 1));
@@ -224,40 +225,145 @@ async function removeBackgroundToTransparent(imageUrl: string): Promise<string |
           if (y < height - 1) queue.push((y + 1) * width + x);
         }
 
-        // 4. 边缘羽化：仅对紧邻透明区域的非透明像素做柔和过渡
+        // ── 4. 白边保护：检测白边环带（紧贴主体的亮色像素） ──
+        // 找到背景区域边界，向内扩展2-3px保护白边
+        const whiteBorder = new Uint8Array(width * height);
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const idx = y * width + x;
+            if (isBackground[idx]) continue; // 背景区域不处理
+            // 检查8邻域是否有背景像素
+            let hasBgNeighbor = false;
+            for (let dy = -1; dy <= 1 && !hasBgNeighbor; dy++) {
+              for (let dx = -1; dx <= 1 && !hasBgNeighbor; dx++) {
+                if (dx === 0 && dy === 0) continue;
+                const nx = x + dx, ny = y + dy;
+                if (nx < 0 || nx >= width || ny < 0 || ny >= height) { hasBgNeighbor = true; continue; }
+                if (isBackground[ny * width + nx]) hasBgNeighbor = true;
+              }
+            }
+            if (hasBgNeighbor) {
+              // 这是背景-前景边界上的像素，标记为白边区域
+              const px = idx * 4;
+              const r = data[px], g = data[px + 1], b = data[px + 2];
+              const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+              if (brightness > 200) { // 亮色像素视为白边
+                whiteBorder[idx] = 1;
+              }
+            }
+          }
+        }
+
+        // 从白边向内扩展2px（白边通常2-3px宽）
+        const whiteBorderExpanded = new Uint8Array(width * height);
+        whiteBorderExpanded.set(whiteBorder);
+        for (let pass = 0; pass < 2; pass++) {
+          const temp = new Uint8Array(width * height);
+          temp.set(whiteBorderExpanded);
+          for (let y = 1; y < height - 1; y++) {
+            for (let x = 1; x < width - 1; x++) {
+              const idx = y * width + x;
+              if (whiteBorderExpanded[idx]) continue;
+              if (isBackground[idx]) continue;
+              // 8邻域有白边像素且当前像素也是亮色 → 扩展白边
+              let hasWbNeighbor = false;
+              for (let dy = -1; dy <= 1 && !hasWbNeighbor; dy++) {
+                for (let dx = -1; dx <= 1 && !hasWbNeighbor; dx++) {
+                  if (dx === 0 && dy === 0) continue;
+                  if (whiteBorderExpanded[(y + dy) * width + (x + dx)]) hasWbNeighbor = true;
+                }
+              }
+              if (hasWbNeighbor) {
+                const px = idx * 4;
+                const r = data[px], g = data[px + 1], b = data[px + 2];
+                const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+                if (brightness > 200) temp[idx] = 1;
+              }
+            }
+          }
+          whiteBorderExpanded.set(temp);
+        }
+
+        // ── 5. 应用 mask：背景=0，白边=1，其他前景=1 ──
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const idx = y * width + x;
+            if (isBackground[idx] && !whiteBorderExpanded[idx]) {
+              mask[idx] = 0; // 背景透明
+            }
+            // 白边区域和主体区域保持 mask=1
+          }
+        }
+
+        // ── 6. 多次 box blur 平滑 alpha mask 消除锯齿 ──
+        // 使用 3x3 box blur 迭代3次（近似高斯模糊，半径约2px）
+        const blurred = new Float32Array(width * height);
+        for (let pass = 0; pass < 3; pass++) {
+          const src = pass === 0 ? mask : blurred;
+          const dst = pass === 0 ? blurred : new Float32Array(width * height);
+          for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+              let sum = 0, count = 0;
+              for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                  const nx = x + dx, ny = y + dy;
+                  if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                    sum += src[ny * width + nx];
+                    count++;
+                  }
+                }
+              }
+              dst[y * width + x] = sum / count;
+            }
+          }
+          if (pass < 2) blurred.set(dst);
+          else blurred.set(dst); // final pass
+        }
+
+        // ── 7. 对模糊后的 mask 做阈值化，保留平滑过渡 ──
+        // alpha < 0.3 → 完全透明，alpha > 0.7 → 完全不透明，中间线性过渡
+        for (let i = 0; i < width * height; i++) {
+          let alpha: number;
+          if (blurred[i] < 0.3) alpha = 0;
+          else if (blurred[i] > 0.7) alpha = 1;
+          else alpha = (blurred[i] - 0.3) / 0.4;
+
+          // 白边区域强制不透明
+          if (whiteBorderExpanded[i]) alpha = 1;
+
+          data[i * 4 + 3] = Math.round(alpha * 255);
+        }
+
+        // ── 8. 白边外侧1px抗锯齿：对白边边缘的像素做premultiplied alpha混合 ──
+        // 让白边外缘从白色平滑过渡到透明，消除锯齿
         for (let y = 1; y < height - 1; y++) {
           for (let x = 1; x < width - 1; x++) {
             const idx = y * width + x;
-            const px = idx * 4;
-            if (data[px + 3] < 128 || data[px + 3] === 0) continue; // 已透明跳过
-            // 检查四邻域是否有透明像素
-            const neighbors = [
-              (y - 1) * width + x, (y + 1) * width + x,
-              y * width + (x - 1), y * width + (x + 1),
-            ];
-            const hasTransparentNeighbor = neighbors.some(n => data[n * 4 + 3] === 0);
-            if (!hasTransparentNeighbor) continue;
-            // 如果这个像素接近背景色，做柔和过渡
-            const r = data[px], g = data[px + 1], b = data[px + 2];
-            const dist = Math.sqrt((r - bgR) ** 2 + (g - bgG) ** 2 + (b - bgB) ** 2);
-            if (dist < tolerance * 3) {
-              const alpha = Math.min(data[px + 3], Math.round((dist / (tolerance * 3)) * 255));
-              data[px + 3] = Math.max(0, alpha);
+            if (!whiteBorderExpanded[idx]) continue;
+            const a = data[idx * 4 + 3];
+            if (a < 255) {
+              // 白边像素alpha不足255，将颜色向白色混合
+              const px = idx * 4;
+              const factor = a / 255;
+              data[px] = Math.round(255 + (data[px] - 255) * factor);
+              data[px + 1] = Math.round(255 + (data[px + 1] - 255) * factor);
+              data[px + 2] = Math.round(255 + (data[px + 2] - 255) * factor);
+              data[px + 3] = 255; // 白边始终不透明
             }
           }
         }
 
         ctx.putImageData(imageData, 0, 0);
 
-        // 5. 检查是否有实际变化（至少 5% 像素变透明）
+        // ── 9. 检查变化率 ──
         let transparentCount = 0;
         for (let i = 3; i < data.length; i += 4) {
           if (data[i] < 128) transparentCount++;
         }
         const transparentRatio = transparentCount / (width * height);
-        if (transparentRatio < 0.05) { resolve(null); return; } // 变化太少，说明本来就是透明的
+        if (transparentRatio < 0.05) { resolve(null); return; }
 
-        // 5. 导出为 PNG data URL 并通过 save-image 持久化
+        // ── 10. 持久化 ──
         canvas.toBlob(async (blob) => {
           if (!blob) { resolve(null); return; }
           try {
@@ -268,7 +374,6 @@ async function removeBackgroundToTransparent(imageUrl: string): Promise<string |
               const result = await res.json();
               resolve(result.url || null);
             } else {
-              // 回退：使用 data URL
               resolve(canvas.toDataURL('image/png'));
             }
           } catch {
