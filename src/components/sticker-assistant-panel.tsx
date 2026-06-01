@@ -474,11 +474,27 @@ ${themeDesc}
           requestBody.model = selectedModelId;
         }
 
-        // 如果有主体图片，作为参考图传入（图生图模式）
+        // 如果有主体图片，持久化后作为参考图传入（图生图模式，与画布图生图一致）
         if (subjectImage && subjectSource === 'image') {
-          requestBody.referenceImages = [subjectImage];
-          requestBody.referenceCategories = { '0': ['subject'] };
-          requestBody.referenceStrengths = [85];
+          try {
+            // 先将 data URL 持久化为服务器 URL
+            let persistedUrl = subjectImage;
+            if (subjectImage.startsWith('data:')) {
+              const saveRes = await fetch('/api/save-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: subjectImage }),
+              });
+              if (saveRes.ok) {
+                const saveData = await saveRes.json();
+                if (saveData.url) persistedUrl = saveData.url;
+              }
+            }
+            // 使用与画布图生图一致的 referenceMode + strength 模式
+            requestBody.referenceImages = [persistedUrl];
+            requestBody.referenceMode = 'reference';
+            requestBody.strength = 75;
+          } catch { /* 使用原始 URL 兜底 */ }
         }
 
         const res = await fetch('/api/generate', {
@@ -491,9 +507,10 @@ ${themeDesc}
 
         let imageUrl: string | undefined;
         if (data.imageUrls?.length > 0) {
+          // 直接模式：generate API 直接返回图片 URL 数组
           imageUrl = data.imageUrls[0];
         } else if (data.taskIds?.length > 0) {
-          // 轮询模式
+          // 轮询模式：通过 poll-task 等待结果
           const taskId = data.taskIds[0];
           for (let attempt = 0; attempt < 120; attempt++) {
             await new Promise(r => setTimeout(r, 2000));
@@ -504,8 +521,9 @@ ${themeDesc}
             });
             if (!pollRes.ok) continue;
             const pollData = await pollRes.json();
-            if (pollData.status === 'completed' && pollData.imageUrls?.length > 0) {
-              imageUrl = pollData.imageUrls[0];
+            if (pollData.status === 'completed') {
+              // poll-task 返回 imageUrl（单数字符串）
+              imageUrl = pollData.imageUrl || (pollData.imageUrls?.length > 0 ? pollData.imageUrls[0] : undefined);
               break;
             }
             if (pollData.status === 'failed') throw new Error(pollData.error || '生成失败');
