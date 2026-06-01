@@ -6517,12 +6517,14 @@ export function InfiniteCanvas({
               >
                 {image.isProcessingPlaceholder && image.processing ? (
                   <div className={`relative w-full h-full overflow-hidden border ${isMonochrome ? 'border-gray-200 bg-gray-100' : 'border-white/[0.14] bg-[#0f0f0f]'}`}>
+                    {(image.processing.sourceUrl || image.url) && (
                     <img
                       src={image.processing.sourceUrl || image.url}
                       alt=""
                       className="absolute inset-0 w-full h-full object-cover blur-xl scale-110 opacity-40 pointer-events-none"
                       draggable={false}
                     />
+                    )}
                     <div className="absolute inset-0 bg-black/50 pointer-events-none" />
                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 pointer-events-none">
                       {image.processing.label.includes('3D') ? (
@@ -6614,7 +6616,7 @@ export function InfiniteCanvas({
                       )}
                     </div>
                   </div>
-                ) : (
+                ) : image.url ? (
                   <img
                     src={image.url}
                     alt={image.prompt || 'canvas image'}
@@ -6637,7 +6639,7 @@ export function InfiniteCanvas({
                       }
                     }}
                   />
-                )}
+                ) : null}
                 {/* 3D model badge - click to open 3D viewer */}
                 {image.threeDModelUrl && !image.isProcessingPlaceholder && (
                   <div className="absolute top-1 left-1 z-30"
