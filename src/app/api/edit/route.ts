@@ -95,21 +95,6 @@ function isImageEditModel(modelId: string): boolean {
 }
 
 /**
- * 判断模型是否支持原生蒙版涂抹（OpenAI images.edit 端点的 mask 参数）
- * 注意：即使不支持原生 mask，也可以通过 chat/completions 将蒙版作为参考图发送
- * 所以所有模型在 UI 层面都"支持涂抹"，这里仅决定是否走 images.edit 路径
- */
-function modelSupportsNativeMask(modelId: string, _providerBaseUrl: string): boolean {
-  const id = modelId.toLowerCase();
-  // gpt-image-2 和 dall-e 系列支持 images.edit 端点
-  // ★ 第三方代理(APImart等)同样支持 /images/edits，不应仅限 api.openai.com
-  if (id.includes('gpt-image') || id.includes('dall-e')) {
-    return true;
-  }
-  return false;
-}
-
-/**
  * 解析 SSE 流式响应，拼接所有 delta content 为完整 JSON 结构
  * 兼容第三方代理忽略 stream:false 强制流式返回的情况
  */
@@ -452,9 +437,8 @@ export async function POST(request: NextRequest) {
     }
 
     // ========== 4. 判断调用路径 ==========
-    const id = model.toLowerCase();
-    const isOpenaiImageModel = id.includes('gpt-image') || id.includes('dall-e');
-    const supportsNativeMask = modelSupportsNativeMask(model, effectiveBaseUrl);
+    // ★ 不针对特定模型/供应商判断路径，统一优先尝试 images.edit
+    // 如果提供商不支持 images.edit，请求会失败并自动 fallback 到其他路径
 
     // ========== 5. LLM 协作：分析原图 + 优化 prompt + 蒙版语义 ==========
     // 核心思路：LLM 是"大脑"理解意图，图像模型是"手"执行修改
@@ -689,20 +673,47 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     }
     updateTaskStage(taskId, '编辑中');
     const editStartTime = Date.now();
-    console.info(`[edit] taskId=${taskId} 开始图像编辑, model=${model}, path=${isOpenaiImageModel && supportsNativeMask ? 'images.edit' : 'chat/completions(fallback)'}`);
 
-    // 路径A: OpenAI images.edit 端点（gpt-image-2 / dall-e 系列）
-    // ★ 第三方代理(APImart等)同样支持 /images/edits 端点
-    // ★ mask 可选：无 mask 时不带 mask 参数，AI 自行理解修改意图
-    if (isOpenaiImageModel && supportsNativeMask) {
+    // ★ 预处理：将前端黑白mask转换为OpenAI格式(透明=编辑)，供 images.edit 路径使用
+    // 前端发送通用黑白格式（白色=编辑, 黑色=保留）
+    // /images/edits 要求：透明=需要编辑, 不透明=保留
+    let openaiMaskBuffer: Buffer | null = null;
+    if (maskBuffer) {
       try {
+        const maskSharp = sharp(maskBuffer);
+        const maskMeta = await maskSharp.metadata();
+        const maskPng = await maskSharp.ensureAlpha().raw().toBuffer();
+        const mw = maskMeta.width || 1;
+        const mh = maskMeta.height || 1;
+        const converted = Buffer.alloc(mw * mh * 4);
+        for (let i = 0; i < mw * mh; i++) {
+          const r = maskPng[i * 4], g = maskPng[i * 4 + 1], b = maskPng[i * 4 + 2];
+          const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+          if (luminance > 128) {
+            converted[i * 4] = 0; converted[i * 4 + 1] = 0; converted[i * 4 + 2] = 0; converted[i * 4 + 3] = 0;
+          } else {
+            converted[i * 4] = 255; converted[i * 4 + 1] = 255; converted[i * 4 + 2] = 255; converted[i * 4 + 3] = 255;
+          }
+        }
+        openaiMaskBuffer = await sharp(converted, { raw: { width: mw, height: mh, channels: 4 } }).png().toBuffer();
+      } catch (maskConvErr) {
+        console.warn('[edit] mask格式转换失败:', maskConvErr instanceof Error ? maskConvErr.message : maskConvErr);
+      }
+    }
+
+    console.info(`[edit] taskId=${taskId} 开始图像编辑, model=${model}, hasMask=${!!maskBuffer}, count=${count}`);
+
+    // 路径A: images.edit 端点（通用，所有支持图像编辑的提供商都应支持）
+    // ★ mask 可选：无 mask 时不带 mask 参数，AI 自行理解修改意图
+    // ★ 不区分模型，统一优先尝试 images.edit；如提供商不支持，请求会失败并自动 fallback
+    try {
         const FormData = (await import('form-data')).default;
         const form = new FormData();
         form.append('model', model);
         form.append('image', imageBuffer, { filename: 'image.png', contentType: mimeType });
         form.append('prompt', editInstruction);
-        if (maskBuffer) {
-          form.append('mask', maskBuffer, { filename: 'mask.png', contentType: 'image/png' });
+        if (openaiMaskBuffer) {
+          form.append('mask', openaiMaskBuffer, { filename: 'mask.png', contentType: 'image/png' });
         }
 
         // 比例到像素尺寸映射
@@ -718,9 +729,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
 
         form.append('size', outputSize);
         form.append('quality', quality);
-        if (model === 'gpt-image-2') {
-          form.append('n', String(Math.min(count, 4)));
-        }
+        form.append('n', String(Math.min(count, 4)));
 
         // Node.js 原生 fetch 不能正确流式传输 form-data，
         // 需要将 form 转为 Buffer 发送，确保 boundary 完整传输
@@ -759,8 +768,8 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                 extraForm.append('model', model);
                 extraForm.append('image', imageBuffer, { filename: 'image.png', contentType: mimeType });
                 extraForm.append('prompt', editInstruction);
-                if (maskBuffer) {
-                  extraForm.append('mask', maskBuffer, { filename: 'mask.png', contentType: 'image/png' });
+                if (openaiMaskBuffer) {
+                  extraForm.append('mask', openaiMaskBuffer, { filename: 'mask.png', contentType: 'image/png' });
                 }
                 extraForm.append('size', outputSize);
                 extraForm.append('quality', quality);
@@ -814,7 +823,6 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       } catch (editErr) {
         console.warn('images.edit error, falling back to chat/completions:', editErr instanceof Error ? editErr.message : editErr);
       }
-    }
 
     // ★ 检查任务是否已被取消（images.edit 之后）
     if (isTaskCancelled(taskId)) {
@@ -849,7 +857,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           prompt: editInstruction,
           size: size || '1024x1024',
           quality: quality || 'standard',
-          n: 1,
+          n: Math.min(count, 4),
         };
 
         // 使用 adjustRequestForProfile 自动调整请求体（size格式转换等）
@@ -878,11 +886,19 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
             } catch { /* 参考图获取失败，跳过 */ }
           }
         }
+        // ★ 蒙版作为视觉参考图发送（黑白格式：白色=编辑区域, 黑色=保留区域）
+        if (maskBuffer) {
+          imageUrls.push(`data:image/png;base64,${maskBuffer.toString('base64')}`);
+        }
         adjustedBody.image_urls = imageUrls;
 
         // 增强 prompt：确保 AI 将参考图作为编辑基础
         if (imageUrls.length > 0) {
-          adjustedBody.prompt = `[IMAGE-TO-IMAGE MODE] You MUST use the provided reference image as the mandatory source/base for editing. Do NOT generate from scratch. ${String(adjustedBody.prompt || '')}`;
+          let promptPrefix = `[IMAGE-TO-IMAGE MODE] You MUST use the provided reference image as the mandatory source/base for editing. Do NOT generate from scratch. `;
+          if (maskBuffer) {
+            promptPrefix += `The LAST image is a mask overlay: WHITE areas indicate regions to modify/edit, BLACK areas must remain unchanged. Only apply changes within the white mask regions. Preserve all details outside the mask precisely. `;
+          }
+          adjustedBody.prompt = `${promptPrefix}${String(adjustedBody.prompt || '')}`;
         }
 
         const genResponse = await fetchWithV1Retry(
@@ -895,7 +911,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               'Content-Type': 'application/json',
             },
             body: JSON.stringify(adjustedBody),
-            signal: AbortSignal.timeout(60000), // ★ 60秒超时
+            signal: AbortSignal.timeout(120000), // ★ 120秒超时（图像编辑耗时长）
           },
         );
 
@@ -932,7 +948,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                     'Content-Type': 'application/json',
                   },
                   body: JSON.stringify({ ...adjustedBody, n: 1 }),
-                  signal: AbortSignal.timeout(60000), // ★ 60秒超时
+                  signal: AbortSignal.timeout(120000), // ★ 120秒超时（图像编辑耗时长）
                 })
                 .then(async r => {
                   if (!r.ok) return null;
@@ -1145,7 +1161,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       }
       if (chatResponse.status === 400) {
         // 400 可能是模型不支持图片输入，尝试降级到 /images/generations
-        if (isOpenaiImageModel || isImageEditModel(model)) {
+        if (isImageEditModel(model)) {
           try {
             const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, 1);
             if (genUrl) {
@@ -1212,7 +1228,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     console.info(`[edit] taskId=${taskId} chat/completions图片提取: ${resultImageUrl ? '成功' : '未找到'}, 耗时=${Date.now() - editStartTime}ms`);
 
     // chat/completions 未提取到图片，尝试降级到 images/generations（★ 限时30秒，避免长时间等待）
-    if (!resultImageUrl && (isOpenaiImageModel || isImageEditModel(model))) {
+    if (!resultImageUrl && isImageEditModel(model)) {
       try {
         console.info(`[edit] taskId=${taskId} chat/completions未返回图片, 尝试images/generations降级`);
         const fallbackStart = Date.now();
@@ -1244,7 +1260,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       const extraCount = count - 1;
       const extraPromises = Array.from({ length: extraCount }, async () => {
         try {
-          if (isImageEditModel(model) && !isOpenaiImageModel) {
+          if (isImageEditModel(model)) {
             // Gemini 模型：再次调用 chat/completions（不带 LLM 协作）
             const extraResp = await fetchWithV1Retry(effectiveBaseUrl, '/chat/completions', {
               method: 'POST',

@@ -735,26 +735,14 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     scaledCanvas.height = targetH;
     const scaledCtx = scaledCanvas.getContext('2d');
     if (!scaledCtx) return null;
-    // 缩放绘制：关闭抗锯齿保持黑白边界清晰
+    // 缩放绘制
     scaledCtx.imageSmoothingEnabled = true;
     scaledCtx.imageSmoothingQuality = 'high';
     scaledCtx.drawImage(bwCanvas, 0, 0, targetW, targetH);
 
-    // ★ OpenAI /images/edits 要求 mask 格式：透明区域=需要编辑, 不透明区域=保留
-    // 生成符合 OpenAI 规范的 mask：画笔涂抹区域为透明(需要编辑), 其余为不透明白色(保留)
-    const openaiMaskCanvas = document.createElement('canvas');
-    openaiMaskCanvas.width = targetW;
-    openaiMaskCanvas.height = targetH;
-    const openaiMaskCtx = openaiMaskCanvas.getContext('2d');
-    if (!openaiMaskCtx) return null;
-    // 先填充白色不透明(保留区域)
-    openaiMaskCtx.fillStyle = '#ffffff';
-    openaiMaskCtx.fillRect(0, 0, targetW, targetH);
-    // 将涂抹区域(白色)绘制为透明(编辑区域) — 使用 destination-out 合成模式
-    openaiMaskCtx.globalCompositeOperation = 'destination-out';
-    openaiMaskCtx.drawImage(bwCanvas, 0, 0, targetW, targetH);
-
-    return openaiMaskCanvas.toDataURL('image/png');
+    // ★ 通用黑白格式 mask：白色=编辑区域, 黑色=保留区域
+    // 后端会根据不同 API 路径自动转换格式（如 images.edit 需要透明=编辑格式）
+    return scaledCanvas.toDataURL('image/png');
   }, [image]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
