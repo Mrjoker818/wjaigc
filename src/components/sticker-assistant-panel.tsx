@@ -393,19 +393,13 @@ export default function StickerAssistantPanel({
   const [subjectDetail, setSubjectDetail] = useState('');
 
   const buildIdentityLock = useCallback((): string => {
+    // 简洁版：仅提供关键身份信息，不过度重复（referenceCategories 已触发 API 自动添加 [REFERENCE MODE] 保留指令）
     const visualDesc = subjectDetail || subject;
-    return `SUBJECT IDENTITY LOCK (MANDATORY — every pixel must conform):
-Subject: ${subject}
-Detailed Visual Blueprint: ${visualDesc}
-ENFORCEMENT RULES:
-- The subject's species, body type, and proportions MUST be identical to the reference
-- The subject's exact color palette (every color zone) MUST be preserved pixel-perfectly
-- The subject's facial features (eye shape/size/color, nose, mouth) MUST be identical
-- The subject's ears/horns/tail shape and position MUST be identical
-- The subject's outfit, accessories, and markings MUST be identical
-- ONLY expression, pose, and action may differ — all other visual attributes are FROZEN
-- Any deviation from the reference subject's visual identity is FORBIDDEN and must be corrected`;
-  }, [subject, subjectDetail]);
+    if (subjectSource === 'image' && subjectImage) {
+      return `Subject identity: ${subject}. Visual: ${visualDesc}. ONLY expression/pose/action may differ.`;
+    }
+    return `Subject: ${subject}. Visual: ${visualDesc}`;
+  }, [subject, subjectDetail, subjectSource, subjectImage]);
 
   /* ── 上传主体图片并识别 ── */
   const handleSubjectImageUpload = useCallback(async (file: File) => {
@@ -568,17 +562,14 @@ ${themeDesc}
     const item = plan[idx];
     const styleP = styleKey === 'custom' ? customStyle : selectedStyle.positivePrompt;
     const negP = styleKey === 'custom' ? '' : selectedStyle.negativePrompt;
-    const identityLock = buildIdentityLock();
 
-    // 构建生成 prompt — 使用与画布图生图完全一致的 [ref] 前缀和保留格式
+    // 构建生成 prompt — 使用 [ref] 前缀与画布图生图完全一致的格式
     let prompt: string;
-    // 详细视觉蓝图 — 从AI识别的详细描述中提取关键特征，直接嵌入prompt
-    const visualBlueprint = subjectDetail ? `\n[VISUAL BLUEPRINT — COPY EXACTLY]: ${subjectDetail}` : '';
     if (subjectImage && subjectSource === 'image') {
-      // 有参考图时，使用画布图生图的完整提示词格式，触发 API 的主体一致性增强
-      prompt = `[ref] Use the provided reference image(s) as the base. Create an image of: Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. While creating this new image, strictly preserve the main subject and focal point of the reference image(s) — do NOT change the original product/object identity, strictly preserve the artistic style and visual aesthetics of the reference image(s), strictly preserve the color palette and tone of the reference image(s), strictly preserve the fine details and textures of the reference image(s). IMPORTANT: The product/object in the result MUST be the SAME product/object as in the reference image — do NOT substitute or replace it with a different product. ${identityLock}${visualBlueprint}. Feel free to reimagine the composition and layout structure, the scene and environment setting. Transparent PNG background, die-cut sticker style, 1024x1024 square, sticker sheet single item, no solid background color.${negP ? ` Avoid: ${negP}, solid background, white background` : ''}`;
+      // 与画布图生图格式完全一致：[ref] + 保留/自由类别 + 身份锁定 + 生成内容
+      prompt = `[ref] Use the provided reference image(s) as the base. strictly preserve the subject, style, color, and fine detail of the reference image(s). Feel free to reimagine the composition and scene. Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. ${buildIdentityLock()}. Transparent PNG background, die-cut sticker style, 1024x1024 square, sticker sheet single item, no solid background color.${negP ? ` Avoid: ${negP}, solid background, white background` : ''}`;
     } else {
-      prompt = `Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. Subject identity: ${identityLock}${visualBlueprint}. Transparent PNG background, die-cut sticker style, no solid background color, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}, solid background, white background` : ''}`;
+      prompt = `Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. ${buildIdentityLock()}. Transparent PNG background, die-cut sticker style, no solid background color, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}, solid background, white background` : ''}`;
     }
 
     const doGenerate = async () => {
@@ -625,15 +616,13 @@ ${themeDesc}
                 if (saveData.url) persistedUrl = saveData.url;
               }
             }
-            // 使用与画布图生图完全一致的 referenceCategories 格式
-            // 保留主体(subject)、风格(style)、色彩(color)、细节(detail)，允许构图/场景自由变化
-            // 主体强度100（最高）, 其余90 → 画布计算 strength ≈ 0.22（保留主体，允许姿势/表情变化）
+            // 不使用 referenceCategories — 让 prompt 中的 [ref] 指令独立控制保留逻辑
+            // 避免与 API 自动添加的 [REFERENCE MODE] 产生双重指令冲突导致模型混乱
             requestBody.referenceImages = [persistedUrl];
             requestBody.referenceMode = 'reference';
-            requestBody.referenceCategories = { '0': ['subject', 'style', 'color', 'detail'] };
-            requestBody.referenceStrengths = [100]; // 单张图整体强度100（主体100+风格90+色彩90+细节90 → API内部按类别分权重）
-            // strength: 0.15 = 画布公式计算最大主体保留值，0.22会导致主体变化
-            requestBody.strength = 0.15;
+            // strength: 0.30 平衡主体保留和姿势/表情变化
+            // 过低(0.15)某些模型会忽略strength参数，过高(0.50+)主体会变形
+            requestBody.strength = 0.30;
           } catch { /* 使用原始 URL 兜底 */ }
         }
 
