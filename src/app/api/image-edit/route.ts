@@ -2886,78 +2886,23 @@ export async function POST(request: NextRequest) {
         try { await fs.unlink(maskPath); } catch (_) { /* ignore */ }
       };
 
-      // ★ 扩展画面：AI 结果 + 原图羽化合成
-      // AI 接收了合成参考图（原图+灰色边框）和蒙版，但部分模型无法完美保留原图内容
-      // 策略：将 AI 结果作为底层，再把原图按偏移位置合成上去（带羽化边缘），
-      // 确保原图区域像素级保留，扩展区域使用 AI 生成内容，过渡自然无灰块
+      // ★ 扩展画面：直接返回 API 扩展结果
+      // 不再合成原图到 AI 结果上，避免原图与扩展区域错位拼接和灰色填充问题
+      // AI 模型已经接收了合成参考图（原图+灰色边框），应该能直接输出完整的扩展结果
       const persistOutpaintResult = async (resultBuffer: Buffer): Promise<{ url: string; w: number; h: number }> => {
         const resultMeta = await sharp(resultBuffer).metadata();
-        const resultW = resultMeta.width || scaledTargetW;
-        const resultH = resultMeta.height || scaledTargetH;
+        const resultW = resultMeta.width || refW;
+        const resultH = resultMeta.height || refH;
 
-        // Step 1: Resize AI result to scaled target dimensions
+        // Step 1: Resize AI result to target dimensions if needed
         let finalBuf = resultBuffer;
-        if (resultW !== scaledTargetW || resultH !== scaledTargetH) {
+        if (resultW !== targetW || resultH !== targetH) {
           finalBuf = await sharp(resultBuffer)
-            .resize(scaledTargetW, scaledTargetH, { fit: 'fill' })
-            .png()
-            .toBuffer();
-        }
-
-        // Step 2: If downscaling was applied, upscale to original target dimensions
-        if (needsDownscale) {
-          finalBuf = await sharp(finalBuf)
             .resize(targetW, targetH, { fit: 'fill' })
-            .png()
-            .toBuffer();
-        }
-
-        // Step 3: Composite original image at offset with feathered edges
-        // This eliminates gray fill artifacts and ensures pixel-perfect original content
-        try {
-          const feather = 4; // Feather radius in pixels for smooth transition
-          const origRGBA = await sharp(imageBuffer)
-            .resize(origW, origH, { fit: 'fill' })
-            .ensureAlpha()
-            .raw()
-            .toBuffer();
-
-          // Create feathered alpha mask: solid white center fading to transparent at edges
-          const innerW = Math.max(1, origW - feather * 4);
-          const innerH = Math.max(1, origH - feather * 4);
-          const alphaMask = await sharp({
-            create: { width: innerW, height: innerH, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } }
-          })
-            .extend({
-              top: feather * 2, bottom: feather * 2,
-              left: feather * 2, right: feather * 2,
-              background: { r: 0, g: 0, b: 0, alpha: 0 }
-            })
-            .resize(origW, origH)
-            .blur(feather)
-            .extractChannel(0)
-            .raw()
-            .toBuffer();
-
-          // Apply alpha mask to original image
-          for (let i = 0; i < origW * origH; i++) {
-            origRGBA[i * 4 + 3] = alphaMask[i];
-          }
-
-          const origWithAlpha = await sharp(origRGBA, {
-            raw: { width: origW, height: origH, channels: 4 }
-          }).png().toBuffer();
-
-          // Composite original onto AI result at offset position
-          finalBuf = await sharp(finalBuf)
-            .composite([{ input: origWithAlpha, left: offsetX, top: offsetY }])
             .jpeg({ quality: 92 })
             .toBuffer();
-
-          console.log(`[outpaint] Composited original at (${offsetX},${offsetY}) with feathered edges, final: ${targetW}x${targetH}`);
-        } catch (compositeErr) {
-          console.warn('[outpaint] Original compositing failed, using AI result directly:', compositeErr instanceof Error ? compositeErr.message : compositeErr);
-          finalBuf = await sharp(finalBuf).jpeg({ quality: 92 }).toBuffer();
+        } else {
+          finalBuf = await sharp(resultBuffer).jpeg({ quality: 92 }).toBuffer();
         }
 
         const resultFileName = `outpaint_${timestamp}.jpg`;
@@ -3038,8 +2983,7 @@ export async function POST(request: NextRequest) {
           status: 'processing',
           progress: 10,
           result: {
-            outpaintInfo: { targetW, targetH, scaleFactor, scaledTargetW, scaledTargetH, refW, refH, offsetX, offsetY, origW, origH },
-            originalImageUrl: imageUrl,
+            outpaintInfo: { targetW, targetH, refW, refH },
             usedModel: cm?.model,
             apiBaseUrl: cm?.apiBaseUrl,
             apiKey: cm?.apiKey,
