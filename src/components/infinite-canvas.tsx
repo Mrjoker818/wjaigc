@@ -721,8 +721,8 @@ export function InfiniteCanvas({
 
   // Left toolbar styles (expanded & collapsed)
   const ltContainerCls = isMonochrome
-    ? 'bg-white/90 border border-gray-200 shadow-lg'
-    : 'bg-background/85 border border-white/[0.06]';
+    ? 'bg-white border border-gray-200 shadow-lg'
+    : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl';
   const ltExpandedBtnCls = isMonochrome
     ? 'flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-blue-50 text-blue-700 hover:bg-blue-100'
     : 'flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright';
@@ -5953,7 +5953,7 @@ export function InfiniteCanvas({
   const ratioOptions = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9'];
 
   // Floating panel style helpers
-  const panelBaseClass = `flex items-center gap-1.5 px-3 py-2 rounded-xl border shadow-xl ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-white/[0.06]/95 border-[#2a2a2a]'}`;
+  const panelBaseClass = `flex items-center gap-1.5 px-3 py-2 rounded-xl border shadow-xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1e1e1e] border-[#333]'}`;
   const panelLabelClass = `text-xs font-medium ${isMonochrome ? 'text-gray-700' : 'text-text-bright'}`;
   const panelSmallLabelClass = `text-xs ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`;
   const panelDividerClass = `w-px h-4 ${isMonochrome ? 'bg-gray-200' : 'bg-[#333]'} mx-1`;
@@ -6034,7 +6034,7 @@ export function InfiniteCanvas({
         <div ref={leftToolbarRef}>
         {leftToolbarExpanded ? (
           /* Expanded: full toolbar */
-          <div className={`absolute top-4 left-4 z-50 flex flex-col gap-1 min-w-[160px] p-2 rounded-xl ${ltContainerCls} transition-all duration-200`} style={{ backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+          <div className={`absolute top-4 left-4 z-50 flex flex-col gap-1 min-w-[160px] p-2 rounded-xl ${isMonochrome ? 'bg-white border border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl'} transition-all duration-200`}>
             {/* Logo header */}
             <div className="flex items-center gap-2 px-2 py-1.5">
               <img src="/logo.png" alt="无界AI" className="w-6 h-6 object-contain rounded" />
@@ -6178,7 +6178,7 @@ export function InfiniteCanvas({
           </div>
         ) : (
           /* Collapsed: icon column */
-          <div className={`absolute top-4 left-4 z-50 flex flex-col items-center py-2 gap-1 rounded-xl ${ltContainerCls} transition-all duration-200`} style={{ width: 48, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+          <div className={`absolute top-4 left-4 z-50 flex flex-col items-center py-2 gap-1 rounded-xl ${isMonochrome ? 'bg-white border border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl'} transition-all duration-200`} style={{ width: 48 }}>
             <button
               onClick={() => { if (onToggleVisionPrompt) onToggleVisionPrompt(); }}
               className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${ohMyPromptOpen ? ltActiveBtnCls : isMonochrome ? `bg-gray-50 ${mIcon.ohMyPrompt} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
@@ -6508,7 +6508,7 @@ export function InfiniteCanvas({
                             </svg>
                             <div className="absolute inset-0 rounded-full bg-gold/20 animate-ping" style={{ animationDuration: '2s' }} />
                           </div>
-                          <div className={`px-3 py-1.5 rounded-full bg-black/55 backdrop-blur-md text-xs font-semibold shadow-lg border ${isMonochrome ? 'text-blue-400 border-blue-400/20' : 'text-gold border-gold/20'}`}>
+                          <div className={`px-3 py-1.5 rounded-full bg-black/90 text-xs font-semibold shadow-lg border ${isMonochrome ? 'text-blue-400 border-blue-400/20' : 'text-gold border-gold/20'}`}>
                             {image.processing.label}
                           </div>
                           <div className="w-40 max-w-[75%] h-2 rounded-full bg-white/10 overflow-hidden shadow-inner">
@@ -6530,7 +6530,7 @@ export function InfiniteCanvas({
                           </div>
                           {/* ★ 取消按钮 */}
                           <button
-                            className="pointer-events-auto mt-1 px-3 py-1 rounded-full bg-red-500/70 hover:bg-red-500/90 text-white text-xs font-medium transition-colors backdrop-blur-sm"
+                            className="pointer-events-auto mt-1 px-3 py-1 rounded-full bg-red-600 hover:bg-red-500 text-white text-xs font-medium transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
                               if (pollingAbortRef.current) {
@@ -6546,7 +6546,7 @@ export function InfiniteCanvas({
                       ) : (
                         /* 通用进度UI */
                         <>
-                          <div className="px-4 py-2 rounded-full bg-black/55 backdrop-blur-md text-white text-sm font-medium shadow-lg border border-white/10">
+                          <div className="px-4 py-2 rounded-full bg-black/90 text-white text-sm font-medium shadow-lg border border-white/10">
                             {image.processing.label}
                           </div>
                           <div className="w-36 max-w-[70%] h-1.5 rounded-full bg-white/15 overflow-hidden">
@@ -6564,7 +6564,7 @@ export function InfiniteCanvas({
                           </div>
                           {/* ★ 取消按钮 */}
                           <button
-                            className="pointer-events-auto mt-1 px-3 py-1 rounded-full bg-red-500/70 hover:bg-red-500/90 text-white text-xs font-medium transition-colors backdrop-blur-sm"
+                            className="pointer-events-auto mt-1 px-3 py-1 rounded-full bg-red-600 hover:bg-red-500 text-white text-xs font-medium transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
                               if (pollingAbortRef.current) {
@@ -10136,7 +10136,7 @@ export function InfiniteCanvas({
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
             >
-              <div className={`flex items-center gap-0.5 px-1 py-1 rounded-xl border shadow-xl ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-background/90 border-white/[0.06]'}`} style={!isMonochrome ? { backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' } : undefined}>
+              <div className={`flex items-center gap-0.5 px-1 py-1 rounded-xl border shadow-xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-white/[0.12]'}`}>
                 {displayedActions.map((action, idx) => (
                   <div key={action.label} className="relative">
                     <button
@@ -10253,7 +10253,7 @@ export function InfiniteCanvas({
         {/* Image context menu */}
         {showContextMenu && (
           <div
-            className={`fixed z-50 py-1.5 rounded-xl border shadow-2xl min-w-[160px] ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-[#1e1e1e] border-[#333]'}`}
+            className={`fixed z-50 py-1.5 rounded-xl border shadow-2xl min-w-[160px] ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1e1e1e] border-[#333]'}`}
             data-popup="context-menu"
             style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
             onClick={(e) => e.stopPropagation()}
@@ -10277,7 +10277,7 @@ export function InfiniteCanvas({
         {/* Canvas context menu */}
         {showCanvasMenu && (
           <div
-            className={`fixed z-50 py-1.5 rounded-xl border shadow-2xl min-w-[200px] ${isMonochrome ? 'bg-white/95 border-gray-200' : 'bg-[#1e1e1e] border-[#333]'}`}
+            className={`fixed z-50 py-1.5 rounded-xl border shadow-2xl min-w-[200px] ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1e1e1e] border-[#333]'}`}
             style={{ left: canvasMenuPos.x, top: canvasMenuPos.y }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -10580,7 +10580,7 @@ export function InfiniteCanvas({
           >
             <div className={`rounded-2xl border shadow-2xl overflow-hidden ${
               isMonochrome
-                ? 'bg-white/95 border-gray-200'
+                ? 'bg-white border-gray-200'
                 : 'bg-gradient-to-b from-[#181818] to-[#111111] border-white/[0.14] shadow-[0_8px_32px_rgba(0,0,0,0.6)]'
             }`}>
               {/* Header */}
@@ -10776,7 +10776,7 @@ export function InfiniteCanvas({
       })()}
 
       {/* Floating pill toolbar - always on top (z-50) */}
-      <div data-toolbar="bottom-toolbar" className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 rounded-2xl px-3 py-2 flex items-center gap-1.5 ${isMonochrome ? 'bg-white/90 border border-gray-200 shadow-lg' : 'bg-background/85 border border-white/[0.06] shadow-2xl'}`} style={{ backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+      <div data-toolbar="bottom-toolbar" className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 rounded-2xl px-3 py-2 flex items-center gap-1.5 ${isMonochrome ? 'bg-white border border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl'}`}>
         {/* Select tool */}
         <button
           className={`tool-btn ${isMonochrome ? `p-2 rounded-xl transition-all relative group ${mIcon.mousePointer} hover:text-gray-700 hover:bg-gray-100` : 'p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
