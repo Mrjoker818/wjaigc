@@ -141,7 +141,12 @@ export default function StickerAssistantPanel({
   const t = themes[isMonochrome ? 'mono' : 'gold'];
 
   /* ── 拖拽 & 最小化 ── */
-  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const panelW = 480;
+  const panelH = 600;
+  const [pos, setPos] = useState({
+    x: typeof window !== 'undefined' ? Math.max(40, (window.innerWidth - panelW) / 2) : 0,
+    y: typeof window !== 'undefined' ? Math.max(40, (window.innerHeight - panelH) / 2) : 0,
+  });
   const [dragging, setDragging] = useState(false);
   const dragOff = useRef({ x: 0, y: 0 });
   const [minimized, setMinimized] = useState(false);
@@ -388,11 +393,9 @@ ${themeDesc}
     <div
       className="fixed z-[150] flex flex-col"
       style={{
-        left: pos.x || undefined,
-        top: pos.y || undefined,
-        right: pos.x ? undefined : 16,
-        bottom: pos.y ? undefined : 64,
-        width: 480,
+        left: pos.x,
+        top: pos.y,
+        width: panelW,
         maxHeight: minimized ? 40 : 'calc(100vh - 100px)',
         background: t.panelBg,
         borderRadius: 10,
