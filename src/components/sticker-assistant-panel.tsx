@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { GripVertical, X, Minus, Sparkles, Loader2, CheckCircle2, XCircle, Clock, RefreshCw, Download, ChevronRight, Smile } from 'lucide-react';
+import { GripVertical, X, Minus, Sparkles, Loader2, CheckCircle2, XCircle, Clock, RefreshCw, Download, ChevronRight, Smile, Upload, ImagePlus, ChevronDown } from 'lucide-react';
 
 /* ──────────────────── 主题色 ──────────────────── */
 const themes = {
@@ -65,6 +65,13 @@ interface ThemePreset {
   icon: string;
   captions: string[];
   mood: string;
+}
+
+interface ModelOption {
+  id: string;
+  providerId: string;
+  providerName: string;
+  displayLabel?: string;
 }
 
 /* ──────────────────── 预设数据 (from Zinxtick) ──────────────────── */
@@ -142,7 +149,7 @@ export default function StickerAssistantPanel({
 
   /* ── 拖拽 & 最小化 ── */
   const panelW = 480;
-  const panelH = 600;
+  const panelH = 620;
   const [pos, setPos] = useState({
     x: typeof window !== 'undefined' ? Math.max(40, (window.innerWidth - panelW) / 2) : 0,
     y: typeof window !== 'undefined' ? Math.max(40, (window.innerHeight - panelH) / 2) : 0,
@@ -154,11 +161,20 @@ export default function StickerAssistantPanel({
   /* ── 步骤 ── */
   const [step, setStep] = useState<0 | 1 | 2>(0);
   const [subject, setSubject] = useState('');
+  const [subjectSource, setSubjectSource] = useState<'text' | 'image'>('text');
+  const [subjectImage, setSubjectImage] = useState<string | null>(null); // data URL or server URL
+  const [subjectImageIdentifying, setSubjectImageIdentifying] = useState(false);
   const [styleKey, setStyleKey] = useState('general');
   const [themeKey, setThemeKey] = useState('everyday');
   const [count, setCount] = useState<9 | 16>(9);
   const [customStyle, setCustomStyle] = useState('');
   const [customTheme, setCustomTheme] = useState('');
+
+  /* ── 模型选择 ── */
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState('');
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const [modelsLoading, setModelsLoading] = useState(false);
 
   /* ── 计划 ── */
   const [plan, setPlan] = useState<StickerItem[]>([]);
@@ -168,6 +184,43 @@ export default function StickerAssistantPanel({
   /* ── 生成 ── */
   const [generating, setGenerating] = useState(false);
   const [genIdx, setGenIdx] = useState(-1);
+
+  /* ── 文件上传 ref ── */
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /* ── 加载模型列表 ── */
+  useEffect(() => {
+    if (!isOpen) return;
+    const loadModels = async () => {
+      setModelsLoading(true);
+      try {
+        const res = await fetch('/api/models?type=image');
+        if (res.ok) {
+          const data = await res.json();
+          const loaded: ModelOption[] = [];
+          if (data.models && Array.isArray(data.models)) {
+            for (const m of data.models) {
+              loaded.push({
+                id: m.id || m.name,
+                providerId: m.providerId || '',
+                providerName: m.providerName || '',
+                displayLabel: m.displayLabel,
+              });
+            }
+          }
+          setModels(loaded);
+          if (loaded.length > 0 && !selectedModelId) {
+            setSelectedModelId(loaded[0].id);
+          }
+        }
+      } catch { /* ignore */ } finally {
+        setModelsLoading(false);
+      }
+    };
+    loadModels();
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const selectedModel = models.find(m => m.id === selectedModelId);
 
   /* ── 拖拽逻辑 ── */
   const onDragDown = useCallback((e: React.MouseEvent) => {
@@ -185,6 +238,14 @@ export default function StickerAssistantPanel({
     return () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
   }, [dragging]);
 
+  /* ── 点击外部关闭模型下拉 ── */
+  useEffect(() => {
+    if (!modelDropdownOpen) return;
+    const handler = () => setModelDropdownOpen(false);
+    window.addEventListener('click', handler);
+    return () => window.removeEventListener('click', handler);
+  }, [modelDropdownOpen]);
+
   /* ── ESC ── */
   useEffect(() => {
     if (!isOpen) return;
@@ -200,6 +261,74 @@ export default function StickerAssistantPanel({
   const buildIdentityLock = useCallback((): string => {
     return `Subject: ${subject}\nCore silhouette: consistent across all stickers\nAllowed expression mechanisms: pose, emotion, props, squash/stretch\nForbidden drift: species/category change, main silhouette change, color/material change`;
   }, [subject]);
+
+  /* ── 上传主体图片并识别 ── */
+  const handleSubjectImageUpload = useCallback(async (file: File) => {
+    // 读取为 data URL 用于预览
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const dataUrl = e.target?.result as string;
+      setSubjectImage(dataUrl);
+      setSubjectSource('image');
+      setSubjectImageIdentifying(true);
+
+      try {
+        // 先持久化到服务器（data URL 太大无法直接传给 vision API）
+        let imageUrl = dataUrl;
+        try {
+          const saveRes = await fetch('/api/save-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageUrl: dataUrl }),
+          });
+          if (saveRes.ok) {
+            const saveData = await saveRes.json();
+            if (saveData.url) imageUrl = saveData.url;
+          }
+        } catch { /* keep data URL */ }
+
+        // 使用 chat API + 图片识别主体
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: [{
+              role: 'user',
+              content: [
+                { type: 'text', text: '请用简短中文描述这张图片中的主体（1-10个字），例如：橘猫、小恐龙、奶茶杯、穿西装的兔子。只输出主体名称，不要添加任何其他文字。' },
+                { type: 'image_url', image_url: { url: imageUrl } },
+              ],
+            }],
+            stream: false,
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          const content = data.choices?.[0]?.message?.content ?? data.content ?? '';
+          const cleanSubject = content.replace(/["""\n\r]/g, '').trim();
+          if (cleanSubject) {
+            setSubject(cleanSubject);
+          }
+        }
+      } catch {
+        // 识别失败不影响使用，用户可以手动输入
+      } finally {
+        setSubjectImageIdentifying(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  /* ── 处理文件拖放 ── */
+  const handleSubjectImageDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      handleSubjectImageUpload(file);
+    }
+  }, [handleSubjectImageUpload]);
 
   /* ── Step 0 → 1: 生成计划 ── */
   const handleGeneratePlan = useCallback(async () => {
@@ -276,22 +405,44 @@ ${themeDesc}
     const negP = styleKey === 'custom' ? '' : selectedStyle.negativePrompt;
     const identityLock = buildIdentityLock();
 
-    const prompt = `Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. Subject identity: ${identityLock}. White border, die-cut sticker style, no background elements, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}` : ''}`;
+    // 构建生成 prompt
+    let prompt = `Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. Subject identity: ${identityLock}. White border, die-cut sticker style, no background elements, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}` : ''}`;
+
+    // 如果有上传的主体图片，加入参考描述
+    if (subjectImage && subjectSource === 'image') {
+      prompt += ` Reference subject appearance from the provided image. Maintain the exact same character design, colors, and proportions as the reference.`;
+    }
 
     const doGenerate = async () => {
       try {
         setPlan(prev => prev.map(p => p.id === item.id ? { ...p, status: 'generating' as const } : p));
+
+        // 构建请求体
+        const requestBody: Record<string, unknown> = {
+          prompt,
+          size: '1024x1024',
+          aspectRatio: '1:1',
+          n: 1,
+          outputCount: 1,
+          quality: 'standard',
+        };
+
+        // 如果选了模型，传递 model 参数
+        if (selectedModelId) {
+          requestBody.model = selectedModelId;
+        }
+
+        // 如果有主体图片，作为参考图传入（图生图模式）
+        if (subjectImage && subjectSource === 'image') {
+          requestBody.referenceImages = [subjectImage];
+          requestBody.referenceCategories = { '0': ['subject'] };
+          requestBody.referenceStrengths = [85];
+        }
+
         const res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt,
-            size: '1024x1024',
-            aspectRatio: '1:1',
-            n: 1,
-            outputCount: 1,
-            quality: 'standard',
-          }),
+          body: JSON.stringify(requestBody),
         });
         if (!res.ok) throw new Error(`生成失败: ${res.status}`);
         const data = await res.json();
@@ -307,7 +458,7 @@ ${themeDesc}
             const pollRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId }),
+              body: JSON.stringify({ taskId, model: selectedModelId || undefined }),
             });
             if (!pollRes.ok) continue;
             const pollData = await pollRes.json();
@@ -339,7 +490,7 @@ ${themeDesc}
       }
     };
     doGenerate();
-  }, [generating, step, plan, styleKey, customStyle, selectedStyle, selectedTheme, buildIdentityLock]);
+  }, [generating, step, plan, styleKey, customStyle, selectedStyle, selectedTheme, buildIdentityLock, selectedModelId, subjectImage, subjectSource]);
 
   /* ── 重试失败项 ── */
   const handleRetry = useCallback((id: number) => {
@@ -461,18 +612,157 @@ ${themeDesc}
           {/* ── Step 0: 配置 ── */}
           {step === 0 && (
             <div className="p-4 space-y-4">
-              {/* 主体输入 */}
+              {/* 主体来源切换 */}
               <div>
                 <label className="block text-xs mb-1.5 font-medium" style={{ color: t.textSub }}>表情主体</label>
-                <input
-                  className="w-full px-3 py-2 rounded-md text-sm outline-none transition-all duration-150"
-                  style={{ background: t.inputBg, color: t.text, border: `1px solid ${t.border}` }}
-                  placeholder="例如: 橘猫、奶茶杯、小恐龙..."
-                  value={subject}
-                  onChange={e => setSubject(e.target.value)}
-                  onFocus={e => (e.currentTarget.style.borderColor = t.accent)}
-                  onBlur={e => (e.currentTarget.style.borderColor = t.border)}
-                />
+                <div className="flex gap-2 mb-2">
+                  <button
+                    className="flex-1 px-2 py-1.5 rounded-md text-xs transition-all duration-150 cursor-pointer flex items-center justify-center gap-1"
+                    style={{
+                      background: subjectSource === 'text' ? t.accentBg : t.cardBg,
+                      border: `1.5px solid ${subjectSource === 'text' ? t.accent : t.border}`,
+                      color: subjectSource === 'text' ? t.accent : t.textSub,
+                    }}
+                    onClick={() => setSubjectSource('text')}
+                  >
+                    文字描述
+                  </button>
+                  <button
+                    className="flex-1 px-2 py-1.5 rounded-md text-xs transition-all duration-150 cursor-pointer flex items-center justify-center gap-1"
+                    style={{
+                      background: subjectSource === 'image' ? t.accentBg : t.cardBg,
+                      border: `1.5px solid ${subjectSource === 'image' ? t.accent : t.border}`,
+                      color: subjectSource === 'image' ? t.accent : t.textSub,
+                    }}
+                    onClick={() => setSubjectSource('image')}
+                  >
+                    <ImagePlus size={12} /> 上传主体
+                  </button>
+                </div>
+
+                {/* 文字描述模式 */}
+                {subjectSource === 'text' && (
+                  <input
+                    className="w-full px-3 py-2 rounded-md text-sm outline-none transition-all duration-150"
+                    style={{ background: t.inputBg, color: t.text, border: `1px solid ${t.border}` }}
+                    placeholder="例如: 橘猫、奶茶杯、小恐龙..."
+                    value={subject}
+                    onChange={e => setSubject(e.target.value)}
+                    onFocus={e => (e.currentTarget.style.borderColor = t.accent)}
+                    onBlur={e => (e.currentTarget.style.borderColor = t.border)}
+                  />
+                )}
+
+                {/* 上传图片模式 */}
+                {subjectSource === 'image' && (
+                  <div>
+                    {subjectImage ? (
+                      <div className="relative rounded-md overflow-hidden" style={{ border: `1px solid ${t.border}` }}>
+                        <img
+                          src={subjectImage}
+                          alt="主体参考图"
+                          className="w-full max-h-40 object-contain"
+                          style={{ background: t.cardBg }}
+                        />
+                        {subjectImageIdentifying && (
+                          <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.5)' }}>
+                            <div className="flex items-center gap-2 text-white text-xs">
+                              <Loader2 size={14} className="animate-spin" />
+                              识别主体中...
+                            </div>
+                          </div>
+                        )}
+                        <button
+                          className="absolute top-1 right-1 p-1 rounded-full transition-colors duration-150 cursor-pointer"
+                          style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}
+                          onClick={() => { setSubjectImage(null); setSubject(''); }}
+                          aria-label="移除图片"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div
+                        className="flex flex-col items-center justify-center gap-2 py-6 rounded-md cursor-pointer transition-all duration-150"
+                        style={{ background: t.inputBg, border: `2px dashed ${t.border}` }}
+                        onClick={() => fileInputRef.current?.click()}
+                        onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = t.accent; }}
+                        onDragLeave={e => { e.currentTarget.style.borderColor = t.border; }}
+                        onDrop={handleSubjectImageDrop}
+                      >
+                        <Upload size={20} style={{ color: t.textDim }} />
+                        <span className="text-xs" style={{ color: t.textDim }}>点击上传或拖拽图片</span>
+                        <span className="text-[10px]" style={{ color: t.textDim }}>AI 将自动识别图片中的主体</span>
+                      </div>
+                    )}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={e => {
+                        const file = e.target.files?.[0];
+                        if (file) handleSubjectImageUpload(file);
+                        e.target.value = '';
+                      }}
+                    />
+                    {/* 识别结果可编辑 */}
+                    {subjectImage && (
+                      <input
+                        className="w-full mt-2 px-3 py-2 rounded-md text-sm outline-none transition-all duration-150"
+                        style={{ background: t.inputBg, color: t.text, border: `1px solid ${t.border}` }}
+                        placeholder="识别主体名称（可手动修改）..."
+                        value={subject}
+                        onChange={e => setSubject(e.target.value)}
+                        onFocus={e => (e.currentTarget.style.borderColor = t.accent)}
+                        onBlur={e => (e.currentTarget.style.borderColor = t.border)}
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 模型选择 */}
+              <div>
+                <label className="block text-xs mb-1.5 font-medium" style={{ color: t.textSub }}>生图模型</label>
+                <div className="relative">
+                  <button
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-md text-sm transition-all duration-150 cursor-pointer"
+                    style={{ background: t.inputBg, color: selectedModel ? t.text : t.textDim, border: `1px solid ${t.border}` }}
+                    onClick={(e) => { e.stopPropagation(); setModelDropdownOpen(v => !v); }}
+                  >
+                    <span className="truncate">
+                      {modelsLoading ? '加载模型中...' : (selectedModel ? `${selectedModel.displayLabel || selectedModel.id}` : (models.length === 0 ? '暂无可用模型' : '选择模型'))}
+                    </span>
+                    <ChevronDown size={14} style={{ color: t.textDim }} />
+                  </button>
+                  {modelDropdownOpen && models.length > 0 && (
+                    <div
+                      className="absolute left-0 right-0 top-full mt-1 rounded-md overflow-hidden z-10 max-h-48 overflow-y-auto"
+                      style={{ background: t.panelBg, border: `1px solid ${t.border}`, boxShadow: t.shadow }}
+                      onClick={e => e.stopPropagation()}
+                    >
+                      {models.map(m => (
+                        <button
+                          key={m.id}
+                          className="w-full text-left px-3 py-2 text-xs transition-colors duration-100 cursor-pointer"
+                          style={{
+                            background: selectedModelId === m.id ? t.accentBg : 'transparent',
+                            color: selectedModelId === m.id ? t.accent : t.textSub,
+                          }}
+                          onMouseEnter={e => { if (selectedModelId !== m.id) e.currentTarget.style.background = t.accentBg; }}
+                          onMouseLeave={e => { if (selectedModelId !== m.id) e.currentTarget.style.background = 'transparent'; }}
+                          onClick={() => { setSelectedModelId(m.id); setModelDropdownOpen(false); }}
+                        >
+                          <div className="font-medium truncate">{m.displayLabel || m.id}</div>
+                          {m.providerName && (
+                            <div className="text-[10px] mt-0.5" style={{ color: t.textDim }}>{m.providerName}</div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* 风格选择 */}
@@ -601,7 +891,26 @@ ${themeDesc}
                 </button>
               </div>
 
-              <div className="space-y-1.5 max-h-[50vh] overflow-y-auto pr-1">
+              {/* 主体信息 */}
+              {(subjectImage || subject) && (
+                <div className="flex items-center gap-2 px-2.5 py-2 rounded-md" style={{ background: t.cardBg, border: `1px solid ${t.border}` }}>
+                  {subjectImage && (
+                    <img src={subjectImage} alt="" className="w-8 h-8 rounded object-cover shrink-0" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-medium truncate" style={{ color: t.text }}>
+                      主体: {subject}
+                    </div>
+                    <div className="text-[10px]" style={{ color: t.textDim }}>
+                      模型: {selectedModel?.displayLabel || selectedModel?.id || '默认'}
+                      {' · '}风格: {selectedStyle.label}
+                      {' · '}主题: {selectedTheme.label}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-1.5 max-h-[45vh] overflow-y-auto pr-1">
                 {plan.map(item => (
                   <div
                     key={item.id}
