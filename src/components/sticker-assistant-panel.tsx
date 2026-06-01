@@ -174,6 +174,7 @@ export default function StickerAssistantPanel({
   const [models, setModels] = useState<ModelOption[]>([]);
   const [selectedModelId, setSelectedModelId] = useState('');
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const [chatDropdownOpen, setChatDropdownOpen] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [chatModelId, setChatModelId] = useState('');
   const [chatModels, setChatModels] = useState<ModelOption[]>([]);
@@ -757,45 +758,84 @@ ${themeDesc}
               </div>
 
               {/* 模型选择 */}
-              <div>
-                <label className="block text-xs mb-1.5 font-medium" style={{ color: t.textSub }}>生图模型</label>
-                <div className="relative">
-                  <button
-                    className="w-full flex items-center justify-between px-3 py-2 rounded-md text-sm transition-all duration-150 cursor-pointer"
-                    style={{ background: t.inputBg, color: selectedModel ? t.text : t.textDim, border: `1px solid ${t.border}` }}
-                    onClick={(e) => { e.stopPropagation(); setModelDropdownOpen(v => !v); }}
-                  >
-                    <span className="truncate">
-                      {modelsLoading ? '加载模型中...' : (selectedModel ? `${selectedModel.displayLabel || selectedModel.id}` : (models.length === 0 ? '暂无可用模型' : '选择模型'))}
-                    </span>
-                    <ChevronDown size={14} style={{ color: t.textDim }} />
-                  </button>
-                  {modelDropdownOpen && models.length > 0 && (
-                    <div
-                      className="absolute left-0 right-0 top-full mt-1 rounded-md overflow-hidden z-10 max-h-48 overflow-y-auto"
-                      style={{ background: t.panelBg, border: `1px solid ${t.border}`, boxShadow: t.shadow }}
-                      onClick={e => e.stopPropagation()}
+              <div className="grid grid-cols-2 gap-2">
+                {/* LLM 计划模型 */}
+                <div>
+                  <label className="block text-xs mb-1.5 font-medium" style={{ color: t.textSub }}>计划模型</label>
+                  <div className="relative">
+                    <button
+                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-md text-xs transition-all duration-150 cursor-pointer"
+                      style={{ background: t.inputBg, color: chatModelId ? t.text : t.textDim, border: `1px solid ${t.border}` }}
+                      onClick={(e) => { e.stopPropagation(); setChatDropdownOpen(v => !v); setModelDropdownOpen(false); }}
                     >
-                      {models.map(m => (
-                        <button
-                          key={m.id}
-                          className="w-full text-left px-3 py-2 text-xs transition-colors duration-100 cursor-pointer"
-                          style={{
-                            background: selectedModelId === m.id ? t.accentBg : 'transparent',
-                            color: selectedModelId === m.id ? t.accent : t.textSub,
-                          }}
-                          onMouseEnter={e => { if (selectedModelId !== m.id) e.currentTarget.style.background = t.accentBg; }}
-                          onMouseLeave={e => { if (selectedModelId !== m.id) e.currentTarget.style.background = 'transparent'; }}
-                          onClick={() => { setSelectedModelId(m.id); setModelDropdownOpen(false); }}
-                        >
-                          <div className="font-medium truncate">{m.displayLabel || m.id}</div>
-                          {m.providerName && (
-                            <div className="text-[10px] mt-0.5" style={{ color: t.textDim }}>{m.providerName}</div>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                      <span className="truncate">
+                        {chatModels.length === 0 ? '暂无模型' : (chatModelId ? (chatModels.find(m => m.id === chatModelId)?.displayLabel || chatModelId) : '选择模型')}
+                      </span>
+                      <ChevronDown size={12} style={{ color: t.textDim }} />
+                    </button>
+                    {chatDropdownOpen && chatModels.length > 0 && (
+                      <div
+                        className="absolute left-0 right-0 top-full mt-1 rounded-md overflow-hidden z-10 max-h-40 overflow-y-auto"
+                        style={{ background: t.panelBg, border: `1px solid ${t.border}`, boxShadow: t.shadow }}
+                        onClick={e => e.stopPropagation()}
+                      >
+                        {chatModels.map(m => (
+                          <button
+                            key={m.id}
+                            className="w-full text-left px-2 py-1.5 text-[11px] transition-colors duration-100 cursor-pointer"
+                            style={{
+                              background: chatModelId === m.id ? t.accentBg : 'transparent',
+                              color: chatModelId === m.id ? t.accent : t.textSub,
+                            }}
+                            onMouseEnter={e => { if (chatModelId !== m.id) e.currentTarget.style.background = t.accentBg; }}
+                            onMouseLeave={e => { if (chatModelId !== m.id) e.currentTarget.style.background = 'transparent'; }}
+                            onClick={() => { setChatModelId(m.id); setChatDropdownOpen(false); }}
+                          >
+                            <div className="font-medium truncate">{m.displayLabel || m.id}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {/* 生图模型 */}
+                <div>
+                  <label className="block text-xs mb-1.5 font-medium" style={{ color: t.textSub }}>生图模型</label>
+                  <div className="relative">
+                    <button
+                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-md text-xs transition-all duration-150 cursor-pointer"
+                      style={{ background: t.inputBg, color: selectedModel ? t.text : t.textDim, border: `1px solid ${t.border}` }}
+                      onClick={(e) => { e.stopPropagation(); setModelDropdownOpen(v => !v); setChatDropdownOpen(false); }}
+                    >
+                      <span className="truncate">
+                        {modelsLoading ? '加载中...' : (selectedModel ? `${selectedModel.displayLabel || selectedModel.id}` : (models.length === 0 ? '暂无模型' : '选择模型'))}
+                      </span>
+                      <ChevronDown size={12} style={{ color: t.textDim }} />
+                    </button>
+                    {modelDropdownOpen && models.length > 0 && (
+                      <div
+                        className="absolute left-0 right-0 top-full mt-1 rounded-md overflow-hidden z-10 max-h-40 overflow-y-auto"
+                        style={{ background: t.panelBg, border: `1px solid ${t.border}`, boxShadow: t.shadow }}
+                        onClick={e => e.stopPropagation()}
+                      >
+                        {models.map(m => (
+                          <button
+                            key={m.id}
+                            className="w-full text-left px-2 py-1.5 text-[11px] transition-colors duration-100 cursor-pointer"
+                            style={{
+                              background: selectedModelId === m.id ? t.accentBg : 'transparent',
+                              color: selectedModelId === m.id ? t.accent : t.textSub,
+                            }}
+                            onMouseEnter={e => { if (selectedModelId !== m.id) e.currentTarget.style.background = t.accentBg; }}
+                            onMouseLeave={e => { if (selectedModelId !== m.id) e.currentTarget.style.background = 'transparent'; }}
+                            onClick={() => { setSelectedModelId(m.id); setModelDropdownOpen(false); }}
+                          >
+                            <div className="font-medium truncate">{m.displayLabel || m.id}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -936,7 +976,8 @@ ${themeDesc}
                       主体: {subject}
                     </div>
                     <div className="text-[10px]" style={{ color: t.textDim }}>
-                      模型: {selectedModel?.displayLabel || selectedModel?.id || '默认'}
+                      计划: {chatModels.find(m => m.id === chatModelId)?.displayLabel || '默认'}
+                      {' · '}生图: {selectedModel?.displayLabel || selectedModel?.id || '默认'}
                       {' · '}风格: {selectedStyle.label}
                       {' · '}主题: {selectedTheme.label}
                     </div>
