@@ -750,9 +750,19 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
 
     console.info(`[edit] taskId=${taskId} 开始图像编辑, model=${model}, hasMask=${!!maskBuffer}, count=${count}`);
 
-    // 路径A: images.edit 端点（通用，所有支持图像编辑的提供商都应支持）
-    // ★ mask 可选：无 mask 时不带 mask 参数，AI 自行理解修改意图
-    // ★ 不区分模型，统一优先尝试 images.edit；如提供商不支持，请求会失败并自动 fallback
+    // 路径选择策略（通用，不针对任何模型或供应商）：
+    // - 有蒙版: images.edit 原生 mask 参数不可靠（第三方代理可能忽略），
+    //   改用 images/generations + 蒙版视觉参考 + prompt 描述（所有供应商通用）
+    // - 无蒙版: 优先 images.edit（更轻量），失败 fallback images/generations → chat/completions
+    const useMaskVisualRef = !!maskBuffer;
+
+    // ★ 有蒙版时直接走 images/generations（通用视觉参考方案）
+    // 原因: images.edit 的 mask 参数依赖供应商正确转发，第三方代理可能忽略
+    // images/generations 通过 image_urls 发送蒙版视觉参考 + prompt 描述，所有供应商通用
+    if (useMaskVisualRef) {
+      console.info(`[edit] taskId=${taskId} 有蒙版, 走images/generations通用视觉参考方案`);
+      // 跳到 images/generations 逻辑（下面 else 分支处理无蒙版的 images.edit）
+    } else {
     try {
         const FormData = (await import('form-data')).default;
         const form = new FormData();
@@ -868,8 +878,9 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           console.warn('images/edit response parsed but no image found, falling back to chat/completions');
         }
       } catch (editErr) {
-        console.warn('images.edit error, falling back to chat/completions:', editErr instanceof Error ? editErr.message : editErr);
+        console.warn('images.edit error, falling back to images/generations:', editErr instanceof Error ? editErr.message : editErr);
       }
+    } // end else (no mask, try images.edit)
 
     // ★ 检查任务是否已被取消（images.edit 之后）
     if (isTaskCancelled(taskId)) {
@@ -877,13 +888,14 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       return;
     }
 
-    // 路径B-1: images/generations 端点（优先，适用于 editEndpoint=/images/generations 的提供商）
-    // 当提供商的兼容层配置 editEndpoint 为 /images/generations 时（如 APImart），
-    // 必须走此路径，因为 /chat/completions 不支持图片生成
+    // 路径B-1: images/generations 端点（通用路径，有mask时优先使用）
+    // 有mask时统一走此路径（mask作为视觉参考+prompt描述，不依赖原生mask参数）
+    // 无mask且editEndpoint=/images/generations时也走此路径
     const compatProfile = resolveCompatProfile(imageProvider);
-    if (compatProfile.editEndpoint === '/images/generations') {
+    const useGenerationsPath = useMaskVisualRef || compatProfile.editEndpoint === '/images/generations';
+    if (useGenerationsPath) {
       try {
-        console.info(`[edit] Provider editEndpoint=/images/generations, using images/generations for model ${model}`);
+        console.info(`[edit] taskId=${taskId} 使用images/generations路径, 原因: ${useMaskVisualRef ? '有mask走视觉参考' : 'editEndpoint=/images/generations'}, model=${model}`);
 
         // 先将原图保存为可访问的 URL（images/generations 需要 URL，不支持 base64）
         let imageUrlForApi = `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
