@@ -10394,7 +10394,7 @@ export function InfiniteCanvas({
                           <div className="rounded-lg overflow-hidden border mt-2" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)' }}>
                             <img src="/api/help-image?file=erase-tool.jpeg" alt="擦除" className="w-full" loading="lazy" />
                           </div>
-                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}>涂抹要消除的区域，本地 LaMa/ZITS/Anime-Lama 优先修复，AI 智能修复兜底</p>
+                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}>涂抹要消除的区域，本地 LaMa/ZITS/Anime-Lama 优先修复，AI 智能修复兜底，所有工具统一使用图像生成面板当前模型，支持任务取消</p>
                         </div>
 
                         {/* 蒙版 */}
@@ -10420,7 +10420,7 @@ export function InfiniteCanvas({
                           <div className="rounded-lg overflow-hidden border mt-2" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)' }}>
                             <img src="/api/help-image?file=remove-bg.jpeg" alt="移除背景" className="w-full" loading="lazy" />
                           </div>
-                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}>自动分离主体与背景，同时生成白底主体图和黑白蒙版图，本地 BiRefNet/U2Net 优先</p>
+                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}>自动分离主体与背景，同时生成透明底主体图和黑白蒙版图，本地 BiRefNet/U2Net/Silueta 优先，AI 原生透明输出+边缘颜色混合修复，消除抠图锯齿</p>
                         </div>
 
                         {/* 放大 */}
@@ -10499,7 +10499,7 @@ export function InfiniteCanvas({
                           <div className="rounded-lg overflow-hidden border mt-2" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)' }}>
                             <img src="/api/help-image?file=svg-trace.jpeg" alt="SVG智能描摹" className="w-full" loading="lazy" />
                           </div>
-                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}>彩色/黑白两种矢量化模式，多级质量预设（快速/均衡/高清/极致）</p>
+                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}>彩色/黑白两种矢量化模式，多级质量预设（快速/均衡/高清/极致），智能放大+降噪预处理，AI 专业 SVG 提示词工程+安全过滤+重试机制，路径数质量控制，SVG 标准化输出</p>
                         </div>
 
                         {/* 扩展 */}
@@ -10591,12 +10591,13 @@ export function InfiniteCanvas({
                         '精修引擎：标准/专家双模式，AI商业级产品精修，适合电商和广告场景',
                         '品牌电商：品牌电商视觉内容生成，商品场景图/营销素材一键出图',
                         '图片编辑工具：放大/移除背景/SVG描摹/擦除/蒙版/编辑元素/多角度/转3D/扩展/裁切/Agent编排/下载',
-                        '移除背景：同时生成白底主体图和黑白蒙版图，本地 BiRefNet/U2Net/Silueta 优先',
+                        '移除背景：同时生成透明底主体图和黑白蒙版图，本地 BiRefNet/U2Net/Silueta 优先，AI 原生透明+边缘修复',
                         '擦除：本地 LaMa/ZITS/Anime-Lama 优先，AI 修复+边界扩散兜底',
-                        '蒙版：AI 重新生成指定区域，结果直接显示，无涂抹痕迹',
+                        '蒙版：AI 重新生成指定区域，后端精确蒙版合成+边缘羽化过渡，仅替换编辑区域',
                         '语言修图：支持 OpenAI+Gemini，自动裁切适配比例，不变形',
                         'Agent 编排：智能选择修图/生图/分析/调色工具，多轮循环决策',
-                        'SVG 智能描摹：彩色/黑白矢量化，多级质量预设',
+                        'SVG 智能描摹：小图智能放大+降噪预处理，AI 专业 SVG 提示词工程+安全过滤+重试+标准化',
+                        '26+模型参数适配：所有模型尺寸/质量参数按官方文档修正，节点模式同步对齐',
                         '任务管理：统一任务注册中心，SSE 实时推送进度，支持取消和排队',
                         '图片压缩上传：前端 canvas+后端 sharp 双重压缩',
                         'API 协议验证：管理员一键验证提供商兼容性',

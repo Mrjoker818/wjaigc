@@ -621,7 +621,48 @@ UPSCALE_TIMEOUT_MS=300000
 
 ## 更新日志
 
-### v2.9.0 (当前版本)
+### v3.0.0 (当前版本)
+
+**P0: SVG 智能描摹全面升级**
+- VTracer 预处理管道升级：小图智能放大（最长边 < 384px → 768px lanczos3）、中值滤波 median(1) 减噪、轻微模糊 blur(0.3) 平滑色彩梯度、低精度预量化（colorPrecision ≤ 5 时 sharp 预减色）
+- AI SVG 提示词工程：从简单指令升级为专业 SVG 工程师 prompt（角色定义+7 步分析流程+1:1 还原优先+路径数 ≤ 220 限制+禁止 base64/image/foreignObject）
+- AI SVG 重试机制：首次失败后使用轮廓锁定提示词二次生成
+- `sanitizeAIGeneratedSvg` 安全过滤：检测拒绝 script/foreignObject/image/on*事件/外部 href/base64 嵌入，验证 viewBox 和元素数量
+- `normalizeVectorSvg` SVG 标准化：统一 width/height/viewBox 为原始图片尺寸
+- 路径数质量控制：彩色/黑白模式 > 900 路径提示"更适合保留 PNG"
+- design/vectorize 路由同步升级：专业提示词+安全过滤+标准化
+
+**P0: 移除背景边缘修复**
+- `repairEdgeColors` 边缘颜色混合修复：对半透明边缘像素采样周围不透明像素颜色加权混合，消除抠图锯齿和色差
+- 集成到 `postProcessLocalRemoveBG`：所有去背景策略（IOPaint RemoveBG / AI 原生透明 / 本地透明化）结果统一应用边缘修复
+- AI 原生透明输出：`background: "transparent"` 参数请求 API 直接返回透明 PNG
+
+**P0: 放大超时修复 + 任务注册**
+- 放大异步任务注册到 task-registry（此前缺失），确保 poll-task 能正确查询第三方 API 提供商信息
+- `submitImageTask` 返回值新增 `apiBaseUrl`/`apiKey`/`advancedParams` 字段
+- `autoTrySubmitImageTask` 传播提供商信息到返回值
+- `pollForResult` 缓存 `providerId`（函数开头调用一次），避免轮询期间用户切换模型导致查询错误提供商
+- 所有 `pollForResult` 调用从传递 `apiKey`（值为 'server-managed'）改为传递 `modelInfo.model`
+- 放大 fetch 添加 5 分钟 AbortController 超时
+
+**P1: 26+ 模型参数适配**
+- MODEL_QUALITIES：从 5 个模型扩展到 26 个模型，按官方文档修正所有尺寸/质量参数
+- MODEL_PIXEL_SIZES：完整重写，26 个模型 × 多质量档位 × 多宽高比的精确像素值
+- MODEL_SPECIFIC_PIXEL_SIZES：从 3 个模型扩展到 33 个模型（含别名如 doubao-seedream-5-0-lite + seedream-5-0-lite）
+- 关键修正：Seedream 5.0 Lite 移除错误 1K 改为 2K/3K；Seedream 4.5 移除 1K 改为 2K/4K；新增 Kling V3/V3 Omni、Ideogram、SD-XL、HiDream、Flux 等
+
+**P1: 节点模式与画布模式对齐**
+- 节点编辑器模型名称使用 `getModelDisplayName()` 显示友好名称
+- quality/aspectRatio 选项根据所选模型动态更新
+- 切换模型时自动重置为新模型支持的默认值
+- buildNodeExecutionRequest 统一使用 `calculateActualPixels` 计算精确像素尺寸
+
+**P1: AI 图像编辑模型默认对齐**
+- 所有工具栏工具（放大/移除背景/擦除/蒙版/扩展/多角度）统一使用图像生成面板当前选择的模型
+- pollForResult 内部 pollModel 使用传入的 model 参数而非每次迭代重新读取 getCurrentModel()
+- `image-editor.tsx` 默认选中图像生成面板当前模型（而非列表第一个）
+
+### v2.9.0
 
 **P0: RemoveBG 同时输出透明图+蒙版图**
 - 移除背景时同时生成透明背景 PNG 和黑白蒙版 PNG，两图并排添加到画布
