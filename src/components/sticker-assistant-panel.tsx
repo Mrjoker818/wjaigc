@@ -292,7 +292,7 @@ export default function StickerAssistantPanel({
   const selectedTheme = THEME_PRESETS.find(th => th.key === themeKey)!;
 
   const buildIdentityLock = useCallback((): string => {
-    return `Subject: ${subject}\nCore silhouette: consistent across all stickers\nAllowed expression mechanisms: pose, emotion, props, squash/stretch\nForbidden drift: species/category change, main silhouette change, color/material change`;
+    return `Subject: ${subject}\nIdentity Lock: The character MUST maintain EXACTLY the same visual identity across ALL stickers — same species/type, same color scheme, same body proportions, same facial features, same outfit/accessories. Only expression, pose, and action may vary. FORBIDDEN: changing species, altering colors, modifying proportions, changing outfit design, or any visual drift that makes the character look different.`;
   }, [subject]);
 
   /* ── 上传主体图片并识别 ── */
@@ -393,7 +393,8 @@ ${themeDesc}
 1. 每个表情必须有明确的"文案"(caption)和"动作描述"(action)
 2. 文案要简短(1-4个字), 适合聊天场景
 3. 动作描述要具体, 确保每个表情的姿势/动作有明显差异
-4. 主体特征必须保持一致(外形/颜色/轮廓)
+4. 主体特征必须保持绝对一致(外形/颜色/轮廓/物种/服饰), 仅允许表情和姿势变化
+5. 动作描述中要包含该表情的具体身体动作和面部表情, 以确保生成的图片有足够的视觉差异
 
 请严格以JSON格式输出, 不要添加任何其他文字:
 [{"id":1,"caption":"文案","action":"动作描述"},...]`;
@@ -450,9 +451,9 @@ ${themeDesc}
     // 构建生成 prompt
     let prompt = `Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. Subject identity: ${identityLock}. White border, die-cut sticker style, no background elements, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}` : ''}`;
 
-    // 如果有上传的主体图片，加入参考描述
+    // 如果有上传的主体图片，在 prompt 中强调主体一致性
     if (subjectImage && subjectSource === 'image') {
-      prompt += ` Reference subject appearance from the provided image. Maintain the exact same character design, colors, and proportions as the reference.`;
+      prompt += ` CRITICAL IDENTITY REQUIREMENT: The character/object in this sticker MUST look EXACTLY like the one in the reference image — same species, same colors, same proportions, same design. Only the expression, pose, and action may change. Do NOT change the character's identity, appearance, or visual features in any way.`;
     }
 
     const doGenerate = async () => {
@@ -474,7 +475,7 @@ ${themeDesc}
           requestBody.model = selectedModelId;
         }
 
-        // 如果有主体图片，持久化后作为参考图传入（图生图模式，与画布图生图一致）
+        // 如果有主体图片，持久化后作为参考图传入（使用 referenceCategories 触发 API 主体一致性增强）
         if (subjectImage && subjectSource === 'image') {
           try {
             // 先将 data URL 持久化为服务器 URL
@@ -490,10 +491,14 @@ ${themeDesc}
                 if (saveData.url) persistedUrl = saveData.url;
               }
             }
-            // 使用与画布图生图一致的 referenceMode + strength 模式
+            // 使用 referenceCategories 触发 API 的主体一致性增强提示词
+            // 保留主体(subject)、风格(style)、色彩(color)，允许姿势/表情/场景自由变化
             requestBody.referenceImages = [persistedUrl];
             requestBody.referenceMode = 'reference';
-            requestBody.strength = 75;
+            requestBody.referenceCategories = { '0': ['subject', 'style', 'color'] };
+            requestBody.referenceStrengths = [85];
+            // strength 在 0~1 之间，低值=更接近参考图（画布图生图在主体保留时计算约 0.15~0.30）
+            requestBody.strength = 0.25;
           } catch { /* 使用原始 URL 兜底 */ }
         }
 
