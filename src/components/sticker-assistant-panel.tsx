@@ -269,7 +269,7 @@ export default function StickerAssistantPanel({
     setDragging(true);
     const rect = (e.currentTarget.parentElement as HTMLElement)?.getBoundingClientRect();
     dragOff.current = { x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) };
-  }, []);
+  }, [chatModelId]);
   useEffect(() => {
     if (!dragging) return;
     const mv = (e: MouseEvent) => setPos({ x: e.clientX - dragOff.current.x, y: e.clientY - dragOff.current.y });
@@ -332,6 +332,7 @@ export default function StickerAssistantPanel({
                 { type: 'image_url', image_url: { url: imageUrl } },
               ],
             }],
+          model: chatModelId || (chatModels.length > 0 ? chatModels[0].id : undefined),
             stream: false,
           }),
         });
@@ -936,7 +937,7 @@ ${themeDesc}
               <button
                 className="w-full py-2.5 rounded-md text-sm font-medium transition-all duration-150 cursor-pointer flex items-center justify-center gap-2"
                 style={{
-                  background: subject.trim() ? t.accent : t.border,
+                  background: (subject.trim() || (subjectSource === 'image' && subjectImage)) ? t.accent : t.border,
                   color: (subject.trim() || (subjectSource === 'image' && subjectImage)) ? (isMonochrome ? '#fff' : '#1a1a1a') : t.textDim,
                   opacity: planLoading ? 0.7 : 1,
                 }}
