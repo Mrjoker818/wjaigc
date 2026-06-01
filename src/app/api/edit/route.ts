@@ -419,9 +419,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ========== 3.5 填充原图匹配目标比例 ==========
-    // 语言修图：如果用户设置了不同的画面比例，对原图做填充（letterbox/pillarbox）
-    // 使比例匹配目标，避免裁切丢失画面内容
+    // ========== 3.5 画面比例拓展提示 ==========
+    // 语言修图：不裁切原图、不加黑边，而是通过提示词引导 AI 在原图基础上自然拓展画面，
+    // 生成与原图风格和内容连贯的新区域
+    let aspectRatioExtendHint = '';
     if (size && size !== '1:1') {
       try {
         const sharpImg = sharp(imageBuffer);
@@ -435,41 +436,20 @@ export async function POST(request: NextRequest) {
         const targetRatio = parts.length === 2 && parts[0] > 0 && parts[1] > 0
           ? parts[0] / parts[1] : origRatio;
 
-        // 比例差异超过 5% 才做填充
+        // 比例差异超过 5% 时，需要拓展画面
         if (Math.abs(origRatio - targetRatio) / Math.max(origRatio, targetRatio) > 0.05) {
-          let canvasW = origW;
-          let canvasH = origH;
           if (origRatio > targetRatio) {
-            // 原图更宽，需要上下加黑边（letterbox）
-            canvasH = Math.round(origW / targetRatio);
+            // 原图更宽 → 目标更高，AI 需要在上下拓展画面
+            aspectRatioExtendHint = 'The output aspect ratio is taller than the original image. Naturally extend the scene by adding content above and below, maintaining the original image content in the center and generating coherent new content for the extended areas that matches the original style, lighting, and scene.';
           } else {
-            // 原图更高，需要左右加黑边（pillarbox）
-            canvasW = Math.round(origH * targetRatio);
+            // 原图更高 → 目标更宽，AI 需要在左右拓展画面
+            aspectRatioExtendHint = 'The output aspect ratio is wider than the original image. Naturally extend the scene by adding content to the left and right, maintaining the original image content in the center and generating coherent new content for the extended areas that matches the original style, lighting, and scene.';
           }
-          // 用黑色填充（与AI生成扩展画面语义一致）
-          // sharp create 只支持 3 (RGB) 或 4 (RGBA) 通道
-          const channels = (meta.channels === 4 ? 4 : 3) as 3 | 4;
-          const hasAlpha = channels === 4;
-          imageBuffer = await sharp({
-            create: {
-              width: canvasW,
-              height: canvasH,
-              channels,
-              background: hasAlpha ? { r: 0, g: 0, b: 0, alpha: 0 } : { r: 0, g: 0, b: 0 },
-            }
-          })
-            .composite([{
-              input: imageBuffer,
-              left: Math.round((canvasW - origW) / 2),
-              top: Math.round((canvasH - origH) / 2),
-            }])
-            .png()
-            .toBuffer();
-          console.log(`[edit] Padded image from ${origW}x${origH} to ${canvasW}x${canvasH} for target ratio ${size}`);
+          console.log(`[edit] Aspect ratio change detected: orig=${origRatio.toFixed(2)} target=${targetRatio.toFixed(2)}, will prompt AI to extend scene`);
         }
-      } catch (padErr) {
-        // 填充失败不影响后续流程
-        console.warn('[edit] Failed to pad image for aspect ratio, using original:', padErr);
+      } catch (ratioErr) {
+        // 比例检测失败不影响后续流程
+        console.warn('[edit] Failed to detect aspect ratio change, skipping extend hint:', ratioErr);
       }
     }
 
@@ -675,7 +655,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
 
     console.info(`[edit] taskId=${taskId} LLM协作阶段耗时=${Date.now() - llmStartTime}ms, effectivePrompt长度=${effectivePrompt.length}`);
 
-    const editInstruction = `Edit this image according to the following instruction: ${effectivePrompt}. Maintain the overall composition and style while making the requested changes.${size ? ` Output image size: ${size}.` : ''}${quality ? ` Output quality: ${quality}.` : ''}`;
+    const editInstruction = `Edit this image according to the following instruction: ${effectivePrompt}. Maintain the overall composition and style while making the requested changes.${aspectRatioExtendHint ? ` ${aspectRatioExtendHint}` : ''}${size ? ` Output image size: ${size}.` : ''}${quality ? ` Output quality: ${quality}.` : ''}`;
 
     // ========== 6. 调用 API（全兼容模式） ==========
     // ★ 检查任务是否已被取消
