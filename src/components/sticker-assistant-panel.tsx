@@ -632,8 +632,8 @@ ${themeDesc}
             requestBody.referenceMode = 'reference';
             requestBody.referenceCategories = { '0': ['subject', 'style', 'color', 'detail'] };
             requestBody.referenceStrengths = [100]; // 单张图整体强度100（主体100+风格90+色彩90+细节90 → API内部按类别分权重）
-            // strength: 0.22 = 画布公式计算 (0.80 - 0.925*0.60 = 0.245, subjectReduction=0.25, max(0.15, 0.245-0.25)=0.15→上调至0.22以允许姿势/表情变化)
-            requestBody.strength = 0.22;
+            // strength: 0.15 = 画布公式计算最大主体保留值，0.22会导致主体变化
+            requestBody.strength = 0.15;
           } catch { /* 使用原始 URL 兜底 */ }
         }
 
