@@ -735,7 +735,11 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
 
     console.info(`[edit] taskId=${taskId} LLM协作阶段耗时=${Date.now() - llmStartTime}ms, effectivePrompt长度=${effectivePrompt.length}`);
 
-    const editInstruction = `Edit this image according to the following instruction: ${effectivePrompt}. Maintain the overall composition and style while making the requested changes.${maskBuffer ? ' IMPORTANT: A mask is provided that indicates the specific area to edit. You MUST only modify the area indicated by the mask (the red-highlighted region in the reference). Do NOT alter areas outside the mask. Apply the requested changes ONLY within the masked region while keeping everything else identical.' : ''}${aspectRatioExtendHint ? ` ${aspectRatioExtendHint}` : ''}${size ? ` Output image size: ${size}.` : ''}${quality ? ` Output quality: ${quality}.` : ''}`;
+    let editInstruction = `Edit this image according to the following instruction: ${effectivePrompt}. Maintain the overall composition and style while making the requested changes.${aspectRatioExtendHint ? ` ${aspectRatioExtendHint}` : ''}${size ? ` Output image size: ${size}.` : ''}${quality ? ` Output quality: ${quality}.` : ''}`;
+    // 蒙版语义增强：所有路径统一添加蒙版描述
+    if (maskBuffer) {
+      editInstruction += ' IMPORTANT: A mask image is provided that indicates the specific area to edit. The mask highlights the region where changes should be applied. You MUST focus your edits on the masked area and keep everything outside the mask unchanged.';
+    }
 
     // ========== 6. 调用 API（全兼容模式） ==========
     // ★ 检查任务是否已被取消
@@ -751,18 +755,12 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     console.info(`[edit] taskId=${taskId} 开始图像编辑, model=${model}, hasMask=${!!maskBuffer}, count=${count}`);
 
     // 路径选择策略（通用，不针对任何模型或供应商）：
-    // - 有蒙版: images.edit 原生 mask 参数不可靠（第三方代理可能忽略），
-    //   改用 images/generations + 蒙版视觉参考 + prompt 描述（所有供应商通用）
-    // - 无蒙版: 优先 images.edit（更轻量），失败 fallback images/generations → chat/completions
-    const useMaskVisualRef = !!maskBuffer;
+    // - 有mask时：跳过images.edit（第三方代理可能不支持原生mask参数），
+    //   统一走images/generations或chat/completions（mask作为视觉参考+prompt描述）
+    // - 无mask时：优先images.edit → fallback images/generations → chat/completions
+    // - 所有路径都在 prompt 中描述蒙版语义（通用增强）
+    const useMaskVisualRef = !!maskBuffer; // 有mask时走视觉参考路径
 
-    // ★ 有蒙版时直接走 images/generations（通用视觉参考方案）
-    // 原因: images.edit 的 mask 参数依赖供应商正确转发，第三方代理可能忽略
-    // images/generations 通过 image_urls 发送蒙版视觉参考 + prompt 描述，所有供应商通用
-    if (useMaskVisualRef) {
-      console.info(`[edit] taskId=${taskId} 有蒙版, 走images/generations通用视觉参考方案`);
-      // 跳到 images/generations 逻辑（下面 else 分支处理无蒙版的 images.edit）
-    } else {
     try {
         const FormData = (await import('form-data')).default;
         const form = new FormData();
@@ -875,12 +873,10 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
             });
             return;
           }
-          console.warn('images/edit response parsed but no image found, falling back to chat/completions');
-        }
+          }
       } catch (editErr) {
         console.warn('images.edit error, falling back to images/generations:', editErr instanceof Error ? editErr.message : editErr);
       }
-    } // end else (no mask, try images.edit)
 
     // ★ 检查任务是否已被取消（images.edit 之后）
     if (isTaskCancelled(taskId)) {
@@ -888,11 +884,10 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       return;
     }
 
-    // 路径B-1: images/generations 端点（通用路径，有mask时优先使用）
-    // 有mask时统一走此路径（mask作为视觉参考+prompt描述，不依赖原生mask参数）
-    // 无mask且editEndpoint=/images/generations时也走此路径
+    // 路径B: images/generations 端点（fallback 路径）
+    // 当 images.edit 失败或 editEndpoint=/images/generations 时使用
     const compatProfile = resolveCompatProfile(imageProvider);
-    const useGenerationsPath = useMaskVisualRef || compatProfile.editEndpoint === '/images/generations';
+    const useGenerationsPath = compatProfile.editEndpoint === '/images/generations';
     if (useGenerationsPath) {
       try {
         console.info(`[edit] taskId=${taskId} 使用images/generations路径, 原因: ${useMaskVisualRef ? '有mask走视觉参考' : 'editEndpoint=/images/generations'}, model=${model}`);
@@ -1404,18 +1399,18 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     });
     console.info(`[edit] ★ taskId=${taskId} 结果已存储到 edit-task-store, image[0]=${images[0]?.url?.substring(0, 80)}`);
 
-      } catch (error: unknown) {
-        const errMsg = error instanceof Error ? error.message : 'Unknown error';
-        console.error(`[edit] ★ taskId=${taskId} IIFE异常: ${errMsg}`, error);
-        const stack = error instanceof Error ? error.stack : '';
-        if (stack) console.error(`[edit] Stack: ${stack}`);
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[edit] ★ taskId=${taskId} IIFE异常: ${errMsg}`, error);
+      const stack = error instanceof Error ? error.stack : '';
+      if (stack) console.error(`[edit] Stack: ${stack}`);
 
-        const isNetworkError = errMsg.includes('fetch failed') || errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND');
-        failTask(taskId, isNetworkError ? '网络连接失败：无法访问 API 服务' : (errMsg || '图片编辑失败'), isNetworkError);
-      } finally {
-        clearTimeout(timeoutId);
-      }
-    });
+      const isNetworkError = errMsg.includes('fetch failed') || errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND');
+      failTask(taskId, isNetworkError ? '网络连接失败：无法访问 API 服务' : (errMsg || '图片编辑失败'), isNetworkError);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  });
 
   // ========== 立即返回 taskId（提交+轮询模式） ==========
   return NextResponse.json({
