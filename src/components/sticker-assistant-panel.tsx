@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { GripVertical, X, Minus, Sparkles, Loader2, CheckCircle2, XCircle, Clock, RefreshCw, Download, ChevronRight, Smile, Upload, ImagePlus } from 'lucide-react';
+import { getModelDisplayName } from '@/lib/model-name-map';
 
 
 /* ──────────────────── 主题色 ──────────────────── */
@@ -206,13 +207,20 @@ export default function StickerAssistantPanel({
 
         if (imgRes.ok) {
           const data = await imgRes.json();
+          const providerMap = new Map<string, string>();
+          if (data.providers && Array.isArray(data.providers)) {
+            for (const p of data.providers) {
+              providerMap.set(p.id, p.name || p.displayName || '');
+            }
+          }
           if (data.models && Array.isArray(data.models)) {
             for (const m of data.models) {
+              const rawId = m.id || m.name;
               loaded.push({
-                id: m.providerId ? `${m.providerId}::${m.id || m.name}` : (m.id || m.name),
+                id: m.providerId ? `${m.providerId}::${rawId}` : rawId,
                 providerId: m.providerId || '',
-                providerName: m.providerName || '',
-                displayLabel: m.displayLabel,
+                providerName: providerMap.get(m.providerId) || m.providerId || '',
+                displayLabel: getModelDisplayName(rawId),
               });
             }
           }
@@ -224,13 +232,20 @@ export default function StickerAssistantPanel({
 
         if (chatRes.ok) {
           const data = await chatRes.json();
+          const providerMap = new Map<string, string>();
+          if (data.providers && Array.isArray(data.providers)) {
+            for (const p of data.providers) {
+              providerMap.set(p.id, p.name || p.displayName || '');
+            }
+          }
           if (data.models && Array.isArray(data.models)) {
             for (const m of data.models) {
+              const rawId = m.id || m.name;
               chatLoaded.push({
-                id: m.providerId ? `${m.providerId}::${m.id || m.name}` : (m.id || m.name),
+                id: m.providerId ? `${m.providerId}::${rawId}` : rawId,
                 providerId: m.providerId || '',
-                providerName: m.providerName || '',
-                displayLabel: m.displayLabel,
+                providerName: providerMap.get(m.providerId) || m.providerId || '',
+                displayLabel: getModelDisplayName(rawId),
               });
             }
           }
