@@ -99,13 +99,11 @@ function isImageEditModel(modelId: string): boolean {
  * 注意：即使不支持原生 mask，也可以通过 chat/completions 将蒙版作为参考图发送
  * 所以所有模型在 UI 层面都"支持涂抹"，这里仅决定是否走 images.edit 路径
  */
-function modelSupportsNativeMask(modelId: string, providerBaseUrl: string): boolean {
+function modelSupportsNativeMask(modelId: string, _providerBaseUrl: string): boolean {
   const id = modelId.toLowerCase();
-  // 仅 OpenAI 官方端点支持 images.edit 的 mask 参数
+  // gpt-image-2 和 dall-e 系列支持 images.edit 端点
+  // ★ 第三方代理(APImart等)同样支持 /images/edits，不应仅限 api.openai.com
   if (id.includes('gpt-image') || id.includes('dall-e')) {
-    if (providerBaseUrl && !providerBaseUrl.includes('api.openai.com')) {
-      return false;
-    }
     return true;
   }
   return false;
@@ -585,9 +583,32 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           signal: AbortSignal.timeout(20000),
         });
 
-        if (collabResp.ok) {
+        // ★ 403 时自动降级到 /responses 端点（部分提供商仅支持 Responses API）
+        let actualCollabResp = collabResp;
+        if (collabResp.status === 403) {
+          const errBody = await collabResp.text().catch(() => '');
+          if (errBody.includes('/responses')) {
+            console.info(`[edit] LLM协作 /chat/completions 403, 降级到 /responses`);
+            const respBody = {
+              model: llmModel,
+              input: collaborationMessages.map((m: Record<string, unknown>) => ({
+                role: (m.role as string) || 'user',
+                content: m.content,
+              })),
+              stream: false,
+            };
+            actualCollabResp = await fetchWithV1Retry(llmBaseUrl, '/responses', {
+              method: 'POST',
+              headers: llmHeaders,
+              body: JSON.stringify(respBody),
+              signal: AbortSignal.timeout(20000),
+            });
+          }
+        }
+
+        if (actualCollabResp.ok) {
           // 兼容 SSE 和非 SSE 响应格式
-          const collabText = await collabResp.text();
+          const collabText = await actualCollabResp.text();
           let collabData: Record<string, unknown>;
           if (collabText.trimStart().startsWith('data:')) {
             collabData = parseSSEToJSON(collabText);
@@ -601,7 +622,10 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           }
           const llmResponse = (collabData.choices as Array<Record<string, unknown>>)?.[0]?.message
             ? ((collabData.choices as Array<Record<string, unknown>>)[0].message as Record<string, unknown>).content as string
-            : '';
+            : // ★ 兼容 Responses API 格式: output[0].content[0].text
+              (collabData.output as Array<Record<string, unknown>>)?.[0]?.content
+                ? (((collabData.output as Array<Record<string, unknown>>)[0].content as Array<Record<string, unknown>>)?.[0]?.text as string) || ''
+                : '';
           updateTaskStage(taskId, '优化指令中');
 
           // 尝试解析 JSON 响应
@@ -665,11 +689,12 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     }
     updateTaskStage(taskId, '编辑中');
     const editStartTime = Date.now();
-    console.info(`[edit] taskId=${taskId} 开始图像编辑, model=${model}, path=${isOpenaiImageModel && supportsNativeMask && maskBuffer ? 'images.edit' : 'chat/completions(fallback)'}`);
+    console.info(`[edit] taskId=${taskId} 开始图像编辑, model=${model}, path=${isOpenaiImageModel && supportsNativeMask ? 'images.edit' : 'chat/completions(fallback)'}`);
 
-    // 路径A: OpenAI images.edit 端点（仅 OpenAI 官方 + 支持 mask 的场景）
-    // 第三方代理即使模型名是 gpt-image-2，也不走 images.edit（因为代理通常不支持）
-    if (isOpenaiImageModel && supportsNativeMask && maskBuffer) {
+    // 路径A: OpenAI images.edit 端点（gpt-image-2 / dall-e 系列）
+    // ★ 第三方代理(APImart等)同样支持 /images/edits 端点
+    // ★ mask 可选：无 mask 时不带 mask 参数，AI 自行理解修改意图
+    if (isOpenaiImageModel && supportsNativeMask) {
       try {
         const FormData = (await import('form-data')).default;
         const form = new FormData();
@@ -713,7 +738,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               'Content-Length': String(formBuffer.length),
             },
             body: formBuffer as unknown as BodyInit,
-            signal: AbortSignal.timeout(60000), // ★ 60秒超时
+            signal: AbortSignal.timeout(120000), // ★ 120秒超时（图像编辑耗时长）
           },
         );
 
@@ -1047,7 +1072,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(chatRequestBody),
-        signal: AbortSignal.timeout(60000),
+        signal: AbortSignal.timeout(120000), // ★ 120秒超时（图像编辑耗时长）
       },
     );
 
