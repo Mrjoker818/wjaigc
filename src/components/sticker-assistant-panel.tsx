@@ -462,12 +462,13 @@ ${themeDesc}
     const negP = styleKey === 'custom' ? '' : selectedStyle.negativePrompt;
     const identityLock = buildIdentityLock();
 
-    // 构建生成 prompt
-    let prompt = `Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. Subject identity: ${identityLock}. White border, die-cut sticker style, no background elements, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}` : ''}`;
-
-    // 如果有上传的主体图片，在 prompt 中强调主体一致性
+    // 构建生成 prompt — 使用与画布图生图完全一致的 [ref] 前缀和保留格式
+    let prompt: string;
     if (subjectImage && subjectSource === 'image') {
-      prompt += ` CRITICAL IDENTITY REQUIREMENT: The character/object in this sticker MUST look EXACTLY like the one in the reference image — same species, same colors, same proportions, same design. Only the expression, pose, and action may change. Do NOT change the character's identity, appearance, or visual features in any way.`;
+      // 有参考图时，使用画布图生图的完整提示词格式，触发 API 的主体一致性增强
+      prompt = `[ref] Use the provided reference image(s) as the base. Create an image of: Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. While creating this new image, strictly preserve the main subject and focal point of the reference image(s) — do NOT change the original product/object identity, strictly preserve the artistic style and visual aesthetics of the reference image(s), strictly preserve the color palette and tone of the reference image(s), strictly preserve the fine details and textures of the reference image(s). IMPORTANT: The product/object in the result MUST be the SAME product/object as in the reference image — do NOT substitute or replace it with a different product. ${identityLock}. Feel free to reimagine the composition and layout structure, the scene and environment setting. White border, die-cut sticker style, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}` : ''}`;
+    } else {
+      prompt = `Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. Subject identity: ${identityLock}. White border, die-cut sticker style, no background elements, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}` : ''}`;
     }
 
     const doGenerate = async () => {
@@ -514,14 +515,15 @@ ${themeDesc}
                 if (saveData.url) persistedUrl = saveData.url;
               }
             }
-            // 使用 referenceCategories 触发 API 的主体一致性增强提示词
-            // 保留主体(subject)、风格(style)、色彩(color)，允许姿势/表情/场景自由变化
+            // 使用与画布图生图完全一致的 referenceCategories 格式
+            // 保留主体(subject)、风格(style)、色彩(color)、细节(detail)，允许构图/场景自由变化
+            // 强度设置：主体95, 风格90, 色彩90, 细节85 → 画布计算 strength ≈ 0.15（最大主体保留）
             requestBody.referenceImages = [persistedUrl];
             requestBody.referenceMode = 'reference';
-            requestBody.referenceCategories = { '0': ['subject', 'style', 'color'] };
-            requestBody.referenceStrengths = [85];
-            // strength 在 0~1 之间，低值=更接近参考图（画布图生图在主体保留时计算约 0.15~0.30）
-            requestBody.strength = 0.25;
+            requestBody.referenceCategories = { '0': ['subject', 'style', 'color', 'detail'] };
+            requestBody.referenceStrengths = [95];
+            // strength 在 0~1 之间，0.15 = 画布图生图在主体保留最高时的最小值（最大保留）
+            requestBody.strength = 0.15;
           } catch { /* 使用原始 URL 兜底 */ }
         }
 
