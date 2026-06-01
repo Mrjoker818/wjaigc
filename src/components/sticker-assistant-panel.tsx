@@ -563,11 +563,12 @@ ${themeDesc}
     const styleP = styleKey === 'custom' ? customStyle : selectedStyle.positivePrompt;
     const negP = styleKey === 'custom' ? '' : selectedStyle.negativePrompt;
 
-    // 构建生成 prompt — 使用 [ref] 前缀与画布图生图完全一致的格式
+    // 构建生成 prompt
+    // 注意：有参考图时，不在 prompt 中写 [ref] 保留指令，避免与 referenceCategories 触发的
+    // API [REFERENCE MODE] 指令冲突。仅写生成内容，保留逻辑完全由 referenceCategories 控制。
     let prompt: string;
     if (subjectImage && subjectSource === 'image') {
-      // 与画布图生图格式完全一致：[ref] + 保留/自由类别 + 身份锁定 + 生成内容
-      prompt = `[ref] Use the provided reference image(s) as the base. strictly preserve the subject, style, color, and fine detail of the reference image(s). Feel free to reimagine the composition and scene. Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. ${buildIdentityLock()}. Transparent PNG background, die-cut sticker style, 1024x1024 square, sticker sheet single item, no solid background color.${negP ? ` Avoid: ${negP}, solid background, white background` : ''}`;
+      prompt = `Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. ${subjectDetail ? `[Subject: ${subjectDetail}]` : ''}. Transparent PNG background, die-cut sticker style, 1024x1024 square, sticker sheet single item, no solid background color.${negP ? ` Avoid: ${negP}, solid background, white background` : ''}`;
     } else {
       prompt = `Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. ${buildIdentityLock()}. Transparent PNG background, die-cut sticker style, no solid background color, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}, solid background, white background` : ''}`;
     }
@@ -616,13 +617,14 @@ ${themeDesc}
                 if (saveData.url) persistedUrl = saveData.url;
               }
             }
-            // 不使用 referenceCategories — 让 prompt 中的 [ref] 指令独立控制保留逻辑
-            // 避免与 API 自动添加的 [REFERENCE MODE] 产生双重指令冲突导致模型混乱
+            // 使用 referenceCategories 触发 API [REFERENCE MODE] 主体一致性增强
+            // 与 03ea886 版本一致：referenceCategories 替代 prompt 中的 [ref] 指令
+            // 不在 prompt 中写 [ref] 避免双重指令冲突
             requestBody.referenceImages = [persistedUrl];
-            requestBody.referenceMode = 'reference';
-            // strength: 0.30 平衡主体保留和姿势/表情变化
-            // 过低(0.15)某些模型会忽略strength参数，过高(0.50+)主体会变形
-            requestBody.strength = 0.30;
+            requestBody.referenceCategories = { '0': ['subject'] };
+            requestBody.referenceStrengths = [85];
+            // strength 0.25 与 03ea886 版本一致
+            requestBody.strength = 0.25;
           } catch { /* 使用原始 URL 兜底 */ }
         }
 
