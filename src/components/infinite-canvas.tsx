@@ -306,6 +306,7 @@ export interface CanvasImage {
     progress: number;
     sourceUrl?: string;
     error?: string;
+    startTime?: number; // 生图开始时间戳(ms)，用于显示已用时间
   };
   threeDModelUrl?: string;
   svgDataUrl?: string; // 保存SVG数据用于下载（画布显示PNG预览时）
@@ -406,6 +407,24 @@ function translateErrorFrontend(msg: string): string {
     return `API 返回错误: ${msg.replace(/\s*\(request id:.*?\)\s*/i, '').trim()}`;
   }
   return msg;
+}
+
+// ★ 生图计时器组件：显示已用时间（秒），每秒更新
+function ElapsedTime({ startTime, className }: { startTime: number; className?: string }) {
+  const [elapsed, setElapsed] = useState(() => Math.round((Date.now() - startTime) / 1000));
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setElapsed(Math.round((Date.now() - startTime) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [startTime]);
+
+  const minutes = Math.floor(elapsed / 60);
+  const seconds = elapsed % 60;
+  const formatted = minutes > 0 ? `${minutes}:${seconds.toString().padStart(2, '0')}` : `${seconds}s`;
+
+  return <span className={className}>{formatted}</span>;
 }
 
 export function InfiniteCanvas({
@@ -3216,6 +3235,7 @@ export function InfiniteCanvas({
         status,
         progress: 6,
         sourceUrl: sourceImage.url,
+        startTime: Date.now(),
       },
     };
     const nextImages = [...imagesRef.current, placeholder];
@@ -4164,7 +4184,7 @@ export function InfiniteCanvas({
       width: canvasGenFrameWidth,
       height: canvasGenFrameHeight,
       isProcessingPlaceholder: true,
-      processing: { label: '图像生成器', status: 'waiting', progress: 0 },
+      processing: { label: '图像生成器', status: 'waiting', progress: 0, startTime: Date.now() },
     };
     onImagesChange([...images, newFrame]);
     setCanvasGenFrameId(frameId);
@@ -4187,7 +4207,7 @@ export function InfiniteCanvas({
     if (canvasGenFrameId) {
       onImagesChange(images.map(img => {
         if (img.id === canvasGenFrameId) {
-          return { ...img, processing: { label: '生成中...', status: 'processing', progress: 10 } };
+          return { ...img, processing: { label: '生成中...', status: 'processing', progress: 10, startTime: img.processing?.startTime || Date.now() } };
         }
         return img;
       }));
@@ -6526,7 +6546,7 @@ export function InfiniteCanvas({
                     />
                     )}
                     <div className="absolute inset-0 bg-black/50 pointer-events-none" />
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 pointer-events-none">
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 pointer-events-none">
                       {image.processing.label.includes('3D') ? (
                         /* 3D专属进度UI：旋转立方体图标 + 金色脉冲 */
                         <>
@@ -6561,12 +6581,19 @@ export function InfiniteCanvas({
                           <div className="text-xs text-white/80 text-center px-3 font-medium">
                             {image.processing.status}
                           </div>
-                          <div className={`text-xs font-mono ${isMonochrome ? 'text-blue-400/70' : 'text-gold/70'}`}>
-                            {Math.round(image.processing.progress)}%
+                          <div className="flex items-center gap-2">
+                            <span className={`text-xs font-mono ${isMonochrome ? 'text-blue-400/70' : 'text-gold/70'}`}>
+                              {Math.round(image.processing.progress)}%
+                            </span>
+                            {image.processing.startTime && (
+                              <span className={`text-xs font-mono ${isMonochrome ? 'text-blue-400/50' : 'text-gold/50'}`}>
+                                <ElapsedTime startTime={image.processing.startTime} />
+                              </span>
+                            )}
                           </div>
                           {/* ★ 取消按钮 */}
                           <button
-                            className="pointer-events-auto mt-1 px-3 py-1 rounded-full bg-red-600 hover:bg-red-500 text-white text-xs font-medium transition-colors"
+                            className="pointer-events-auto mt-0.5 px-3 py-1 rounded-full bg-red-600 hover:bg-red-500 text-white text-xs font-medium transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
                               if (pollingAbortRef.current) {
@@ -6582,7 +6609,7 @@ export function InfiniteCanvas({
                       ) : (
                         /* 通用进度UI */
                         <>
-                          <div className="px-4 py-2 rounded-full bg-black/90 text-white text-sm font-medium shadow-lg border border-white/10">
+                          <div className={`px-4 py-2 rounded-full bg-black/90 text-sm font-medium shadow-lg border ${isMonochrome ? 'text-blue-400 border-blue-400/20' : 'text-white border-white/10'}`}>
                             {image.processing.label}
                           </div>
                           <div className="w-36 max-w-[70%] h-1.5 rounded-full bg-white/15 overflow-hidden">
@@ -6590,17 +6617,24 @@ export function InfiniteCanvas({
                               className="h-full rounded-full progress-shimmer transition-all duration-500"
                               style={{
                                 width: `${image.processing.progress}%`,
-                                background: 'linear-gradient(90deg, #d4af37, #f4e18f, #d4af37)',
+                                background: isMonochrome ? 'linear-gradient(90deg, #3b82f6, #93c5fd, #3b82f6)' : 'linear-gradient(90deg, #d4af37, #f4e18f, #d4af37)',
                                 backgroundSize: '200% 100%',
                               }}
                             />
                           </div>
-                          <div className="text-xs text-white/70 text-center px-3">
-                            {image.processing.status} {Math.round(image.processing.progress)}%
+                          <div className="flex items-center gap-2 text-xs px-3">
+                            <span className="text-white/70">
+                              {image.processing.status} {Math.round(image.processing.progress)}%
+                            </span>
+                            {image.processing.startTime && (
+                              <span className={`font-mono ${isMonochrome ? 'text-blue-400/50' : 'text-gold/50'}`}>
+                                <ElapsedTime startTime={image.processing.startTime} />
+                              </span>
+                            )}
                           </div>
                           {/* ★ 取消按钮 */}
                           <button
-                            className="pointer-events-auto mt-1 px-3 py-1 rounded-full bg-red-600 hover:bg-red-500 text-white text-xs font-medium transition-colors"
+                            className="pointer-events-auto mt-0.5 px-3 py-1 rounded-full bg-red-600 hover:bg-red-500 text-white text-xs font-medium transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
                               if (pollingAbortRef.current) {

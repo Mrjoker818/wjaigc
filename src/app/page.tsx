@@ -624,6 +624,7 @@ function CanvasApp() {
           label: '生成中',
           status: 'submitting',
           progress: 5,
+          startTime: Date.now(),
         },
         aspectRatio: params.aspectRatio,
         model: params.model,
