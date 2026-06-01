@@ -3,63 +3,10 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 
 // API route to serve Oh My Prompt resource library data
-// Strategy: Use build-time bundled data (via category-registry) as the primary source,
-// falling back to disk files only if available. This ensures data is available in all
-// deployment environments, including FaaS where public/ may not be on disk.
+// Strategy: Runtime file reading from disk — works in all deployment environments
+// (dev, production, FaaS) without relying on build-time bundling of JSON/TS modules.
 
-// Build-time bundled index and category data (always available)
-import indexDataFromBundle from '@/data/omp-resources/index.json';
-import { getCategoryData } from '@/data/omp-resources/category-registry';
-
-export async function GET(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const catId = searchParams.get('cat');
-
-    // If catId is provided, return specific category data
-    if (catId) {
-      // Primary: use bundled category data (always available)
-      const bundledData = getCategoryData(catId);
-      if (bundledData) {
-        return NextResponse.json(bundledData, {
-          headers: { 'Cache-Control': 'public, max-age=3600' },
-        });
-      }
-
-      // Fallback: try disk (in case new categories were added after build)
-      const diskDir = findDataDir();
-      if (diskDir) {
-        const catFile = join(diskDir, 'categories', `${catId}.json`);
-        try {
-          if (existsSync(catFile)) {
-            const data = JSON.parse(readFileSync(catFile, 'utf-8'));
-            return NextResponse.json(data, {
-              headers: { 'Cache-Control': 'public, max-age=3600' },
-            });
-          }
-        } catch (readErr) {
-          console.error(`[omp-resources] Error reading category '${catId}' from disk:`, readErr);
-        }
-      }
-
-      return NextResponse.json({ error: 'Category not found' }, { status: 404 });
-    }
-
-    // Return the index — prefer bundled (always available)
-    return NextResponse.json(indexDataFromBundle, {
-      headers: { 'Cache-Control': 'public, max-age=3600' },
-    });
-  } catch (error) {
-    console.error('[omp-resources API] Error:', error);
-    return NextResponse.json(
-      { error: 'Failed to load resource data' },
-      { status: 500 }
-    );
-  }
-}
-
-// ===== Disk fallback helpers =====
-
+// Cached data directory path
 let cachedDataDir: string | null | undefined = undefined;
 
 function findDataDir(): string | null {
@@ -78,4 +25,67 @@ function findDataDir(): string | null {
   }
   cachedDataDir = null;
   return null;
+}
+
+// Cached index data (loaded once, reused across requests)
+let cachedIndexData: Record<string, unknown> | null = null;
+
+function getIndexData(): Record<string, unknown> | null {
+  if (cachedIndexData !== null) return cachedIndexData;
+  const dir = findDataDir();
+  if (dir) {
+    try {
+      const raw = readFileSync(join(dir, 'index.json'), 'utf-8');
+      cachedIndexData = JSON.parse(raw);
+      return cachedIndexData;
+    } catch (err) {
+      console.error('[omp-resources] Error reading index.json:', err);
+    }
+  }
+  cachedIndexData = null;
+  return null;
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const catId = searchParams.get('cat');
+
+    // If catId is provided, return specific category data
+    if (catId) {
+      // Read category data from disk
+      const dir = findDataDir();
+      if (dir) {
+        const catFile = join(dir, 'categories', `${catId}.json`);
+        try {
+          if (existsSync(catFile)) {
+            const data = JSON.parse(readFileSync(catFile, 'utf-8'));
+            return NextResponse.json(data, {
+              headers: { 'Cache-Control': 'public, max-age=3600' },
+            });
+          }
+        } catch (readErr) {
+          console.error(`[omp-resources] Error reading category '${catId}' from disk:`, readErr);
+        }
+      }
+
+      return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+    }
+
+    // Return the index
+    const indexData = getIndexData();
+    if (indexData) {
+      return NextResponse.json(indexData, {
+        headers: { 'Cache-Control': 'public, max-age=3600' },
+      });
+    }
+
+    return NextResponse.json({ error: 'Resource data not available' }, { status: 503 });
+  } catch (error) {
+    console.error('[omp-resources API] Error:', error);
+    return NextResponse.json(
+      { error: 'Failed to load resource data' },
+      { status: 500 }
+    );
+  }
 }
