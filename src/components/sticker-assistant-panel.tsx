@@ -609,12 +609,11 @@ ${themeDesc}
     const styleP = styleKey === 'custom' ? customStyle : selectedStyle.positivePrompt;
     const negP = styleKey === 'custom' ? '' : selectedStyle.negativePrompt;
 
-    // 构建生成 prompt
-    // 注意：有参考图时，不在 prompt 中写 [ref] 保留指令，避免与 referenceCategories 触发的
-    // API [REFERENCE MODE] 指令冲突。仅写生成内容，保留逻辑完全由 referenceCategories 控制。
+    // 构建生成 prompt — 完全对齐画布图生图格式（使用 [ref] + preserve/freedom）
     let prompt: string;
     if (subjectImage && subjectSource === 'image') {
-      prompt = `Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. ${subjectDetail ? `[Subject: ${subjectDetail}]` : ''}. Transparent PNG background, die-cut sticker style, 1024x1024 square, sticker sheet single item, no solid background color.${negP ? ` Avoid: ${negP}, solid background, white background` : ''}`;
+      // 与画布图生图完全一致：[ref] 前缀 + preserve/freedom 格式
+      prompt = `[ref] Use the provided reference image(s) as the base. strictly preserve the subject (the main character/object — its species, body shape, proportions, all colors, patterns, fur/skin, facial features, ears/horns/tail, clothing and accessories), strictly preserve the artistic style, strictly preserve the color palette and tone, strictly preserve the fine details and textures. Feel free to reimagine the composition and layout structure, the scene and environment setting. Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. ${subjectDetail ? `[Subject visual details: ${subjectDetail}]` : ''}. Transparent PNG background, die-cut sticker style, 1024x1024 square, sticker sheet single item, no solid background color.${negP ? ` Avoid: ${negP}, solid background, white background` : ''}`;
     } else {
       prompt = `Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. ${buildIdentityLock()}. Transparent PNG background, die-cut sticker style, no solid background color, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}, solid background, white background` : ''}`;
     }
@@ -663,14 +662,14 @@ ${themeDesc}
                 if (saveData.url) persistedUrl = saveData.url;
               }
             }
-            // referenceCategories 触发 API [REFERENCE MODE] 主体+风格+色彩+细节一致性增强
-            // 不在 prompt 中写 [ref] 避免双重指令冲突
-            // 797e5df 版本的有效配置：4 个类别全覆盖 + strength 0.15
+            // 完全对齐画布图生图格式：referenceMode + strength，不用 referenceCategories
+            // referenceCategories 会触发 API 添加 [REFERENCE MODE] 与 prompt 中 [ref] 冲突
+            // 画布图生图仅使用 referenceMode + strength + prompt 中 [ref] 指令，效果好
             requestBody.referenceImages = [persistedUrl];
-            requestBody.referenceCategories = { '0': ['subject', 'style', 'color', 'detail'] };
-            requestBody.referenceStrengths = [95];
-            // strength 0.15 = 画布图生图在主体保留最高时的最小值（最大保留）
-            requestBody.strength = 0.15;
+            requestBody.referenceMode = 'reference';
+            // strength 0.25 = 画布图生图中等保留强度（subject 70 + style 60 时计算值）
+            // 0.15 对部分模型过于保守导致忽略 strength，0.25 是经过验证的平衡点
+            requestBody.strength = 0.25;
           } catch { /* 使用原始 URL 兜底 */ }
         }
 
