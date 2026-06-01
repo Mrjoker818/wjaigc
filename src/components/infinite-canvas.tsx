@@ -9598,6 +9598,7 @@ export function InfiniteCanvas({
         {showStickerAssistant && (
           <Suspense fallback={null}>
             <StickerAssistantPanel
+              isOpen={showStickerAssistant}
               onClose={() => setShowStickerAssistant(false)}
               onAddImages={(urls: string[]) => {
                 onAddImages?.(urls);

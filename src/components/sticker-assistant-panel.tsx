@@ -1,570 +1,743 @@
 'use client';
 
-import React, { useState, useCallback, useRef } from 'react';
-import { X, Sparkles, Download, RotateCcw, Loader2, Image as ImageIcon, RefreshCw, ArrowLeft, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { GripVertical, X, Minus, Sparkles, Loader2, CheckCircle2, XCircle, Clock, RefreshCw, Download, ChevronRight, Smile } from 'lucide-react';
 
-/* ──────── Preset data ──────── */
+/* ──────────────────── 主题色 ──────────────────── */
+const themes = {
+  gold: {
+    panelBg: '#1a1a1a',
+    deepBg: '#141414',
+    cardBg: '#222',
+    inputBg: '#1e1e1e',
+    border: 'rgba(255,255,255,0.08)',
+    accent: '#d4af37',
+    accentHover: '#e0be4a',
+    accentBg: 'rgba(212,175,55,0.10)',
+    text: '#e5e5e5',
+    textSub: '#a3a3a3',
+    textDim: '#737373',
+    shadow: '0 8px 32px rgba(0,0,0,0.5)',
+    headerGrad: 'linear-gradient(135deg, #222 0%, #1a1a1a 100%)',
+    btnClose: '#ef4444',
+  },
+  mono: {
+    panelBg: '#ffffff',
+    deepBg: '#f9fafb',
+    cardBg: '#ffffff',
+    inputBg: '#ffffff',
+    border: '#e5e7eb',
+    accent: '#2563eb',
+    accentHover: '#1d4ed8',
+    accentBg: 'rgba(37,99,235,0.06)',
+    text: '#1f2937',
+    textSub: '#6b7280',
+    textDim: '#9ca3af',
+    shadow: '0 8px 32px rgba(0,0,0,0.08)',
+    headerGrad: 'linear-gradient(135deg, #f3f4f6 0%, #ffffff 100%)',
+    btnClose: '#dc2626',
+  },
+} as const;
 
-const STYLE_PRESETS = [
-  { id: 1, name: '大众通用', desc: '圆润可爱，干净高级', prompt: '大众通用表情包美术：圆润可爱但不低幼，干净高级的现代卡通，主体轮廓清晰，柔和粗描边，饱满块面，轻微立体光影，颜色明快但不过饱和，动作夸张但不怪异，白色贴纸外轮廓或干净透明背景，64px缩略图也能看懂，适合微信/LINE/Telegram聊天发送。避免：写实照片、油腻AI质感、复杂背景、廉价儿童泡泡字、暗黑恐怖、赛博朋克、过度二次元、凌乱小装饰、网红土味大字、表情僵硬、同一姿势换字。' },
-  { id: 2, name: '漫画风格', desc: '夸张表情，分镜感', prompt: '漫画风格表情包：清晰手绘线条，夸张表情和肢体变形，速度线、冲击线、汗滴、爆炸框、拟声符号适量使用，动作有漫画分镜感，表情冲突更强，画面有笑点但不杂乱，主体仍保持一致且缩略图可读。避免：黑白草稿感、过多网点、复杂分镜框、恐怖猎奇、过度日漫脸、文字占满画面、动作乱到看不懂。' },
-  { id: 3, name: '经典贴纸', desc: '厚白边，剪纸感', prompt: '经典贴纸风格：主体像独立贴纸剪纸一样清楚，厚实白边，干净透明背景，简化背景和道具，轮廓强，色块干净，表情动作一眼读懂，整体更轻、更Q、更适合直接作为聊天贴纸上传。避免：复杂场景、背景插画感、过重光影、写实材质、边缘脏、白边不稳定、主体太小、细节太多。' },
-  { id: 4, name: '平面设计', desc: '强图形，高对比', prompt: '强烈平面设计风格：高识别度平面图形，强轮廓，明确几何构图，大色块，高对比配色，少量有设计感的阴影或颗粒，画面像精致海报符号但仍是可发送表情，主体造型统一，文字和图形关系强。避免：普通企业插画、信息图表感、复杂渐变、过多装饰纹理、品牌logo误用、主体被设计元素盖住、缺少表情包情绪。' },
-  { id: 5, name: '古早QQ风', desc: '怀旧即时通讯味', prompt: '古早QQ聊天风格表情包：怀旧即时通讯表情味道，圆润小图标感，轻微像素/低分辨率边缘趣味，亮晶晶高光，柔和渐变，蓝白聊天软件氛围，夸张但简单的表情，动作直接，符号化汗滴/爱心/星星/感叹号，像早期聊天窗口里会出现的小表情，但保持现代清晰度和可上传质量。避免：直接复制QQ企鹅、QQ官方表情、QQ logo或受保护角色；不要做成真实软件截图，不要过度像素化到看不清，不要脏旧压缩噪点。' },
-  { id: 6, name: '自定义', desc: '描述你想要的风格', prompt: '' },
-];
+type ThemeKey = keyof typeof themes;
 
-const THEME_PRESETS = [
-  { id: 1, name: '日常高频', captions: '收到, 谢谢, 好耶, 加油, 不行, 你猜, 无语, 吃瓜, 摸鱼, 开摆, 裂开, 困了, 抱抱, 冲, 哈哈, 晚安' },
-  { id: 2, name: '打工摸鱼', captions: '收到, 在忙, 马上, 加班中, 摸鱼, 开会了, 别催, 需求变了, 崩溃, 救命, 下班, 老板来了, 先鸽了, 继续冲, 已读乱回, 周一不想动' },
-  { id: 3, name: '阴阳怪气', captions: '你猜, 啊对对对, 就不, 关我啥事, 你说得对, 好棒棒, 笑死, 我不信, 真的假的, 还有这事, 你开心就好, 懂了, 已阅, 退退退, 看戏, 别装' },
-  { id: 4, name: '可爱贴贴', captions: '贴贴, 抱抱, 想你, 喜欢, 谢谢你, 辛苦啦, 摸摸头, 不哭, 陪你, 晚安, 早安, 开心, 给你花花, 心动, 充电中, 一起躺' },
-  { id: 5, name: '吃喝玩乐', captions: '开吃, 干杯, 好香, 饿了, 吃瓜, 点奶茶, 续命, 出门玩, 躺平, 快乐水, 再来一口, 买它, 排队中, 拍照, 嗨起来, 明天减肥' },
-  { id: 6, name: '节日祝福', captions: '早安, 晚安, 新年好, 恭喜发财, 大吉大利, 平安喜乐, 生日快乐, 谢谢, 想你, 祝你好运, 万事顺意, 元气满满, 收红包, 干杯, 团圆啦, 明天更好' },
-  { id: 7, name: '自定义', captions: '' },
-];
-
-/* ──────── Types ──────── */
-
+/* ──────────────────── 数据类型 ──────────────────── */
 interface StickerItem {
   id: number;
   caption: string;
   action: string;
   status: 'pending' | 'generating' | 'done' | 'failed';
   imageUrl?: string;
+  error?: string;
 }
 
+interface StylePreset {
+  key: string;
+  label: string;
+  icon: string;
+  positivePrompt: string;
+  negativePrompt: string;
+}
+
+interface ThemePreset {
+  key: string;
+  label: string;
+  icon: string;
+  captions: string[];
+  mood: string;
+}
+
+/* ──────────────────── 预设数据 (from Zinxtick) ──────────────────── */
+const STYLE_PRESETS: StylePreset[] = [
+  {
+    key: 'general',
+    label: '大众通用',
+    icon: '😊',
+    positivePrompt: 'cute cartoon sticker, thick outlines, vivid solid colors, flat shading, simple clean background, sticker art style, expressive pose, white border outline, chibi proportions',
+    negativePrompt: 'photorealistic, 3d render, complex details, gradient, realistic texture, blurry, low quality, watermark, text',
+  },
+  {
+    key: 'comic',
+    label: '漫画风格',
+    icon: '💥',
+    positivePrompt: 'manga style sticker, screen tones, bold ink outlines, dynamic action lines, monochrome with spot color, speech bubble elements, dramatic expression, comic panel feel',
+    negativePrompt: 'photorealistic, watercolor, pastel, gradient, realistic shading, blurry, low quality, watermark',
+  },
+  {
+    key: 'classic',
+    label: '经典贴纸',
+    icon: '⭐',
+    positivePrompt: 'die-cut sticker style, clean vector outline, solid bold colors, no background, whimsical character design, rounded shapes, professional sticker production, white stroke border',
+    negativePrompt: 'photorealistic, 3d, complex background, gradient, messy lines, blurry, low quality, watermark, photo',
+  },
+  {
+    key: 'flat',
+    label: '平面设计',
+    icon: '🎨',
+    positivePrompt: 'flat design sticker, minimal geometric shapes, limited color palette, clean vector art, bold solid fills, no shadows, modern graphic style, simple silhouettes',
+    negativePrompt: 'realistic, 3d, gradient, texture, complex details, watercolor, photorealistic, blurry',
+  },
+  {
+    key: 'retro',
+    label: '古早QQ风',
+    icon: '🐧',
+    positivePrompt: 'early 2000s Chinese QQ sticker style, pixel-art influenced, simple round body, big head small body, bright saturated colors, cute kawaii expression, retro digital feel, simple gif-style pose',
+    negativePrompt: 'photorealistic, 3d render, complex shading, realistic, modern minimalist, gradient',
+  },
+  {
+    key: 'custom',
+    label: '自定义',
+    icon: '✏️',
+    positivePrompt: '',
+    negativePrompt: '',
+  },
+];
+
+const THEME_PRESETS: ThemePreset[] = [
+  { key: 'everyday', label: '日常高频', icon: '💬', captions: ['收到','谢谢','好耶','加油','不行','你猜','无语','吃瓜','摸鱼','开摆','裂开','困了','抱抱','冲','哈哈','晚安'], mood: '日常实用、友好亲切' },
+  { key: 'work', label: '打工摸鱼', icon: '💼', captions: ['收到','在忙','马上','加班中','摸鱼','开会了','别催','需求变了','崩溃','救命','下班','老板来了','先鸽了','继续冲','已读乱回','周一不想动'], mood: '疲惫搞笑、社交解压' },
+  { key: 'sarcastic', label: '阴阳怪气', icon: '😏', captions: ['你猜','啊对对对','就不','关我啥事','你说得对','好棒棒','笑死','我不信','真的假的','还有这事','你开心就好','懂了','已阅','退退退','看戏','别装'], mood: '傲娇吐槽、俏皮搞笑' },
+  { key: 'cute', label: '可爱贴贴', icon: '💕', captions: ['贴贴','抱抱','想你','喜欢','谢谢你','辛苦啦','摸摸头','不哭','陪你','晚安','早安','开心','给你花花','心动','充电中','一起躺'], mood: '温暖治愈、软萌贴心' },
+  { key: 'food', label: '吃喝玩乐', icon: '🍜', captions: ['开吃','干杯','好香','饿了','吃瓜','点奶茶','续命','出门玩','躺平','快乐水','再来一口','买它','排队中','拍照','嗨起来','明天减肥'], mood: '热闹感官、快乐吃喝' },
+  { key: 'holiday', label: '节日祝福', icon: '🎉', captions: ['早安','晚安','新年好','恭喜发财','大吉大利','平安喜乐','生日快乐','谢谢','想你','祝你好运','万事顺意','元气满满','收红包','干杯','团圆啦','明天更好'], mood: '积极温暖、吉祥如意' },
+  { key: 'custom', label: '自定义', icon: '✏️', captions: [], mood: '' },
+];
+
+/* ──────────────────── Props ──────────────────── */
 interface StickerAssistantPanelProps {
+  isOpen: boolean;
+  onClose: () => void;
   isMonochrome?: boolean;
   onAddImages?: (urls: string[]) => void;
-  currentModel?: string;
-  onClose?: () => void;
 }
 
-/* ──────── Component ──────── */
-
+/* ──────────────────── 组件 ──────────────────── */
 export default function StickerAssistantPanel({
+  isOpen,
+  onClose,
   isMonochrome = false,
   onAddImages,
-  onClose,
 }: StickerAssistantPanelProps) {
+  const t = themes[isMonochrome ? 'mono' : 'gold'];
 
-  /* ───── Theme tokens (matching image-editor.tsx / infinite-canvas.tsx) ───── */
-  const thBg           = isMonochrome ? 'bg-gray-50' : 'bg-[#1a1a1a]';
-  const thBgDeep       = isMonochrome ? 'bg-white' : 'bg-[#141414]';
-  const thBgHover      = isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-[#222]';
-  const thBgCard       = isMonochrome ? 'bg-white' : 'bg-[#222]';
-  const thBgCardHover  = isMonochrome ? 'hover:bg-gray-50' : 'hover:bg-[#2a2a2a]';
-  const thBgInput      = isMonochrome ? 'bg-white' : 'bg-[#1e1e1e]';
-  const thBgOverlay    = isMonochrome ? 'bg-black/30' : 'bg-black/60';
+  /* ── 拖拽 & 最小化 ── */
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const dragOff = useRef({ x: 0, y: 0 });
+  const [minimized, setMinimized] = useState(false);
 
-  const thBorder       = isMonochrome ? 'border-gray-200' : 'border-white/[0.08]';
-  const thBorderLight  = isMonochrome ? 'border-gray-100' : 'border-white/[0.06]';
-  const thBorderAccent = isMonochrome ? 'border-blue-300' : 'border-[#d4af37]';
-  const thBorderFocus  = isMonochrome ? 'focus:border-blue-400' : 'focus:border-[#d4af37]';
-
-  const thText         = isMonochrome ? 'text-gray-800' : 'text-gray-100';
-  const thTextSec      = isMonochrome ? 'text-gray-500' : 'text-gray-400';
-  const thTextMuted    = isMonochrome ? 'text-gray-400' : 'text-gray-500';
-  const thTextDim      = isMonochrome ? 'text-gray-300' : 'text-gray-600';
-  const thTextPlaceholder = isMonochrome ? 'placeholder:text-gray-400' : 'placeholder:text-gray-600';
-
-  const thAccent       = isMonochrome ? 'text-blue-600' : 'text-[#d4af37]';
-  const thAccentIcon   = isMonochrome ? 'text-blue-500' : 'text-[#d4af37]';
-  const thAccentBg     = isMonochrome ? 'bg-blue-500' : 'bg-[#d4af37]';
-  const thAccentBgText = isMonochrome ? 'text-white' : 'text-black';
-  const thAccentBgHover= isMonochrome ? 'hover:bg-blue-600' : 'hover:bg-[#e0b840]';
-  const thAccentLight  = isMonochrome ? 'bg-blue-50' : 'bg-[#d4af37]/10';
-  const thAccentLightText = isMonochrome ? 'text-blue-600' : 'text-[#d4af37]';
-  const thAccentBorder = isMonochrome ? 'border-blue-200' : 'border-[#d4af37]/30';
-  const thAccentRing   = isMonochrome ? 'ring-blue-500/30' : 'ring-[#d4af37]/30';
-
-  const thShadow       = isMonochrome ? 'shadow-lg shadow-gray-200/50' : 'shadow-2xl shadow-black/50';
-  const thDivider      = isMonochrome ? 'divide-gray-100' : 'divide-white/[0.06]';
-
-  /* ───── State ───── */
+  /* ── 步骤 ── */
+  const [step, setStep] = useState<0 | 1 | 2>(0);
   const [subject, setSubject] = useState('');
-  const [selectedStyle, setSelectedStyle] = useState(1);
+  const [styleKey, setStyleKey] = useState('general');
+  const [themeKey, setThemeKey] = useState('everyday');
+  const [count, setCount] = useState<9 | 16>(9);
   const [customStyle, setCustomStyle] = useState('');
-  const [selectedTheme, setSelectedTheme] = useState(1);
   const [customTheme, setCustomTheme] = useState('');
-  const [stickerCount, setStickerCount] = useState(16);
-  const [step, setStep] = useState<'config' | 'plan' | 'generate'>('config');
-  const [stickers, setStickers] = useState<StickerItem[]>([]);
-  const [isPlanning, setIsPlanning] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [currentGenIndex, setCurrentGenIndex] = useState(-1);
-  const [error, setError] = useState('');
-  const abortRef = useRef(false);
 
-  /* ───── Logic ───── */
-  const buildIdentityLock = useCallback((subj: string): string => {
-    return `Subject: ${subj}. Core silhouette, colors, and features must stay consistent across all stickers. The subject must be instantly recognizable in every sticker at thumbnail size. Do not change species, main silhouette, main colors, face placement or feature count across the pack.`;
+  /* ── 计划 ── */
+  const [plan, setPlan] = useState<StickerItem[]>([]);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState('');
+
+  /* ── 生成 ── */
+  const [generating, setGenerating] = useState(false);
+  const [genIdx, setGenIdx] = useState(-1);
+
+  /* ── 拖拽逻辑 ── */
+  const onDragDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setDragging(true);
+    const rect = (e.currentTarget.parentElement as HTMLElement)?.getBoundingClientRect();
+    dragOff.current = { x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) };
   }, []);
+  useEffect(() => {
+    if (!dragging) return;
+    const mv = (e: MouseEvent) => setPos({ x: e.clientX - dragOff.current.x, y: e.clientY - dragOff.current.y });
+    const up = () => setDragging(false);
+    window.addEventListener('mousemove', mv);
+    window.addEventListener('mouseup', up);
+    return () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
+  }, [dragging]);
 
-  const buildStickerPrompt = useCallback((item: StickerItem, subj: string, stylePrompt: string): string => {
-    return `Create a single square sticker design. ${buildIdentityLock(subj)} Style: ${stylePrompt}. Action: ${item.action}. Caption: "${item.caption}" - integrate text naturally if it improves the sticker, or omit text if the action is clear without it. Format: single 1024x1024 sticker with clean margins, white sticker border or transparent background. The sticker must be readable at small thumbnail size and work as a chat reaction.`;
-  }, [buildIdentityLock]);
+  /* ── ESC ── */
+  useEffect(() => {
+    if (!isOpen) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isOpen, onClose]);
 
-  const handlePlan = useCallback(async () => {
-    if (!subject.trim()) { setError('请输入表情包主题'); return; }
-    setIsPlanning(true);
-    setError('');
-    abortRef.current = false;
+  /* ── 辅助 ── */
+  const selectedStyle = STYLE_PRESETS.find(s => s.key === styleKey)!;
+  const selectedTheme = THEME_PRESETS.find(th => th.key === themeKey)!;
 
-    const styleObj = STYLE_PRESETS.find(s => s.id === selectedStyle)!;
-    const themeObj = THEME_PRESETS.find(t => t.id === selectedTheme)!;
-    const styleDesc = selectedStyle === 6 ? customStyle : styleObj.name;
-    const captions = selectedTheme === 7 ? customTheme : themeObj.captions;
+  const buildIdentityLock = useCallback((): string => {
+    return `Subject: ${subject}\nCore silhouette: consistent across all stickers\nAllowed expression mechanisms: pose, emotion, props, squash/stretch\nForbidden drift: species/category change, main silhouette change, color/material change`;
+  }, [subject]);
 
-    const systemPrompt = `你是一个表情包策划专家。根据用户提供的主题、风格和主题类型，生成一个表情包计划。
-返回JSON格式，包含一个items数组，每个元素有：id(序号), caption(简短文案2-5字), action(动作描述，描述主体在做什么，要有画面感和动作感)。
-确保每个表情的动作和姿态都有明显差异，不要只是换个文案的同一个姿势。
-数量为${stickerCount}个。`;
-
-    const userPrompt = `主题/主体：${subject}
-风格：${styleDesc}
-主题类型：${selectedTheme === 7 ? customTheme : themeObj.name}
-参考文案：${captions}
-请生成${stickerCount}个表情的详细计划，每个表情要有独特的动作和姿态。`;
-
+  /* ── Step 0 → 1: 生成计划 ── */
+  const handleGeneratePlan = useCallback(async () => {
+    if (!subject.trim()) return;
+    setPlanLoading(true);
+    setPlanError('');
     try {
+      const themeDesc = themeKey === 'custom'
+        ? customTheme
+        : `主题:${selectedTheme.label}, 情绪:${selectedTheme.mood}, 参考文案:${selectedTheme.captions.slice(0, 8).join('/')}`;
+      const styleDesc = styleKey === 'custom'
+        ? customStyle
+        : `风格:${selectedStyle.label}, 正向提示:${selectedStyle.positivePrompt}`;
+
+      const prompt = `你是一个表情包策划专家。请根据以下要求生成表情包计划。
+
+主体: ${subject}
+${styleDesc}
+${themeDesc}
+数量: ${count}个
+
+要求:
+1. 每个表情必须有明确的"文案"(caption)和"动作描述"(action)
+2. 文案要简短(1-4个字), 适合聊天场景
+3. 动作描述要具体, 确保每个表情的姿势/动作有明显差异
+4. 主体特征必须保持一致(外形/颜色/轮廓)
+
+请严格以JSON格式输出, 不要添加任何其他文字:
+[{"id":1,"caption":"文案","action":"动作描述"},...]`;
+
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }], stream: false }),
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: prompt }],
+          stream: false,
+        }),
       });
+
       if (!res.ok) throw new Error(`API错误: ${res.status}`);
       const data = await res.json();
-      const content = data.choices?.[0]?.message?.content || data.content || '';
+      const content = data.choices?.[0]?.message?.content ?? data.content ?? '';
       const jsonMatch = content.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) throw new Error('无法解析计划，请重试');
-      const items = JSON.parse(jsonMatch[0]);
-      const plan: StickerItem[] = items.slice(0, stickerCount).map((it: { id?: number; caption?: string; action?: string }, idx: number) => ({
-        id: it.id || idx + 1,
-        caption: it.caption || '',
-        action: it.action || '',
+      if (!jsonMatch) throw new Error('无法解析表情计划');
+      const items: StickerItem[] = JSON.parse(jsonMatch[0]).map((item: { caption?: string; action?: string }, i: number) => ({
+        id: i + 1,
+        caption: item.caption || `表情${i + 1}`,
+        action: item.action || '微笑',
         status: 'pending' as const,
       }));
-      setStickers(plan);
-      setStep('plan');
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : '生成计划失败');
+      setPlan(items);
+      setStep(1);
+    } catch (err: unknown) {
+      setPlanError(err instanceof Error ? err.message : '生成计划失败');
     } finally {
-      setIsPlanning(false);
+      setPlanLoading(false);
     }
-  }, [subject, selectedStyle, customStyle, selectedTheme, customTheme, stickerCount, buildIdentityLock]);
+  }, [subject, styleKey, themeKey, count, customStyle, customTheme, selectedStyle, selectedTheme]);
 
-  const generateSingleSticker = useCallback(async (item: StickerItem, index: number): Promise<string | null> => {
-    const styleObj = STYLE_PRESETS.find(s => s.id === selectedStyle)!;
-    const stylePrompt = selectedStyle === 6 ? customStyle : styleObj.prompt;
-    const prompt = buildStickerPrompt(item, subject, stylePrompt);
-
-    try {
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, size: '1024x1024', aspectRatio: '1:1', quality: 'standard', n: 1 }),
-      });
-      if (!res.ok) throw new Error(`API错误: ${res.status}`);
-      const data = await res.json();
-
-      if (data.imageUrls?.length > 0) return data.imageUrls[0];
-      if (data.imageUrl) return data.imageUrl;
-
-      if (data.taskIds?.length > 0 || data.taskId) {
-        const taskId = data.taskIds?.[0] || data.taskId;
-        for (let attempt = 0; attempt < 60; attempt++) {
-          if (abortRef.current) return null;
-          await new Promise(r => setTimeout(r, 2000));
-          const pollRes = await fetch('/api/poll-task', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskId }),
-          });
-          if (!pollRes.ok) continue;
-          const pollData = await pollRes.json();
-          if (pollData.status === 'completed' && pollData.imageUrl) return pollData.imageUrl;
-          if (pollData.status === 'completed' && pollData.imageUrls?.length > 0) return pollData.imageUrls[0];
-          if (pollData.status === 'failed') throw new Error(pollData.error || '生成失败');
-        }
-        throw new Error('生成超时');
-      }
-      throw new Error('无返回结果');
-    } catch (e: unknown) {
-      console.error(`Sticker ${index + 1} generation error:`, e);
-      return null;
-    }
-  }, [selectedStyle, customStyle, subject, buildStickerPrompt]);
-
-  const handleGenerate = useCallback(async () => {
-    setIsGenerating(true);
-    abortRef.current = false;
-    setError('');
-    const completedUrls: string[] = [];
-
-    for (let i = 0; i < stickers.length; i++) {
-      if (abortRef.current) break;
-      if (stickers[i].status === 'done' && stickers[i].imageUrl) {
-        completedUrls.push(stickers[i].imageUrl!);
-        continue;
-      }
-      setCurrentGenIndex(i);
-      setStickers(prev => prev.map((s, idx) => idx === i ? { ...s, status: 'generating' as const } : s));
-      const url = await generateSingleSticker(stickers[i], i);
-      if (url) {
-        setStickers(prev => prev.map((s, idx) => idx === i ? { ...s, status: 'done' as const, imageUrl: url } : s));
-        completedUrls.push(url);
-      } else {
-        setStickers(prev => prev.map((s, idx) => idx === i ? { ...s, status: 'failed' as const } : s));
-      }
-    }
-    setCurrentGenIndex(-1);
-    setIsGenerating(false);
-    if (completedUrls.length > 0 && onAddImages) onAddImages(completedUrls);
-  }, [stickers, generateSingleSticker, onAddImages]);
-
-  const handleRetryFailed = useCallback(async () => {
-    const failedIndices = stickers.map((s, i) => s.status === 'failed' ? i : -1).filter(i => i >= 0);
-    if (failedIndices.length === 0) return;
-    setIsGenerating(true);
-    abortRef.current = false;
-    for (const i of failedIndices) {
-      if (abortRef.current) break;
-      setCurrentGenIndex(i);
-      setStickers(prev => prev.map((s, idx) => idx === i ? { ...s, status: 'generating' as const } : s));
-      const url = await generateSingleSticker(stickers[i], i);
-      if (url) {
-        setStickers(prev => prev.map((s, idx) => idx === i ? { ...s, status: 'done' as const, imageUrl: url } : s));
-      } else {
-        setStickers(prev => prev.map((s, idx) => idx === i ? { ...s, status: 'failed' as const } : s));
-      }
-    }
-    setCurrentGenIndex(-1);
-    setIsGenerating(false);
-  }, [stickers, generateSingleSticker]);
-
-  const handleStop = useCallback(() => { abortRef.current = true; }, []);
-  const handleReset = useCallback(() => {
-    setStep('config'); setStickers([]); setError('');
-    setCurrentGenIndex(-1); setIsGenerating(false); setIsPlanning(false);
-    abortRef.current = false;
+  /* ── Step 1 → 2: 逐个生成贴纸 ── */
+  const handleStartGeneration = useCallback(() => {
+    setStep(2);
+    setGenerating(true);
   }, []);
 
-  const handleDownload = useCallback(async () => {
-    const doneStickers = stickers.filter(s => s.status === 'done' && s.imageUrl);
-    for (const s of doneStickers) {
+  useEffect(() => {
+    if (!generating || step !== 2 || plan.length === 0) return;
+    const idx = plan.findIndex(p => p.status === 'pending' || p.status === 'failed');
+    if (idx === -1) { setGenerating(false); return; }
+    setGenIdx(idx);
+
+    const item = plan[idx];
+    const styleP = styleKey === 'custom' ? customStyle : selectedStyle.positivePrompt;
+    const negP = styleKey === 'custom' ? '' : selectedStyle.negativePrompt;
+    const identityLock = buildIdentityLock();
+
+    const prompt = `Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. Subject identity: ${identityLock}. White border, die-cut sticker style, no background elements, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}` : ''}`;
+
+    const doGenerate = async () => {
       try {
-        const response = await fetch(s.imageUrl!);
-        const blob = await response.blob();
+        setPlan(prev => prev.map(p => p.id === item.id ? { ...p, status: 'generating' as const } : p));
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt,
+            size: '1024x1024',
+            aspectRatio: '1:1',
+            n: 1,
+            outputCount: 1,
+            quality: 'standard',
+          }),
+        });
+        if (!res.ok) throw new Error(`生成失败: ${res.status}`);
+        const data = await res.json();
+
+        let imageUrl: string | undefined;
+        if (data.imageUrls?.length > 0) {
+          imageUrl = data.imageUrls[0];
+        } else if (data.taskIds?.length > 0) {
+          // 轮询模式
+          const taskId = data.taskIds[0];
+          for (let attempt = 0; attempt < 120; attempt++) {
+            await new Promise(r => setTimeout(r, 2000));
+            const pollRes = await fetch('/api/poll-task', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId }),
+            });
+            if (!pollRes.ok) continue;
+            const pollData = await pollRes.json();
+            if (pollData.status === 'completed' && pollData.imageUrls?.length > 0) {
+              imageUrl = pollData.imageUrls[0];
+              break;
+            }
+            if (pollData.status === 'failed') throw new Error(pollData.error || '生成失败');
+          }
+        }
+        if (!imageUrl) throw new Error('未获取到图片');
+
+        // 持久化
+        try {
+          const saveRes = await fetch('/api/save-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageUrl }),
+          });
+          if (saveRes.ok) {
+            const saveData = await saveRes.json();
+            if (saveData.url) imageUrl = saveData.url;
+          }
+        } catch { /* keep original URL */ }
+
+        setPlan(prev => prev.map(p => p.id === item.id ? { ...p, status: 'done' as const, imageUrl } : p));
+      } catch (err: unknown) {
+        setPlan(prev => prev.map(p => p.id === item.id ? { ...p, status: 'failed' as const, error: err instanceof Error ? err.message : '生成失败' } : p));
+      }
+    };
+    doGenerate();
+  }, [generating, step, plan, styleKey, customStyle, selectedStyle, selectedTheme, buildIdentityLock]);
+
+  /* ── 重试失败项 ── */
+  const handleRetry = useCallback((id: number) => {
+    setPlan(prev => prev.map(p => p.id === id ? { ...p, status: 'pending' as const, error: undefined } : p));
+  }, []);
+
+  /* ── 停止生成 ── */
+  const handleStop = useCallback(() => {
+    setGenerating(false);
+    setGenIdx(-1);
+  }, []);
+
+  /* ── 全部添加到画布 ── */
+  const handleAddAllToCanvas = useCallback(() => {
+    const urls = plan.filter(p => p.status === 'done' && p.imageUrl).map(p => p.imageUrl!);
+    if (urls.length > 0 && onAddImages) onAddImages(urls);
+  }, [plan, onAddImages]);
+
+  /* ── 下载全部 ── */
+  const handleDownloadAll = useCallback(async () => {
+    const done = plan.filter(p => p.status === 'done' && p.imageUrl);
+    for (const item of done) {
+      try {
+        const res = await fetch(item.imageUrl!);
+        const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `sticker_${s.id}_${s.caption}.png`;
+        a.download = `sticker_${item.id}_${item.caption}.png`;
         a.click();
         URL.revokeObjectURL(url);
       } catch { /* skip */ }
     }
-  }, [stickers]);
+  }, [plan]);
 
-  const doneCount = stickers.filter(s => s.status === 'done').length;
-  const failedCount = stickers.filter(s => s.status === 'failed').length;
-  const allDone = stickers.length > 0 && doneCount + failedCount === stickers.length;
+  /* ── 重置 ── */
+  const handleReset = useCallback(() => {
+    setStep(0);
+    setPlan([]);
+    setPlanError('');
+    setGenerating(false);
+    setGenIdx(-1);
+  }, []);
 
-  /* ───── Step badge helper ───── */
-  const StepBadge = ({ label, active, done: isDone }: { label: string; active: boolean; done?: boolean }) => (
-    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
-      active ? `${thAccentBg} ${thAccentBgText}` :
-      isDone ? `${thAccentLight} ${thAccentLightText}` :
-      `${isMonochrome ? 'bg-gray-100 text-gray-400' : 'bg-white/[0.06] text-gray-500'}`
-    }`}>
-      {isDone && <CheckCircle2 className="h-3 w-3" />}
-      {label}
-    </span>
-  );
+  if (!isOpen) return null;
 
-  /* ───── Selectable card helper ───── */
-  const SelectCard = ({ selected, onClick, children, className = '' }: {
-    selected: boolean; onClick: () => void; children: React.ReactNode; className?: string;
-  }) => (
-    <button
-      onClick={onClick}
-      className={`px-3 py-2.5 rounded-lg text-left transition-all duration-150 border cursor-pointer ${
-        selected
-          ? `${thAccentBorder} ${thAccentLight} ${thAccentLightText} ring-2 ${thAccentRing} font-medium`
-          : `${thBgCard} ${thBorder} ${thTextSec} ${thBgCardHover}`
-      } ${className}`}
-    >
-      {children}
-    </button>
-  );
+  const doneCount = plan.filter(p => p.status === 'done').length;
+  const failCount = plan.filter(p => p.status === 'failed').length;
 
-  /* ───── Status icon ───── */
-  const StatusIcon = ({ status }: { status: StickerItem['status'] }) => {
-    switch (status) {
-      case 'generating': return <Loader2 className={`h-5 w-5 animate-spin ${thAccentIcon}`} />;
-      case 'done': return <CheckCircle2 className="h-5 w-5 text-emerald-500" />;
-      case 'failed': return <XCircle className="h-5 w-5 text-red-400" />;
-      default: return <Clock className={`h-5 w-5 ${thTextDim}`} />;
-    }
-  };
-
-  /* ═══════════════ RENDER ═══════════════ */
   return (
     <div
-      className={`fixed inset-0 z-[200] flex items-center justify-center ${thBgOverlay}`}
-      onClick={e => { if (e.target === e.currentTarget) onClose?.(); }}
+      className="fixed z-[150] flex flex-col"
+      style={{
+        left: pos.x || undefined,
+        top: pos.y || undefined,
+        right: pos.x ? undefined : 16,
+        bottom: pos.y ? undefined : 64,
+        width: 480,
+        maxHeight: minimized ? 40 : 'calc(100vh - 100px)',
+        background: t.panelBg,
+        borderRadius: 10,
+        border: `1px solid ${t.border}`,
+        boxShadow: t.shadow,
+        overflow: 'hidden',
+        transition: 'max-height 0.2s ease',
+      }}
+      data-popup="sticker-assistant"
     >
-      <div className={`${thBg} rounded-2xl ${thShadow} border ${thBorder} w-[740px] max-h-[88vh] flex flex-col overflow-hidden`}>
-
-        {/* ── Header ── */}
-        <div className={`flex items-center justify-between px-5 py-3.5 border-b ${thBorder} ${isMonochrome ? '' : 'bg-[#141414]'}`}>
-          <div className="flex items-center gap-3">
-            <div className={`w-8 h-8 rounded-lg ${thAccentLight} flex items-center justify-center`}>
-              <Sparkles className={`h-4 w-4 ${thAccentIcon}`} />
-            </div>
-            <div>
-              <h2 className={`text-base font-bold ${thText}`}>表情助手</h2>
-              <p className={`text-[10px] ${thTextMuted}`}>Zinxtick Sticker Pack Builder</p>
-            </div>
-          </div>
+      {/* ── 标题栏 ── */}
+      <div
+        className="flex items-center justify-between px-3 h-10 cursor-move select-none shrink-0"
+        style={{ background: t.headerGrad, borderBottom: `1px solid ${t.border}` }}
+        onMouseDown={onDragDown}
+      >
+        <div className="flex items-center gap-2">
+          <GripVertical size={14} style={{ color: t.textDim }} />
+          <Smile size={15} style={{ color: t.accent }} />
+          <span className="text-sm font-medium" style={{ color: t.text }}>表情助手</span>
+          {plan.length > 0 && step >= 1 && (
+            <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: t.accentBg, color: t.accent }}>
+              {doneCount}/{plan.length}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
           <button
-            onClick={onClose}
-            className={`p-1.5 rounded-lg ${thBgHover} ${thTextMuted} hover:${thText} transition-colors`}
+            className="p-1 rounded transition-colors duration-150"
+            style={{ color: t.textDim }}
+            onMouseEnter={e => (e.currentTarget.style.color = t.text)}
+            onMouseLeave={e => (e.currentTarget.style.color = t.textDim)}
+            onClick={() => setMinimized(v => !v)}
+            aria-label="最小化"
           >
-            <X className="h-4 w-4" />
+            <Minus size={14} />
+          </button>
+          <button
+            className="p-1 rounded transition-colors duration-150"
+            style={{ color: t.textDim }}
+            onMouseEnter={e => (e.currentTarget.style.color = t.btnClose)}
+            onMouseLeave={e => (e.currentTarget.style.color = t.textDim)}
+            onClick={onClose}
+            aria-label="关闭"
+          >
+            <X size={14} />
           </button>
         </div>
+      </div>
 
-        {/* ── Step indicator ── */}
-        <div className={`flex items-center gap-2 px-5 py-2.5 border-b ${thBorderLight} ${isMonochrome ? 'bg-gray-50/80' : 'bg-[#111]'}`}>
-          <StepBadge label="1. 配置" active={step === 'config'} done={step !== 'config'} />
-          <span className={thTextDim}>→</span>
-          <StepBadge label="2. 计划" active={step === 'plan'} done={step === 'generate'} />
-          <span className={thTextDim}>→</span>
-          <StepBadge label="3. 生成" active={step === 'generate'} />
-        </div>
+      {minimized ? null : (
+        <div className="flex-1 overflow-y-auto" style={{ background: t.deepBg }}>
+          {/* ── 生成进度条 ── */}
+          {step === 2 && plan.length > 0 && (
+            <div className="h-1 shrink-0" style={{ background: t.border }}>
+              <div
+                className="h-full transition-all duration-300"
+                style={{ width: `${(doneCount / plan.length) * 100}%`, background: t.accent }}
+              />
+            </div>
+          )}
 
-        {/* ── Content ── */}
-        <div className={`flex-1 overflow-y-auto p-5 space-y-5 ${isMonochrome ? '' : ''}`}>
-
-          {/* === Step 1: Config === */}
-          {step === 'config' && (
-            <div className="space-y-5">
-              {/* Subject */}
+          {/* ── Step 0: 配置 ── */}
+          {step === 0 && (
+            <div className="p-4 space-y-4">
+              {/* 主体输入 */}
               <div>
-                <label className={`text-sm font-medium ${thAccent} mb-2 block`}>表情包主题</label>
+                <label className="block text-xs mb-1.5 font-medium" style={{ color: t.textSub }}>表情主体</label>
                 <input
+                  className="w-full px-3 py-2 rounded-md text-sm outline-none transition-all duration-150"
+                  style={{ background: t.inputBg, color: t.text, border: `1px solid ${t.border}` }}
+                  placeholder="例如: 橘猫、奶茶杯、小恐龙..."
                   value={subject}
                   onChange={e => setSubject(e.target.value)}
-                  placeholder="例如：一只橘猫、可乐罐、小老虎、咖啡杯..."
-                  className={`w-full px-4 py-2.5 rounded-lg ${thBgInput} border ${thBorder} ${thText} ${thTextPlaceholder} ${thBorderFocus} focus:outline-none focus:ring-2 ${thAccentRing} transition-all`}
+                  onFocus={e => (e.currentTarget.style.borderColor = t.accent)}
+                  onBlur={e => (e.currentTarget.style.borderColor = t.border)}
                 />
               </div>
 
-              {/* Style */}
+              {/* 风格选择 */}
               <div>
-                <label className={`text-sm font-medium ${thAccent} mb-2 block`}>风格</label>
+                <label className="block text-xs mb-1.5 font-medium" style={{ color: t.textSub }}>风格</label>
                 <div className="grid grid-cols-3 gap-2">
                   {STYLE_PRESETS.map(s => (
-                    <SelectCard key={s.id} selected={selectedStyle === s.id} onClick={() => setSelectedStyle(s.id)}>
-                      <div className={`text-sm ${selectedStyle === s.id ? 'font-medium' : ''}`}>{s.name}</div>
-                      <div className={`text-[10px] mt-0.5 ${selectedStyle === s.id ? thAccentLightText : thTextMuted}`}>{s.desc}</div>
-                    </SelectCard>
+                    <button
+                      key={s.key}
+                      className="flex items-center gap-1.5 px-2.5 py-2 rounded-md text-xs transition-all duration-150 cursor-pointer"
+                      style={{
+                        background: styleKey === s.key ? t.accentBg : t.cardBg,
+                        border: `1.5px solid ${styleKey === s.key ? t.accent : t.border}`,
+                        color: styleKey === s.key ? t.accent : t.textSub,
+                      }}
+                      onClick={() => setStyleKey(s.key)}
+                    >
+                      <span>{s.icon}</span>
+                      <span>{s.label}</span>
+                    </button>
                   ))}
                 </div>
-                {selectedStyle === 6 && (
+                {styleKey === 'custom' && (
                   <textarea
+                    className="w-full mt-2 px-3 py-2 rounded-md text-xs outline-none resize-none transition-all duration-150"
+                    style={{ background: t.inputBg, color: t.text, border: `1px solid ${t.border}`, minHeight: 60 }}
+                    placeholder="输入自定义风格提示词..."
                     value={customStyle}
                     onChange={e => setCustomStyle(e.target.value)}
-                    placeholder="描述你想要的风格，例如：水彩手绘、像素游戏、低饱和治愈系..."
-                    className={`w-full mt-2 px-4 py-2.5 rounded-lg ${thBgInput} border ${thBorder} ${thText} ${thTextPlaceholder} ${thBorderFocus} focus:outline-none text-sm resize-none h-20 transition-all`}
+                    onFocus={e => (e.currentTarget.style.borderColor = t.accent)}
+                    onBlur={e => (e.currentTarget.style.borderColor = t.border)}
                   />
                 )}
               </div>
 
-              {/* Theme */}
+              {/* 主题选择 */}
               <div>
-                <label className={`text-sm font-medium ${thAccent} mb-2 block`}>主题</label>
+                <label className="block text-xs mb-1.5 font-medium" style={{ color: t.textSub }}>主题</label>
                 <div className="grid grid-cols-4 gap-2">
-                  {THEME_PRESETS.map(t => (
-                    <SelectCard key={t.id} selected={selectedTheme === t.id} onClick={() => setSelectedTheme(t.id)} className="text-center">
-                      <div className={`text-sm ${selectedTheme === t.id ? 'font-medium' : ''}`}>{t.name}</div>
-                    </SelectCard>
+                  {THEME_PRESETS.map(th => (
+                    <button
+                      key={th.key}
+                      className="flex flex-col items-center gap-0.5 px-2 py-2 rounded-md text-xs transition-all duration-150 cursor-pointer"
+                      style={{
+                        background: themeKey === th.key ? t.accentBg : t.cardBg,
+                        border: `1.5px solid ${themeKey === th.key ? t.accent : t.border}`,
+                        color: themeKey === th.key ? t.accent : t.textSub,
+                      }}
+                      onClick={() => setThemeKey(th.key)}
+                    >
+                      <span className="text-base">{th.icon}</span>
+                      <span className="text-[10px] leading-tight">{th.label}</span>
+                    </button>
                   ))}
                 </div>
-                {selectedTheme === 7 && (
+                {themeKey === 'custom' && (
                   <textarea
+                    className="w-full mt-2 px-3 py-2 rounded-md text-xs outline-none resize-none transition-all duration-150"
+                    style={{ background: t.inputBg, color: t.text, border: `1px solid ${t.border}`, minHeight: 60 }}
+                    placeholder="输入自定义主题描述和想要的文案..."
                     value={customTheme}
                     onChange={e => setCustomTheme(e.target.value)}
-                    placeholder="描述你想要的主题和文案，例如：熬夜打游戏的猫猫..."
-                    className={`w-full mt-2 px-4 py-2.5 rounded-lg ${thBgInput} border ${thBorder} ${thText} ${thTextPlaceholder} ${thBorderFocus} focus:outline-none text-sm resize-none h-20 transition-all`}
+                    onFocus={e => (e.currentTarget.style.borderColor = t.accent)}
+                    onBlur={e => (e.currentTarget.style.borderColor = t.border)}
                   />
-                )}
-                {selectedTheme !== 7 && (
-                  <div className={`mt-2 text-xs ${thTextMuted} leading-relaxed`}>
-                    预设文案：{THEME_PRESETS.find(t => t.id === selectedTheme)?.captions}
-                  </div>
                 )}
               </div>
 
-              {/* Count */}
+              {/* 数量 */}
               <div>
-                <label className={`text-sm font-medium ${thAccent} mb-2 block`}>数量</label>
-                <div className="flex gap-3">
+                <label className="block text-xs mb-1.5 font-medium" style={{ color: t.textSub }}>数量</label>
+                <div className="flex gap-2">
                   {[9, 16].map(n => (
-                    <SelectCard key={n} selected={stickerCount === n} onClick={() => setStickerCount(n)}>
-                      <span className="text-sm">{n}个{n === 9 ? '（精简版）' : '（完整版）'}</span>
-                    </SelectCard>
+                    <button
+                      key={n}
+                      className="flex-1 px-3 py-1.5 rounded-md text-xs transition-all duration-150 cursor-pointer"
+                      style={{
+                        background: count === n ? t.accentBg : t.cardBg,
+                        border: `1.5px solid ${count === n ? t.accent : t.border}`,
+                        color: count === n ? t.accent : t.textSub,
+                      }}
+                      onClick={() => setCount(n as 9 | 16)}
+                    >
+                      {n}个（{n === 9 ? '精简版' : '完整版'}）
+                    </button>
                   ))}
                 </div>
               </div>
+
+              {/* 生成计划按钮 */}
+              <button
+                className="w-full py-2.5 rounded-md text-sm font-medium transition-all duration-150 cursor-pointer flex items-center justify-center gap-2"
+                style={{
+                  background: subject.trim() ? t.accent : t.border,
+                  color: subject.trim() ? (isMonochrome ? '#fff' : '#1a1a1a') : t.textDim,
+                  opacity: planLoading ? 0.7 : 1,
+                }}
+                onClick={handleGeneratePlan}
+                disabled={!subject.trim() || planLoading}
+              >
+                {planLoading ? (
+                  <><Loader2 size={15} className="animate-spin" /> 生成计划中...</>
+                ) : (
+                  <><Sparkles size={15} /> 生成表情计划</>
+                )}
+              </button>
+              {planError && (
+                <p className="text-xs text-red-500 mt-1">{planError}</p>
+              )}
             </div>
           )}
 
-          {/* === Step 2: Plan === */}
-          {step === 'plan' && (
-            <div className="space-y-3">
+          {/* ── Step 1: 计划确认 ── */}
+          {step === 1 && (
+            <div className="p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className={`text-sm font-medium ${thAccent}`}>表情计划</h3>
+                <span className="text-sm font-medium" style={{ color: t.text }}>
+                  表情计划 ({plan.length}个)
+                </span>
                 <button
-                  onClick={() => setStep('config')}
-                  className={`text-xs ${thTextMuted} hover:${thTextSec} transition-colors flex items-center gap-1`}
+                  className="text-xs px-2 py-1 rounded transition-colors duration-150 cursor-pointer"
+                  style={{ color: t.accent, background: t.accentBg }}
+                  onClick={handleReset}
                 >
-                  <ArrowLeft className="h-3 w-3" /> 修改配置
+                  重新配置
                 </button>
               </div>
-              <div className={`grid grid-cols-2 gap-2 max-h-[400px] overflow-y-auto rounded-lg ${thBorder} border`}>
-                {stickers.map((s, i) => (
-                  <div key={i} className={`${thBgCard} p-3 ${i % 2 === 0 && i < stickers.length - 1 ? '' : ''} ${i < stickers.length - (stickers.length % 2 === 0 ? 2 : 1) ? `border-b ${thBorderLight}` : ''}`}>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={`text-xs font-bold ${thAccent}`}>#{s.id}</span>
-                      <span className={`text-sm ${thText} font-medium`}>{s.caption}</span>
+
+              <div className="space-y-1.5 max-h-[50vh] overflow-y-auto pr-1">
+                {plan.map(item => (
+                  <div
+                    key={item.id}
+                    className="flex items-start gap-2 px-2.5 py-2 rounded-md"
+                    style={{ background: t.cardBg, border: `1px solid ${t.border}` }}
+                  >
+                    <span className="text-xs font-mono shrink-0 mt-0.5" style={{ color: t.accent }}>
+                      {String(item.id).padStart(2, '0')}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-medium truncate" style={{ color: t.text }}>
+                        {item.caption}
+                      </div>
+                      <div className="text-[11px] truncate" style={{ color: t.textDim }}>
+                        {item.action}
+                      </div>
                     </div>
-                    <p className={`text-xs ${thTextMuted} leading-relaxed`}>{s.action}</p>
                   </div>
                 ))}
               </div>
+
+              <button
+                className="w-full py-2.5 rounded-md text-sm font-medium transition-all duration-150 cursor-pointer flex items-center justify-center gap-2"
+                style={{ background: t.accent, color: isMonochrome ? '#fff' : '#1a1a1a' }}
+                onClick={handleStartGeneration}
+              >
+                <ChevronRight size={15} /> 开始生成
+              </button>
             </div>
           )}
 
-          {/* === Step 3: Generate === */}
-          {step === 'generate' && (
-            <div className="space-y-3">
+          {/* ── Step 2: 生成 ── */}
+          {step === 2 && (
+            <div className="p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className={`text-sm font-medium ${thAccent}`}>
-                  生成进度 {doneCount}/{stickers.length}
-                  {failedCount > 0 && <span className="text-red-400 ml-2">({failedCount}失败)</span>}
-                </h3>
-                <div className="flex items-center gap-2">
-                  {failedCount > 0 && !isGenerating && (
-                    <button onClick={handleRetryFailed} className={`text-xs text-red-400 hover:text-red-300 transition-colors flex items-center gap-1 cursor-pointer`}>
-                      <RefreshCw className="h-3 w-3" /> 重试失败项
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Progress bar */}
-              <div className={`w-full h-1.5 rounded-full ${isMonochrome ? 'bg-gray-200' : 'bg-white/[0.06]'}`}>
-                <div
-                  className={`h-full rounded-full transition-all duration-300 ${thAccentBg}`}
-                  style={{ width: `${stickers.length > 0 ? (doneCount / stickers.length * 100) : 0}%` }}
-                />
-              </div>
-
-              <div className="grid grid-cols-4 gap-2">
-                {stickers.map((s, i) => (
-                  <div
-                    key={i}
-                    className={`rounded-lg overflow-hidden border transition-all duration-200 ${
-                      s.status === 'generating' ? `${isMonochrome ? 'border-blue-300' : 'border-[#d4af37]/50'} ring-2 ${thAccentRing}` :
-                      s.status === 'done' ? `${isMonochrome ? 'border-emerald-300' : 'border-emerald-500/40'}` :
-                      s.status === 'failed' ? 'border-red-400/40' :
-                      thBorder
-                    }`}
+                <span className="text-sm font-medium" style={{ color: t.text }}>
+                  生成进度 {doneCount}/{plan.length}
+                  {failCount > 0 && <span className="text-red-500 ml-1">({failCount}失败)</span>}
+                </span>
+                {generating ? (
+                  <button
+                    className="text-xs px-2 py-1 rounded cursor-pointer transition-colors duration-150"
+                    style={{ background: '#ef4444', color: '#fff' }}
+                    onClick={handleStop}
                   >
-                    {s.imageUrl ? (
-                      <img src={s.imageUrl} alt={s.caption} className="w-full aspect-square object-cover" />
+                    停止
+                  </button>
+                ) : (
+                  <div className="flex gap-2">
+                    {failCount > 0 && (
+                      <button
+                        className="text-xs px-2 py-1 rounded cursor-pointer transition-colors duration-150"
+                        style={{ color: t.accent, background: t.accentBg }}
+                        onClick={() => { setGenerating(true); }}
+                      >
+                        重试失败
+                      </button>
+                    )}
+                    <button
+                      className="text-xs px-2 py-1 rounded cursor-pointer transition-colors duration-150"
+                      style={{ color: t.accent, background: t.accentBg }}
+                      onClick={handleReset}
+                    >
+                      重新开始
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 max-h-[50vh] overflow-y-auto">
+                {plan.map(item => (
+                  <div
+                    key={item.id}
+                    className="relative rounded-md overflow-hidden"
+                    style={{
+                      aspectRatio: '1',
+                      background: t.cardBg,
+                      border: `1px solid ${item.status === 'failed' ? '#ef4444' : t.border}`,
+                    }}
+                  >
+                    {item.status === 'done' && item.imageUrl ? (
+                      <img
+                        src={item.imageUrl}
+                        alt={item.caption}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : item.status === 'generating' ? (
+                      <div className="w-full h-full flex flex-col items-center justify-center gap-1">
+                        <Loader2 size={18} className="animate-spin" style={{ color: t.accent }} />
+                        <span className="text-[10px]" style={{ color: t.textDim }}>生成中</span>
+                      </div>
+                    ) : item.status === 'failed' ? (
+                      <div
+                        className="w-full h-full flex flex-col items-center justify-center gap-1 cursor-pointer"
+                        onClick={() => handleRetry(item.id)}
+                      >
+                        <XCircle size={18} className="text-red-500" />
+                        <span className="text-[10px] text-red-400">点击重试</span>
+                      </div>
                     ) : (
-                      <div className={`w-full aspect-square flex items-center justify-center ${isMonochrome ? 'bg-gray-50' : 'bg-[#1a1a1a]'}`}>
-                        <StatusIcon status={s.status} />
+                      <div className="w-full h-full flex flex-col items-center justify-center">
+                        <Clock size={16} style={{ color: t.textDim }} />
                       </div>
                     )}
-                    <div className={`px-2 py-1 ${isMonochrome ? 'bg-gray-50' : 'bg-[#111]'}`}>
-                      <span className={`text-[10px] ${thTextSec}`}>{s.caption}</span>
+                    {/* 底部文案 */}
+                    <div
+                      className="absolute bottom-0 left-0 right-0 px-1 py-0.5 text-center text-[10px] truncate"
+                      style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}
+                    >
+                      {item.caption}
                     </div>
                   </div>
                 ))}
               </div>
-            </div>
-          )}
 
-          {/* Error */}
-          {error && (
-            <div className={`text-sm ${isMonochrome ? 'text-red-600 bg-red-50 border border-red-200' : 'text-red-400 bg-red-500/10 border border-red-500/20'} px-3 py-2 rounded-lg`}>
-              {error}
+              {/* 底部操作 */}
+              {!generating && doneCount > 0 && (
+                <div className="flex gap-2 pt-1">
+                  <button
+                    className="flex-1 py-2 rounded-md text-xs font-medium cursor-pointer transition-all duration-150 flex items-center justify-center gap-1"
+                    style={{ background: t.accent, color: isMonochrome ? '#fff' : '#1a1a1a' }}
+                    onClick={handleAddAllToCanvas}
+                  >
+                    <CheckCircle2 size={13} /> 添加到画布 ({doneCount})
+                  </button>
+                  <button
+                    className="py-2 px-3 rounded-md text-xs font-medium cursor-pointer transition-all duration-150 flex items-center justify-center gap-1"
+                    style={{ background: t.cardBg, color: t.textSub, border: `1px solid ${t.border}` }}
+                    onClick={handleDownloadAll}
+                  >
+                    <Download size={13} />
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
-
-        {/* ── Footer ── */}
-        <div className={`px-5 py-3.5 border-t ${thBorder} flex items-center justify-between ${isMonochrome ? 'bg-gray-50/50' : 'bg-[#141414]'}`}>
-          <div className={`text-xs ${thTextMuted}`}>
-            {step === 'config' && '输入主题后点击"生成计划"开始'}
-            {step === 'plan' && '确认计划后点击"开始生成"'}
-            {step === 'generate' && !allDone && `正在生成 ${doneCount}/${stickers.length}...`}
-            {step === 'generate' && allDone && `已完成 ${doneCount}/${stickers.length}`}
-          </div>
-          <div className="flex items-center gap-2">
-            {step !== 'config' && (
-              <button
-                onClick={handleReset}
-                className={`px-3 py-1.5 rounded-lg text-sm ${thTextMuted} ${thBgHover} transition-colors cursor-pointer`}
-              >
-                <RotateCcw className="h-3.5 w-3.5 inline mr-1" />重新开始
-              </button>
-            )}
-
-            {step === 'config' && (
-              <button
-                onClick={handlePlan}
-                disabled={isPlanning || !subject.trim()}
-                className={`px-5 py-2 rounded-lg text-sm font-bold transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${thAccentBg} ${thAccentBgText} ${thAccentBgHover}`}
-              >
-                {isPlanning ? <><Loader2 className="h-4 w-4 inline mr-1 animate-spin" />规划中...</> : <><Sparkles className="h-4 w-4 inline mr-1" />生成计划</>}
-              </button>
-            )}
-
-            {step === 'plan' && (
-              <button
-                onClick={() => { setStep('generate'); handleGenerate(); }}
-                className={`px-5 py-2 rounded-lg text-sm font-bold transition-all duration-150 cursor-pointer ${thAccentBg} ${thAccentBgText} ${thAccentBgHover}`}
-              >
-                <Sparkles className="h-4 w-4 inline mr-1" />开始生成
-              </button>
-            )}
-
-            {step === 'generate' && isGenerating && (
-              <button
-                onClick={handleStop}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-red-500/80 text-white hover:bg-red-500 transition-colors cursor-pointer"
-              >
-                停止
-              </button>
-            )}
-
-            {step === 'generate' && !isGenerating && doneCount > 0 && (
-              <button
-                onClick={handleDownload}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${thAccentBg} ${thAccentBgText} ${thAccentBgHover}`}
-              >
-                <Download className="h-4 w-4 inline mr-1" />下载全部
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
