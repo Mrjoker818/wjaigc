@@ -141,6 +141,78 @@ export async function POST(request: NextRequest) {
     if (!response.ok) {
       const error = await response.text().catch(() => '');
       console.error('Chat API error:', error);
+
+      // Fallback: if /chat/completions returns 403 and error mentions /responses,
+      // retry with OpenAI Responses API format
+      if (response.status === 403 && error.includes('/responses')) {
+        console.info('[chat] /chat/completions not allowed, retrying with /responses endpoint...');
+        try {
+          const responsesBody: Record<string, unknown> = {
+            model: requestModel,
+            input: messages,
+            stream,
+          };
+
+          const responsesRes = await fetchWithV1Retry(
+            chatBaseUrl,
+            '/responses',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${chatApiKey}`,
+              },
+              body: JSON.stringify(responsesBody),
+              signal: AbortSignal.timeout(120000),
+            }
+          );
+
+          if (!responsesRes.ok) {
+            const retryErr = await responsesRes.text().catch(() => '');
+            console.error('Chat API /responses fallback error:', retryErr);
+            return NextResponse.json({ error: `API 调用失败: ${responsesRes.status}` }, { status: responsesRes.status });
+          }
+
+          // Stream response from /responses
+          if (stream && responsesRes.body) {
+            await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: true });
+            return new NextResponse(responsesRes.body, {
+              headers: {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+              },
+            });
+          }
+
+          // Non-stream: convert Responses API output to chat/completions format
+          const respData = await responsesRes.json();
+          const outputText = Array.isArray(respData.output)
+            ? respData.output
+                .filter((o: { type: string }) => o.type === 'message')
+                .flatMap((o: { content: Array<{ text: string }> }) => o.content?.map((c: { text: string }) => c.text) || [])
+                .join('')
+            : respData.output_text || JSON.stringify(respData.output || '');
+
+          await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: false });
+          return NextResponse.json({
+            id: respData.id || `chatcmpl-${Date.now()}`,
+            object: 'chat.completion',
+            created: Math.floor(Date.now() / 1000),
+            model: requestModel,
+            choices: [{
+              index: 0,
+              message: { role: 'assistant', content: outputText },
+              finish_reason: 'stop',
+            }],
+            usage: respData.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+          });
+        } catch (fallbackErr) {
+          console.error('Chat API /responses fallback exception:', fallbackErr);
+          return NextResponse.json({ error: `API 调用失败: ${response.status}` }, { status: response.status });
+        }
+      }
+
       return NextResponse.json({ error: `API 调用失败: ${response.status}` }, { status: response.status });
     }
 
