@@ -312,7 +312,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   // - supportsMask=true: 绝大多数图像模型，蒙版作为视觉参考图 + prompt 语义描述
   // - supportsMask=false: Gemini 系列，AI 无法可靠理解蒙版语义，仅支持文字修图
   const currentModelSupportsMask = (() => {
-    if (!currentImageModel) return false;
+    if (!currentImageModel) return true; // 未选模型时默认支持蒙版（不阻止画笔使用）
     if (currentImageModel.supportsMask !== undefined) return currentImageModel.supportsMask;
     // 降级判断：默认支持（后端通用蒙版方案）
     return true;
@@ -642,8 +642,11 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    // 修正缩放：CSS显示尺寸可能 ≠ canvas内部分辨率
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
     ctx.lineWidth = brushSize;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -667,8 +670,13 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const rect = canvas.getBoundingClientRect();
+    // 修正缩放：CSS显示尺寸可能 ≠ canvas内部分辨率
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
     ctx.beginPath();
-    ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+    ctx.moveTo(x, y);
   }, [currentModelSupportsMask, autoMaskPreview]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
