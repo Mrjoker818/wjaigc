@@ -102,7 +102,10 @@ function isImageEditModel(modelId: string): boolean {
 function parseSSEToJSON(sseText: string): Record<string, unknown> {
   const lines = sseText.split('\n');
   let fullContent = '';
+  // 保留多模态内容数组（图片等非文本部件）
+  const multimodalParts: Array<Record<string, unknown>> = [];
   let lastChunk: Record<string, unknown> | null = null;
+  let hasMultimodalContent = false;
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -117,9 +120,17 @@ function parseSSEToJSON(sseText: string): Record<string, unknown> {
       }
       // 检查多模态内容（部分代理直接在 delta 中返回图片）
       if (delta?.content && Array.isArray(delta.content)) {
+        hasMultimodalContent = true;
         for (const part of delta.content) {
           if (typeof part === 'string') fullContent += part;
-          else if (typeof part === 'object' && part !== null) fullContent += JSON.stringify(part);
+          else if (typeof part === 'object' && part !== null) {
+            // 保留原始对象结构，不序列化成字符串
+            multimodalParts.push(part as Record<string, unknown>);
+            // 同时也拼接文本摘要到 fullContent 作为 fallback
+            if ('text' in part && typeof (part as Record<string, unknown>).text === 'string') {
+              fullContent += (part as Record<string, unknown>).text as string;
+            }
+          }
         }
       }
     } catch {
@@ -128,18 +139,26 @@ function parseSSEToJSON(sseText: string): Record<string, unknown> {
   }
 
   // 构建与标准 chat/completions 非流式响应一致的 JSON 结构
+  // 关键：如果有图片等多模态内容，必须保留数组结构
+  const contentValue = hasMultimodalContent && multimodalParts.length > 0
+    ? [
+        ...(fullContent ? [{ type: 'text', text: fullContent }] : []),
+        ...multimodalParts,
+      ]
+    : (fullContent || '');
+
   if (lastChunk) {
     return {
       ...lastChunk,
       choices: [{
         ...((lastChunk as Record<string, unknown>).choices as Array<Record<string, unknown>>)?.[0],
-        message: { role: 'assistant', content: fullContent || '' },
+        message: { role: 'assistant', content: contentValue },
         finish_reason: 'stop',
       }],
     };
   }
 
-  return { choices: [{ message: { role: 'assistant', content: fullContent } }] };
+  return { choices: [{ message: { role: 'assistant', content: contentValue } }] };
 }
 
 /**
