@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { findProviderForFeature, findProviderById } from '@/lib/server-api-config';
-import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { fetchWithV1Retry, getInternalApiUrl, optionalApiAuth } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
 import { executeAgentLoop, getToolsForLLM, type AgentContext, type AgentResult } from '@/lib/agent-engine';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
@@ -47,6 +47,8 @@ if (typeof setInterval !== 'undefined') {
  */
 export async function POST(request: NextRequest) {
   try {
+    await optionalApiAuth(request);
+
     const body = await request.json();
     const { image, prompt, maskDataUrl, model, providerId, maxRounds, imagePrompt } = body;
 
@@ -267,7 +269,7 @@ export async function POST(request: NextRequest) {
               // 调用放大 API
               const task = localTaskStore.get(taskId);
               if (task) localTaskStore.set(taskId, { ...task, label: '执行无损放大...' });
-              const upscaleResp = await fetch(new URL('/api/image/upscale', request.url).href, {
+              const upscaleResp = await fetch(getInternalApiUrl('/api/image/upscale'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ imageUrl: finalImageUrl, scale: step.params.scale || '2', outputFormat: 'png' }),
@@ -281,7 +283,7 @@ export async function POST(request: NextRequest) {
               // 调用去背景 API
               const task = localTaskStore.get(taskId);
               if (task) localTaskStore.set(taskId, { ...task, label: '执行移除背景...' });
-              const rbResp = await fetch(new URL('/api/image-edit', request.url).href, {
+              const rbResp = await fetch(getInternalApiUrl('/api/image-edit'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ imageUrl: finalImageUrl, action: 'removebg' }),
@@ -295,7 +297,7 @@ export async function POST(request: NextRequest) {
               // 调用 SVG 描摹 API
               const task = localTaskStore.get(taskId);
               if (task) localTaskStore.set(taskId, { ...task, label: '执行SVG描摹...' });
-              const svgResp = await fetch(new URL('/api/svg-trace', request.url).href, {
+              const svgResp = await fetch(getInternalApiUrl('/api/svg-trace'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ imageUrl: finalImageUrl, mode: step.params.mode || 'color', quality: step.params.quality || 'balanced' }),

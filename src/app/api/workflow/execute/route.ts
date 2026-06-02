@@ -9,6 +9,7 @@
  * P0升级: 串行等待执行 — 上游节点失败时跳过下游节点
  */
 import { NextRequest, NextResponse } from 'next/server';
+import { requireApiAuth } from '@/lib/api-helpers';
 import {
   topologicalSort,
   getNodeInputs,
@@ -56,6 +57,7 @@ function getFeatureForNodeType(type: NodeType): 'imageEdit' | 'chat' | 'vectoriz
 }
 
 export async function POST(request: NextRequest) {
+  await requireApiAuth(request);
   try {
     const body = await request.json();
     const { action, executionId, nodes, connections } = body;

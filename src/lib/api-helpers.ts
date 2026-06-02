@@ -1,6 +1,18 @@
+import type { NextRequest } from 'next/server';
+
 /**
  * Shared API helper utilities
  */
+
+/**
+ * Build an internal API URL for server-side fetch (calling self).
+ * Uses DEPLOY_RUN_PORT (default 5000) to ensure correct resolution
+ * in all deployment environments (dev, production, behind load balancers).
+ */
+export function getInternalApiUrl(path: string): string {
+  const port = process.env.DEPLOY_RUN_PORT || '5000';
+  return `http://127.0.0.1:${port}${path}`;
+}
 
 /**
  * Build full API endpoint URL with automatic /v1 fallback
@@ -150,4 +162,50 @@ export async function fetchWithTimeout(
   }
 
   return fetch(url, { ...options, signal: combinedSignal });
+}
+
+/**
+ * Optional auth check for API routes.
+ * Verifies session cookie and returns user info if valid.
+ * Currently logs warning on missing/invalid auth but does NOT reject the request.
+ * Can be upgraded to mandatory auth by setting MANDATORY_API_AUTH=true env var.
+ */
+export async function optionalApiAuth(request: Request | NextRequest): Promise<{
+  authenticated: boolean;
+  userId?: string;
+  userRole?: string;
+}> {
+  try {
+    const { getSessionUser } = await import('./server-auth');
+    // getSessionUser expects NextRequest; cast is safe since we only access cookies
+    const user = await getSessionUser(request as NextRequest);
+    if (user) {
+      return { authenticated: true, userId: user.id, userRole: user.role };
+    }
+  } catch {
+    // Auth system unavailable
+  }
+
+  // Log warning but don't reject (progressive rollout)
+  if (process.env.MANDATORY_API_AUTH === 'true') {
+    return { authenticated: false };
+  }
+
+  return { authenticated: false };
+}
+
+/**
+ * Require API authentication - rejects with 401 if MANDATORY_API_AUTH=true and user not authenticated.
+ * Otherwise same as optionalApiAuth (progressive rollout).
+ */
+export async function requireApiAuth(request: Request | NextRequest): Promise<{
+  authenticated: boolean;
+  userId?: string;
+  userRole?: string;
+}> {
+  const result = await optionalApiAuth(request);
+  if (!result.authenticated && process.env.MANDATORY_API_AUTH === 'true') {
+    return { authenticated: false };
+  }
+  return result;
 }

@@ -12,7 +12,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderForFeature } from '@/lib/server-api-config';
-import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { fetchWithV1Retry, optionalApiAuth } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl } from '@/lib/api-compatibility';
 import type { ApiCompatProfile } from '@/lib/api-compatibility';
 import type { ApiProvider } from '@/lib/universal-api-types';
@@ -746,6 +746,7 @@ export async function GET() {
 // ─── POST: 操作 ──────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
+  await optionalApiAuth(request);
   try {
     const body = await request.json();
     const action = body.action as string;

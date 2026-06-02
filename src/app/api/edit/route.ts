@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import sharp from 'sharp';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl, getApiProviders } from '@/lib/server-api-config';
-import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { fetchWithV1Retry, optionalApiAuth } from '@/lib/api-helpers';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { getEditTask, deleteEditTask, setEditTask, updateTaskStage, failEditTask } from '@/lib/edit-task-store';
@@ -247,6 +247,7 @@ function extractAllImagesFromResponse(responseData: Record<string, unknown>, fal
 // POST: 执行语言修图
 // ============================================================
 export async function POST(request: NextRequest) {
+  await optionalApiAuth(request);
   try {
     const {
       image,         // base64 data URL（客户端已转换）

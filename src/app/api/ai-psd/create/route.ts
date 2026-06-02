@@ -7,10 +7,13 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
-import { dbCreateTask } from '@/lib/ai-psd/storage';
+import { dbCreateTask, cleanupExpiredTasks } from '@/lib/ai-psd/storage';
 import type { AiPsdTask, GenerationMode, SceneType, StyleTag, ColorTone, LayerComplexity, OutputQuality, TextRenderMode } from '@/lib/ai-psd/types';
 
+import { requireApiAuth } from '@/lib/api-helpers';
+
 export async function POST(request: NextRequest) {
+  await requireApiAuth(request);
   try {
     const body = await request.json();
 
@@ -89,6 +92,11 @@ export async function POST(request: NextRequest) {
     // ─── 持久化 + 注册 ──────────────────────────────────
     await dbCreateTask(task);
     registerTask(taskId, 'ai-psd', 'AI PSD生成');
+
+    // ─── 惰性清理过期任务（>7天） ─────────────────────
+    cleanupExpiredTasks().catch((err: Error) => {
+      console.warn('[ai-psd] Cleanup expired tasks failed:', err.message);
+    });
 
     // ─── 异步启动任务Worker（不await，让API立即返回）──────
     import('@/lib/ai-psd/task-worker').then(({ runAiPsdTask }) => {

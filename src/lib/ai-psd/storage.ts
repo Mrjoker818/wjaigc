@@ -316,3 +316,54 @@ function rowToTask(row: Record<string, unknown>): AiPsdTask {
     updatedAt: (row.updated_at as number) || 0,
   };
 }
+
+/**
+ * P0-3: 清理过期的 AI PSD 任务数据
+ * 删除超过 maxAgeMs 的已完成/失败任务，释放数据库和磁盘空间
+ * @param maxAgeMs 最大保留时间，默认 7 天
+ * @returns 删除的任务数量
+ */
+export async function cleanupExpiredTasks(maxAgeMs: number = 7 * 24 * 60 * 60 * 1000): Promise<number> {
+  const cutoffTime = Date.now() - maxAgeMs;
+
+  try {
+    // 先查询将要删除的任务的文件路径（用于清理文件）
+    const { rows } = await execSql(
+      `SELECT id, preview_url, psd_url, zip_url, json_url, report_url
+       FROM ai_psd_tasks
+       WHERE status IN ('completed', 'failed', 'cancelled')
+         AND created_at < $1`,
+      [cutoffTime]
+    );
+
+    if (rows.length === 0) return 0;
+
+    // 删除数据库记录
+    const result = await execSql(
+      `DELETE FROM ai_psd_tasks
+       WHERE status IN ('completed', 'failed', 'cancelled')
+         AND created_at < $1`,
+      [cutoffTime]
+    );
+
+    // 清理磁盘文件（异步，不阻塞）
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    const projectRoot = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
+
+    for (const row of rows) {
+      const taskDir = path.join(projectRoot, 'public', 'ai-psd', row.id as string);
+      try {
+        await fs.rm(taskDir, { recursive: true, force: true });
+      } catch {
+        // 目录可能已不存在，忽略
+      }
+    }
+
+    console.log(`[ai-psd-storage] Cleaned up ${result.rowCount} expired tasks (older than ${Math.round(maxAgeMs / 86400000)} days)`);
+    return result.rowCount;
+  } catch (error) {
+    console.error('[ai-psd-storage] Cleanup failed:', error);
+    return 0;
+  }
+}

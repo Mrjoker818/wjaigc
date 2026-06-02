@@ -3,6 +3,7 @@ import sharp from 'sharp';
 import { execFile } from 'child_process';
 import { unlink, mkdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
+import { getInternalApiUrl } from '@/lib/api-helpers';
 import path from 'path';
 import { getServerDataRoot, saveImageFile } from '@/lib/server-data-root';
 import { uploadImageToS3, isS3Available } from '@/lib/s3-storage';
@@ -1253,7 +1254,7 @@ async function saveResult(
 async function tryDesignVectorizeFallback(req: NextRequest, imageUrl: string, mode: TraceMode): Promise<NextResponse | null> {
   try {
     const fallbackMode = mode === 'bw' ? 'line-art' : 'logo';
-    const res = await fetch(new URL('/api/design/vectorize', req.url), {
+    const res = await fetch(getInternalApiUrl('/api/design/vectorize'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') || '' },
       body: JSON.stringify({ imageUrl, mode: fallbackMode, layerId: `svg-trace-${Date.now()}` }),

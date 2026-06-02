@@ -98,6 +98,7 @@ function CanvasApp() {
   // The "current" state is always historyStack[historyIndex].
   // After a normal edit: push new state, advance index.
   // After undo: just decrement index and apply.
+  const MAX_UNDO_STEPS = 100;
   const historyStackRef = useRef<CanvasImage[][]>([]);
   const historyIndexRef = useRef<number>(-1);
 
@@ -117,6 +118,13 @@ function CanvasApp() {
       // Push current state
       historyStackRef.current.push(currentSnapshot);
       historyIndexRef.current = historyStackRef.current.length - 1;
+
+      // Evict oldest entries when exceeding the limit
+      if (historyStackRef.current.length > MAX_UNDO_STEPS) {
+        const excess = historyStackRef.current.length - MAX_UNDO_STEPS;
+        historyStackRef.current = historyStackRef.current.slice(excess);
+        historyIndexRef.current = historyStackRef.current.length - 1;
+      }
 
       // Apply the change
       const next = typeof action === 'function' ? action(prev) : action;
