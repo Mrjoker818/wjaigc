@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { findProviderForFeature, findProviderById } from '@/lib/server-api-config';
-import { fetchWithV1Retry, getInternalApiUrl, optionalApiAuth } from '@/lib/api-helpers';
+import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
+import { optionalApiAuth } from '@/lib/api-auth';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
 import { executeAgentLoop, getToolsForLLM, type AgentContext, type AgentResult } from '@/lib/agent-engine';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';

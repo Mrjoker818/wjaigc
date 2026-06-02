@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderById, findProviderForFeature, findAllProvidersForType, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
-import { fetchWithV1Retry, optionalApiAuth } from '@/lib/api-helpers';
+import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { optionalApiAuth } from '@/lib/api-auth';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { translateApiError } from '@/lib/api-error-translate';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, convertAspectRatioToSize, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, type ApiCompatProfile, type ImageEndpoint } from '@/lib/api-compatibility';

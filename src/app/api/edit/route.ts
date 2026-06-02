@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import sharp from 'sharp';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl, getApiProviders } from '@/lib/server-api-config';
-import { fetchWithV1Retry, optionalApiAuth } from '@/lib/api-helpers';
+import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { optionalApiAuth } from '@/lib/api-auth';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { getEditTask, deleteEditTask, setEditTask, updateTaskStage, failEditTask } from '@/lib/edit-task-store';

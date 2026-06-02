@@ -10,7 +10,7 @@ import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { dbCreateTask, cleanupExpiredTasks } from '@/lib/ai-psd/storage';
 import type { AiPsdTask, GenerationMode, SceneType, StyleTag, ColorTone, LayerComplexity, OutputQuality, TextRenderMode } from '@/lib/ai-psd/types';
 
-import { requireApiAuth } from '@/lib/api-helpers';
+import { requireApiAuth } from '@/lib/api-auth';
 
 export async function POST(request: NextRequest) {
   await requireApiAuth(request);

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
-import { fetchWithV1Retry, optionalApiAuth } from '@/lib/api-helpers';
+import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { optionalApiAuth } from '@/lib/api-auth';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 
 export const maxDuration = 60;

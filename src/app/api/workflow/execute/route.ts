@@ -9,7 +9,8 @@
  * P0升级: 串行等待执行 — 上游节点失败时跳过下游节点
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { requireApiAuth, getInternalApiUrl } from '@/lib/api-helpers';
+import { getInternalApiUrl } from '@/lib/api-helpers';
+import { requireApiAuth } from '@/lib/api-auth';
 import {
   topologicalSort,
   getNodeInputs,
