@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { User, Project, UsageStats } from '@/lib/user-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
+import { APP_VERSION_LABEL } from '@/config/app-meta';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -345,7 +346,7 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
 
             {/* 版本号 */}
             <div className="relative z-10">
-              <p className="text-xs text-muted-foreground/50 font-mono">v2.9.0</p>
+              <p className="text-xs text-muted-foreground/50 font-mono">{APP_VERSION_LABEL}</p>
             </div>
           </div>
 
