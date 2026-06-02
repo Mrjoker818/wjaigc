@@ -79,6 +79,7 @@ export function registerTask(taskId: string, type: TaskType, label?: string): Ta
     updatedAt: Date.now(),
   };
   taskRegistry.set(taskId, task);
+  evictOldestTerminalTasks();
   emitEvent('created', task);
   return task;
 }
@@ -253,10 +254,32 @@ export function getActiveTaskCount(userId: string): number {
 
 // ─── 清理 ──────────────────────────────────────────────────────────────
 
+const MAX_TASKS = 500;
+
+/** 淘汰最老的终态任务，确保 registry 不超过上限 */
+function evictOldestTerminalTasks(): void {
+  if (taskRegistry.size <= MAX_TASKS) return;
+  const ACTIVE_STATUSES: TaskStatus[] = ['pending', 'processing', 'queued'];
+  // 按 updatedAt 升序排列终态任务，优先淘汰最老的
+  const terminalEntries: [string, TaskInfo][] = [];
+  for (const [id, task] of taskRegistry) {
+    if (!ACTIVE_STATUSES.includes(task.status)) {
+      terminalEntries.push([id, task]);
+    }
+  }
+  terminalEntries.sort((a, b) => a[1].updatedAt - b[1].updatedAt);
+  const excess = taskRegistry.size - MAX_TASKS;
+  for (let i = 0; i < Math.min(excess, terminalEntries.length); i++) {
+    const id = terminalEntries[i][0];
+    taskRegistry.delete(id);
+    cancelledTasks.delete(id);
+  }
+}
+
 // 定期清理过期任务（>30分钟）
 // ★ 只清理终态任务（completed/failed/cancelled），避免误删仍在处理的任务
 if (typeof setInterval !== 'undefined') {
-  setInterval(() => {
+  const cleanupTimer = setInterval(() => {
     const now = Date.now();
     const THIRTY_MIN = 30 * 60 * 1000;
     const ACTIVE_STATUSES: TaskStatus[] = ['pending', 'processing', 'queued'];
@@ -275,5 +298,11 @@ if (typeof setInterval !== 'undefined') {
         }
       }
     }
+    // 淘汰超出上限的旧任务
+    evictOldestTerminalTasks();
   }, 5 * 60 * 1000);
+  // 不阻止进程退出
+  if (cleanupTimer && typeof cleanupTimer === 'object' && 'unref' in cleanupTimer) {
+    cleanupTimer.unref();
+  }
 }

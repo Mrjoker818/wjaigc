@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { findProviderForModel, getPublicModels } from '@/lib/server-api-config';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl } from '@/lib/api-compatibility';
-import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 import sharp from 'sharp';
 
@@ -27,12 +27,39 @@ export function getBrandResult(taskId: string): Record<string, unknown> | undefi
   return r;
 }
 
+// 定期清理过期结果 + 上限保护
+const MAX_BRAND_RESULTS = 200;
+if (typeof setInterval !== 'undefined') {
+  const brandCleanupTimer = setInterval(() => {
+    const store = getBrandResultStore();
+    const now = Date.now();
+    const THIRTY_MIN = 30 * 60 * 1000;
+    for (const [id, r] of store) {
+      if (now - ((r as Record<string, unknown>)._cachedAt as number) > THIRTY_MIN) {
+        store.delete(id);
+      }
+    }
+    // 超上限时淘汰最老
+    if (store.size > MAX_BRAND_RESULTS) {
+      const entries = Array.from(store.entries())
+        .sort((a, b) => ((a[1] as Record<string, unknown>)._cachedAt as number) - ((b[1] as Record<string, unknown>)._cachedAt as number));
+      const excess = store.size - MAX_BRAND_RESULTS;
+      for (let i = 0; i < excess; i++) {
+        store.delete(entries[i][0]);
+      }
+    }
+  }, 5 * 60 * 1000);
+  if (brandCleanupTimer && typeof brandCleanupTimer === 'object' && 'unref' in brandCleanupTimer) {
+    brandCleanupTimer.unref();
+  }
+}
+
 // ─── Persist result image to local server ────
 async function persistResultImage(imageUrl: string): Promise<string> {
   try {
     if (imageUrl.startsWith('/api/serve-upload/') || imageUrl.startsWith('/uploads/')) return imageUrl;
     if (imageUrl.startsWith('data:')) {
-      const resp = await fetch('http://localhost:5000/api/save-image', {
+      const resp = await fetch(getInternalApiUrl('/api/save-image'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageUrl }),
@@ -49,7 +76,7 @@ async function persistResultImage(imageUrl: string): Promise<string> {
         const contentType = imgResp.headers.get('content-type') || 'image/png';
         const buffer = Buffer.from(await imgResp.arrayBuffer());
         const base64 = `data:${contentType};base64,${buffer.toString('base64')}`;
-        const resp = await fetch('http://localhost:5000/api/save-image', {
+        const resp = await fetch(getInternalApiUrl('/api/save-image'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ imageUrl: base64 }),
@@ -91,7 +118,7 @@ async function generateProductMask(productImageUrl: string): Promise<ProductMask
       // Read the mask image
       let maskFetchUrl = result.maskUrl;
       if (maskFetchUrl.startsWith('/api/serve-upload/')) {
-        maskFetchUrl = `http://localhost:5000${maskFetchUrl}`;
+        maskFetchUrl = getInternalApiUrl(maskFetchUrl);
       }
       const maskResp = await fetch(maskFetchUrl, { signal: AbortSignal.timeout(30000) });
       if (maskResp.ok) {
@@ -126,7 +153,7 @@ async function generateSimpleMask(imageUrl: string): Promise<ProductMaskResult |
       if (!resp.ok) return null;
       imageBuffer = Buffer.from(await resp.arrayBuffer());
     } else if (imageUrl.startsWith('/api/serve-upload/')) {
-      const resp = await fetch(`http://localhost:5000${imageUrl}`, { signal: AbortSignal.timeout(30000) });
+      const resp = await fetch(getInternalApiUrl(imageUrl), { signal: AbortSignal.timeout(30000) });
       if (!resp.ok) return null;
       imageBuffer = Buffer.from(await resp.arrayBuffer());
     } else {
@@ -173,7 +200,7 @@ async function loadImageBuffer(imageUrl: string): Promise<Buffer | null> {
       return Buffer.from(await resp.arrayBuffer());
     }
     if (imageUrl.startsWith('/api/serve-upload/')) {
-      const resp = await fetch(`http://localhost:5000${imageUrl}`, { signal: AbortSignal.timeout(30000) });
+      const resp = await fetch(getInternalApiUrl(imageUrl), { signal: AbortSignal.timeout(30000) });
       if (!resp.ok) return null;
       return Buffer.from(await resp.arrayBuffer());
     }

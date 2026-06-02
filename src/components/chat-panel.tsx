@@ -2676,6 +2676,10 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
             } else {
               updated = [...prev, agent];
             }
+            // 限制最大30个自定义智能体，超出时移除最老的
+            if (updated.length > 30) {
+              updated = updated.slice(updated.length - 30);
+            }
             localStorage.setItem('custom-agents', JSON.stringify(updated));
             return updated;
           });

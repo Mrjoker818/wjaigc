@@ -20,6 +20,7 @@ import { dbGetUserData, dbSetUserData } from '@/lib/db-storage';
 
 // ─── 内存项目存储 ────────────────────────────────────────────────────
 const BRAND_PROJECTS_KEY = 'brand_factory_projects';
+const MAX_PROJECTS = 500;
 const projectsStore = new Map<string, Record<string, unknown>>();
 
 /** 获取所有项目（内存 → 数据库） */
@@ -40,10 +41,24 @@ async function loadProjects(): Promise<Record<string, unknown>[]> {
   return Array.from(projectsStore.values());
 }
 
-/** 持久化所有项目到数据库 */
+/** 持久化所有项目到数据库（LRU淘汰超上限项目） */
 async function persistProjects(): Promise<void> {
   try {
-    const projects = Array.from(projectsStore.values());
+    let projects = Array.from(projectsStore.values());
+    // LRU淘汰：超过上限时按 updatedAt 排序，移除最老的项目
+    if (projects.length > MAX_PROJECTS) {
+      projects.sort((a, b) => {
+        const ta = (a.updatedAt as number) || (a.createdAt as number) || 0;
+        const tb = (b.updatedAt as number) || (b.createdAt as number) || 0;
+        return ta - tb;
+      });
+      const toRemove = projects.slice(0, projects.length - MAX_PROJECTS);
+      for (const p of toRemove) {
+        const id = (p.id as string) || '';
+        if (id) projectsStore.delete(id);
+      }
+      projects = projects.slice(projects.length - MAX_PROJECTS);
+    }
     await dbSetUserData('__system__', BRAND_PROJECTS_KEY, { projects });
   } catch (e) {
     console.error('[brand-factory] persist error:', e);

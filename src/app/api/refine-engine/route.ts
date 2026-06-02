@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, getPublicModels, getPublicApiProviders } from '@/lib/server-api-config';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, isEditsEndpointRejected, stripEditsOnlyFields } from '@/lib/api-compatibility';
-import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { translateApiError } from '@/lib/api-error-translate';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 
@@ -13,7 +13,7 @@ async function persistResultImage(imageUrl: string): Promise<string> {
       return imageUrl;
     }
     if (imageUrl.startsWith('data:')) {
-      const resp = await fetch('http://localhost:5000/api/save-image', {
+      const resp = await fetch(getInternalApiUrl('/api/save-image'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageUrl }),
@@ -30,7 +30,7 @@ async function persistResultImage(imageUrl: string): Promise<string> {
         const contentType = imgResp.headers.get('content-type') || 'image/png';
         const buffer = Buffer.from(await imgResp.arrayBuffer());
         const base64 = `data:${contentType};base64,${buffer.toString('base64')}`;
-        const resp = await fetch('http://localhost:5000/api/save-image', {
+        const resp = await fetch(getInternalApiUrl('/api/save-image'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ imageUrl: base64 }),
@@ -65,6 +65,33 @@ function setRefineResult(taskId: string, result: RefineResult) {
 }
 export function getRefineResult(taskId: string): RefineResult | undefined {
   return getGlobalRefineResults().get(taskId);
+}
+
+// 定期清理过期结果 + 上限保护
+const MAX_REFINE_RESULTS = 200;
+const REFINE_RESULT_TTL = 30 * 60 * 1000; // 30分钟
+if (typeof setInterval !== 'undefined') {
+  const refineCleanupTimer = setInterval(() => {
+    const store = getGlobalRefineResults();
+    const now = Date.now();
+    for (const [id, r] of store) {
+      if (now - r.completedAt > REFINE_RESULT_TTL) {
+        store.delete(id);
+      }
+    }
+    // 超上限时淘汰最老
+    if (store.size > MAX_REFINE_RESULTS) {
+      const entries = Array.from(store.entries())
+        .sort((a, b) => a[1].completedAt - b[1].completedAt);
+      const excess = store.size - MAX_REFINE_RESULTS;
+      for (let i = 0; i < excess; i++) {
+        store.delete(entries[i][0]);
+      }
+    }
+  }, 5 * 60 * 1000);
+  if (refineCleanupTimer && typeof refineCleanupTimer === 'object' && 'unref' in refineCleanupTimer) {
+    refineCleanupTimer.unref();
+  }
 }
 
 // ─── Material Library ───

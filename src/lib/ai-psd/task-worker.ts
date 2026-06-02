@@ -103,9 +103,16 @@ async function advanceTask(
   extra?: Partial<Pick<AiPsdTask, 'currentStep' | 'currentLayerName' | 'previewUrl' | 'psdUrl' | 'zipUrl' | 'jsonUrl' | 'reportUrl' | 'errorMessage' | 'layerPlan'>>,
 ) {
   await dbUpdateTaskStatus(taskId, status, progress, extra);
-  // 同步推送到 SSE (task-registry)
+  // 同步推送到 SSE (task-registry) — 映射 ai-psd 状态到 task-registry 状态
+  const statusMap: Record<string, import('@/lib/task-registry').TaskStatus> = {
+    idle: 'pending', uploading: 'processing', queued: 'queued',
+    planning: 'processing', preview_generating: 'processing',
+    layer_generating: 'processing', text_building: 'processing',
+    psd_exporting: 'processing', packaging: 'processing',
+    success: 'completed', failed: 'failed', cancelled: 'cancelled',
+  };
   updateTaskProgress(taskId, {
-    status: status === 'success' ? 'completed' : status as any,
+    status: statusMap[status] || 'processing',
     progress,
     label: extra?.currentStep || '',
   });

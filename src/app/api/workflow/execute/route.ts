@@ -9,7 +9,7 @@
  * P0升级: 串行等待执行 — 上游节点失败时跳过下游节点
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { requireApiAuth } from '@/lib/api-helpers';
+import { requireApiAuth, getInternalApiUrl } from '@/lib/api-helpers';
 import {
   topologicalSort,
   getNodeInputs,
@@ -34,7 +34,7 @@ const executionCache = new Map<string, {
 
 // 30分钟后自动清理
 const CLEANUP_MS = 30 * 60 * 1000;
-setInterval(() => {
+const wfCleanupTimer = setInterval(() => {
   const now = Date.now();
   for (const [key, val] of executionCache) {
     if (val.completedAt && now - val.completedAt > CLEANUP_MS) {
@@ -42,6 +42,9 @@ setInterval(() => {
     }
   }
 }, 5 * 60 * 1000);
+if (wfCleanupTimer && typeof wfCleanupTimer === 'object' && 'unref' in wfCleanupTimer) {
+  wfCleanupTimer.unref();
+}
 
 /**
  * 节点类型 → 所需API功能映射
@@ -647,7 +650,7 @@ async function executeAsyncTask(
     for (const rawUrl of allUrls) {
       if (rawUrl.startsWith('data:') || rawUrl.startsWith('http')) {
         try {
-          const saveResp = await fetch(`${process.env.DEPLOY_RUN_PORT ? `http://localhost:${process.env.DEPLOY_RUN_PORT}` : 'http://localhost:5000'}/api/save-image`, {
+          const saveResp = await fetch(getInternalApiUrl('/api/save-image'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ imageUrl: rawUrl }),

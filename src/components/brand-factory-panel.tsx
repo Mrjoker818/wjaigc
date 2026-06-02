@@ -425,10 +425,18 @@ interface BrandFactoryPanelProps {
 
 export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome = false }: BrandFactoryPanelProps) {
   // === Panel drag state ===
-  const [panelPos, setPanelPos] = useState({ x: typeof window !== 'undefined' ? (window.innerWidth - 960) / 2 : 0, y: typeof window !== 'undefined' ? Math.max(20, (window.innerHeight - Math.min(window.innerHeight * 0.85, 700)) / 2) : 20 });
+  const [panelPos, setPanelPos] = useState({ x: 0, y: 20 });
   const [isDragging, setIsDragging] = useState(false);
   const dragOffset = useRef({ x: 0, y: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
+
+  // 客户端挂载后设置初始居中位置（避免 Hydration 不匹配）
+  useEffect(() => {
+    setPanelPos({
+      x: Math.max(0, (window.innerWidth - 960) / 2),
+      y: Math.max(20, (window.innerHeight - Math.min(window.innerHeight * 0.85, 700)) / 2),
+    });
+  }, []);
 
   // === Core state ===
   const [activeTab, setActiveTab] = useState('projects');

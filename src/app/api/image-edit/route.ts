@@ -1365,7 +1365,7 @@ export async function POST(request: NextRequest) {
     } = body;
 
     // 防御性处理：确保 model 是字符串（前端可能误传对象）
-    const modelStr = typeof rawModel === 'string' ? rawModel : (rawModel as any)?.model || String(rawModel);
+    const modelStr = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel);
 
     // Content safety check (for actions that accept prompt input)
     if (prompt && typeof prompt === 'string') {
