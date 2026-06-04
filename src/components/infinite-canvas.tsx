@@ -496,6 +496,13 @@ export function InfiniteCanvas({
     hoverToolbarTimerRef.current = setTimeout(() => setHoverToolbarImageId(null), 300);
   }, []);
 
+  /** 对比模式：选中第一张图后点击第二张进行叠加滑块对比 */
+  const [compareFirstImageId, setCompareFirstImageId] = useState<string | null>(null);
+  const [compareActive, setCompareActive] = useState(false);
+  const [compareSliderPos, setCompareSliderPos] = useState(50); // 百分比 0-100
+  const compareDraggingRef = useRef(false);
+  const compareFirstImage = compareFirstImageId ? images.find(img => img.id === compareFirstImageId) : null;
+
   // Agent editor state
   const [showAgentEditor, setShowAgentEditor] = useState(false);
   const [agentEditImage, setAgentEditImage] = useState<CanvasImage | null>(null);
@@ -6819,6 +6826,13 @@ export function InfiniteCanvas({
                       title="语言修图"
                     >
                       <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      className={`p-1 rounded transition-colors ${isMonochrome ? 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-200' : 'bg-[#1a1a1a] hover:bg-[#2a2a2a] text-white/80 border border-white/10'}`}
+                      onClick={(e) => { e.stopPropagation(); setCompareImages({ left: image, right: null }); setCompareSelecting(true); hideHoverToolbar(); }}
+                      title="图片对比"
+                    >
+                      <Contrast className="h-3.5 w-3.5" />
                     </button>
                     <button
                       className={`p-1 rounded transition-colors ${isMonochrome ? 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-200' : 'bg-[#1a1a1a] hover:bg-[#2a2a2a] text-white/80 border border-white/10'}`}
