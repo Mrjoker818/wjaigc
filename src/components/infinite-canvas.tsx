@@ -19,6 +19,7 @@ function findClosestStandardRatio(w: number, h: number): string {
 }
 
 import React, { useState, useRef, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Plus, Trash2, Copy, Download, Image as ImageIcon,
   Move, ZoomIn, ZoomOut, Maximize2, Hand, Info,
@@ -6560,7 +6561,7 @@ export function InfiniteCanvas({
                   if (visionPromptEnabled && editMode === 'none') {
                     setVisionHoverImage(image);
                   }
-                  if (editMode === 'none' && !dragTarget && !resizingImage) {
+                  if (editMode === 'none' && !dragTarget && !resizingImage && !compareSelecting) {
                     keepHoverToolbar(image.id);
                   }
                 }}
@@ -6813,7 +6814,7 @@ export function InfiniteCanvas({
                   </div>
                 )}
                 {/* Hover toolbar - quick actions on image hover */}
-                {hoverToolbarImageId === image.id && editMode === 'none' && !dragTarget && !resizingImage && (
+                {hoverToolbarImageId === image.id && editMode === 'none' && !dragTarget && !resizingImage && !compareSelecting && (
                   <div
                     className="absolute -top-9 left-1/2 -translate-x-1/2 z-50 flex items-center gap-0.5 px-1 py-0.5 rounded-lg shadow-lg"
                     style={{ fontSize: `${Math.max(10, 12 / zoom)}px` }}
@@ -6823,6 +6824,7 @@ export function InfiniteCanvas({
                     <button
                       className={`p-1 rounded transition-colors ${isMonochrome ? 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-200' : 'bg-[#1a1a1a] hover:bg-[#2a2a2a] text-white/80 border border-white/10'}`}
                       onClick={(e) => { e.stopPropagation(); selectImage(image.id); onEditImage?.(image); hideHoverToolbar(); }}
+                      onMouseDown={(e) => e.stopPropagation()}
                       title="语言修图"
                     >
                       <Pencil className="h-3.5 w-3.5" />
@@ -6830,6 +6832,7 @@ export function InfiniteCanvas({
                     <button
                       className={`p-1 rounded transition-colors ${isMonochrome ? 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-200' : 'bg-[#1a1a1a] hover:bg-[#2a2a2a] text-white/80 border border-white/10'}`}
                       onClick={(e) => { e.stopPropagation(); setCompareImages({ left: image, right: null }); setCompareSelecting(true); hideHoverToolbar(); }}
+                      onMouseDown={(e) => e.stopPropagation()}
                       title="图片对比"
                     >
                       <Contrast className="h-3.5 w-3.5" />
@@ -6837,6 +6840,7 @@ export function InfiniteCanvas({
                     <button
                       className={`p-1 rounded transition-colors ${isMonochrome ? 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-200' : 'bg-[#1a1a1a] hover:bg-[#2a2a2a] text-white/80 border border-white/10'}`}
                       onClick={(e) => { e.stopPropagation(); handleDownloadImage(image); hideHoverToolbar(); }}
+                      onMouseDown={(e) => e.stopPropagation()}
                       title="下载"
                     >
                       <Download className="h-3.5 w-3.5" />
@@ -6844,6 +6848,7 @@ export function InfiniteCanvas({
                     <button
                       className={`p-1 rounded transition-colors ${isMonochrome ? 'bg-white hover:bg-red-50 text-red-500 border border-gray-200' : 'bg-[#1a1a1a] hover:bg-red-900/30 text-white/80 hover:text-red-400 border border-white/10'}`}
                       onClick={(e) => { e.stopPropagation(); onImagesChange(images.filter(i => i.id !== image.id)); hideHoverToolbar(); }}
+                      onMouseDown={(e) => e.stopPropagation()}
                       title="删除"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -9675,7 +9680,7 @@ export function InfiniteCanvas({
         )}
 
         {/* ====== IMAGE COMPARE DIALOG ====== */}
-        {showCompareDialog && compareImages.left && compareImages.right && (
+        {showCompareDialog && compareImages.left && compareImages.right && createPortal(
           <Suspense fallback={null}>
             <ImageCompareDialog
               leftImage={{ url: compareImages.left.url, prompt: compareImages.left.prompt, modelName: compareImages.left.modelName }}
@@ -9683,7 +9688,8 @@ export function InfiniteCanvas({
               isMonochrome={isMonochrome}
               onClose={() => { setShowCompareDialog(false); setCompareImages({ left: null, right: null }); }}
             />
-          </Suspense>
+          </Suspense>,
+          document.body
         )}
 
         {/* ====== BRAND E-COMMERCE PANEL ====== */}
