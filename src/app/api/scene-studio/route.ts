@@ -1,43 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { writeFile, readFile, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
 import path from 'path';
+import fs from 'fs';
 
-const SCENES_DIR = path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'scene-studio-data');
+const DATA_DIR = path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'scene-studio-data');
 
-async function ensureDir() {
-  if (!existsSync(SCENES_DIR)) {
-    await mkdir(SCENES_DIR, { recursive: true });
+function ensureDir() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
   }
 }
 
-// GET: list scenes / get single scene
+// GET: list scenes or get single scene
 export async function GET(request: NextRequest) {
   try {
+    ensureDir();
     const { searchParams } = new URL(request.url);
     const sceneId = searchParams.get('sceneId');
 
-    await ensureDir();
-
     if (sceneId) {
-      const filePath = path.join(SCENES_DIR, `${sceneId}.json`);
-      if (!existsSync(filePath)) {
+      // Get specific scene
+      const filePath = path.join(DATA_DIR, `${sceneId}.json`);
+      if (!fs.existsSync(filePath)) {
         return NextResponse.json({ error: 'Scene not found' }, { status: 404 });
       }
-      const data = await readFile(filePath, 'utf-8');
-      return NextResponse.json(JSON.parse(data));
+      const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      return NextResponse.json(data);
     }
 
-    const fs = await import('fs/promises');
-    const files = await fs.readdir(SCENES_DIR);
-    const scenes = [];
-    for (const file of files) {
-      if (file.endsWith('.json')) {
-        const data = await readFile(path.join(SCENES_DIR, file), 'utf-8');
-        const scene = JSON.parse(data);
-        scenes.push({ id: scene.id, name: scene.name, updatedAt: scene.updatedAt });
+    // List all scenes
+    const files = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
+    const scenes = files.map(f => {
+      try {
+        const data = JSON.parse(fs.readFileSync(path.join(DATA_DIR, f), 'utf-8'));
+        return {
+          id: data.id || f.replace('.json', ''),
+          name: data.name || 'Unnamed',
+          updatedAt: data.updatedAt || data.timestamp,
+        };
+      } catch {
+        return { id: f.replace('.json', ''), name: 'Corrupted', updatedAt: null };
       }
-    }
+    }).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
     return NextResponse.json({ scenes });
   } catch (error) {
     console.error('[SceneStudio] GET error:', error);
@@ -45,49 +49,52 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST: save scene / save screenshot / delete scene
+// POST: save/delete scene or screenshot
 export async function POST(request: NextRequest) {
   try {
+    ensureDir();
     const body = await request.json();
-    const { action, sceneId, sceneData, screenshotData } = body;
-
-    await ensureDir();
+    const { action } = body;
 
     if (action === 'save') {
-      const id = sceneId || `scene_${Date.now()}`;
-      const scene = {
-        id,
+      const { sceneData } = body;
+      const sceneId = sceneData?.id || `scene_${Date.now()}`;
+      const filePath = path.join(DATA_DIR, `${sceneId}.json`);
+      const data = {
+        id: sceneId,
         ...sceneData,
-        updatedAt: new Date().toISOString(),
-        createdAt: sceneData?.createdAt || new Date().toISOString(),
+        updatedAt: Date.now(),
       };
-      const filePath = path.join(SCENES_DIR, `${id}.json`);
-      await writeFile(filePath, JSON.stringify(scene, null, 2));
-      return NextResponse.json({ success: true, sceneId: id });
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+      return NextResponse.json({ success: true, sceneId });
     }
 
     if (action === 'saveScreenshot') {
-      const id = sceneId || `scene_${Date.now()}`;
-      if (screenshotData) {
-        const base64Data = screenshotData.replace(/^data:image\/png;base64,/, '');
-        const buffer = Buffer.from(base64Data, 'base64');
-        const filePath = path.join(SCENES_DIR, `${id}_preview.png`);
-        await writeFile(filePath, buffer);
-        return NextResponse.json({ success: true, previewPath: `/api/scene-studio/preview/${id}` });
+      const { sceneId, screenshotData } = body;
+      if (!sceneId || !screenshotData) {
+        return NextResponse.json({ error: 'Missing sceneId or screenshotData' }, { status: 400 });
       }
-      return NextResponse.json({ error: 'Missing screenshot data' }, { status: 400 });
+
+      // Save screenshot as base64 data URL in the scene JSON
+      const filePath = path.join(DATA_DIR, `${sceneId}.json`);
+      if (!fs.existsSync(filePath)) {
+        return NextResponse.json({ error: 'Scene not found' }, { status: 404 });
+      }
+      const sceneData = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      sceneData.screenshot = screenshotData;
+      sceneData.updatedAt = Date.now();
+      fs.writeFileSync(filePath, JSON.stringify(sceneData, null, 2));
+      return NextResponse.json({ success: true });
     }
 
     if (action === 'delete') {
-      const filePath = path.join(SCENES_DIR, `${sceneId}.json`);
-      if (existsSync(filePath)) {
-        const { unlink } = await import('fs/promises');
-        await unlink(filePath);
+      const { sceneId } = body;
+      if (!sceneId) {
+        return NextResponse.json({ error: 'Missing sceneId' }, { status: 400 });
       }
-      const previewPath = path.join(SCENES_DIR, `${sceneId}_preview.png`);
-      if (existsSync(previewPath)) {
-        const { unlink } = await import('fs/promises');
-        await unlink(previewPath);
+      const filePath = path.join(DATA_DIR, `${sceneId}.json`);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
       }
       return NextResponse.json({ success: true });
     }

@@ -4,18 +4,23 @@ import { NextRequest, NextResponse } from 'next/server';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { mode, prompt, negativePrompt, screenshotData, structureStrength, styleStrength, aspectRatio, model } = body;
+    const { mode, prompt, negativePrompt, screenshotData, structureStrength, aspectRatio, imageCount, model } = body;
 
     if (!prompt && mode !== 'text_to_image') {
       return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
     }
 
     // Find the best available API provider for image generation
-    // 'imageEdit' type providers support image-to-image; fall back to any provider
-    const { findProviderForFeature } = await import('@/lib/server-api-config');
-    let provider = await findProviderForFeature('imageEdit');
+    const { findProviderForFeature, getApiProviders } = await import('@/lib/server-api-config');
+    let provider: Awaited<ReturnType<typeof findProviderForFeature>> = await findProviderForFeature('imageEdit');
     if (!provider) {
       provider = await findProviderForFeature('3d');
+    }
+    if (!provider) {
+      // Try any image model provider as last resort
+      const allProviders = await getApiProviders();
+      const imageProvider = allProviders.find(p => p.modelType === 'image' && p.selectedModels && p.selectedModels.length > 0);
+      if (imageProvider) provider = imageProvider;
     }
     if (!provider) {
       return NextResponse.json({ error: 'No image generation API configured. Please add one in admin panel.' }, { status: 400 });
@@ -38,12 +43,21 @@ export async function POST(request: NextRequest) {
     // Prepare the API request
     const { resolveCompatProfile, adjustRequestForProfile } = await import('@/lib/api-compatibility');
     const compatProfile = resolveCompatProfile(provider);
-    const size = aspectRatio === '1:1' ? '1024x1024' : aspectRatio === '9:16' ? '768x1344' : '1344x768';
+
+    // Calculate size based on aspect ratio
+    let size = '1344x768'; // default 16:9 landscape
+    if (aspectRatio === '1:1') size = '1024x1024';
+    else if (aspectRatio === '9:16') size = '768x1344';
+    else if (aspectRatio === '4:3') size = '1152x896';
+    else if (aspectRatio === '3:4') size = '896x1152';
+    else if (aspectRatio === '16:9') size = '1344x768';
+
+    const n = imageCount || 1;
 
     const requestBody: Record<string, unknown> = {
-      model: model || provider.selectedModels?.[0] || 'dall-e-3',
+      model: model || (provider.selectedModels && provider.selectedModels.length > 0 ? provider.selectedModels[0] : 'dall-e-3'),
       prompt: enhancedPrompt,
-      n: 1,
+      n,
       size,
     };
 
@@ -67,14 +81,20 @@ export async function POST(request: NextRequest) {
 
     // Determine endpoint path from compat profile
     const endpointPath = endpoint === '/images/edits' ? '/images/edits' : '/images/generations';
-    const response = await fetchWithV1Retry(baseUrl, endpointPath, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+    const response = await fetchWithV1Retry(
+      baseUrl,
+      endpointPath,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(finalBody),
       },
-      body: JSON.stringify(finalBody),
-    });
+      true,
+      300000
+    );
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -83,7 +103,22 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await response.json();
-    return NextResponse.json({ success: true, result });
+
+    // Try to handle async task responses (e.g., apimart)
+    const { parseResponseForProfile } = await import('@/lib/api-compatibility');
+    const parsed = parseResponseForProfile(result, compatProfile);
+
+    // If the API returned taskIds for polling
+    if (parsed.mode === 'polling' && parsed.taskIds.length > 0) {
+      return NextResponse.json({
+        success: true,
+        result: { status: 'processing', taskIds: parsed.taskIds },
+        isAsync: true,
+      });
+    }
+
+    // Direct image response
+    return NextResponse.json({ success: true, result: { data: parsed.directImageUrls.map(url => ({ url })) } });
   } catch (error) {
     console.error('[SceneStudio] Generate error:', error);
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
