@@ -592,8 +592,12 @@ function CanvasApp() {
               const uniquePlaceholders = processingPlaceholders.filter(
                 img => !serverIds.has(img.id)
               );
+              // 清理无效图片框：没有 url 且不是处理中占位框的图片（可能是之前生成失败残留）
+              const validImages = latest.canvasImages.filter(
+                (img: { url?: string; isProcessingPlaceholder?: boolean }) => img.url || img.isProcessingPlaceholder
+              );
               setImages([
-                ...latest.canvasImages.map(img => ({ ...img })),
+                ...validImages.map(img => ({ ...img })),
                 ...uniquePlaceholders,
               ]);
             }
@@ -854,6 +858,10 @@ function CanvasApp() {
               if (!pollData.success && !pollData.retryable) {
                 // 不可重试的错误
                 console.error(`[poll] taskId=${currentTaskId} NON-RETRYABLE error after ${Math.round((Date.now()-taskStartTime)/1000)}s, pollCount=${pollCount}`, pollData.error);
+                // 清理处理帧占位符，避免空图片框残留在画布上
+                for (const failedPhId of placeholderIds) {
+                  setImages(prev => prev.filter(img => img.id !== failedPhId));
+                }
                 toast.error('生成失败', {
                   description: pollData.error || '任务执行失败',
                   className: 'bg-[#141414] border border-red-900 text-white',
@@ -866,6 +874,10 @@ function CanvasApp() {
               // 根据单任务最大轮询时间动态计算最大重试次数（间隔按3s估算），确保不会过早放弃
               if (!pollData.success && pollData.retryable && pollCount > Math.floor(perTaskMaxPollTime / 3000)) {
                 console.warn(`[生成] 可重试错误已达 ${pollCount} 次 (上限 ${Math.floor(perTaskMaxPollTime / 3000)})，最后错误: ${pollData.error}`);
+                // 清理处理帧占位符，避免空图片框残留在画布上
+                for (const failedPhId of placeholderIds) {
+                  setImages(prev => prev.filter(img => img.id !== failedPhId));
+                }
                 toast.error('生成失败', {
                   description: pollData.error || '多次重试后仍未生成图像，建议稍后在画布查看',
                   className: 'bg-[#141414] border border-red-900 text-white',
