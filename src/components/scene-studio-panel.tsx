@@ -1549,10 +1549,21 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[200] flex"
-      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+      className="fixed inset-0 z-[200] flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
+      {/* Large floating window */}
+      <div
+        className="flex rounded-xl overflow-hidden shadow-2xl"
+        style={{
+          width: 'calc(100vw - 80px)',
+          height: 'calc(100vh - 80px)',
+          background: BG_PRIMARY,
+          border: `1px solid ${BORDER_COLOR}`,
+        }}
+        onClick={e => e.stopPropagation()}
+      >
       {/* Left sidebar - collapsible */}
       {!panelCollapsed && (
         <div className="w-56 flex-shrink-0 flex flex-col border-r" style={{ borderColor: BORDER_COLOR, background: BG_PRIMARY }}>
@@ -1684,7 +1695,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
         </div>
 
         {/* 3D Canvas */}
-        <div className="flex-1 relative scene-studio-canvas" style={{ background: '#050505' }}>
+        <div className="flex-1 relative scene-studio-canvas overflow-hidden" style={{ background: '#050505' }}>
           <Suspense fallback={
             <div className="absolute inset-0 flex items-center justify-center" style={{ color: TEXT_DIM }}>
               <Loader2 size={24} className="animate-spin" />
@@ -1708,50 +1719,50 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
             </Canvas>
           </Suspense>
 
-          {/* Bottom floating action bar */}
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 px-3 py-2 rounded-xl" style={{ background: 'rgba(10,10,10,0.9)', border: `1px solid ${BORDER_COLOR}`, backdropFilter: 'blur(8px)' }}>
-            <button
-              onClick={() => setRightTab('ai-generate')}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] cursor-pointer transition-colors"
-              style={{ background: `${accent}20`, color: accent, border: `1px solid ${accent}30` }}
-            >
-              <Sparkles size={11} /> AI生成
-            </button>
-            <button
-              onClick={captureScreenshot}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] cursor-pointer transition-colors"
-              style={{ background: BG_TERTIARY, color: TEXT_SECONDARY, border: `1px solid ${BORDER_COLOR}` }}
-            >
-              <Camera size={11} /> 截图
-            </button>
-            <button
-              onClick={() => setRightTab('ai-layout')}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] cursor-pointer transition-colors"
-              style={{ background: BG_TERTIARY, color: TEXT_SECONDARY, border: `1px solid ${BORDER_COLOR}` }}
-            >
-              <Wand2 size={11} /> AI布景
-            </button>
-            <button
-              onClick={saveScene}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] cursor-pointer transition-colors"
-              style={{ background: BG_TERTIARY, color: TEXT_SECONDARY, border: `1px solid ${BORDER_COLOR}` }}
-            >
-              <Save size={11} /> 保存
-            </button>
-            <button
-              onClick={() => { if (generationResults.length > 0) addImageToCanvas(generationResults[0].url); }}
-              disabled={generationResults.length === 0}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] cursor-pointer transition-colors disabled:opacity-30"
-              style={{ background: BG_TERTIARY, color: TEXT_SECONDARY, border: `1px solid ${BORDER_COLOR}` }}
-            >
-              <ImagePlus size={11} /> 加入画布
-            </button>
-          </div>
-
           {/* Keyboard shortcut hints */}
-          <div className="absolute top-2 left-2 text-[9px] px-2 py-1 rounded" style={{ color: TEXT_DIM, background: 'rgba(0,0,0,0.5)' }}>
+          <div className="absolute top-2 left-2 text-[9px] px-2 py-1 rounded pointer-events-none" style={{ color: TEXT_DIM, background: 'rgba(0,0,0,0.5)', zIndex: 10 }}>
             W 移动 · E 旋转 · R 缩放 · Del 删除 · Esc 关闭
           </div>
+        </div>
+
+        {/* Bottom floating action bar - OUTSIDE canvas container to avoid R3F event capture */}
+        <div className="flex-shrink-0 flex items-center justify-center gap-1 px-3 py-2 border-t" style={{ background: BG_PRIMARY, borderColor: BORDER_COLOR }}>
+          <button
+            onClick={() => setRightTab('ai-generate')}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] cursor-pointer transition-colors"
+            style={{ background: `${accent}20`, color: accent, border: `1px solid ${accent}30` }}
+          >
+            <Sparkles size={11} /> AI生成
+          </button>
+          <button
+            onClick={captureScreenshot}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] cursor-pointer transition-colors"
+            style={{ background: BG_TERTIARY, color: TEXT_SECONDARY, border: `1px solid ${BORDER_COLOR}` }}
+          >
+            <Camera size={11} /> 截图
+          </button>
+          <button
+            onClick={() => setRightTab('ai-layout')}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] cursor-pointer transition-colors"
+            style={{ background: BG_TERTIARY, color: TEXT_SECONDARY, border: `1px solid ${BORDER_COLOR}` }}
+          >
+            <Wand2 size={11} /> AI布景
+          </button>
+          <button
+            onClick={saveScene}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] cursor-pointer transition-colors"
+            style={{ background: BG_TERTIARY, color: TEXT_SECONDARY, border: `1px solid ${BORDER_COLOR}` }}
+          >
+            <Save size={11} /> 保存
+          </button>
+          <button
+            onClick={() => { if (generationResults.length > 0) addImageToCanvas(generationResults[0].url); }}
+            disabled={generationResults.length === 0}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] cursor-pointer transition-colors disabled:opacity-30"
+            style={{ background: BG_TERTIARY, color: TEXT_SECONDARY, border: `1px solid ${BORDER_COLOR}` }}
+          >
+            <ImagePlus size={11} /> 加入画布
+          </button>
         </div>
       </div>
 
@@ -1841,7 +1852,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
 
       {/* Collapsed panel toggle button */}
       {panelCollapsed && (
-        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col gap-1">
+        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col gap-1 z-10">
           <button
             onClick={() => setPanelCollapsed(false)}
             className="p-2 rounded-lg cursor-pointer transition-colors"
@@ -1852,6 +1863,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
           </button>
         </div>
       )}
+      </div>{/* end floating window */}
     </div>,
     document.body
   );
