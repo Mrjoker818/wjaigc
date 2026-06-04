@@ -6868,12 +6868,40 @@ export function InfiniteCanvas({
               </div>
             );
           })}
-          {/* Processing frame connection lines - dashed lines from source images to processing frames */}
+          {/* Processing frame connection lines - elegant animated lines from source images to processing frames */}
           {(() => {
             const processingFrames = images.filter(img => img.isProcessingPlaceholder && img.processing?.sourceUrl);
             if (processingFrames.length === 0) return null;
+            const gold = isMonochrome ? '#3b82f6' : '#d4af37';
             return (
               <svg style={{ position: 'absolute', left: 0, top: 0, width: '1px', height: '1px', overflow: 'visible', pointerEvents: 'none' }}>
+                <defs>
+                  {processingFrames.map(frame => {
+                    const sourceImage = images.find(img => img.url === frame.processing!.sourceUrl && !img.isProcessingPlaceholder);
+                    if (!sourceImage) return null;
+                    const sx = sourceImage.x + sourceImage.width / 2;
+                    const sy = sourceImage.y + sourceImage.height / 2;
+                    const tx = frame.x + frame.width / 2;
+                    const ty = frame.y + frame.height / 2;
+                    const dx = tx - sx;
+                    const dy = ty - sy;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    return (
+                      <g key={`proc-defs-${frame.id}`}>
+                        {/* Gradient along the connection */}
+                        <linearGradient id={`proc-grad-${frame.id}`} gradientUnits="userSpaceOnUse" x1={sx} y1={sy} x2={tx} y2={ty}>
+                          <stop offset="0%" stopColor={gold} stopOpacity="0.6" />
+                          <stop offset="50%" stopColor={gold} stopOpacity="0.3" />
+                          <stop offset="100%" stopColor={gold} stopOpacity="0.8" />
+                        </linearGradient>
+                        {/* Glow filter */}
+                        <filter id={`proc-glow-${frame.id}`} x="-50%" y="-50%" width="200%" height="200%">
+                          <feGaussianBlur in="SourceGraphic" stdDeviation={3 / zoom} />
+                        </filter>
+                      </g>
+                    );
+                  })}
+                </defs>
                 {processingFrames.map(frame => {
                   const sourceImage = images.find(img => img.url === frame.processing!.sourceUrl && !img.isProcessingPlaceholder);
                   if (!sourceImage) return null;
@@ -6881,17 +6909,93 @@ export function InfiniteCanvas({
                   const sy = sourceImage.y + sourceImage.height / 2;
                   const tx = frame.x + frame.width / 2;
                   const ty = frame.y + frame.height / 2;
-                  const midX = (sx + tx) / 2;
+                  const dx = tx - sx;
+                  const dy = ty - sy;
+                  const dist = Math.sqrt(dx * dx + dy * dy);
+                  // Source anchor point (right edge center)
+                  const srcAnchorX = sourceImage.x + sourceImage.width;
+                  const srcAnchorY = sourceImage.y + sourceImage.height / 2;
+                  // Target anchor point (left edge center)
+                  const tgtAnchorX = frame.x;
+                  const tgtAnchorY = frame.y + frame.height / 2;
+                  // Control points for smooth S-curve
+                  const cpOffset = Math.min(Math.max(dist * 0.4, 60 / zoom), 300 / zoom);
+                  const cp1x = srcAnchorX + cpOffset;
+                  const cp1y = srcAnchorY;
+                  const cp2x = tgtAnchorX - cpOffset;
+                  const cp2y = tgtAnchorY;
+                  const pathD = `M ${srcAnchorX} ${srcAnchorY} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${tgtAnchorX} ${tgtAnchorY}`;
                   return (
-                    <path
-                      key={`proc-conn-${frame.id}`}
-                      d={`M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`}
-                      fill="none"
-                      stroke={isMonochrome ? '#888' : '#d4af37'}
-                      strokeWidth={1.5 / zoom}
-                      strokeDasharray={`${6 / zoom} ${4 / zoom}`}
-                      opacity={0.6}
-                    />
+                    <g key={`proc-conn-${frame.id}`}>
+                      {/* Wide background glow */}
+                      <path
+                        d={pathD}
+                        fill="none"
+                        stroke={gold}
+                        strokeWidth={12 / zoom}
+                        strokeLinecap="round"
+                        opacity={0.06}
+                      />
+                      {/* Medium soft glow */}
+                      <path
+                        d={pathD}
+                        fill="none"
+                        stroke={gold}
+                        strokeWidth={6 / zoom}
+                        strokeLinecap="round"
+                        opacity={0.1}
+                        filter={`url(#proc-glow-${frame.id})`}
+                      />
+                      {/* Main dashed line with gradient */}
+                      <path
+                        d={pathD}
+                        fill="none"
+                        stroke={`url(#proc-grad-${frame.id})`}
+                        strokeWidth={1.5 / zoom}
+                        strokeLinecap="round"
+                        strokeDasharray={`${8 / zoom} ${5 / zoom}`}
+                      />
+                      {/* Flowing dot animation overlay */}
+                      <path
+                        d={pathD}
+                        fill="none"
+                        stroke={gold}
+                        strokeWidth={2.5 / zoom}
+                        strokeLinecap="round"
+                        strokeDasharray={`${3 / zoom} ${18 / zoom}`}
+                        opacity={0.7}
+                      >
+                        <animate attributeName="stroke-dashoffset" from="0" to={`${-21 / zoom}`} dur="1.2s" repeatCount="indefinite" />
+                      </path>
+                      {/* Source anchor dot */}
+                      <circle cx={srcAnchorX} cy={srcAnchorY} r={3.5 / zoom} fill={gold} opacity={0.5} />
+                      <circle cx={srcAnchorX} cy={srcAnchorY} r={2 / zoom} fill={gold} opacity={0.9} />
+                      {/* Target anchor dot with pulse */}
+                      <circle cx={tgtAnchorX} cy={tgtAnchorY} r={6 / zoom} fill={gold} opacity={0.1}>
+                        <animate attributeName="r" values={`${4 / zoom};${8 / zoom};${4 / zoom}`} dur="2s" repeatCount="indefinite" />
+                        <animate attributeName="opacity" values="0.15;0.05;0.15" dur="2s" repeatCount="indefinite" />
+                      </circle>
+                      <circle cx={tgtAnchorX} cy={tgtAnchorY} r={3.5 / zoom} fill={gold} opacity={0.5} />
+                      <circle cx={tgtAnchorX} cy={tgtAnchorY} r={2 / zoom} fill={gold} opacity={0.9} />
+                      {/* Direction arrow near midpoint */}
+                      {(() => {
+                        const t = 0.55;
+                        const mt = 1 - t;
+                        const mx = mt*mt*mt*srcAnchorX + 3*mt*mt*t*cp1x + 3*mt*t*t*cp2x + t*t*t*tgtAnchorX;
+                        const my = mt*mt*mt*srcAnchorY + 3*mt*mt*t*cp1y + 3*mt*t*t*cp2y + t*t*t*tgtAnchorY;
+                        const dt = 0.01;
+                        const mt2 = 1 - (t + dt);
+                        const nx = mt2*mt2*mt2*srcAnchorX + 3*mt2*mt2*(t+dt)*cp1x + 3*mt2*(t+dt)*(t+dt)*cp2x + (t+dt)*(t+dt)*(t+dt)*tgtAnchorX;
+                        const ny = mt2*mt2*mt2*srcAnchorY + 3*mt2*mt2*(t+dt)*cp1y + 3*mt2*(t+dt)*(t+dt)*cp2y + (t+dt)*(t+dt)*(t+dt)*tgtAnchorY;
+                        const angle = Math.atan2(ny - my, nx - mx) * 180 / Math.PI;
+                        const arrowSize = 5 / zoom;
+                        return (
+                          <g transform={`translate(${mx}, ${my}) rotate(${angle})`}>
+                            <path d={`M ${-arrowSize} ${-arrowSize * 0.6} L 0 0 L ${-arrowSize} ${arrowSize * 0.6}`} fill="none" stroke={gold} strokeWidth={1.2 / zoom} strokeLinecap="round" strokeLinejoin="round" opacity={0.5} />
+                          </g>
+                        );
+                      })()}
+                    </g>
                   );
                 })}
               </svg>
