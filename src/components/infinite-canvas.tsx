@@ -27,7 +27,7 @@ import {
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
-  Settings, Palette, Users, HelpCircle, Box, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, ChevronsRight, ChevronsLeft
+  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, ChevronsRight, ChevronsLeft, Boxes
 } from 'lucide-react';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
 import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
@@ -49,6 +49,7 @@ const FontDesignPanel = lazy(() => import('@/components/font-design-panel'));
 const BrandFactoryPanel = lazy(() => import('@/components/brand-factory-panel'));
 const AiPsdPanel = lazy(() => import('@/components/ai-psd/ai-psd-panel'));
 const ImageCompareDialog = lazy(() => import('@/components/image-compare-dialog').then(m => ({ default: m.ImageCompareDialog })));
+const SceneStudioPanel = lazy(() => import('@/components/scene-studio-panel'));
 const StickerAssistantPanel = lazy(() => import('@/components/sticker-assistant-panel'));
 
 /* ====== Multi-Angle Sphere Preview (Canvas 2D) ====== */
@@ -521,6 +522,7 @@ export function InfiniteCanvas({
   const [showBrandFactory, setShowBrandFactory] = useState(false);
   const [showAiPsd, setShowAiPsd] = useState(false);
   const [showStickerAssistant, setShowStickerAssistant] = useState(false);
+  const [showSceneStudio, setShowSceneStudio] = useState(false);
 
   // Image compare state
   const [showCompareDialog, setShowCompareDialog] = useState(false);
@@ -5876,7 +5878,7 @@ export function InfiniteCanvas({
     { icon: <Wand2 size={14} className={isMonochrome ? monoColors['蒙版'] : ''} />, label: '蒙版', desc: '精准遮罩控制，只改露出的区域', action: handleOpenMask },
     { icon: <Layers size={14} className={isMonochrome ? monoColors['编辑元素'] : ''} />, label: '编辑元素', desc: '按元素分层，独立编辑', action: handleEditElements },
     { icon: <RotateCcw size={14} className={isMonochrome ? monoColors['多角度'] : ''} />, label: '多角度', desc: '多视角生成', action: handleOpenMultiAngle },
-    { icon: <Box size={14} className={isMonochrome ? monoColors['转3D'] : ''} />, label: '转3D', desc: '生成3D模型预览', action: handleOpen3D },
+    { icon: <BoxIcon size={14} className={isMonochrome ? monoColors['转3D'] : ''} />, label: '转3D', desc: '生成3D模型预览', action: handleOpen3D },
     { icon: <Expand size={14} className={isMonochrome ? monoColors['扩展'] : ''} />, label: '扩展', desc: '向四周延伸画面，自动补齐背景', action: handleOpenExpand },
     { icon: <Scissors size={14} className={isMonochrome ? monoColors['裁切'] : ''} />, label: '裁切', desc: '自由/预设比例裁切', action: handleOpenCrop },
     { icon: <Scan size={14} className={isMonochrome ? monoColors['精修引擎'] : ''} />, label: '精修引擎', desc: '产品精修：标准/专家模式，AI商业级修图', action: () => { const img = selectedImageData || selectedImage; setRefineEngineImageUrl(img?.url || ''); setShowRefineEngine(true); } },
@@ -9570,7 +9572,7 @@ export function InfiniteCanvas({
               <div className={`w-[520px] max-h-[86vh] overflow-hidden rounded-2xl border shadow-2xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-white/[0.06]/80 border-white/[0.14]'}`}>
                 <div className={`flex items-center justify-between px-4 py-3 border-b ${isMonochrome ? 'border-gray-100' : 'border-white/[0.14]'}`}>
                   <div className="flex items-center gap-2">
-                    <Box size={16} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
+                    <BoxIcon size={16} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
                     <div>
                       <div className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>一键转 3D</div>
                       <div className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#777]'}`}>API 大模型 / 本地模型双后端，结果会在当前图片右侧生成</div>
@@ -9868,6 +9870,19 @@ export function InfiniteCanvas({
             <StickerAssistantPanel
               isOpen={showStickerAssistant}
               onClose={() => setShowStickerAssistant(false)}
+              onAddImages={(urls: string[]) => {
+                onAddImages?.(urls);
+              }}
+              isMonochrome={isMonochrome}
+            />
+          </Suspense>
+        )}
+
+        {/* 3D Scene Studio Panel */}
+        {showSceneStudio && (
+          <Suspense fallback={null}>
+            <SceneStudioPanel
+              onClose={() => setShowSceneStudio(false)}
               onAddImages={(urls: string[]) => {
                 onAddImages?.(urls);
               }}
@@ -11209,6 +11224,16 @@ export function InfiniteCanvas({
         >
           <Building2 className="h-4 w-4" />
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">品牌工厂</span>
+        </button>
+
+        {/* 3D构图画布 Pro */}
+        <button
+          onClick={() => setShowSceneStudio(true)}
+          className={`${toolBtnCls}`}
+          title="3D构图画布 Pro"
+        >
+          <Boxes className="h-4 w-4" />
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">3D构图</span>
         </button>
 
         {/* AI PSD Generator - AI PSD生成器 */}

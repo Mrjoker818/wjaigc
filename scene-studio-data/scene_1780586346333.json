@@ -1,0 +1,16 @@
+{
+  "id": "scene_1780586346333",
+  "name": "test scene",
+  "objects": [],
+  "camera": {
+    "position": [
+      0,
+      5,
+      10
+    ],
+    "fov": 45
+  },
+  "lights": [],
+  "updatedAt": "2026-06-04T15:19:06.333Z",
+  "createdAt": "2026-06-04T15:19:06.333Z"
+}
