@@ -479,8 +479,22 @@ export function InfiniteCanvas({
 }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
+  // Resize preview: stores live dimensions during resize, applied to images only on mouseup
+  const [resizePreview, setResizePreview] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+
   // Canvas grid background mode: dots / lines / blank
   const [gridMode, setGridMode] = useState<'dots' | 'lines' | 'blank'>('dots');
+
+  // Hover toolbar: shown when hovering over an image (separate from visionHoverImage)
+  const [hoverToolbarImageId, setHoverToolbarImageId] = useState<string | null>(null);
+  const hoverToolbarTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const keepHoverToolbar = useCallback((imageId: string) => {
+    if (hoverToolbarTimerRef.current) clearTimeout(hoverToolbarTimerRef.current);
+    setHoverToolbarImageId(imageId);
+  }, []);
+  const hideHoverToolbar = useCallback(() => {
+    hoverToolbarTimerRef.current = setTimeout(() => setHoverToolbarImageId(null), 300);
+  }, []);
 
   // Agent editor state
   const [showAgentEditor, setShowAgentEditor] = useState(false);
@@ -674,8 +688,6 @@ export function InfiniteCanvas({
   const [resizingImage, setResizingImage] = useState<string | null>(null);
   const [resizeCorner, setResizeCorner] = useState<string | null>(null);
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, w: 0, h: 0, imgX: 0, imgY: 0 });
-  // Resize preview: stores live dimensions during resize, applied to images only on mouseup
-  const [resizePreview, setResizePreview] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
   // Box select
   const [boxSelectStart, setBoxSelectStart] = useState<{ x: number; y: number } | null>(null);
@@ -714,17 +726,6 @@ export function InfiniteCanvas({
   const canvasGenFrameHeight = 288; // 16:9 ratio
   const [visionHoverImage, setVisionHoverImage] = useState<CanvasImage | null>(null);
   const [showRefFusion, setShowRefFusion] = useState(false);
-
-  // Hover toolbar: shows quick actions when mouse hovers over an image
-  const [hoverToolbarImageId, setHoverToolbarImageId] = useState<string | null>(null);
-  const hoverToolbarTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const keepHoverToolbar = useCallback((imageId: string) => {
-    if (hoverToolbarTimerRef.current) clearTimeout(hoverToolbarTimerRef.current);
-    setHoverToolbarImageId(imageId);
-  }, []);
-  const hideHoverToolbar = useCallback(() => {
-    hoverToolbarTimerRef.current = setTimeout(() => setHoverToolbarImageId(null), 300);
-  }, []);
 
   // Context menu
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
@@ -2075,6 +2076,7 @@ export function InfiniteCanvas({
       ));
     }
     setResizePreview(null);
+
     setResizingImage(null);
     setResizeCorner(null);
 
@@ -6551,7 +6553,6 @@ export function InfiniteCanvas({
                   if (visionPromptEnabled && editMode === 'none') {
                     setVisionHoverImage(image);
                   }
-                  // Show hover toolbar when not in edit mode and not dragging
                   if (editMode === 'none' && !dragTarget && !resizingImage) {
                     keepHoverToolbar(image.id);
                   }
@@ -6804,6 +6805,37 @@ export function InfiniteCanvas({
                     <Sparkles className="h-4 w-4 animate-spin" />
                   </div>
                 )}
+                {/* Hover toolbar - quick actions on image hover */}
+                {hoverToolbarImageId === image.id && editMode === 'none' && !dragTarget && !resizingImage && (
+                  <div
+                    className="absolute -top-9 left-1/2 -translate-x-1/2 z-50 flex items-center gap-0.5 px-1 py-0.5 rounded-lg shadow-lg"
+                    style={{ fontSize: `${Math.max(10, 12 / zoom)}px` }}
+                    onMouseEnter={() => keepHoverToolbar(image.id)}
+                    onMouseLeave={() => hideHoverToolbar()}
+                  >
+                    <button
+                      className={`p-1 rounded transition-colors ${isMonochrome ? 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-200' : 'bg-[#1a1a1a] hover:bg-[#2a2a2a] text-white/80 border border-white/10'}`}
+                      onClick={(e) => { e.stopPropagation(); selectImage(image.id); onEditImage?.(image); hideHoverToolbar(); }}
+                      title="语言修图"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      className={`p-1 rounded transition-colors ${isMonochrome ? 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-200' : 'bg-[#1a1a1a] hover:bg-[#2a2a2a] text-white/80 border border-white/10'}`}
+                      onClick={(e) => { e.stopPropagation(); handleDownloadImage(image); hideHoverToolbar(); }}
+                      title="下载"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      className={`p-1 rounded transition-colors ${isMonochrome ? 'bg-white hover:bg-red-50 text-red-500 border border-gray-200' : 'bg-[#1a1a1a] hover:bg-red-900/30 text-white/80 hover:text-red-400 border border-white/10'}`}
+                      onClick={(e) => { e.stopPropagation(); onImagesChange(images.filter(i => i.id !== image.id)); hideHoverToolbar(); }}
+                      title="删除"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
                 {/* Image dimensions indicator (bottom-right, show on hover) */}
                 <div className="absolute bottom-1 right-1 z-20 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none"
                   style={{ fontSize: `${Math.max(9, 10 / zoom)}px` }}>
@@ -6813,72 +6845,34 @@ export function InfiniteCanvas({
                     {image.originalWidth || image.width} × {image.originalHeight || image.height}
                   </span>
                 </div>
-                {/* Hover toolbar: quick actions when mouse hovers over image */}
-                {hoverToolbarImageId === image.id && !isSelected && editMode === 'none' && !image.isProcessingPlaceholder && (
-                  <div
-                    className="absolute -top-10 left-1/2 -translate-x-1/2 z-30 flex items-center gap-0.5 rounded-lg px-1 py-0.5 shadow-xl"
-                    style={{ backgroundColor: isMonochrome ? 'rgba(255,255,255,0.95)' : 'rgba(26,26,26,0.95)', border: isMonochrome ? '1px solid #e5e7eb' : '1px solid rgba(255,255,255,0.12)' }}
-                    onMouseEnter={() => keepHoverToolbar(image.id)}
-                    onMouseLeave={hideHoverToolbar}
-                  >
-                    <button className={`p-1 rounded transition-colors ${isMonochrome ? 'hover:bg-gray-100 text-gray-600' : 'hover:bg-white/10 text-gray-400 hover:text-white'}`} title="图生图"
-                      onClick={(e) => { e.stopPropagation(); selectImage(image.id); setEditImageId(image.id); }}>
-                      <ImagePlus className="h-3.5 w-3.5" />
-                    </button>
-                    <button className={`p-1 rounded transition-colors ${isMonochrome ? 'hover:bg-gray-100 text-gray-600' : 'hover:bg-white/10 text-gray-400 hover:text-white'}`} title="语言修图"
-                      onClick={(e) => { e.stopPropagation(); selectImage(image.id); onEditImage?.(image); }}>
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button className={`p-1 rounded transition-colors ${isMonochrome ? 'hover:bg-gray-100 text-gray-600' : 'hover:bg-white/10 text-gray-400 hover:text-white'}`} title="下载"
-                      onClick={(e) => { e.stopPropagation(); handleDownloadImage(image); }}>
-                      <Download className="h-3.5 w-3.5" />
-                    </button>
-                    <button className={`p-1 rounded transition-colors ${isMonochrome ? 'hover:bg-gray-100 text-red-500' : 'hover:bg-white/10 text-gray-400 hover:text-red-400'}`} title="删除"
-                      onClick={(e) => { e.stopPropagation(); onImagesChange(images.filter(i => i.id !== image.id)); if (selectedIds.has(image.id)) setSelectedIds(new Set()); }}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                )}
                 {/* Edit mode stroke overlay - moved to floating window */}
               </div>
             );
           })}
-          {/* Processing connection lines: show relationship between processing frames and their source images */}
+          {/* Processing frame connection lines - dashed lines from source images to processing frames */}
           {(() => {
-            const processingImages = visibleImages.filter(img => img.isProcessingPlaceholder && img.processing?.sourceUrl);
-            if (processingImages.length === 0) return null;
+            const processingFrames = images.filter(img => img.isProcessingPlaceholder && img.processing?.sourceUrl);
+            if (processingFrames.length === 0) return null;
             return (
-              <svg
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  top: 0,
-                  width: '1px',
-                  height: '1px',
-                  overflow: 'visible',
-                  pointerEvents: 'none',
-                  zIndex: 5,
-                }}
-              >
-                {processingImages.map(procImg => {
-                  const sourceImg = images.find(i => !i.isProcessingPlaceholder && i.url === procImg.processing!.sourceUrl);
-                  if (!sourceImg) return null;
-                  const srcX = sourceImg.x + sourceImg.width;
-                  const srcY = sourceImg.y + sourceImg.height / 2;
-                  const tgtX = procImg.x;
-                  const tgtY = procImg.y + procImg.height / 2;
-                  const midX = (srcX + tgtX) / 2;
+              <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ overflow: 'visible' }}>
+                {processingFrames.map(frame => {
+                  const sourceImage = images.find(img => img.url === frame.processing!.sourceUrl && !img.isProcessingPlaceholder);
+                  if (!sourceImage) return null;
+                  const sx = sourceImage.x + sourceImage.width / 2;
+                  const sy = sourceImage.y + sourceImage.height / 2;
+                  const tx = frame.x + frame.width / 2;
+                  const ty = frame.y + frame.height / 2;
+                  const midX = (sx + tx) / 2;
                   return (
-                    <g key={`proc-line-${procImg.id}`}>
-                      <path
-                        d={`M ${srcX} ${srcY} C ${midX} ${srcY}, ${midX} ${tgtY}, ${tgtX} ${tgtY}`}
-                        fill="none"
-                        stroke={isMonochrome ? '#3b82f6' : '#d4af37'}
-                        strokeWidth={1.5 / zoom}
-                        strokeDasharray={`${4 / zoom} ${3 / zoom}`}
-                        opacity={0.5}
-                      />
-                    </g>
+                    <path
+                      key={`proc-conn-${frame.id}`}
+                      d={`M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`}
+                      fill="none"
+                      stroke={isMonochrome ? '#888' : '#d4af37'}
+                      strokeWidth={1.5}
+                      strokeDasharray="6 4"
+                      opacity={0.6}
+                    />
                   );
                 })}
               </svg>
@@ -11159,16 +11153,6 @@ export function InfiniteCanvas({
 
         <div className={`w-px h-5 ${separatorCls}`} />
 
-        {/* Grid mode toggle */}
-        <button
-          onClick={() => setGridMode(prev => prev === 'dots' ? 'lines' : prev === 'lines' ? 'blank' : 'dots')}
-          className={`${toolBtnCls}`}
-          title={`画布网格: ${gridMode === 'dots' ? '点阵' : gridMode === 'lines' ? '线条' : '空白'}`}
-        >
-          {gridMode === 'dots' ? <LayoutGrid className={`h-4 w-4 ${mIcon.layoutGrid}`} /> : gridMode === 'lines' ? <Frame className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">网格: {gridMode === 'dots' ? '点阵' : gridMode === 'lines' ? '线条' : '空白'}</span>
-        </button>
-
         {/* Reset view */}
         <button
           onClick={() => { setZoom(1); setViewOffset({ x: 0, y: 0 }); }}
@@ -11177,6 +11161,16 @@ export function InfiniteCanvas({
         >
           <Maximize2 className="h-4 w-4" />
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">重置视图</span>
+        </button>
+
+        {/* Grid mode toggle */}
+        <button
+          onClick={() => setGridMode(prev => prev === 'dots' ? 'lines' : prev === 'lines' ? 'blank' : 'dots')}
+          className={`${toolBtnCls}`}
+          title={`网格: ${gridMode === 'dots' ? '点阵' : gridMode === 'lines' ? '线条' : '空白'}`}
+        >
+          <LayoutGrid className="h-4 w-4" />
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">{gridMode === 'dots' ? '点阵' : gridMode === 'lines' ? '线条' : '空白'}</span>
         </button>
 
         {/* Generating progress */}
