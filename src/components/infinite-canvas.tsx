@@ -6873,7 +6873,7 @@ export function InfiniteCanvas({
             const processingFrames = images.filter(img => img.isProcessingPlaceholder && img.processing?.sourceUrl);
             if (processingFrames.length === 0) return null;
             return (
-              <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ overflow: 'visible' }}>
+              <svg style={{ position: 'absolute', left: 0, top: 0, width: '1px', height: '1px', overflow: 'visible', pointerEvents: 'none' }}>
                 {processingFrames.map(frame => {
                   const sourceImage = images.find(img => img.url === frame.processing!.sourceUrl && !img.isProcessingPlaceholder);
                   if (!sourceImage) return null;
@@ -6888,8 +6888,8 @@ export function InfiniteCanvas({
                       d={`M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`}
                       fill="none"
                       stroke={isMonochrome ? '#888' : '#d4af37'}
-                      strokeWidth={1.5}
-                      strokeDasharray="6 4"
+                      strokeWidth={1.5 / zoom}
+                      strokeDasharray={`${6 / zoom} ${4 / zoom}`}
                       opacity={0.6}
                     />
                   );
