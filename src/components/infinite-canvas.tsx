@@ -479,6 +479,9 @@ export function InfiniteCanvas({
 }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
+  // Canvas grid background mode: dots / lines / blank
+  const [gridMode, setGridMode] = useState<'dots' | 'lines' | 'blank'>('dots');
+
   // Agent editor state
   const [showAgentEditor, setShowAgentEditor] = useState(false);
   const [agentEditImage, setAgentEditImage] = useState<CanvasImage | null>(null);
@@ -671,6 +674,8 @@ export function InfiniteCanvas({
   const [resizingImage, setResizingImage] = useState<string | null>(null);
   const [resizeCorner, setResizeCorner] = useState<string | null>(null);
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, w: 0, h: 0, imgX: 0, imgY: 0 });
+  // Resize preview: stores live dimensions during resize, applied to images only on mouseup
+  const [resizePreview, setResizePreview] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
   // Box select
   const [boxSelectStart, setBoxSelectStart] = useState<{ x: number; y: number } | null>(null);
@@ -709,6 +714,17 @@ export function InfiniteCanvas({
   const canvasGenFrameHeight = 288; // 16:9 ratio
   const [visionHoverImage, setVisionHoverImage] = useState<CanvasImage | null>(null);
   const [showRefFusion, setShowRefFusion] = useState(false);
+
+  // Hover toolbar: shows quick actions when mouse hovers over an image
+  const [hoverToolbarImageId, setHoverToolbarImageId] = useState<string | null>(null);
+  const hoverToolbarTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const keepHoverToolbar = useCallback((imageId: string) => {
+    if (hoverToolbarTimerRef.current) clearTimeout(hoverToolbarTimerRef.current);
+    setHoverToolbarImageId(imageId);
+  }, []);
+  const hideHoverToolbar = useCallback(() => {
+    hoverToolbarTimerRef.current = setTimeout(() => setHoverToolbarImageId(null), 300);
+  }, []);
 
   // Context menu
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
@@ -1927,9 +1943,8 @@ export function InfiniteCanvas({
         newY = resizeStart.imgY + (resizeStart.h - newH);
       }
 
-      onImagesChange(images.map(i =>
-        i.id === resizingImage ? { ...i, x: newX, y: newY, width: newW, height: newH } : i
-      ));
+      // Update resize preview (only apply to images on mouseup — avoids flooding undo history)
+      setResizePreview({ x: newX, y: newY, width: newW, height: newH });
       return;
     }
 
@@ -2053,6 +2068,13 @@ export function InfiniteCanvas({
       setIsLongPressing(false);
     }
 
+    // Apply resize preview to images (single history entry instead of one per mousemove)
+    if (resizingImage && resizePreview) {
+      onImagesChange(images.map(i =>
+        i.id === resizingImage ? { ...i, x: resizePreview.x, y: resizePreview.y, width: resizePreview.width, height: resizePreview.height } : i
+      ));
+    }
+    setResizePreview(null);
     setResizingImage(null);
     setResizeCorner(null);
 
@@ -2212,7 +2234,7 @@ export function InfiniteCanvas({
     }
 
     mouseDownOnImageRef.current = false;
-  }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp, groupDragTarget, groupDragOffset, genGroupDragTarget, genGroupDragOffset, hexCubeDragTarget, hexCubeDragOffset]);
+  }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp, groupDragTarget, groupDragOffset, genGroupDragTarget, genGroupDragOffset, hexCubeDragTarget, hexCubeDragOffset, resizingImage, resizePreview]);
 
   const handleMouseLeave = useCallback(() => {
     if (editMode !== 'none') {
@@ -6071,20 +6093,33 @@ export function InfiniteCanvas({
         <div
           className="absolute inset-0 pointer-events-none"
           style={
-            isMonochrome
-              ? {
-                  // 灰色网点，方便查看图片边缘
-                  backgroundImage: 'radial-gradient(circle, #e5e5e5 1px, transparent 1px)',
-                  backgroundSize: '12px 12px',
-                  transform: `translate(${viewOffset.x % 12}px, ${viewOffset.y % 12}px)`,
-                }
-              : {
-                  // 深色科技风：24px网格线
-                  backgroundColor: '#0F1117',
-                  backgroundImage: 'linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)',
-                  backgroundSize: '24px 24px',
-                  transform: `translate(${viewOffset.x % 24}px, ${viewOffset.y % 24}px)`,
-                }
+            gridMode === 'blank' ? {
+              backgroundColor: isMonochrome ? '#ffffff' : '#0F1117',
+            }
+            : isMonochrome ? {
+                backgroundColor: '#ffffff',
+                backgroundImage: gridMode === 'dots'
+                  ? `radial-gradient(circle, #d1d5db ${zoom < 0.3 ? 0.5 : zoom < 0.7 ? 0.8 : 1.15}px, transparent ${zoom < 0.3 ? 0.5 : zoom < 0.7 ? 0.8 : 1.15}px)`
+                  : 'linear-gradient(rgba(0,0,0,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.06) 1px, transparent 1px)',
+                backgroundSize: gridMode === 'dots'
+                  ? `${12 / Math.max(zoom, 0.15)}px ${12 / Math.max(zoom, 0.15)}px`
+                  : `${24 / Math.max(zoom, 0.15)}px ${24 / Math.max(zoom, 0.15)}px`,
+                transform: gridMode === 'dots'
+                  ? `translate(${viewOffset.x % (12 / Math.max(zoom, 0.15))}px, ${viewOffset.y % (12 / Math.max(zoom, 0.15))}px)`
+                  : `translate(${viewOffset.x % (24 / Math.max(zoom, 0.15))}px, ${viewOffset.y % (24 / Math.max(zoom, 0.15))}px)`,
+              }
+            : {
+                backgroundColor: '#0F1117',
+                backgroundImage: gridMode === 'dots'
+                  ? `radial-gradient(circle, rgba(255,255,255,${zoom < 0.3 ? 0.08 : zoom < 0.7 ? 0.12 : 0.18}) ${zoom < 0.3 ? 0.5 : 0.8}px, transparent ${zoom < 0.3 ? 0.5 : 0.8}px)`
+                  : 'linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)',
+                backgroundSize: gridMode === 'dots'
+                  ? `${12 / Math.max(zoom, 0.15)}px ${12 / Math.max(zoom, 0.15)}px`
+                  : `${24 / Math.max(zoom, 0.15)}px ${24 / Math.max(zoom, 0.15)}px`,
+                transform: gridMode === 'dots'
+                  ? `translate(${viewOffset.x % (12 / Math.max(zoom, 0.15))}px, ${viewOffset.y % (12 / Math.max(zoom, 0.15))}px)`
+                  : `translate(${viewOffset.x % (24 / Math.max(zoom, 0.15))}px, ${viewOffset.y % (24 / Math.max(zoom, 0.15))}px)`,
+              }
           }
         />
 
@@ -6506,19 +6541,24 @@ export function InfiniteCanvas({
                 key={image.id}
                 className={`absolute group z-10 ${isSelected ? 'z-20' : ''} ${editMode !== 'none' && editImageId !== image.id ? 'opacity-30' : ''}`}
                 style={{
-                  left: image.x + (isDragging ? dragOffset.x : 0) + (isGroupDragging ? groupDragOffset.x : 0) + (isInDraggedGenGroup ? genGroupDragOffset.x : 0),
-                  top: image.y + (isDragging ? dragOffset.y : 0) + (isGroupDragging ? groupDragOffset.y : 0) + (isInDraggedGenGroup ? genGroupDragOffset.y : 0),
-                  width: image.width,
-                  height: image.height,
+                  left: (resizingImage === image.id && resizePreview ? resizePreview.x : image.x) + (isDragging ? dragOffset.x : 0) + (isGroupDragging ? groupDragOffset.x : 0) + (isInDraggedGenGroup ? genGroupDragOffset.x : 0),
+                  top: (resizingImage === image.id && resizePreview ? resizePreview.y : image.y) + (isDragging ? dragOffset.y : 0) + (isGroupDragging ? groupDragOffset.y : 0) + (isInDraggedGenGroup ? genGroupDragOffset.y : 0),
+                  width: resizingImage === image.id && resizePreview ? resizePreview.width : image.width,
+                  height: resizingImage === image.id && resizePreview ? resizePreview.height : image.height,
                   display: (isGroupCollapsed || isInCollapsedGenGroup || isGenGroupResultImage) ? 'none' : undefined,
                 }}
                 onMouseEnter={() => {
                   if (visionPromptEnabled && editMode === 'none') {
                     setVisionHoverImage(image);
                   }
+                  // Show hover toolbar when not in edit mode and not dragging
+                  if (editMode === 'none' && !dragTarget && !resizingImage) {
+                    keepHoverToolbar(image.id);
+                  }
                 }}
                 onMouseLeave={() => {
                   setVisionHoverImage(null);
+                  hideHoverToolbar();
                 }}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -6773,10 +6813,77 @@ export function InfiniteCanvas({
                     {image.originalWidth || image.width} × {image.originalHeight || image.height}
                   </span>
                 </div>
+                {/* Hover toolbar: quick actions when mouse hovers over image */}
+                {hoverToolbarImageId === image.id && !isSelected && editMode === 'none' && !image.isProcessingPlaceholder && (
+                  <div
+                    className="absolute -top-10 left-1/2 -translate-x-1/2 z-30 flex items-center gap-0.5 rounded-lg px-1 py-0.5 shadow-xl"
+                    style={{ backgroundColor: isMonochrome ? 'rgba(255,255,255,0.95)' : 'rgba(26,26,26,0.95)', border: isMonochrome ? '1px solid #e5e7eb' : '1px solid rgba(255,255,255,0.12)' }}
+                    onMouseEnter={() => keepHoverToolbar(image.id)}
+                    onMouseLeave={hideHoverToolbar}
+                  >
+                    <button className={`p-1 rounded transition-colors ${isMonochrome ? 'hover:bg-gray-100 text-gray-600' : 'hover:bg-white/10 text-gray-400 hover:text-white'}`} title="图生图"
+                      onClick={(e) => { e.stopPropagation(); selectImage(image.id); setEditImageId(image.id); }}>
+                      <ImagePlus className="h-3.5 w-3.5" />
+                    </button>
+                    <button className={`p-1 rounded transition-colors ${isMonochrome ? 'hover:bg-gray-100 text-gray-600' : 'hover:bg-white/10 text-gray-400 hover:text-white'}`} title="语言修图"
+                      onClick={(e) => { e.stopPropagation(); selectImage(image.id); onEditImage?.(image); }}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button className={`p-1 rounded transition-colors ${isMonochrome ? 'hover:bg-gray-100 text-gray-600' : 'hover:bg-white/10 text-gray-400 hover:text-white'}`} title="下载"
+                      onClick={(e) => { e.stopPropagation(); handleDownloadImage(image); }}>
+                      <Download className="h-3.5 w-3.5" />
+                    </button>
+                    <button className={`p-1 rounded transition-colors ${isMonochrome ? 'hover:bg-gray-100 text-red-500' : 'hover:bg-white/10 text-gray-400 hover:text-red-400'}`} title="删除"
+                      onClick={(e) => { e.stopPropagation(); onImagesChange(images.filter(i => i.id !== image.id)); if (selectedIds.has(image.id)) setSelectedIds(new Set()); }}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
                 {/* Edit mode stroke overlay - moved to floating window */}
               </div>
             );
           })}
+          {/* Processing connection lines: show relationship between processing frames and their source images */}
+          {(() => {
+            const processingImages = visibleImages.filter(img => img.isProcessingPlaceholder && img.processing?.sourceUrl);
+            if (processingImages.length === 0) return null;
+            return (
+              <svg
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  top: 0,
+                  width: '1px',
+                  height: '1px',
+                  overflow: 'visible',
+                  pointerEvents: 'none',
+                  zIndex: 5,
+                }}
+              >
+                {processingImages.map(procImg => {
+                  const sourceImg = images.find(i => !i.isProcessingPlaceholder && i.url === procImg.processing!.sourceUrl);
+                  if (!sourceImg) return null;
+                  const srcX = sourceImg.x + sourceImg.width;
+                  const srcY = sourceImg.y + sourceImg.height / 2;
+                  const tgtX = procImg.x;
+                  const tgtY = procImg.y + procImg.height / 2;
+                  const midX = (srcX + tgtX) / 2;
+                  return (
+                    <g key={`proc-line-${procImg.id}`}>
+                      <path
+                        d={`M ${srcX} ${srcY} C ${midX} ${srcY}, ${midX} ${tgtY}, ${tgtX} ${tgtY}`}
+                        fill="none"
+                        stroke={isMonochrome ? '#3b82f6' : '#d4af37'}
+                        strokeWidth={1.5 / zoom}
+                        strokeDasharray={`${4 / zoom} ${3 / zoom}`}
+                        opacity={0.5}
+                      />
+                    </g>
+                  );
+                })}
+              </svg>
+            );
+          })()}
           {/* Reference Fusion Visualization - inside transform container for correct coordinate system */}
           {showRefFusion && referenceIds.length > 0 && (() => {
             const refImages = referenceIds
@@ -11051,6 +11158,16 @@ export function InfiniteCanvas({
         </div>
 
         <div className={`w-px h-5 ${separatorCls}`} />
+
+        {/* Grid mode toggle */}
+        <button
+          onClick={() => setGridMode(prev => prev === 'dots' ? 'lines' : prev === 'lines' ? 'blank' : 'dots')}
+          className={`${toolBtnCls}`}
+          title={`画布网格: ${gridMode === 'dots' ? '点阵' : gridMode === 'lines' ? '线条' : '空白'}`}
+        >
+          {gridMode === 'dots' ? <LayoutGrid className={`h-4 w-4 ${mIcon.layoutGrid}`} /> : gridMode === 'lines' ? <Frame className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">网格: {gridMode === 'dots' ? '点阵' : gridMode === 'lines' ? '线条' : '空白'}</span>
+        </button>
 
         {/* Reset view */}
         <button
