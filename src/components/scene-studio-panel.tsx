@@ -1621,7 +1621,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
       {/* Center: 3D Canvas */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top toolbar */}
-        <div className="flex items-center justify-between px-3 py-1.5 border-b" style={{ borderColor: BORDER_COLOR, background: BG_PRIMARY }}>
+        <div className="relative z-20 flex items-center justify-between px-3 py-1.5 border-b" style={{ borderColor: BORDER_COLOR, background: BG_PRIMARY, pointerEvents: 'auto' }}>
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5">
               <BoxIcon size={14} style={{ color: accent }} />
@@ -1694,8 +1694,9 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
           </div>
         </div>
 
-        {/* 3D Canvas */}
-        <div className="flex-1 relative scene-studio-canvas overflow-hidden" style={{ background: '#050505' }}>
+        {/* 3D Canvas - contained within absolute wrapper to prevent R3F overflow */}
+        <div className="flex-1 relative scene-studio-canvas" style={{ background: '#050505', minHeight: 0 }}>
+          <div className="absolute inset-0 overflow-hidden">
           <Suspense fallback={
             <div className="absolute inset-0 flex items-center justify-center" style={{ color: TEXT_DIM }}>
               <Loader2 size={24} className="animate-spin" />
@@ -1718,6 +1719,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
               />
             </Canvas>
           </Suspense>
+          </div>
 
           {/* Keyboard shortcut hints */}
           <div className="absolute top-2 left-2 text-[9px] px-2 py-1 rounded pointer-events-none" style={{ color: TEXT_DIM, background: 'rgba(0,0,0,0.5)', zIndex: 10 }}>
@@ -1725,10 +1727,10 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
           </div>
         </div>
 
-        {/* Bottom floating action bar - OUTSIDE canvas container to avoid R3F event capture */}
-        <div className="flex-shrink-0 flex items-center justify-center gap-1 px-3 py-2 border-t" style={{ background: BG_PRIMARY, borderColor: BORDER_COLOR }}>
+        {/* Bottom action bar - relative z-index + pointer-events-auto ensures clickability above R3F canvas */}
+        <div className="relative z-20 flex-shrink-0 flex items-center justify-center gap-1 px-3 py-2 border-t" style={{ background: BG_PRIMARY, borderColor: BORDER_COLOR, pointerEvents: 'auto' }}>
           <button
-            onClick={() => setRightTab('ai-generate')}
+            onClick={() => { setRightTab('ai-generate'); if (panelCollapsed) setPanelCollapsed(false); }}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] cursor-pointer transition-colors"
             style={{ background: `${accent}20`, color: accent, border: `1px solid ${accent}30` }}
           >
@@ -1742,7 +1744,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
             <Camera size={11} /> 截图
           </button>
           <button
-            onClick={() => setRightTab('ai-layout')}
+            onClick={() => { setRightTab('ai-layout'); if (panelCollapsed) setPanelCollapsed(false); }}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] cursor-pointer transition-colors"
             style={{ background: BG_TERTIARY, color: TEXT_SECONDARY, border: `1px solid ${BORDER_COLOR}` }}
           >
