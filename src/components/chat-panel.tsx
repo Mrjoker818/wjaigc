@@ -1258,9 +1258,9 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: model,
+          providerId: model.includes('::') ? model.split('::')[0] : undefined,
           messages: requestMessages,
           stream: false,
-
         }),
       });
 
@@ -1469,7 +1469,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
               body: JSON.stringify({
                 prompt: userText,
                 model: model,
-      
+                providerId: model.includes('::') ? model.split('::')[0] : undefined,
                 mode: 'enhance',
               }),
             });
@@ -1675,7 +1675,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
         body: JSON.stringify({
           prompt: optimizerInput.trim(),
           model: model,
-
+          providerId: model.includes('::') ? model.split('::')[0] : undefined,
           mode: 'agent',
           systemPrompt: agentSystemPrompt,
         }),

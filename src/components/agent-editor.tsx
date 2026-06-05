@@ -25,6 +25,23 @@ interface AgentStep {
   detail?: string;
 }
 
+// 从图像生成面板读取当前选择的模型信息
+function getCurrentImageModelInfo(): { imageModel?: string; imageProviderId?: string } {
+  try {
+    const stored = localStorage.getItem('wujie_selected_model');
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      const compositeKey = parsed.model || '';
+      if (compositeKey.includes('::')) {
+        const [pid, mid] = compositeKey.split('::');
+        return { imageModel: mid, imageProviderId: pid };
+      }
+      return { imageModel: compositeKey, imageProviderId: parsed.providerId || parsed.compositeProviderId || undefined };
+    }
+  } catch { /* ignore */ }
+  return {};
+}
+
 // 主题色
 const GOLD = '#d4af37';
 const GOLD_DIM = '#a88a2a';
@@ -235,6 +252,7 @@ export function AgentEditor({
           maxRounds,
           size: '1024',
           quality: 'medium',
+          ...getCurrentImageModelInfo(),
         }),
       });
 

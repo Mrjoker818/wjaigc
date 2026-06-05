@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
-import { findProviderForModel, getPublicModels } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderById, getPublicModels } from '@/lib/server-api-config';
+import type { ApiProviderConfig } from '@/lib/universal-api-types';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl } from '@/lib/api-compatibility';
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
@@ -445,7 +446,16 @@ const ECOM_TEMPLATES: EcomTemplate[] = [
 
 // ─── Helper: Get image provider ────────────────────────────────────
 
-async function getImageProvider(model?: string) {
+async function getImageProvider(model?: string, providerId?: string) {
+  // 优先使用前端传递的 providerId 精确匹配
+  if (providerId) {
+    const p = await findProviderById(providerId);
+    if (p) {
+      console.log(`[brand-ecommerce] getImageProvider: 通过 providerId="${providerId}" 匹配到提供商 "${p.name}"`);
+      return p;
+    }
+    console.warn(`[brand-ecommerce] getImageProvider: providerId="${providerId}" 未匹配到提供商，回退到模型匹配`);
+  }
   if (model) {
     const p = await findProviderForModel(model);
     if (p) return p;
@@ -505,7 +515,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'generate') {
-      const { templateIds, productDesc, styleExtra, model, referenceImageUrl, productImageUrl, brandColors, variantCount, productConsistencyMode, productConsistencyStrength } = body;
+      const { templateIds, productDesc, styleExtra, model, providerId, referenceImageUrl, productImageUrl, brandColors, variantCount, productConsistencyMode, productConsistencyStrength } = body;
       if (!templateIds?.length) {
         return NextResponse.json({ error: '请至少选择一个模板' }, { status: 400 });
       }
@@ -513,7 +523,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '请输入商品描述' }, { status: 400 });
       }
 
-      const provider = await getImageProvider(model);
+      const provider = await getImageProvider(model, providerId);
       if (!provider) {
         return NextResponse.json({ error: '未找到可用的图像模型，请在管理员后台配置' }, { status: 400 });
       }
@@ -957,12 +967,20 @@ export async function POST(request: NextRequest) {
 
     if (action === 'assist') {
       // LLM-assisted design: generate optimized prompts and style suggestions
-      const { productDesc, style, sceneDesc, templateId, assistType, llmModel } = body;
+      const { productDesc, style, sceneDesc, templateId, assistType, llmModel, llmProviderId } = body;
       const effectiveStyle = style || sceneDesc || '';
       if (!productDesc) return NextResponse.json({ error: '请提供商品描述' }, { status: 400 });
       if (!llmModel) return NextResponse.json({ error: '请选择LLM模型' }, { status: 400 });
 
-      const provider = await findProviderForModel(llmModel);
+      // 优先使用前端传递的 llmProviderId 精确匹配
+      let provider: ApiProviderConfig | null = null;
+      if (llmProviderId) {
+        provider = await findProviderById(llmProviderId);
+        if (provider) console.log(`[brand-ecommerce] assist: 通过 llmProviderId="${llmProviderId}" 匹配到LLM提供商 "${provider.name}"`);
+      }
+      if (!provider) {
+        provider = await findProviderForModel(llmModel);
+      }
       if (!provider) return NextResponse.json({ error: '未找到该模型的API提供商配置' }, { status: 400 });
 
       // ★ Dynamic template for assist (resolve suffixed IDs like detail-vertical-2)

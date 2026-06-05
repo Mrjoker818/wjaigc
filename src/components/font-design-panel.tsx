@@ -418,6 +418,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
           ratio: mode === 'transparent-logo' ? '1:1' : ratio,
           color, background, strokeOptions, graphicElements, material, jimengEnhanced,
           model: selectedModel, mode, count: 1,
+          providerId: imageModels.find(m => m.id === selectedModel)?.providerId,
         }),
       });
       const data = await res.json();

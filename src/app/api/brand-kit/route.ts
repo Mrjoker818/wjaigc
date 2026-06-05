@@ -30,7 +30,13 @@ interface DesignScenario {
 
 // ─── Helper: Get image provider ──────────────────────────────────────
 
-async function getImageProvider(model?: string) {
+async function getImageProvider(model?: string, providerId?: string) {
+  // 优先使用providerId精确匹配
+  if (providerId) {
+    const { findProviderById } = await import('@/lib/server-api-config');
+    const provider = await findProviderById(providerId);
+    if (provider) return { provider, modelId: model || (provider.selectedModels && provider.selectedModels[0]) || '' };
+  }
   const modelId = model || '';
   if (modelId) {
     const provider = await findProviderForModel(modelId);
@@ -48,7 +54,13 @@ async function getImageProvider(model?: string) {
 
 // ─── Helper: Get LLM provider ───────────────────────────────────────
 
-async function getLLMProvider(model?: string) {
+async function getLLMProvider(model?: string, providerId?: string) {
+  // 优先使用providerId精确匹配
+  if (providerId) {
+    const { findProviderById } = await import('@/lib/server-api-config');
+    const provider = await findProviderById(providerId);
+    if (provider) return { provider, modelId: model || (provider.selectedModels && provider.selectedModels[0]) || '' };
+  }
   const modelId = model || '';
   if (modelId) {
     const provider = await findProviderForModel(modelId);
@@ -347,11 +359,13 @@ async function handleGenerate(body: {
   scenarioIds: string[];
   customPrompt?: string;
   imageModel?: string;
+  imageProviderId?: string;
   llmModel?: string;
+  llmProviderId?: string;
   aspectRatio?: string;
   count?: number;
 }) {
-  const { brandDNA, scenarioIds, customPrompt, imageModel, llmModel, aspectRatio, count } = body;
+  const { brandDNA, scenarioIds, customPrompt, imageModel, imageProviderId, llmModel, llmProviderId, aspectRatio, count } = body;
 
   if (!brandDNA) {
     return NextResponse.json({ error: '请先提取品牌 DNA' }, { status: 400 });
@@ -362,12 +376,12 @@ async function handleGenerate(body: {
   }
 
   // Step 1: Use LLM to generate detailed prompts for each scenario
-  const llmInfo = await getLLMProvider(llmModel);
+  const llmInfo = await getLLMProvider(llmModel, llmProviderId);
   if (!llmInfo) {
     return NextResponse.json({ error: '未找到可用的 LLM 模型' }, { status: 400 });
   }
 
-  const imageInfo = await getImageProvider(imageModel);
+  const imageInfo = await getImageProvider(imageModel, imageProviderId);
   if (!imageInfo) {
     return NextResponse.json({ error: '未找到可用的图像模型，请在管理员系统中配置图像模型' }, { status: 400 });
   }

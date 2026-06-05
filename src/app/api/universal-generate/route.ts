@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findProviderForModel, normalizeApiBaseUrl } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
@@ -20,6 +20,7 @@ interface UniversalGenerateRequest {
   n?: number;
   referenceImageUrl?: string;
   userId?: string;
+  providerId?: string;
 }
 
 export async function POST(request: NextRequest) {
@@ -34,6 +35,7 @@ export async function POST(request: NextRequest) {
       aspectRatio = '1:1',
       n = 1,
       referenceImageUrl,
+      providerId,
     } = body;
 
     const sessionUser = await getSessionUser(request);
@@ -48,7 +50,11 @@ export async function POST(request: NextRequest) {
     }
 
     const resolvedModel = model.includes('::') ? model.split('::').slice(1).join('::') : model;
-    const provider = await findProviderForModel(resolvedModel, 'image');
+    // 优先使用 providerId 精确匹配提供商
+    let provider = providerId ? await findProviderById(providerId) : null;
+    if (!provider) {
+      provider = await findProviderForModel(resolvedModel, 'image');
+    }
     const apiKey = provider?.apiKey;
     const baseUrl = normalizeApiBaseUrl(provider?.baseUrl || '');
 

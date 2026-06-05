@@ -639,12 +639,13 @@ function BrandKitCard({ kit, selected, onSelect, onEdit, onDelete, onBatchGenera
 }
 
 // ========== Batch Generate Dialog ==========
-function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageModel }: {
+function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageModel, currentImageProviderId }: {
   kit: BrandKit;
   isGold: boolean;
   onClose: () => void;
   onAddImages?: (urls: string[]) => void;
   currentImageModel?: string;
+  currentImageProviderId?: string;
 }) {
   const [selectedScenes, setSelectedScenes] = useState<string[]>(['poster', 'social_media', 'banner']);
   const [count, setCount] = useState(2);
@@ -676,6 +677,7 @@ function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageMo
           sceneTypes: selectedScenes,
           count,
           imageModel: currentImageModel,
+          imageProviderId: currentImageProviderId,
           aspectRatio,
         }),
       });
@@ -884,13 +886,22 @@ function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageMo
 // ========== Main Brand Kit Panel ==========
 export default function BrandKitPanel({ isGold, onAddImages }: BrandKitPanelProps) {
   const [currentImageModel, setCurrentImageModel] = useState<string>('');
+  const [currentImageProviderId, setCurrentImageProviderId] = useState<string>('');
   useEffect(() => {
     const readModel = () => {
       try {
         const stored = localStorage.getItem('wujie_selected_model');
         if (stored) {
           const parsed = JSON.parse(stored);
-          setCurrentImageModel(parsed.model || parsed.modelId || '');
+          const compositeKey = parsed.model || '';
+          if (compositeKey.includes('::')) {
+            const [pid, mid] = compositeKey.split('::');
+            setCurrentImageModel(mid);
+            setCurrentImageProviderId(pid);
+          } else {
+            setCurrentImageModel(compositeKey || parsed.modelId || '');
+            setCurrentImageProviderId(parsed.providerId || parsed.compositeProviderId || '');
+          }
         }
       } catch { /* ignore */ }
     };
@@ -1065,6 +1076,7 @@ export default function BrandKitPanel({ isGold, onAddImages }: BrandKitPanelProp
           onClose={() => setBatchDialog(null)}
           onAddImages={onAddImages}
           currentImageModel={currentImageModel}
+          currentImageProviderId={currentImageProviderId}
         />
       )}
     </div>

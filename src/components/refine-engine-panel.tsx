@@ -306,7 +306,8 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         action: 'refine',
         imageUrl: sourceImage,
         mode: refineMode,
-        model: selectedModel,
+        model: selectedModel.includes('::') ? selectedModel.split('::').pop()! : selectedModel,
+        providerId: selectedModel.includes('::') ? selectedModel.split('::')[0] : undefined,
         productCategory: selectedCategory,
         productName: productName || '产品',
         materialType: customMaterial,
@@ -391,7 +392,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
             const pollResp = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId: data.taskId, model: selectedModel }),
+              body: JSON.stringify({ taskId: data.taskId, model: selectedModel.includes('::') ? selectedModel.split('::').pop()! : selectedModel, providerId: selectedModel.includes('::') ? selectedModel.split('::')[0] : undefined }),
             });
             const pollData = await pollResp.json();
             console.log(`[refine-engine-panel] Poll #${pollAttemptRef.current}: status=${pollData.status}, progress=${pollData.progress}, hasResult=${!!pollData.result}`);

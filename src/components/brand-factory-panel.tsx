@@ -451,7 +451,9 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
   const [imageModels, setImageModels] = useState<ImageModel[]>([]);
   const [llmModels, setLlmModels] = useState<ImageModel[]>([]);
   const [selectedImageModel, setSelectedImageModel] = useState('');
+  const [selectedImageProviderId, setSelectedImageProviderId] = useState('');
   const [selectedLlmModel, setSelectedLlmModel] = useState('');
+  const [selectedLlmProviderId, setSelectedLlmProviderId] = useState('');
   const [showModelPanel, setShowModelPanel] = useState(false);
 
   // === Project create state ===
@@ -556,8 +558,10 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
           const saved = localStorage.getItem('wujie_bf_image_model');
           if (saved && mapped.some(m => m.id === saved)) {
             setSelectedImageModel(saved);
+            setSelectedImageProviderId(mapped.find(m => m.id === saved)?.providerId || '');
           } else if (mapped.length) {
             setSelectedImageModel(mapped[0].id);
+            setSelectedImageProviderId(mapped[0].providerId || '');
           }
         }
       })
@@ -578,8 +582,10 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
           const saved = localStorage.getItem('wujie_bf_llm_model');
           if (saved && mapped.some(m => m.id === saved)) {
             setSelectedLlmModel(saved);
+            setSelectedLlmProviderId(mapped.find(m => m.id === saved)?.providerId || '');
           } else if (mapped.length) {
             setSelectedLlmModel(mapped[0].id);
+            setSelectedLlmProviderId(mapped[0].providerId || '');
           }
         }
       })
@@ -636,7 +642,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
       const res = await fetch('/api/brand-factory', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, ...body, imageModel: selectedImageModel, llmModel: selectedLlmModel }),
+        body: JSON.stringify({ action, ...body, imageModel: selectedImageModel, imageProviderId: selectedImageProviderId, llmModel: selectedLlmModel, llmProviderId: selectedLlmProviderId }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || '操作失败');
@@ -1713,7 +1719,11 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
             <span className={`${th.textSec} text-xs font-medium`}>图像生成模型</span>
           </div>
           <select className={`${th.select} w-full text-xs`} value={selectedImageModel}
-            onChange={e => { setSelectedImageModel(e.target.value); localStorage.setItem('wujie_bf_image_model', e.target.value); }}>
+            onChange={e => {
+              setSelectedImageModel(e.target.value);
+              setSelectedImageProviderId(imageModels.find(m => m.id === e.target.value)?.providerId || '');
+              localStorage.setItem('wujie_bf_image_model', e.target.value);
+            }}>
             {imageModels.map(m => (
               <option key={m.id} value={m.id} className={th.optionBg}>{m.name}{m.providerName ? ` (${m.providerName})` : ''}</option>
             ))}
@@ -1726,7 +1736,11 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
             <span className={`${th.textSec} text-xs font-medium`}>LLM分析模型</span>
           </div>
           <select className={`${th.select} w-full text-xs`} value={selectedLlmModel}
-            onChange={e => { setSelectedLlmModel(e.target.value); localStorage.setItem('wujie_bf_llm_model', e.target.value); }}>
+            onChange={e => {
+              setSelectedLlmModel(e.target.value);
+              setSelectedLlmProviderId(llmModels.find(m => m.id === e.target.value)?.providerId || '');
+              localStorage.setItem('wujie_bf_llm_model', e.target.value);
+            }}>
             {llmModels.map(m => (
               <option key={m.id} value={m.id} className={th.optionBg}>{m.name}{m.providerName ? ` (${m.providerName})` : ''}</option>
             ))}

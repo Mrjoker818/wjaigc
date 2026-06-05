@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
-import { findProviderForFeature, findProviderById } from '@/lib/server-api-config';
+import { findProviderForFeature, findProviderById, findProviderForModel } from '@/lib/server-api-config';
+import type { ApiProviderConfig } from '@/lib/universal-api-types';
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { optionalApiAuth } from '@/lib/api-auth';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest) {
     await optionalApiAuth(request);
 
     const body = await request.json();
-    const { image, prompt, maskDataUrl, model, providerId, maxRounds, imagePrompt } = body;
+    const { image, prompt, maskDataUrl, model, providerId, maxRounds, imagePrompt, imageModel, imageProviderId } = body;
 
     if (!image || !prompt) {
       return NextResponse.json({ success: false, error: '缺少图片或描述' }, { status: 400 });
@@ -244,6 +245,8 @@ export async function POST(request: NextRequest) {
                 finalImageUrl, // 使用上一步的结果（第一步用原图）
                 String(step.params.prompt || prompt),
                 i === 0 ? maskDataUrl : undefined, // 仅第一步使用用户蒙版
+                imageModel,
+                imageProviderId,
               );
               if (editResult.success && editResult.imageUrl) {
                 finalImageUrl = editResult.imageUrl;
@@ -429,23 +432,29 @@ export async function GET(request: NextRequest) {
 async function performImageEdit(
   imageUrl: string,
   editPrompt: string,
-  maskDataUrl: string | undefined
+  maskDataUrl: string | undefined,
+  imageModelFromFrontend?: string,
+  imageProviderIdFromFrontend?: string
 ): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
-  // 查找图像编辑提供商 (use 'imageEdit' feature key)
-  const imageProvider = await findProviderForFeature('imageEdit');
+  // 优先使用前端传递的图像模型和提供商，遵循用户在图像生成面板的选择
+  let imageProvider: ApiProvider | null = null;
+  if (imageProviderIdFromFrontend) {
+    imageProvider = await findProviderById(imageProviderIdFromFrontend);
+  }
+  if (!imageProvider && imageModelFromFrontend) {
+    imageProvider = await findProviderForModel(imageModelFromFrontend, 'image');
+  }
+  if (!imageProvider) {
+    // 兜底：查找图像编辑提供商
+    imageProvider = await findProviderForFeature('imageEdit');
+  }
   if (!imageProvider) {
     return { success: false, error: '未配置图像模型' };
   }
 
-  // 获取提供商配置
-  const provider = await findProviderById(String(imageProvider.id));
-  if (!provider) {
-    return { success: false, error: '图像提供商配置不存在' };
-  }
-
-  const baseUrl = provider.baseUrl?.replace(/\/+$/, '') || '';
-  const apiKey = provider.apiKey || '';
-  const imageModel = provider.selectedModels?.[0] || '';
+  const baseUrl = imageProvider.baseUrl?.replace(/\/+$/, '') || '';
+  const apiKey = imageProvider.apiKey || '';
+  const imageModel = imageModelFromFrontend || imageProvider.selectedModels?.[0] || '';
 
   if (!baseUrl || !apiKey || !imageModel) {
     return { success: false, error: '图像提供商配置不完整' };

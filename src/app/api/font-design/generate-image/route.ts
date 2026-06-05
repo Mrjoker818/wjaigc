@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse, after } from 'next/server';
-import { findProviderForModel } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderById } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
       prompt, model, ratio = '16:9', count = 1,
       text, scene, primaryStyleCategory, secondaryStyle,
       color, background, strokeOptions, graphicElements, material,
-      jimengEnhanced = true, mode = 'full',
+      jimengEnhanced = true, mode = 'full', providerId,
     } = body as Record<string, unknown>;
 
     const textStr = String(text || '');
@@ -131,7 +131,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '缺少提示词或文字输入' }, { status: 400 });
     }
 
-    let provider = modelStr ? await findProviderForModel(modelStr) : null;
+    // 优先使用 providerId 精确匹配，避免多提供商同名模型路由错误
+    let provider = null;
+    if (providerId) {
+      provider = await findProviderById(providerId as string);
+      if (provider) {
+        console.log(`[font-design/generate-image] 使用 providerId 精确匹配: ${provider.name} (${providerId})`);
+      } else {
+        console.warn(`[font-design/generate-image] providerId="${providerId}" 未找到匹配提供商，回退到 findProviderForModel`);
+      }
+    }
+    if (!provider) {
+      provider = modelStr ? await findProviderForModel(modelStr) : null;
+    }
     if (!provider) {
       // Fallback: find any provider with image models
       const { getApiProviders } = await import('@/lib/server-api-config');

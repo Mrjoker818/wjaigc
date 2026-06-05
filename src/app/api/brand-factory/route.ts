@@ -11,7 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { findProviderForModel, findProviderForFeature } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderForFeature, findProviderById } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { optionalApiAuth } from '@/lib/api-auth';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl } from '@/lib/api-compatibility';
@@ -72,7 +72,12 @@ function genId(prefix: string): string {
 
 // ─── 模型调用辅助 ────────────────────────────────────────────────────
 
-async function getImageProvider(imageModel?: string): Promise<ApiProvider | null> {
+async function getImageProvider(imageModel?: string, imageProviderId?: string): Promise<ApiProvider | null> {
+  if (imageProviderId) {
+    const provider = await findProviderById(imageProviderId);
+    if (provider) return provider;
+    console.warn(`[brand-factory] imageProviderId="${imageProviderId}" 未找到提供商，回退到模型匹配`);
+  }
   if (imageModel) {
     const provider = await findProviderForModel(imageModel, 'image');
     if (provider) return provider;
@@ -80,7 +85,12 @@ async function getImageProvider(imageModel?: string): Promise<ApiProvider | null
   return findProviderForFeature('imageEdit');
 }
 
-async function getLLMProvider(llmModel?: string): Promise<ApiProvider | null> {
+async function getLLMProvider(llmModel?: string, llmProviderId?: string): Promise<ApiProvider | null> {
+  if (llmProviderId) {
+    const provider = await findProviderById(llmProviderId);
+    if (provider) return provider;
+    console.warn(`[brand-factory] llmProviderId="${llmProviderId}" 未找到提供商，回退到模型匹配`);
+  }
   if (llmModel) {
     const provider = await findProviderForModel(llmModel, 'chat');
     if (provider) return provider;
@@ -92,9 +102,10 @@ async function callLLM(
   prompt: string,
   systemPrompt: string,
   llmModel?: string,
-  options?: { maxTokens?: number; temperature?: number }
+  options?: { maxTokens?: number; temperature?: number },
+  llmProviderId?: string
 ): Promise<{ success: boolean; content?: string; error?: string }> {
-  const provider = await getLLMProvider(llmModel);
+  const provider = await getLLMProvider(llmModel, llmProviderId);
   if (!provider) {
     return { success: false, error: '未找到可用的LLM模型提供商，请在管理员后台配置' };
   }
@@ -310,9 +321,10 @@ function deepExtractImageUrls(obj: unknown, depth = 0): string[] {
 async function generateImage(
   prompt: string,
   imageModel?: string,
-  options?: { size?: string; quality?: string; n?: number }
+  options?: { size?: string; quality?: string; n?: number },
+  imageProviderId?: string
 ): Promise<{ success: boolean; imageUrl?: string; imageUrls?: string[]; taskId?: string; error?: string }> {
-  const provider = await getImageProvider(imageModel);
+  const provider = await getImageProvider(imageModel, imageProviderId);
   if (!provider) {
     return { success: false, error: '未找到可用的图像模型提供商，请在管理员后台配置' };
   }
@@ -606,15 +618,16 @@ async function pollTaskResult(
 async function generateImageWithPoll(
   prompt: string,
   imageModel?: string,
-  options?: { size?: string; quality?: string; n?: number }
+  options?: { size?: string; quality?: string; n?: number },
+  imageProviderId?: string
 ): Promise<{ success: boolean; imageUrl?: string; imageUrls?: string[]; error?: string }> {
-  const result = await generateImage(prompt, imageModel, options);
+  const result = await generateImage(prompt, imageModel, options, imageProviderId);
   if (!result.success) return result;
   // 如果同步返回了图片URL，直接返回
   if (result.imageUrl || result.imageUrls) return result;
   // 异步任务，需要轮询
   if (result.taskId) {
-    const provider = await getImageProvider(imageModel);
+    const provider = await getImageProvider(imageModel, imageProviderId);
     if (!provider) return { success: false, error: '未找到提供商' };
     const profile = resolveCompatProfile(provider);
     return pollTaskResult(result.taskId, {
@@ -768,6 +781,8 @@ export async function POST(request: NextRequest) {
     const action = body.action as string;
     const imageModel = body.imageModel as string | undefined;
     const llmModel = body.llmModel as string | undefined;
+    const imageProviderId = body.imageProviderId as string | undefined;
+    const llmProviderId = body.llmProviderId as string | undefined;
 
     switch (action) {
       // ─── 项目管理 ─────────────────────────────────────
@@ -874,7 +889,7 @@ export async function POST(request: NextRequest) {
         if (!projectId) return NextResponse.json({ error: '缺少项目ID' }, { status: 400 });
 
         const { system, user } = buildAnalyzeDNAPrompt(body);
-        const result = await callLLM(user, system, llmModel, { maxTokens: 4096, temperature: 0.7 });
+        const result = await callLLM(user, system, llmModel, { maxTokens: 4096, temperature: 0.7 }, llmProviderId);
 
         if (!result.success || !result.content) {
           return NextResponse.json({ error: result.error || '品牌DNA分析失败' }, { status: 500 });
@@ -930,7 +945,7 @@ export async function POST(request: NextRequest) {
         }
 
         const { system, user } = buildGenerateDirectionsPrompt(brandDnaRaw, count);
-        const result = await callLLM(user, system, llmModel, { maxTokens: 4096, temperature: 0.8 });
+        const result = await callLLM(user, system, llmModel, { maxTokens: 4096, temperature: 0.8 }, llmProviderId);
 
         if (!result.success || !result.content) {
           return NextResponse.json({ error: result.error || '创意方向生成失败' }, { status: 500 });
@@ -983,7 +998,7 @@ export async function POST(request: NextRequest) {
 
         const result = await generateImageWithPoll(prompt, imageModel, {
           size: body.ratio === '9:16' ? '1024x1536' : body.ratio === '1:1' ? '1024x1024' : '1536x1024',
-        });
+        }, imageProviderId);
 
         if (!result.success) {
           return NextResponse.json({ error: result.error || 'KV图生成失败' }, { status: 500 });
@@ -1021,7 +1036,7 @@ export async function POST(request: NextRequest) {
         const results: { item: string; imageUrl?: string; error?: string }[] = [];
         for (const item of items) {
           const prompt = buildBatchMaterialPrompt(brandDna, materialType, item);
-          const result = await generateImageWithPoll(prompt, imageModel, { size: '1024x1024' });
+          const result = await generateImageWithPoll(prompt, imageModel, { size: '1024x1024' }, imageProviderId);
           results.push({
             item,
             imageUrl: result.imageUrl,
@@ -1085,7 +1100,7 @@ export async function POST(request: NextRequest) {
         }
 
         const { system, user } = buildConsistencyCheckPrompt(brandName, brandDna, materials);
-        const result = await callLLM(user, system, llmModel, { maxTokens: 2048, temperature: 0.3 });
+        const result = await callLLM(user, system, llmModel, { maxTokens: 2048, temperature: 0.3 }, llmProviderId);
 
         if (!result.success || !result.content) {
           return NextResponse.json({ error: result.error || '一致性检查失败' }, { status: 500 });
@@ -1146,7 +1161,7 @@ export async function POST(request: NextRequest) {
         if (!text) return NextResponse.json({ error: '请输入标题文字' }, { status: 400 });
 
         const prompt = buildChineseTitlePrompt(text, scene, style, brandDna);
-        const result = await generateImageWithPoll(prompt, imageModel, { size: '1536x1024' });
+        const result = await generateImageWithPoll(prompt, imageModel, { size: '1536x1024' }, imageProviderId);
 
         if (!result.success) {
           return NextResponse.json({ error: result.error || '标题图生成失败' }, { status: 500 });

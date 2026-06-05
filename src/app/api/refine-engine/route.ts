@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findProviderForModel, getPublicModels, getPublicApiProviders } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderById, getPublicModels, getPublicApiProviders } from '@/lib/server-api-config';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, isEditsEndpointRejected, stripEditsOnlyFields } from '@/lib/api-compatibility';
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
@@ -402,7 +402,16 @@ export async function GET() {
 }
 
 // ─── Helper: Get image provider ───
-async function getImageProvider(model?: string): Promise<ApiProvider | null> {
+async function getImageProvider(model?: string, providerId?: string): Promise<ApiProvider | null> {
+  // providerId 优先匹配
+  if (providerId) {
+    const p = await findProviderById(providerId);
+    if (p) {
+      console.log(`[refine-engine] 提供商选择: providerId="${providerId}", 匹配="${p.displayName || p.name}" (id=${p.id}), baseUrl="${p.baseUrl}"`);
+      return p;
+    }
+    console.warn(`[refine-engine] ⚠️ providerId="${providerId}" 未找到匹配的提供商，回退到模型匹配`);
+  }
   if (model) {
     const p = await findProviderForModel(model);
     if (p) return p;
@@ -695,6 +704,7 @@ export async function POST(request: NextRequest) {
         mode,
         model,
         aspectRatio,
+        providerId,
       } = body;
 
       if (!imageUrl) {
@@ -705,9 +715,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '请选择生图模型' }, { status: 400 });
       }
 
-      const provider = await getImageProvider(model);
+      const provider = await getImageProvider(model, providerId);
       if (!provider) {
-        return NextResponse.json({ error: `未找到模型 ${model} 对应的API提供商` }, { status: 400 });
+        return NextResponse.json({ error: `未找到模型 ${model} 对应的API提供商${providerId ? ` (providerId: ${providerId})` : ''}` }, { status: 400 });
       }
 
       const selectedModel = model || provider.selectedModels?.[0];

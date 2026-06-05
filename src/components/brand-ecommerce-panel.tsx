@@ -70,8 +70,10 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   const [selectedTemplates, setSelectedTemplates] = useState<Set<string>>(new Set());
   const [models, setModels] = useState<ImageModel[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
+  const [selectedImageProviderId, setSelectedImageProviderId] = useState('');
   const [llmModels, setLlmModels] = useState<LlmModel[]>([]);
   const [selectedLlmModel, setSelectedLlmModel] = useState('');
+  const [selectedLlmProviderId, setSelectedLlmProviderId] = useState('');
   const [productDesc, setProductDesc] = useState('');
   const [styleExtra, setStyleExtra] = useState('');
   const [mainText, setMainText] = useState('');
@@ -174,10 +176,35 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           });
           setModels(mapped);
           const saved = localStorage.getItem('wujie_selected_model');
-          if (saved && mapped.some((m: ImageModel) => m.id === saved)) {
-            setSelectedModel(saved);
+          let resolvedProviderId = '';
+          let resolvedModel = '';
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved);
+              const compositeKey = parsed?.modelId || saved;
+              if (compositeKey.includes('::')) {
+                const [pid, mid] = compositeKey.split('::');
+                resolvedProviderId = pid;
+                resolvedModel = mid;
+              } else {
+                resolvedModel = compositeKey;
+              }
+            } catch {
+              if (saved.includes('::')) {
+                const [pid, mid] = saved.split('::');
+                resolvedProviderId = pid;
+                resolvedModel = mid;
+              } else {
+                resolvedModel = saved;
+              }
+            }
+          }
+          if (resolvedModel && mapped.some((m: ImageModel) => m.id === resolvedModel)) {
+            setSelectedModel(resolvedModel);
+            if (resolvedProviderId) setSelectedImageProviderId(resolvedProviderId);
           } else if (mapped.length) {
             setSelectedModel(mapped[0].id);
+            if (mapped[0].providerId) setSelectedImageProviderId(mapped[0].providerId);
           }
         }
       })
@@ -196,10 +223,19 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           });
           setLlmModels(mapped);
           const saved = localStorage.getItem('wujie_selected_llm_model');
-          if (saved && mapped.some((m: LlmModel) => m.id === saved)) {
-            setSelectedLlmModel(saved);
+          if (saved) {
+            const pureLlmModel = saved.includes('::') ? saved.split('::')[1] : saved;
+            const savedLlmProvId = saved.includes('::') ? saved.split('::')[0] : '';
+            if (mapped.some((m: LlmModel) => m.id === pureLlmModel)) {
+              setSelectedLlmModel(pureLlmModel);
+              setSelectedLlmProviderId(savedLlmProvId || mapped.find((m: LlmModel) => m.id === pureLlmModel)?.providerId || '');
+            } else if (mapped.length) {
+              setSelectedLlmModel(mapped[0].id);
+              setSelectedLlmProviderId(mapped[0].providerId);
+            }
           } else if (mapped.length) {
             setSelectedLlmModel(mapped[0].id);
+            setSelectedLlmProviderId(mapped[0].providerId);
           }
         }
       })
@@ -322,6 +358,9 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           styleExtra: styleExtra.trim(),
           sceneDesc: sceneDesc.trim(),
           model: selectedModel,
+          imageProviderId: selectedImageProviderId,
+          llmModel: selectedLlmModel,
+          llmProviderId: selectedLlmProviderId,
           referenceImageUrl: refImage,
           productImageUrl: productImage,
           productConsistencyMode: productImage ? productConsistencyMode : undefined,

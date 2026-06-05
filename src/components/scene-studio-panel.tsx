@@ -1315,6 +1315,20 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
         setGenerationResults(prev => [...newResults, ...prev]);
       } else {
         // Fallback: try /api/generate + poll
+        // 使用图像生成面板当前选择的模型
+        const currentImageModel = (() => {
+          try {
+            const saved = localStorage.getItem('wujie_selected_model');
+            if (saved) {
+              const parsed = JSON.parse(saved);
+              const compositeKey = parsed.model || parsed.modelId || '';
+              const pureModelId = compositeKey.includes('::') ? compositeKey.split('::')[1] : compositeKey;
+              const providerId = compositeKey.includes('::') ? compositeKey.split('::')[0] : parsed.providerId;
+              return { model: pureModelId, providerId };
+            }
+          } catch {}
+          return { model: undefined, providerId: undefined };
+        })();
         const fallbackRes = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1324,6 +1338,8 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
             n: imageCount,
             referenceImageUrl,
             strength: strengthInfo?.value || 60,
+            model: currentImageModel.model,
+            providerId: currentImageModel.providerId,
           }),
         });
 
@@ -1336,7 +1352,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                 const pollRes = await fetch('/api/poll-task', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ taskId: taskIds[0] }),
+                  body: JSON.stringify({ taskId: taskIds[0], model: currentImageModel.model, providerId: currentImageModel.providerId }),
                 });
                 const pollData = await pollRes.json();
                 if (pollData.status === 'completed' && pollData.result?.imageUrl) {
