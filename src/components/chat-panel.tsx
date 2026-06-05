@@ -1037,7 +1037,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
             for (const m of data.models) {
               models.push({
                 id: m.providerId ? `${m.providerId}::${m.id || m.name}` : (m.id || m.name),
-                name: getModelDisplayName(m.name || m.id),
+                name: (m.name && m.name !== m.id) ? m.name : getModelDisplayName(m.name || m.id),
                 provider: providerMap.get(m.providerId) || m.providerId || '',
                 providerId: m.providerId || '',
                 description: m.description,

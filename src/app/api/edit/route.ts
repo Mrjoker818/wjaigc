@@ -1529,9 +1529,13 @@ export async function GET() {
           supportsMask = false; // Gemini 系列无法可靠理解蒙版语义
         }
 
+        // 优先使用提供商的模型显示名称
+        const discoveredModel = (provider.discoveredModels || []).find((m: { id: string; name?: string }) => m.id === modelId);
+        const displayName = discoveredModel?.name || modelId;
+
         editModels.push({
           id: modelId,
-          name: modelId,
+          name: displayName,
           providerId: provider.id,
           providerName: provider.name || provider.id,
           supportsMask,

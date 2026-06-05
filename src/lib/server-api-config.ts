@@ -695,23 +695,26 @@ export async function getPublicModels(modelType?: ApiKind): Promise<ModelInfo[]>
         const visible = discovered.filter(model => selected.has(model.id));
         return (visible.length ? visible : Array.from(selected).map(id => ({
           id,
-          name: getModelDisplayName(id),
+          name: '', // will be resolved below
           providerId: provider.id,
           type: modelTypeForProvider(provider),
         } satisfies ModelInfo))).map(model => {
-          const displayName = getModelDisplayName(model.id);
-          // Use mapped name if it differs from ID (mapping found), otherwise keep original name
-          const name = displayName !== model.id ? displayName : (model.name || displayName);
+          // 优先使用第三方 API 供应商提供的模型名称，回退到本地映射
+          const providerName = (model as ModelInfo).name && (model as ModelInfo).name !== model.id ? (model as ModelInfo).name : '';
+          const mappedName = getModelDisplayName(model.id);
+          const name = providerName || mappedName;
           return { ...model, providerId: provider.id, name };
         });
       }
       // If no models explicitly selected, show all discovered models
       // (admin hasn't filtered yet, so all are available)
       return discovered.map(model => {
-        const displayName = getModelDisplayName(model.id);
-        const name = displayName !== model.id ? displayName : (model.name || displayName);
-        return { ...model, providerId: provider.id, name };
-      });
+          // 优先使用第三方 API 供应商提供的模型名称，回退到本地映射
+          const providerName = model.name && model.name !== model.id ? model.name : '';
+          const mappedName = getModelDisplayName(model.id);
+          const name = providerName || mappedName;
+          return { ...model, providerId: provider.id, name };
+        });
     })
     // Filter by model-level type for non-general queries
     // This prevents image models from appearing in chat panel and vice versa

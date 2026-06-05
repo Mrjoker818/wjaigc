@@ -18,6 +18,7 @@ interface ServerModel {
   providerName: string;
   type?: string;
   supportsMask?: boolean;
+  apiDisplayName?: string;
 }
 
 /** 参考图条目 */
@@ -320,7 +321,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
   // 当前选中的图像模型名称（始终显示供应商名称）
   const currentModelName = currentImageModel
-    ? `${getModelDisplayName(currentImageModel.id)}${currentImageModel.providerName ? ` (${fixProviderName(currentImageModel.providerName)})` : ''}`
+    ? `${currentImageModel.apiDisplayName || getModelDisplayName(currentImageModel.id)}${currentImageModel.providerName ? ` (${fixProviderName(currentImageModel.providerName)})` : ''}`
     : '选择图像模型';
 
   // 当前选中的LLM模型
@@ -496,6 +497,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               providerName: m.providerName || '',
               type: 'image',
               supportsMask: m.supportsMask,
+              apiDisplayName: (m.name && m.name !== m.id) ? m.name : '',
             }));
             setImageModels(models);
           }
@@ -1438,7 +1440,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       >
         <div className="flex-1 min-w-0">
           <div className="font-medium flex items-center gap-1.5">
-            {getModelDisplayName(model.id)}
+            {model.apiDisplayName || getModelDisplayName(model.id)}
             {model.providerName && <span className={`text-[10px] px-1 py-0.5 ${thAccentLight} ${thAccentLightText} rounded`}>{fixProviderName(model.providerName)}</span>}
             {maskSupported
               ? <span className="text-[10px] px-1 py-0.5 bg-green-500/20 text-green-400 rounded">支持涂抹</span>

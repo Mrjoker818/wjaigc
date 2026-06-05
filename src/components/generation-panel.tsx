@@ -634,7 +634,7 @@ export function GenerationPanel(
         : "bg-transparent";
 
     // 万能API相关函数
-    const [discoveredModels, setDiscoveredModels] = useState<{id: string, providerId: string, providerName: string, is3DProvider?: boolean, displayLabel?: string}[]>([]);
+    const [discoveredModels, setDiscoveredModels] = useState<{id: string, providerId: string, providerName: string, is3DProvider?: boolean, displayLabel?: string, apiDisplayName?: string}[]>([]);
 
     // 迁移旧版纯 modelId → 复合键 providerId::modelId
     useEffect(() => {
@@ -698,7 +698,7 @@ export function GenerationPanel(
             const res = await fetch('/api/models?type=image');
             if (res.ok) {
                 const data = await res.json();
-                const serverModels: {id: string, providerId: string, providerName: string, is3DProvider?: boolean, displayLabel?: string}[] = [];
+                const serverModels: {id: string, providerId: string, providerName: string, is3DProvider?: boolean, displayLabel?: string, apiDisplayName?: string}[] = [];
                 const providerMap = new Map<string, string>();
                 if (data.providers && Array.isArray(data.providers)) {
                     for (const p of data.providers) {
@@ -715,6 +715,7 @@ export function GenerationPanel(
                             providerName: providerMap.get(m.providerId) || m.providerId || '',
                             is3DProvider: is3D,
                             displayLabel: is3D ? get3DModelLabel(m.id || m.name) : undefined,
+                            apiDisplayName: m.name || '',
                         });
                     }
                 }
@@ -971,7 +972,7 @@ export function GenerationPanel(
                                         const compositeValue = `${dm.providerId}::${dm.id}`;
                                         return (
                                         <option key={compositeValue} value={compositeValue} className={mc ? "bg-white text-gray-900" : "bg-[#1a1d26] text-text-bright"}>
-                                            {dm.is3DProvider ? `[3D] ${dm.displayLabel || getModelDisplayName(dm.id)}` : getModelDisplayName(dm.id)}
+                                            {dm.is3DProvider ? `[3D] ${dm.displayLabel || dm.apiDisplayName || getModelDisplayName(dm.id)}` : dm.apiDisplayName || getModelDisplayName(dm.id)}
                                         </option>
                                         );
                                     })}
@@ -985,7 +986,7 @@ export function GenerationPanel(
                             const compositeKey = `${dm.providerId}::${dm.id}`;
                             return compositeKey === model || dm.id === model;
                         });
-                        if (discoveredModel) return <p className={`text-xs mt-0.5 ${mc ? 'text-gray-400' : 'text-gold-muted/70'}`}>{discoveredModel.is3DProvider ? `${discoveredModel.displayLabel || getModelDisplayName(discoveredModel.id)} · 来自 ${discoveredModel.providerName}` : `${getModelDisplayName(discoveredModel.id)} · 来自 ${discoveredModel.providerName}`}</p>;
+                        if (discoveredModel) return <p className={`text-xs mt-0.5 ${mc ? 'text-gray-400' : 'text-gold-muted/70'}`}>{discoveredModel.is3DProvider ? `${discoveredModel.displayLabel || discoveredModel.apiDisplayName || getModelDisplayName(discoveredModel.id)} · 来自 ${discoveredModel.providerName}` : `${discoveredModel.apiDisplayName || getModelDisplayName(discoveredModel.id)} · 来自 ${discoveredModel.providerName}`}</p>;
                         return null;
                     })()}
                 </div>

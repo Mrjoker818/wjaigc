@@ -729,7 +729,7 @@ export function InfiniteCanvas({
   const [canvasGenQuality, setCanvasGenQuality] = useState('standard');
   const [canvasGenCount, setCanvasGenCount] = useState(1);
   const [canvasGenRefImages, setCanvasGenRefImages] = useState<string[]>([]);
-  const [canvasGenModels, setCanvasGenModels] = useState<{id: string, providerId: string, providerName: string}[]>([]);
+  const [canvasGenModels, setCanvasGenModels] = useState<{id: string, providerId: string, providerName: string, apiDisplayName?: string}[]>([]);
   const [canvasGenGenerating, setCanvasGenGenerating] = useState(false);
   const [canvasGenFramePos, setCanvasGenFramePos] = useState<{x: number, y: number}>({ x: 0, y: 0 });
   const canvasGenFrameWidth = 512;
@@ -3543,7 +3543,7 @@ export function InfiniteCanvas({
         const res = await fetch('/api/models?type=image');
         if (res.ok) {
           const data = await res.json();
-          const models: {id: string, providerId: string, providerName: string}[] = [];
+          const models: {id: string, providerId: string, providerName: string, apiDisplayName?: string}[] = [];
           const providerMap = new Map<string, string>();
           if (data.providers && Array.isArray(data.providers)) {
             for (const p of data.providers) {
@@ -3557,6 +3557,7 @@ export function InfiniteCanvas({
                 id: m.id || m.name,
                 providerId: m.providerId || '',
                 providerName: providerMap.get(m.providerId) || m.providerId || '',
+                apiDisplayName: (m.name && m.name !== m.id) ? m.name : '',
               });
             }
           }
@@ -7174,7 +7175,7 @@ export function InfiniteCanvas({
 
             // Find current model display name
             const currentModelObj = canvasGenModels.find(m => m.id === group.toolbar.model && m.providerId === (group.toolbar.providerId || ''));
-            const modelDisplayName = currentModelObj ? `${getModelDisplayName(currentModelObj.id)} · 来自 ${currentModelObj.providerName}` : (group.toolbar.model ? getModelDisplayName(group.toolbar.model) : '选择模型');
+            const modelDisplayName = currentModelObj ? `${currentModelObj.apiDisplayName || getModelDisplayName(currentModelObj.id)} · 来自 ${currentModelObj.providerName}` : (group.toolbar.model ? getModelDisplayName(group.toolbar.model) : '选择模型');
 
             return (
               <div key={`gen-group-${group.id}`}>
@@ -7579,7 +7580,7 @@ export function InfiniteCanvas({
                                 }}
                               >
                                 {isSelected && <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>}
-                                <span className="truncate">{getModelDisplayName(m.id)} · 来自 {m.providerName}</span>
+                                <span className="truncate">{m.apiDisplayName || getModelDisplayName(m.id)} · 来自 {m.providerName}</span>
                               </button>
                             );
                           })}
@@ -10251,7 +10252,7 @@ export function InfiniteCanvas({
                         >
                           {(() => {
                             const hcgModelObj = models.find(m => m.id === hcg.toolbar.model && m.providerId === (hcg.toolbar.providerId || ''));
-                            return hcgModelObj ? `${getModelDisplayName(hcgModelObj.id)} · 来自 ${hcgModelObj.providerName}` : (hcg.toolbar.model ? getModelDisplayName(hcg.toolbar.model) : '选择模型');
+                            return hcgModelObj ? `${hcgModelObj.apiDisplayName || getModelDisplayName(hcgModelObj.id)} · 来自 ${hcgModelObj.providerName}` : (hcg.toolbar.model ? getModelDisplayName(hcg.toolbar.model) : '选择模型');
                           })()}
                           <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
                         </button>
@@ -10280,7 +10281,7 @@ export function InfiniteCanvas({
                                   setOpenModelDropdownGroupId(null);
                                 }}
                               >
-                                <span>{getModelDisplayName(m.id)} · 来自 {m.providerName}</span>
+                                <span>{m.apiDisplayName || getModelDisplayName(m.id)} · 来自 {m.providerName}</span>
                                 {hcg.toolbar.model === m.id && hcg.toolbar.providerId === m.providerId && (
                                   <svg className="w-3 h-3 flex-shrink-0" viewBox="0 0 24 24" fill={isMonochrome ? "#3b82f6" : "#d4af37"} stroke="none"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>
                                 )}
@@ -10951,7 +10952,7 @@ export function InfiniteCanvas({
                     {canvasGenModels.length === 0 && <option value="">暂无可用模型</option>}
                     {canvasGenModels.map(m => {
                       const compositeKey = `${m.providerId}::${m.id}`;
-                      return <option key={compositeKey} value={compositeKey}>{getModelDisplayName(m.id)}{m.providerName ? ` (${m.providerName})` : ''}</option>;
+                      return <option key={compositeKey} value={compositeKey}>{m.apiDisplayName || getModelDisplayName(m.id)}{m.providerName ? ` (${m.providerName})` : ''}</option>;
                     })}
                   </select>
                 </div>

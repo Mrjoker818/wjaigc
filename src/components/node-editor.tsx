@@ -41,7 +41,7 @@ function getNodeIcon(type: NodeType, size = 14, className = '') {
 
 // ==================== 模型列表 Hook ====================
 
-interface ModelOption { id: string; name: string; type: string; provider: string; }
+interface ModelOption { id: string; name: string; type: string; provider: string; apiDisplayName?: string; }
 
 
 function useModelList() {
@@ -3078,7 +3078,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
                       onMouseDown={(e) => e.stopPropagation()}
                     >
                       <option value="">选择模型</option>
-                      {(llmModels ?? []).map(m => <option key={m.id} value={m.id} style={{ background: T.optionBg, color: T.optionText }}>{getModelDisplayName(m.id)}{m.provider ? ` (${m.provider})` : ''}</option>)}
+                      {(llmModels ?? []).map(m => <option key={m.id} value={m.id} style={{ background: T.optionBg, color: T.optionText }}>{m.apiDisplayName || m.name || getModelDisplayName(m.id)}{m.provider ? ` (${m.provider})` : ''}</option>)}
                     </select>
                     {/* LLM 指令 */}
                     <input
@@ -3263,7 +3263,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
 
 interface PropertyPanelProps {
   node: WorkflowNode | null;
-  models: { id: string; name: string; type: string; provider: string }[];
+  models: { id: string; name: string; type: string; provider: string; apiDisplayName?: string }[];
   modelsLoading: boolean;
   onUpdate: (nodeId: string, updates: Partial<WorkflowNode>) => void;
   onDelete: (nodeId: string) => void;
@@ -3554,7 +3554,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
           >
             <option value="">{modelsLoading ? '加载中...' : '选择模型'}</option>
             {models.filter(m => m.type === modelFilterType).map(m => (
-              <option key={`${m.id}-${m.provider}`} value={m.id}>{getModelDisplayName(m.id)} ({m.provider})</option>
+              <option key={`${m.id}-${m.provider}`} value={m.id}>{m.apiDisplayName || m.name || getModelDisplayName(m.id)} ({m.provider})</option>
             ))}
           </select>
         );

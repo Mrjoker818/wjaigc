@@ -1071,9 +1071,13 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                           <div className="mt-2">
                             <p className={`text-xs mb-1 ${isGold ? 'text-[#888]' : 'text-gray-500'}`}>当前模型：</p>
                             <div className="flex flex-wrap gap-1">
-                              {provider.selectedModels.map(modelId => (
-                                <span key={modelId} className={`text-xs px-2 py-0.5 rounded ${isGold ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'bg-amber-50 text-amber-700'}`}>{getModelDisplayName(modelId)}</span>
-                              ))}
+                              {provider.selectedModels.map(modelId => {
+                                const discovered = (provider.discoveredModels || []).find((dm: { id: string }) => dm.id === modelId);
+                                const displayName = discovered?.name && discovered.name !== modelId ? discovered.name : getModelDisplayName(modelId);
+                                return (
+                                <span key={modelId} className={`text-xs px-2 py-0.5 rounded ${isGold ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'bg-amber-50 text-amber-700'}`}>{displayName}</span>
+                                );
+                              })}
                             </div>
                           </div>
                         )}
