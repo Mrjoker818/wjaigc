@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { findProviderForFeature, findProviderById, findProviderForModel } from '@/lib/server-api-config';
-import type { ApiProviderConfig } from '@/lib/universal-api-types';
+import type { ApiProvider } from '@/lib/universal-api-types';
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { optionalApiAuth } from '@/lib/api-auth';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
@@ -461,7 +461,7 @@ async function performImageEdit(
   }
 
   // 使用 API 兼容层确定正确的端点
-  const profile = resolveCompatProfile(provider);
+  const profile = resolveCompatProfile(imageProvider);
   const resolvedEndpoint = profile.editEndpoint || '/images/edits';
 
   // Path A: 支持 /images/edits 端点的提供商（OpenAI 官方等）

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { findProviderForModel, findProviderById, getPublicModels } from '@/lib/server-api-config';
-import type { ApiProviderConfig } from '@/lib/universal-api-types';
+import type { ApiProvider } from '@/lib/universal-api-types';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl } from '@/lib/api-compatibility';
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
@@ -973,7 +973,7 @@ export async function POST(request: NextRequest) {
       if (!llmModel) return NextResponse.json({ error: '请选择LLM模型' }, { status: 400 });
 
       // 优先使用前端传递的 llmProviderId 精确匹配
-      let provider: ApiProviderConfig | null = null;
+      let provider: ApiProvider | null = null;
       if (llmProviderId) {
         provider = await findProviderById(llmProviderId);
         if (provider) console.log(`[brand-ecommerce] assist: 通过 llmProviderId="${llmProviderId}" 匹配到LLM提供商 "${provider.name}"`);
