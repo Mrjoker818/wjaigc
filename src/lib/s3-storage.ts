@@ -279,28 +279,67 @@ export async function persistRemoteImage(
       contentType = `image/${match[1] === 'jpg' ? 'jpeg' : match[1]}`;
       imageBuffer = Buffer.from(match[2], 'base64');
     } else {
-      // Remote URL - download
-      const resp = await fetch(imageUrl, { signal: AbortSignal.timeout(30000) });
+      // Remote URL - download (2min timeout for large 4K images)
+      const resp = await fetch(imageUrl, { signal: AbortSignal.timeout(120000) });
       if (!resp.ok) {
         console.warn(`[s3-storage] Failed to download ${imageUrl}: ${resp.status}`);
         return null;
       }
       imageBuffer = Buffer.from(await resp.arrayBuffer());
       
-      // Detect content type and extension
+      // Compress large images (>3MB) to reduce storage and improve browser loading
+      // Note: DO NOT downscale - preserve original resolution for quality
+      let wasCompressedAsPng = false;
+      let wasCompressedAsJpeg = false;
+      if (imageBuffer.length > 3 * 1024 * 1024) {
+        try {
+          const sharp = (await import('sharp')).default;
+          const metadata = await sharp(imageBuffer).metadata();
+          const sizeMB = imageBuffer.length / (1024 * 1024);
+          
+          if (metadata.hasAlpha || metadata.channels === 4) {
+            // PNG with transparency - re-compress with better PNG settings
+            imageBuffer = await sharp(imageBuffer)
+              .png({ quality: 90, compressionLevel: 9, palette: true, effort: 8 })
+              .toBuffer();
+            wasCompressedAsPng = true;
+            console.log(`[s3-storage] Re-compressed PNG: ${metadata.width}x${metadata.height}, ${(sizeMB).toFixed(1)}MB → ${(imageBuffer.length / 1024 / 1024).toFixed(1)}MB`);
+          } else {
+            // No transparency - convert to JPEG for much smaller size
+            imageBuffer = await sharp(imageBuffer)
+              .jpeg({ quality: 92 })
+              .toBuffer();
+            wasCompressedAsJpeg = true;
+            console.log(`[s3-storage] Compressed to JPEG: ${metadata.width}x${metadata.height}, ${(sizeMB).toFixed(1)}MB → ${(imageBuffer.length / 1024 / 1024).toFixed(1)}MB`);
+          }
+        } catch (compressErr) {
+          console.warn('[s3-storage] Image compression failed, keeping original:', compressErr);
+        }
+      }
+      
+      // Detect content type and extension from response headers
+      // (before potential compression overrides the format)
+      let detectedExt = '.png';
+      let detectedContentType = 'image/png';
       const ct = resp.headers.get('content-type') || '';
-      if (ct.includes('jpeg') || ct.includes('jpg')) { ext = '.jpg'; contentType = 'image/jpeg'; }
-      else if (ct.includes('webp')) { ext = '.webp'; contentType = 'image/webp'; }
-      else if (ct.includes('gif')) { ext = '.gif'; contentType = 'image/gif'; }
-      else { ext = '.png'; contentType = 'image/png'; }
+      if (ct.includes('jpeg') || ct.includes('jpg')) { detectedExt = '.jpg'; detectedContentType = 'image/jpeg'; }
+      else if (ct.includes('webp')) { detectedExt = '.webp'; detectedContentType = 'image/webp'; }
+      else if (ct.includes('gif')) { detectedExt = '.gif'; detectedContentType = 'image/gif'; }
       
       // Also check URL path for extension hints
       try {
         const urlPath = new URL(imageUrl).pathname;
-        if (urlPath.endsWith('.jpg') || urlPath.endsWith('.jpeg')) { ext = '.jpg'; contentType = 'image/jpeg'; }
-        else if (urlPath.endsWith('.webp')) { ext = '.webp'; contentType = 'image/webp'; }
-        else if (urlPath.endsWith('.gif')) { ext = '.gif'; contentType = 'image/gif'; }
+        if (urlPath.endsWith('.jpg') || urlPath.endsWith('.jpeg')) { detectedExt = '.jpg'; detectedContentType = 'image/jpeg'; }
+        else if (urlPath.endsWith('.webp')) { detectedExt = '.webp'; detectedContentType = 'image/webp'; }
+        else if (urlPath.endsWith('.gif')) { detectedExt = '.gif'; detectedContentType = 'image/gif'; }
       } catch {}
+      
+      // If compression changed the format, override detected values
+      if (wasCompressedAsPng) { detectedExt = '.png'; detectedContentType = 'image/png'; }
+      else if (wasCompressedAsJpeg) { detectedExt = '.jpg'; detectedContentType = 'image/jpeg'; }
+      
+      ext = detectedExt;
+      contentType = detectedContentType;
     }
     
     // Generate unique filename

@@ -9,6 +9,7 @@ import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
+import { persistRemoteImage } from '@/lib/s3-storage';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
@@ -1037,12 +1038,22 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
 
-    // 如果有直接返回的图片URL，直接返回结果
+    // 如果有直接返回的图片URL，同步持久化后再返回（确保4K图片可靠性）
     if (directImageUrls.length > 0) {
+      const persistedUrls: string[] = [];
+      for (const rawUrl of directImageUrls) {
+        try {
+          const persisted = await persistRemoteImage(rawUrl);
+          persistedUrls.push(persisted || rawUrl);
+        } catch (e) {
+          console.warn('[generate] 持久化直接图片失败，使用原始URL:', e);
+          persistedUrls.push(rawUrl);
+        }
+      }
       return NextResponse.json({
         success: true,
         mode: 'direct',
-        imageUrls: directImageUrls,
+        imageUrls: persistedUrls,
         model: usedModelId,
         modelName: usedModelName,
         providerName: usedProviderName,
@@ -1051,7 +1062,7 @@ export async function POST(request: NextRequest) {
         originalPrompt: prompt,
         category: imageCategory,
         style: stylePreset,
-        count: directImageUrls.length,
+        count: persistedUrls.length,
       });
     }
 

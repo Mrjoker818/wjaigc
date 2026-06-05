@@ -755,9 +755,10 @@ export async function POST(request: NextRequest) {
       }
 
       // ★ 持久化图片策略：
-      // 1. 需要后处理的任务(outpaint/removeBG/crop)：必须同步持久化，因为后处理需要下载图片
-      // 2. data: URL：必须同步持久化，浏览器无法缓存大data URL
-      // 3. 普通生成任务：立即返回源URL，后台异步持久化（速度优化）
+      // 同步持久化所有图片URL：
+      // - data: URL 浏览器无法缓存
+      // - 远程HTTP URL：4K大图浏览器直接加载可能超时/中断，必须先持久化到本地再返回
+      // - 需要后处理的任务：后续步骤需要下载图片
       if (sourceImageUrl) {
         pollResult.imageUrl = sourceImageUrl;
 
@@ -765,45 +766,28 @@ export async function POST(request: NextRequest) {
         const registryInfoForCheck = getTaskInfo(taskId);
         const registryResultForCheck = (registryInfoForCheck?.result as Record<string, unknown>) || {};
         const needsPostProcess = !!(registryResultForCheck.outpaintInfo || registryResultForCheck.engine === 'ai-background-remove' || registryResultForCheck.cropInfo);
-        const needsImmediatePersist = sourceImageUrl.startsWith('data:') || needsPostProcess;
 
-        if (needsImmediatePersist) {
-          // 同步持久化：data: URL 或需要后处理的任务
-          try {
-            const { persistRemoteImage } = await import('@/lib/s3-storage');
-            const persistedUrl = await persistRemoteImage(sourceImageUrl, `generate/${taskId}`);
-            if (persistedUrl) {
-              pollResult.imageUrl = persistedUrl;
-              completedTaskCache.set(taskId, { imageUrl: persistedUrl, timestamp: Date.now() });
-            }
-          } catch (persistErr) {
-            console.warn('[poll-task] Synchronous persist failed:', persistErr);
-            // 持久化失败时仍设置缓存，避免重复查询远端
+        try {
+          // 同步持久化：所有图片URL都需要先保存到本地，确保浏览器可靠加载
+          const { persistRemoteImage } = await import('@/lib/s3-storage');
+          const persistedUrl = await persistRemoteImage(sourceImageUrl, `generate/${taskId}`);
+          if (persistedUrl) {
+            pollResult.imageUrl = persistedUrl;
+            completedTaskCache.set(taskId, { imageUrl: persistedUrl, timestamp: Date.now() });
+            // Save source mapping for future reference
+            try {
+              const { saveImageDataMapping } = await import('@/lib/image-source-map');
+              const filename = persistedUrl.split('/').pop() || persistedUrl;
+              await saveImageDataMapping(filename, sourceImageUrl);
+            } catch {}
+          } else {
+            // 持久化返回null（文件已存在或失败），使用源URL
             completedTaskCache.set(taskId, { imageUrl: sourceImageUrl, timestamp: Date.now() });
           }
-        } else {
-          // HTTP/远程 URL + 普通生成任务：先写入完成缓存，后台异步持久化
+        } catch (persistErr) {
+          console.warn('[poll-task] Synchronous persist failed:', persistErr);
+          // 持久化失败时仍设置缓存，避免重复查询远端
           completedTaskCache.set(taskId, { imageUrl: sourceImageUrl, timestamp: Date.now() });
-
-          const bgTaskId = taskId;
-          const bgSourceUrl = sourceImageUrl;
-          after(async () => {
-            try {
-              const { persistRemoteImage } = await import('@/lib/s3-storage');
-              const persistedUrl = await persistRemoteImage(bgSourceUrl, `generate/${bgTaskId}`);
-              if (persistedUrl) {
-                completedTaskCache.set(bgTaskId, { imageUrl: persistedUrl, timestamp: Date.now() });
-                try {
-                  const { saveImageDataMapping } = await import('@/lib/image-source-map');
-                  const filename = persistedUrl.split('/').pop() || persistedUrl;
-                  await saveImageDataMapping(filename, bgSourceUrl);
-                } catch {}
-                console.log(`[poll-task] Background persist completed: ${bgTaskId} → ${persistedUrl}`);
-              }
-            } catch (persistErr) {
-              console.warn('[poll-task] Background persist failed (source URL still works):', persistErr);
-            }
-          });
         }
 
         // ★ Outpaint 扩展后处理：直接返回 AI API 扩展结果，不合成原图
