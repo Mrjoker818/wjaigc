@@ -2,9 +2,28 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense, lazy } from 'react';
 import { createPortal } from 'react-dom';
-import { Canvas, useThree, ThreeEvent } from '@react-three/fiber';
+import { Canvas, useThree, ThreeEvent, extend } from '@react-three/fiber';
 import { OrbitControls, TransformControls, Grid, GizmoHelper, GizmoViewport, useGLTF, Html } from '@react-three/drei';
 import * as THREE from 'three';
+
+// Register Three.js classes with R3F to avoid React 19 "incorrect casing" warnings
+extend({
+  AmbientLight: THREE.AmbientLight,
+  DirectionalLight: THREE.DirectionalLight,
+  PointLight: THREE.PointLight,
+  SpotLight: THREE.SpotLight,
+  GridHelper: THREE.GridHelper,
+  MeshStandardMaterial: THREE.MeshStandardMaterial,
+  MeshBasicMaterial: THREE.MeshBasicMaterial,
+  BoxGeometry: THREE.BoxGeometry,
+  CylinderGeometry: THREE.CylinderGeometry,
+  SphereGeometry: THREE.SphereGeometry,
+  PlaneGeometry: THREE.PlaneGeometry,
+  CircleGeometry: THREE.CircleGeometry,
+  Mesh: THREE.Mesh,
+  Group: THREE.Group,
+  Object3D: THREE.Object3D,
+});
 import {
   Box as BoxIcon, Cylinder as CylinderIcon, Plane as PlaneIcon,
   X, Plus, Trash2, Lock, Unlock, Eye, EyeOff,
@@ -1686,15 +1705,22 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
             {/* 3D Canvas */}
             <div className="flex-1 relative" style={{ minHeight: 0 }}>
               <div className="absolute inset-0 overflow-hidden scene-studio-canvas">
-                <SceneCanvas
-                  objects={objects}
-                  lights={lights}
-                  cameraPreset={cameraPreset}
-                  selectedId={selectedId}
-                  transformMode={transformMode}
-                  onTransformChange={handleTransformChange}
-                  onSelectObject={(id: string | null) => setSelectedId(id)}
-                />
+                <Canvas
+                  shadows
+                  camera={{ position: [5, 5, 5], fov: 50, near: 0.1, far: 200 }}
+                  gl={{ preserveDrawingBuffer: true, antialias: true }}
+                  style={{ background: '#0a0a0a' }}
+                >
+                  <SceneCanvas
+                    objects={objects}
+                    lights={lights}
+                    cameraPreset={cameraPreset}
+                    selectedId={selectedId}
+                    transformMode={transformMode}
+                    onTransformChange={handleTransformChange}
+                    onSelectObject={(id: string | null) => setSelectedId(id)}
+                  />
+                </Canvas>
               </div>
               {/* Keyboard shortcuts hint */}
               <div className="absolute bottom-2 left-2 pointer-events-none z-10">
