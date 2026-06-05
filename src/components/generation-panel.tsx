@@ -457,6 +457,9 @@ export function GenerationPanel(
         const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
         const compositeProviderId = model.includes('::') ? model.split('::')[0] : undefined;
         
+        // ★ 调试日志：确认前端传递的 providerId
+        console.log('[generation-panel] 提交生成请求:', { model, pureModelId, compositeProviderId, hasProviderId: !!compositeProviderId });
+        
         onGenerate({
             prompt: fullPrompt,
             size: getModelSize(aspectRatio) || "1024x1024",
@@ -642,7 +645,9 @@ export function GenerationPanel(
     // 迁移旧版纯 modelId → 复合键 providerId::modelId
     useEffect(() => {
         if (pendingModelMigration && discoveredModels.length > 0) {
-            const match = discoveredModels.find(dm => dm.id === pendingModelMigration);
+            // 当多个提供商有同名模型时，优先选择第一个匹配的（按 sort_order 排序）
+            const matches = discoveredModels.filter(dm => dm.id === pendingModelMigration);
+            const match = matches.length > 0 ? matches[0] : undefined;
             if (match) {
                 const compositeKey = `${match.providerId}::${match.id}`;
                 setModel(compositeKey);

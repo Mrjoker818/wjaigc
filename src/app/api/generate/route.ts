@@ -209,9 +209,18 @@ export async function POST(request: NextRequest) {
     
     // 尝试找到用户指定模型对应的 provider（优先使用 providerId 精确匹配）
     let provider = providerId ? await findProviderById(providerId) : null;
-    if (!provider) provider = await findProviderForModel(model, 'image');
+    if (provider && !(provider.selectedModels || []).includes(model)) {
+      console.warn(`[generate] ⚠️ providerId="${providerId}" 找到提供商 "${provider.displayName || provider.name}"，但该提供商的 selectedModels 不包含 "${model}"，仍使用此提供商`);
+    }
+    if (!provider) {
+      console.warn(`[generate] ⚠️ providerId="${providerId}" 未匹配到提供商，回退到 findProviderForModel(model="${model}")`);
+      provider = await findProviderForModel(model, 'image');
+    }
     let serverApiKey = provider?.apiKey;
     let apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || '');
+    
+    // ★ 关键日志：记录实际使用的提供商信息，便于追踪
+    console.log(`[generate] 提供商选择: model="${model}", requestedProviderId="${providerId}", matched="${provider?.displayName || provider?.name || 'none'}", matchedId="${provider?.id || 'none'}", baseUrl="${apiBaseUrl}", hasApiKey=${!!serverApiKey}`);
     
     // 解析兼容性档案 - 决定 API 调用方式
     const initialProfile = resolveCompatProfile(provider);
@@ -598,6 +607,9 @@ export async function POST(request: NextRequest) {
 
       console.log('Submitting image task:', {
         model: currentModelConfig.modelId,
+        providerId: currentProviderId,
+        providerName: provider?.displayName || provider?.name || 'unknown',
+        apiBaseUrl: currentApiBaseUrl,
         prompt: enhancedPrompt.substring(0, 50) + '...',
         size: adjustedBody.size,
         endpoint,

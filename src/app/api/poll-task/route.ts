@@ -555,6 +555,7 @@ export async function POST(request: NextRequest) {
       apiKey = provider?.apiKey;
       apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || '');
       providerName = provider?.name || 'unknown';
+      console.log(`[poll-task] 提供商查找: providerId="${providerId}", model="${model || regUsedModel || ''}", matched="${provider?.displayName || provider?.name || 'none'}", matchedId="${provider?.id || 'none'}", baseUrl="${apiBaseUrl}"`);
       if (!apiKey || !apiBaseUrl) {
         console.error(`[poll-task] No API provider for taskId=${taskId}, model=${model}, providerId=${providerId}`);
         return NextResponse.json({ success: false, error: 'No API provider configured for image polling' }, { status: 400 });

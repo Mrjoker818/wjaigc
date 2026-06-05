@@ -584,12 +584,15 @@ export async function findProviderForModel(modelId: string, modelType?: ApiKind)
   const isFlexibleType = !modelType || modelType === 'universal' || modelType === 'general';
   const matchesType = (p: ApiProvider) => isFlexibleType || p.modelType === modelType || p.modelType === 'universal' || p.modelType === 'general';
 
-  // 1. Exact match
-  const exact = enabled.find(provider =>
+  // 1. Exact match — 当多个提供商有同名模型时，记录警告
+  const exactMatches = enabled.filter(provider =>
     matchesType(provider) &&
     (provider.selectedModels || []).includes(modelId),
   );
-  if (exact) return exact;
+  if (exactMatches.length > 1) {
+    console.warn(`[findProviderForModel] ⚠️ 模型 "${modelId}" 存在于 ${exactMatches.length} 个提供商中: [${exactMatches.map(p => `"${p.displayName || p.name}"`).join(', ')}]，将使用第一个: "${exactMatches[0].displayName || exactMatches[0].name}" (id=${exactMatches[0].id})。建议前端传递 providerId 精确指定。`);
+  }
+  if (exactMatches.length > 0) return exactMatches[0];
 
   // 2. Strip -thinking suffix and retry (e.g. gemini-2.5-flash-thinking → gemini-2.5-flash)
   if (modelId.endsWith('-thinking')) {
