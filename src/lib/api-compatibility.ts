@@ -31,7 +31,7 @@ export type ResponseMode = 'polling' | 'direct';
 export type SizeFormat = 'aspect-ratio' | 'pixel';
 
 /** Which endpoint to use for image generation */
-export type ImageEndpoint = '/images/generations' | '/images/edits';
+export type ImageEndpoint = '/images/generations' | '/images/edits' | '/chat/completions';
 
 /** How to encode /images/edits requests */
 export type EditEncoding = 'json-first' | 'multipart-only';
@@ -166,12 +166,37 @@ export const PROFILE_AUTO: ApiCompatProfile = {
   pollPathTemplate: '/tasks/{taskId}',
 };
 
+/**
+ * Gemini image model via chat/completions — for providers like 4SAPI that
+ * don't support Gemini models on /images/generations but DO support them
+ * via /chat/completions (images returned as base64 in content).
+ *
+ * Key differences from other profiles:
+ * - Uses /chat/completions endpoint for ALL requests (text-to-image AND img2img)
+ * - Images are extracted from the response's content array (inline_data parts)
+ * - Size is passed as a generationConfig parameter
+ * - No polling — response is direct (but slow, 30-120s)
+ */
+export const PROFILE_GEMINI_IMAGE: ApiCompatProfile = {
+  id: 'gemini-image',
+  label: 'Gemini 图像 (chat/completions)',
+  responseMode: 'direct',
+  sizeFormat: 'pixel',
+  defaultEndpoint: '/chat/completions',
+  editEndpoint: '/chat/completions',
+  editEncoding: 'json-first',
+  supportsInputFidelity: false,
+  pollMode: 'none',
+  pollPathTemplate: '',
+};
+
 /** Map of all built-in profiles by id */
 export const COMPAT_PROFILES: Record<string, ApiCompatProfile> = {
   [PROFILE_APIMART.id]: PROFILE_APIMART,
   [PROFILE_OPENAI.id]: PROFILE_OPENAI,
   [PROFILE_OPENAI_ASYNC.id]: PROFILE_OPENAI_ASYNC,
   [PROFILE_AUTO.id]: PROFILE_AUTO,
+  [PROFILE_GEMINI_IMAGE.id]: PROFILE_GEMINI_IMAGE,
 };
 
 // ---------------------------------------------------------------------------
@@ -185,7 +210,270 @@ export const COMPAT_PROFILES: Record<string, ApiCompatProfile> = {
 const URL_PROFILE_RULES: Array<{ pattern: RegExp; profile: ApiCompatProfile }> = [
   { pattern: /apimart\.ai/i,              profile: PROFILE_APIMART },
   { pattern: /api\.openai\.com/i,         profile: PROFILE_OPENAI },
+  { pattern: /pearapi\.ai/i,              profile: PROFILE_OPENAI },   // PearAPI: nano-banana models use standard /images/generations
 ];
+
+// ---------------------------------------------------------------------------
+// Utility: build polling URL
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Gemini image model detection & response parsing
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if a model ID is a Gemini image model that generates images via
+ * /chat/completions (not /images/generations).
+ *
+ * Models like gemini-2.5-flash-image, gemini-3-pro-image, etc. generate
+ * images by returning them as inline_data in the chat response content.
+ * Some API relay stations (e.g. 4SAPI) only support these models via
+ * /chat/completions, not /images/generations.
+ */
+export function isGeminiImageModel(modelId: string): boolean {
+  if (!modelId) return false;
+  const lower = modelId.toLowerCase();
+  return lower.includes('gemini') && (
+    lower.includes('image') || lower.includes('flash-image') || lower.includes('pro-image')
+  );
+}
+
+/**
+ * Check if a model ID is a nano-banana variant (PearAPI's adapted Gemini models).
+ * These models ARE OpenAI-compatible and use /images/generations directly.
+ * They should NOT use the gemini-image profile.
+ */
+export function isNanoBananaModel(modelId: string): boolean {
+  if (!modelId) return false;
+  const lower = modelId.toLowerCase();
+  return lower.includes('nano-banana') || lower.includes('nanobanana');
+}
+
+/**
+ * Build a /chat/completions request body for Gemini image generation.
+ * Converts the standard image generation request into a chat completion
+ * format that Gemini models understand.
+ *
+ * The prompt instructs the model to generate an image, and the response
+ * will contain base64 image data in the content array.
+ */
+export function buildGeminiChatImageRequest(
+  requestBody: Record<string, unknown>,
+): Record<string, unknown> {
+  const model = requestBody.model || 'gemini-2.5-flash-image-preview';
+  const prompt = requestBody.prompt || '';
+  const size = requestBody.size || '1024x1024';
+  const quality = requestBody.quality || requestBody.resolution;
+
+  // Build the user message content
+  const userContent: Array<Record<string, unknown>> = [
+    { type: 'text', text: prompt },
+  ];
+
+  // If there are reference images, add them as image_url content parts
+  const imageUrls = requestBody.image_urls as string[] | undefined;
+  if (imageUrls && imageUrls.length > 0) {
+    for (const imgUrl of imageUrls) {
+      if (imgUrl.startsWith('data:')) {
+        // base64 data URL — extract mime and base64 data
+        const match = imgUrl.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+          userContent.push({
+            type: 'image_url',
+            image_url: { url: imgUrl },
+          });
+        }
+      } else if (imgUrl.startsWith('http')) {
+        userContent.push({
+          type: 'image_url',
+          image_url: { url: imgUrl },
+        });
+      }
+    }
+  }
+
+  // Also handle the single `image` field (for img2img via edits)
+  const singleImage = requestBody.image as string | undefined;
+  if (singleImage && !imageUrls?.length) {
+    userContent.push({
+      type: 'image_url',
+      image_url: { url: singleImage },
+    });
+  }
+
+  // Build the chat/completions request
+  const chatRequest: Record<string, unknown> = {
+    model,
+    messages: [
+      {
+        role: 'user',
+        content: userContent,
+      },
+    ],
+    // Request image generation via response modalities
+    // Some providers support this, others need it in the prompt
+  };
+
+  // Add generation config for size/quality if supported
+  const generationConfig: Record<string, unknown> = {};
+  if (quality && typeof quality === 'string') {
+    // Map quality to image_size for Gemini models
+    const qualityToSize: Record<string, string> = {
+      '1K': '1024x1024',
+      '2K': '2048x2048',
+      '4K': '4096x4096',
+    };
+    if (qualityToSize[quality]) {
+      generationConfig.image_size = qualityToSize[quality];
+    }
+  }
+  if (size && typeof size === 'string') {
+    generationConfig.image_size = size;
+  }
+  if (Object.keys(generationConfig).length > 0) {
+    chatRequest.generationConfig = generationConfig;
+  }
+
+  return chatRequest;
+}
+
+/**
+ * Parse a /chat/completions response that contains a Gemini-generated image.
+ * Images are typically embedded as base64 in the response content.
+ *
+ * Returns an array of image data URLs (data:image/png;base64,...) found
+ * in the response, or an empty array if no images were found.
+ */
+export function parseGeminiChatImageResponse(
+  apiResponse: Record<string, unknown>,
+): string[] {
+  const imageUrls: string[] = [];
+
+  // Try to extract from choices[0].message.content
+  const choices = apiResponse.choices as Array<Record<string, unknown>> | undefined;
+  if (choices && choices.length > 0) {
+    const message = choices[0].message as Record<string, unknown> | undefined;
+    if (message) {
+      // Case 1: content is a string with base64 image embedded
+      const content = message.content;
+      if (typeof content === 'string') {
+        // Check if the content contains base64 image data
+        // Some providers return the image as a markdown image link
+        const base64Match = content.match(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/);
+        if (base64Match) {
+          imageUrls.push(base64Match[0]);
+        }
+
+        // Some providers return the raw base64 in content
+        if (!base64Match && content.length > 1000 && /^[A-Za-z0-9+/=\s]+$/.test(content.substring(0, 100))) {
+          imageUrls.push(`data:image/png;base64,${content.replace(/\s/g, '')}`);
+        }
+      }
+
+      // Case 2: content is an array of content parts (OpenAI multimodal format)
+      if (Array.isArray(content)) {
+        for (const part of content) {
+          if (typeof part === 'object' && part !== null) {
+            const p = part as Record<string, unknown>;
+
+            // OpenAI format: { type: "image_url", image_url: { url: "data:..." } }
+            if (p.type === 'image_url' && p.image_url) {
+              const imgUrl = (p.image_url as Record<string, unknown>)?.url as string;
+              if (imgUrl) imageUrls.push(imgUrl);
+            }
+
+            // Gemini native format: { type: "image", data: "base64...", mimeType: "image/png" }
+            if (p.type === 'image' && p.data) {
+              const mime = (p.mimeType as string) || 'image/png';
+              imageUrls.push(`data:${mime};base64,${p.data}`);
+            }
+
+            // Some providers: { type: "image", source: { data: "base64..." } }
+            if (p.type === 'image' && p.source) {
+              const source = p.source as Record<string, unknown>;
+              if (source.data) {
+                const mediaType = (source.media_type as string) || (source.mediaType as string) || 'image/png';
+                imageUrls.push(`data:${mediaType};base64,${source.data}`);
+              }
+            }
+
+            // Inline data format: { inline_data: { data: "base64...", mime_type: "image/png" } }
+            if (p.inline_data) {
+              const inlineData = p.inline_data as Record<string, unknown>;
+              if (inlineData.data) {
+                const mime = (inlineData.mime_type as string) || (inlineData.mimeType as string) || 'image/png';
+                imageUrls.push(`data:${mime};base64,${inlineData.data}`);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return imageUrls;
+}
+
+/**
+ * Resolve the compat profile for a given model + provider combination.
+ * When the model is a Gemini image model AND the provider doesn't support
+ * /images/generations for Gemini (i.e., the provider's resolved profile
+ * would return a non-generations endpoint error), we switch to the
+ * gemini-image profile that uses /chat/completions.
+ *
+ * This function is the single decision point for whether to route a
+ * Gemini image model through /chat/completions.
+ *
+ * @param modelId - The model ID being used
+ * @param provider - The API provider configuration
+ * @returns The appropriate ApiCompatProfile
+ */
+export function resolveProfileForModel(
+  modelId: string,
+  provider: {
+    baseUrl?: string;
+    requestStyle?: string;
+    compatProfile?: string;
+    advancedParams?: Record<string, string>;
+  } | null | undefined,
+): ApiCompatProfile {
+  // First resolve the normal profile
+  const baseProfile = resolveCompatProfile(provider);
+
+  // If the user explicitly set a profile (including gemini-image), respect it
+  if (provider?.compatProfile && COMPAT_PROFILES[provider.compatProfile]) {
+    return COMPAT_PROFILES[provider.compatProfile];
+  }
+  if (provider?.advancedParams?.compatProfile && COMPAT_PROFILES[provider.advancedParams.compatProfile]) {
+    return COMPAT_PROFILES[provider.advancedParams.compatProfile];
+  }
+
+  // If this is a nano-banana model (PearAPI adapted), always use standard OpenAI profile
+  // These models ARE OpenAI-compatible on /images/generations
+  if (isNanoBananaModel(modelId)) {
+    return baseProfile;
+  }
+
+  // If this is a Gemini image model AND the provider's base profile uses
+  // /images/generations, we need to check if the provider actually supports
+  // Gemini models there. Providers like 4SAPI don't — they only support
+  // Gemini via /chat/completions.
+  if (isGeminiImageModel(modelId)) {
+    // Check if the provider has explicitly set compatProfile to 'gemini-image'
+    if (provider?.compatProfile === 'gemini-image' || provider?.advancedParams?.compatProfile === 'gemini-image') {
+      return PROFILE_GEMINI_IMAGE;
+    }
+    // For 4SAPI-like providers (detected by URL pattern), auto-switch to gemini-image profile
+    const url = (provider?.baseUrl || '').toLowerCase();
+    if (url.includes('4sapi')) {
+      return PROFILE_GEMINI_IMAGE;
+    }
+    // For other providers, keep the base profile (they may support Gemini on /images/generations)
+    return baseProfile;
+  }
+
+  return baseProfile;
+}
 
 // ---------------------------------------------------------------------------
 // Utility: build polling URL
@@ -1022,5 +1310,10 @@ export const COMPAT_PROFILE_OPTIONS: Array<{ value: string; label: string; descr
     value: 'openai-async',
     label: 'OpenAI 兼容 (异步轮询)',
     description: 'OpenAI 格式但返回 task_id，需像素尺寸 + 轮询',
+  },
+  {
+    value: 'gemini-image',
+    label: 'Gemini 图像 (chat/completions)',
+    description: '通过 /chat/completions 生成图像，适合仅在此端点支持 Gemini 图像模型的中转站（如4SAPI）',
   },
 ];

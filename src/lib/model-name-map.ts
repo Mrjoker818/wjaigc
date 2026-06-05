@@ -28,12 +28,18 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'gemini-2.5-pro-image', entry: { name: 'Nano Banana Pro', short: 'NB Pro', type: 'image', provider: 'Google' } },
   { pattern: 'gemini-flash-image', entry: { name: 'Nano Banana', short: 'NB', type: 'image', provider: 'Google' } },
   { pattern: 'gemini-pro-image', entry: { name: 'Nano Banana Pro', short: 'NB Pro', type: 'image', provider: 'Google' } },
-  { pattern: 'nano-banana-2', entry: { name: 'Nano Banana 2', short: 'NB2', type: 'image', provider: 'Google' } },
-  { pattern: 'nano-banana-pro', entry: { name: 'Nano Banana Pro', short: 'NB Pro', type: 'image', provider: 'Google' } },
-  { pattern: 'nano-banana', entry: { name: 'Nano Banana', short: 'NB', type: 'image', provider: 'Google' } },
-  { pattern: 'nanobanana2', entry: { name: 'Nano Banana 2', short: 'NB2', type: 'image', provider: 'Google' } },
-  { pattern: 'nanobananapro', entry: { name: 'Nano Banana Pro', short: 'NB Pro', type: 'image', provider: 'Google' } },
-  { pattern: 'nanobanana', entry: { name: 'Nano Banana', short: 'NB', type: 'image', provider: 'Google' } },
+  // PearAPI nano-banana models (display names per PearAPI website convention)
+  { pattern: 'nano-banana-pro-4k', entry: { name: 'Nano Banana Pro 4K', short: 'NB Pro 4K', type: 'image', provider: 'PearAPI' } },
+  { pattern: 'nano-banana-2-4k', entry: { name: 'Nano Banana 2 4K', short: 'NB2 4K', type: 'image', provider: 'PearAPI' } },
+  { pattern: 'nano-banana-pro', entry: { name: 'Nano Banana Pro', short: 'NB Pro', type: 'image', provider: 'PearAPI' } },
+  { pattern: 'nano-banana-2', entry: { name: 'Nano Banana 2', short: 'NB2', type: 'image', provider: 'PearAPI' } },
+  { pattern: 'nano-banana', entry: { name: 'Nano Banana', short: 'NB', type: 'image', provider: 'PearAPI' } },
+  { pattern: 'nanobananapro4k', entry: { name: 'Nano Banana Pro 4K', short: 'NB Pro 4K', type: 'image', provider: 'PearAPI' } },
+  { pattern: 'nanobanana24k', entry: { name: 'Nano Banana 2 4K', short: 'NB2 4K', type: 'image', provider: 'PearAPI' } },
+  { pattern: 'nanobanana2pro', entry: { name: 'Nano Banana 2 Pro', short: 'NB2 Pro', type: 'image', provider: 'PearAPI' } },
+  { pattern: 'nanobananapro', entry: { name: 'Nano Banana Pro', short: 'NB Pro', type: 'image', provider: 'PearAPI' } },
+  { pattern: 'nanobanana2', entry: { name: 'Nano Banana 2', short: 'NB2', type: 'image', provider: 'PearAPI' } },
+  { pattern: 'nanobanana', entry: { name: 'Nano Banana', short: 'NB', type: 'image', provider: 'PearAPI' } },
   // Google Imagen series
   { pattern: 'imagen-4-ultra', entry: { name: 'Imagen 4 Ultra', type: 'image', provider: 'Google' } },
   { pattern: 'imagen-4', entry: { name: 'Imagen 4', type: 'image', provider: 'Google' } },
@@ -235,6 +241,11 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   // MiniMax
   { pattern: 'minimax-m2', entry: { name: 'MiniMax M2', type: 'chat', provider: 'MiniMax' } },
   { pattern: 'minimax', entry: { name: 'MiniMax', type: 'chat', provider: 'MiniMax' } },
+  // Grok (xAI)
+  { pattern: 'grok-3-mini', entry: { name: 'Grok 3 Mini', type: 'chat', provider: 'xAI' } },
+  { pattern: 'grok-3', entry: { name: 'Grok 3', type: 'chat', provider: 'xAI' } },
+  { pattern: 'grok-2-mini', entry: { name: 'Grok 2 Mini', type: 'chat', provider: 'xAI' } },
+  { pattern: 'grok-2', entry: { name: 'Grok 2', type: 'chat', provider: 'xAI' } },
 
   // ===== 3D Models =====
   { pattern: 'hunyuan3d', entry: { name: '混元3D', type: '3d', provider: 'Tencent' } },

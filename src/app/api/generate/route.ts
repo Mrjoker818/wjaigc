@@ -7,7 +7,7 @@ import { optionalApiAuth } from '@/lib/api-auth';
 import { translateApiError } from '@/lib/api-error-translate';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
@@ -55,6 +55,9 @@ function inferModelConfig(modelId: string, profile: ApiCompatProfile, providerNa
   if (id.includes('gpt-image') || id.includes('dall-e')) {
     paramType = 'quality';
   } else if (id.includes('gemini') || id.includes('seedream') || id.includes('doubao') || id.includes('flux')) {
+    paramType = 'resolution';
+  } else if (id.includes('nano-banana') || id.includes('nanobanana')) {
+    // PearAPI nano-banana 系列：基于 Gemini 的图像模型，使用分辨率参数
     paramType = 'resolution';
   }
 
@@ -395,8 +398,14 @@ export async function POST(request: NextRequest) {
       requestN: number,
       currentProvider?: { baseUrl?: string; requestStyle?: string; advancedParams?: Record<string, string> } | null,
     ): Promise<{ taskIds: string[]; directImageUrls: string[]; usedModel: string; usedProviderId: string }> => {
-      // 解析兼容性档案 - 由提供商配置决定 API 调用方式
-      const profile: ApiCompatProfile = resolveCompatProfile(currentProvider);
+      // 解析兼容性档案 - 由提供商配置和模型类型共同决定 API 调用方式
+      // 关键改进：对于 Gemini 图像模型，如果提供商不支持 /images/generations，
+      // 自动切换到 gemini-image profile（通过 /chat/completions 生图）
+      const profile: ApiCompatProfile = resolveProfileForModel(
+        currentModelConfig.modelId,
+        currentProvider,
+      );
+      const isGeminiImageRoute = profile.id === 'gemini-image';
 
       let effectiveSize = currentModelConfig.supportedSizes.includes(requestedSize) 
         ? requestedSize 
@@ -494,6 +503,81 @@ export async function POST(request: NextRequest) {
             // 压缩失败不影响流程，使用原图
             console.warn('Reference image compression failed:', compressErr);
           }
+        }
+      }
+
+      // ★ Gemini 图像模型专用路由：通过 /chat/completions 生图
+      // 某些中转站（如4SAPI）的 Gemini 图像模型仅支持 /chat/completions 端点，
+      // 不支持 /images/generations。此路由将请求转换为 chat 格式，
+      // 然后从响应的 content 中提取 base64 图片数据。
+      if (isGeminiImageRoute) {
+        const chatRequestBody = buildGeminiChatImageRequest(requestBody);
+        console.log('Gemini image route: using /chat/completions for model', currentModelConfig.modelId);
+
+        const geminiController = new AbortController();
+        const geminiTimeoutId = setTimeout(() => geminiController.abort(), 600000); // 10分钟超时（Gemini生图可能很慢）
+
+        try {
+          const chatResponse = await fetchWithV1Retry(
+            currentApiBaseUrl,
+            '/chat/completions',
+            {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${currentApiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(chatRequestBody),
+              signal: geminiController.signal,
+            }
+          );
+
+          clearTimeout(geminiTimeoutId);
+
+          if (!chatResponse.ok) {
+            const errorText = await chatResponse.text();
+            console.error('Gemini chat/completions error:', chatResponse.status, errorText);
+            let errorMsg = `Gemini API 请求失败 (${chatResponse.status})`;
+            try {
+              const errorJson = JSON.parse(errorText);
+              if (errorJson.error?.message) errorMsg = errorJson.error.message;
+            } catch { /* ignore */ }
+            throw new Error(translateApiError(errorMsg));
+          }
+
+          const chatResponseText = await chatResponse.text();
+          let chatResult: Record<string, unknown>;
+          try {
+            chatResult = JSON.parse(chatResponseText);
+          } catch {
+            console.error('[generate] Gemini chat returned non-JSON response, first 200 chars:', chatResponseText.substring(0, 200));
+            throw new Error('Gemini API 返回了非 JSON 响应');
+          }
+
+          // 从 chat/completions 响应中提取图片
+          const extractedImageUrls = parseGeminiChatImageResponse(chatResult);
+
+          if (extractedImageUrls.length > 0) {
+            console.log('Gemini image route: extracted', extractedImageUrls.length, 'images from chat response');
+            return {
+              taskIds: [],
+              directImageUrls: extractedImageUrls,
+              usedModel: currentModelConfig.modelId,
+              usedProviderId: currentProviderId,
+            };
+          }
+
+          // 如果是流式响应，chatResult 可能包含未完成的 SSE 数据
+          // 检查是否有 choices 但 content 中没有图片
+          const choices = chatResult.choices as Array<Record<string, unknown>> | undefined;
+          if (choices && choices.length > 0) {
+            const content = (choices[0].message as Record<string, unknown>)?.content;
+            console.error('[generate] Gemini chat response has choices but no extractable image. Content type:', typeof content, 'Content preview:', typeof content === 'string' ? content.substring(0, 200) : JSON.stringify(content).substring(0, 200));
+          }
+
+          throw new Error('Gemini 图像模型未返回图片数据，请检查模型是否支持图像生成');
+        } finally {
+          clearTimeout(geminiTimeoutId);
         }
       }
 
