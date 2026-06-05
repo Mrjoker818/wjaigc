@@ -712,8 +712,13 @@ function CanvasApp() {
       if (data.mode === 'direct') {
         const { imageUrls, model, prompt: enhancedPrompt, originalPrompt, category, style, modelName, providerName, apiBaseUrl } = data;
         
-        // 并行持久化所有图片URL
+        // 并行持久化所有需要持久化的图片URL（跳过已经是本地路径的URL）
         const savedUrls = await Promise.all(imageUrls.map(async (imageUrl: string) => {
+          // 已经是本地路径（serve-upload/本地文件），无需再次持久化
+          if (imageUrl.startsWith('/api/serve-upload/') || imageUrl.startsWith('/uploads/') || imageUrl.startsWith('blob:')) {
+            return imageUrl;
+          }
+          // data: URL 或远程 HTTP URL 需要持久化
           let savedUrl = imageUrl;
           try {
             const saveRes = await fetch('/api/save-image', {
@@ -730,11 +735,26 @@ function CanvasApp() {
         }));
 
         // 加载每张图片的真实像素尺寸（第三方API可能返回与请求不同的尺寸）
-        const loadActualSize = (url: string): Promise<{ w: number; h: number }> => {
+        const loadActualSize = (url: string, retries = 2): Promise<{ w: number; h: number }> => {
           return new Promise(resolve => {
             const img = new window.Image();
-            img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
-            img.onerror = () => resolve({ w: 0, h: 0 }); // 加载失败时返回0，后续使用fallback
+            const timeout = setTimeout(() => {
+              img.src = '';
+              if (retries > 0) {
+                resolve(loadActualSize(url, retries - 1));
+              } else {
+                resolve({ w: 0, h: 0 });
+              }
+            }, 15000); // 15秒超时，4K大图可能需要更长时间加载
+            img.onload = () => { clearTimeout(timeout); resolve({ w: img.naturalWidth, h: img.naturalHeight }); };
+            img.onerror = () => {
+              clearTimeout(timeout);
+              if (retries > 0) {
+                resolve(loadActualSize(url, retries - 1));
+              } else {
+                resolve({ w: 0, h: 0 }); // 加载失败时返回0，后续使用fallback
+              }
+            };
             img.src = url;
           });
         };
@@ -744,11 +764,28 @@ function CanvasApp() {
           const savedUrl = savedUrls[i];
           const actualSize = actualSizes[i];
 
+          // 从请求参数推算像素尺寸作为fallback
           let imgW = 1024, imgH = 1024;
           if (params.size?.includes('x') || params.size?.includes('×')) {
             const [sw, sh] = params.size.replace(/×/g, 'x').split('x');
-            imgW = parseInt(sw) || 1024;
-            imgH = parseInt(sh) || 1024;
+            const pw = parseInt(sw), ph = parseInt(sh);
+            // 像素格式 (如 "2304x4096")
+            if (pw > 100 && ph > 100) {
+              imgW = pw; imgH = ph;
+            }
+          }
+          // 如果无法从size解析像素，尝试从quality和aspectRatio推算
+          if (imgW <= 100 && params.aspectRatio) {
+            const [aw, ah] = params.aspectRatio.replace(/×/g, ':').split(':').map(Number);
+            if (aw > 0 && ah > 0) {
+              const basePixels: Record<string, number> = {
+                '1K': 1024, '2K': 2048, '3K': 3072, '4K': 4096,
+              };
+              const base = basePixels[params.quality || '2K'] || 2048;
+              const longEdge = base;
+              if (aw >= ah) { imgW = longEdge; imgH = Math.round(longEdge * ah / aw); }
+              else { imgH = longEdge; imgW = Math.round(longEdge * aw / ah); }
+            }
           }
           // 优先使用图片真实像素尺寸，fallback到请求尺寸
           const finalW = actualSize.w > 0 ? actualSize.w : imgW;

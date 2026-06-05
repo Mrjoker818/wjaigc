@@ -138,7 +138,7 @@ export async function POST(request: NextRequest) {
         try {
           const metadata = await sharp(buffer).metadata();
           const hasAlpha = metadata.channels === 4 || metadata.hasAlpha === true;
-          const maxEdge = 2048;
+          const maxEdge = 8192; // 保留最高8K分辨率，不缩小
           if ((metadata.width || 0) > maxEdge || (metadata.height || 0) > maxEdge) {
             const resizePipeline = sharp(buffer)
               .resize(maxEdge, maxEdge, { fit: 'inside', withoutEnlargement: true });
@@ -209,13 +209,13 @@ export async function POST(request: NextRequest) {
         const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || 'http://localhost:5000';
         const baseUrl = domain.startsWith('http') ? domain : `https://${domain}`;
         const fullUrl = `${baseUrl}${imageUrl}`;
-        const response = await fetch(fullUrl, { signal: AbortSignal.timeout(15000) });
+        const response = await fetch(fullUrl, { signal: AbortSignal.timeout(120000) }); // 2min for 4K images
         if (!response.ok) {
           return NextResponse.json({ error: `Failed to fetch local image: ${response.status}` }, { status: 400 });
         }
         const contentType = response.headers.get('content-type') || 'image/png';
         const buffer = Buffer.from(await response.arrayBuffer());
-        if (buffer.length > 20 * 1024 * 1024) {
+        if (buffer.length > 80 * 1024 * 1024) { // 80MB for 4K images
           return NextResponse.json({ error: 'Image too large (max 20MB)' }, { status: 400 });
         }
         const extFromCt = contentType.split('/')[1]?.replace('jpeg', 'jpg').replace('svg+xml', 'svg');
@@ -275,7 +275,7 @@ export async function POST(request: NextRequest) {
           try {
             const metadata = await sharp(buffer).metadata();
             const hasAlpha = metadata.channels === 4 || metadata.hasAlpha === true;
-            const maxEdge = 4096; // 保留4K分辨率
+            const maxEdge = 8192; // 保留最高8K分辨率，不缩小
             const needsResize = (metadata.width || 0) > maxEdge || (metadata.height || 0) > maxEdge;
 
             if (needsResize) {
