@@ -249,10 +249,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 远程 HTTP(S) URL — 下载后保存
+    // 远程 HTTP(S) URL — 下载后保存（自动压缩超大图片）
     if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const timeoutId = setTimeout(() => controller.abort(), 120000); // ★ 2分钟超时（4K图片可能很大且下载慢）
 
       try {
         const response = await fetch(imageUrl, { signal: controller.signal });
@@ -263,16 +263,41 @@ export async function POST(request: NextRequest) {
         }
 
         const contentType = response.headers.get('content-type') || 'image/png';
-        const buffer = Buffer.from(await response.arrayBuffer());
+        let buffer: Buffer = Buffer.from(await response.arrayBuffer());
 
-        if (buffer.length > 20 * 1024 * 1024) {
-          return NextResponse.json({ error: 'Image too large (max 20MB)' }, { status: 400 });
+        if (buffer.length > 50 * 1024 * 1024) {
+          return NextResponse.json({ error: 'Image too large (max 50MB)' }, { status: 400 });
         }
 
-        const extFromUrl = imageUrl.split('.').pop()?.split('?')[0]?.toLowerCase();
-        const extFromCt = contentType.split('/')[1]?.replace('jpeg', 'jpg').replace('svg+xml', 'svg');
-        const ext = extFromCt || extFromUrl || 'png';
-        const filename = `gen-${timestamp}-${random}.${ext}`;
+        // ★ 自动压缩：大图（>2MB）自动转 JPEG 缩小体积，保留透明通道的用 PNG
+        let finalExt = contentType.split('/')[1]?.replace('jpeg', 'jpg').replace('svg+xml', 'svg') || 'png';
+        if (buffer.length > 2 * 1024 * 1024 && !finalExt.includes('svg') && !finalExt.includes('gif')) {
+          try {
+            const metadata = await sharp(buffer).metadata();
+            const hasAlpha = metadata.channels === 4 || metadata.hasAlpha === true;
+            const maxEdge = 4096; // 保留4K分辨率
+            const needsResize = (metadata.width || 0) > maxEdge || (metadata.height || 0) > maxEdge;
+
+            if (needsResize) {
+              const pipeline = sharp(buffer).resize(maxEdge, maxEdge, { fit: 'inside', withoutEnlargement: true });
+              if (hasAlpha) {
+                buffer = await pipeline.png({ quality: 92, compressionLevel: 6 }).toBuffer();
+                finalExt = 'png';
+              } else {
+                buffer = await pipeline.jpeg({ quality: 90 }).toBuffer();
+                finalExt = 'jpg';
+              }
+            } else if (!hasAlpha && finalExt === 'png' && buffer.length > 3 * 1024 * 1024) {
+              // 无透明通道的大 PNG 转 JPEG 减小体积
+              buffer = await sharp(buffer).jpeg({ quality: 90 }).toBuffer();
+              finalExt = 'jpg';
+            }
+          } catch (compressErr) {
+            console.warn('[save-image] Auto-compress failed, using original:', compressErr);
+          }
+        }
+
+        const filename = `gen-${timestamp}-${random}.${finalExt}`;
         const filePath = path.join(uploadDir, filename);
         await writeFile(filePath, buffer);
         // 开发环境也写入 public/uploads

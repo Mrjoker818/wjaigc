@@ -33,7 +33,7 @@ import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, Refe
 import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import type { PsdLayerItem } from '@/types/psdLayer';
-import { toStableImageUrl } from '@/lib/stable-image-url';
+import { toStableImageUrl, onPersistComplete, getCachedLocalUrl } from '@/lib/stable-image-url';
 import { taskEventsClient } from '@/lib/task-events-client';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
 import OhMyPrompt from '@/components/oh-my-prompt';
@@ -318,6 +318,7 @@ export interface CanvasImage {
   modelName?: string;
   apiProvider?: string;
   apiBaseUrl?: string;
+  thumbnailUrl?: string; // 缩略图URL，用于画布渲染（4K图片性能优化）
 }
 
 interface InfiniteCanvasProps {
@@ -589,6 +590,101 @@ export function InfiniteCanvas({
   }, [images, viewOffset, zoom, canvasSize]);
   // Track total vs visible for debugging
   const virtualizationStats = useMemo(() => ({ total: images.length, visible: visibleImages.length }), [images.length, visibleImages.length]);
+
+  // ★ 缩略图生成：为大图（>1024px）生成客户端缩略图，减少4K图片解码开销
+  const thumbnailCacheRef = useRef<Map<string, string>>(new Map()); // imageUrl → thumbnailDataUrl
+  const thumbnailGenInProgressRef = useRef<Set<string>>(new Set());
+  const [thumbnailVersion, setThumbnailVersion] = useState(0); // 触发重渲染
+
+  useEffect(() => {
+    const THUMBNAIL_MAX = 800; // 缩略图最大边长
+    const ORIG_THRESHOLD = 1200; // 原图超过此尺寸才生成缩略图
+    let cancelled = false;
+
+    for (const img of images) {
+      if (img.isProcessingPlaceholder || !img.url || img.url.startsWith('data:') || img.thumbnailUrl) continue;
+      // 仅对大图生成缩略图
+      const origW = img.originalWidth || img.width;
+      const origH = img.originalHeight || img.height;
+      if (origW <= ORIG_THRESHOLD && origH <= ORIG_THRESHOLD) continue;
+      // 已有缓存
+      if (thumbnailCacheRef.current.has(img.url)) continue;
+      // 正在生成
+      if (thumbnailGenInProgressRef.current.has(img.url)) continue;
+
+      thumbnailGenInProgressRef.current.add(img.url);
+
+      // 异步生成缩略图
+      const generateThumbnail = async (imageUrl: string) => {
+        try {
+          const imageEl = new window.Image();
+          imageEl.crossOrigin = 'anonymous';
+          await new Promise<void>((resolve, reject) => {
+            imageEl.onload = () => resolve();
+            imageEl.onerror = () => reject(new Error('Failed to load image for thumbnail'));
+            imageEl.src = imageUrl;
+          });
+          if (cancelled) return;
+
+          const w = imageEl.naturalWidth;
+          const h = imageEl.naturalHeight;
+          if (w <= ORIG_THRESHOLD && h <= ORIG_THRESHOLD) return;
+
+          const scale = Math.min(1, THUMBNAIL_MAX / Math.max(w, h));
+          const tw = Math.round(w * scale);
+          const th = Math.round(h * scale);
+
+          const canvas = document.createElement('canvas');
+          canvas.width = tw;
+          canvas.height = th;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
+          ctx.drawImage(imageEl, 0, 0, tw, th);
+
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+          thumbnailCacheRef.current.set(imageUrl, dataUrl);
+          // 触发重渲染让 visibleImages 的 thumbnailUrl 更新
+          setThumbnailVersion(v => v + 1);
+        } catch {
+          // 缩略图生成失败不影响原图显示
+        } finally {
+          thumbnailGenInProgressRef.current.delete(imageUrl);
+        }
+      };
+
+      generateThumbnail(img.url);
+    }
+
+    return () => { cancelled = true; };
+  }, [images]);
+
+  // 为 visibleImages 附加 thumbnailUrl
+  const visibleImagesWithThumbnails = useMemo(() => {
+    // thumbnailVersion 作为依赖确保缓存更新后重新计算
+    void thumbnailVersion;
+    return visibleImages.map(img => {
+      if (img.thumbnailUrl) return img;
+      const cached = thumbnailCacheRef.current.get(img.url);
+      if (cached) return { ...img, thumbnailUrl: cached };
+      return img;
+    });
+  }, [visibleImages, thumbnailVersion]);
+
+  // ★ 远程 URL 后台持久化监听：当远程图片持久化为本地 URL 后，更新画布图片
+  useEffect(() => {
+    const unsubscribe = onPersistComplete((originalUrl: string, localUrl: string) => {
+      let changed = false;
+      const updated = images.map(img => {
+        if (img.url === originalUrl) {
+          changed = true;
+          return { ...img, url: localUrl };
+        }
+        return img;
+      });
+      if (changed) onImagesChange(updated);
+    });
+    return unsubscribe;
+  }, [images, onImagesChange]);
 
   // Navigate to image when navigateToImageId changes
   useEffect(() => {
@@ -6418,7 +6514,7 @@ export function InfiniteCanvas({
         )}
 
         {/* Canvas images */}
-        <div style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px) scale(${zoom})`, transformOrigin: '0 0' }}>
+        <div style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px) scale(${zoom})`, transformOrigin: '0 0', willChange: 'transform', contain: 'layout style' }}>
           {/* Image Groups */}
           {groups.map(group => {
             const groupImages = images.filter(img => img.groupId === group.id);
@@ -6534,7 +6630,7 @@ export function InfiniteCanvas({
               </div>
             );
           })}
-          {visibleImages.map(image => {
+          {visibleImagesWithThumbnails.map(image => {
             const isSelected = selectedIds.has(image.id);
             const isDragging = dragTarget && selectedIds.has(image.id);
             // Hide images belonging to collapsed groups
@@ -6599,6 +6695,8 @@ export function InfiniteCanvas({
                       alt=""
                       className="absolute inset-0 w-full h-full object-cover blur-xl scale-110 opacity-40 pointer-events-none"
                       draggable={false}
+                      loading="lazy"
+                      decoding="async"
                     />
                     )}
                     <div className="absolute inset-0 bg-black/50 pointer-events-none" />
@@ -6708,14 +6806,22 @@ export function InfiniteCanvas({
                   </div>
                 ) : image.url ? (
                   <img
-                    src={image.url}
+                    src={image.thumbnailUrl || image.url}
                     alt={image.prompt || 'canvas image'}
                     className="w-full h-full object-cover pointer-events-none"
                     draggable={false}
+                    loading="lazy"
+                    decoding="async"
+                    style={{ contain: 'paint' }}
                     onError={(e) => {
                       const img = e.currentTarget;
                       if (img.dataset.retried) return; // 已重试过，不再循环
                       img.dataset.retried = '1';
+                      // 如果缩略图失败，回退到原图
+                      if (image.thumbnailUrl && img.src === image.thumbnailUrl) {
+                        img.src = image.url;
+                        return;
+                      }
                       const url = image.url;
                       // /uploads/xxx → /api/serve-upload/xxx (S3回退恢复)
                       if (url.startsWith('/uploads/')) {
