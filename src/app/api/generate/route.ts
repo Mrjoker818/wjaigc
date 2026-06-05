@@ -924,7 +924,7 @@ export async function POST(request: NextRequest) {
 
     const taskIds: string[] = [];
     const directImageUrls: string[] = [];
-    let usedModelName = modelConfig.name;
+    let usedModelName = modelConfig.modelId; // 使用模型ID而非config.name（config.name可能被providerName覆盖）
     let usedModelId = modelConfig.modelId;
     let usedProviderId = provider?.id || 'env';
     let usedProviderName = provider?.displayName || provider?.name || '';
@@ -979,7 +979,7 @@ export async function POST(request: NextRequest) {
                 taskIds.push(...result.taskIds);
               }
               usedModelId = result.usedModel;
-              usedModelName = candidateConfig.name;
+              usedModelName = result.usedModel || candidate.modelId; // 使用实际使用的模型ID
               usedProviderId = result.usedProviderId;
               usedProviderName = candidate.displayName || candidate.modelId;
               usedApiBaseUrl = candidate.baseUrl;

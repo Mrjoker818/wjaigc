@@ -251,6 +251,9 @@ function CanvasApp() {
                   originalWidth: (img.originalWidth as number) || 512,
                   originalHeight: (img.originalHeight as number) || 512,
                   createdAt: (img.createdAt as number) || Date.now(),
+                  modelName: (img.modelName as string) || '',
+                  apiProvider: (img.apiProvider as string) || '',
+                  apiBaseUrl: (img.apiBaseUrl as string) || '',
                 })));
                 // 恢复分组数据（优先 metadata，其次 localStorage 兜底）
                 const metaGroups = projects[0].metadata?.groups;
@@ -454,6 +457,9 @@ function CanvasApp() {
             groupId: img.groupId || '',
             threeDModelUrl: img.threeDModelUrl || '',
             threeDModelUrls: img.threeDModelUrls || undefined,
+            modelName: img.modelName || '',
+            apiProvider: img.apiProvider || '',
+            apiBaseUrl: img.apiBaseUrl || '',
           }))
           .filter(img => img.url);
 
@@ -523,6 +529,9 @@ function CanvasApp() {
             groupId: img.groupId || '',
             threeDModelUrl: img.threeDModelUrl || '',
             threeDModelUrls: img.threeDModelUrls || undefined,
+            modelName: img.modelName || '',
+            apiProvider: img.apiProvider || '',
+            apiBaseUrl: img.apiBaseUrl || '',
           }))
           .filter(img => img.url);
         // 1. localStorage 即时写入
@@ -2594,6 +2603,9 @@ function CanvasApp() {
                       originalWidth: (img.originalWidth as number) || 512,
                       originalHeight: (img.originalHeight as number) || 512,
                       createdAt: (img.createdAt as number) || Date.now(),
+                      modelName: (img.modelName as string) || '',
+                      apiProvider: (img.apiProvider as string) || '',
+                      apiBaseUrl: (img.apiBaseUrl as string) || '',
                     })));
                     // 恢复分组数据（优先 metadata，其次 localStorage 兜底）
                     const metaGroups = project.metadata?.groups;
@@ -2703,6 +2715,9 @@ function CanvasApp() {
                     groupId: img.groupId || '',
                     threeDModelUrl: img.threeDModelUrl || '',
                     threeDModelUrls: img.threeDModelUrls || undefined,
+                    modelName: img.modelName || '',
+                    apiProvider: img.apiProvider || '',
+                    apiBaseUrl: img.apiBaseUrl || '',
                   }))
                   .filter(img => img.url);
                 mgr.updateProject(currentProject.id, {
@@ -2788,6 +2803,9 @@ function CanvasApp() {
                     groupId: img.groupId || '',
                     threeDModelUrl: img.threeDModelUrl || '',
                     threeDModelUrls: img.threeDModelUrls || undefined,
+                    modelName: img.modelName || '',
+                    apiProvider: img.apiProvider || '',
+                    apiBaseUrl: img.apiBaseUrl || '',
                   }))
                   .filter(img => img.url);
                 // 保存 canvasImages + metadata(groups)，与自动保存逻辑保持一致
@@ -2830,6 +2848,9 @@ function CanvasApp() {
                 originalWidth: (img.originalWidth as number) || 512,
                 originalHeight: (img.originalHeight as number) || 512,
                 createdAt: (img.createdAt as number) || Date.now(),
+                modelName: (img.modelName as string) || '',
+                apiProvider: (img.apiProvider as string) || '',
+                apiBaseUrl: (img.apiBaseUrl as string) || '',
               })));
               // 恢复分组数据（优先 metadata，其次 localStorage 兜底）
               const metaGroups = freshProject.metadata?.groups;
