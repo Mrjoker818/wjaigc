@@ -1457,6 +1457,16 @@ export function InfiniteCanvas({
         }
         return;
       }
+      // Ctrl+G: Create group from selected images
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyG') {
+        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
+        e.preventDefault();
+        if (selectedIds.size >= 2) {
+          handleCreateGroup();
+        }
+        return;
+      }
       // Ctrl+Q: Masonry layout for selected images
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyQ') {
         const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
@@ -6043,7 +6053,7 @@ export function InfiniteCanvas({
         setShowCompareDialog(true);
       }
     } }] : []),
-    { label: '创建组', shortcut: '', action: () => { handleCreateGroup(); } },
+    { label: '创建组', shortcut: 'Ctrl+G', action: () => { handleCreateGroup(); } },
     { label: '对齐-左', action: () => {
       const selImgs = images.filter(i => selectedIds.has(i.id));
       if (selImgs.length < 2) return;
