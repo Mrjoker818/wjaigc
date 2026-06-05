@@ -529,7 +529,28 @@ async function submitImageTask(
   // ★ Gemini 图像模型专用路由：通过 /chat/completions 生图
   // 某些中转站（如4SAPI）的 Gemini 图像模型仅支持 /chat/completions 端点，
   // 不支持 /images/generations。需要将请求转换为 chat 格式。
-  if (profile.id === 'gemini-image') {
+  //
+  // ⚠️ 但 Gemini chat/completions 只能"参考"原图生成新图，无法做精确编辑操作。
+  // 对于 outpaint/inpaint（扩展/擦除/蒙版）等需要像素级控制的操作，
+  // Gemini 会变形/重绘而非精确扩展，应跳过此 provider 回退到支持 edits 的候选模型。
+  const isEditOperation = endpoint === '/images/edits'
+    || !!requestBody.mask
+    || (typeof requestBody.strength === 'number' && requestBody.strength < 1)
+    || (typeof requestBody.prompt === 'string' && (
+      requestBody.prompt.includes('outpainting') ||
+      requestBody.prompt.includes('expansion task') ||
+      requestBody.prompt.includes('inpainting') ||
+      requestBody.prompt.includes('erase') ||
+      requestBody.prompt.includes('remove')
+    ));
+
+  if (profile.id === 'gemini-image' && isEditOperation) {
+    // Gemini chat/completions 不支持精确图片编辑，跳过此 provider
+    console.info(`[submitImageTask] Skipping gemini-image provider for edit operation (model="${modelId}"), will try next candidate`);
+    throw new Error('GEMINI_IMAGE_NOT_FOR_EDITS: Gemini 图像模型不支持精确编辑操作（扩展/擦除/蒙版），请使用其他图像模型');
+  }
+
+  if (profile.id === 'gemini-image' && !isEditOperation) {
     console.info(`[submitImageTask] Gemini image route detected for model="${modelId}", using /chat/completions`);
     const chatRequestBody = buildGeminiChatImageRequest(requestBody);
     const chatController = new AbortController();
@@ -2880,12 +2901,14 @@ export async function POST(request: NextRequest) {
       genBody.image_urls = [originalBase64];
       genBody.strength = 0.65; // 保留原图风格，同时允许扩展
 
-      // Submit to AI model API
-      const cm = candidateModels[0];
-      const result = await submitImageTask(
-        cm.apiBaseUrl, cm.apiKey, genBody, '/images/edits',
-        { baseUrl: cm.apiBaseUrl, advancedParams: cm.advancedParams, model: cm.model }
+      // Submit to AI model API — 使用 autoTrySubmitImageTask 自动回退非 gemini-image 的候选模型
+      const result = await autoTrySubmitImageTask(
+        candidateModels,
+        (model: string) => ({ ...genBody, model }),
+        '扩展画面',
+        '/images/edits',
       );
+      const usedModel = result.usedModel || modelStr;
 
       // ★ 扩展结果持久化：直接保存 AI 生成结果
       // 不做原图合成，AI 已根据原图+方向提示词生成完整扩展图
@@ -2941,10 +2964,10 @@ export async function POST(request: NextRequest) {
           progress: 10,
           result: {
             outpaintInfo: { targetW, targetH, genW, genH },
-            usedModel: cm?.model,
-            apiBaseUrl: cm?.apiBaseUrl,
-            apiKey: cm?.apiKey,
-            advancedParams: cm?.advancedParams,
+            usedModel,
+            apiBaseUrl: result.apiBaseUrl,
+            apiKey: result.apiKey,
+            advancedParams: result.advancedParams,
           }
         });
       }
