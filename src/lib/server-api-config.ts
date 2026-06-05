@@ -24,6 +24,29 @@ export function normalizeApiBaseUrl(baseUrl: string): string {
 
 type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'imageEdit' | 'universal' | 'general';
 
+/**
+ * Normalize advancedParams from DB storage format to Record<string, string>.
+ * DB may store as:
+ * - Record<string, string> (e.g. { "compatProfile": "apimart" })
+ * - Array<{key: string, value: string}> (admin panel key-value pairs)
+ * Returns a flat Record<string, string> in all cases.
+ */
+function normalizeAdvancedParams(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object') return {};
+  if (Array.isArray(raw)) {
+    const result: Record<string, string> = {};
+    for (const item of raw) {
+      if (item && typeof item === 'object' && 'key' in item && 'value' in item) {
+        const key = String(item.key).trim();
+        if (key) result[key] = String(item.value ?? '');
+      }
+    }
+    return result;
+  }
+  // Already a Record<string, string>
+  return raw as Record<string, string>;
+}
+
 interface StoredApiConfig {
   providers: ApiProvider[];
   updatedAt: number;
@@ -185,7 +208,7 @@ async function readConfig(): Promise<StoredApiConfig> {
         modelType: p.model_type as ApiKind,
         requestStyle: p.request_style as ApiProvider['requestStyle'],
         selectedModels: Array.isArray(p.selected_models) ? p.selected_models : [],
-        advancedParams: (p.advanced_params && typeof p.advanced_params === 'object') ? p.advanced_params as Record<string, string> : {},
+        advancedParams: normalizeAdvancedParams(p.advanced_params),
         isDefault: p.is_default,
         createdAt: p.created_at,
         updatedAt: p.updated_at,

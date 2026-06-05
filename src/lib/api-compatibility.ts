@@ -229,8 +229,10 @@ export const COMPAT_PROFILES: Record<string, ApiCompatProfile> = {
  */
 const URL_PROFILE_RULES: Array<{ pattern: RegExp; profile: ApiCompatProfile }> = [
   { pattern: /apimart\.ai/i,              profile: PROFILE_APIMART },
+  { pattern: /apib\.ai/i,                 profile: PROFILE_APIMART },  // APImart 域名变体 (api.apib.ai)
   { pattern: /api\.openai\.com/i,         profile: PROFILE_OPENAI },
   { pattern: /pearapi\.ai/i,              profile: PROFILE_PEARAPI },  // PearAPI: nano-banana models use aspect-ratio format
+  { pattern: /tokln\.com/i,               profile: PROFILE_OPENAI },   // token link: OpenAI-compatible direct response, pixel size format
 ];
 
 // ---------------------------------------------------------------------------

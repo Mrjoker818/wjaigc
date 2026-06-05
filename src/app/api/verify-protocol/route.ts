@@ -45,16 +45,17 @@ export async function POST(request: NextRequest) {
       'Content-Type': 'application/json',
     };
 
-    // Apply advanced params as headers
+    // Apply advanced params as headers (skip internal config keys like compatProfile)
+    const INTERNAL_KEYS = new Set(['compatProfile']);
     if (Array.isArray(advancedParams)) {
       for (const param of advancedParams) {
-        if (param.key?.trim() && param.value !== undefined) {
+        if (param.key?.trim() && param.value !== undefined && !INTERNAL_KEYS.has(param.key.trim())) {
           headers[param.key.trim()] = String(param.value);
         }
       }
     } else if (advancedParams && typeof advancedParams === 'object') {
       for (const [key, value] of Object.entries(advancedParams)) {
-        if (key.trim()) headers[key.trim()] = String(value);
+        if (key.trim() && !INTERNAL_KEYS.has(key.trim())) headers[key.trim()] = String(value);
       }
     }
 
