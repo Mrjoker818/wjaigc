@@ -5,7 +5,7 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { optionalApiAuth } from '@/lib/api-auth';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { translateApiError } from '@/lib/api-error-translate';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, convertAspectRatioToSize, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, type ApiCompatProfile, type ImageEndpoint } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, convertAspectRatioToSize, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, type ApiCompatProfile, type ImageEndpoint, buildGeminiChatImageRequest, parseGeminiChatImageResponse, resolveProfileForModel, isGeminiImageModel } from '@/lib/api-compatibility';
 import { saveImageFile } from '@/lib/server-data-root';
 import sharp from 'sharp';
 import fsSync from 'fs';
@@ -520,10 +520,76 @@ async function submitImageTask(
   apiKey: string,
   requestBody: Record<string, unknown>,
   endpoint: '/images/generations' | '/images/edits' = '/images/generations',
-  providerInfo?: { baseUrl?: string; requestStyle?: string; advancedParams?: Record<string, string> } | null,
+  providerInfo?: { baseUrl?: string; requestStyle?: string; advancedParams?: Record<string, string>; model?: string } | null,
 ): Promise<{ taskId?: string; directUrl?: string; apiBaseUrl?: string; apiKey?: string; advancedParams?: Record<string, string> }> {
-  // 解析兼容性档案
-  const profile = resolveCompatProfile(providerInfo);
+  // 解析兼容性档案 — 优先使用 resolveProfileForModel 来正确处理 Gemini 图像模型
+  const modelId = providerInfo?.model || (typeof requestBody.model === 'string' ? requestBody.model : '');
+  const profile = resolveProfileForModel(modelId, providerInfo);
+
+  // ★ Gemini 图像模型专用路由：通过 /chat/completions 生图
+  // 某些中转站（如4SAPI）的 Gemini 图像模型仅支持 /chat/completions 端点，
+  // 不支持 /images/generations。需要将请求转换为 chat 格式。
+  if (profile.id === 'gemini-image') {
+    console.info(`[submitImageTask] Gemini image route detected for model="${modelId}", using /chat/completions`);
+    const chatRequestBody = buildGeminiChatImageRequest(requestBody);
+    const chatController = new AbortController();
+    const chatTimeoutId = setTimeout(() => chatController.abort(), 600000); // 10分钟超时
+
+    try {
+      const chatResponse = await fetchWithV1Retry(
+        apiBaseUrl,
+        '/chat/completions',
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(chatRequestBody),
+          signal: chatController.signal,
+        }
+      );
+
+      clearTimeout(chatTimeoutId);
+
+      if (!chatResponse.ok) {
+        const errorText = await chatResponse.text();
+        console.error('[submitImageTask] Gemini chat/completions error:', chatResponse.status, errorText);
+        let errorMsg = `Gemini API 请求失败 (${chatResponse.status})`;
+        try {
+          const errorJson = JSON.parse(errorText);
+          if (errorJson.error?.message) errorMsg = errorJson.error.message;
+        } catch { /* ignore */ }
+        throw new Error(translateApiError(errorMsg));
+      }
+
+      const chatResponseText = await chatResponse.text();
+      let chatResult: Record<string, unknown>;
+      try {
+        chatResult = JSON.parse(chatResponseText);
+      } catch {
+        console.error('[submitImageTask] Gemini chat returned non-JSON, first 200 chars:', chatResponseText.substring(0, 200));
+        throw new Error('Gemini API 返回了非 JSON 响应');
+      }
+
+      const extractedImageUrls = parseGeminiChatImageResponse(chatResult);
+      if (extractedImageUrls.length > 0) {
+        console.info(`[submitImageTask] Gemini image route: extracted ${extractedImageUrls.length} images`);
+        return { directUrl: extractedImageUrls[0], apiBaseUrl, apiKey, advancedParams: providerInfo?.advancedParams };
+      }
+
+      // 没有提取到图片
+      const choices = chatResult.choices as Array<Record<string, unknown>> | undefined;
+      if (choices && choices.length > 0) {
+        const content = (choices[0].message as Record<string, unknown>)?.content;
+        console.error('[submitImageTask] Gemini chat response has choices but no extractable image. Content type:', typeof content, 'Content preview:', typeof content === 'string' ? content.substring(0, 200) : JSON.stringify(content).substring(0, 200));
+      }
+
+      throw new Error('Gemini 图像模型未返回图片结果');
+    } finally {
+      clearTimeout(chatTimeoutId);
+    }
+  }
 
   // 使用兼容性层调整请求（size格式、端点选择、input_fidelity等）
   const hasImageField = !!requestBody.image;
@@ -928,6 +994,7 @@ async function autoTrySubmitImageTask(
       const result = await submitImageTask(candidate.apiBaseUrl, candidate.apiKey, requestBody, endpoint, {
         baseUrl: candidate.apiBaseUrl,
         advancedParams: candidate.advancedParams,
+        model: candidate.model,
       });
       return { ...result, usedModel: candidate.model };
     } catch (err: unknown) {
@@ -957,6 +1024,7 @@ async function autoTrySubmitImageTask(
               const retryResult = await submitImageTask(retryCandidate.apiBaseUrl, retryCandidate.apiKey, retryBody, endpoint, {
                 baseUrl: retryCandidate.apiBaseUrl,
                 advancedParams: retryCandidate.advancedParams,
+                model: retryCandidate.model,
               });
               return { ...retryResult, usedModel: retryCandidate.model };
             } catch (retryErr: unknown) {
@@ -2816,7 +2884,7 @@ export async function POST(request: NextRequest) {
       const cm = candidateModels[0];
       const result = await submitImageTask(
         cm.apiBaseUrl, cm.apiKey, genBody, '/images/edits',
-        { baseUrl: cm.apiBaseUrl, advancedParams: cm.advancedParams }
+        { baseUrl: cm.apiBaseUrl, advancedParams: cm.advancedParams, model: cm.model }
       );
 
       // ★ 扩展结果持久化：直接保存 AI 生成结果

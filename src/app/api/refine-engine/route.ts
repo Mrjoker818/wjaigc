@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderById, getPublicModels, getPublicApiProviders } from '@/lib/server-api-config';
 import type { ApiProvider } from '@/lib/universal-api-types';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, isEditsEndpointRejected, stripEditsOnlyFields } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, isEditsEndpointRejected, stripEditsOnlyFields, resolveProfileForModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse } from '@/lib/api-compatibility';
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { translateApiError } from '@/lib/api-error-translate';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
@@ -451,7 +451,8 @@ async function submitRefineToApi(
   console.log(`[refine-engine] submitRefineToApi START taskId=${taskId}`);
   updateTaskProgress(taskId, { status: 'processing', progress: 10, label: '构建精修请求...' });
 
-  const compatProfile = resolveCompatProfile(params.provider);
+  const compatProfile = resolveProfileForModel(params.model, params.provider);
+  const isGeminiImageRoute = compatProfile.id === 'gemini-image';
   updateTaskProgress(taskId, { progress: 20, label: '准备参考图片...' });
 
   // Build request body
@@ -561,6 +562,76 @@ ${params.prompt}`;
   }
 
   const hasImageFlag = !!(rawBody.image || rawBody.image_urls);
+
+  // ★ Gemini 图像模型专用路由：通过 /chat/completions 生图
+  // 某些中转站（如4SAPI）的 Gemini 图像模型仅支持 /chat/completions 端点
+  if (isGeminiImageRoute) {
+    console.info(`[refine-engine] Gemini image route for model="${params.model}", using /chat/completions`);
+    const chatRequestBody = buildGeminiChatImageRequest(rawBody);
+
+    updateTaskProgress(taskId, { progress: 40, label: '调用AI模型生成...' });
+
+    const chatController = new AbortController();
+    const chatTimeoutId = setTimeout(() => chatController.abort(), 600000);
+
+    try {
+      const chatResponse = await fetchWithV1Retry(
+        params.provider.baseUrl, '/chat/completions',
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${params.provider.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(chatRequestBody),
+          signal: chatController.signal,
+        },
+        true, 600000
+      );
+
+      clearTimeout(chatTimeoutId);
+
+      if (!chatResponse.ok) {
+        const errorText = await chatResponse.text().catch(() => '');
+        console.error('[refine-engine] Gemini chat/completions error:', chatResponse.status, errorText);
+        let errorMsg = `Gemini API 请求失败 (${chatResponse.status})`;
+        try {
+          const errorJson = JSON.parse(errorText);
+          if (errorJson.error?.message) errorMsg = errorJson.error.message;
+        } catch { /* ignore */ }
+        throw new Error(errorMsg);
+      }
+
+      const chatResponseText = await chatResponse.text();
+      let chatResult: Record<string, unknown>;
+      try {
+        chatResult = JSON.parse(chatResponseText);
+      } catch {
+        console.error('[refine-engine] Gemini chat returned non-JSON, first 200 chars:', chatResponseText.substring(0, 200));
+        throw new Error('Gemini API 返回了非 JSON 响应');
+      }
+
+      const extractedImageUrls = parseGeminiChatImageResponse(chatResult);
+      if (extractedImageUrls.length > 0) {
+        console.info(`[refine-engine] Gemini image route: extracted ${extractedImageUrls.length} images`);
+        updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
+        const persistedUrls = await Promise.all(extractedImageUrls.map(persistResultImage));
+        setRefineResult(taskId, { directImageUrls: persistedUrls, completedAt: Date.now() });
+        updateTaskProgress(taskId, {
+          status: 'completed',
+          progress: 100,
+          label: '精修完成',
+          result: { directImageUrls: persistedUrls },
+        });
+        return { directImageUrls: persistedUrls };
+      }
+
+      throw new Error('Gemini 图像模型未返回图片结果');
+    } finally {
+      clearTimeout(chatTimeoutId);
+    }
+  }
+
   const { body: apiBody, endpoint: apiEndpoint } = adjustRequestForProfile(rawBody, compatProfile, { hasImage: hasImageFlag });
   const path = apiEndpoint || '/images/generations';
 

@@ -439,6 +439,7 @@ export default function StickerAssistantPanel({
 
   /* ── 文件上传 ref ── */
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isGeneratingItemRef = useRef(false); // 防止并发生图
 
   /* ── 加载模型列表 ── */
   useEffect(() => {
@@ -706,9 +707,11 @@ ${themeDesc}
 
   useEffect(() => {
     if (!generating || step !== 2 || plan.length === 0) return;
+    if (isGeneratingItemRef.current) return; // 防止并发生图
     const idx = plan.findIndex(p => p.status === 'pending' || p.status === 'failed');
-    if (idx === -1) { setGenerating(false); return; }
+    if (idx === -1) { setGenerating(false); isGeneratingItemRef.current = false; return; }
     setGenIdx(idx);
+    isGeneratingItemRef.current = true;
 
     const item = plan[idx];
     const styleP = styleKey === 'custom' ? customStyle : selectedStyle.positivePrompt;
@@ -787,8 +790,11 @@ ${themeDesc}
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody),
         });
-        if (!res.ok) throw new Error(`生成失败: ${res.status}`);
         const data = await res.json();
+        if (!res.ok || data.success === false) {
+          const apiError = data.error || data.message || `生成失败: ${res.status}`;
+          throw new Error(apiError);
+        }
 
         let imageUrl: string | undefined;
         if (data.imageUrls?.length > 0) {
@@ -843,6 +849,8 @@ ${themeDesc}
         setPlan(prev => prev.map(p => p.id === item.id ? { ...p, status: 'done' as const, imageUrl } : p));
       } catch (err: unknown) {
         setPlan(prev => prev.map(p => p.id === item.id ? { ...p, status: 'failed' as const, error: err instanceof Error ? err.message : '生成失败' } : p));
+      } finally {
+        isGeneratingItemRef.current = false;
       }
     };
     doGenerate();
@@ -857,6 +865,7 @@ ${themeDesc}
   const handleStop = useCallback(() => {
     setGenerating(false);
     setGenIdx(-1);
+    isGeneratingItemRef.current = false;    isGeneratingItemRef.current = false;
   }, []);
 
   /* ── 全部添加到画布 ── */
