@@ -1239,6 +1239,37 @@ export function adjustRequestForProfile(
     delete body.input_fidelity;
   }
 
+  // --- Convert image/image_urls to OpenAI images[] array format ---
+  // OpenAI's GPT Image models require the `images` array format:
+  //   images: [{ image_url: { url: "data:image/jpeg;base64,..." } }]
+  // Older format (image / image_urls) is not accepted by these models.
+  // Apply this conversion for openai/auto profiles when there are reference images.
+  // APImart/pearapi/gemini-image profiles use their own formats — skip conversion.
+  if ((profile.id === 'openai' || profile.id === 'auto') && hasImage) {
+    const imagesArray: Array<{ image_url: { url: string } }> = [];
+
+    // Primary: use the `image` field (base64 data URL from /images/edits preparation)
+    if (body.image && typeof body.image === 'string') {
+      imagesArray.push({ image_url: { url: body.image as string } });
+    }
+
+    // Also add any extra image_urls that aren't already the same as `image`
+    if (Array.isArray(body.image_urls)) {
+      for (const url of body.image_urls as string[]) {
+        if (typeof url === 'string' && url !== body.image) {
+          imagesArray.push({ image_url: { url } });
+        }
+      }
+    }
+
+    if (imagesArray.length > 0) {
+      body.images = imagesArray;
+      // Remove old format fields to avoid confusing the API
+      delete body.image;
+      delete body.image_urls;
+    }
+  }
+
   return { body, endpoint };
 }
 

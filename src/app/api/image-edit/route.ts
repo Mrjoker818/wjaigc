@@ -530,9 +530,12 @@ async function submitImageTask(
   // 某些中转站（如4SAPI）的 Gemini 图像模型仅支持 /chat/completions 端点，
   // 不支持 /images/generations。需要将请求转换为 chat 格式。
   //
-  // ⚠️ 但 Gemini chat/completions 只能"参考"原图生成新图，无法做精确编辑操作。
-  // 对于 outpaint/inpaint（扩展/擦除/蒙版）等需要像素级控制的操作，
+  // ⚠️ 但真正的 Gemini 图像模型通过 chat/completions 只能"参考"原图生成新图，
+  // 无法做精确编辑操作。对于 outpaint/inpaint（扩展/擦除/蒙版）等需要像素级控制的操作，
   // Gemini 会变形/重绘而非精确扩展，应跳过此 provider 回退到支持 edits 的候选模型。
+  // 注意：同一 provider 上的非 Gemini 模型（如 gpt-image-2-c）不应被拒绝，
+  // 因为它们通过 chat/completions 也能做编辑。
+  const isActualGeminiImageModel = isGeminiImageModel(modelId);
   const isEditOperation = endpoint === '/images/edits'
     || !!requestBody.mask
     || (typeof requestBody.strength === 'number' && requestBody.strength < 1)
@@ -544,9 +547,9 @@ async function submitImageTask(
       requestBody.prompt.includes('remove')
     ));
 
-  if (profile.id === 'gemini-image' && isEditOperation) {
+  if (profile.id === 'gemini-image' && isActualGeminiImageModel && isEditOperation) {
     // Gemini chat/completions 不支持精确图片编辑，跳过此 provider
-    console.info(`[submitImageTask] Skipping gemini-image provider for edit operation (model="${modelId}"), will try next candidate`);
+    console.info(`[submitImageTask] Skipping gemini-image model "${modelId}" for edit operation, will try next candidate`);
     throw new Error('GEMINI_IMAGE_NOT_FOR_EDITS: Gemini 图像模型不支持精确编辑操作（扩展/擦除/蒙版），请使用其他图像模型');
   }
 

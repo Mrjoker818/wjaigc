@@ -160,7 +160,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
             };
           });
           setModels(imageModels);
-          if (imageModels.length > 0) setSelectedModel(imageModels[0].id);
+          if (imageModels.length > 0) setSelectedModel(imageModels[0].providerId ? `${imageModels[0].providerId}::${imageModels[0].id}` : imageModels[0].id);
         }
       } catch (err) {
         console.error('Failed to load models:', err);
@@ -473,9 +473,11 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   };
 
   // ─── Model display name ───
-  const getModelDisplay = (modelId: string) => {
-    const model = models.find(m => m.id === modelId);
-    if (!model) return modelId;
+  const getModelDisplay = (modelKey: string) => {
+    const pureModelId = modelKey.includes('::') ? modelKey.split('::').pop()! : modelKey;
+    const providerId = modelKey.includes('::') ? modelKey.split('::')[0] : undefined;
+    const model = models.find(m => m.id === pureModelId && (!providerId || m.providerId === providerId));
+    if (!model) return pureModelId;
     return `${model.providerName} · ${model.name}`;
   };
 
@@ -1080,7 +1082,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                         <button
                           key={`${m.id}-${m.providerId}`}
                           onClick={() => {
-                            setSelectedModel(m.id);
+                            setSelectedModel(m.providerId ? `${m.providerId}::${m.id}` : m.id);
                             setShowModelDropdown(false);
                             // Reset aspect ratio and quality when model changes
                             const pureModelId = m.id.includes('::') ? m.id.split('::').pop()! : m.id;
@@ -1091,10 +1093,10 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                           }}
                           className="w-full px-3 py-2.5 text-left transition-colors"
                           style={{
-                            background: selectedModel === m.id ? accentBg : 'transparent',
+                            background: selectedModel === (m.providerId ? `${m.providerId}::${m.id}` : m.id) ? accentBg : 'transparent',
                           }}
                           onMouseEnter={e => (e.currentTarget.style.background = accentBgHover)}
-                          onMouseLeave={e => (e.currentTarget.style.background = selectedModel === m.id ? accentBg : 'transparent')}
+                          onMouseLeave={e => (e.currentTarget.style.background = selectedModel === (m.providerId ? `${m.providerId}::${m.id}` : m.id) ? accentBg : 'transparent')}
                         >
                           <div className="text-sm" style={{ color: textColor }}>{m.name}</div>
                           <div className="text-xs mt-0.5" style={{ color: textMutedColor }}>{m.providerName}</div>
