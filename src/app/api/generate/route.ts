@@ -512,7 +512,10 @@ export async function POST(request: NextRequest) {
       // 然后从响应的 content 中提取 base64 图片数据。
       if (isGeminiImageRoute) {
         const chatRequestBody = buildGeminiChatImageRequest(requestBody);
-        console.log('Gemini image route: using /chat/completions for model', currentModelConfig.modelId);
+        console.log('Gemini image route: using /chat/completions for model', currentModelConfig.modelId, 'size:', requestBody.size, 'quality:', requestBody.quality || requestBody.resolution);
+        const msgs = chatRequestBody.messages as Array<Record<string, unknown>> | undefined;
+        console.log('Gemini chatRequestBody messages[0]:', JSON.stringify(msgs?.[0]?.content || '').substring(0, 200));
+        console.log('Gemini chatRequestBody generationConfig:', JSON.stringify(chatRequestBody.generationConfig));
 
         const geminiController = new AbortController();
         const geminiTimeoutId = setTimeout(() => geminiController.abort(), 600000); // 10分钟超时（Gemini生图可能很慢）

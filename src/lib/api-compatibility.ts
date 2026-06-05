@@ -130,6 +130,25 @@ export const PROFILE_OPENAI: ApiCompatProfile = {
 };
 
 /**
+ * PearAPI-compatible providers (nano-banana / Gemini adapted models).
+ * - Uses aspect-ratio format (e.g., "16:9", "3:4") instead of pixel sizes
+ * - Returns images directly (URL or base64)
+ * - Uses /images/generations for both text-to-image and image editing
+ */
+export const PROFILE_PEARAPI: ApiCompatProfile = {
+  id: 'pearapi',
+  label: 'PearAPI 兼容 (比例格式)',
+  responseMode: 'direct',
+  sizeFormat: 'aspect-ratio',
+  defaultEndpoint: '/images/generations',
+  editEndpoint: '/images/generations',
+  editEncoding: 'json-first',
+  supportsInputFidelity: false,
+  pollMode: 'none',
+  pollPathTemplate: '',
+};
+
+/**
  * OpenAI-compatible providers that use async task_id (some proxies).
  * - Requires pixel size format
  * - Returns task_id for polling
@@ -197,6 +216,7 @@ export const COMPAT_PROFILES: Record<string, ApiCompatProfile> = {
   [PROFILE_OPENAI_ASYNC.id]: PROFILE_OPENAI_ASYNC,
   [PROFILE_AUTO.id]: PROFILE_AUTO,
   [PROFILE_GEMINI_IMAGE.id]: PROFILE_GEMINI_IMAGE,
+  [PROFILE_PEARAPI.id]: PROFILE_PEARAPI,
 };
 
 // ---------------------------------------------------------------------------
@@ -210,7 +230,7 @@ export const COMPAT_PROFILES: Record<string, ApiCompatProfile> = {
 const URL_PROFILE_RULES: Array<{ pattern: RegExp; profile: ApiCompatProfile }> = [
   { pattern: /apimart\.ai/i,              profile: PROFILE_APIMART },
   { pattern: /api\.openai\.com/i,         profile: PROFILE_OPENAI },
-  { pattern: /pearapi\.ai/i,              profile: PROFILE_OPENAI },   // PearAPI: nano-banana models use standard /images/generations
+  { pattern: /pearapi\.ai/i,              profile: PROFILE_PEARAPI },  // PearAPI: nano-banana models use aspect-ratio format
 ];
 
 // ---------------------------------------------------------------------------
@@ -230,6 +250,57 @@ const URL_PROFILE_RULES: Array<{ pattern: RegExp; profile: ApiCompatProfile }> =
  * Some API relay stations (e.g. 4SAPI) only support these models via
  * /chat/completions, not /images/generations.
  */
+/**
+ * Resolve Gemini image pixel size from ratio + quality
+ * Frontend sends ratio like "3:4", but 4SAPI/gemini-image providers need actual pixels like "768x1024"
+ */
+/** Greatest common divisor */
+function gcd(a: number, b: number): number {
+  a = Math.abs(a);
+  b = Math.abs(b);
+  while (b) {
+    [a, b] = [b, a % b];
+  }
+  return a;
+}
+
+export function resolveGeminiImageSize(
+  size: string | undefined,
+  quality: string | undefined,
+): string | undefined {
+  if (!size) return undefined;
+
+  // If already a pixel format (e.g. "1024x1024" or "1024x1536"), use directly
+  if (/^\d+x\d+$/.test(size)) {
+    return size;
+  }
+
+  // If it's a ratio format like "3:4", convert to pixels based on quality
+  const qualityLevel = quality || '1K';
+  const ratioToPixels: Record<string, Record<string, string>> = {
+    '1:1':  { '1K': '1024x1024', '2K': '2048x2048', '4K': '4096x4096' },
+    '4:3':  { '1K': '1024x768',  '2K': '2048x1536', '4K': '4096x3072' },
+    '3:4':  { '1K': '768x1024',  '2K': '1536x2048', '4K': '3072x4096' },
+    '16:9': { '1K': '1024x576',  '2K': '2048x1152', '4K': '4096x2304' },
+    '9:16': { '1K': '576x1024',  '2K': '1152x2048', '4K': '2304x4096' },
+    '3:2':  { '1K': '1024x683',  '2K': '2048x1365', '4K': '4096x2730' },
+    '2:3':  { '1K': '683x1024',  '2K': '1365x2048', '4K': '2730x4096' },
+  };
+
+  const ratioMap = ratioToPixels[size];
+  if (ratioMap && ratioMap[qualityLevel]) {
+    return ratioMap[qualityLevel];
+  }
+
+  // Fallback: if ratio exists but quality not found, use 1K
+  if (ratioMap) {
+    return ratioMap['1K'];
+  }
+
+  // Unknown format, return as-is
+  return size;
+}
+
 export function isGeminiImageModel(modelId: string): boolean {
   if (!modelId) return false;
   const lower = modelId.toLowerCase();
@@ -264,6 +335,9 @@ export function buildGeminiChatImageRequest(
   const prompt = requestBody.prompt || '';
   const size = requestBody.size || '1024x1024';
   const quality = requestBody.quality || requestBody.resolution;
+
+  // Resolve the size to actual pixel dimensions
+  const resolvedSize = resolveGeminiImageSize(size as string, quality as string);
 
   // Build the user message content
   const userContent: Array<Record<string, unknown>> = [
@@ -301,6 +375,37 @@ export function buildGeminiChatImageRequest(
     });
   }
 
+  // Build aspect ratio instruction to inject into the prompt
+  // Gemini models understand ratio instructions in the prompt
+  // Some relay stations (like 4SAPI) ignore generationConfig.image_size,
+  // so we must put the ratio in the prompt as well
+  let ratioInstruction = '';
+  if (size && typeof size === 'string' && size.includes(':')) {
+    // size is a ratio like "3:4"
+    const orientation = size === '1:1' ? 'square' :
+      parseInt(size.split(':')[0]) < parseInt(size.split(':')[1]) ? 'portrait' : 'landscape';
+    ratioInstruction = `\n\n[Image format: Aspect ratio ${size} (${orientation}). Size: ${resolvedSize || size}.]`;
+  } else if (resolvedSize) {
+    // size was a pixel format, derive ratio from it
+    const [w, h] = resolvedSize.split('x').map(Number);
+    if (w && h) {
+      const orientation = w === h ? 'square' : w < h ? 'portrait' : 'landscape';
+      // Calculate simplified ratio
+      const g = gcd(w, h);
+      ratioInstruction = `\n\n[Image format: Aspect ratio ${w/g}:${h/g} (${orientation}). Size: ${resolvedSize}.]`;
+    }
+  }
+
+  // Inject ratio instruction into the prompt content
+  if (ratioInstruction) {
+    for (const item of userContent) {
+      if (item.type === 'text') {
+        item.text = item.text + ratioInstruction;
+        break;
+      }
+    }
+  }
+
   // Build the chat/completions request
   const chatRequest: Record<string, unknown> = {
     model,
@@ -315,24 +420,16 @@ export function buildGeminiChatImageRequest(
   };
 
   // Add generation config for size/quality if supported
-  const generationConfig: Record<string, unknown> = {};
-  if (quality && typeof quality === 'string') {
-    // Map quality to image_size for Gemini models
-    const qualityToSize: Record<string, string> = {
-      '1K': '1024x1024',
-      '2K': '2048x2048',
-      '4K': '4096x4096',
-    };
-    if (qualityToSize[quality]) {
-      generationConfig.image_size = qualityToSize[quality];
-    }
+  // Note: Some relay stations (4SAPI) ignore this, so we also put ratio in the prompt above
+  const generationConfig: Record<string, unknown> = {
+    responseModalities: ['IMAGE'],
+  };
+
+  if (resolvedSize) {
+    generationConfig.image_size = resolvedSize;
   }
-  if (size && typeof size === 'string') {
-    generationConfig.image_size = size;
-  }
-  if (Object.keys(generationConfig).length > 0) {
-    chatRequest.generationConfig = generationConfig;
-  }
+
+  chatRequest.generationConfig = generationConfig;
 
   return chatRequest;
 }
@@ -1315,5 +1412,10 @@ export const COMPAT_PROFILE_OPTIONS: Array<{ value: string; label: string; descr
     value: 'gemini-image',
     label: 'Gemini 图像 (chat/completions)',
     description: '通过 /chat/completions 生成图像，适合仅在此端点支持 Gemini 图像模型的中转站（如4SAPI）',
+  },
+  {
+    value: 'pearapi',
+    label: 'PearAPI 兼容 (宽高比)',
+    description: 'OpenAI 格式但使用宽高比而非像素尺寸，适合 PearAPI 等 nano-banana 系列模型的中转站',
   },
 ];

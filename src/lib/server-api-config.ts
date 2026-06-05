@@ -703,17 +703,18 @@ export async function getPublicModels(modelType?: ApiKind): Promise<ModelInfo[]>
           const providerName = (model as ModelInfo).name && (model as ModelInfo).name !== model.id ? (model as ModelInfo).name : '';
           const mappedName = getModelDisplayName(model.id);
           const name = providerName || mappedName;
-          return { ...model, providerId: provider.id, name };
+          const apiDisplayName = providerName || mappedName; // 优先第三方供应商名称，回退到本地映射
+          return { ...model, providerId: provider.id, name, apiDisplayName };
         });
       }
       // If no models explicitly selected, show all discovered models
       // (admin hasn't filtered yet, so all are available)
       return discovered.map(model => {
-          // 优先使用第三方 API 供应商提供的模型名称，回退到本地映射
           const providerName = model.name && model.name !== model.id ? model.name : '';
           const mappedName = getModelDisplayName(model.id);
           const name = providerName || mappedName;
-          return { ...model, providerId: provider.id, name };
+          const apiDisplayName = providerName || mappedName;
+          return { ...model, providerId: provider.id, name, apiDisplayName };
         });
     })
     // Filter by model-level type for non-general queries
