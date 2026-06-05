@@ -1172,13 +1172,18 @@ export function InfiniteCanvas({
   }, [genGroups]);
 
   /** Get current image model from localStorage (independent of component state) */
-  const getCurrentModel = useCallback((): { model: string; providerId?: string } => {
+  const getCurrentModel = useCallback((): { model: string; providerId?: string; apiDisplayName?: string; providerName?: string } => {
     try {
       // 优先读取 wujie_selected_model（generation-panel 写入）
       const raw = localStorage.getItem('wujie_selected_model');
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed.model) return { model: parsed.model, providerId: parsed.providerId };
+        if (parsed.model) return {
+          model: parsed.model,
+          providerId: parsed.providerId,
+          apiDisplayName: parsed.apiDisplayName || '',
+          providerName: parsed.providerName || '',
+        };
       }
       // 兜底：从 unbounded_ai_user_data 读取
       const userId = localStorage.getItem('unbounded_ai_current_user');
@@ -4690,6 +4695,8 @@ export function InfiniteCanvas({
           originalWidth: targetW,
           originalHeight: targetH,
           modifyPrompt: `${upMultiplier}x HD ${upscalePreset.toUpperCase()} 放大`,
+          modelName: modelInfo.apiDisplayName || modelInfo.model,
+          apiProvider: modelInfo.providerName || '',
         });
       } else {
         const pollError = lastPollErrorRef.current || '放大超时，请重试';
@@ -4872,6 +4879,8 @@ export function InfiniteCanvas({
           originalWidth: w,
           originalHeight: h,
           modifyPrompt: data.engine === 'local-background-alpha' ? '背景移除（本地透明化）' : String(data.engine || '').includes('ai-background-remove') ? '背景移除（AI高精度）' : '背景移除',
+          modelName: modelInfo.apiDisplayName || modelInfo.model,
+          apiProvider: modelInfo.providerName || '',
         });
 
         // 同时添加黑白蒙版图到画布（紧邻主体图右侧）
@@ -4918,6 +4927,7 @@ export function InfiniteCanvas({
   const handleSvgTraceConfirm = useCallback(async () => {
     const img = selectedImageData;
     if (!img) return;
+    const modelInfo = getCurrentModel();
 
     const modeLabels: Record<string, string> = {
       color: '彩色矢量化',
@@ -5006,6 +5016,8 @@ export function InfiniteCanvas({
             modifyPrompt: `${modeLabel} (${engineLabel})`,
             // 保存SVG数据URL用于下载（如果PNG预览被使用）
             ...(svgDataUrl && data.isSvgPreview ? { svgDataUrl } : {}),
+            modelName: modelInfo.apiDisplayName || modelInfo.model,
+            apiProvider: modelInfo.providerName || '',
           });
         } else {
           // Compress / thumbnail result - use data URL for display
@@ -5020,6 +5032,8 @@ export function InfiniteCanvas({
             originalWidth: img.originalWidth || Math.round(img.width),
             originalHeight: img.originalHeight || Math.round(img.height),
             modifyPrompt: modeLabel,
+            modelName: modelInfo.apiDisplayName || modelInfo.model,
+            apiProvider: modelInfo.providerName || '',
           });
         }
       } else {
@@ -5097,6 +5111,8 @@ export function InfiniteCanvas({
         originalWidth: img.originalWidth || Math.round(img.width),
         originalHeight: img.originalHeight || Math.round(img.height),
         modifyPrompt: `AI视角变换 / ${multiAngleMode === 'image' ? '环绕观察' : '摄像机位移'} / 水平 ${multiAngleRotation}° / 垂直 ${multiAngleTilt}° / ${['特写', '标准', '广角'][multiAngleZoom]}`,
+        modelName: modelInfo.apiDisplayName || modelInfo.model,
+        apiProvider: modelInfo.providerName || '',
       });
       setActiveTool('none');
     } catch (e) {
@@ -5131,6 +5147,7 @@ export function InfiniteCanvas({
   const handle3DConfirm = useCallback(async () => {
     const img = selectedImageData;
     if (!img) return;
+    const modelInfo = getCurrentModel();
     const providers = getThreeDProviders();
     const provider = providers.find(p => p.id === threeDProviderId);
     if (threeDBackend === 'api' && !provider) {
@@ -5262,6 +5279,8 @@ export function InfiniteCanvas({
         modifyPrompt: `图生3D/${threeDType}/${threeDBackend}/${threeDQuality}/${threeDFormat}${threeDAssetUrl ? ` → ${threeDAssetUrl}` : ''}`,
         threeDModelUrl: threeDAssetUrl || data.assetUrl || '',
         threeDModelUrls: threeDModelUrls || data.modelUrls,
+        modelName: modelInfo.apiDisplayName || modelInfo.model,
+        apiProvider: modelInfo.providerName || '',
       });
       setThreeDProgress(null);
     } catch (e) {
@@ -5462,6 +5481,7 @@ export function InfiniteCanvas({
   const handleEditConfirm = useCallback(async () => {
     const editImg = images.find(i => i.id === editImageId);
     if (!editImg) { exitEditMode(); return; }
+    const modelInfo = getCurrentModel();
 
     const apiKey = getApiKey();
 
@@ -5502,7 +5522,7 @@ export function InfiniteCanvas({
           ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
           const newUrl = canvas.toDataURL('image/png');
           updateProcessingFrame(placeholderId, { progress: 92, status: '正在生成裁切结果...' });
-          completeProcessingFrame(placeholderId, newUrl, displayW, displayH, { originalWidth: canvas.width, originalHeight: canvas.height });
+          completeProcessingFrame(placeholderId, newUrl, displayW, displayH, { originalWidth: canvas.width, originalHeight: canvas.height, modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' });
         }
       } catch (e) {
         console.error('Crop failed:', e);
@@ -5641,10 +5661,10 @@ export function InfiniteCanvas({
           updateProcessingFrame(placeholderId, { progress: 96, status: '正在合成编辑结果...' });
           try {
             const stableUrl = await toStableImageUrl(resultUrl);
-            completeProcessingFrame(placeholderId, stableUrl, currentEditImg.width, currentEditImg.height, { originalWidth: currentEditImg.originalWidth || Math.round(currentEditImg.width), originalHeight: currentEditImg.originalHeight || Math.round(currentEditImg.height) });
+            completeProcessingFrame(placeholderId, stableUrl, currentEditImg.width, currentEditImg.height, { originalWidth: currentEditImg.originalWidth || Math.round(currentEditImg.width), originalHeight: currentEditImg.originalHeight || Math.round(currentEditImg.height), modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' });
           } catch (stableErr) {
             console.error('Stable URL conversion failed:', stableErr);
-            completeProcessingFrame(placeholderId, resultUrl, currentEditImg.width, currentEditImg.height, { originalWidth: currentEditImg.originalWidth || Math.round(currentEditImg.width), originalHeight: currentEditImg.originalHeight || Math.round(currentEditImg.height) });
+            completeProcessingFrame(placeholderId, resultUrl, currentEditImg.width, currentEditImg.height, { originalWidth: currentEditImg.originalWidth || Math.round(currentEditImg.width), originalHeight: currentEditImg.originalHeight || Math.round(currentEditImg.height), modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' });
           }
         } else {
           const pollError = lastPollErrorRef.current || '未获取到结果';
@@ -5756,9 +5776,9 @@ export function InfiniteCanvas({
           updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入扩展结果...' });
           try {
             const stableUrl = await toStableImageUrl(resultUrl);
-            completeProcessingFrame(placeholderId, stableUrl, currentEditImg.width * (finalW / origW), currentEditImg.height * (finalH / origH), { originalWidth: finalW, originalHeight: finalH });
+            completeProcessingFrame(placeholderId, stableUrl, currentEditImg.width * (finalW / origW), currentEditImg.height * (finalH / origH), { originalWidth: finalW, originalHeight: finalH, modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' });
           } catch (stableErr) {
-            completeProcessingFrame(placeholderId, resultUrl, currentEditImg.width * (finalW / origW), currentEditImg.height * (finalH / origH), { originalWidth: finalW, originalHeight: finalH });
+            completeProcessingFrame(placeholderId, resultUrl, currentEditImg.width * (finalW / origW), currentEditImg.height * (finalH / origH), { originalWidth: finalW, originalHeight: finalH, modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' });
           }
         } else {
           const pollError = lastPollErrorRef.current || '扩展超时，请重试';
@@ -6962,6 +6982,26 @@ export function InfiniteCanvas({
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
+                  </div>
+                )}
+                {/* Model & API info badge (bottom-left) */}
+                {(image.modelName || image.apiProvider) && !image.isProcessingPlaceholder && (
+                  <div className="absolute bottom-1 left-1 z-20 pointer-events-none flex flex-col gap-0.5"
+                    style={{ fontSize: `${Math.max(8, 9 / zoom)}px` }}>
+                    {image.modelName && (
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap leading-tight ${
+                        isMonochrome ? 'bg-black/60 text-white/90' : 'bg-black/70 text-white/90'
+                      }`}>
+                        {image.modelName}
+                      </span>
+                    )}
+                    {image.apiProvider && (
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-normal whitespace-nowrap leading-tight ${
+                        isMonochrome ? 'bg-black/50 text-blue-300/80' : 'bg-black/60 text-gold/70'
+                      }`}>
+                        {image.apiProvider}
+                      </span>
+                    )}
                   </div>
                 )}
                 {/* Image dimensions indicator (bottom-right, show on hover) */}

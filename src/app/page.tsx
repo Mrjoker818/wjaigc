@@ -701,7 +701,7 @@ function CanvasApp() {
 
       // === 直接返回模式：API 直接返回图片URL ===
       if (data.mode === 'direct') {
-        const { imageUrls, model, prompt: enhancedPrompt, originalPrompt, category, style } = data;
+        const { imageUrls, model, prompt: enhancedPrompt, originalPrompt, category, style, modelName, providerName, apiBaseUrl } = data;
         
         // 并行持久化所有图片URL
         const savedUrls = await Promise.all(imageUrls.map(async (imageUrl: string) => {
@@ -765,6 +765,9 @@ function CanvasApp() {
                 isProcessingPlaceholder: false,
                 processing: undefined,
                 createdAt: Date.now(),
+                modelName: modelName || model,
+                apiProvider: providerName || '',
+                apiBaseUrl: apiBaseUrl || '',
               } : img
             ));
           }
@@ -783,7 +786,7 @@ function CanvasApp() {
 
       // === 轮询模式：API返回任务ID，前端轮询结果 ===
       if (data.mode === 'polling') {
-        const { taskIds, estimatedTime, prompt: enhancedPrompt, originalPrompt, category, style } = data;
+        const { taskIds, estimatedTime, prompt: enhancedPrompt, originalPrompt, category, style, modelName: pollingModelName, providerName: pollingProviderName, apiBaseUrl: pollingApiBaseUrl } = data;
         
         // 自适应轮询间隔策略（优化版）
         // 前期更快探测，后期适度延长避免浪费请求
@@ -1031,6 +1034,9 @@ function CanvasApp() {
               originalWidth: finalW,
               originalHeight: finalH,
               createdAt: Date.now(),
+              modelName: pollingModelName || img.model,
+              apiProvider: pollingProviderName || '',
+              apiBaseUrl: pollingApiBaseUrl || '',
             };
           });
 

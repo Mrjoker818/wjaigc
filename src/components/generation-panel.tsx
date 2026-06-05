@@ -380,10 +380,13 @@ export function GenerationPanel(
                                 try {
                                     const pureId = saved.includes('::') ? saved.split('::').pop()! : saved;
                                     const providerId = saved.includes('::') ? saved.split('::')[0] : '';
+                                    const dm = discoveredModels.find(m => m.id === pureId && m.providerId === providerId);
                                     localStorage.setItem('wujie_selected_model', JSON.stringify({
                                         model: pureId,
                                         providerId: providerId,
                                         compositeKey: saved,
+                                        apiDisplayName: dm?.apiDisplayName || dm?.displayLabel || '',
+                                        providerName: dm?.providerName || '',
                                     }));
                                 } catch {}
                             }
@@ -660,10 +663,13 @@ export function GenerationPanel(
                 try {
                     const pureId = compositeKey.includes('::') ? compositeKey.split('::').pop()! : compositeKey;
                     const providerId = compositeKey.includes('::') ? compositeKey.split('::')[0] : '';
+                    const dm = discoveredModels.find(m => m.id === pureId && m.providerId === providerId);
                     localStorage.setItem('wujie_selected_model', JSON.stringify({
                         model: pureId,
                         providerId: providerId,
                         compositeKey: compositeKey,
+                        apiDisplayName: dm?.apiDisplayName || dm?.displayLabel || '',
+                        providerName: dm?.providerName || '',
                     }));
                 } catch {}
             }
@@ -936,10 +942,13 @@ export function GenerationPanel(
                             try {
                               const newPureModelId = compositeKey.includes('::') ? compositeKey.split('::').pop()! : compositeKey;
                               const providerId = compositeKey.includes('::') ? compositeKey.split('::')[0] : '';
+                              const dm = discoveredModels.find(m => m.id === newPureModelId && m.providerId === providerId);
                               localStorage.setItem('wujie_selected_model', JSON.stringify({
                                 model: newPureModelId,
                                 providerId: providerId,
                                 compositeKey: compositeKey,
+                                apiDisplayName: dm?.apiDisplayName || dm?.displayLabel || '',
+                                providerName: dm?.providerName || '',
                               }));
                             } catch {}
                             // Extract pure modelId for ratio/quality lookup

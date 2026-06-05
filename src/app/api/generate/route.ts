@@ -927,6 +927,8 @@ export async function POST(request: NextRequest) {
     let usedModelName = modelConfig.name;
     let usedModelId = modelConfig.modelId;
     let usedProviderId = provider?.id || 'env';
+    let usedProviderName = provider?.displayName || provider?.name || '';
+    let usedApiBaseUrl = apiBaseUrl || '';
 
     // 提交所有生成任务（带自动重试逻辑）
     for (let i = 0; i < totalCount; i++) {
@@ -979,6 +981,8 @@ export async function POST(request: NextRequest) {
               usedModelId = result.usedModel;
               usedModelName = candidateConfig.name;
               usedProviderId = result.usedProviderId;
+              usedProviderName = candidate.displayName || candidate.modelId;
+              usedApiBaseUrl = candidate.baseUrl;
               try {
                 await appendUserJsonl(userId, 'images', {
                   type: 'submit',
@@ -1041,6 +1045,8 @@ export async function POST(request: NextRequest) {
         imageUrls: directImageUrls,
         model: usedModelId,
         modelName: usedModelName,
+        providerName: usedProviderName,
+        apiBaseUrl: usedApiBaseUrl,
         prompt: enhancedPrompt,
         originalPrompt: prompt,
         category: imageCategory,
@@ -1060,6 +1066,8 @@ export async function POST(request: NextRequest) {
       taskIds,
       model: usedModelId,
       modelName: usedModelName,
+      providerName: usedProviderName,
+      apiBaseUrl: usedApiBaseUrl,
       estimatedTime: modelConfig.estimatedTime,
       prompt: enhancedPrompt,
       originalPrompt: prompt,
