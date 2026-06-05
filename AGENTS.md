@@ -621,7 +621,35 @@ UPSCALE_TIMEOUT_MS=300000
 
 ## 更新日志
 
-### v3.0.0 (当前版本)
+### v3.1.0 (当前版本)
+
+**P0: 扩展命令 gemini-image 协议修复**
+- submitImageTask 新增 gemini-image 协议检测与 chat 格式转换（buildGeminiChatImageRequest）
+- 编辑操作（扩展/擦除/蒙版）遇到真正的 Gemini 图像模型时自动跳过，回退到支持 /images/edits 的模型
+- isGeminiImageModel 精确检测：只跳过真正的 Gemini 图像模型，gpt-image-2-c 等非 Gemini 模型不再被错误跳过
+- outpaint 改用 autoTrySubmitImageTask，支持候选模型自动回退
+
+**P0: images[].image_url 格式适配**
+- adjustRequestForProfile 新增 image/image_urls → images[{image_url:{url}}] 格式转换
+- 修复 "images[].image_url is required" 错误（OpenAI GPT-Image-2 等模型新格式要求）
+- 所有 API 路由（generate / image-edit / refine-engine / scene-studio）统一受益
+
+**P0: 精修引擎修复**
+- submitRefineToApi 新增 gemini-image 专用路由（buildGeminiChatImageRequest + parseGeminiChatImageResponse）
+- selectedModel 格式从纯 modelId 改为 providerId::modelId，修复多供应商同名模型选择 bug
+- getModelDisplay 匹配时同时比较 modelId + providerId
+
+**P0: 表情助手修复**
+- 修复并发问题：添加 isGeneratingItemRef 防止多个 doGenerate 同时运行
+- 改为串行逐张生成，避免 API 限流导致全部失败
+- 改进错误处理：先解析 JSON 再检查 res.ok，显示实际 API 错误信息
+
+**P0: 3D 构图功能修复**
+- 后端 scene-studio/generate/route.ts 重写：支持 providerId/model 前端传参 + images 格式转换 + gemini-image/pearapi 协议
+- 前端新增图像模型选择器（生成 tab）和 LLM 模型选择器（布景 tab）
+- AIAutoLayoutPanel 接受 chatModels/selectedChatModel/onSelectChatModel props
+
+### v3.0.0
 
 **P0: SVG 智能描摹全面升级**
 - VTracer 预处理管道升级：小图智能放大（最长边 < 384px → 768px lanczos3）、中值滤波 median(1) 减噪、轻微模糊 blur(0.3) 平滑色彩梯度、低精度预量化（colorPrecision ≤ 5 时 sharp 预减色）
