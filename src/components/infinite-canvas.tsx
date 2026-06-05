@@ -593,12 +593,12 @@ export function InfiniteCanvas({
 
   // ★ 缩略图生成：为大图（>1024px）生成客户端缩略图，减少4K图片解码开销
   const thumbnailCacheRef = useRef<Map<string, string>>(new Map()); // imageUrl → thumbnailDataUrl
+  const THUMBNAIL_MAX = 1280; // 缩略图最大边长（800→1280，确保放大查看时仍清晰）
+  const ORIG_THRESHOLD = 1200; // 原图超过此尺寸才生成缩略图
   const thumbnailGenInProgressRef = useRef<Set<string>>(new Set());
   const [thumbnailVersion, setThumbnailVersion] = useState(0); // 触发重渲染
 
   useEffect(() => {
-    const THUMBNAIL_MAX = 800; // 缩略图最大边长
-    const ORIG_THRESHOLD = 1200; // 原图超过此尺寸才生成缩略图
     let cancelled = false;
 
     for (const img of images) {
@@ -641,7 +641,7 @@ export function InfiniteCanvas({
           if (!ctx) return;
           ctx.drawImage(imageEl, 0, 0, tw, th);
 
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
           thumbnailCacheRef.current.set(imageUrl, dataUrl);
           // 触发重渲染让 visibleImages 的 thumbnailUrl 更新
           setThumbnailVersion(v => v + 1);
@@ -6826,13 +6826,13 @@ export function InfiniteCanvas({
                   </div>
                 ) : image.url ? (
                   <img
-                    src={image.thumbnailUrl || image.url}
+                    src={zoom > 0.5 || (image.width && image.width * zoom > THUMBNAIL_MAX) ? image.url : (image.thumbnailUrl || image.url)}
                     alt={image.prompt || 'canvas image'}
                     className="w-full h-full object-cover pointer-events-none"
                     draggable={false}
                     loading="lazy"
                     decoding="async"
-                    style={{ contain: 'paint' }}
+                    style={{ contain: 'paint', imageRendering: zoom > 1 ? 'auto' : undefined }}
                     onError={(e) => {
                       const img = e.currentTarget;
                       if (img.dataset.retried) return; // 已重试过，不再循环
