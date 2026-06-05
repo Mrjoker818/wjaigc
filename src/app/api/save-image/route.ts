@@ -137,13 +137,32 @@ export async function POST(request: NextRequest) {
       if (shouldCompress && mimeType !== 'svg') {
         try {
           const metadata = await sharp(buffer).metadata();
-          const hasAlpha = metadata.channels === 4 || metadata.hasAlpha === true;
+          // 检测是否真正有透明像素（而非仅 channels===4 或 hasAlpha 标记）
+          // RGBA 图片若所有像素 alpha=255（全不透明）→ 无需保留 PNG，可安全转 JPEG
+          let reallyHasTransparency = false;
+          if (metadata.channels === 4 || metadata.hasAlpha === true) {
+            try {
+              const { data, info } = await sharp(buffer).raw().toBuffer({ resolveWithObject: true });
+              const pixelCount = info.width * info.height;
+              const channels = info.channels;
+              for (let i = 0; i < pixelCount; i++) {
+                if (data[i * channels + channels - 1] < 255) {
+                  reallyHasTransparency = true;
+                  break;
+                }
+              }
+            } catch {
+              // 检测失败时保守保留 PNG
+              reallyHasTransparency = true;
+            }
+          }
+
           const maxEdge = 8192; // 保留最高8K分辨率，不缩小
           if ((metadata.width || 0) > maxEdge || (metadata.height || 0) > maxEdge) {
             const resizePipeline = sharp(buffer)
               .resize(maxEdge, maxEdge, { fit: 'inside', withoutEnlargement: true });
-            if (hasAlpha) {
-              // 有透明通道的图片保持 PNG 格式，不丢失透明度
+            if (reallyHasTransparency) {
+              // 有真正透明像素 — 必须保留 PNG 格式
               finalBuffer = await resizePipeline.png({ quality: 90, compressionLevel: 6 }).toBuffer();
               finalMimeType = 'png';
             } else {
@@ -153,7 +172,8 @@ export async function POST(request: NextRequest) {
           } else if (buffer.length > 1024 * 1024) {
             // 不超尺寸但超1MB，也压缩
             const pipeline = sharp(buffer);
-            if (hasAlpha) {
+            if (reallyHasTransparency) {
+              // 有真正透明像素 — 必须保留 PNG 格式
               finalBuffer = await pipeline.png({ quality: 90, compressionLevel: 6 }).toBuffer();
               finalMimeType = 'png';
             } else {
@@ -214,13 +234,49 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: `Failed to fetch local image: ${response.status}` }, { status: 400 });
         }
         const contentType = response.headers.get('content-type') || 'image/png';
-        const buffer = Buffer.from(await response.arrayBuffer());
+        let buffer: Buffer = Buffer.from(await response.arrayBuffer());
         if (buffer.length > 80 * 1024 * 1024) { // 80MB for 4K images
           return NextResponse.json({ error: 'Image too large (max 20MB)' }, { status: 400 });
         }
-        const extFromCt = contentType.split('/')[1]?.replace('jpeg', 'jpg').replace('svg+xml', 'svg');
-        const ext = extFromCt || 'png';
-        const filename = `gen-${timestamp}-${random}.${ext}`;
+
+        // ★ 自动压缩：大图（>1MB）无透明像素的 PNG 自动转 JPEG，保留透明通道的用 PNG
+        let finalExt = contentType.split('/')[1]?.replace('jpeg', 'jpg').replace('svg+xml', 'svg') || 'png';
+        if (shouldCompress && buffer.length > 1024 * 1024 && !finalExt.includes('svg') && !finalExt.includes('gif')) {
+          try {
+            const metadata = await sharp(buffer).metadata();
+            let reallyHasTransparency = false;
+            if (metadata.channels === 4 || metadata.hasAlpha === true) {
+              try {
+                const { data, info } = await sharp(buffer).raw().toBuffer({ resolveWithObject: true });
+                const pixelCount = info.width * info.height;
+                const channels = info.channels;
+                for (let i = 0; i < pixelCount; i++) {
+                  if (data[i * channels + channels - 1] < 255) {
+                    reallyHasTransparency = true;
+                    break;
+                  }
+                }
+              } catch {
+                reallyHasTransparency = true;
+              }
+            }
+
+            if (reallyHasTransparency) {
+              // 有真正透明像素 — 必须保留 PNG 格式，仅做 PNG 优化压缩
+              buffer = await sharp(buffer).png({ quality: 90, compressionLevel: 6 }).toBuffer();
+              finalExt = 'png';
+            } else {
+              // 无透明像素 — 转为 JPEG 大幅缩小体积
+              const quality = buffer.length > 5 * 1024 * 1024 ? 85 : 90;
+              buffer = await sharp(buffer).jpeg({ quality }).toBuffer();
+              finalExt = 'jpg';
+            }
+          } catch (compressErr) {
+            console.warn('[save-image] Sharp compress failed for local path, using original:', compressErr);
+          }
+        }
+
+        const filename = `gen-${timestamp}-${random}.${finalExt}`;
         const filePath = path.join(uploadDir, filename);
         await writeFile(filePath, buffer);
         if (isProd) {
@@ -234,7 +290,8 @@ export async function POST(request: NextRequest) {
         // S3 backup
         let s3Key: string | null = null;
         if (isS3Available()) {
-          s3Key = await uploadImageToS3(buffer, filename, contentType);
+          const s3ContentType = finalExt === 'jpg' ? 'image/jpeg' : finalExt === 'svg' ? 'image/svg+xml' : `image/${finalExt}`;
+          s3Key = await uploadImageToS3(buffer, filename, s3ContentType);
           if (s3Key) console.log(`[save-image] S3 backup: ${s3Key}`);
         }
         return NextResponse.json({
@@ -274,21 +331,39 @@ export async function POST(request: NextRequest) {
         if (buffer.length > 2 * 1024 * 1024 && !finalExt.includes('svg') && !finalExt.includes('gif')) {
           try {
             const metadata = await sharp(buffer).metadata();
-            const hasAlpha = metadata.channels === 4 || metadata.hasAlpha === true;
+            // 检测是否真正有透明像素（而非仅 channels===4 或 hasAlpha 标记）
+            let reallyHasTransparency = false;
+            if (metadata.channels === 4 || metadata.hasAlpha === true) {
+              try {
+                const { data, info } = await sharp(buffer).raw().toBuffer({ resolveWithObject: true });
+                const pixelCount = info.width * info.height;
+                const channels = info.channels;
+                for (let i = 0; i < pixelCount; i++) {
+                  if (data[i * channels + channels - 1] < 255) {
+                    reallyHasTransparency = true;
+                    break;
+                  }
+                }
+              } catch {
+                // 检测失败时保守保留 PNG
+                reallyHasTransparency = true;
+              }
+            }
             const maxEdge = 8192; // 保留最高8K分辨率，不缩小
             const needsResize = (metadata.width || 0) > maxEdge || (metadata.height || 0) > maxEdge;
 
             if (needsResize) {
               const pipeline = sharp(buffer).resize(maxEdge, maxEdge, { fit: 'inside', withoutEnlargement: true });
-              if (hasAlpha) {
+              if (reallyHasTransparency) {
+                // 有真正透明像素 — 必须保留 PNG 格式
                 buffer = await pipeline.png({ quality: 92, compressionLevel: 6 }).toBuffer();
                 finalExt = 'png';
               } else {
                 buffer = await pipeline.jpeg({ quality: 90 }).toBuffer();
                 finalExt = 'jpg';
               }
-            } else if (!hasAlpha && finalExt === 'png' && buffer.length > 3 * 1024 * 1024) {
-              // 无透明通道的大 PNG 转 JPEG 减小体积
+            } else if (!reallyHasTransparency && finalExt === 'png' && buffer.length > 3 * 1024 * 1024) {
+              // 无真正透明通道的大 PNG 转 JPEG 减小体积
               buffer = await sharp(buffer).jpeg({ quality: 90 }).toBuffer();
               finalExt = 'jpg';
             }

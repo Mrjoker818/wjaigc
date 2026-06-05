@@ -242,6 +242,53 @@ export async function getS3ImageUrl(filenameOrPath: string): Promise<string | nu
 }
 
 /**
+ * 检测图片是否包含真正的透明像素（alpha < 255）
+ *
+ * 仅检查 hasAlpha/channel 数不够：很多 PNG 以 RGBA 模式存储但所有 alpha=255（完全不透明），
+ * 这种情况可以安全转 JPEG，而不会丢失任何透明信息。
+ *
+ * @param imageBuffer 图片 Buffer
+ * @returns true 表示图片中有至少一个半透明/全透明像素，不可转 JPEG
+ */
+async function hasRealTransparency(imageBuffer: Buffer): Promise<boolean> {
+  try {
+    const sharp = (await import('sharp')).default;
+    const metadata = await sharp(imageBuffer).metadata();
+
+    // 没有 alpha 通道，肯定不透明
+    if (!metadata.hasAlpha && metadata.channels !== 4) {
+      return false;
+    }
+
+    // 有 alpha 通道，提取 alpha 通道数据检查是否有非 255 值
+    const { data, info } = await sharp(imageBuffer)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    // 只检查 RGBA 格式（channels=4）
+    if (info.channels !== 4) {
+      return false;
+    }
+
+    // 采样检测 alpha 通道（每 4 字节第 4 个是 alpha）
+    // 为性能考虑，大图采样检测
+    const totalPixels = info.width * info.height;
+    const step = totalPixels > 4000000 ? Math.floor(totalPixels / 100000) : (totalPixels > 1000000 ? 16 : 4);
+    for (let i = 0; i < totalPixels; i += step) {
+      const offset = i * 4 + 3; // alpha 通道偏移
+      if (offset < data.length && data[offset] < 255) {
+        return true; // 发现透明像素
+      }
+    }
+
+    return false; // 所有采样 alpha 均为 255，无真正透明
+  } catch {
+    // 检测失败时保守处理，假定有透明
+    return true;
+  }
+}
+
+/**
  * Persist a remote/base64 image: download → save local + upload S3 → return stable URL
  * 
  * This is the core function for ensuring images survive redeployment.
@@ -296,21 +343,24 @@ export async function persistRemoteImage(
           const sharp = (await import('sharp')).default;
           const metadata = await sharp(imageBuffer).metadata();
           const sizeMB = imageBuffer.length / (1024 * 1024);
-          
-          if (metadata.hasAlpha || metadata.channels === 4) {
-            // PNG with transparency - re-compress with better PNG settings
+
+          // 检测是否真正有透明像素（而非仅 hasAlpha 标记）
+          const reallyHasTransparency = await hasRealTransparency(imageBuffer);
+
+          if (reallyHasTransparency) {
+            // 有真正透明像素 — 必须保留 PNG 格式，仅优化压缩
             imageBuffer = await sharp(imageBuffer)
               .png({ quality: 90, compressionLevel: 9, palette: true, effort: 8 })
               .toBuffer();
             wasCompressedAsPng = true;
-            console.log(`[s3-storage] Re-compressed PNG: ${metadata.width}x${metadata.height}, ${(sizeMB).toFixed(1)}MB → ${(imageBuffer.length / 1024 / 1024).toFixed(1)}MB`);
+            console.log(`[s3-storage] Re-compressed PNG (has transparency): ${metadata.width}x${metadata.height}, ${(sizeMB).toFixed(1)}MB → ${(imageBuffer.length / 1024 / 1024).toFixed(1)}MB`);
           } else {
-            // No transparency - convert to JPEG for much smaller size
+            // 无透明像素 — 安全转 JPEG，大幅减小体积
             imageBuffer = await sharp(imageBuffer)
               .jpeg({ quality: 92 })
               .toBuffer();
             wasCompressedAsJpeg = true;
-            console.log(`[s3-storage] Compressed to JPEG: ${metadata.width}x${metadata.height}, ${(sizeMB).toFixed(1)}MB → ${(imageBuffer.length / 1024 / 1024).toFixed(1)}MB`);
+            console.log(`[s3-storage] Compressed to JPEG (no transparency): ${metadata.width}x${metadata.height}, ${(sizeMB).toFixed(1)}MB → ${(imageBuffer.length / 1024 / 1024).toFixed(1)}MB`);
           }
         } catch (compressErr) {
           console.warn('[s3-storage] Image compression failed, keeping original:', compressErr);
