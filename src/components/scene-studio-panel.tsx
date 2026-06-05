@@ -937,10 +937,13 @@ function AIGenerationPanel({
 
 /* ========== AI AUTO LAYOUT PANEL ========== */
 
-function AIAutoLayoutPanel({ onApplyLayout, isGenerating, isMonochrome }: {
+function AIAutoLayoutPanel({ onApplyLayout, isGenerating, isMonochrome, chatModels, selectedChatModel, onSelectChatModel }: {
   onApplyLayout: (description: string) => void;
   isGenerating: boolean;
   isMonochrome?: boolean;
+  chatModels: { id: string; providerId: string; name: string }[];
+  selectedChatModel: string;
+  onSelectChatModel: (id: string) => void;
 }) {
   const [description, setDescription] = useState('');
   const accent = isMonochrome ? '#3b82f6' : ACCENT;
@@ -959,6 +962,20 @@ function AIAutoLayoutPanel({ onApplyLayout, isGenerating, isMonochrome }: {
         className="w-full px-2 py-1.5 rounded-lg text-[13px] outline-none resize-none"
         style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}`, scrollbarWidth: 'thin' }}
       />
+      {chatModels.length > 0 && (
+        <select
+          value={selectedChatModel}
+          onChange={e => onSelectChatModel(e.target.value)}
+          className="w-full px-2 py-1 rounded-lg text-[11px] outline-none cursor-pointer"
+          style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}` }}
+        >
+          {chatModels.map(m => (
+            <option key={`${m.providerId}::${m.id}`} value={`${m.providerId}::${m.id}`}>
+              {m.name}
+            </option>
+          ))}
+        </select>
+      )}
       <div className="space-y-1">
         <p className="text-[9px]" style={{ color: TEXT_DIM }}>快速模板：</p>
         <div className="flex flex-wrap gap-1">
@@ -1134,6 +1151,50 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [imageCount, setImageCount] = useState(1);
 
+  // Model selection state
+  const [imageModels, setImageModels] = useState<{ id: string; name: string; providerId: string }[]>([]);
+  const [chatModels, setChatModels] = useState<{ id: string; name: string; providerId: string }[]>([]);
+  const [selectedImageModelId, setSelectedImageModelId] = useState<string>('');
+  const [selectedChatModelId, setSelectedChatModelId] = useState<string>('');
+  const [showImageModelDropdown, setShowImageModelDropdown] = useState(false);
+  const [showChatModelDropdown, setShowChatModelDropdown] = useState(false);
+
+  // Load models on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const [imgRes, chatRes] = await Promise.all([
+          fetch('/api/models?type=image'),
+          fetch('/api/models?type=chat'),
+        ]);
+        if (imgRes.ok) {
+          const imgData = await imgRes.json();
+          const models = (imgData.models || []).flatMap((p: { id: string; name: string; models: { id: string; name: string; providerId?: string }[] }) =>
+            p.models.map((m: { id: string; name: string; providerId?: string }) => ({
+              id: m.providerId ? `${m.providerId}::${m.id}` : m.id,
+              name: m.name || m.id,
+              providerId: m.providerId || p.id,
+            }))
+          );
+          setImageModels(models);
+          if (models.length > 0) setSelectedImageModelId(models[0].id);
+        }
+        if (chatRes.ok) {
+          const chatData = await chatRes.json();
+          const models = (chatData.models || []).flatMap((p: { id: string; name: string; models: { id: string; name: string; providerId?: string }[] }) =>
+            p.models.map((m: { id: string; name: string; providerId?: string }) => ({
+              id: m.providerId ? `${m.providerId}::${m.id}` : m.id,
+              name: m.name || m.id,
+              providerId: m.providerId || p.id,
+            }))
+          );
+          setChatModels(models);
+          if (models.length > 0) setSelectedChatModelId(models[0].id);
+        }
+      } catch (e) { console.error('[scene-studio] Failed to load models:', e); }
+    })();
+  }, []);
+
   // UI state
   const [rightTab, setRightTab] = useState<'build' | 'generate' | 'layout' | 'assets'>('build');
   const [savedCameraViews, setSavedCameraViews] = useState<CameraView[]>([]);
@@ -1271,6 +1332,10 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
         : `请根据用户需求生成一张商业级场景视觉图。用户需求：${prompt}。视觉风格：${strengthInfo?.name || '平衡优化'}。构图要求：主体明确，空间层次清晰，前景、中景、背景关系明确，适合商业广告展示。输出要求：高质量商业广告画面，真实光影，高级质感，画面整洁，品牌感强。${negativePrompt ? `[negative: ${negativePrompt}]` : ''}`;
 
       // Use scene-studio generate API
+      const modelInfo = selectedImageModelId.includes('::')
+        ? { model: selectedImageModelId.split('::').pop()!, providerId: selectedImageModelId.split('::')[0] }
+        : { model: selectedImageModelId, providerId: undefined };
+
       const res = await fetch('/api/scene-studio/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1282,6 +1347,8 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
           structureStrength: strengthInfo?.value || 60,
           aspectRatio,
           imageCount,
+          model: modelInfo.model,
+          providerId: modelInfo.providerId,
         }),
       });
 
@@ -1394,6 +1461,10 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
     setIsAILayoutGenerating(true);
 
     try {
+      const chatModelInfo = selectedChatModelId.includes('::')
+        ? { model: selectedChatModelId.split('::').pop()!, providerId: selectedChatModelId.split('::')[0] }
+        : selectedChatModelId ? { model: selectedChatModelId, providerId: undefined } : {};
+
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1428,6 +1499,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
 5. 确保物体不会重叠`
           }],
           stream: false,
+          ...chatModelInfo,
         }),
       });
 
@@ -2053,6 +2125,22 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
               {/* ===== GENERATE TAB ===== */}
               {rightTab === 'generate' && (
                 <>
+                  {/* Image model selector */}
+                  <div className="mb-2">
+                    <label className="text-xs text-muted-foreground mb-1 block">图像模型</label>
+                    <select
+                      value={selectedImageModelId}
+                      onChange={e => setSelectedImageModelId(e.target.value)}
+                      className="w-full rounded-md px-2 py-1.5 text-xs border border-border bg-muted text-foreground"
+                    >
+                      <option value="">自动选择</option>
+                      {imageModels.map(m => (
+                        <option key={`${m.id}-${m.providerId}`} value={`${m.providerId}::${m.id}`}>
+                          {m.name || m.id}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   {/* Generation mode */}
                   <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#222' : '#1a1a1a', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}>
                     <div className="text-sm font-medium mb-2" style={{ color: accent }}>生成模式</div>
@@ -2199,6 +2287,9 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                     onApplyLayout={handleAILayout}
                     isGenerating={isAILayoutGenerating}
                     isMonochrome={isMonochrome}
+                    chatModels={chatModels}
+                    selectedChatModel={selectedChatModelId}
+                    onSelectChatModel={setSelectedChatModelId}
                   />
 
                   {/* Quick templates */}
