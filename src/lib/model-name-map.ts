@@ -52,7 +52,9 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'dalle-2', entry: { name: 'DALL-E 2', type: 'image', provider: 'OpenAI' } },
   { pattern: 'gpt-4o-image', entry: { name: 'GPT-4o 图像', type: 'image', provider: 'OpenAI' } },
   // OpenAI GPT-image
+  { pattern: 'gpt-image-2-c', entry: { name: 'GPT Image 2 Chat', type: 'image', provider: 'OpenAI' } },
   { pattern: 'gpt-image-2', entry: { name: 'GPT Image 2', type: 'image', provider: 'OpenAI' } },
+  { pattern: 'gpt-image-1.5', entry: { name: 'GPT Image 1.5', type: 'image', provider: 'OpenAI' } },
   { pattern: 'gpt-image-1', entry: { name: 'GPT Image 1', type: 'image', provider: 'OpenAI' } },
   { pattern: 'gpt-image', entry: { name: 'GPT Image', type: 'image', provider: 'OpenAI' } },
   // Midjourney
@@ -151,11 +153,15 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'gemini-1.5-pro', entry: { name: 'Gemini 1.5 Pro', short: 'GF 1.5P', type: 'chat', provider: 'Google' } },
   { pattern: 'gemini-pro', entry: { name: 'Gemini Pro', type: 'chat', provider: 'Google' } },
   { pattern: 'gemini-flash', entry: { name: 'Gemini Flash', type: 'chat', provider: 'Google' } },
-  // OpenAI GPT
+  // OpenAI GPT (more specific patterns first)
+  { pattern: 'gpt-5.5', entry: { name: 'GPT-5.5', type: 'chat', provider: 'OpenAI' } },
   { pattern: 'gpt-5.4', entry: { name: 'GPT-5.4', type: 'chat', provider: 'OpenAI' } },
   { pattern: 'gpt-5.3', entry: { name: 'GPT-5.3', type: 'chat', provider: 'OpenAI' } },
   { pattern: 'gpt-5.2', entry: { name: 'GPT-5.2', type: 'chat', provider: 'OpenAI' } },
   { pattern: 'gpt-5.1', entry: { name: 'GPT-5.1', type: 'chat', provider: 'OpenAI' } },
+  { pattern: 'gpt-5-pro', entry: { name: 'GPT-5 Pro', type: 'chat', provider: 'OpenAI' } },
+  { pattern: 'gpt-5-mini', entry: { name: 'GPT-5 Mini', type: 'chat', provider: 'OpenAI' } },
+  { pattern: 'gpt-5-nano', entry: { name: 'GPT-5 Nano', type: 'chat', provider: 'OpenAI' } },
   { pattern: 'gpt-5', entry: { name: 'GPT-5', type: 'chat', provider: 'OpenAI' } },
   { pattern: 'gpt-4.1-nano', entry: { name: 'GPT-4.1 nano', type: 'chat', provider: 'OpenAI' } },
   { pattern: 'gpt-4.1-mini', entry: { name: 'GPT-4.1 mini', type: 'chat', provider: 'OpenAI' } },
@@ -242,6 +248,10 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'minimax-m2', entry: { name: 'MiniMax M2', type: 'chat', provider: 'MiniMax' } },
   { pattern: 'minimax', entry: { name: 'MiniMax', type: 'chat', provider: 'MiniMax' } },
   // Grok (xAI)
+  { pattern: 'grok-4.3', entry: { name: 'Grok 4.3', type: 'chat', provider: 'xAI' } },
+  { pattern: 'grok-4.20', entry: { name: 'Grok 4.20', type: 'chat', provider: 'xAI' } },
+  { pattern: 'grok-4.1', entry: { name: 'Grok 4.1', type: 'chat', provider: 'xAI' } },
+  { pattern: 'grok-4', entry: { name: 'Grok 4', type: 'chat', provider: 'xAI' } },
   { pattern: 'grok-3-mini', entry: { name: 'Grok 3 Mini', type: 'chat', provider: 'xAI' } },
   { pattern: 'grok-3', entry: { name: 'Grok 3', type: 'chat', provider: 'xAI' } },
   { pattern: 'grok-2-mini', entry: { name: 'Grok 2 Mini', type: 'chat', provider: 'xAI' } },
