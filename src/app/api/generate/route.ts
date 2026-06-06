@@ -560,9 +560,15 @@ export async function POST(request: NextRequest) {
             } catch { /* ignore */ }
             // 合并 errorMsg + errorText 做可重试检测，兼容各种 API 错误格式
             const combinedErrorText = `${errorMsg} ${errorText}`;
-            // ★ 可重试错误检测 — 渠道不可用/模型未找到等错误标记为可重试，触发候选模型回退
+            // ★ 可重试错误检测 — 渠道不可用/模型未找到/超时/上游认证等错误标记为可重试，触发候选模型回退
             const translatedMsg = translateApiError(errorMsg);
-            if (combinedErrorText.includes('No available channel') || combinedErrorText.includes('no available channel') || combinedErrorText.includes('not configured') || combinedErrorText.includes('model_not_found') || combinedErrorText.includes('model not found')) {
+            const isRetryableError =
+              combinedErrorText.includes('No available channel') || combinedErrorText.includes('no available channel') ||
+              combinedErrorText.includes('not configured') || combinedErrorText.includes('model_not_found') || combinedErrorText.includes('model not found') ||
+              combinedErrorText.includes('bad_response_status_code') ||
+              (chatResponse.status >= 500 && chatResponse.status !== 501) ||
+              chatResponse.status === 401;
+            if (isRetryableError) {
               console.warn('[generate] Gemini image route retryable error, will try fallback models:', errorMsg);
               const retryErr = new Error(`当前模型暂不可用，请稍后重试或更换模型`);
               (retryErr as Error & { retryable?: boolean }).retryable = true;
@@ -672,6 +678,13 @@ export async function POST(request: NextRequest) {
             }
           } catch { /* ignore */ }
 
+          // 5xx 服务器错误（如 Cloudflare 524 超时）→ 可重试
+          if (resp.status >= 502 && resp.status <= 599) {
+            const retryErr = new Error(`API 服务器错误 (${resp.status})，请稍后重试或更换模型`);
+            (retryErr as Error & { retryable?: boolean }).retryable = true;
+            throw retryErr;
+          }
+
           // 合并 errorMsg + errorText 做可重试检测，兼容各种 API 错误格式
           const combinedErrorText = `${errorMsg} ${errorText}`;
           // 通用可重试错误检测 - 不针对特定提供商
@@ -688,6 +701,12 @@ export async function POST(request: NextRequest) {
           }
           if (combinedErrorText.includes('Invalid API key') || combinedErrorText.includes('invalid api_key') || combinedErrorText.includes('Incorrect API key')) {
             throw new Error(`API 密钥无效，请联系管理员检查配置`);
+          }
+          // 中转服务 401 + bad_response_status_code → 上游错误，可重试
+          if (resp.status === 401 && combinedErrorText.includes('bad_response_status_code')) {
+            const retryErr = new Error(`API 上游服务认证异常，请稍后重试或更换模型`);
+            (retryErr as Error & { retryable?: boolean }).retryable = true;
+            throw retryErr;
           }
           
           // ★ 翻译英文错误信息为中文

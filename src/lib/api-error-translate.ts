@@ -37,6 +37,10 @@ export function translateApiError(rawMsg: string): string {
   if (msg.includes('permission denied') || msg.includes('access denied') || msg.includes('unauthorized')) {
     return 'API 权限不足，请联系管理员检查配置';
   }
+  // 上游认证异常（中转站 401 + bad_response_status_code）
+  if (msg.includes('bad_response_status_code') || msg.includes('上游服务认证异常')) {
+    return 'API 上游服务认证异常，请稍后重试或更换模型';
+  }
   // 不支持的画面比例
   if (msg.includes('ratio or price') || msg.includes('not configured')
     || msg.includes('aspect ratio is not in the allowed') || msg.includes('invalid aspect ratio')
@@ -59,9 +63,9 @@ export function translateApiError(rawMsg: string): string {
   if (msg.includes('internal server error') || msg.includes('server error')) {
     return 'API 服务内部错误，请稍后重试';
   }
-  // 超时
-  if (msg.includes('timeout') || msg.includes('timed out')) {
-    return '请求超时，请稍后重试';
+  // 超时（含 Cloudflare 524）
+  if (msg.includes('timeout') || msg.includes('timed out') || msg.includes('a timeout occurred') || msg.includes('524')) {
+    return '请求超时，API 服务响应过慢，请稍后重试或更换模型';
   }
   // 请求体过大
   if (msg.includes('request too large') || msg.includes('payload too large') || msg.includes('size limit')) {

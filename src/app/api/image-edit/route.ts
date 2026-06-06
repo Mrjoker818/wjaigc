@@ -832,10 +832,15 @@ async function submitImageTask(
     if (errorMsg.includes('must be an URL') || errorMsg.includes('Invalid URL') || errorMsg.includes('data:')) {
       throw new ModelCapabilityError(translatedMsg);
     }
-    if (errorMsg.includes('model_not_found') || errorMsg.includes('model not found') || errorMsg.includes('Model not found') || errorMsg.includes('No available channel')) {
+    if (errorMsg.includes('model_not_found') || errorMsg.includes('model not found') || errorMsg.includes('Model not found') || errorMsg.includes('No available channel') || errorMsg.includes('no available channel')) {
       throw new ModelCapabilityError(translatedMsg);
     }
     if (errorMsg.includes('_error') || errorMsg.includes('try again later')) {
+      throw new ModelCapabilityError(translatedMsg);
+    }
+    // 5xx 服务器错误 / Cloudflare 524 超时 / 401 认证错误 → 可重试回退
+    if (errorMsg.includes('524') || errorMsg.includes('timeout occurred') || errorMsg.includes('bad_response_status_code') || (submitResponse.status >= 500 && submitResponse.status !== 501) || submitResponse.status === 401) {
+      console.warn('[submitImageTask] retryable server error, will try fallback:', submitResponse.status, errorMsg);
       throw new ModelCapabilityError(translatedMsg);
     }
 
