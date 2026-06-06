@@ -1241,6 +1241,13 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
 
       // ★ 清理常见 API 错误信息，提供更友好的中文提示
       const translatedMsg = translateApiError(errorMsg);
+
+      // ★ 渠道不可用 / 模型未找到 — 提供更明确提示
+      if (errorMsg.includes('No available channel') || errorMsg.includes('not configured') || errorMsg.includes('model_not_found') || errorMsg.includes('model not found')) {
+        failTask(taskId, `模型 ${model} 在当前渠道暂不可用，请稍后重试或更换模型`);
+        return;
+      }
+
       if (chatResponse.status === 401 || chatResponse.status === 403) {
         failTask(taskId, `API Key 无效或权限不足: ${translatedMsg}`);
         return;

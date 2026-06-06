@@ -826,7 +826,7 @@ async function submitImageTask(
     if (errorMsg.includes('must be an URL') || errorMsg.includes('Invalid URL') || errorMsg.includes('data:')) {
       throw new ModelCapabilityError(translatedMsg);
     }
-    if (errorMsg.includes('model_not_found') || errorMsg.includes('model not found') || errorMsg.includes('Model not found')) {
+    if (errorMsg.includes('model_not_found') || errorMsg.includes('model not found') || errorMsg.includes('Model not found') || errorMsg.includes('No available channel')) {
       throw new ModelCapabilityError(translatedMsg);
     }
     if (errorMsg.includes('_error') || errorMsg.includes('try again later')) {

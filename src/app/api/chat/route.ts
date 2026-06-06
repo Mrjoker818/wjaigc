@@ -215,6 +215,11 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ★ 渠道不可用 / 模型未找到 — 提供更明确提示
+      if (error.includes('No available channel') || error.includes('model_not_found') || error.includes('not configured')) {
+        return NextResponse.json({ error: `模型 ${model || requestModel} 在当前渠道暂不可用，请稍后重试或更换模型` }, { status: 503 });
+      }
+
       return NextResponse.json({ error: `API 调用失败: ${response.status}` }, { status: response.status });
     }
 

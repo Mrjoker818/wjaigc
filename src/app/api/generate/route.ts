@@ -555,7 +555,15 @@ export async function POST(request: NextRequest) {
               const errorJson = JSON.parse(errorText);
               if (errorJson.error?.message) errorMsg = errorJson.error.message;
             } catch { /* ignore */ }
-            throw new Error(translateApiError(errorMsg));
+            // ★ 可重试错误检测 — 渠道不可用/模型未找到等错误标记为可重试，触发候选模型回退
+            const translatedMsg = translateApiError(errorMsg);
+            if (errorMsg.includes('No available channel') || errorMsg.includes('not configured') || errorMsg.includes('model_not_found') || errorMsg.includes('model not found')) {
+              console.warn('[generate] Gemini image route retryable error, will try fallback models:', errorMsg);
+              const retryErr = new Error(translatedMsg);
+              (retryErr as Error & { retryable?: boolean }).retryable = true;
+              throw retryErr;
+            }
+            throw new Error(translatedMsg);
           }
 
           const chatResponseText = await chatResponse.text();
@@ -655,7 +663,7 @@ export async function POST(request: NextRequest) {
           } catch { /* ignore */ }
 
           // 通用可重试错误检测 - 不针对特定提供商
-          if (errorMsg.includes('ratio or price') || errorMsg.includes('not configured') || errorMsg.includes('model_not_found') || errorMsg.includes('model not found') || errorCode === 'model_not_found') {
+          if (errorMsg.includes('ratio or price') || errorMsg.includes('not configured') || errorMsg.includes('model_not_found') || errorMsg.includes('model not found') || errorCode === 'model_not_found' || errorMsg.includes('No available channel')) {
             const retryErr = new Error(`当前模型暂不可用`);
             (retryErr as Error & { retryable?: boolean }).retryable = true;
             throw retryErr;

@@ -502,6 +502,10 @@ async function performImageEdit(
 
     if (!resp.ok) {
       const errText = await resp.text().catch(() => '');
+      // ★ 渠道不可用 / 模型未找到 — 提供更明确提示
+      if (errText.includes('No available channel') || errText.includes('model_not_found') || errText.includes('not configured')) {
+        return { success: false, error: `模型在当前渠道暂不可用，请稍后重试或更换模型` };
+      }
       return { success: false, error: `OpenAI edit 失败 (${resp.status}): ${errText.slice(0, 200)}` };
     }
 

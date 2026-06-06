@@ -21,6 +21,10 @@ export function translateApiError(rawMsg: string): string {
   if (msg.includes('model_not_found') || msg.includes('model not found')) {
     return '模型不存在或已下线，请尝试切换其他模型';
   }
+  // 渠道不可用（4sapi 等中转站常见错误：模型在当前密钥组下无可用渠道）
+  if (msg.includes('no available channel') || msg.includes('no channel')) {
+    return '当前模型渠道不可用，请尝试切换其他模型或联系管理员检查配置';
+  }
   // 暂时不可用 / 稍后重试（★ 最常见：APImart 的 "Please wait and try again later"）
   if (msg.includes('try again later') || msg.includes('please wait') || msg.includes('_error')) {
     return '当前模型暂时不可用，请稍后重试或切换其他模型';
