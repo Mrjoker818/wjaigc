@@ -118,7 +118,16 @@ export async function POST(request: NextRequest) {
       if (!retryResponse.ok) {
         const retryError = await retryResponse.text().catch(() => '');
         console.error('Chat API error (both attempts):', errorText, retryError);
-        return NextResponse.json({ error: `API 调用失败: ${retryResponse.status}` }, { status: retryResponse.status });
+        // Try to extract meaningful error message from 4sapi/distributor responses
+        let apiErrMsg = `API 调用失败: ${retryResponse.status}`;
+        try {
+          const ej = JSON.parse(retryError);
+          apiErrMsg = ej.error?.message || ej.message || ej.msg || apiErrMsg;
+        } catch { /* not JSON, use default */ }
+        if (/no\s+available\s+channel/i.test(retryError)) {
+          apiErrMsg = '当前模型渠道暂不可用，请稍后重试或更换模型';
+        }
+        return NextResponse.json({ error: apiErrMsg }, { status: retryResponse.status });
       }
       
       // Use retry response for streaming/non-streaming

@@ -553,13 +553,18 @@ export async function POST(request: NextRequest) {
             let errorMsg = `Gemini API 请求失败 (${chatResponse.status})`;
             try {
               const errorJson = JSON.parse(errorText);
+              // 兼容多种 API 错误格式：{error:{message:...}}, {message:...}, {msg:...}
               if (errorJson.error?.message) errorMsg = errorJson.error.message;
+              else if (errorJson.message) errorMsg = errorJson.message;
+              else if (errorJson.msg) errorMsg = errorJson.msg;
             } catch { /* ignore */ }
+            // 合并 errorMsg + errorText 做可重试检测，兼容各种 API 错误格式
+            const combinedErrorText = `${errorMsg} ${errorText}`;
             // ★ 可重试错误检测 — 渠道不可用/模型未找到等错误标记为可重试，触发候选模型回退
             const translatedMsg = translateApiError(errorMsg);
-            if (errorMsg.includes('No available channel') || errorMsg.includes('not configured') || errorMsg.includes('model_not_found') || errorMsg.includes('model not found')) {
+            if (combinedErrorText.includes('No available channel') || combinedErrorText.includes('no available channel') || combinedErrorText.includes('not configured') || combinedErrorText.includes('model_not_found') || combinedErrorText.includes('model not found')) {
               console.warn('[generate] Gemini image route retryable error, will try fallback models:', errorMsg);
-              const retryErr = new Error(translatedMsg);
+              const retryErr = new Error(`当前模型暂不可用，请稍后重试或更换模型`);
               (retryErr as Error & { retryable?: boolean }).retryable = true;
               throw retryErr;
             }
@@ -654,27 +659,34 @@ export async function POST(request: NextRequest) {
           let errorCode = '';
           try {
             const errorJson = JSON.parse(errorText);
+            // 兼容多种 API 错误格式：{error:{message:...}}, {message:...}, {msg:...}
             if (errorJson.error?.message) {
               errorMsg = errorJson.error.message;
+            } else if (errorJson.message) {
+              errorMsg = errorJson.message;
+            } else if (errorJson.msg) {
+              errorMsg = errorJson.msg;
             }
             if (errorJson.error?.code) {
               errorCode = errorJson.error.code;
             }
           } catch { /* ignore */ }
 
+          // 合并 errorMsg + errorText 做可重试检测，兼容各种 API 错误格式
+          const combinedErrorText = `${errorMsg} ${errorText}`;
           // 通用可重试错误检测 - 不针对特定提供商
-          if (errorMsg.includes('ratio or price') || errorMsg.includes('not configured') || errorMsg.includes('model_not_found') || errorMsg.includes('model not found') || errorCode === 'model_not_found' || errorMsg.includes('No available channel')) {
-            const retryErr = new Error(`当前模型暂不可用`);
+          if (combinedErrorText.includes('ratio or price') || combinedErrorText.includes('not configured') || combinedErrorText.includes('model_not_found') || combinedErrorText.includes('model not found') || errorCode === 'model_not_found' || combinedErrorText.includes('No available channel') || combinedErrorText.includes('no available channel')) {
+            const retryErr = new Error(`当前模型暂不可用，请稍后重试或更换模型`);
             (retryErr as Error & { retryable?: boolean }).retryable = true;
             throw retryErr;
           }
-          if (errorMsg.includes('Insufficient balance') || errorMsg.includes('insufficient') || errorMsg.includes('余额')) {
+          if (combinedErrorText.includes('Insufficient balance') || combinedErrorText.includes('insufficient') || combinedErrorText.includes('余额')) {
             throw new Error(`API 余额不足，请联系管理员充值`);
           }
-          if (errorMsg.includes('Rate limit') || errorMsg.includes('rate_limit') || errorMsg.includes('Too many requests') || errorMsg.includes('请稍等') || errorMsg.includes('稍后再试') || errorMsg.includes('请求过于频繁')) {
+          if (combinedErrorText.includes('Rate limit') || combinedErrorText.includes('rate_limit') || combinedErrorText.includes('Too many requests') || combinedErrorText.includes('请稍等') || combinedErrorText.includes('稍后再试') || combinedErrorText.includes('请求过于频繁')) {
             throw new Error(`请求过于频繁，请稍后再试`);
           }
-          if (errorMsg.includes('Invalid API key') || errorMsg.includes('invalid api_key') || errorMsg.includes('Incorrect API key')) {
+          if (combinedErrorText.includes('Invalid API key') || combinedErrorText.includes('invalid api_key') || combinedErrorText.includes('Incorrect API key')) {
             throw new Error(`API 密钥无效，请联系管理员检查配置`);
           }
           

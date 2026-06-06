@@ -764,8 +764,14 @@ async function submitImageTask(
     let errorMsg = `API 请求失败 (${submitResponse.status})`;
     try {
       const errorJson = JSON.parse(errorText);
-      if (errorJson.error?.message) errorMsg = errorJson.error.message;
+      errorMsg = errorJson.error?.message || errorJson.message || errorJson.msg || errorJson.detail || errorMsg;
     } catch { /* ignore */ }
+    // 原始文本兜底：如果解析后的 errorMsg 仍为默认格式，尝试从原始文本提取关键信息
+    if (errorMsg === `API 请求失败 (${submitResponse.status})`) {
+      const lowerText = errorText.toLowerCase();
+      if (lowerText.includes('no available channel')) errorMsg = errorText.trim();
+      else if (lowerText.includes('model_not_found') || lowerText.includes('model not found')) errorMsg = errorText.trim();
+    }
 
     // 自动回退：如果 /images/edits 端点不被支持，回退到 /images/generations
     // 使用原始响应文本(errorText)进行检测，而非清理后的 errorMsg
