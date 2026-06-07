@@ -63,6 +63,7 @@ interface SceneLight {
   intensity: number;
   color: string;
   position: [number, number, number];
+  angle?: number; // for spot light, in degrees
 }
 
 type CameraPreset = 'front' | 'side' | 'top' | '45degree' | 'free';
@@ -326,7 +327,7 @@ function SceneLightHelper({ light }: { light: SceneLight }) {
     return <directionalLight position={light.position} intensity={light.intensity} color={light.color} castShadow />;
   }
   if (light.type === 'spot') {
-    return <spotLight position={light.position} intensity={light.intensity} color={light.color} angle={0.5} penumbra={0.5} castShadow />;
+    return <spotLight position={light.position} intensity={light.intensity} color={light.color} angle={((light.angle ?? 45) / 180) * Math.PI} penumbra={0.5} castShadow />;
   }
   // point light
   return <pointLight position={light.position} intensity={light.intensity} color={light.color} castShadow />;
@@ -942,7 +943,7 @@ function AIAutoLayoutPanel({ onApplyLayout, isGenerating, isMonochrome, chatMode
   onApplyLayout: (description: string) => void;
   isGenerating: boolean;
   isMonochrome?: boolean;
-  chatModels: { id: string; providerId: string; name: string }[];
+  chatModels: { id: string; providerId: string; name: string; providerName?: string }[];
   selectedChatModel: string;
   onSelectChatModel: (id: string) => void;
 }) {
@@ -972,7 +973,7 @@ function AIAutoLayoutPanel({ onApplyLayout, isGenerating, isMonochrome, chatMode
         >
           {chatModels.map(m => (
             <option key={m.id} value={m.id}>
-              {m.name}
+              {m.providerName ? `[${m.providerName}] ` : ''}{m.name}
             </option>
           ))}
         </select>
@@ -1193,10 +1194,11 @@ function LightEditorPanel({ lights, onLightsChange, isMonochrome }: {
                 <div className="flex items-center gap-1.5">
                   <span className="text-[9px] w-8" style={{ color: TEXT_DIM }}>角度</span>
                   <input
-                    type="range" min={10} max={90} step={5} value={45}
+                    type="range" min={10} max={90} step={5} value={light.angle ?? 45}
+                    onChange={e => onLightsChange(lights.map(l => l.id === light.id ? { ...l, angle: parseInt(e.target.value) } : l))}
                     className="flex-1 h-1 accent-amber-500"
                   />
-                  <span className="text-[9px]" style={{ color: TEXT_DIM }}>45°</span>
+                  <span className="text-[9px]" style={{ color: TEXT_DIM }}>{light.angle ?? 45}°</span>
                 </div>
               )}
             </div>
@@ -1233,8 +1235,8 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
   const [imageCount, setImageCount] = useState(1);
 
   // Model selection state
-  const [imageModels, setImageModels] = useState<{ id: string; name: string; providerId: string }[]>([]);
-  const [chatModels, setChatModels] = useState<{ id: string; name: string; providerId: string }[]>([]);
+  const [imageModels, setImageModels] = useState<{ id: string; name: string; providerId: string; providerName: string }[]>([]);
+  const [chatModels, setChatModels] = useState<{ id: string; name: string; providerId: string; providerName: string }[]>([]);
   const [selectedImageModelId, setSelectedImageModelId] = useState<string>('');
   const [selectedChatModelId, setSelectedChatModelId] = useState<string>('');
   const [showImageModelDropdown, setShowImageModelDropdown] = useState(false);
@@ -1250,21 +1252,32 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
         ]);
         if (imgRes.ok) {
           const imgData = await imgRes.json();
+          // Build providerId→providerName map from providers array
+          const providerMap: Record<string, string> = {};
+          for (const p of imgData.providers || []) {
+            providerMap[p.id] = p.displayName || p.name || p.id;
+          }
           // API returns flat models array: { id, name, providerId, ... }
           const models = (imgData.models || []).map((m: { id: string; name: string; providerId?: string }) => ({
             id: m.providerId ? `${m.providerId}::${m.id}` : m.id,
             name: m.name || m.id,
             providerId: m.providerId || '',
+            providerName: m.providerId ? (providerMap[m.providerId] || m.providerId) : '',
           }));
           setImageModels(models);
           if (models.length > 0) setSelectedImageModelId(models[0].id);
         }
         if (chatRes.ok) {
           const chatData = await chatRes.json();
+          const providerMap: Record<string, string> = {};
+          for (const p of chatData.providers || []) {
+            providerMap[p.id] = p.displayName || p.name || p.id;
+          }
           const models = (chatData.models || []).map((m: { id: string; name: string; providerId?: string }) => ({
             id: m.providerId ? `${m.providerId}::${m.id}` : m.id,
             name: m.name || m.id,
             providerId: m.providerId || '',
+            providerName: m.providerId ? (providerMap[m.providerId] || m.providerId) : '',
           }));
           setChatModels(models);
           if (models.length > 0) setSelectedChatModelId(models[0].id);
@@ -1432,10 +1445,61 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Generation failed');
+        throw new Error(errData.error || `HTTP ${res.status}`);
       }
 
       const data = await res.json();
+
+      // Check for API-level errors (HTTP 200 but error in body)
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      // Handle async polling response (pearapi, openai-async, etc.)
+      if (data.isAsync && data.result?.taskIds?.length > 0) {
+        const taskIds = data.result.taskIds;
+        const pollModel = modelInfo.model;
+        const pollProviderId = modelInfo.providerId;
+        const pollApiBaseUrl = data.apiBaseUrl;
+        const pollApiKey = data.apiKey;
+        const pollAdvancedParams = data.advancedParams;
+
+        for (const taskId of taskIds) {
+          const pollInterval = setInterval(async () => {
+            try {
+              const pollRes = await fetch('/api/poll-task', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ taskId, model: pollModel, providerId: pollProviderId, apiBaseUrl: pollApiBaseUrl, apiKey: pollApiKey, advancedParams: pollAdvancedParams }),
+              });
+              const pollData = await pollRes.json();
+              if (pollData.status === 'completed' && pollData.result?.imageUrl) {
+                clearInterval(pollInterval);
+                setGenerationResults(prev => [{
+                  id: `gen_${Date.now()}`,
+                  url: pollData.result.imageUrl,
+                  prompt,
+                  mode: generationMode,
+                  strengthMode,
+                  timestamp: Date.now(),
+                }, ...prev]);
+                setIsGenerating(false);
+              } else if (pollData.status === 'failed') {
+                clearInterval(pollInterval);
+                console.error('[SceneStudio] Poll failed:', pollData.error);
+                alert('生成失败: ' + (pollData.error || '未知错误'));
+                setIsGenerating(false);
+              }
+            } catch {
+              clearInterval(pollInterval);
+              setIsGenerating(false);
+            }
+          }, 2000);
+          // Timeout after 3 minutes
+          setTimeout(() => { clearInterval(pollInterval); setIsGenerating(false); }, 180000);
+        }
+        return; // Don't set isGenerating false yet — polling will handle it
+      }
 
       // Handle different response formats from API providers
       const resultUrls: string[] = [];
@@ -1460,8 +1524,12 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
         setGenerationResults(prev => [...newResults, ...prev]);
       } else {
         // Fallback: try /api/generate + poll
-        // 使用图像生成面板当前选择的模型
+        // Use selected model or fallback to localStorage
         const currentImageModel = (() => {
+          // Prefer the model already selected in this panel
+          if (selectedImageModelId) {
+            return modelInfo; // { model, providerId } already parsed above
+          }
           try {
             const saved = localStorage.getItem('wujie_selected_model');
             if (saved) {
@@ -1526,8 +1594,16 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
           }
         }
       }
+
+      // If we reach here without any results or async polling, show error
+      if (!data.isAsync && resultUrls.length === 0) {
+        const errMsg = data.error || data.result?.error || 'API 未返回图片结果，请检查模型配置';
+        console.error('[SceneStudio] No results from API:', data);
+        alert('生成失败: ' + errMsg);
+      }
     } catch (err) {
       console.error('[SceneStudio] Generate error:', err);
+      alert('生成失败: ' + (err instanceof Error ? err.message : '未知错误'));
     } finally {
       setIsGenerating(false);
     }
@@ -1802,8 +1878,8 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
         data-popup
         className="relative flex rounded-xl overflow-hidden shadow-2xl border"
         style={{
-          width: 'calc(100vw - 80px)',
-          height: 'calc(100vh - 80px)',
+          width: isMinimized ? 320 : 'calc(100vw - 80px)',
+          height: isMinimized ? 'auto' : 'calc(100vh - 80px)',
           background: isMonochrome ? '#1a1a1a' : '#111',
           borderColor: isMonochrome ? '#333' : '#d4af3740',
           left: windowPos.x,
@@ -1829,9 +1905,9 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
             <button
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-white/10 transition-colors"
               onClick={() => setIsMinimized(!isMinimized)}
-              title="缩小"
+              title={isMinimized ? '展开' : '最小化'}
             >
-              <Minus size={14} style={{ color: '#888' }} />
+              {isMinimized ? <Maximize2 size={14} style={{ color: '#888' }} /> : <Minus size={14} style={{ color: '#888' }} />}
             </button>
             <button
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-red-500/30 transition-colors"
@@ -1843,12 +1919,8 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
           </div>
         </div>
 
-        {/* === Minimized state === */}
-        {isMinimized ? (
-          <div className="flex-1 flex items-center justify-center pt-9">
-            <span className="text-sm" style={{ color: '#666' }}>窗口已缩小 — 点击顶部 □ 恢复</span>
-          </div>
-        ) : (
+        {/* === Minimized: only title bar visible === */}
+        {!isMinimized && (
         <>
           {/* === Left: 3D Viewport === */}
           <div className="flex-1 flex flex-col overflow-hidden pt-9">
@@ -1989,7 +2061,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
           >
             {/* Tab buttons */}
             <div
-              className="flex border-b flex-shrink-0 pt-9"
+              className="flex border-b flex-shrink-0"
               style={{ borderColor: isMonochrome ? '#333' : '#d4af3720' }}
             >
               {([
@@ -2056,10 +2128,10 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                                 <div className="text-[13px] text-center" style={{ color: axis === 'x' ? '#ef4444' : axis === 'y' ? '#22c55e' : '#3b82f6' }}>{axis.toUpperCase()}</div>
                                 <input
                                   type="number"
-                                  value={Math.round(obj.rotation[i] * 180 / Math.PI)}
+                                  value={Math.round(obj.rotation[i])}
                                   onChange={e => {
                                     const newRot = [...obj.rotation] as [number, number, number];
-                                    newRot[i] = (parseFloat(e.target.value) || 0) * Math.PI / 180;
+                                    newRot[i] = parseFloat(e.target.value) || 0;
                                     updateObject(obj.id, { rotation: newRot });
                                   }}
                                   className="w-full px-1.5 py-1 rounded text-center text-sm"
@@ -2225,7 +2297,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                         <option value="">自动选择</option>
                         {imageModels.map(m => (
                           <option key={m.id} value={m.id}>
-                            {m.name || m.id}
+                            {m.providerName ? `[${m.providerName}] ` : ''}{m.name || m.id}
                           </option>
                         ))}
                       </select>
