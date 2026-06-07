@@ -18,8 +18,8 @@ export const runtime = 'nodejs';
  *   backgroundMode: suggested background removal mode
  */
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiAuthOrReject(request);
-  if (authResult) return authResult;
+  const auth = await requireApiAuthOrReject(request);
+  if (auth instanceof NextResponse) return auth;
   try {
     const { image } = await request.json();
 

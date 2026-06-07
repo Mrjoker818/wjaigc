@@ -79,8 +79,8 @@ async function getLLMProvider(model?: string, providerId?: string) {
 // ─── GET handler: List all brand kits ─────────────────────────────────
 
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAuthOrReject(request);
-  if (authResult) return authResult;
+  const auth = await requireApiAuthOrReject(request);
+  if (auth instanceof NextResponse) return auth;
   try {
     const rows = await dbListBrandKits();
     const kits = rows.map(row => ({
@@ -115,8 +115,8 @@ function safeParseJSONArray(str: string): string[] {
 // ─── POST handler ────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiAuthOrReject(request);
-  if (authResult) return authResult;
+  const auth = await requireApiAuthOrReject(request);
+  if (auth instanceof NextResponse) return auth;
   try {
     const body = await request.json();
     const { action } = body;

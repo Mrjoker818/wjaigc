@@ -7,8 +7,8 @@ export const dynamic = 'force-dynamic';
 // ─── GET: List e-commerce templates ─────────────────────────────────────
 
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAuthOrReject(request);
-  if (authResult) return authResult;
+  const auth = await requireApiAuthOrReject(request);
+  if (auth instanceof NextResponse) return auth;
   try {
     const enabledOnly = request.nextUrl.searchParams.get('enabled') === 'true';
     const templates = await dbGetEcomTemplates(enabledOnly);
@@ -32,8 +32,8 @@ export async function GET(request: NextRequest) {
 // ─── POST: CRUD operations ──────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiAuthOrReject(request);
-  if (authResult) return authResult;
+  const auth = await requireApiAuthOrReject(request);
+  if (auth instanceof NextResponse) return auth;
   try {
     const body = await request.json();
     const { action } = body;

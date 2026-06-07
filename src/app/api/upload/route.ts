@@ -32,10 +32,10 @@ export async function POST(request: NextRequest) {
       'image/svg+xml': [[0x3C]], // starts with <
       'image/bmp': [[0x42, 0x4D]],
     };
-    const allowedSigs = IMAGE_SIGNATURES[file.type] || Object.values(IMAGE_SIGNATURES).flat();
+    const allowedSigs: number[][] = (IMAGE_SIGNATURES[file.type] || Object.values(IMAGE_SIGNATURES).flat()) as number[][];
     const headerBytes = Array.from(buffer.slice(0, 8));
-    const isValidImage = allowedSigs.some((sig: number[]) => 
-      sig.every((byte: number, idx: number) => headerBytes[idx] === byte)
+    const isValidImage = allowedSigs.some((sig) => 
+      sig.every((byte, idx) => headerBytes[idx] === byte)
     );
     if (!isValidImage && buffer.length > 8) {
       return NextResponse.json({ error: 'File content does not match image format' }, { status: 400 });

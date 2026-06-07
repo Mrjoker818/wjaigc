@@ -1097,7 +1097,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               remotePollInfo: {
                 taskId: remoteTaskId,
                 apiBaseUrl: effectiveBaseUrl,
-                apiKey: effectiveApiKey,
+                providerId: providerId || '',
                 model,
                 prompt: effectivePrompt,
                 allTaskIds: parsed.taskIds,

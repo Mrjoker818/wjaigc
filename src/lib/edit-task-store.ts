@@ -20,6 +20,7 @@ export interface EditTask {
   remotePollInfo?: {
     taskId: string;
     apiBaseUrl: string;
+    providerId?: string;
     model: string;
     prompt: string;
     allTaskIds: string[];

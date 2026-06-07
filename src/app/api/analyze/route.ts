@@ -5,9 +5,9 @@ import { requireApiAuthOrReject } from '@/lib/api-auth';
 export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiAuthOrReject(request);
-  if (authResult) return authResult;
   try {
+    const auth = await requireApiAuthOrReject(request);
+    if (auth instanceof NextResponse) return auth;
     const { image, category } = await request.json();
     
     if (!image) {

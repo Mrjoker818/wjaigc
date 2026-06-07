@@ -106,7 +106,12 @@ export async function POST(request: NextRequest) {
 
       if (remotePollInfo && task.status === 'processing') {
         try {
-          const { taskId: remoteTaskId, apiBaseUrl, apiKey, model: remoteModel, compatProfile: remoteCompat } = remotePollInfo;
+          const { taskId: remoteTaskId, apiBaseUrl, model: remoteModel, compatProfile: remoteCompat } = remotePollInfo;
+          // 从服务端配置查找 API Key（不再从前端传入的 remotePollInfo 获取）
+          const remoteProvider = remotePollInfo.providerId
+            ? await findProviderById(remotePollInfo.providerId)
+            : remoteModel ? await findProviderForModel(remoteModel) : null;
+          const pollApiKey = remoteProvider?.apiKey || '';
           
           // 使用 compatProfile 构建正确的轮询 URL（而非硬编码 /tasks/{id}）
           let pollUrl: string;
@@ -141,7 +146,7 @@ export async function POST(request: NextRequest) {
             pollPath,
             {
               method: 'GET',
-              headers: { 'Authorization': `Bearer ${apiKey}` },
+              headers: { 'Authorization': `Bearer ${pollApiKey}` },
               signal: AbortSignal.timeout(30000),
             },
           );

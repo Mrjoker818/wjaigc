@@ -15,8 +15,8 @@ function normalizeEndpoint() {
 }
 
 export async function POST(req: NextRequest) {
-  const authResult = await requireApiAuthOrReject(req);
-  if (authResult) return authResult;
+  const auth = await requireApiAuthOrReject(req);
+  if (auth instanceof NextResponse) return auth;
   try {
     const body = await req.json() as LayerSplitRequest;
     const imageUrl = String(body.imageUrl || '');
