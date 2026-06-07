@@ -1863,15 +1863,16 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
   // Side tab button helper
 
   // ====== RENDER ======
-  // ====== RENDER ======
   return createPortal(
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center"
-      style={{ pointerEvents: 'auto' }}
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      className="fixed z-[200] flex items-start justify-start"
+      style={{
+        pointerEvents: 'auto',
+        ...(isMinimized ? { inset: undefined, left: windowPos.x, top: windowPos.y } : { inset: 0 }),
+      }}
     >
-      {/* Semi-transparent overlay */}
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
+      {/* Semi-transparent overlay (only when expanded) */}
+      {!isMinimized && <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />}
 
       {/* Draggable floating window */}
       <div
@@ -1882,8 +1883,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
           height: isMinimized ? 'auto' : 'calc(100vh - 80px)',
           background: isMonochrome ? '#1a1a1a' : '#111',
           borderColor: isMonochrome ? '#333' : '#d4af3740',
-          left: windowPos.x,
-          top: windowPos.y,
+          ...(isMinimized ? {} : { left: windowPos.x, top: windowPos.y }),
           ...(isDragging ? { outline: '2px solid #d4af37', outlineOffset: '-2px' } : {}),
         }}
         onMouseDown={e => e.stopPropagation()}
@@ -1892,8 +1892,8 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
         {/* === Title bar (draggable) === */}
         <div
           data-panel-header
-          className="absolute top-0 left-0 right-0 h-9 flex items-center justify-between px-3 z-30 cursor-move select-none"
-          style={{ background: isMonochrome ? '#222' : '#161616', borderBottom: isMonochrome ? '1px solid #333' : '1px solid #d4af3730' }}
+          className="flex items-center justify-between px-3 shrink-0 cursor-move select-none"
+          style={{ height: 36, background: isMonochrome ? '#222' : '#161616', borderBottom: isMinimized ? 'none' : (isMonochrome ? '1px solid #333' : '1px solid #d4af3730') }}
           onMouseDown={handleDragStart}
         >
           <div className="flex items-center gap-2">
@@ -1923,7 +1923,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
         {!isMinimized && (
         <>
           {/* === Left: 3D Viewport === */}
-          <div className="flex-1 flex flex-col overflow-hidden pt-9">
+          <div className="flex-1 flex flex-col overflow-hidden">
             {/* Top transform toolbar */}
             <div
               className="relative z-20 flex items-center gap-1 px-3 py-1.5 border-b"
