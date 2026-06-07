@@ -95,6 +95,7 @@ interface SavedScene {
   savedCameraViews: CameraView[];
   prompt: string;
   timestamp: number;
+  sceneData?: Record<string, unknown>;
 }
 
 interface SceneStudioProps {
@@ -172,11 +173,11 @@ const CAMERA_PRESETS: { name: string; label: string; key: CameraPreset; position
   { name: '自由', label: '自由', key: 'free', position: [4, 3, 6], target: [0, 0.5, 0] },
 ];
 
-const STRENGTH_MODES: { key: StrengthMode; name: string; label: string; value: number; desc: string }[] = [
-  { key: 'strict', name: '严格保留构图', label: '严格', value: 85, desc: '最大限度保持3D构图' },
-  { key: 'balanced', name: '平衡优化', label: '平衡', value: 60, desc: '保持构图，提升质感' },
-  { key: 'creative', name: '创意发挥', label: '创意', value: 35, desc: '只参考大结构，AI自由发挥' },
-  { key: 'commercial', name: '商业强化', label: '强化', value: 70, desc: '强化广告质感、光影、材质' },
+const STRENGTH_MODES: { key: StrengthMode; name: string; label: string; value: number; desc: string; promptHint: string }[] = [
+  { key: 'strict', name: '严格保留构图', label: '严格', value: 85, desc: '最大限度保持3D构图', promptHint: '严格按照参考图的构图和布局生成，保持物体的位置、大小和空间关系不变，只提升画质和细节' },
+  { key: 'balanced', name: '平衡优化', label: '平衡', value: 60, desc: '保持构图，提升质感', promptHint: '保持整体构图不变，优化光影效果、材质质感和画面氛围，提升视觉表现力' },
+  { key: 'creative', name: '创意发挥', label: '创意', value: 35, desc: '只参考大结构，AI自由发挥', promptHint: '参考整体构图结构，自由发挥创意，可以改变风格、色调、氛围，生成更有艺术感的画面' },
+  { key: 'commercial', name: '商业强化', label: '强化', value: 70, desc: '强化广告质感、光影、材质', promptHint: '商业摄影级别，强化产品光影、材质质感和广告氛围，景深效果，studio lighting，8K ultra detail' },
 ];
 
 const ASPECT_RATIOS = ['16:9', '1:1', '9:16', '4:3', '3:4'] as const;
@@ -805,7 +806,7 @@ function AIGenerationPanel({
         {STRENGTH_MODES.map(mode => (
           <button
             key={mode.key}
-            onClick={() => setStrengthMode(mode.key)}
+            onClick={() => { setStrengthMode(mode.key); if (!prompt.trim()) setPrompt(mode.promptHint); }}
             className="px-1.5 py-0.5 rounded text-[9px] transition-colors cursor-pointer"
             style={{
               background: strengthMode === mode.key ? `${accent}20` : BG_TERTIARY,
@@ -1008,11 +1009,12 @@ function AIAutoLayoutPanel({ onApplyLayout, isGenerating, isMonochrome, chatMode
 
 /* ========== ASSET MANAGEMENT PANEL ========== */
 
-function AssetManagementPanel({ onSaveScene, onLoadScene, onExportScene, onDeleteScene, scenes, onLoadById, isMonochrome }: {
+function AssetManagementPanel({ onSaveScene, onLoadScene, onExportScene, onDeleteScene, onDuplicateScene, scenes, onLoadById, isMonochrome }: {
   onSaveScene: () => void;
   onLoadScene: () => void;
   onExportScene: () => void;
   onDeleteScene: (id: string) => void;
+  onDuplicateScene: (id: string) => void;
   scenes: { id: string; name: string; updatedAt?: string }[];
   onLoadById: (id: string) => void;
   isMonochrome?: boolean;
@@ -1054,6 +1056,9 @@ function AssetManagementPanel({ onSaveScene, onLoadScene, onExportScene, onDelet
                 <button onClick={() => onLoadById(scene.id)} className="text-[13px] flex-1 text-left cursor-pointer" style={{ color: TEXT_PRIMARY }}>
                   {scene.name}
                 </button>
+                <button onClick={() => onDuplicateScene(scene.id)} className="p-0.5 opacity-0 group-hover:opacity-100 cursor-pointer" style={{ color: TEXT_DIM }} title="复制场景">
+                  <Copy size={9} />
+                </button>
                 <button onClick={() => onDeleteScene(scene.id)} className="p-0.5 opacity-0 group-hover:opacity-100 cursor-pointer" style={{ color: TEXT_DIM }}>
                   <Trash2 size={9} />
                 </button>
@@ -1082,6 +1087,8 @@ function LightEditorPanel({ lights, onLightsChange, isMonochrome }: {
   isMonochrome?: boolean;
 }) {
   const accent = isMonochrome ? '#3b82f6' : ACCENT;
+  const [expandedLight, setExpandedLight] = useState<string | null>(null);
+  const LIGHT_TYPE_LABELS: Record<SceneLight['type'], string> = { ambient: '环境光', directional: '方向光', point: '点光', spot: '聚光灯' };
 
   return (
     <div className="space-y-1.5 p-2">
@@ -1103,25 +1110,97 @@ function LightEditorPanel({ lights, onLightsChange, isMonochrome }: {
         </button>
       </div>
       {lights.map(light => (
-        <div key={light.id} className="flex items-center gap-1.5 px-2 py-1 rounded" style={{ background: BG_TERTIARY }}>
-          <Lightbulb size={10} style={{ color: light.color }} />
-          <span className="text-[13px] flex-1 truncate" style={{ color: TEXT_PRIMARY }}>{light.name}</span>
-          <input
-            type="range"
-            min={0} max={3} step={0.1}
-            value={light.intensity}
-            onChange={e => onLightsChange(lights.map(l => l.id === light.id ? { ...l, intensity: parseFloat(e.target.value) } : l))}
-            className="w-12 h-1 accent-amber-500"
-          />
-          <input
-            type="color"
-            value={light.color}
-            onChange={e => onLightsChange(lights.map(l => l.id === light.id ? { ...l, color: e.target.value } : l))}
-            className="w-4 h-4 rounded cursor-pointer border-0"
-          />
-          <button onClick={() => onLightsChange(lights.filter(l => l.id !== light.id))} className="cursor-pointer" style={{ color: TEXT_DIM }}>
-            <Trash2 size={9} />
-          </button>
+        <div key={light.id}>
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer" style={{ background: BG_TERTIARY }} onClick={() => setExpandedLight(expandedLight === light.id ? null : light.id)}>
+            <Lightbulb size={10} style={{ color: light.color }} />
+            <span className="text-[13px] flex-1 truncate" style={{ color: TEXT_PRIMARY }}>{light.name}</span>
+            <span className="text-[9px] px-1 py-0.5 rounded" style={{ background: BG_HOVER, color: TEXT_DIM }}>{LIGHT_TYPE_LABELS[light.type]}</span>
+            <input
+              type="range" min={0} max={3} step={0.1}
+              value={light.intensity}
+              onChange={e => { e.stopPropagation(); onLightsChange(lights.map(l => l.id === light.id ? { ...l, intensity: parseFloat(e.target.value) } : l)); }}
+              className="w-10 h-1 accent-amber-500"
+              onClick={e => e.stopPropagation()}
+            />
+            <input
+              type="color"
+              value={light.color}
+              onChange={e => { e.stopPropagation(); onLightsChange(lights.map(l => l.id === light.id ? { ...l, color: e.target.value } : l)); }}
+              className="w-4 h-4 rounded cursor-pointer border-0"
+              onClick={e => e.stopPropagation()}
+            />
+            <button onClick={e => { e.stopPropagation(); onLightsChange(lights.filter(l => l.id !== light.id)); }} className="cursor-pointer" style={{ color: TEXT_DIM }}>
+              <Trash2 size={9} />
+            </button>
+            {expandedLight === light.id ? <ChevronDown size={9} style={{ color: TEXT_DIM }} /> : <ChevronRight size={9} style={{ color: TEXT_DIM }} />}
+          </div>
+          {expandedLight === light.id && (
+            <div className="px-2 py-1.5 space-y-1.5 mt-0.5 rounded-b" style={{ background: BG_HOVER }}>
+              {/* Light name */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] w-8" style={{ color: TEXT_DIM }}>名称</span>
+                <input
+                  value={light.name}
+                  onChange={e => onLightsChange(lights.map(l => l.id === light.id ? { ...l, name: e.target.value } : l))}
+                  className="flex-1 px-1.5 py-0.5 rounded text-[13px] outline-none"
+                  style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}` }}
+                />
+              </div>
+              {/* Light type */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] w-8" style={{ color: TEXT_DIM }}>类型</span>
+                <select
+                  value={light.type}
+                  onChange={e => onLightsChange(lights.map(l => l.id === light.id ? { ...l, type: e.target.value as SceneLight['type'] } : l))}
+                  className="flex-1 px-1.5 py-0.5 rounded text-[13px] outline-none cursor-pointer"
+                  style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}` }}
+                >
+                  <option value="ambient">环境光</option>
+                  <option value="directional">方向光</option>
+                  <option value="point">点光</option>
+                  <option value="spot">聚光灯</option>
+                </select>
+              </div>
+              {/* Light position */}
+              {light.type !== 'ambient' && (
+                <div className="space-y-1">
+                  <span className="text-[9px]" style={{ color: TEXT_DIM }}>位置</span>
+                  <div className="grid grid-cols-3 gap-1">
+                    {(['x', 'y', 'z'] as const).map(axis => {
+                      const idx = { x: 0, y: 1, z: 2 }[axis];
+                      return (
+                        <div key={axis} className="flex flex-col">
+                          <label className="text-[8px]" style={{ color: axis === 'x' ? '#f73b3b' : axis === 'y' ? '#3bf73b' : '#3b3bf7' }}>{axis.toUpperCase()}</label>
+                          <input
+                            type="number" step={0.5}
+                            value={light.position[idx]}
+                            onChange={e => {
+                              const p: [number, number, number] = [...light.position];
+                              p[idx] = parseFloat(e.target.value) || 0;
+                              onLightsChange(lights.map(l => l.id === light.id ? { ...l, position: p } : l));
+                            }}
+                            className="w-full px-1 py-0.5 rounded text-[13px] outline-none"
+                            style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}` }}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {/* Spot angle */}
+              {light.type === 'spot' && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[9px] w-8" style={{ color: TEXT_DIM }}>角度</span>
+                  <input
+                    type="range" min={10} max={90} step={5} value={45}
+                    className="flex-1 h-1 accent-amber-500"
+                  />
+                  <span className="text-[9px]" style={{ color: TEXT_DIM }}>45°</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       ))}
     </div>
@@ -1537,16 +1616,23 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
       setIsAILayoutGenerating(false);
     }
   }, [selectedChatModelId]);
-  const saveScene = useCallback(async () => {
+  const saveScene = useCallback(async (overrideName?: string, overrideSceneData?: Record<string, unknown>) => {
     try {
-      const sceneData = {
-        name: sceneName,
-        objects,
-        lights,
-        cameraPreset,
-        savedCameraViews,
-        prompt,
-      };
+      let sceneData: Record<string, unknown>;
+      if (overrideSceneData) {
+        sceneData = { ...overrideSceneData, name: overrideName || (overrideSceneData.name as string) + ' 副本' };
+        delete sceneData.id; // Generate new id for duplicate
+        delete sceneData.updatedAt;
+      } else {
+        sceneData = {
+          name: overrideName || sceneName,
+          objects,
+          lights,
+          cameraPreset,
+          savedCameraViews,
+          prompt,
+        };
+      }
       const res = await fetch('/api/scene-studio', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1873,7 +1959,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
               <button
                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-all cursor-pointer"
                 style={{ background: isMonochrome ? '#252525' : '#1a1a1a', color: '#aaa', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}
-                onClick={saveScene}
+                onClick={() => saveScene()}
               >
                 <Save size={14} />
                 <span>保存</span>
@@ -2278,7 +2364,18 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                       <div className="text-sm font-medium mb-2" style={{ color: accent }}>生成结果</div>
                       <div className="grid grid-cols-2 gap-1.5">
                         {generationResults.map((result, i) => (
-                          <img key={i} src={result.url} alt={`结果${i + 1}`} className="w-full rounded cursor-pointer" onClick={() => addImageToCanvas(result.url)} />
+                          <div key={i} className="relative group">
+                            <img src={result.url} alt={`结果${i + 1}`} className="w-full rounded cursor-pointer" onClick={() => addImageToCanvas(result.url)} />
+                            <a
+                              href={result.url}
+                              download={`scene-result-${i + 1}.png`}
+                              className="absolute top-1 right-1 px-1.5 py-0.5 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                              style={{ background: isMonochrome ? '#333' : '#d4af37cc', color: isMonochrome ? '#fff' : '#000' }}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              ↓
+                            </a>
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -2335,7 +2432,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                       <button
                         className="w-full py-2 rounded text-sm font-medium cursor-pointer transition-colors"
                         style={{ background: isMonochrome ? '#333' : '#d4af3720', color: accent }}
-                        onClick={saveScene}
+                        onClick={() => saveScene()}
                       >
                         保存场景
                       </button>
@@ -2358,11 +2455,59 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                             </button>
                             <button
                               className="text-xs cursor-pointer"
+                              style={{ color: '#999' }}
+                              title="复制场景"
+                              onClick={() => {
+                                // Load scene, then save as copy
+                                fetch(`/api/scene-studio?sceneId=${scene.id}`)
+                                  .then(r => r.ok ? r.json() : null)
+                                  .then(data => {
+                                    if (data) saveScene(scene.name + ' 副本', data);
+                                  })
+                                  .catch(() => {});
+                              }}
+                            >
+                              📋
+                            </button>
+                            <button
+                              className="text-xs cursor-pointer"
                               style={{ color: '#ef4444' }}
                               onClick={() => deleteScene(scene.id)}
                             >
                               ✕
                             </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Generated images library */}
+                  {generationResults.length > 0 && (
+                    <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#222' : '#1a1a1a', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}>
+                      <div className="text-sm font-medium mb-2" style={{ color: accent }}>生成素材库 ({generationResults.length})</div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {generationResults.map((result, i) => (
+                          <div key={i} className="relative group">
+                            <img src={result.url} alt={`素材${i + 1}`} className="w-full rounded cursor-pointer aspect-square object-cover" onClick={() => addImageToCanvas(result.url)} />
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded gap-1">
+                              <button
+                                className="text-[9px] px-1 py-0.5 rounded cursor-pointer"
+                                style={{ background: accent, color: '#000' }}
+                                onClick={e => { e.stopPropagation(); addImageToCanvas(result.url); }}
+                              >
+                                加画布
+                              </button>
+                              <a
+                                href={result.url}
+                                download={`scene-asset-${i + 1}.png`}
+                                className="text-[9px] px-1 py-0.5 rounded cursor-pointer"
+                                style={{ background: isMonochrome ? '#444' : '#d4af37cc', color: isMonochrome ? '#fff' : '#000' }}
+                                onClick={e => e.stopPropagation()}
+                              >
+                                下载
+                              </a>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -2381,13 +2526,24 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                         📸 截取画面
                       </button>
                       {generationResults.length > 0 && (
-                        <button
-                          className="w-full py-2 rounded text-sm font-medium cursor-pointer transition-colors"
-                          style={{ background: isMonochrome ? '#333' : '#d4af3720', color: accent }}
-                          onClick={() => addImageToCanvas(generationResults[0].url)}
-                        >
-                          加入无限画布
-                        </button>
+                        <>
+                          <button
+                            className="w-full py-2 rounded text-sm font-medium cursor-pointer transition-colors"
+                            style={{ background: isMonochrome ? '#333' : '#d4af3720', color: accent }}
+                            onClick={() => addImageToCanvas(generationResults[0].url)}
+                          >
+                            加入无限画布
+                          </button>
+                          {generationResults.length > 1 && (
+                            <button
+                              className="w-full py-2 rounded text-sm cursor-pointer transition-colors"
+                              style={{ background: isMonochrome ? '#2a2a2a' : '#0d0d0d', color: '#bbb', border: isMonochrome ? '1px solid #333' : '1px solid #333' }}
+                              onClick={() => generationResults.forEach(r => addImageToCanvas(r.url))}
+                            >
+                              全部加入画布
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
