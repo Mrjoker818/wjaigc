@@ -817,8 +817,10 @@ export function topologicalSort(nodes: WorkflowNode[], connections: WorkflowConn
     }
   }
 
-  // 如果有环，将剩余节点追加（降级处理）
+  // 如果有环，记录警告并追加剩余节点（降级处理）
   if (sorted.length < nodes.length) {
+    const cycleNodeIds = nodes.filter(n => !sorted.find(s => s.id === n.id)).map(n => n.id);
+    console.warn('[workflow-engine] 检测到循环依赖，节点:', cycleNodeIds.join(', '), '— 这些节点可能在执行时阻塞');
     for (const node of nodes) {
       if (!sorted.find(n => n.id === node.id)) sorted.push(node);
     }

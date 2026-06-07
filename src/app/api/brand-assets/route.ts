@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbGetBrandAssets, dbGetBrandAsset, dbUpsertBrandAsset, dbDeleteBrandAsset, dbSetDefaultBrandAsset, type DbBrandAsset } from '@/lib/db-storage';
+import { optionalApiAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,9 +8,14 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
+    const auth = await optionalApiAuth(request);
     const userId = request.nextUrl.searchParams.get('userId');
     if (!userId) {
       return NextResponse.json({ error: '缺少 userId 参数' }, { status: 400 });
+    }
+    // If authenticated, verify the requesting user matches the target userId
+    if (auth.authenticated && auth.userId && auth.userId !== userId && auth.userRole !== 'admin') {
+      return NextResponse.json({ error: '无权访问其他用户数据' }, { status: 403 });
     }
 
     const assets = await dbGetBrandAssets(userId);
@@ -24,8 +30,13 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const auth = await optionalApiAuth(request);
     const body = await request.json();
-    const { action } = body;
+    const { action, userId } = body;
+    // If authenticated, verify the requesting user matches the target userId
+    if (auth.authenticated && auth.userId && userId && auth.userId !== userId && auth.userRole !== 'admin') {
+      return NextResponse.json({ error: '无权修改其他用户数据' }, { status: 403 });
+    }
 
     // ─── List assets ───
     if (action === 'list') {

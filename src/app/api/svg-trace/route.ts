@@ -157,21 +157,22 @@ async function resolveImageUrl(imageUrl: string): Promise<Buffer> {
     // Try /api/serve-upload/ path → data root uploads
     const serveUploadMatch = imageUrl.match(/^\/api\/serve-upload\/(.+)$/);
     if (serveUploadMatch) {
-      const filePath = path.join(dataRoot, serveUploadMatch[1]);
-      if (existsSync(filePath)) {
+      const filePath = path.normalize(path.join(dataRoot, serveUploadMatch[1]));
+      if (filePath.startsWith(path.normalize(dataRoot)) && existsSync(filePath)) {
         return await readFile(filePath);
       }
     }
 
     // Try public directory
-    const publicPath = path.join(workspacePath, 'public', imageUrl);
-    if (existsSync(publicPath)) {
+    const publicPath = path.normalize(path.join(workspacePath, 'public', imageUrl));
+    const publicRoot = path.normalize(path.join(workspacePath, 'public'));
+    if (publicPath.startsWith(publicRoot) && existsSync(publicPath)) {
       return await readFile(publicPath);
     }
 
     // Try data root
-    const dataPath = path.join(dataRoot, imageUrl.replace(/^\//, ''));
-    if (existsSync(dataPath)) {
+    const dataPath = path.normalize(path.join(dataRoot, imageUrl.replace(/^\//, '')));
+    if (dataPath.startsWith(path.normalize(dataRoot)) && existsSync(dataPath)) {
       return await readFile(dataPath);
     }
 

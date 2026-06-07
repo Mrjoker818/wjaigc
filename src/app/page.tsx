@@ -367,10 +367,11 @@ function CanvasApp() {
   // Keep a ref to latest images to avoid stale closure in setTimeout
   const latestImagesRef = useRef(images);
   latestImagesRef.current = images;
+  const currentUserRef = useRef(currentUser);
+  currentUserRef.current = currentUser;
   useEffect(() => {
     if (!currentProject) return;
     // 项目切换进行中时，跳过自动保存，避免旧闭包数据覆盖
-    if (switchingProjectRef.current) return;
     if (switchingProjectRef.current) return;
     // 防抖：1秒后保存
     if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
@@ -505,7 +506,7 @@ function CanvasApp() {
       if (!currentProject) return;
       try {
         const mgr = UserManagerCore.getInstance();
-        const persistableCanvasImages = images
+        const persistableCanvasImages = latestImagesRef.current
           .map(img => ({
             id: img.id,
             url: img.url.startsWith('data:') || img.url.startsWith('blob:') ? '' : img.url,
@@ -691,7 +692,7 @@ function CanvasApp() {
       const response = await fetch(apiEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...params, userId: currentUser?.id }),
+        body: JSON.stringify({ ...params, userId: currentUserRef.current?.id }),
       });
 
       const data = await response.json();
@@ -898,8 +899,7 @@ function CanvasApp() {
               const pollResponse = await fetch('/api/poll-task', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ taskId: currentTaskId, model: params.model, providerId: params.providerId, userId: currentUser?.id }),
-              });
+                body: JSON.stringify({ taskId: currentTaskId, model: params.model, providerId: params.providerId, userId: currentUserRef.current?.id }),              });
 
               const pollData = await pollResponse.json();
               console.log(`[poll] #${pollCount} taskId=${currentTaskId} success=${pollData.success} status=${pollData.status} retryable=${pollData.retryable} progress=${pollData.progress} taskElapsed=${Math.round((Date.now()-taskStartTime)/1000)}s`);
@@ -1024,7 +1024,7 @@ function CanvasApp() {
                 const saveResp = await fetch('/api/save-image', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ imageUrl: img.url, userId: currentUser?.id, sourceUrl: img.sourceUrl }),
+                  body: JSON.stringify({ imageUrl: img.url, userId: currentUserRef.current?.id, sourceUrl: img.sourceUrl }),
                 });
                 const saveData = await saveResp.json();
                 if (saveData.success && saveData.url) {
@@ -1131,7 +1131,7 @@ function CanvasApp() {
               const saveResp = await fetch('/api/save-image', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ imageUrl: img.url, userId: currentUser?.id, sourceUrl: img.sourceUrl }),
+                body: JSON.stringify({ imageUrl: img.url, userId: currentUserRef.current?.id, sourceUrl: img.sourceUrl }),
               });
               const saveData = await saveResp.json();
               if (saveData.success && saveData.url) {
@@ -1258,8 +1258,8 @@ function CanvasApp() {
 
   // 添加参考图到画布
   const handleAddToCanvas = useCallback(async (imageUrl: string) => {
-    // 检查图片是否已存在于画布中
-    if (images.some(img => img.url === imageUrl)) {
+    // 检查图片是否已存在于画布中（使用ref避免闭包过期）
+    if (latestImagesRef.current.some(img => img.url === imageUrl)) {
       toast.info('图片已在画布中', {
         description: '该参考图已经添加到画布',
         className: 'bg-[#141414] border-[#2a2a2a] text-white',
@@ -1522,8 +1522,7 @@ function CanvasApp() {
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...params, userId: currentUser?.id }),
-      });
+        body: JSON.stringify({ ...params, userId: currentUserRef.current?.id }),      });
 
       const data = await response.json();
 
@@ -1587,7 +1586,7 @@ function CanvasApp() {
               const pollResponse = await fetch('/api/poll-task', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ taskId: currentTaskId, model: params.model, providerId: params.providerId, userId: currentUser?.id }),
+                body: JSON.stringify({ taskId: currentTaskId, model: params.model, providerId: params.providerId, userId: currentUserRef.current?.id }),
               });
 
               const pollData = await pollResponse.json();

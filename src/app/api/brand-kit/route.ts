@@ -4,6 +4,7 @@ import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile 
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { dbListBrandKits, dbUpsertBrandKit, dbDeleteBrandKit } from '@/lib/db-storage';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -77,7 +78,9 @@ async function getLLMProvider(model?: string, providerId?: string) {
 
 // ─── GET handler: List all brand kits ─────────────────────────────────
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult) return authResult;
   try {
     const rows = await dbListBrandKits();
     const kits = rows.map(row => ({
@@ -112,6 +115,8 @@ function safeParseJSONArray(str: string): string[] {
 // ─── POST handler ────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult) return authResult;
   try {
     const body = await request.json();
     const { action } = body;

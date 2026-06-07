@@ -27,22 +27,27 @@ function findDataDir(): string | null {
   return null;
 }
 
-// Cached index data (loaded once, reused across requests)
+// Cached index data with TTL (5 minutes)
 let cachedIndexData: Record<string, unknown> | null = null;
+let cachedIndexTime = 0;
+const INDEX_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 function getIndexData(): Record<string, unknown> | null {
-  if (cachedIndexData !== null) return cachedIndexData;
+  const now = Date.now();
+  if (cachedIndexData !== null && now - cachedIndexTime < INDEX_CACHE_TTL) return cachedIndexData;
   const dir = findDataDir();
   if (dir) {
     try {
       const raw = readFileSync(join(dir, 'index.json'), 'utf-8');
       cachedIndexData = JSON.parse(raw);
+      cachedIndexTime = now;
       return cachedIndexData;
     } catch (err) {
       console.error('[omp-resources] Error reading index.json:', err);
     }
   }
   cachedIndexData = null;
+  cachedIndexTime = 0;
   return null;
 }
 

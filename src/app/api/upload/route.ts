@@ -23,6 +23,24 @@ export async function POST(request: NextRequest) {
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
 
+    // Magic byte validation: verify the file is actually an image
+    const IMAGE_SIGNATURES: Record<string, number[][]> = {
+      'image/jpeg': [[0xFF, 0xD8, 0xFF]],
+      'image/png': [[0x89, 0x50, 0x4E, 0x47]],
+      'image/gif': [[0x47, 0x49, 0x46]],
+      'image/webp': [[0x52, 0x49, 0x46, 0x46]], // RIFF header (webp starts with RIFF)
+      'image/svg+xml': [[0x3C]], // starts with <
+      'image/bmp': [[0x42, 0x4D]],
+    };
+    const allowedSigs = IMAGE_SIGNATURES[file.type] || Object.values(IMAGE_SIGNATURES).flat();
+    const headerBytes = Array.from(buffer.slice(0, 8));
+    const isValidImage = allowedSigs.some((sig: number[]) => 
+      sig.every((byte: number, idx: number) => headerBytes[idx] === byte)
+    );
+    if (!isValidImage && buffer.length > 8) {
+      return NextResponse.json({ error: 'File content does not match image format' }, { status: 400 });
+    }
+
     // Generate unique filename
     const ext = file.name.split('.').pop() || 'png';
     const timestamp = Date.now();

@@ -778,6 +778,19 @@ export interface DbBrandMaterial {
   created_at: number;
 }
 
+/** Allowed columns for brand_projects table (SQL injection prevention) */
+const BRAND_PROJECT_COLUMNS = new Set([
+  'id', 'name', 'description', 'style', 'industry', 'target_audience',
+  'color_palette', 'brand_keywords', 'reference_images', 'is_archived',
+  'created_at', 'updated_at',
+]);
+
+/** Allowed columns for brand_materials table (SQL injection prevention) */
+const BRAND_MATERIAL_COLUMNS = new Set([
+  'id', 'project_id', 'direction_id', 'material_type', 'title', 'ratio',
+  'image_url', 'prompt', 'score', 'status', 'created_at',
+]);
+
 export async function dbListBrandProjects(): Promise<DbBrandProject[]> {
   try {
     const { rows } = await execSql('SELECT * FROM wujie_brand_projects WHERE is_archived = false ORDER BY updated_at DESC');
@@ -807,7 +820,7 @@ export async function dbUpsertBrandProject(project: Partial<DbBrandProject> & { 
       const values: unknown[] = [];
       let idx = 1;
       for (const [k, v] of Object.entries(project)) {
-        if (k === 'id') continue;
+        if (k === 'id' || !BRAND_PROJECT_COLUMNS.has(k)) continue;
         fields.push(`${k} = $${idx}`);
         values.push(v);
         idx++;
@@ -821,7 +834,7 @@ export async function dbUpsertBrandProject(project: Partial<DbBrandProject> & { 
       const vals: unknown[] = [project.id, now, now];
       let pi = 1;
       for (const [k, v] of Object.entries(project)) {
-        if (k === 'id') continue;
+        if (k === 'id' || !BRAND_PROJECT_COLUMNS.has(k)) continue;
         pi++;
         cols.push(k);
         vals.push(v);
@@ -866,7 +879,7 @@ export async function dbUpsertBrandMaterial(material: Partial<DbBrandMaterial> &
       const values: unknown[] = [];
       let idx = 1;
       for (const [k, v] of Object.entries(material)) {
-        if (k === 'id') continue;
+        if (k === 'id' || !BRAND_MATERIAL_COLUMNS.has(k)) continue;
         fields.push(`${k} = $${idx}`);
         values.push(v);
         idx++;
@@ -877,7 +890,7 @@ export async function dbUpsertBrandMaterial(material: Partial<DbBrandMaterial> &
       const cols = ['id', 'created_at'];
       const vals: unknown[] = [material.id, now];
       for (const [k, v] of Object.entries(material)) {
-        if (k === 'id') continue;
+        if (k === 'id' || !BRAND_MATERIAL_COLUMNS.has(k)) continue;
         cols.push(k);
         vals.push(v);
       }

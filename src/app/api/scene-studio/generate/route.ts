@@ -180,7 +180,6 @@ export async function POST(request: NextRequest) {
         result: { status: 'processing', taskIds: parsed.taskIds },
         isAsync: true,
         apiBaseUrl: baseUrl,
-        apiKey,
         advancedParams: provider.advancedParams,
       });
     }

@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbGetEcomTemplates, dbGetEcomTemplate, dbUpsertEcomTemplate, dbDeleteEcomTemplate, dbBatchUpdateEcomTemplateOrder, type DbEcomTemplate } from '@/lib/db-storage';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 // ─── GET: List e-commerce templates ─────────────────────────────────────
 
 export async function GET(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult) return authResult;
   try {
     const enabledOnly = request.nextUrl.searchParams.get('enabled') === 'true';
     const templates = await dbGetEcomTemplates(enabledOnly);
@@ -29,6 +32,8 @@ export async function GET(request: NextRequest) {
 // ─── POST: CRUD operations ──────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult) return authResult;
   try {
     const body = await request.json();
     const { action } = body;

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { LLMClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 export const runtime = 'nodejs';
 
@@ -17,6 +18,8 @@ export const runtime = 'nodejs';
  *   backgroundMode: suggested background removal mode
  */
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult) return authResult;
   try {
     const { image } = await request.json();
 

@@ -7,6 +7,7 @@ import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile 
 import { executeAgentLoop, getToolsForLLM, type AgentContext, type AgentResult } from '@/lib/agent-engine';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { translateApiError } from '@/lib/api-error-translate';
+import { isTaskCancelled as isRegistryCancelled } from '@/lib/task-registry';
 export const runtime = 'nodejs';
 export const maxDuration = 600;
 
@@ -88,10 +89,10 @@ export async function POST(request: NextRequest) {
         }
       }, EDIT_GLOBAL_TIMEOUT_MS);
 
-      // 辅助函数：检查任务是否已被取消
+      // 辅助函数：检查任务是否已被取消（同时检查本地 store 和全局 task-registry）
       const isCancelled = () => {
         const task = localTaskStore.get(taskId);
-        return !task || task.status === 'cancelled';
+        return !task || task.status === 'cancelled' || isRegistryCancelled(taskId);
       };
 
       try {

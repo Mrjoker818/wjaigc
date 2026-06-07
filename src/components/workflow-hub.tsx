@@ -155,6 +155,7 @@ function formatTime(ts: number): string {
 interface WorkflowHubProps {
   onBack: () => void;
   onEditWorkflow: (wf: Workflow) => void;
+  onRunWorkflow?: (wf: Workflow) => void;
   themeStyle?: 'gold' | 'monochrome';
 }
 
@@ -201,7 +202,7 @@ const hubThemes: Record<string, Record<string, string>> = {
   },
 };
 
-export default function WorkflowHub({ onBack, onEditWorkflow, themeStyle = 'gold' }: WorkflowHubProps) {
+export default function WorkflowHub({ onBack, onEditWorkflow, onRunWorkflow, themeStyle = 'gold' }: WorkflowHubProps) {
   const T = hubThemes[themeStyle];
   const [workflows, setWorkflows] = useState(MOCK_WORKFLOWS);
   const [search, setSearch] = useState('');
@@ -220,8 +221,11 @@ export default function WorkflowHub({ onBack, onEditWorkflow, themeStyle = 'gold
 
   const handleRun = useCallback((id: string) => {
     const wf = workflows.find(w => w.id === id);
-    if (wf) onEditWorkflow(wf);
-  }, [workflows, onEditWorkflow]);
+    if (wf) {
+      if (onRunWorkflow) onRunWorkflow(wf);
+      else onEditWorkflow(wf);
+    }
+  }, [workflows, onEditWorkflow, onRunWorkflow]);
 
   const handleToggleFav = useCallback((id: string) => {
     setWorkflows(prev => prev.map(wf => wf.id === id ? { ...wf, favorited: !wf.favorited } : wf));

@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execSql } from '@/lib/db-client';
+import { getSessionUser } from '@/lib/server-auth';
 
 // GET /api/favorites - List favorites (paginated)
 export async function GET(request: NextRequest) {
   try {
+    const sessionUser = await getSessionUser(request);
+    if (!sessionUser) {
+      return NextResponse.json({ error: 'Login required' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
-    const userId = searchParams.get('userId') || '';
+    const userId = sessionUser.id; // Use session user ID instead of parameter
     const page = parseInt(searchParams.get('page') || '1', 10);
     const limit = Math.min(parseInt(searchParams.get('limit') || '20', 10), 100);
     const offset = (page - 1) * limit;
@@ -47,9 +53,13 @@ export async function GET(request: NextRequest) {
 // POST /api/favorites - Add to favorites
 export async function POST(request: NextRequest) {
   try {
+    const sessionUser = await getSessionUser(request);
+    if (!sessionUser) {
+      return NextResponse.json({ error: 'Login required' }, { status: 401 });
+    }
+
     const body = await request.json();
     const {
-      userId,
       username,
       imageUrl,
       prompt,
@@ -68,8 +78,9 @@ export async function POST(request: NextRequest) {
       sourceProjectId,
     } = body;
 
-    if (!userId || !imageUrl) {
-      return NextResponse.json({ error: 'userId and imageUrl are required' }, { status: 400 });
+    const userId = sessionUser.id;
+    if (!imageUrl) {
+      return NextResponse.json({ error: 'imageUrl is required' }, { status: 400 });
     }
 
     // Check duplicate
@@ -110,17 +121,22 @@ export async function POST(request: NextRequest) {
 // DELETE /api/favorites - Remove from favorites
 export async function DELETE(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-    const userId = searchParams.get('userId');
-
-    if (!id || !userId) {
-      return NextResponse.json({ error: 'id and userId are required' }, { status: 400 });
+    const sessionUser = await getSessionUser(request);
+    if (!sessionUser) {
+      return NextResponse.json({ error: 'Login required' }, { status: 401 });
     }
 
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json({ error: 'id is required' }, { status: 400 });
+    }
+
+    // Use string id directly for SQL (parameterized query is safe)
     await execSql(
       `DELETE FROM wujie_favorites WHERE id = $1 AND user_id = $2`,
-      [parseInt(id, 10), userId]
+      [id, sessionUser.id]
     );
 
     return NextResponse.json({ success: true });

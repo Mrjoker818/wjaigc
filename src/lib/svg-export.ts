@@ -727,13 +727,9 @@ export async function exportAsSVG(
   const data = imageData.data;
 
   // Stage 1: Color Quantization — Median-Cut for pro/studio, bit-shift for fast
-  let palette: number[][];
-  let indexed: Uint16Array;
-
-  // 统一使用 buildPaletteFast（稳定可靠），medianCutQuantize 作为备选保留但不调用
   const result = buildPaletteFast(data, width, height, colorPrecision, gradientStep);
-  palette = result.palette;
-  indexed = result.indexed;
+  const palette = result.palette;
+  const indexed = result.indexed;
 
   // Stage 1.5: Filter speckle
   filterSpeckle(indexed, width, height, speckleThreshold);

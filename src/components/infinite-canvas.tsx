@@ -671,10 +671,12 @@ export function InfiniteCanvas({
   }, [visibleImages, thumbnailVersion]);
 
   // ★ 远程 URL 后台持久化监听：当远程图片持久化为本地 URL 后，更新画布图片
+  // Use imagesRef to avoid stale closure over images
   useEffect(() => {
     const unsubscribe = onPersistComplete((originalUrl: string, localUrl: string) => {
+      const currentImages = imagesRef.current;
       let changed = false;
-      const updated = images.map(img => {
+      const updated = currentImages.map(img => {
         if (img.url === originalUrl) {
           changed = true;
           return { ...img, url: localUrl };
@@ -684,7 +686,7 @@ export function InfiniteCanvas({
       if (changed) onImagesChange(updated);
     });
     return unsubscribe;
-  }, [images, onImagesChange]);
+  }, [onImagesChange]);
 
   // Navigate to image when navigateToImageId changes
   useEffect(() => {

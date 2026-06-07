@@ -95,7 +95,10 @@ def decode_base64_to_np(b64_str: str):
     img = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
     if img is None:
         raise ValueError("无法解码图片")
-    if len(img.shape) == 2:
+    # Handle single-channel (H,W,1) by squeezing to (H,W) first
+    if img.ndim == 3 and img.shape[2] == 1:
+        img = img.squeeze(axis=2)
+    if img.ndim == 2:
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
     elif img.shape[2] == 4:
         img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)

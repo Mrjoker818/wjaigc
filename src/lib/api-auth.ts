@@ -1,6 +1,7 @@
 import 'server-only';
 
 import type { NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
 import { getSessionUser } from './server-auth';
 
 /**
@@ -52,7 +53,25 @@ export async function requireApiAuth(request: Request | NextRequest): Promise<{
 }> {
   const result = await optionalApiAuth(request);
   if (!result.authenticated && process.env.MANDATORY_API_AUTH === 'true') {
+    // Return 401-like marker so callers can check and reject
     return { authenticated: false };
   }
   return result;
+}
+
+/**
+ * Require API auth and return 401 NextResponse if not authenticated.
+ * Use this in API routes that MUST have authentication.
+ * Returns user info if authenticated, or a NextResponse with 401 status.
+ */
+export async function requireApiAuthOrReject(request: Request | NextRequest): Promise<{
+  authenticated: true;
+  userId: string;
+  userRole: string;
+} | NextResponse> {
+  const result = await optionalApiAuth(request);
+  if (!result.authenticated) {
+    return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+  }
+  return result as { authenticated: true; userId: string; userRole: string };
 }

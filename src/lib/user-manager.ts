@@ -5,7 +5,8 @@ import { APP_VERSION_LABEL } from '@/config/app-meta';
 const STORAGE_KEY = 'unbounded_ai_user_data';
 const CURRENT_USER_KEY = 'unbounded_ai_current_user';
 const DEFAULT_ADMIN_NAME = 'Mr.joker';
-const DEFAULT_ADMIN_PASSWORD = 'dongdong851212';
+// Default admin password is no longer stored in client code for security.
+// The server handles authentication; client sends the password the user types.
 
 const userStorageFolder = (userId: string): string => `data/users/${userId}`;
 
@@ -121,7 +122,7 @@ export class UserManager {
       admin = {
         id: 'admin_mr_joker',
         name: DEFAULT_ADMIN_NAME,
-        password: DEFAULT_ADMIN_PASSWORD,
+        password: '',  // Password is managed server-side; client never stores it
         role: 'admin',
         status: 'active',
         apiPermissions: defaultApiPermissions(),
@@ -142,7 +143,7 @@ export class UserManager {
 
     const normalizedAdmin: User = {
       ...admin,
-      password: admin.password || DEFAULT_ADMIN_PASSWORD,
+      password: admin.password || '',  // Password managed server-side
       role: 'admin',
       status: admin.status || 'active',
       apiPermissions: admin.apiPermissions || defaultApiPermissions(),

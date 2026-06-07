@@ -10,6 +10,8 @@ type DataArea = 'images' | 'chat' | 'projects' | 'uploads' | 'layers' | 'exports
 
 const allowedAreas = new Set<DataArea>(['images', 'chat', 'projects', 'uploads', 'layers', 'exports', '3d']);
 
+const MAX_PAYLOAD_SIZE = 10 * 1024 * 1024; // 10MB limit for payload
+
 function safeFilename(name: string): string {
   return name.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').slice(0, 120) || 'asset';
 }
@@ -43,6 +45,12 @@ export async function POST(request: NextRequest) {
     const area = String(body.area || 'projects') as DataArea;
     if (!allowedAreas.has(area)) {
       return NextResponse.json({ success: false, error: 'Invalid data area' }, { status: 400 });
+    }
+
+    // Payload size limit
+    const payloadStr = typeof body.payload === 'string' ? body.payload : JSON.stringify(body.payload ?? '');
+    if (payloadStr.length > MAX_PAYLOAD_SIZE) {
+      return NextResponse.json({ success: false, error: 'Payload too large (max 10MB)' }, { status: 413 });
     }
 
     if (requestedUserId !== 'anonymous' && requestedUserId !== sessionUser.id && sessionUser.role !== 'admin') {

@@ -470,7 +470,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
   const handleAddApi = async () => {
     if (!apiName.trim() || !apiBaseUrl.trim() || !apiKey.trim()) return;
     const models = selectedModels.length ? selectedModels : apiModel.trim() ? [apiModel.trim()] : [];
-    await fetch('/api/admin/apis', {
+    const res = await fetch('/api/admin/apis', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -486,6 +486,11 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
         ],
       }),
     });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: '保存失败' }));
+      alert(data.error || '保存失败，请重试');
+      return;
+    }
     setApiName('');
     setApiBaseUrl('');
     setApiKey('');
@@ -539,11 +544,16 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     ];
     if (paramsWithCompat.length > 0) updates.advancedParams = paramsWithCompat;
 
-    await fetch('/api/admin/apis', {
+    const res = await fetch('/api/admin/apis', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'update', providerId: editingProviderId, updates }),
     });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: '更新失败' }));
+      alert(data.error || '更新失败，请重试');
+      return;
+    }
     // Reset form
     setEditingProviderId(null);
     setApiName('');

@@ -33,6 +33,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Only http/https image URLs can be cached' }, { status: 400 });
     }
 
+    // SSRF protection: block private/internal network addresses
+    const hostname = parsedUrl.hostname.toLowerCase();
+    if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(hostname)) {
+      return NextResponse.json({ success: false, error: 'Private network URLs are not allowed' }, { status: 403 });
+    }
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+      return NextResponse.json({ success: false, error: 'Localhost URLs are not allowed' }, { status: 403 });
+    }
+    if (/^(169\.254\.|fe80:)/.test(hostname)) {
+      return NextResponse.json({ success: false, error: 'Link-local URLs are not allowed' }, { status: 403 });
+    }
+    if (/^0\./.test(hostname)) {
+      return NextResponse.json({ success: false, error: 'Invalid URL host' }, { status: 403 });
+    }
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 分钟超时，4K 大图下载可能需要较长时间
 

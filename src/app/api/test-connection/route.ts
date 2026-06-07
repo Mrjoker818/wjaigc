@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     // Use the base URL as-is (user provides the complete base URL including /v1 if needed)
     const targetBaseUrl = (baseUrl || 'https://api.apimart.ai/v1').replace(/\/+$/, '');
 
-    console.log('🔍 Testing API connection:', targetBaseUrl, 'credential:', apiKey.substring(0, 8) + '...');
+    console.log('🔍 Testing API connection:', targetBaseUrl, 'credential:', `***${apiKey.slice(-4)}`);
 
     // Strategy 1: Try /models endpoint (OpenAI-compatible)
     // This works with most OpenAI-compatible APIs

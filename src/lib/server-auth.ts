@@ -16,7 +16,13 @@ export const WUJIE_SESSION_COOKIE = 'wujie_session';
 export const WUJIE_SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 const DEFAULT_ADMIN_NAME = process.env.WUJIE_ADMIN_USERNAME || 'Mr.joker';
-const DEFAULT_ADMIN_PASSWORD = process.env.WUJIE_ADMIN_PASSWORD || 'dongdong851212';
+const DEFAULT_ADMIN_PASSWORD = process.env.WUJIE_ADMIN_PASSWORD || (() => {
+  // Security warning: using hardcoded default password. Set WUJIE_ADMIN_PASSWORD env var for production!
+  if (process.env.COZE_PROJECT_ENV === 'PROD') {
+    console.warn('[SECURITY] WUJIE_ADMIN_PASSWORD not set! Using default password in production is insecure.');
+  }
+  return 'dongdong851212';
+})();
 
 type StoredUser = Omit<User, 'password'> & {
   passwordHash: string;
@@ -46,7 +52,19 @@ function defaultApiPermissions() {
 }
 
 function authSecret(): string {
-  return process.env.WUJIE_AUTH_SECRET || process.env.NEXTAUTH_SECRET || 'wujie-local-session-secret';
+  const secret = process.env.WUJIE_AUTH_SECRET || process.env.NEXTAUTH_SECRET;
+  if (!secret) {
+    if (process.env.COZE_PROJECT_ENV === 'PROD') {
+      console.warn('[SECURITY] WUJIE_AUTH_SECRET/NEXTAUTH_SECRET not set! Using generated secret. Sessions will not persist across restarts.');
+    }
+    // Generate a per-process random fallback secret (sessions won't persist across restarts)
+    const _fallbackKey = '__wujie_auth_secret__';
+    if (!(globalThis as Record<string, unknown>)[_fallbackKey]) {
+      (globalThis as Record<string, unknown>)[_fallbackKey] = crypto.randomBytes(32).toString('hex');
+    }
+    return (globalThis as Record<string, unknown>)[_fallbackKey] as string;
+  }
+  return secret;
 }
 
 function hashPassword(password: string): string {

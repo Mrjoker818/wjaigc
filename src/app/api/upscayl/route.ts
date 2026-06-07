@@ -387,6 +387,7 @@ export async function GET() {
 
 // POST: 执行放大
 export async function POST(request: NextRequest) {
+  let tmpDir = '';
   try {
     const body = await request.json();
     const { imageUrl, model, scale, tileSize, customWidth, compression, outputFormat } = body as {
@@ -468,7 +469,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 创建临时目录
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upscayl-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upscayl-'));
 
     try {
       // 下载原始图片
@@ -541,6 +542,7 @@ export async function POST(request: NextRequest) {
       throw innerError;
     }
   } catch (error: unknown) {
+    if (tmpDir) { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {} }
     console.error('[upscayl] Error:', error);
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({

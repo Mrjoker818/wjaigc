@@ -1461,7 +1461,6 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
         const pollModel = modelInfo.model;
         const pollProviderId = modelInfo.providerId;
         const pollApiBaseUrl = data.apiBaseUrl;
-        const pollApiKey = data.apiKey;
         const pollAdvancedParams = data.advancedParams;
 
         for (const taskId of taskIds) {
@@ -1470,7 +1469,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
               const pollRes = await fetch('/api/poll-task', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ taskId, model: pollModel, providerId: pollProviderId, apiBaseUrl: pollApiBaseUrl, apiKey: pollApiKey, advancedParams: pollAdvancedParams }),
+                body: JSON.stringify({ taskId, model: pollModel, providerId: pollProviderId, apiBaseUrl: pollApiBaseUrl, advancedParams: pollAdvancedParams }),
               });
               const pollData = await pollRes.json();
               if (pollData.status === 'completed' && pollData.result?.imageUrl) {

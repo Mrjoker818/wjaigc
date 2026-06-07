@@ -1,9 +1,16 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { listManagedUsers } from '@/lib/server-auth';
+import { requireApiAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // Require authentication to prevent user enumeration
+  const auth = await requireApiAuth(request);
+  if (!auth.authenticated) {
+    return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
+  }
+
   try {
     const users = (await listManagedUsers()).filter(user => user.role !== 'admin' && user.status !== 'disabled');
     return NextResponse.json({

@@ -214,11 +214,12 @@ export class UniversalApiManager {
 
   private async discoverModels(provider: ApiProvider): Promise<ModelInfo[]> {
     try {
+      const apiKey = await this.ensureDecrypted(provider.id);
       const baseUrl = provider.baseUrl.replace(/\/+$/, '');
       
       const response = await fetchWithV1Retry(baseUrl, '/models', {
         headers: {
-          'Authorization': `Bearer ${this.getDecryptedKey(provider.id)}`,
+          'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
         signal: AbortSignal.timeout(15000),
@@ -396,11 +397,12 @@ export class UniversalApiManager {
     }
 
     try {
+      const apiKey = await this.ensureDecrypted(provider.id);
       const baseUrl = provider.baseUrl.replace(/\/+$/, '');
       
       const response = await fetchWithV1Retry(baseUrl, '/models', {
         headers: {
-          'Authorization': `Bearer ${this.getDecryptedKey(provider.id)}`,
+          'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
         signal: AbortSignal.timeout(15000),
@@ -488,7 +490,7 @@ export class UniversalApiManager {
       'Content-Type': 'application/json',
     };
 
-    const decryptedKey = this.getDecryptedKey(provider.id);
+    const decryptedKey = await this.ensureDecrypted(provider.id);
     if (config.authType === 'bearer') {
       headers['Authorization'] = `Bearer ${decryptedKey}`;
     } else if (config.authType === 'header' && config.apiKeyHeader) {
@@ -541,7 +543,7 @@ export class UniversalApiManager {
       'Content-Type': 'application/json',
     };
 
-    const decryptedKey = this.getDecryptedKey(provider.id);
+    const decryptedKey = await this.ensureDecrypted(provider.id);
     if (config.authType === 'bearer') {
       headers['Authorization'] = `Bearer ${decryptedKey}`;
     } else if (config.authType === 'header' && config.apiKeyHeader) {

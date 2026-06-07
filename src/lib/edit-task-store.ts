@@ -9,7 +9,7 @@ import type { ApiCompatProfile } from '@/lib/api-compatibility';
 
 export interface EditTask {
   id: string;
-  status: 'processing' | 'completed' | 'failed';
+  status: 'processing' | 'completed' | 'failed' | 'cancelled';
   progress: number;
   stage: string;
   error?: string;
@@ -20,7 +20,6 @@ export interface EditTask {
   remotePollInfo?: {
     taskId: string;
     apiBaseUrl: string;
-    apiKey: string;
     model: string;
     prompt: string;
     allTaskIds: string[];
@@ -47,7 +46,7 @@ if (typeof setInterval !== 'undefined' && !(globalThis as Record<string, unknown
     for (const [id, task] of editTaskStore) {
       const isOld = now - task.createdAt > 30 * 60 * 1000;
       const isTerminal = task.status === 'completed' || task.status === 'failed';
-      const isZombie = now - task.createdAt > 2 * 60 * 60 * 1000; // 2小时僵尸
+      const isZombie = now - task.createdAt > 30 * 60 * 1000; // 30分钟僵尸（processing太久也应清理，释放apiKey）
       if ((isOld && isTerminal) || isZombie) {
         editTaskStore.delete(id);
       }
@@ -97,4 +96,23 @@ export function failEditTask(taskId: string, error: string, networkError = false
     createdAt: editTaskStore.get(taskId)?.createdAt || Date.now(),
     completedAt: Date.now(),
   });
+}
+
+export function cancelEditTask(taskId: string): boolean {
+  const task = editTaskStore.get(taskId);
+  if (task && task.status === 'processing') {
+    editTaskStore.set(taskId, {
+      ...task,
+      status: 'cancelled',
+      stage: '已取消',
+      completedAt: Date.now(),
+    });
+    return true;
+  }
+  return false;
+}
+
+export function isEditTaskCancelled(taskId: string): boolean {
+  const task = editTaskStore.get(taskId);
+  return task?.status === 'cancelled';
 }

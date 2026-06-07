@@ -13,6 +13,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
  * 4. 重置时调用 resetTimer()
  */
 export function useProgressTimer() {
+  const startTimeRef = useRef<number | null>(null);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [elapsed, setElapsed] = useState<number>(0);
   const [totalTime, setTotalTime] = useState<number | null>(null);
@@ -22,6 +23,7 @@ export function useProgressTimer() {
   // 启动计时器
   const startTimer = useCallback((taskId?: string) => {
     const now = Date.now();
+    startTimeRef.current = now;
     setStartTime(now);
     setElapsed(0);
     setTotalTime(null);
@@ -34,10 +36,10 @@ export function useProgressTimer() {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
-    if (startTime) {
-      setTotalTime(Date.now() - startTime);
+    if (startTimeRef.current) {
+      setTotalTime(Date.now() - startTimeRef.current);
     }
-  }, [startTime]);
+  }, []);
 
   // 重置计时器
   const resetTimer = useCallback(() => {
@@ -45,6 +47,7 @@ export function useProgressTimer() {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
+    startTimeRef.current = null;
     setStartTime(null);
     setElapsed(0);
     setTotalTime(null);
@@ -71,11 +74,13 @@ export function useProgressTimer() {
     }
   }, [currentTaskId, stopTimer]);
 
-  // 计时器效果
+  // 计时器效果 — use startTimeRef.current to avoid stale closure
   useEffect(() => {
-    if (startTime && !totalTime) {
+    if (startTimeRef.current !== null && totalTime === null) {
       timerRef.current = setInterval(() => {
-        setElapsed(Date.now() - startTime);
+        if (startTimeRef.current) {
+          setElapsed(Date.now() - startTimeRef.current);
+        }
       }, 1000);
       return () => {
         if (timerRef.current) {
@@ -84,7 +89,7 @@ export function useProgressTimer() {
         }
       };
     }
-  }, [startTime, totalTime]);
+  }, [totalTime]);
 
   // 格式化时间
   const formatTime = (ms: number): string => {

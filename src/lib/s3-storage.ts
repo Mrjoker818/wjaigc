@@ -22,19 +22,26 @@ function getStorage(): S3Storage | null {
   
   const endpointUrl = process.env.COZE_BUCKET_ENDPOINT_URL;
   const bucketName = process.env.COZE_BUCKET_NAME;
+  const accessKey = process.env.COZE_BUCKET_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID || '';
+  const secretKey = process.env.COZE_BUCKET_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY || '';
   
   if (!endpointUrl || !bucketName) {
     console.warn('[s3-storage] S3 not configured: missing COZE_BUCKET_ENDPOINT_URL or COZE_BUCKET_NAME');
     return null;
   }
   
+  if (!accessKey || !secretKey) {
+    console.warn('[s3-storage] S3 credentials not configured: missing access key / secret key');
+    return null;
+  }
+  
   try {
     _storage = new S3Storage({
       endpointUrl,
-      accessKey: '',
-      secretKey: '',
+      accessKey,
+      secretKey,
       bucketName,
-      region: 'cn-beijing',
+      region: process.env.COZE_BUCKET_REGION || 'cn-beijing',
     });
     console.log(`[s3-storage] S3 initialized. Bucket: ${bucketName}`);
     return _storage;

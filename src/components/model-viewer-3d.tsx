@@ -17,9 +17,16 @@ interface EBState { hasError: boolean }
 
 class CanvasErrorBoundary extends Component<EBProps, EBState> {
   state: EBState = { hasError: false };
-  static getDerivedStateFromError(): EBState { return { hasError: false }; }
+  static getDerivedStateFromError(): EBState { return { hasError: true }; }
   componentDidCatch(err: Error) { this.props.onError(err.message); }
   render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+          3D 模型加载失败
+        </div>
+      );
+    }
     return this.props.children;
   }
 }
@@ -173,6 +180,9 @@ function GlbModel({ url, onInfo, onLoadComplete }: SubModelProps) {
   const raw = useLoader(GLTFLoader, url);
   const processed = useRef(false);
   useEffect(() => {
+    processed.current = false;
+  }, [url]);
+  useEffect(() => {
     if (processed.current) return;
     processed.current = true;
     const scene = raw.scene;
@@ -180,7 +190,7 @@ function GlbModel({ url, onInfo, onLoadComplete }: SubModelProps) {
     centerAndScaleModel(scene);
     onInfo(computeModelInfo(scene, 'glb', raw));
     onLoadComplete();
-  }, [raw, onInfo, onLoadComplete]);
+  }, [raw, onInfo, onLoadComplete, url]);
   return <primitive object={raw.scene} />;
 }
 
@@ -188,13 +198,16 @@ function ObjModel({ url, onInfo, onLoadComplete }: SubModelProps) {
   const raw = useLoader(OBJLoader, url);
   const processed = useRef(false);
   useEffect(() => {
+    processed.current = false;
+  }, [url]);
+  useEffect(() => {
     if (processed.current) return;
     processed.current = true;
     ensureVisibleMaterials(raw);
     centerAndScaleModel(raw);
     onInfo(computeModelInfo(raw, 'obj', raw));
     onLoadComplete();
-  }, [raw, onInfo, onLoadComplete]);
+  }, [raw, onInfo, onLoadComplete, url]);
   return <primitive object={raw} />;
 }
 
@@ -202,13 +215,16 @@ function FbxModel({ url, onInfo, onLoadComplete }: SubModelProps) {
   const raw = useLoader(FBXLoader, url);
   const processed = useRef(false);
   useEffect(() => {
+    processed.current = false;
+  }, [url]);
+  useEffect(() => {
     if (processed.current) return;
     processed.current = true;
     ensureVisibleMaterials(raw);
     centerAndScaleModel(raw);
     onInfo(computeModelInfo(raw, 'fbx', raw));
     onLoadComplete();
-  }, [raw, onInfo, onLoadComplete]);
+  }, [raw, onInfo, onLoadComplete, url]);
   return <primitive object={raw} />;
 }
 

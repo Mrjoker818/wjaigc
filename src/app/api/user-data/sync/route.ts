@@ -4,6 +4,13 @@ import { dbGetUserData, dbSetUserData } from '@/lib/db-storage';
 
 export const dynamic = 'force-dynamic';
 
+// Allowed key prefixes for user data sync (prevent overwriting system data)
+const ALLOWED_KEY_PREFIXES = ['projects', 'favorites', 'brand_', 'font_', 'canvas_', 'workflow_', 'settings_', 'theme_', 'custom_'];
+
+function isKeyAllowed(key: string): boolean {
+  return ALLOWED_KEY_PREFIXES.some(prefix => key.startsWith(prefix));
+}
+
 /**
  * GET /api/user-data/sync?key=projects
  * Read user data from database (fallback to empty)
@@ -18,6 +25,9 @@ export async function GET(request: NextRequest) {
     const key = request.nextUrl.searchParams.get('key');
     if (!key) {
       return NextResponse.json({ success: false, error: 'Missing key parameter' }, { status: 400 });
+    }
+    if (!isKeyAllowed(key)) {
+      return NextResponse.json({ success: false, error: 'Key not allowed' }, { status: 403 });
     }
 
     const value = await dbGetUserData(sessionUser.id, key);
@@ -46,6 +56,9 @@ export async function POST(request: NextRequest) {
     const key = body.key;
     if (!key) {
       return NextResponse.json({ success: false, error: 'Missing key parameter' }, { status: 400 });
+    }
+    if (!isKeyAllowed(key)) {
+      return NextResponse.json({ success: false, error: 'Key not allowed' }, { status: 403 });
     }
 
     await dbSetUserData(sessionUser.id, key, body.value ?? null);

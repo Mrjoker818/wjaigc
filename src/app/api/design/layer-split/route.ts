@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 export const maxDuration = 120;
 
@@ -14,6 +15,8 @@ function normalizeEndpoint() {
 }
 
 export async function POST(req: NextRequest) {
+  const authResult = await requireApiAuthOrReject(req);
+  if (authResult) return authResult;
   try {
     const body = await req.json() as LayerSplitRequest;
     const imageUrl = String(body.imageUrl || '');

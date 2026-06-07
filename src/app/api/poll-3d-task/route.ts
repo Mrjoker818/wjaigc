@@ -2,6 +2,24 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 
+// Filter sensitive fields (apiKey, secret, token, password) from response data before sending to client
+function filterSensitiveFields(obj: unknown): unknown {
+  if (!obj || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(filterSensitiveFields);
+  const SENSITIVE_KEYS = ['apikey', 'api_key', 'secret', 'token', 'password', 'authorization', 'credential'];
+  const filtered: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+    if (SENSITIVE_KEYS.some(k => key.toLowerCase().includes(k))) {
+      filtered[key] = '[FILTERED]';
+    } else if (typeof value === 'object' && value !== null) {
+      filtered[key] = filterSensitiveFields(value);
+    } else {
+      filtered[key] = value;
+    }
+  }
+  return filtered;
+}
+
 /**
  * Poll 3D task status API
  * For async 3D generation APIs (Hunyuan3D, Meshy, Tripo, etc.) that return task IDs
@@ -280,7 +298,8 @@ export async function POST(request: NextRequest) {
       assetUrl,
       previewImageUrl,
       modelUrls,
-      rawData: data,
+      // Filter sensitive fields from rawData before sending to client
+      rawData: filterSensitiveFields(data),
     });
   } catch (error) {
     console.error('[poll-3d-task] Fatal error:', error);

@@ -46,7 +46,14 @@ export async function GET(request: NextRequest) {
 
     // Priority 1: Check localPath (extracted from embedded markdown images)
     if (item.localPath) {
-      const localFilePath = path.join(process.cwd(), 'public', item.localPath);
+      // Path traversal prevention: normalize and verify the path is within public/gallery
+      const resolvedPath = path.resolve(process.cwd(), 'public', item.localPath);
+      const allowedDir = path.resolve(process.cwd(), 'public', 'gallery');
+      if (!resolvedPath.startsWith(allowedDir)) {
+        console.warn('[gallery-image] Path traversal blocked:', item.localPath);
+        return NextResponse.json({ error: 'Invalid path' }, { status: 403 });
+      }
+      const localFilePath = resolvedPath;
       if (fs.existsSync(localFilePath)) {
         const stat = fs.statSync(localFilePath);
         if (stat.size > 100) {

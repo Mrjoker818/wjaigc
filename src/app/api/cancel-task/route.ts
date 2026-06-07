@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cancelTask, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
+import { cancelEditTask } from '@/lib/edit-task-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,6 +36,9 @@ export async function POST(request: NextRequest) {
     }
 
     cancelTask(taskId);
+
+    // 同时取消 edit-task-store 中的任务
+    cancelEditTask(taskId);
 
     return NextResponse.json({
       success: true,
