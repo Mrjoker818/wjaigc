@@ -1877,7 +1877,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
       {/* Draggable floating window */}
       <div
         data-popup
-        className="relative flex rounded-xl overflow-hidden shadow-2xl border"
+        className="relative flex flex-col rounded-xl overflow-hidden shadow-2xl border"
         style={{
           width: isMinimized ? 320 : 'calc(100vw - 80px)',
           height: isMinimized ? 'auto' : 'calc(100vh - 80px)',
@@ -1921,7 +1921,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
 
         {/* === Minimized: only title bar visible === */}
         {!isMinimized && (
-        <>
+        <div className="flex-1 flex flex-row overflow-hidden">
           {/* === Left: 3D Viewport === */}
           <div className="flex-1 flex flex-col overflow-hidden">
             {/* Top transform toolbar */}
@@ -2648,7 +2648,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
               )}
             </div>
           </div>
-        </>
+        </div>
         )}
       </div>
     </div>,
