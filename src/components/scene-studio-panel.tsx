@@ -962,7 +962,7 @@ function AIAutoLayoutPanel({ onApplyLayout, isGenerating, isMonochrome, chatMode
         className="w-full px-2 py-1.5 rounded-lg text-[13px] outline-none resize-none"
         style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}`, scrollbarWidth: 'thin' }}
       />
-      {chatModels.length > 0 && (
+      {chatModels.length > 0 ? (
         <select
           value={selectedChatModel}
           onChange={e => onSelectChatModel(e.target.value)}
@@ -970,11 +970,13 @@ function AIAutoLayoutPanel({ onApplyLayout, isGenerating, isMonochrome, chatMode
           style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}` }}
         >
           {chatModels.map(m => (
-            <option key={`${m.providerId}::${m.id}`} value={`${m.providerId}::${m.id}`}>
+            <option key={m.id} value={m.id}>
               {m.name}
             </option>
           ))}
         </select>
+      ) : (
+        <p className="text-[10px] py-1" style={{ color: TEXT_DIM }}>请先在管理员后台配置 LLM 模型</p>
       )}
       <div className="space-y-1">
         <p className="text-[9px]" style={{ color: TEXT_DIM }}>快速模板：</p>
@@ -1169,25 +1171,22 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
         ]);
         if (imgRes.ok) {
           const imgData = await imgRes.json();
-          const models = (imgData.models || []).flatMap((p: { id: string; name: string; models: { id: string; name: string; providerId?: string }[] }) =>
-            p.models.map((m: { id: string; name: string; providerId?: string }) => ({
-              id: m.providerId ? `${m.providerId}::${m.id}` : m.id,
-              name: m.name || m.id,
-              providerId: m.providerId || p.id,
-            }))
-          );
+          // API returns flat models array: { id, name, providerId, ... }
+          const models = (imgData.models || []).map((m: { id: string; name: string; providerId?: string }) => ({
+            id: m.providerId ? `${m.providerId}::${m.id}` : m.id,
+            name: m.name || m.id,
+            providerId: m.providerId || '',
+          }));
           setImageModels(models);
           if (models.length > 0) setSelectedImageModelId(models[0].id);
         }
         if (chatRes.ok) {
           const chatData = await chatRes.json();
-          const models = (chatData.models || []).flatMap((p: { id: string; name: string; models: { id: string; name: string; providerId?: string }[] }) =>
-            p.models.map((m: { id: string; name: string; providerId?: string }) => ({
-              id: m.providerId ? `${m.providerId}::${m.id}` : m.id,
-              name: m.name || m.id,
-              providerId: m.providerId || p.id,
-            }))
-          );
+          const models = (chatData.models || []).map((m: { id: string; name: string; providerId?: string }) => ({
+            id: m.providerId ? `${m.providerId}::${m.id}` : m.id,
+            name: m.name || m.id,
+            providerId: m.providerId || '',
+          }));
           setChatModels(models);
           if (models.length > 0) setSelectedChatModelId(models[0].id);
         }
@@ -1453,7 +1452,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
     } finally {
       setIsGenerating(false);
     }
-  }, [prompt, generationMode, strengthMode, negativePrompt, captureScreenshot, aspectRatio, imageCount]);
+  }, [prompt, generationMode, strengthMode, negativePrompt, captureScreenshot, aspectRatio, imageCount, selectedImageModelId]);
 
   // AI Auto Layout
   const handleAILayout = useCallback(async (description: string) => {
@@ -1503,7 +1502,10 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
         }),
       });
 
-      if (!res.ok) throw new Error('AI layout failed');
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `AI layout failed (${res.status})`);
+      }
       const data = await res.json();
       const content = data.choices?.[0]?.message?.content || data.content || '';
 
@@ -1529,12 +1531,12 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
       }
     } catch (err) {
       console.error('AI layout error:', err);
+      const msg = err instanceof Error ? err.message : '未知错误';
+      alert(`AI 布景失败：${msg}`);
     } finally {
       setIsAILayoutGenerating(false);
     }
-  }, []);
-
-  // Save scene to server
+  }, [selectedChatModelId]);
   const saveScene = useCallback(async () => {
     try {
       const sceneData = {
@@ -2128,18 +2130,22 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                   {/* Image model selector */}
                   <div className="mb-2">
                     <label className="text-xs text-muted-foreground mb-1 block">图像模型</label>
-                    <select
-                      value={selectedImageModelId}
-                      onChange={e => setSelectedImageModelId(e.target.value)}
-                      className="w-full rounded-md px-2 py-1.5 text-xs border border-border bg-muted text-foreground"
-                    >
-                      <option value="">自动选择</option>
-                      {imageModels.map(m => (
-                        <option key={`${m.id}-${m.providerId}`} value={`${m.providerId}::${m.id}`}>
-                          {m.name || m.id}
-                        </option>
-                      ))}
-                    </select>
+                    {imageModels.length > 0 ? (
+                      <select
+                        value={selectedImageModelId}
+                        onChange={e => setSelectedImageModelId(e.target.value)}
+                        className="w-full rounded-md px-2 py-1.5 text-xs border border-border bg-muted text-foreground"
+                      >
+                        <option value="">自动选择</option>
+                        {imageModels.map(m => (
+                          <option key={m.id} value={m.id}>
+                            {m.name || m.id}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <p className="text-[11px] py-1" style={{ color: TEXT_DIM }}>请先在管理员后台配置图像模型</p>
+                    )}
                   </div>
                   {/* Generation mode */}
                   <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#222' : '#1a1a1a', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}>
