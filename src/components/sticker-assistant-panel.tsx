@@ -141,7 +141,7 @@ interface StickerAssistantPanelProps {
   onAddImages?: (urls: string[]) => void;
 }
 
-/* ──────────────────── 白色/浅色背景移除（确保透明PNG，保留白边，抗锯齿） ──────────────────── */
+/* ──────────────────── 白色/浅色背景移除（参考 zinxtick production-qa：edge-flood + 结构化蒙版 + 边缘颜色修复 + 通道预乘抗锯齿） ──────────────────── */
 async function removeBackgroundToTransparent(imageUrl: string): Promise<string | null> {
   return new Promise((resolve) => {
     try {
@@ -295,38 +295,54 @@ async function removeBackgroundToTransparent(imageUrl: string): Promise<string |
           }
         }
 
-        // ── 6. 多次 box blur 平滑 alpha mask 消除锯齿 ──
-        // 使用 3x3 box blur 迭代3次（近似高斯模糊，半径约2px）
-        const blurred = new Float32Array(width * height);
-        for (let pass = 0; pass < 3; pass++) {
-          const src = pass === 0 ? mask : blurred;
-          const dst = pass === 0 ? blurred : new Float32Array(width * height);
+        // ── 6. 多次分离式 box blur（水平+垂直，近似高斯模糊，O(N)复杂度） ──
+        // 使用 5x1 + 1x5 分离式卷积，半径更大，抗锯齿效果更好
+        const blurRadius = 2; // 半径2 = 5px宽
+        const blurPasses = 4; // 4次迭代，近似σ≈2.4的高斯
+        let bSrc = new Float32Array(mask);
+        let bDst = new Float32Array(width * height);
+
+        for (let pass = 0; pass < blurPasses; pass++) {
+          // 水平方向
           for (let y = 0; y < height; y++) {
             for (let x = 0; x < width; x++) {
-              let sum = 0, count = 0;
-              for (let dy = -1; dy <= 1; dy++) {
-                for (let dx = -1; dx <= 1; dx++) {
-                  const nx = x + dx, ny = y + dy;
-                  if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-                    sum += src[ny * width + nx];
-                    count++;
-                  }
+              let sum = 0, cnt = 0;
+              for (let dx = -blurRadius; dx <= blurRadius; dx++) {
+                const nx = x + dx;
+                if (nx >= 0 && nx < width) {
+                  sum += bSrc[y * width + nx];
+                  cnt++;
                 }
               }
-              dst[y * width + x] = sum / count;
+              bDst[y * width + x] = sum / cnt;
             }
           }
-          if (pass < 2) blurred.set(dst);
-          else blurred.set(dst); // final pass
+          // 垂直方向
+          const tmp = new Float32Array(width * height);
+          for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+              let sum = 0, cnt = 0;
+              for (let dy = -blurRadius; dy <= blurRadius; dy++) {
+                const ny = y + dy;
+                if (ny >= 0 && ny < height) {
+                  sum += bDst[ny * width + x];
+                  cnt++;
+                }
+              }
+              tmp[y * width + x] = sum / cnt;
+            }
+          }
+          bSrc = tmp;
         }
+        const blurred = bSrc;
 
         // ── 7. 对模糊后的 mask 做阈值化，保留平滑过渡 ──
-        // alpha < 0.3 → 完全透明，alpha > 0.7 → 完全不透明，中间线性过渡
+        // 使用更宽松的过渡区间（0.2-0.8），让边缘更平滑
         for (let i = 0; i < width * height; i++) {
           let alpha: number;
-          if (blurred[i] < 0.3) alpha = 0;
-          else if (blurred[i] > 0.7) alpha = 1;
-          else alpha = (blurred[i] - 0.3) / 0.4;
+          if (blurred[i] < 0.2) alpha = 0;
+          else if (blurred[i] > 0.8) alpha = 1;
+          else alpha = (blurred[i] - 0.2) / 0.6;
 
           // 白边区域强制不透明
           if (whiteBorderExpanded[i]) alpha = 1;
@@ -334,36 +350,72 @@ async function removeBackgroundToTransparent(imageUrl: string): Promise<string |
           data[i * 4 + 3] = Math.round(alpha * 255);
         }
 
-        // ── 8. 白边外侧1px抗锯齿：对白边边缘的像素做premultiplied alpha混合 ──
-        // 让白边外缘从白色平滑过渡到透明，消除锯齿
+        // ── 8. 边缘颜色修复（参考 repairEdgeColors + zinxtick production-qa） ──
+        // 半透明像素用周围不透明像素颜色替换，消除锯齿边缘的"晕边"（fringe/halo）伪影
+        const edgeRadius = 2;
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const idx = (y * width + x) * 4;
+            const a = data[idx + 3];
+            if (a <= 0 || a >= 252) continue; // 只处理半透明像素
+
+            // 在 5x5 区域采样不透明像素颜色
+            const rSamples: number[] = [], gSamples: number[] = [], bSamples: number[] = [];
+            for (let dy = -edgeRadius; dy <= edgeRadius; dy++) {
+              for (let dx = -edgeRadius; dx <= edgeRadius; dx++) {
+                const nx = x + dx, ny = y + dy;
+                if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+                const nIdx = (ny * width + nx) * 4;
+                if (data[nIdx + 3] >= 252) {
+                  rSamples.push(data[nIdx]);
+                  gSamples.push(data[nIdx + 1]);
+                  bSamples.push(data[nIdx + 2]);
+                }
+              }
+            }
+
+            if (rSamples.length > 0) {
+              // 使用中位数颜色替换（比均值更抗异常值）
+              rSamples.sort((a, b) => a - b);
+              gSamples.sort((a, b) => a - b);
+              bSamples.sort((a, b) => a - b);
+              const mid = Math.floor(rSamples.length / 2);
+              data[idx] = rSamples.length % 2 !== 0 ? rSamples[mid] : Math.round((rSamples[mid - 1] + rSamples[mid]) / 2);
+              data[idx + 1] = gSamples.length % 2 !== 0 ? gSamples[mid] : Math.round((gSamples[mid - 1] + gSamples[mid]) / 2);
+              data[idx + 2] = bSamples.length % 2 !== 0 ? bSamples[mid] : Math.round((bSamples[mid - 1] + bSamples[mid]) / 2);
+            }
+          }
+        }
+
+        // ── 9. 白边外缘抗锯齿：对白边边缘的半透明像素做 premultiplied alpha 混合 ──
         for (let y = 1; y < height - 1; y++) {
           for (let x = 1; x < width - 1; x++) {
             const idx = y * width + x;
             if (!whiteBorderExpanded[idx]) continue;
             const a = data[idx * 4 + 3];
             if (a < 255) {
-              // 白边像素alpha不足255，将颜色向白色混合
               const px = idx * 4;
               const factor = a / 255;
               data[px] = Math.round(255 + (data[px] - 255) * factor);
               data[px + 1] = Math.round(255 + (data[px + 1] - 255) * factor);
               data[px + 2] = Math.round(255 + (data[px + 2] - 255) * factor);
-              data[px + 3] = 255; // 白边始终不透明
+              data[px + 3] = 255;
             }
           }
         }
 
         ctx.putImageData(imageData, 0, 0);
 
-        // ── 9. 检查变化率 ──
+        // ── 10. 检查变化率 ──
         let transparentCount = 0;
-        for (let i = 3; i < data.length; i += 4) {
-          if (data[i] < 128) transparentCount++;
+        const outData = ctx.getImageData(0, 0, width, height).data;
+        for (let i = 3; i < outData.length; i += 4) {
+          if (outData[i] < 128) transparentCount++;
         }
         const transparentRatio = transparentCount / (width * height);
         if (transparentRatio < 0.05) { resolve(null); return; }
 
-        // ── 10. 持久化 ──
+        // ── 11. 持久化 ──
         canvas.toBlob(async (blob) => {
           if (!blob) { resolve(null); return; }
           try {
@@ -430,6 +482,8 @@ export default function StickerAssistantPanel({
 
   /* ── 计划 ── */
   const [plan, setPlan] = useState<StickerItem[]>([]);
+  const planRef = useRef<StickerItem[]>([]);
+  planRef.current = plan; // 同步最新 plan 到 ref
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState('');
 
@@ -699,162 +753,256 @@ ${themeDesc}
     }
   }, [subject, subjectDetail, styleKey, themeKey, count, customStyle, customTheme, selectedStyle, selectedTheme, chatModelId, chatModels, subjectSource, subjectImage]);
 
-  /* ── Step 1 → 2: 逐个生成贴纸 ── */
+  /* ── Step 1 → 2: 批量生成贴纸 ── */
   const handleStartGeneration = useCallback(() => {
     setStep(2);
     setGenerating(true);
   }, []);
 
-  useEffect(() => {
-    if (!generating || step !== 2 || plan.length === 0) return;
-    if (isGeneratingItemRef.current) return; // 防止并发生图
-    const idx = plan.findIndex(p => p.status === 'pending' || p.status === 'failed');
-    if (idx === -1) { setGenerating(false); isGeneratingItemRef.current = false; return; }
-    setGenIdx(idx);
-    isGeneratingItemRef.current = true;
+  // 并发控制：最多同时3个请求，检测平台是否支持批量(n>1)
+  const MAX_CONCURRENT = 3;
+  const batchSupportRef = useRef<'unknown' | 'supported' | 'unsupported'>('unknown');
+  const batchDetectRef = useRef(false);
+  const [batchMode, setBatchMode] = useState<'unknown' | 'supported' | 'unsupported'>('unknown');
 
-    const item = plan[idx];
+  // 检测当前API是否支持批量生成（n>1）
+  // 策略：通过模型能力推断，而非发送真实生成请求（避免浪费API额度）
+  const detectBatchSupport = useCallback((): boolean => {
+    if (batchDetectRef.current) return batchSupportRef.current === 'supported';
+    batchDetectRef.current = true;
+
+    // 已知不支持 n>1 的模型模式：DALL-E 3, Gemini 图像模型, Midjourney
+    // 已知支持 n>1 的模型模式：Stable Diffusion, Flux, 部分国产模型
+    if (!selectedModelId) {
+      batchSupportRef.current = 'unsupported';
+      setBatchMode('unsupported');
+      return false;
+    }
+
+    const modelId = selectedModelId.includes('::') ? selectedModelId.split('::').pop()! : selectedModelId;
+    const id = modelId.toLowerCase();
+
+    // 明确支持批量生成的模型
+    const batchSupportedPatterns = [
+      'flux', 'sdxl', 'stable-diffusion', 'sd-',
+      'kandinsky', 'deepfloyd', 'wuerstchen',
+      'doubao-seedream', 'seedream', 'wanx',
+      'kling', 'ideogram', 'hidream',
+      'playground', 'leonardoai',
+    ];
+
+    // 明确不支持批量生成的模型（这些模型n参数固定为1）
+    const batchUnsupportedPatterns = [
+      'dall-e', 'gpt-image', 'gpt-4o',
+      'gemini', 'midjourney', 'mj-',
+      'imagen', 'recraft-v3',
+    ];
+
+    const isSupported = batchSupportedPatterns.some(p => id.includes(p));
+    const isUnsupported = batchUnsupportedPatterns.some(p => id.includes(p));
+
+    if (isUnsupported) {
+      batchSupportRef.current = 'unsupported';
+      setBatchMode('unsupported');
+      return false;
+    } else if (isSupported) {
+      batchSupportRef.current = 'supported';
+      setBatchMode('supported');
+      return true;
+    } else {
+      // 未知模型：保守处理，不支持批量
+      batchSupportRef.current = 'unsupported';
+      setBatchMode('unsupported');
+      return false;
+    }
+  }, [selectedModelId]);
+
+  // 模型切换时重置批量检测
+  useEffect(() => {
+    batchDetectRef.current = false;
+    batchSupportRef.current = 'unknown';
+    setBatchMode('unknown');
+  }, [selectedModelId]);
+
+  // 生成单个表情的完整流程（返回结果URL或抛出错误）
+  const generateOneSticker = useCallback(async (item: StickerItem): Promise<string> => {
     const styleP = styleKey === 'custom' ? customStyle : selectedStyle.positivePrompt;
     const negP = styleKey === 'custom' ? '' : selectedStyle.negativePrompt;
-
     const identityLock = buildIdentityLock();
 
-    // 构建生成 prompt — 恢复 03ea886 验证有效的格式
+    // 构建生成 prompt
     let prompt: string;
     if (subjectImage && subjectSource === 'image') {
-      // 03ea886 验证 95% 成功率的 prompt 格式：[ref] + preserve + identityLock + IMPORTANT
       prompt = `[ref] Use the provided reference image(s) as the base. Create an image of: Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. While creating this new image, strictly preserve the main subject and focal point of the reference image(s) — do NOT change the original product/object identity, strictly preserve the artistic style and visual aesthetics of the reference image(s), strictly preserve the color palette and tone of the reference image(s), strictly preserve the fine details and textures of the reference image(s). IMPORTANT: The product/object in the result MUST be the SAME product/object as in the reference image — do NOT substitute or replace it with a different product. ${identityLock}. Feel free to reimagine the composition and layout structure, the scene and environment setting. ${subjectDetail ? `[Subject visual details: ${subjectDetail}]` : ''}. Transparent PNG background, die-cut sticker style, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}` : ''}`;
     } else {
       prompt = `Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. Subject identity: ${identityLock}. Transparent PNG background, die-cut sticker style, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}` : ''}`;
     }
 
-    const doGenerate = async () => {
+    const requestBody: Record<string, unknown> = {
+      prompt,
+      size: '1024x1024',
+      aspectRatio: '1:1',
+      n: 1,
+      outputCount: 1,
+      quality: 'standard',
+    };
+
+    if (selectedModelId) {
+      const selModel = models.find(m => m.id === selectedModelId);
+      if (selModel) {
+        requestBody.model = selModel.id.includes('::') ? selModel.id.split('::').pop()! : selModel.id;
+        requestBody.providerId = selModel.providerId || undefined;
+      } else if (selectedModelId.includes('::')) {
+        requestBody.model = selectedModelId.split('::').pop()!;
+        requestBody.providerId = selectedModelId.split('::')[0];
+      } else {
+        requestBody.model = selectedModelId;
+      }
+    }
+
+    // 如果有主体图片，持久化后作为参考图传入
+    if (subjectImage && subjectSource === 'image') {
       try {
-        setPlan(prev => prev.map(p => p.id === item.id ? { ...p, status: 'generating' as const } : p));
-
-        // 构建请求体
-        const requestBody: Record<string, unknown> = {
-          prompt,
-          size: '1024x1024',
-          aspectRatio: '1:1',
-          n: 1,
-          outputCount: 1,
-          quality: 'standard',
-        };
-
-        // 如果选了模型，拆解 providerId::modelId 分别传递（与画布图生图一致）
-        if (selectedModelId) {
-          const selModel = models.find(m => m.id === selectedModelId);
-          if (selModel) {
-            requestBody.model = selModel.id.includes('::') ? selModel.id.split('::').pop()! : selModel.id;
-            requestBody.providerId = selModel.providerId || undefined;
-          } else if (selectedModelId.includes('::')) {
-            requestBody.model = selectedModelId.split('::').pop()!;
-            requestBody.providerId = selectedModelId.split('::')[0];
-          } else {
-            requestBody.model = selectedModelId;
-          }
-        }
-
-        // 如果有主体图片，持久化后作为参考图传入（使用 referenceCategories 触发 API 主体一致性增强）
-        if (subjectImage && subjectSource === 'image') {
-          try {
-            // 先将 data URL 持久化为服务器 URL
-            let persistedUrl = subjectImage;
-            if (subjectImage.startsWith('data:')) {
-              const saveRes = await fetch('/api/save-image', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ imageUrl: subjectImage }),
-              });
-              if (saveRes.ok) {
-                const saveData = await saveRes.json();
-                if (saveData.url) persistedUrl = saveData.url;
-              }
-            }
-            // 03ea886 验证 95% 成功率的配置：
-            // referenceCategories 触发 API [REFERENCE MODE] 主体一致性增强
-            // 同时 prompt 中 [ref] + preserve + identityLock + IMPORTANT 共同作用
-            // 两者不冲突，反而形成双重保障
-            requestBody.referenceImages = [persistedUrl];
-            requestBody.referenceMode = 'reference';
-            requestBody.referenceCategories = { '0': ['subject', 'style', 'color', 'detail'] };
-            requestBody.referenceStrengths = [95];
-            // strength 0.15 = 画布图生图在主体保留最高时的最小值（最大保留）
-            requestBody.strength = 0.15;
-          } catch { /* 使用原始 URL 兜底 */ }
-        }
-
-        const res = await fetch('/api/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody),
-        });
-        const data = await res.json();
-        if (!res.ok || data.success === false) {
-          const apiError = data.error || data.message || `生成失败: ${res.status}`;
-          throw new Error(apiError);
-        }
-
-        let imageUrl: string | undefined;
-        if (data.imageUrls?.length > 0) {
-          // 直接模式：generate API 直接返回图片 URL 数组
-          imageUrl = data.imageUrls[0];
-        } else if (data.taskIds?.length > 0) {
-          // 轮询模式：通过 poll-task 等待结果
-          const taskId = data.taskIds[0];
-          // 拆解 model 和 providerId 给 poll-task
-          const pollModelId = selectedModelId?.includes('::') ? selectedModelId.split('::').pop()! : (selectedModelId || undefined);
-          const pollProviderId = selectedModelId?.includes('::') ? selectedModelId.split('::')[0] : undefined;
-          for (let attempt = 0; attempt < 120; attempt++) {
-            await new Promise(r => setTimeout(r, 2000));
-            const pollRes = await fetch('/api/poll-task', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId, model: pollModelId, providerId: pollProviderId }),
-            });
-            if (!pollRes.ok) continue;
-            const pollData = await pollRes.json();
-            if (pollData.status === 'completed') {
-              // poll-task 返回 imageUrl（单数字符串）
-              imageUrl = pollData.imageUrl || (pollData.imageUrls?.length > 0 ? pollData.imageUrls[0] : undefined);
-              break;
-            }
-            if (pollData.status === 'failed') throw new Error(pollData.error || '生成失败');
-          }
-        }
-        if (!imageUrl) throw new Error('未获取到图片');
-
-        // 持久化
-        try {
+        let persistedUrl = subjectImage;
+        if (subjectImage.startsWith('data:')) {
           const saveRes = await fetch('/api/save-image', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ imageUrl }),
+            body: JSON.stringify({ imageUrl: subjectImage }),
           });
           if (saveRes.ok) {
             const saveData = await saveRes.json();
-            if (saveData.url) imageUrl = saveData.url;
+            if (saveData.url) persistedUrl = saveData.url;
           }
-        } catch { /* keep original URL */ }
+        }
+        requestBody.referenceImages = [persistedUrl];
+        requestBody.referenceMode = 'reference';
+        requestBody.referenceCategories = { '0': ['subject', 'style', 'color', 'detail'] };
+        requestBody.referenceStrengths = [95];
+        requestBody.strength = 0.15;
+      } catch { /* 使用原始 URL 兜底 */ }
+    }
 
-        // 自动移除白色/浅色背景，确保输出为透明PNG
-        try {
-          if (imageUrl) {
-            const transparentUrl = await removeBackgroundToTransparent(imageUrl);
-            if (transparentUrl) imageUrl = transparentUrl;
-          }
-        } catch { /* 保留原图 */ }
+    const res = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || data.message || `生成失败: ${res.status}`);
+    }
 
-        setPlan(prev => prev.map(p => p.id === item.id ? { ...p, status: 'done' as const, imageUrl } : p));
-      } catch (err: unknown) {
-        setPlan(prev => prev.map(p => p.id === item.id ? { ...p, status: 'failed' as const, error: err instanceof Error ? err.message : '生成失败' } : p));
-      } finally {
-        isGeneratingItemRef.current = false;
+    let imageUrl: string | undefined;
+    if (data.imageUrls?.length > 0) {
+      imageUrl = data.imageUrls[0];
+    } else if (data.taskIds?.length > 0) {
+      const taskId = data.taskIds[0];
+      const pollModelId = selectedModelId?.includes('::') ? selectedModelId.split('::').pop()! : (selectedModelId || undefined);
+      const pollProviderId = selectedModelId?.includes('::') ? selectedModelId.split('::')[0] : undefined;
+      for (let attempt = 0; attempt < 120; attempt++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const pollRes = await fetch('/api/poll-task', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskId, model: pollModelId, providerId: pollProviderId }),
+        });
+        if (!pollRes.ok) continue;
+        const pollData = await pollRes.json();
+        if (pollData.status === 'completed') {
+          imageUrl = pollData.imageUrl || (pollData.imageUrls?.length > 0 ? pollData.imageUrls[0] : undefined);
+          break;
+        }
+        if (pollData.status === 'failed') throw new Error(pollData.error || '生成失败');
       }
+    }
+    if (!imageUrl) throw new Error('未获取到图片');
+
+    // 持久化
+    try {
+      const saveRes = await fetch('/api/save-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl }),
+      });
+      if (saveRes.ok) {
+        const saveData = await saveRes.json();
+        if (saveData.url) imageUrl = saveData.url;
+      }
+    } catch { /* keep original URL */ }
+
+    // 自动移除白色/浅色背景，确保输出为透明PNG
+    try {
+      if (imageUrl) {
+        const transparentUrl = await removeBackgroundToTransparent(imageUrl);
+        if (transparentUrl) imageUrl = transparentUrl;
+      }
+    } catch { /* 保留原图 */ }
+
+    return imageUrl!;
+  }, [styleKey, customStyle, selectedStyle, selectedModelId, models, subjectImage, subjectSource, subjectDetail, buildIdentityLock]);
+
+  useEffect(() => {
+    if (!generating || step !== 2 || plan.length === 0) return;
+    if (isGeneratingItemRef.current) return; // 防止重复触发
+
+    isGeneratingItemRef.current = true;
+
+    const runBatchGeneration = async () => {
+      // 1. 先检测平台是否支持批量生成
+      const supportsBatch = detectBatchSupport();
+
+      // 2. 持续处理直到所有项完成
+      while (true) {
+        // 收集当前待处理的项
+        const currentPlan = planRef.current;
+        const pendingItems = currentPlan.filter(p => p.status === 'pending' || p.status === 'failed');
+        if (pendingItems.length === 0) break;
+
+        // 取一批待处理项（最多MAX_CONCURRENT个）
+        const batch = pendingItems.slice(0, MAX_CONCURRENT);
+
+        // 标记为 generating
+        for (const item of batch) {
+          setPlan(prev => prev.map(p => p.id === item.id ? { ...p, status: 'generating' as const } : p));
+        }
+        setGenIdx(batch[0].id - 1);
+
+        if (batch.length > 1) {
+          // ── 并发批量生成：同时发送多个请求，大幅提升速度 ──
+          // 注意：由于每个表情的 prompt 不同，无法使用 API 的 n>1 参数
+          // 改用并发请求（最多 MAX_CONCURRENT 个同时进行）
+          const results = await Promise.allSettled(
+            batch.map(item => generateOneSticker(item))
+          );
+          for (let i = 0; i < results.length; i++) {
+            const result = results[i];
+            const item = batch[i];
+            if (result.status === 'fulfilled') {
+              setPlan(prev => prev.map(p => p.id === item.id ? { ...p, status: 'done' as const, imageUrl: result.value } : p));
+            } else {
+              setPlan(prev => prev.map(p => p.id === item.id ? { ...p, status: 'failed' as const, error: result.reason?.message || '生成失败' } : p));
+            }
+          }
+        } else {
+          // ── 单张生成 ──
+          const item = batch[0];
+          try {
+            const imageUrl = await generateOneSticker(item);
+            setPlan(prev => prev.map(p => p.id === item.id ? { ...p, status: 'done' as const, imageUrl } : p));
+          } catch (err: unknown) {
+            setPlan(prev => prev.map(p => p.id === item.id ? { ...p, status: 'failed' as const, error: err instanceof Error ? err.message : '生成失败' } : p));
+          }
+        }
+      }
+
+      setGenerating(false);
+      setGenIdx(-1);
+      isGeneratingItemRef.current = false;
     };
-    doGenerate();
-  }, [generating, step, plan, styleKey, customStyle, selectedStyle, selectedTheme, buildIdentityLock, selectedModelId, subjectImage, subjectSource, subjectDetail]);
+
+    runBatchGeneration();
+  }, [generating, step, plan, detectBatchSupport, generateOneSticker]);
 
   /* ── 重试失败项 ── */
   const handleRetry = useCallback((id: number) => {
@@ -865,7 +1013,7 @@ ${themeDesc}
   const handleStop = useCallback(() => {
     setGenerating(false);
     setGenIdx(-1);
-    isGeneratingItemRef.current = false;    isGeneratingItemRef.current = false;
+    isGeneratingItemRef.current = false;
   }, []);
 
   /* ── 全部添加到画布 ── */
@@ -916,6 +1064,7 @@ ${themeDesc}
 
   const doneCount = plan.filter(p => p.status === 'done').length;
   const failCount = plan.filter(p => p.status === 'failed').length;
+  const generatingCount = plan.filter(p => p.status === 'generating').length;
 
   return (
     <div
@@ -1356,6 +1505,9 @@ ${themeDesc}
               >
                 <ChevronRight size={15} /> 开始生成
               </button>
+              <div className="text-xs mt-1 text-center" style={{ color: t.textSub }}>
+                {batchMode === 'supported' ? '批量模式：支持同时生成多张' : batchMode === 'unsupported' ? `并发模式：最多${MAX_CONCURRENT}张同时生成` : '将自动检测批量生成能力'}
+              </div>
             </div>
           )}
 
@@ -1365,6 +1517,7 @@ ${themeDesc}
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium" style={{ color: t.text }}>
                   生成进度 {doneCount}/{plan.length}
+                  {generating && generatingCount > 0 && <span className="ml-1 opacity-60">（{generatingCount}张同时生成中）</span>}
                   {failCount > 0 && <span className="text-red-500 ml-1">({failCount}失败)</span>}
                 </span>
                 {generating ? (
