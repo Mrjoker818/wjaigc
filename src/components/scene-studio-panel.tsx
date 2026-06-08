@@ -37,6 +37,7 @@ import {
   Send, ImagePlus, Video, LayoutGrid, Store,
   Package, Tag, Archive, Cuboid, Circle,
   Layout, Columns3, Minimize2, Expand,
+  Undo2, Redo2,
   Trash, Bookmark, RotateCcw as ResetIcon, GripVertical,
   Scan, Paintbrush, LayoutDashboard, Minus, Hammer, Boxes
 } from 'lucide-react';
@@ -1223,6 +1224,60 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
   const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>('translate');
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>('45degree');
 
+  // Undo/Redo system
+  const MAX_SCENE_HISTORY = 50;
+  const sceneHistoryRef = useRef<{ objects: SceneObject[]; lights: SceneLight[] }[]>([]);
+  const sceneHistoryIdxRef = useRef(-1);
+  const isUndoRedoRef = useRef(false); // 防止 undo/redo 操作自身记录历史
+
+  const pushSceneHistory = useCallback((objs: SceneObject[], lts: SceneLight[]) => {
+    if (isUndoRedoRef.current) return;
+    const snapshot = { objects: JSON.parse(JSON.stringify(objs)), lights: JSON.parse(JSON.stringify(lts)) };
+    const idx = sceneHistoryIdxRef.current;
+    // 裁剪 redo 分支
+    if (idx < sceneHistoryRef.current.length - 1) {
+      sceneHistoryRef.current = sceneHistoryRef.current.slice(0, idx + 1);
+    }
+    sceneHistoryRef.current.push(snapshot);
+    if (sceneHistoryRef.current.length > MAX_SCENE_HISTORY) {
+      sceneHistoryRef.current.shift();
+    }
+    sceneHistoryIdxRef.current = sceneHistoryRef.current.length - 1;
+  }, []);
+
+  const handleSceneUndo = useCallback(() => {
+    const idx = sceneHistoryIdxRef.current;
+    if (idx <= 0) return;
+    isUndoRedoRef.current = true;
+    sceneHistoryIdxRef.current = idx - 1;
+    const snapshot = sceneHistoryRef.current[idx - 1];
+    setObjects(snapshot.objects);
+    setLights(snapshot.lights);
+    // Reset flag after React processes the state updates (useEffect runs)
+    queueMicrotask(() => { isUndoRedoRef.current = false; });
+  }, []);
+
+  const handleSceneRedo = useCallback(() => {
+    const idx = sceneHistoryIdxRef.current;
+    if (idx >= sceneHistoryRef.current.length - 1) return;
+    isUndoRedoRef.current = true;
+    sceneHistoryIdxRef.current = idx + 1;
+    const snapshot = sceneHistoryRef.current[idx + 1];
+    setObjects(snapshot.objects);
+    setLights(snapshot.lights);
+    // Reset flag after React processes the state updates (useEffect runs)
+    queueMicrotask(() => { isUndoRedoRef.current = false; });
+  }, []);
+
+  const canUndo = sceneHistoryIdxRef.current > 0;
+  const canRedo = sceneHistoryIdxRef.current < sceneHistoryRef.current.length - 1;
+
+  // Push history when objects or lights change
+  useEffect(() => {
+    pushSceneHistory(objects, lights);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [objects, lights]);
+
   // AI generation state
   const [generationMode, setGenerationMode] = useState<GenerationMode>('image-to-image');
   const [strengthMode, setStrengthMode] = useState<StrengthMode>('balanced');
@@ -1306,6 +1361,24 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
   });
 
   const accent = isMonochrome ? '#3b82f6' : ACCENT;
+
+  // Keyboard shortcut: Ctrl+Z / Ctrl+Shift+Z
+  useEffect(() => {
+    if (isMinimized) return;
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleSceneRedo();
+        } else {
+          handleSceneUndo();
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isMinimized, handleSceneUndo, handleSceneRedo]);
+
   const selectedObject = useMemo(() => objects.find(o => o.id === selectedId) || null, [objects, selectedId]);
 
   // Window drag handlers (consistent with ImageEditor pattern)
@@ -1901,6 +1974,23 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
             <span className="text-xs" style={{ color: '#666' }}>{sceneName}</span>
           </div>
           <div className="flex items-center gap-1">
+            <button
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              onClick={handleSceneUndo}
+              disabled={sceneHistoryIdxRef.current <= 0}
+              title="撤销 (Ctrl+Z)"
+            >
+              <Undo2 size={14} style={{ color: '#888' }} />
+            </button>
+            <button
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              onClick={handleSceneRedo}
+              disabled={sceneHistoryIdxRef.current >= sceneHistoryRef.current.length - 1}
+              title="重做 (Ctrl+Shift+Z)"
+            >
+              <Redo2 size={14} style={{ color: '#888' }} />
+            </button>
+            <div style={{ width: 1, height: 16, background: '#333', margin: '0 2px' }} />
             <button
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-white/10 transition-colors"
               onClick={() => setIsMinimized(!isMinimized)}
