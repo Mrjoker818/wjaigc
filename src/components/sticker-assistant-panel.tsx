@@ -83,36 +83,36 @@ const STYLE_PRESETS: StylePreset[] = [
     key: 'general',
     label: '大众通用',
     icon: '😊',
-    positivePrompt: 'cute cartoon sticker, thick outlines, vivid solid colors, flat shading, transparent background, sticker art style, expressive pose, die-cut sticker, chibi proportions',
-    negativePrompt: 'photorealistic, 3d render, complex details, gradient, realistic texture, blurry, low quality, watermark, text, solid background, white background',
+    positivePrompt: 'cute cartoon sticker, thick outlines, vivid solid colors, flat shading, clean white background, sticker art style, expressive pose, die-cut sticker, chibi proportions',
+    negativePrompt: 'photorealistic, 3d render, complex details, gradient, realistic texture, blurry, low quality, watermark, text, cluttered background, detailed background, checkerboard, mosaic, noise, pattern',
   },
   {
     key: 'comic',
     label: '漫画风格',
     icon: '💥',
-    positivePrompt: 'manga style sticker, screen tones, bold ink outlines, dynamic action lines, monochrome with spot color, speech bubble elements, dramatic expression, transparent background, die-cut sticker',
-    negativePrompt: 'photorealistic, watercolor, pastel, gradient, realistic shading, blurry, low quality, watermark, solid background, white background',
+    positivePrompt: 'manga style sticker, screen tones, bold ink outlines, dynamic action lines, monochrome with spot color, speech bubble elements, dramatic expression, clean white background, die-cut sticker',
+    negativePrompt: 'photorealistic, watercolor, pastel, gradient, realistic shading, blurry, low quality, watermark, cluttered background, detailed background, checkerboard, mosaic, noise, pattern',
   },
   {
     key: 'classic',
     label: '经典贴纸',
     icon: '⭐',
-    positivePrompt: 'die-cut sticker style, clean vector outline, solid bold colors, transparent background, whimsical character design, rounded shapes, professional sticker production, white border outline',
-    negativePrompt: 'photorealistic, 3d, gradient, messy lines, blurry, low quality, watermark, photo, solid background, white background',
+    positivePrompt: 'die-cut sticker style, clean vector outline, solid bold colors, clean white background, whimsical character design, rounded shapes, professional sticker production, white border outline',
+    negativePrompt: 'photorealistic, 3d, gradient, messy lines, blurry, low quality, watermark, photo, cluttered background, detailed background, checkerboard, mosaic, noise, pattern',
   },
   {
     key: 'flat',
     label: '平面设计',
     icon: '🎨',
-    positivePrompt: 'flat design sticker, minimal geometric shapes, limited color palette, clean vector art, bold solid fills, no shadows, modern graphic style, simple silhouettes, transparent background, die-cut sticker',
+    positivePrompt: 'flat design sticker, minimal geometric shapes, limited color palette, clean vector art, bold solid fills, no shadows, modern graphic style, simple silhouettes, white background, die-cut sticker',
     negativePrompt: 'realistic, 3d, gradient, texture, complex details, watercolor, photorealistic, blurry',
   },
   {
     key: 'retro',
     label: '古早QQ风',
     icon: '🐧',
-    positivePrompt: 'early 2000s Chinese QQ sticker style, pixel-art influenced, simple round body, big head small body, bright saturated colors, cute kawaii expression, retro digital feel, simple gif-style pose, transparent background, die-cut sticker',
-    negativePrompt: 'photorealistic, 3d render, complex shading, realistic, modern minimalist, gradient, solid background, white background',
+    positivePrompt: 'early 2000s Chinese QQ sticker style, pixel-art influenced, simple round body, big head small body, bright saturated colors, cute kawaii expression, retro digital feel, simple gif-style pose, clean white background, die-cut sticker',
+    negativePrompt: 'photorealistic, 3d render, complex shading, realistic, modern minimalist, gradient, checkerboard, mosaic, noise, pattern',
   },
   {
     key: 'custom',
@@ -996,9 +996,9 @@ ${themeDesc}
     // 构建生成 prompt
     let prompt: string;
     if (subjectImage && subjectSource === 'image') {
-      prompt = `[ref] Use the provided reference image(s) as the base. Create an image of: Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. While creating this new image, strictly preserve the main subject and focal point of the reference image(s) — do NOT change the original product/object identity, strictly preserve the artistic style and visual aesthetics of the reference image(s), strictly preserve the color palette and tone of the reference image(s), strictly preserve the fine details and textures of the reference image(s). IMPORTANT: The product/object in the result MUST be the SAME product/object as in the reference image — do NOT substitute or replace it with a different product. ${identityLock}. Feel free to reimagine the composition and layout structure, the scene and environment setting. ${subjectDetail ? `[Subject visual details: ${subjectDetail}]` : ''}. Transparent PNG background, die-cut sticker style, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}` : ''}`;
+      prompt = `[ref] Use the provided reference image(s) as the base. Create an image of: Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. While creating this new image, strictly preserve the main subject and focal point of the reference image(s) — do NOT change the original product/object identity, strictly preserve the artistic style and visual aesthetics of the reference image(s), strictly preserve the color palette and tone of the reference image(s), strictly preserve the fine details and textures of the reference image(s). IMPORTANT: The product/object in the result MUST be the SAME product/object as in the reference image — do NOT substitute or replace it with a different product. ${identityLock}. Feel free to reimagine the composition and layout structure, the scene and environment setting. ${subjectDetail ? `[Subject visual details: ${subjectDetail}]` : ''}. Clean solid white background, die-cut sticker style, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}` : ''}`;
     } else {
-      prompt = `Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. Subject identity: ${identityLock}. Transparent PNG background, die-cut sticker style, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}` : ''}`;
+      prompt = `Sticker #${item.id}: "${item.caption}" — ${item.action}. ${styleP}. Subject identity: ${identityLock}. Clean solid white background, die-cut sticker style, 1024x1024 square, sticker sheet single item.${negP ? ` Avoid: ${negP}` : ''}`;
     }
 
     const requestBody: Record<string, unknown> = {
@@ -1720,7 +1720,9 @@ ${themeDesc}
                     className="relative rounded-md overflow-hidden"
                     style={{
                       aspectRatio: '1',
-                      background: t.cardBg,
+                      background: item.status === 'done' && item.imageUrl
+                        ? 'repeating-conic-gradient(#e0e0e0 0% 25%, #fff 0% 50%) 50% / 16px 16px'
+                        : t.cardBg,
                       border: `1px solid ${item.status === 'failed' ? '#ef4444' : t.border}`,
                     }}
                   >
