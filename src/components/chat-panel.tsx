@@ -2995,7 +2995,8 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
             </div>
           )}
 
-          <div className="flex gap-1.5 items-end">
+          {/* Toolbar Row - 上传/Tune/快捷指令 + 发送按钮 */}
+          <div className="flex items-center gap-2 mb-2">
             <input
               ref={fileInputRef}
               type="file"
@@ -3005,51 +3006,52 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
             />
             <button
               onClick={() => fileInputRef.current?.click()}
-              className={`shrink-0 h-8 w-8 rounded-lg flex items-center justify-center transition-colors ${
+              className={`shrink-0 h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] transition-colors ${
                 isGold
-                  ? 'bg-white/[0.04] border border-white/[0.04] text-gold-muted hover:text-gold hover:border-gold/40'
-                  : 'bg-gray-100 border border-gray-200 text-gray-400 hover:text-gray-700 hover:border-gray-300'
+                  ? 'bg-white/[0.04] text-gold-muted/70 hover:text-gold hover:bg-white/[0.08]'
+                  : 'bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100'
               }`}
               title="上传图片"
             >
-              <ImageIcon size={14} />
+              <ImageIcon size={12} />
+              <span>图片</span>
             </button>
-            {/* P2-1: Tune toggle button */}
             <button
               onClick={() => setShowTunePanel(prev => !prev)}
-              className={`shrink-0 h-8 w-8 rounded-lg flex items-center justify-center transition-colors ${
+              className={`shrink-0 h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] transition-colors ${
                 showTunePanel
                   ? isGold
-                    ? 'bg-gold/15 text-gold border border-gold/40'
-                    : 'bg-blue-100 text-blue-600 border border-blue-300'
+                    ? 'bg-gold/15 text-gold'
+                    : 'bg-blue-100 text-blue-600'
                   : isGold
-                    ? 'bg-white/[0.04] border border-white/[0.04] text-gold-muted hover:text-gold hover:border-gold/40'
-                    : 'bg-gray-100 border border-gray-200 text-gray-400 hover:text-gray-700 hover:border-gray-300'
+                    ? 'bg-white/[0.04] text-gold-muted/70 hover:text-gold hover:bg-white/[0.08]'
+                    : 'bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100'
               }`}
               title="Tune 精细调节"
             >
-              <Sliders size={14} />
+              <Sliders size={12} />
+              <span>Tune</span>
             </button>
-            {/* P2-3: Quick commands button */}
             <div className="relative">
               <button
                 onClick={() => setShowQuickCommands(prev => !prev)}
-                className={`shrink-0 h-8 w-8 rounded-lg flex items-center justify-center transition-colors ${
+                className={`shrink-0 h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] transition-colors ${
                   showQuickCommands
                     ? isGold
-                      ? 'bg-gold/15 text-gold border border-gold/40'
-                      : 'bg-blue-100 text-blue-600 border border-blue-300'
+                      ? 'bg-gold/15 text-gold'
+                      : 'bg-blue-100 text-blue-600'
                     : isGold
-                      ? 'bg-white/[0.04] border border-white/[0.04] text-gold-muted hover:text-gold hover:border-gold/40'
-                      : 'bg-gray-100 border border-gray-200 text-gray-400 hover:text-gray-700 hover:border-gray-300'
+                      ? 'bg-white/[0.04] text-gold-muted/70 hover:text-gold hover:bg-white/[0.08]'
+                      : 'bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100'
                 }`}
                 title="快捷指令"
               >
-                <Zap size={14} />
+                <Zap size={12} />
+                <span>指令</span>
               </button>
               {showQuickCommands && (
-                <div className={`absolute bottom-full left-0 mb-1 w-44 rounded-lg border shadow-lg z-50 overflow-hidden ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
-                  <div className={`px-2 py-1 text-[10px] font-medium ${isGold ? 'text-gold-muted/60' : 'text-gray-400'}`}>
+                <div className={`absolute bottom-full left-0 mb-1 w-48 rounded-lg border shadow-lg z-50 overflow-hidden ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
+                  <div className={`px-3 py-1.5 text-[10px] font-medium ${isGold ? 'text-gold-muted/60' : 'text-gray-400'}`}>
                     快捷指令
                   </div>
                   {quickCommands.map((cmd, idx) => (
@@ -3060,7 +3062,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                         setShowQuickCommands(false);
                         textareaRef.current?.focus();
                       }}
-                      className={`w-full flex items-center gap-2 px-2 py-1.5 text-xs transition-colors ${isGold ? 'text-white/80 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'}`}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs transition-colors ${isGold ? 'text-white/80 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'}`}
                     >
                       <span>{cmd.icon}</span>
                       <span>{cmd.label}</span>
@@ -3069,91 +3071,92 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                 </div>
               )}
             </div>
-            <div className={`flex-1 relative rounded-xl overflow-visible ${isGold ? 'bg-white/[0.03] border border-white/[0.04] focus-within:border-gold/40 focus-within:shadow-gold/10' : 'bg-white border border-gray-200 focus-within:border-gray-400 focus-within:shadow-sm'} transition-all`}>
-              <Textarea
-                ref={textareaRef}
-                value={input}
-                onChange={handleInputChange}
-                placeholder={tabModeImage ? "描述你想对这张图片做什么..." : "输入消息... (@ 引用图片/品牌/提示词, Ctrl+V 粘贴图片)"}
-                className={`w-full resize-none min-h-[52px] max-h-[180px] border-0 bg-transparent px-4 py-3 text-[14px] leading-relaxed focus:outline-none focus:ring-0 ${themeClasses.text} placeholder:${isGold ? 'text-gold-muted/50' : 'text-gray-400'}`}
-                onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-                  // Handle mention picker navigation
-                  if (mentionPickerOpen && mentionPickerItems.length > 0) {
-                    if (e.key === 'ArrowDown') {
-                      e.preventDefault();
-                      setMentionPickerIndex(prev => Math.min(prev + 1, mentionPickerItems.length - 1));
-                      return;
-                    }
-                    if (e.key === 'ArrowUp') {
-                      e.preventDefault();
-                      setMentionPickerIndex(prev => Math.max(prev - 1, 0));
-                      return;
-                    }
-                    if (e.key === 'Enter' || e.key === 'Tab') {
-                      e.preventDefault();
-                      selectMentionItem(mentionPickerItems[mentionPickerIndex]);
-                      return;
-                    }
-                    if (e.key === 'Escape') {
-                      e.preventDefault();
-                      setMentionPickerOpen(false);
-                      return;
-                    }
-                  }
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                }}
-                disabled={isLoading}
-              />
-              {/* P1-1: @ Mention Picker Popup */}
-              {mentionPickerOpen && mentionPickerItems.length > 0 && (
-                <div className={`absolute bottom-full left-0 right-0 mb-1 rounded-lg border shadow-lg z-50 overflow-hidden ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
-                  <div className={`px-2 py-1 text-[10px] font-medium ${isGold ? 'text-gold-muted/60' : 'text-gray-400'}`}>
-                    @ 引用 — 输入筛选，↑↓选择，Enter确认
-                  </div>
-                  {mentionPickerItems.map((item, idx) => (
-                    <button
-                      key={`${item.type}-${item.id}`}
-                      onClick={() => selectMentionItem(item)}
-                      className={`w-full flex items-center gap-2 px-2 py-1.5 text-xs transition-colors ${
-                        idx === mentionPickerIndex
-                          ? isGold ? 'bg-gold/10 text-gold' : 'bg-blue-50 text-blue-700'
-                          : isGold ? 'text-white/80 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
-                      }`}
-                    >
-                      {item.type === 'canvas-image' && <ImageIcon size={12} className="shrink-0" />}
-                      {item.type === 'brand' && <Palette size={12} className="shrink-0" />}
-                      {item.type === 'prompt' && <Sparkles size={12} className="shrink-0" />}
-                      <span className="truncate">{item.label}</span>
-                      <span className={`ml-auto text-[10px] ${isGold ? 'text-white/30' : 'text-gray-300'}`}>
-                        {item.type === 'canvas-image' ? '图片' : item.type === 'brand' ? '品牌' : '提示词'}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <div className="flex-1" />
             <button
               onClick={handleSend}
               disabled={!input.trim() || isLoading}
-              className={`shrink-0 h-9 w-9 rounded-xl flex items-center justify-center transition-all ${
+              className={`shrink-0 h-7 px-3 rounded-md flex items-center gap-1.5 text-[11px] font-medium transition-all ${
                 !input.trim() || isLoading
                   ? isGold
-                    ? 'bg-[#1a1a1a]/60 border border-white/[0.05] text-[#444] cursor-not-allowed'
-                    : 'bg-gray-100 border border-gray-200 text-gray-300 cursor-not-allowed'
+                    ? 'bg-white/[0.03] text-white/20 cursor-not-allowed'
+                    : 'bg-gray-50 text-gray-300 cursor-not-allowed'
                   : isGold
-                    ? 'bg-gradient-to-r from-gold to-gold-dark text-black hover:opacity-90 shadow-lg shadow-gold/20'
+                    ? 'bg-gold text-black hover:opacity-90 shadow-md shadow-gold/20'
                     : 'bg-blue-500 text-white hover:bg-blue-600 shadow-md'
               }`}
             >
-              {isLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Send className="h-4 w-4" />
-              )}
+              <Send size={12} />
+              <span>发送</span>
+              {isLoading && <Loader2 size={10} className="animate-spin ml-0.5" />}
             </button>
+          </div>
+
+          {/* Textarea Row - 输入框独立占满宽度 */}
+          <div className={`relative rounded-xl overflow-visible ${isGold ? 'bg-white/[0.03] border border-white/[0.04] focus-within:border-gold/40 focus-within:shadow-gold/10' : 'bg-white border border-gray-200 focus-within:border-gray-400 focus-within:shadow-sm'} transition-all`}>
+            <Textarea
+              ref={textareaRef}
+              value={input}
+              onChange={handleInputChange}
+              placeholder={tabModeImage ? "描述你想对这张图片做什么..." : "输入消息，@ 引用图片/品牌/提示词..."}
+              className={`w-full resize-none min-h-[60px] max-h-[200px] border-0 bg-transparent px-4 py-3 text-[14px] leading-relaxed focus:outline-none focus:ring-0 ${themeClasses.text} placeholder:${isGold ? 'text-gold-muted/40' : 'text-gray-400'}`}
+              onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+                // Handle mention picker navigation
+                if (mentionPickerOpen && mentionPickerItems.length > 0) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setMentionPickerIndex(prev => Math.min(prev + 1, mentionPickerItems.length - 1));
+                    return;
+                  }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setMentionPickerIndex(prev => Math.max(prev - 1, 0));
+                    return;
+                  }
+                  if (e.key === 'Enter' || e.key === 'Tab') {
+                    e.preventDefault();
+                    selectMentionItem(mentionPickerItems[mentionPickerIndex]);
+                    return;
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setMentionPickerOpen(false);
+                    return;
+                  }
+                }
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              disabled={isLoading}
+            />
+            {/* P1-1: @ Mention Picker Popup */}
+            {mentionPickerOpen && mentionPickerItems.length > 0 && (
+              <div className={`absolute bottom-full left-0 right-0 mb-1 rounded-lg border shadow-lg z-50 overflow-hidden ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
+                <div className={`px-3 py-1.5 text-[10px] font-medium ${isGold ? 'text-gold-muted/60' : 'text-gray-400'}`}>
+                  @ 引用 — 输入筛选，↑↓选择，Enter确认
+                </div>
+                {mentionPickerItems.map((item, idx) => (
+                  <button
+                    key={`${item.type}-${item.id}`}
+                    onClick={() => selectMentionItem(item)}
+                    className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
+                      idx === mentionPickerIndex
+                        ? isGold ? 'bg-gold/10 text-gold' : 'bg-blue-50 text-blue-700'
+                        : isGold ? 'text-white/80 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    {item.type === 'canvas-image' && <ImageIcon size={12} className="shrink-0" />}
+                    {item.type === 'brand' && <Palette size={12} className="shrink-0" />}
+                    {item.type === 'prompt' && <Sparkles size={12} className="shrink-0" />}
+                    <span className="truncate">{item.label}</span>
+                    <span className={`ml-auto text-[10px] ${isGold ? 'text-white/30' : 'text-gray-300'}`}>
+                      {item.type === 'canvas-image' ? '图片' : item.type === 'brand' ? '品牌' : '提示词'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
