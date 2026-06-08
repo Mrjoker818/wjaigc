@@ -2875,11 +2875,17 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
 - 生成模型: ${tabImage.model || '未知'}
 用户的消息是针对这张图片的操作指令，请据此理解用户意图。
 
-【图像生成指令 - 极其重要】
-当用户需要基于此图片生成新图片（如生成变体、修改风格、设计套图、制作表情包、调整色调、扩展画面等），你必须：
+【⚠️ 图像生成指令 - 必须遵守⚠️】
+仅在用户明确要求"生成/画出/创建/制作/设计一张图片或某种视觉内容"时，才输出图像生成指令。
+例如：画一只猫、设计海报、制作表情包、生成插画、帮我P图、变体、换风格 → 必须输出[GENERATE:]
+例如：什么是AI、解释xxx原理、写一段文案、推荐配色 → 不要输出[GENERATE:]
+
+当你判断需要生成图片时，输出格式要求（严格遵守）：
 1. 先用自然语言描述你的设计思路和建议（中文）
-2. 在回复末尾单独一行输出图像生成指令，格式为：[GENERATE: 详细的英文图像生成提示词]
-提示词要求：英文、详细描述画面内容/风格/构图/色彩/细节、包含原始图片的核心特征、200-500词。
+2. 在回复的最后，单独一行输出，必须严格遵循此格式：
+[GENERATE: 详细的英文图像生成提示词]
+
+提示词要求：英文、200-500词、详细描述画面内容/风格/构图/色彩/光照/细节。
 示例：用户说"做一套表情包" → 你先给设计建议，最后单独一行输出：
 [GENERATE: a set of 4 cute cartoon stickers of a cat character, kawaii style, white background, various expressions happy sad angry surprised, bold outlines, vibrant colors, meme sticker design]`;
       }
@@ -2893,11 +2899,17 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
       if (!tabImage) {
         enhancedSystemPrompt += `
 
-【图像生成指令 - 极其重要】
-当用户需要生成图片（如画一幅画、设计海报、生成插画、制作Logo等），你必须：
+【⚠️ 图像生成指令 - 必须遵守⚠️】
+仅在用户明确要求"生成/画出/创建/制作/设计一张图片或某种视觉内容"时，才输出图像生成指令。
+例如：画一只猫、设计海报、制作表情包、生成插画 → 必须输出[GENERATE:]
+例如：什么是AI、解释原理、写文案、推荐配色 → 不要输出[GENERATE:]
+
+当你判断需要生成图片时，输出格式要求（严格遵守）：
 1. 先用自然语言描述你的设计思路和建议（中文）
-2. 在回复末尾单独一行输出图像生成指令，格式为：[GENERATE: 详细的英文图像生成提示词]
-提示词要求：英文、详细描述画面内容/风格/构图/色彩/细节、200-500词。
+2. 在回复的最后，单独一行输出，必须严格遵循此格式：
+[GENERATE: 详细的英文图像生成提示词]
+
+提示词要求：英文、200-500词、详细描述画面内容/风格/构图/色彩/光照/细节。
 示例：用户说"画一只猫" → 你先给出创意建议，最后单独一行输出：
 [GENERATE: a beautiful cat sitting on a windowsill, soft sunlight, oil painting style, warm color palette, detailed fur texture, cozy atmosphere, 4K quality]`;
       }
@@ -3016,9 +3028,11 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                 const delta = parsed.choices?.[0]?.delta?.content || '';
                 if (delta) {
                   assistantContent += delta;
+                  // 流式输出时实时隐藏 [GENERATE: ...] 标签
+                  const streamDisplayContent = assistantContent.replace(/\[GENERATE:\s*[\s\S]*$/g, '').trimEnd();
                   setMessages(prev => prev.map(msg => 
                     msg.id === assistantMessageId 
-                      ? { ...msg, content: assistantContent }
+                      ? { ...msg, content: streamDisplayContent || assistantContent }
                       : msg
                   ));
                 }
