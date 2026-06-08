@@ -602,14 +602,22 @@ function getCurrentGenerationModel(): string {
 /** 获取当前图像生成模型（从generation-panel同步的模型信息） */
 function getCurrentImageModelInfo(): { model: string; providerId?: string } {
   try {
-    if (typeof window === 'undefined') return { model: 'gemini-2.5-flash-image-preview' };
-    // 优先从 localStorage 读取 generation panel 选择的模型
+    if (typeof window === 'undefined') return { model: '' };
+    // 优先从 wujie_selected_model 读取（generation panel 最新选择的模型）
+    const rawModel = localStorage.getItem('wujie_selected_model');
+    if (rawModel) {
+      const modelInfo = JSON.parse(rawModel);
+      if (modelInfo.model) {
+        return { model: modelInfo.model, providerId: modelInfo.providerId || undefined };
+      }
+    }
+    // 备用：从 userData 读取
     const currentUserId = localStorage.getItem('unbounded_ai_current_user');
     const raw = localStorage.getItem('unbounded_ai_user_data');
-    if (!raw || !currentUserId) return { model: 'gemini-2.5-flash-image-preview' };
+    if (!raw || !currentUserId) return { model: '' };
     const data = JSON.parse(raw);
     const selectedModel = data?.userData?.[currentUserId]?.selectedModel;
-    if (!selectedModel) return { model: 'gemini-2.5-flash-image-preview' };
+    if (!selectedModel) return { model: '' };
     // selectedModel format: "providerId::modelId" or just "modelId"
     if (selectedModel.includes('::')) {
       const [providerId, modelId] = selectedModel.split('::');
@@ -617,7 +625,7 @@ function getCurrentImageModelInfo(): { model: string; providerId?: string } {
     }
     return { model: selectedModel };
   } catch { /* fallback */ }
-  return { model: 'gemini-2.5-flash-image-preview' };
+  return { model: '' };
 }
 
 function parseToolCalls(content: string): ToolCall[] {
@@ -2865,12 +2873,33 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
 - 图片尺寸: ${tabImage.width}×${tabImage.height}
 - 原始描述: ${tabImage.prompt || '无'}
 - 生成模型: ${tabImage.model || '未知'}
-用户的消息是针对这张图片的操作指令，请据此理解用户意图。`;
+用户的消息是针对这张图片的操作指令，请据此理解用户意图。
+
+【图像生成指令 - 极其重要】
+当用户需要基于此图片生成新图片（如生成变体、修改风格、设计套图、制作表情包、调整色调、扩展画面等），你必须：
+1. 先用自然语言描述你的设计思路和建议（中文）
+2. 在回复末尾单独一行输出图像生成指令，格式为：[GENERATE: 详细的英文图像生成提示词]
+提示词要求：英文、详细描述画面内容/风格/构图/色彩/细节、包含原始图片的核心特征、200-500词。
+示例：用户说"做一套表情包" → 你先给设计建议，最后单独一行输出：
+[GENERATE: a set of 4 cute cartoon stickers of a cat character, kawaii style, white background, various expressions happy sad angry surprised, bold outlines, vibrant colors, meme sticker design]`;
       }
 
       // P2-1: Tune Mode — Inject fine-tuning parameters
       if (tuneContextString) {
         enhancedSystemPrompt += tuneContextString;
+      }
+
+      // 通用图像生成指令 - 当没有选中画布图片时，也告诉LLM可以触发生图
+      if (!tabImage) {
+        enhancedSystemPrompt += `
+
+【图像生成指令 - 极其重要】
+当用户需要生成图片（如画一幅画、设计海报、生成插画、制作Logo等），你必须：
+1. 先用自然语言描述你的设计思路和建议（中文）
+2. 在回复末尾单独一行输出图像生成指令，格式为：[GENERATE: 详细的英文图像生成提示词]
+提示词要求：英文、详细描述画面内容/风格/构图/色彩/细节、200-500词。
+示例：用户说"画一只猫" → 你先给出创意建议，最后单独一行输出：
+[GENERATE: a beautiful cat sitting on a windowsill, soft sunlight, oil painting style, warm color palette, detailed fur texture, cozy atmosphere, 4K quality]`;
       }
 
       if (enhancedSystemPrompt) {
@@ -2930,117 +2959,9 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
       // Clear mentions after sending
       setActiveMentions([]);
 
-      // ====== 图像生成意图检测（在LLM流之前，并行启动） ======
-      const isSkillImageIntent = activeSkill && (activeSkill.category === 'image' || activeSkill.category === 'design');
-      const shouldGenerateImage = isImageGenerationIntent(trimmedInput) || isSkillImageIntent;
-
-      // 如果检测到生图意图，立即并行启动图像生成（不等LLM流完成）
-      let imageGenPromise: Promise<{ imageUrls: string[]; sourceImageId?: string } | null> | null = null;
-      const imageSourceId = tabModeImage?.id || selectedCanvasImage?.id;
-
-      if (shouldGenerateImage) {
-        console.log('[ChatImage] Detected image generation intent, starting parallel generation for:', trimmedInput);
-        imageGenPromise = (async () => {
-          try {
-            // Step 1: 优化prompt
-            let optimizedPrompt = trimmedInput;
-            // 如果有Skill上下文，使用LLM的专业设计回复
-            const isDesignSkill = activeSkill && (activeSkill.category === 'image' || activeSkill.category === 'design');
-            if (!isDesignSkill) {
-              try {
-                const optRes = await fetch('/api/optimize-prompt', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    prompt: trimmedInput,
-                    model: actualModel,
-                    providerId,
-                    mode: 'enhance',
-                  }),
-                });
-                if (optRes.ok) {
-                  const optData = await optRes.json();
-                  if (optData.optimized) {
-                    let cleaned = optData.optimized.trim();
-                    cleaned = cleaned
-                      .replace(/<think[\s\S]*?<\/think>/gi, '')
-                      .replace(/<thinking[\s\S]*?<\/thinking>/gi, '')
-                      .replace(/【[^】]*】/g, '')
-                      .replace(/\*\*[^*]*\*\*/g, '')
-                      .trim();
-                    if (cleaned.length > 10) {
-                      optimizedPrompt = cleaned;
-                    }
-                  }
-                }
-              } catch { /* fallback to original */ }
-            }
-            console.log('[ChatImage] Using prompt:', optimizedPrompt.substring(0, 100) + '...');
-
-            // Step 2: 检测比例和质量
-            const aspectRatio = detectAspectRatioFromText(trimmedInput) || '1:1';
-            const quality = /高清|高质量|hd|high.?quality|2k|4k/i.test(trimmedInput) ? '2K' : '1K';
-
-            // Step 3: 提交图像生成
-            const imageModelInfo = getCurrentImageModelInfo();
-            const generateRes = await fetch('/api/generate', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                prompt: optimizedPrompt,
-                model: imageModelInfo.model,
-                providerId: imageModelInfo.providerId,
-                aspectRatio,
-                quality,
-              }),
-            });
-            const generateData = await generateRes.json();
-            console.log('[ChatImage] Generate API response:', JSON.stringify(generateData).substring(0, 200));
-
-            if (!generateData.success) {
-              console.error('[ChatImage] Generate API failed:', generateData.error);
-              return null;
-            }
-
-            const taskIds: string[] = generateData.taskIds || [];
-            const genModel = generateData.model || imageModelInfo.model;
-            const resultUrls: string[] = [];
-
-            // Step 4: 轮询获取结果
-            for (const taskId of taskIds) {
-              for (let i = 0; i < 60; i++) {
-                const interval = i <= 2 ? 800 : i <= 5 ? 1000 : i <= 15 ? 1500 : 2000;
-                await new Promise(r => setTimeout(r, interval));
-
-                const pollRes = await fetch('/api/poll-task', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ taskId, model: genModel }),
-                });
-                const pollData = await pollRes.json();
-
-                if (pollData.status === 'completed' && pollData.imageUrl) {
-                  resultUrls.push(pollData.imageUrl);
-                  break;
-                } else if (pollData.status === 'failed') {
-                  console.error('[ChatImage] Image generation failed:', pollData.error);
-                  break;
-                }
-              }
-            }
-
-            // 处理直接返回imageUrl的情况
-            if (generateData.imageUrl && !resultUrls.includes(generateData.imageUrl)) {
-              resultUrls.push(generateData.imageUrl);
-            }
-
-            return { imageUrls: resultUrls, sourceImageId: imageSourceId };
-          } catch (err) {
-            console.error('[ChatImage] Parallel image generation error:', err);
-            return null;
-          }
-        })();
-      }
+      // ====== 图像生成：改为LLM驱动模式 ======
+      // 不再预检测意图，而是在LLM回复中解析 [GENERATE: ...] 标签
+      // LLM会在systemPrompt中被告知如何使用此标签
 
       // 创建 AbortController 以支持取消
       const controller = new AbortController();
@@ -3128,50 +3049,251 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
         ));
       }
 
-      // ====== 等待并行图像生成结果 ======
-      if (imageGenPromise) {
-        // 标记正在生成图像
+      // ====== LLM驱动的图像生成：解析 [GENERATE: ...] 标签 ======
+      const generateMatch = assistantContent.match(/\[GENERATE:\s*([\s\S]+?)\]/);
+      if (generateMatch) {
+        const rawPrompt = generateMatch[1].trim();
+        // 从显示内容中移除 [GENERATE: ...] 标签
+        const displayContent = assistantContent.replace(/\[GENERATE:\s*[\s\S]+?\]/g, '').trim();
         setMessages(prev => prev.map(msg => 
           msg.id === assistantMessageId 
-            ? { ...msg, isGeneratingImage: true }
+            ? { ...msg, content: displayContent, isGeneratingImage: true }
             : msg
         ));
 
-        try {
-          const imageResult = await imageGenPromise;
-          if (imageResult && imageResult.imageUrls.length > 0) {
-            // 将生成的图片添加到助手消息中
-            setMessages(prev => prev.map(msg => 
-              msg.id === assistantMessageId 
-                ? { 
-                    ...msg, 
-                    generatedImages: imageResult.imageUrls,
-                    isGeneratingImage: false,
-                  }
-                : msg
-            ));
-
-            // 将图片添加到画布（通过 onAddImages），附带源图片ID用于SVG连线
-            if (onAddImages) {
-              onAddImages(imageResult.imageUrls, imageResult.sourceImageId);
-            }
-
-            console.log('[ChatImage] Successfully added', imageResult.imageUrls.length, 'images to canvas');
-          } else {
-            // 没有生成图片，清除loading状态
-            setMessages(prev => prev.map(msg => 
-              msg.id === assistantMessageId 
-                ? { ...msg, isGeneratingImage: false, generateError: '图像生成未返回结果，请检查图像模型配置' }
-                : msg
-            ));
-          }
-        } catch (imgError) {
-          console.error('[ChatImage] Image generation error:', imgError);
+        // 检查是否有可用的图像模型
+        const imageModelInfo = getCurrentImageModelInfo();
+        if (!imageModelInfo.model) {
+          console.warn('[ChatImage] No image model selected');
           setMessages(prev => prev.map(msg => 
             msg.id === assistantMessageId 
-              ? { ...msg, isGeneratingImage: false, generateError: '图像生成出错' }
+              ? { ...msg, isGeneratingImage: false, generateError: '请先在左侧图像生成面板中选择一个图像模型，然后再试一次' }
               : msg
           ));
+        } else {
+          // 异步执行图像生成
+          (async () => {
+            try {
+              console.log('[ChatImage] LLM-triggered generation with prompt:', rawPrompt.substring(0, 100) + '...');
+
+              // 检测比例和质量
+              const aspectRatio = detectAspectRatioFromText(rawPrompt + ' ' + trimmedInput) || '1:1';
+              const quality = /高清|高质量|hd|high.?quality|2k|4k/i.test(trimmedInput) ? '2K' : '1K';
+
+              // 如果用户选中了画布图片，作为参考图传入
+              const sourceImageUrl = tabModeImage?.url || selectedCanvasImage?.url;
+              const referenceImages = sourceImageUrl ? [sourceImageUrl] : undefined;
+              const imageSourceId = tabModeImage?.id || selectedCanvasImage?.id;
+
+              // 提交图像生成
+              const generateRes = await fetch('/api/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  prompt: rawPrompt,
+                  model: imageModelInfo.model,
+                  providerId: imageModelInfo.providerId,
+                  aspectRatio,
+                  quality,
+                  referenceImages,
+                }),
+              });
+              const generateData = await generateRes.json();
+              console.log('[ChatImage] Generate API response:', JSON.stringify(generateData).substring(0, 200));
+
+              if (!generateData.success) {
+                console.error('[ChatImage] Generate API failed:', generateData.error);
+                setMessages(prev => prev.map(msg => 
+                  msg.id === assistantMessageId 
+                    ? { ...msg, isGeneratingImage: false, generateError: `图像生成失败: ${generateData.error || '未知错误'}` }
+                    : msg
+                ));
+                return;
+              }
+
+              const taskIds: string[] = generateData.taskIds || [];
+              const genModel = generateData.model || imageModelInfo.model;
+              const resultUrls: string[] = [];
+
+              // 轮询获取结果
+              for (const taskId of taskIds) {
+                for (let i = 0; i < 60; i++) {
+                  const interval = i <= 2 ? 800 : i <= 5 ? 1000 : i <= 15 ? 1500 : 2000;
+                  await new Promise(r => setTimeout(r, interval));
+
+                  const pollRes = await fetch('/api/poll-task', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ taskId, model: genModel }),
+                  });
+                  const pollData = await pollRes.json();
+
+                  if (pollData.status === 'completed' && pollData.imageUrl) {
+                    resultUrls.push(pollData.imageUrl);
+                    break;
+                  } else if (pollData.status === 'failed') {
+                    console.error('[ChatImage] Image generation failed:', pollData.error);
+                    break;
+                  }
+                }
+              }
+
+              // 处理直接返回imageUrl的情况
+              if (generateData.imageUrl && !resultUrls.includes(generateData.imageUrl)) {
+                resultUrls.push(generateData.imageUrl);
+              }
+
+              if (resultUrls.length > 0) {
+                // 更新消息：添加生成图片，移除loading
+                setMessages(prev => prev.map(msg => 
+                  msg.id === assistantMessageId 
+                    ? { ...msg, generatedImages: resultUrls, isGeneratingImage: false }
+                    : msg
+                ));
+
+                // 将图片添加到画布，附带源图片ID用于SVG连线
+                if (onAddImages) {
+                  onAddImages(resultUrls, imageSourceId);
+                }
+                console.log('[ChatImage] Successfully added', resultUrls.length, 'images to canvas');
+              } else {
+                setMessages(prev => prev.map(msg => 
+                  msg.id === assistantMessageId 
+                    ? { ...msg, isGeneratingImage: false, generateError: '图像生成未返回结果，请检查图像模型配置' }
+                    : msg
+                ));
+              }
+            } catch (imgError) {
+              console.error('[ChatImage] Image generation error:', imgError);
+              setMessages(prev => prev.map(msg => 
+                msg.id === assistantMessageId 
+                  ? { ...msg, isGeneratingImage: false, generateError: `图像生成出错: ${imgError instanceof Error ? imgError.message : '未知错误'}` }
+                  : msg
+              ));
+            }
+          })();
+        }
+      }
+
+      // ====== 兜底：如果LLM未输出 [GENERATE: ...] 但用户意图明确是生图 ======
+      if (!generateMatch && (tabImage || (activeSkill && ['image', 'design'].includes(activeSkill.category)))) {
+        const userWantsImage = isImageGenerationIntent(trimmedInput);
+        if (userWantsImage) {
+          console.log('[ChatImage] Fallback: LLM did not output [GENERATE] tag but user intent is clear');
+          setMessages(prev => prev.map(msg => 
+            msg.id === assistantMessageId 
+              ? { ...msg, isGeneratingImage: true }
+              : msg
+          ));
+
+          const imageModelInfo = getCurrentImageModelInfo();
+          if (!imageModelInfo.model) {
+            setMessages(prev => prev.map(msg => 
+              msg.id === assistantMessageId 
+                ? { ...msg, isGeneratingImage: false, generateError: '请先在左侧图像生成面板中选择一个图像模型' }
+                : msg
+            ));
+          } else {
+            (async () => {
+              try {
+                const sourceImageUrl = tabImage?.url || selectedCanvasImage?.url;
+                const referenceImages = sourceImageUrl ? [sourceImageUrl] : undefined;
+                const imageSourceId = tabImage?.id || selectedCanvasImage?.id;
+                const aspectRatio = detectAspectRatioFromText(trimmedInput) || (tabImage ? '1:1' : '1:1');
+                const quality = /高清|高质量|hd|high.?quality|2k|4k/i.test(trimmedInput) ? '2K' : '1K';
+
+                // 用 optimize-prompt 优化用户的提示词
+                let optimizedPrompt = trimmedInput;
+                try {
+                  const optRes = await fetch('/api/optimize-prompt', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: trimmedInput, mode: 'enhance', model: actualModel, providerId }),
+                  });
+                  const optData = await optRes.json();
+                  if (optData.optimizedPrompt) {
+                    optimizedPrompt = optData.optimizedPrompt;
+                  }
+                } catch { /* use original */ }
+
+                console.log('[ChatImage] Fallback generation with prompt:', optimizedPrompt.substring(0, 100));
+
+                const generateRes = await fetch('/api/generate', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    prompt: optimizedPrompt,
+                    model: imageModelInfo.model,
+                    providerId: imageModelInfo.providerId,
+                    aspectRatio,
+                    quality,
+                    referenceImages,
+                  }),
+                });
+                const generateData = await generateRes.json();
+
+                if (!generateData.success) {
+                  setMessages(prev => prev.map(msg => 
+                    msg.id === assistantMessageId 
+                      ? { ...msg, isGeneratingImage: false, generateError: `图像生成失败: ${generateData.error || '未知错误'}` }
+                      : msg
+                  ));
+                  return;
+                }
+
+                const taskIds: string[] = generateData.taskIds || [];
+                const genModel = generateData.model || imageModelInfo.model;
+                const resultUrls: string[] = [];
+
+                for (const taskId of taskIds) {
+                  for (let i = 0; i < 60; i++) {
+                    const interval = i <= 2 ? 800 : i <= 5 ? 1000 : i <= 15 ? 1500 : 2000;
+                    await new Promise(r => setTimeout(r, interval));
+                    const pollRes = await fetch('/api/poll-task', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ taskId, model: genModel }),
+                    });
+                    const pollData = await pollRes.json();
+                    if (pollData.status === 'completed' && pollData.imageUrl) {
+                      resultUrls.push(pollData.imageUrl);
+                      break;
+                    } else if (pollData.status === 'failed') {
+                      break;
+                    }
+                  }
+                }
+
+                if (generateData.imageUrl && !resultUrls.includes(generateData.imageUrl)) {
+                  resultUrls.push(generateData.imageUrl);
+                }
+
+                if (resultUrls.length > 0) {
+                  setMessages(prev => prev.map(msg => 
+                    msg.id === assistantMessageId 
+                      ? { ...msg, generatedImages: resultUrls, isGeneratingImage: false }
+                      : msg
+                  ));
+                  if (onAddImages) {
+                    onAddImages(resultUrls, imageSourceId);
+                  }
+                } else {
+                  setMessages(prev => prev.map(msg => 
+                    msg.id === assistantMessageId 
+                      ? { ...msg, isGeneratingImage: false, generateError: '图像生成未返回结果' }
+                      : msg
+                  ));
+                }
+              } catch (imgError) {
+                console.error('[ChatImage] Fallback generation error:', imgError);
+                setMessages(prev => prev.map(msg => 
+                  msg.id === assistantMessageId 
+                    ? { ...msg, isGeneratingImage: false, generateError: `图像生成出错: ${imgError instanceof Error ? imgError.message : '未知错误'}` }
+                    : msg
+                ));
+              }
+            })();
+          }
         }
       }
 
