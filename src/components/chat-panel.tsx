@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders } from 'lucide-react';
+import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -40,6 +40,7 @@ interface Message {
   imageUrl?: string;
   generatedImages?: string[]; // AI生成的图片URL列表
   isGeneratingImage?: boolean; // 是否正在生成图片
+  generateError?: string; // 生成失败时的错误信息
   suggestions?: NextSuggestion[]; // 建议下一步操作
   isClarifying?: boolean; // 是否为追问消息
 }
@@ -576,6 +577,11 @@ function detectAspectRatioFromText(text: string): string | undefined {
   if (/方形|正方|square|1:?1/.test(lower)) return '1:1';
   if (/4:?3/.test(lower)) return '4:3';
   if (/3:?4/.test(lower)) return '3:4';
+  // Skill-specific defaults
+  if (/海报|poster|封面|cover|壁纸|wallpaper|名片|card|ppt|演示/i.test(lower)) return '3:4';
+  if (/头像|avatar|icon|图标|logo/i.test(lower)) return '1:1';
+  if (/横幅|banner|电脑壁纸|desktop/i.test(lower)) return '16:9';
+  if (/手机壁纸|phone.*wallpaper|锁屏/i.test(lower)) return '9:16';
   return undefined;
 }
 
@@ -591,6 +597,27 @@ function getCurrentGenerationModel(): string {
     if (selectedModel) return selectedModel;
   } catch { /* fallback */ }
   return 'gemini-2.5-flash-image-preview';
+}
+
+/** 获取当前图像生成模型（从generation-panel同步的模型信息） */
+function getCurrentImageModelInfo(): { model: string; providerId?: string } {
+  try {
+    if (typeof window === 'undefined') return { model: 'gemini-2.5-flash-image-preview' };
+    // 优先从 localStorage 读取 generation panel 选择的模型
+    const currentUserId = localStorage.getItem('unbounded_ai_current_user');
+    const raw = localStorage.getItem('unbounded_ai_user_data');
+    if (!raw || !currentUserId) return { model: 'gemini-2.5-flash-image-preview' };
+    const data = JSON.parse(raw);
+    const selectedModel = data?.userData?.[currentUserId]?.selectedModel;
+    if (!selectedModel) return { model: 'gemini-2.5-flash-image-preview' };
+    // selectedModel format: "providerId::modelId" or just "modelId"
+    if (selectedModel.includes('::')) {
+      const [providerId, modelId] = selectedModel.split('::');
+      return { model: modelId, providerId };
+    }
+    return { model: selectedModel };
+  } catch { /* fallback */ }
+  return { model: 'gemini-2.5-flash-image-preview' };
 }
 
 function parseToolCalls(content: string): ToolCall[] {
@@ -656,20 +683,22 @@ function isImageGenerationIntent(message: string): boolean {
   const lower = message.toLowerCase();
   // Precise action patterns: action verb near image noun (within 6 chars)
   const actionPatterns = [
-    /生成.{0,6}(图|图片|图像|插画|海报|封面|插图|画)/,
-    /画.{0,4}(一.{0,2})?(图|图片|画|插画|海报)/,
-    /制作.{0,6}(图|图片|海报|封面|插图)/,
-    /创建.{0,6}(图|图片|图像|插画|海报)/,
-    /设计.{0,6}(图|图片|海报|封面|插图)/,
-    /给我.{0,6}(图|图片|画|海报)/,
-    /出.{0,4}(一.{0,2})?(张|幅|份)?(图|图片|画|海报)/,
-    /做.{0,4}(一.{0,2})?(张|幅|份)?(图|图片|画|海报)/,
+    /生成.{0,6}(图|图片|图像|插画|海报|封面|插图|画|套图|组图|系列)/,
+    /画.{0,4}(一.{0,2})?(图|图片|画|插画|海报|套图)/,
+    /制作.{0,6}(图|图片|海报|封面|插图|套图|名片|卡片|贴纸|表情)/,
+    /创建.{0,6}(图|图片|图像|插画|海报|套图)/,
+    /设计.{0,6}(图|图片|海报|封面|插图|套图|名片|卡片|logo|Logo|品牌|UI|界面|包装|样机)/,
+    /给我.{0,6}(图|图片|画|海报|套图)/,
+    /出.{0,4}(一.{0,2})?(张|幅|份|套|组)?(图|图片|画|海报)/,
+    /做.{0,4}(一.{0,2})?(张|幅|份|套|组)?(图|图片|画|海报|名片|卡片|贴纸|表情)/,
     /绘制/,
-    /generate\s+(an?\s+)?(image|picture|photo|illustration|poster)/,
-    /create\s+(an?\s+)?(image|picture|photo|illustration|poster)/,
-    /draw\s+(an?\s+)?(image|picture|photo|illustration|poster)/,
-    /make\s+(an?\s+)?(image|picture|photo|illustration|poster)/,
-    /生图/, /画一个/, /画一张/, /来一张/, /来一个/,
+    /generate\s+(an?\s+)?(image|picture|photo|illustration|poster|set|series)/,
+    /create\s+(an?\s+)?(image|picture|photo|illustration|poster|set|series)/,
+    /draw\s+(an?\s+)?(image|picture|photo|illustration|poster|set|series)/,
+    /make\s+(an?\s+)?(image|picture|photo|illustration|poster|set|series)/,
+    /design\s+(an?\s+)?(image|poster|logo|brand|card|ui|mockup|packaging)/,
+    /生图/, /画一个/, /画一张/, /来一张/, /来一个/, /出一套/, /做一套/,
+    /帮我.{0,4}(图|画|海报|封面|logo|Logo|名片|贴纸|表情|包装|样机)/,
   ];
   if (actionPatterns.some(p => p.test(lower))) return true;
   // Standalone strong-intent nouns
@@ -677,7 +706,12 @@ function isImageGenerationIntent(message: string): boolean {
     /海报/, /poster/, /封面/, /cover/, /壁纸/, /wallpaper/,
     /logo/i, /icon/i, /banner/i, /插画/, /原画/, /concept\s*art/i,
     /角色.*设计/, /character.*design/i, /头像/, /avatar/i,
-    /表情/, /emoji/i, /贴纸/, /sticker/i,
+    /表情包?/, /emoji/i, /贴纸/, /sticker/i,
+    /套图/, /名片/, /包装设计/, /样机/, /mockup/i,
+    /室内设计/, /杂志封面/, /书籍封面/, /PPT/, /ppt/,
+    /漫画/, /连环画/, /分镜/, /storyboard/i,
+    /服装设计/, /时尚设计/, /App.*界面/, /网页.*设计/,
+    /产品.*图/, /电商.*图/, /商品.*图/,
   ];
   return strongNouns.some(p => p.test(lower));
 }
@@ -2984,7 +3018,9 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
       // After streaming completes, check if user intended to generate an image
       // Use user's original message + optimize-prompt API to get a proper English prompt
       const userText = trimmedInput;
-      if (isImageGenerationIntent(userText)) {
+      // Skills with image/design category should always trigger image generation
+      const isSkillImageIntent = activeSkill && (activeSkill.category === 'image' || activeSkill.category === 'design');
+      if (isImageGenerationIntent(userText) || isSkillImageIntent) {
         // Mark as generating
         setMessages(prev => prev.map(msg => 
           msg.id === assistantMessageId 
@@ -2993,10 +3029,55 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
         ));
 
         try {
-          // Step 1: Optimize the user's prompt to English
+          // Step 1: Build the image generation prompt
+          // For Skills, use the LLM's professional response as the prompt basis
+          // For regular requests, optimize the user's original text
           let optimizedPrompt = userText;
-          console.log('[ChatImage] Starting image generation for:', userText);
-          try {
+          console.log('[ChatImage] Starting image generation for:', userText, 'isSkillImageIntent:', !!isSkillImageIntent);
+          
+          // If a Skill triggered this, use the LLM's detailed response as the image prompt
+          // The LLM has already generated professional design guidance based on the Skill's systemPrompt
+          if (isSkillImageIntent && assistantContent.length > 20) {
+            // Extract the most relevant image description from the LLM response
+            // Remove markdown formatting, keep descriptive content
+            let skillPrompt = assistantContent
+              .replace(/#{1,6}\s/g, '') // remove headers
+              .replace(/\*\*([^*]*)\*\*/g, '$1') // remove bold
+              .replace(/\*([^*]*)\*/g, '$1') // remove italic
+              .replace(/```[\s\S]*?```/g, '') // remove code blocks
+              .replace(/- /g, '') // remove list markers
+              .replace(/\n{2,}/g, '. ') // replace double newlines with period
+              .trim();
+            // If the skill prompt is very long, use optimize-prompt to condense it
+            if (skillPrompt.length > 500) {
+              try {
+                const condenseRes = await fetch('/api/optimize-prompt', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    prompt: `Based on this design brief, generate a concise English image generation prompt (max 200 words, focus on visual description, style, composition, colors): ${skillPrompt.substring(0, 1500)}`,
+                    model: model,
+                    providerId: model.includes('::') ? model.split('::')[0] : undefined,
+                    mode: 'enhance',
+                  }),
+                });
+                if (condenseRes.ok) {
+                  const condenseData = await condenseRes.json();
+                  if (condenseData.optimized) {
+                    optimizedPrompt = condenseData.optimized
+                      .replace(/<think[\s\S]*?<\/think>/gi, '')
+                      .replace(/<thinking[\s\S]*?<\/thinking>/gi, '')
+                      .trim();
+                  }
+                }
+              } catch { /* fallback to original */ }
+            } else {
+              optimizedPrompt = skillPrompt;
+            }
+            console.log('[ChatImage] Skill-based prompt:', optimizedPrompt.substring(0, 150) + '...');
+          } else {
+            // Regular image generation: optimize the user's text
+            try {
             const optRes = await fetch('/api/optimize-prompt', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -3026,19 +3107,24 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
           } catch (optErr) {
             console.error('Prompt optimization failed, using original:', optErr);
           }
+          } // end of else (regular image generation)
 
           // Step 2: Detect aspect ratio from user's message
           const aspectRatio = detectAspectRatioFromText(userText) || '1:1';
 
           // Step 3: Generate image with the optimized prompt
+          const imageModelInfo = getCurrentImageModelInfo();
+          // Determine quality based on skill or user request
+          const quality = /高清|高质量|hd|high.?quality|2k|4k/i.test(userText) ? '2K' : '1K';
           const generateRes = await fetch('/api/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               prompt: optimizedPrompt,
-              model: getCurrentGenerationModel(),
+              model: imageModelInfo.model,
+              providerId: imageModelInfo.providerId,
               aspectRatio,
-              quality: '1K',
+              quality,
     
             }),
           });
@@ -3050,7 +3136,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
             console.error('[ChatImage] Generate API failed:', generateData.error);
           } else if (generateData.taskIds && generateData.taskIds.length > 0) {
             // 使用服务端实际使用的模型（可能因自动切换而与请求模型不同）
-            const actualModel = generateData.model || getCurrentGenerationModel();
+            const actualModel = generateData.model || imageModelInfo.model;
             // Poll for each task
             for (const taskId of generateData.taskIds) {
               const maxPolls = 60;
@@ -3072,13 +3158,23 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                       ? { 
                           ...msg, 
                           generatedImages: [...(msg.generatedImages || []), pollData.imageUrl],
+                          isGeneratingImage: false,
                         }
                       : msg
                   ));
+                  // 自动添加到画布
+                  if (onAddImages && pollData.imageUrl) {
+                    onAddImages([pollData.imageUrl]);
+                  }
                   gotImage = true;
                   break;
                 } else if (pollData.status === 'failed') {
                   console.error('Image generation failed:', pollData.error);
+                  setMessages(prev => prev.map(msg => 
+                    msg.id === assistantMessageId 
+                      ? { ...msg, isGeneratingImage: false, generateError: pollData.error || '生成失败' }
+                      : msg
+                  ));
                   break;
                 }
               }
@@ -3097,6 +3193,10 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                   }
                 : msg
             ));
+            // 自动添加到画布
+            if (onAddImages && generateData.imageUrl) {
+              onAddImages([generateData.imageUrl]);
+            }
           }
         } catch (imgError) {
           console.error('[ChatImage] Auto image generation error:', imgError);
@@ -3126,7 +3226,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
       setIsLoading(false);
       abortControllerRef.current = null;
     }
-  }, [input, isLoading, messages, model, systemPrompt, isThinkingMode, saveSession, pendingImage, allAgents, activeMentions, tabModeImage, brandDna, tuneContextString]);
+  }, [input, isLoading, messages, model, systemPrompt, isThinkingMode, saveSession, pendingImage, allAgents, activeMentions, tabModeImage, brandDna, tuneContextString, activeSkill, onAddImages]);
 
   // 提示词大师功能 - Agent智能体化
   const handleOptimizePrompt = useCallback(async () => {
@@ -3767,23 +3867,44 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                             title="点击添加到画布"
                             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                           />
-                          {onAddImages && (
-                            <button
-                              onClick={() => onAddImages([imgUrl])}
-                              className="absolute bottom-2 right-2 opacity-0 group-hover/chat-img:opacity-100 transition-opacity bg-black/60 text-white text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1"
+                          <div className="absolute bottom-2 right-2 flex gap-1.5 opacity-0 group-hover/chat-img:opacity-100 transition-opacity">
+                            {onAddImages && (
+                              <button
+                                onClick={() => onAddImages([imgUrl])}
+                                className="bg-black/60 text-white text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1 hover:bg-black/80"
+                              >
+                                <Plus size={12} /> 画布
+                              </button>
+                            )}
+                            <a
+                              href={imgUrl}
+                              download
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="bg-black/60 text-white text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1 hover:bg-black/80"
                             >
-                              <Plus size={12} /> 添加到画布
-                            </button>
-                          )}
+                              <Download size={12} /> 下载
+                            </a>
+                          </div>
                         </div>
                       ))}
+                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                        已自动添加到画布 | 点击图片可再次添加
+                      </div>
                     </div>
                   )}
                   {/* 正在生成图片的加载状态 */}
                   {message.isGeneratingImage && (
-                    <div className="flex items-center gap-2 mb-1 text-xs text-muted-foreground">
+                    <div className={`flex items-center gap-2 mb-1 text-xs ${isGold ? 'text-gold/70' : 'text-muted-foreground'}`}>
                       <Loader2 size={12} className="animate-spin" />
-                      <span>正在生成图片...</span>
+                      <span>正在生成图片，请稍候...</span>
+                    </div>
+                  )}
+                  {/* 生成失败提示 */}
+                  {message.generateError && (
+                    <div className="flex items-center gap-2 mb-1 text-xs text-destructive">
+                      <AlertCircle size={12} />
+                      <span>图片生成失败: {message.generateError}</span>
                     </div>
                   )}
                   <div className={`rounded-2xl px-3.5 py-2.5 ${
