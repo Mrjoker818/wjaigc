@@ -175,6 +175,10 @@ function CanvasApp() {
   const [showImageEditor, setShowImageEditor] = useState(false);
   const [editingImage, setEditingImage] = useState<CanvasImage | null>(null);
 
+  // Chat panel integration states
+  const [chatInitialImage, setChatInitialImage] = useState<CanvasImage | null>(null);
+  const [chatTabOpen, setChatTabOpen] = useState(false);
+
   // Current chat model info from ChatPanel (used for vision-prompt)
   const [currentChatModelInfo, setCurrentChatModelInfo] = useState<{
     model: string; providerId: string; providerPreset?: string;
@@ -2381,6 +2385,10 @@ function CanvasApp() {
             } catch {}
           }}
           onEditImage={handleEditImage}
+          onSendToChat={(image) => {
+            setChatInitialImage(image);
+            setChatTabOpen(true);
+          }}
         />
       </div>
 
@@ -2539,7 +2547,7 @@ function CanvasApp() {
                   />
               </div>
               <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
-                <ChatPanel themeStyle={themeStyle} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} canvasImages={images} onChatModelChange={setCurrentChatModelInfo} />
+                <ChatPanel themeStyle={themeStyle} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} canvasImages={images} selectedCanvasImage={selectedImage} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} />
               </div>
 
             {/* 固定在底部的开始生成按钮 */}

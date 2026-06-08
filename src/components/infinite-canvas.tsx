@@ -379,6 +379,8 @@ interface InfiniteCanvasProps {
   onSwitchToNodeMode?: () => void;
   /** Switch to workflow hub */
   onSwitchToWorkflowHub?: () => void;
+  /** Send canvas image to chat panel for AI modification */
+  onSendToChat?: (image: CanvasImage) => void;
 }
 
 type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'upscale' | 'svg-trace';
@@ -479,6 +481,7 @@ export function InfiniteCanvas({
   onToggleFavorites,
   onSwitchToNodeMode,
   onSwitchToWorkflowHub,
+  onSendToChat,
 }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
@@ -6167,6 +6170,7 @@ export function InfiniteCanvas({
     { label: '提取关键词', action: () => { const img = selectedImageData; if (img) onExtractKeywords(img); } },
     { label: '语言修图', action: () => { const img = selectedImageData; if (img) onEditImage?.(img); else onEditImage?.(null); } },
     { label: 'Agent编排', action: () => { const img = selectedImageData; if (img) { setAgentEditImage(img); setShowAgentEditor(true); } } },
+    { label: '发送到聊天修改', action: () => { const img = selectedImageData; if (img && onSendToChat) onSendToChat(img); } },
     { label: '图片对比', action: () => { const img = selectedImageData; if (img) { setCompareImages({ left: img, right: null }); setCompareSelecting(true); } } },
     { label: '加入收藏夹', action: () => { const img = selectedImageData; if (img && onAddToFavorites) onAddToFavorites(img); } },
   ];

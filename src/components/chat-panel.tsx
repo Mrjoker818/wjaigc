@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
-import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare } from 'lucide-react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -18,6 +18,20 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
 
+interface ChatSkill {
+  id: string;
+  name: string;
+  category: string; // 'image' | 'design' | 'brand' | 'editing' | 'custom'
+  description: string;
+  systemPrompt: string;
+  agentId?: string; // 关联的智能体ID
+  paramSlots: { name: string; label: string; defaultValue?: string; placeholder?: string }[];
+  steps: { role: 'user' | 'assistant'; content: string }[];
+  createdAt: number;
+  updatedAt: number;
+  usageCount: number;
+}
+
 interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -26,6 +40,15 @@ interface Message {
   imageUrl?: string;
   generatedImages?: string[]; // AI生成的图片URL列表
   isGeneratingImage?: boolean; // 是否正在生成图片
+  suggestions?: NextSuggestion[]; // 建议下一步操作
+  isClarifying?: boolean; // 是否为追问消息
+}
+
+interface NextSuggestion {
+  id: string;
+  label: string;
+  action: 'img2img' | 'retouch' | 'upscale' | 'remove-bg' | 'extend' | 'svg-trace' | 'agent-edit' | 'generate-variant' | 'send-to-prompt';
+  prompt?: string;
 }
 
 interface ChatSession {
@@ -266,7 +289,19 @@ interface ChatPanelProps {
   onAddToPrompt?: (prompt: string) => void;
   onAddImages?: (imageUrls: string[]) => void;
   canvasImages?: CanvasImage[];
+  selectedCanvasImage?: CanvasImage | null;
   onChatModelChange?: (info: { model: string; providerId: string; apiKey: string; baseUrl: string; providerPreset?: string } | null) => void;
+  onSuggestionAction?: (action: string, data?: Record<string, string>) => void;
+  brandDna?: Record<string, unknown> | null;
+  onInjectBrandDna?: (dna: Record<string, unknown>) => void;
+  /** Image sent from canvas right-click menu "发送到聊天修改" */
+  chatInitialImage?: CanvasImage | null;
+  /** Called when chatInitialImage has been consumed (auto-tab-mode) */
+  onChatInitialImageConsumed?: () => void;
+  /** External control to switch to chat tab */
+  chatTabOpen?: boolean;
+  /** Callback when chat tab open state changes */
+  onChatTabOpenChange?: (open: boolean) => void;
 }
 
 function isImageUrl(url: string): boolean {
@@ -327,6 +362,64 @@ function extractImageUrls(content: string): string[] {
   }
   
   return urls;
+}
+
+// Helper: parse next-step suggestions from AI response
+function parseSuggestions(content: string): { cleanedContent: string; suggestions: NextSuggestion[] } {
+  const suggestions: NextSuggestion[] = [];
+  // Match suggestion blocks: 💡 建议下一步 / 🎯 下一步建议 / [建议] etc.
+  const suggestionPatterns = [
+    /💡\s*建议下一步[：:]\s*\n([\s\S]*?)(?=\n\n|\n#{1,3}\s|$)/i,
+    /🎯\s*下一步建议[：:]\s*\n([\s\S]*?)(?=\n\n|\n#{1,3}\s|$)/i,
+    /\[建议\]\s*\n([\s\S]*?)(?=\n\n|\n#{1,3}\s|$)/i,
+  ];
+
+  let cleanedContent = content;
+  for (const pattern of suggestionPatterns) {
+    const match = content.match(pattern);
+    if (match) {
+      const block = match[1];
+      // Parse individual suggestions like: 1. 调整配色 → 图生图 / 2. 修改细节 → 语言修图
+      const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+      for (const line of lines) {
+        const m = line.match(/^\d+\.\s*(.+?)(?:\s*[→➡>]\s*(.+))?$/);
+        if (m) {
+          const label = m[1].trim();
+          const actionHint = (m[2] || '').trim();
+          let action: NextSuggestion['action'] = 'generate-variant';
+          let prompt: string | undefined;
+          if (/图生图|风格|参考|变体|variant/i.test(actionHint)) action = 'img2img';
+          else if (/修图|修改|编辑|retouch|edit/i.test(actionHint)) action = 'retouch';
+          else if (/放大|高清|upscale/i.test(actionHint)) action = 'upscale';
+          else if (/背景|去背|removebg|remove.?bg/i.test(actionHint)) action = 'remove-bg';
+          else if (/扩展|延伸|extend|outpaint/i.test(actionHint)) action = 'extend';
+          else if (/矢量|描摹|svg|vectoriz/i.test(actionHint)) action = 'svg-trace';
+          else if (/agent|编排|智能/i.test(actionHint)) action = 'agent-edit';
+          else if (/提示词|prompt|生图/i.test(actionHint)) action = 'send-to-prompt';
+          prompt = label;
+          suggestions.push({ id: `sug-${Date.now()}-${suggestions.length}`, label, action, prompt });
+        }
+      }
+      // Remove suggestion block from content
+      cleanedContent = cleanedContent.replace(match[0], '').trim();
+      break;
+    }
+  }
+  return { cleanedContent, suggestions };
+}
+
+// Helper: detect if user input is too vague
+function isVagueInput(text: string): boolean {
+  const trimmed = text.trim();
+  // Too short (< 8 chars) and no image attached
+  if (trimmed.length < 8) return true;
+  // Very generic single-word or two-word requests
+  const vaguePatterns = /^(画一个|做一个|设计|生成|搞个|来个|帮我|创作|随便|帮我画)\s*$/;
+  if (vaguePatterns.test(trimmed)) return true;
+  // Just a noun without any detail
+  const nounOnlyPattern = /^(一个|一只|一副|一张)?[\u4e00-\u9fa5]{1,4}$/;
+  if (nounOnlyPattern.test(trimmed)) return true;
+  return false;
 }
 
 // Helper: create markdown components for react-markdown
@@ -932,7 +1025,7 @@ ${outputSpec || '1. 设计理念（200字内）\n2. 详细方案描述\n3. 材�
   );
 }
 
-export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages = [], onChatModelChange }: ChatPanelProps) {
+export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages = [], selectedCanvasImage, onChatModelChange, onSuggestionAction, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [model, setModel] = useState('gemini-3.1-pro-preview');
@@ -977,7 +1070,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showChatSettings, setShowChatSettings] = useState(true);
   // 提示词大师相关状态
-  const [activeTab, setActiveTab] = useState<'chat' | 'optimizer'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'optimizer' | 'skills'>('chat');
   const [optimizerInput, setOptimizerInput] = useState('');
   const [optimizerOutputEn, setOptimizerOutputEn] = useState('');
   const [optimizerOutputCn, setOptimizerOutputCn] = useState('');
@@ -1001,6 +1094,188 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   const [customAgents, setCustomAgents] = useState<typeof AGENTS>([]);
   const [showAgentBuilder, setShowAgentBuilder] = useState(false);
   const [editingAgent, setEditingAgent] = useState<typeof AGENTS[0] | null>(null);
+  // Skills 相关状态
+  const [chatSkills, setChatSkills] = useState<ChatSkill[]>([]);
+  const [showSkillSaveDialog, setShowSkillSaveDialog] = useState(false);
+  const [skillSaveName, setSkillSaveName] = useState('');
+  const [skillSaveCategory, setSkillSaveCategory] = useState<string>('custom');
+  const [skillSaveDescription, setSkillSaveDescription] = useState('');
+  const [skillSearchQuery, setSkillSearchQuery] = useState('');
+  const [activeSkill, setActiveSkill] = useState<ChatSkill | null>(null);
+  const [skillParamValues, setSkillParamValues] = useState<Record<string, string>>({});
+
+  // ===== @ Reference System =====
+  interface MentionRef {
+    type: 'canvas-image' | 'brand' | 'prompt' | 'model';
+    id: string;
+    label: string;
+    data?: Record<string, unknown>;
+  }
+  const [activeMentions, setActiveMentions] = useState<MentionRef[]>([]);
+  const [mentionPickerOpen, setMentionPickerOpen] = useState(false);
+  const [mentionPickerSearch, setMentionPickerSearch] = useState('');
+  const [mentionPickerIndex, setMentionPickerIndex] = useState(0);
+  const mentionTriggerRef = useRef<{ start: number; end: number } | null>(null);
+
+  // ===== Tab Mode (selected image → chat targeting) =====
+  const [tabModeImage, setTabModeImage] = useState<CanvasImage | null>(null);
+
+  // Sync with externally selected canvas image
+  useEffect(() => {
+    if (selectedCanvasImage) {
+      setTabModeImage(selectedCanvasImage);
+    } else {
+      setTabModeImage(null);
+    }
+  }, [selectedCanvasImage]);
+
+  // P2-2: ChatCanvas - handle image sent from canvas right-click menu
+  useEffect(() => {
+    if (chatInitialImage) {
+      setTabModeImage(chatInitialImage);
+      setActiveTab('chat');
+      setInput('请帮我修改这张图片：');
+      if (onChatTabOpenChange) onChatTabOpenChange(true);
+      if (onChatInitialImageConsumed) onChatInitialImageConsumed();
+    }
+  }, [chatInitialImage, onChatInitialImageConsumed, onChatTabOpenChange]);
+
+  // Get mention picker items based on search
+  const mentionPickerItems: MentionRef[] = useMemo(() => {
+    const items: MentionRef[] = [];
+    // Canvas images
+    canvasImages.forEach(img => {
+      items.push({
+        type: 'canvas-image',
+        id: img.id,
+        label: img.prompt ? img.prompt.slice(0, 40) + (img.prompt.length > 40 ? '...' : '') : `图片 ${img.id.slice(0, 6)}`,
+        data: { url: img.url, prompt: img.prompt || '', width: img.width, height: img.height },
+      });
+    });
+    // Brand DNA
+    if (brandDna) {
+      items.push({
+        type: 'brand',
+        id: 'brand-dna',
+        label: '品牌规范 (BrandDNA)',
+        data: brandDna,
+      });
+    }
+    // Prompts from oh-my-prompt
+    try {
+      const stored = localStorage.getItem('oh-my-prompt-items');
+      if (stored) {
+        const promptItems = JSON.parse(stored) as Array<{ id: string; title: string; content: string }>;
+        promptItems.forEach(p => {
+          items.push({
+            type: 'prompt',
+            id: p.id,
+            label: `提示词: ${p.title}`,
+            data: { content: p.content },
+          });
+        });
+      }
+    } catch { /* ignore */ }
+    return items.filter(item =>
+      !mentionPickerSearch || item.label.toLowerCase().includes(mentionPickerSearch.toLowerCase())
+    ).slice(0, 8);
+  }, [canvasImages, brandDna, mentionPickerSearch]);
+
+  // Handle @ trigger in textarea
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    const cursorPos = e.target.selectionStart;
+    setInput(value);
+
+    // Detect @ trigger
+    const textBeforeCursor = value.slice(0, cursorPos);
+    const atMatch = textBeforeCursor.match(/@([^\s@]*)$/);
+    if (atMatch) {
+      setMentionPickerOpen(true);
+      setMentionPickerSearch(atMatch[1]);
+      setMentionPickerIndex(0);
+      mentionTriggerRef.current = {
+        start: cursorPos - atMatch[0].length,
+        end: cursorPos,
+      };
+    } else {
+      setMentionPickerOpen(false);
+      mentionTriggerRef.current = null;
+    }
+  }, []);
+
+  // Select a mention item
+  const selectMentionItem = useCallback((item: MentionRef) => {
+    if (!mentionTriggerRef.current) return;
+    const { start, end } = mentionTriggerRef.current;
+    const before = input.slice(0, start);
+    const after = input.slice(end);
+    setInput(before + after);
+    setActiveMentions(prev => {
+      if (prev.some(m => m.type === item.type && m.id === item.id)) return prev;
+      return [...prev, item];
+    });
+    setMentionPickerOpen(false);
+    mentionTriggerRef.current = null;
+    // If brand, also inject into system prompt context
+    if (item.type === 'brand' && item.data && onInjectBrandDna) {
+      onInjectBrandDna(item.data);
+    }
+  }, [input, onInjectBrandDna]);
+
+  // Remove a mention
+  const removeMention = useCallback((index: number) => {
+    setActiveMentions(prev => prev.filter((_, i) => i !== index));
+  }, []);
+
+  // ===== End @ Reference System =====
+
+  // ===== P2-1: Tune Mode — Fine-grained parameter adjustment =====
+  interface TuneParams {
+    strength: number;       // 0-100, how strongly to apply changes
+    styleShift: number;     // -50 to +50, shift toward more/less stylized
+    colorTone: number;      // -50 to +50, shift toward cooler/warmer
+    detailLevel: number;    // 0-100, level of detail to preserve/add
+  }
+  const [tuneParams, setTuneParams] = useState<TuneParams>({
+    strength: 70,
+    styleShift: 0,
+    colorTone: 0,
+    detailLevel: 50,
+  });
+  const [showTunePanel, setShowTunePanel] = useState(false);
+
+  const updateTuneParam = useCallback((key: keyof TuneParams, value: number) => {
+    setTuneParams(prev => ({ ...prev, [key]: value }));
+  }, []);
+
+  // Build tune context string for prompt injection
+  const tuneContextString = useMemo(() => {
+    if (!showTunePanel) return '';
+    const parts: string[] = [];
+    if (tuneParams.strength !== 70) parts.push(`修改强度: ${tuneParams.strength}%${tuneParams.strength > 85 ? '(强烈)' : tuneParams.strength < 40 ? '(轻微)' : '(适中)'}`);
+    if (tuneParams.styleShift !== 0) parts.push(`风格偏移: ${tuneParams.styleShift > 0 ? '更艺术化' : '更写实'}(${Math.abs(tuneParams.styleShift)}%)`);
+    if (tuneParams.colorTone !== 0) parts.push(`色调偏移: ${tuneParams.colorTone > 0 ? '偏暖' : '偏冷'}(${Math.abs(tuneParams.colorTone)}%)`);
+    if (tuneParams.detailLevel !== 50) parts.push(`细节程度: ${tuneParams.detailLevel > 70 ? '高细节' : tuneParams.detailLevel < 30 ? '简约' : '标准'}(${tuneParams.detailLevel}%)`);
+    return parts.length > 0 ? `\n【精细调节参数】\n${parts.join('\n')}` : '';
+  }, [showTunePanel, tuneParams]);
+
+  // ===== End Tune Mode =====
+
+  // ===== P2-3: Tab Completion — Quick command templates =====
+  const quickCommands = useMemo(() => [
+    { label: '生成图片', prompt: '请生成一张', icon: '🎨' },
+    { label: '修改图片', prompt: '请修改这张图片：', icon: '✏️' },
+    { label: '调整风格', prompt: '请将风格调整为', icon: '🎭' },
+    { label: '换背景', prompt: '请将背景替换为', icon: '🖼️' },
+    { label: '优化提示词', prompt: '请帮我优化这个提示词：', icon: '✨' },
+    { label: '生成变体', prompt: '请基于这张图生成变体，', icon: '🔄' },
+    { label: '添加文字', prompt: '请在图片上添加文字：', icon: '📝' },
+    { label: '品牌设计', prompt: '请按照品牌规范设计', icon: '💎' },
+  ], []);
+  const [showQuickCommands, setShowQuickCommands] = useState(false);
+
+  // ===== End Quick Commands =====
 
   // 合并内置+自定义智能体
   const allAgents = [...AGENTS, ...customAgents];
@@ -1012,6 +1287,119 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
       if (stored) setCustomAgents(JSON.parse(stored));
     } catch {}
   }, []);
+
+  // 加载 Skills
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('chat-skills');
+      if (stored) setChatSkills(JSON.parse(stored));
+    } catch {}
+  }, []);
+
+  // 保存 Skills
+  const saveSkills = useCallback((skills: ChatSkill[]) => {
+    setChatSkills(skills);
+    try {
+      localStorage.setItem('chat-skills', JSON.stringify(skills));
+    } catch {}
+  }, []);
+
+  // 保存当前对话为 Skill
+  const handleSaveAsSkill = useCallback(() => {
+    if (!skillSaveName.trim()) return;
+    const agent = allAgents.find(a => a.id === systemPrompt);
+    const steps = messages
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .slice(-6) // 取最近6条作为步骤参考
+      .map(m => ({ role: m.role, content: m.content.substring(0, 200) }));
+
+    // 自动提取参数槽位 - 从用户消息中提取变量模式
+    const paramSlots: ChatSkill['paramSlots'] = [];
+    const userMessages = messages.filter(m => m.role === 'user');
+    if (userMessages.length > 0) {
+      const firstMsg = userMessages[0].content;
+      // 如果第一条消息包含具体描述，将其标记为主题参数
+      if (firstMsg.length > 4) {
+        paramSlots.push({
+          name: 'topic',
+          label: '主题内容',
+          defaultValue: firstMsg.substring(0, 50),
+          placeholder: '输入新的主题内容...',
+        });
+      }
+    }
+
+    const newSkill: ChatSkill = {
+      id: `skill-${Date.now()}`,
+      name: skillSaveName.trim(),
+      category: skillSaveCategory,
+      description: skillSaveDescription.trim() || `从对话"${currentSessionId}"提炼的技能`,
+      systemPrompt: agent?.prompt || systemPrompt,
+      agentId: agent?.id,
+      paramSlots,
+      steps,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      usageCount: 0,
+    };
+    saveSkills([...chatSkills, newSkill]);
+    setShowSkillSaveDialog(false);
+    setSkillSaveName('');
+    setSkillSaveCategory('custom');
+    setSkillSaveDescription('');
+  }, [skillSaveName, skillSaveCategory, skillSaveDescription, messages, systemPrompt, allAgents, chatSkills, saveSkills, currentSessionId]);
+
+  // 使用 Skill 创建新对话
+  const handleUseSkill = useCallback((skill: ChatSkill) => {
+    const paramValues = { ...skillParamValues };
+    // 设置智能体
+    if (skill.agentId) {
+      setSystemPrompt(skill.agentId);
+    }
+    // 构建首条消息 - 替换参数槽位
+    let firstMessage = '';
+    if (skill.steps.length > 0) {
+      const firstUserStep = skill.steps.find(s => s.role === 'user');
+      if (firstUserStep) {
+        firstMessage = firstUserStep.content;
+        // 替换参数槽位
+        for (const slot of skill.paramSlots) {
+          const val = paramValues[slot.name] || slot.defaultValue || '';
+          if (val) {
+            firstMessage = firstMessage.replace(slot.defaultValue || slot.name, val);
+          }
+        }
+      }
+    }
+    // 创建新对话
+    const newId = `chat-${Date.now()}`;
+    const newSession: ChatSession = {
+      id: newId,
+      title: `Skill: ${skill.name}`,
+      messages: [],
+      model: model,
+      systemPrompt: skill.agentId || systemPrompt,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    setChatSessions(prev => [newSession, ...prev]);
+    setCurrentSessionId(newId);
+    setMessages([]);
+    setActiveSkill(null);
+    setSkillParamValues({});
+    setActiveTab('chat');
+    // 更新使用计数
+    saveSkills(chatSkills.map(s => s.id === skill.id ? { ...s, usageCount: s.usageCount + 1, updatedAt: Date.now() } : s));
+    // 如果有首条消息，自动发送
+    if (firstMessage.trim()) {
+      setInput(firstMessage);
+    }
+  }, [skillParamValues, model, systemPrompt, chatSkills, saveSkills]);
+
+  // 删除 Skill
+  const handleDeleteSkill = useCallback((skillId: string) => {
+    saveSkills(chatSkills.filter(s => s.id !== skillId));
+  }, [chatSkills, saveSkills]);
   const [showHistoryPanel, setShowHistoryPanel] = useState(false);
   const [showFilePanel, setShowFilePanel] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -1325,12 +1713,21 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   };
 
   const handleSend = useCallback(async () => {
-    if (!input.trim() || isLoading) return;
+    if (input.trim() || isLoading) {
+      // continue
+    } else {
+      return;
+    }
+
+    const trimmedInput = input.trim();
+
+    // P0-3: 模糊意图主动追问 - 如果输入太模糊，添加追问标记
+    const isVague = isVagueInput(trimmedInput) && !pendingImage;
 
     const userMessage: Message = {
       id: `user-${Date.now()}`,
       role: 'user',
-      content: input.trim(),
+      content: trimmedInput,
       timestamp: Date.now(),
     };
 
@@ -1351,10 +1748,80 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
       const systemPromptObj = allAgents.find(p => p.id === systemPrompt);
       const requestMessages = [];
       
-      if (systemPromptObj) {
+      // 构建增强版系统提示词
+      let enhancedSystemPrompt = systemPromptObj?.prompt || '';
+      
+      // P0-2: 生成后主动引导 - 在系统提示词中注入建议指令
+      enhancedSystemPrompt += `
+
+【重要：回复格式规范】
+1. 当你帮助用户生成图片或完成设计任务后，必须在回复末尾附加"建议下一步"区域，格式如下：
+💡 建议下一步：
+1. [具体操作描述] → [操作类型]
+2. [具体操作描述] → [操作类型]
+3. [具体操作描述] → [操作类型]
+
+操作类型必须是以下之一：图生图、语言修图、放大、移除背景、扩展画面、SVG描摹、Agent编排、提示词优化
+每次给出2-3个建议，建议应与当前对话内容紧密相关。
+
+2. 如果你生成的图片有任何值得注意的设计特点，请简要说明。`;
+
+      // P0-3: 模糊意图追问 - 如果输入太模糊，注入追问指令
+      if (isVague) {
+        enhancedSystemPrompt += `
+
+【重要：当前用户输入过于模糊】
+用户输入简短且缺少关键细节。请先追问澄清，而非直接执行。你需要问清楚：
+- 具体主题/对象是什么？
+- 期望的风格/氛围是什么？
+- 用途/场景是什么？
+- 有无特殊要求？
+追问时给出2-3个具体选项帮助用户选择，降低回答门槛。格式示例：
+"我理解您想[用户意图]，为了给出最好的结果，请补充一些细节：
+1. 关于主题：[选项A] / [选项B] / [选项C]
+2. 关于风格：[选项A] / [选项B] / [选项C]"`;
+      }
+
+      // P1-3: 品牌资产注入 - 如果有@品牌引用，注入BrandDNA到systemPrompt
+      const brandMention = activeMentions.find(m => m.type === 'brand');
+      if (brandMention?.data) {
+        const dna = brandMention.data;
+        enhancedSystemPrompt += `
+
+【品牌规范 (BrandDNA)】
+当前对话需严格遵循以下品牌规范，所有生成内容必须符合：
+- 主色: ${dna.primaryColor || dna['primaryColor'] || '未指定'}
+- 辅色: ${dna.secondaryColor || dna['secondaryColor'] || '未指定'}
+- 字体: ${dna.fontFamily || dna['fontFamily'] || '未指定'}
+- 视觉调性: ${dna.visualTone || dna['visualTone'] || '未指定'}
+- 禁区规则: ${dna.restrictions || dna['restrictions'] || '未指定'}
+${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.styleDescription || dna['styleDescription']}` : ''}
+请确保所有图片生成、设计建议都符合以上品牌规范。`;
+      }
+
+      // P1-2: Tab模式 - 如果有选中画布图片，注入图片上下文
+      const tabImage = tabModeImage;
+      if (tabImage) {
+        enhancedSystemPrompt += `
+
+【当前编辑图片】
+用户正在编辑画布上的一张图片，请针对该图片给出建议或修改指令：
+- 图片URL: ${tabImage.url}
+- 图片尺寸: ${tabImage.width}×${tabImage.height}
+- 原始描述: ${tabImage.prompt || '无'}
+- 生成模型: ${tabImage.model || '未知'}
+用户的消息是针对这张图片的操作指令，请据此理解用户意图。`;
+      }
+
+      // P2-1: Tune Mode — Inject fine-tuning parameters
+      if (tuneContextString) {
+        enhancedSystemPrompt += tuneContextString;
+      }
+
+      if (enhancedSystemPrompt) {
         requestMessages.push({
           role: 'system',
-          content: systemPromptObj.prompt
+          content: enhancedSystemPrompt
         });
       }
 
@@ -1375,10 +1842,38 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
         }
       });
 
-      requestMessages.push({
-        role: 'user',
-        content: input.trim()
-      });
+      // P1-1: @引用系统 - 构建包含引用图片的用户消息
+      const mentionedImages = activeMentions.filter(m => m.type === 'canvas-image' && m.data?.url);
+      const mentionedPrompts = activeMentions.filter(m => m.type === 'prompt' && m.data?.content);
+      
+      // Build context prefix from mentions
+      let mentionContext = '';
+      if (mentionedPrompts.length > 0) {
+        mentionContext += '\n\n[引用的提示词]\n' + mentionedPrompts.map(m => `- ${m.data!.content}`).join('\n');
+      }
+      
+      if (mentionedImages.length > 0) {
+        // Send as multimodal content with images
+        const imageContents = mentionedImages.map(m => ({
+          type: 'image_url' as const,
+          image_url: { url: m.data!.url as string }
+        }));
+        requestMessages.push({
+          role: 'user',
+          content: [
+            { type: 'text', text: trimmedInput + mentionContext },
+            ...imageContents
+          ]
+        });
+      } else {
+        requestMessages.push({
+          role: 'user',
+          content: trimmedInput + mentionContext
+        });
+      }
+
+      // Clear mentions after sending
+      setActiveMentions([]);
 
       // 创建 AbortController 以支持取消
       const controller = new AbortController();
@@ -1447,9 +1942,28 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
         }
       }
 
+      // P0-2: 解析建议下一步
+      const { cleanedContent, suggestions } = parseSuggestions(assistantContent);
+      if (suggestions.length > 0) {
+        setMessages(prev => prev.map(msg => 
+          msg.id === assistantMessageId 
+            ? { ...msg, content: cleanedContent, suggestions }
+            : msg
+        ));
+      }
+
+      // P0-3: 检测追问回复 - 标记追问消息
+      if (isVague && assistantContent.includes('？') || assistantContent.includes('?') || /请补充|请说明|请选择|请告诉我/.test(assistantContent)) {
+        setMessages(prev => prev.map(msg => 
+          msg.id === assistantMessageId 
+            ? { ...msg, isClarifying: true }
+            : msg
+        ));
+      }
+
       // After streaming completes, check if user intended to generate an image
       // Use user's original message + optimize-prompt API to get a proper English prompt
-      const userText = input.trim();
+      const userText = trimmedInput;
       if (isImageGenerationIntent(userText)) {
         // Mark as generating
         setMessages(prev => prev.map(msg => 
@@ -1592,7 +2106,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
       setIsLoading(false);
       abortControllerRef.current = null;
     }
-  }, [input, isLoading, messages, model, systemPrompt, isThinkingMode, saveSession]);
+  }, [input, isLoading, messages, model, systemPrompt, isThinkingMode, saveSession, pendingImage, allAgents, activeMentions, tabModeImage, brandDna, tuneContextString]);
 
   // 提示词大师功能 - Agent智能体化
   const handleOptimizePrompt = useCallback(async () => {
@@ -1813,9 +2327,49 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
               <Wand2 size={13} />
               提示词大师
             </button>
+            <button
+              onClick={() => setActiveTab('skills')}
+              className={`relative z-10 px-2.5 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
+                activeTab === 'skills'
+                  ? isGold
+                    ? 'bg-gold/15 text-gold shadow-sm'
+                    : 'bg-white text-gray-900 shadow-sm'
+                  : isGold
+                    ? 'text-gold-muted/70 hover:text-muted-foreground'
+                    : 'text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              <Bookmark size={13} />
+              Skills
+              {chatSkills.length > 0 && (
+                <span className={`ml-0.5 text-[10px] ${activeTab === 'skills' ? (isGold ? 'text-gold' : 'text-blue-500') : (isGold ? 'text-gold-muted/50' : 'text-gray-400')}`}>
+                  {chatSkills.length}
+                </span>
+              )}
+            </button>
           </div>
           {activeTab === 'chat' && (
             <div className="flex items-center gap-0.5">
+              <button
+                onClick={() => {
+                  if (messages.length >= 2) {
+                    setSkillSaveName('');
+                    setSkillSaveCategory('custom');
+                    setSkillSaveDescription('');
+                    setShowSkillSaveDialog(!showSkillSaveDialog);
+                  }
+                }}
+                className={`p-1.5 rounded-md transition-colors ${
+                  messages.length < 2
+                    ? isGold ? 'text-gold-muted/30 cursor-not-allowed' : 'text-gray-300 cursor-not-allowed'
+                    : showSkillSaveDialog
+                      ? isGold ? 'text-gold bg-gold/10' : 'text-gray-900 bg-gray-100'
+                      : isGold ? 'text-gold-muted hover:text-gold hover:bg-white/[0.06]' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'
+                }`}
+                title={messages.length < 2 ? '至少2条对话才能保存为Skill' : '保存为Skill'}
+              >
+                <BookmarkCheck size={14} />
+              </button>
               <button
                 onClick={handleNewChat}
                 className={`p-1.5 rounded-md transition-colors ${
@@ -1856,6 +2410,23 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
               >
                 <Trash2 size={14} />
               </button>
+              {messages.length >= 2 && (
+                <button
+                  onClick={() => {
+                    setSkillSaveName('');
+                    setSkillSaveDescription('');
+                    setSkillSaveCategory('custom');
+                    setShowSkillSaveDialog(true);
+                    setActiveTab('skills');
+                  }}
+                  className={`p-2 rounded-lg transition-colors ${
+                    isGold ? 'text-gold-muted hover:text-gold hover:bg-gold/10' : 'text-gray-400 hover:text-blue-500 hover:bg-blue-50'
+                  }`}
+                  title="保存为 Skill"
+                >
+                  <BookmarkCheck size={14} />
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -2234,7 +2805,46 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                         发送到生图
                       </button>
                     )}
+                    {message.role === 'assistant' && message.isClarifying && (
+                      <span className={`text-xs flex items-center gap-1 ${isGold ? 'text-amber-400/70' : 'text-amber-500'}`}>
+                        <Lightbulb size={12} />
+                        追问中
+                      </span>
+                    )}
                   </div>
+                  {/* P0-2: 建议下一步操作 */}
+                  {message.role === 'assistant' && message.suggestions && message.suggestions.length > 0 && (
+                    <div className={`mt-1.5 rounded-lg p-2 ${isGold ? 'bg-gold/5 border border-gold/15' : 'bg-blue-50/50 border border-blue-100'}`}>
+                      <div className={`text-[10px] font-medium mb-1.5 flex items-center gap-1 ${isGold ? 'text-gold/70' : 'text-blue-500'}`}>
+                        <Zap size={10} />
+                        建议下一步
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {message.suggestions.map(sug => (
+                          <button
+                            key={sug.id}
+                            onClick={() => {
+                              if (sug.action === 'send-to-prompt' && onAddToPrompt && sug.prompt) {
+                                onAddToPrompt(sug.prompt);
+                              } else if (onSuggestionAction) {
+                                onSuggestionAction(sug.action, { prompt: sug.prompt || '', label: sug.label });
+                              } else if (onAddToPrompt && sug.prompt) {
+                                onAddToPrompt(sug.prompt);
+                              }
+                            }}
+                            className={`text-[10px] px-2 py-1 rounded-md transition-all flex items-center gap-0.5 ${
+                              isGold
+                                ? 'bg-gold/10 text-gold/80 border border-gold/20 hover:bg-gold/20 hover:text-gold'
+                                : 'bg-white text-blue-600 border border-blue-200 hover:bg-blue-50 hover:text-blue-700'
+                            }`}
+                          >
+                            <ArrowRight size={9} />
+                            {sug.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 {message.role === 'user' && (
                   <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
@@ -2312,6 +2922,79 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
 
         {/* Input - 精致设计 */}
         <div className={`px-3 py-2 border-t ${themeClasses.border} shrink-0 ${isGold ? 'bg-[#0d0d0d]/90' : 'bg-white'}`}>
+          {/* P1-2: Tab Mode Indicator */}
+          {tabModeImage && (
+            <div className={`mb-1.5 flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs ${isGold ? 'bg-gold/10 text-gold border border-gold/20' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
+              <Target size={12} />
+              <span className="truncate">针对图片: {tabModeImage.prompt?.slice(0, 20) || tabModeImage.id.slice(0, 6)}</span>
+              <button onClick={() => setTabModeImage(null)} className="ml-auto shrink-0 opacity-60 hover:opacity-100">
+                <X size={12} />
+              </button>
+            </div>
+          )}
+
+          {/* P2-1: Tune Mode Panel */}
+          {showTunePanel && (
+            <div className={`mb-1.5 p-2 rounded-lg text-xs space-y-2 ${isGold ? 'bg-white/[0.03] border border-white/[0.06]' : 'bg-gray-50 border border-gray-200'}`}>
+              <div className="flex items-center justify-between">
+                <span className={`font-medium ${themeClasses.text}`}>Tune 精细调节</span>
+                <button onClick={() => setShowTunePanel(false)} className={`opacity-50 hover:opacity-100 ${themeClasses.textMuted}`}>
+                  <X size={12} />
+                </button>
+              </div>
+              {([
+                { key: 'strength' as const, label: '修改强度', min: 0, max: 100, icon: '💪' },
+                { key: 'styleShift' as const, label: '风格偏移', min: -50, max: 50, icon: '🎭' },
+                { key: 'colorTone' as const, label: '色调偏移', min: -50, max: 50, icon: '🎨' },
+                { key: 'detailLevel' as const, label: '细节程度', min: 0, max: 100, icon: '🔍' },
+              ]).map(param => (
+                <div key={param.key} className="flex items-center gap-2">
+                  <span className="w-4 text-center">{param.icon}</span>
+                  <span className={`w-16 shrink-0 ${themeClasses.textMuted}`}>{param.label}</span>
+                  <input
+                    type="range"
+                    min={param.min}
+                    max={param.max}
+                    value={tuneParams[param.key]}
+                    onChange={e => updateTuneParam(param.key, parseInt(e.target.value))}
+                    className="flex-1 h-1 accent-current"
+                  />
+                  <span className={`w-8 text-right tabular-nums ${themeClasses.textMuted}`}>
+                    {tuneParams[param.key]}
+                  </span>
+                </div>
+              ))}
+              <button
+                onClick={() => { setTuneParams({ strength: 70, styleShift: 0, colorTone: 0, detailLevel: 50 }); }}
+                className={`w-full text-center py-0.5 rounded text-[10px] ${isGold ? 'text-gold-muted/60 hover:text-gold' : 'text-gray-400 hover:text-gray-600'}`}
+              >
+                重置参数
+              </button>
+            </div>
+          )}
+
+          {/* P1-1: Active Mentions Tags */}
+          {activeMentions.length > 0 && (
+            <div className="mb-1.5 flex flex-wrap gap-1">
+              {activeMentions.map((m, i) => (
+                <span key={`${m.type}-${m.id}`} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                  m.type === 'canvas-image' ? (isGold ? 'bg-gold/15 text-gold border border-gold/30' : 'bg-blue-50 text-blue-700 border border-blue-200') :
+                  m.type === 'brand' ? (isGold ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' : 'bg-amber-50 text-amber-700 border border-amber-200') :
+                  m.type === 'prompt' ? (isGold ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-emerald-50 text-emerald-700 border border-emerald-200') :
+                  (isGold ? 'bg-white/10 text-white/60 border border-white/10' : 'bg-gray-50 text-gray-600 border border-gray-200')
+                }`}>
+                  {m.type === 'canvas-image' && <ImageIcon size={10} />}
+                  {m.type === 'brand' && <Palette size={10} />}
+                  {m.type === 'prompt' && <Sparkles size={10} />}
+                  <span className="truncate max-w-[100px]">{m.label}</span>
+                  <button onClick={() => removeMention(i)} className="opacity-50 hover:opacity-100">
+                    <X size={10} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
           <div className="flex gap-1.5 items-end">
             <input
               ref={fileInputRef}
@@ -2331,14 +3014,92 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
             >
               <ImageIcon size={14} />
             </button>
-            <div className={`flex-1 relative rounded-xl overflow-hidden ${isGold ? 'bg-white/[0.03] border border-white/[0.04] focus-within:border-gold/40 focus-within:shadow-gold/10' : 'bg-white border border-gray-200 focus-within:border-gray-400 focus-within:shadow-sm'} transition-all`}>
+            {/* P2-1: Tune toggle button */}
+            <button
+              onClick={() => setShowTunePanel(prev => !prev)}
+              className={`shrink-0 h-8 w-8 rounded-lg flex items-center justify-center transition-colors ${
+                showTunePanel
+                  ? isGold
+                    ? 'bg-gold/15 text-gold border border-gold/40'
+                    : 'bg-blue-100 text-blue-600 border border-blue-300'
+                  : isGold
+                    ? 'bg-white/[0.04] border border-white/[0.04] text-gold-muted hover:text-gold hover:border-gold/40'
+                    : 'bg-gray-100 border border-gray-200 text-gray-400 hover:text-gray-700 hover:border-gray-300'
+              }`}
+              title="Tune 精细调节"
+            >
+              <Sliders size={14} />
+            </button>
+            {/* P2-3: Quick commands button */}
+            <div className="relative">
+              <button
+                onClick={() => setShowQuickCommands(prev => !prev)}
+                className={`shrink-0 h-8 w-8 rounded-lg flex items-center justify-center transition-colors ${
+                  showQuickCommands
+                    ? isGold
+                      ? 'bg-gold/15 text-gold border border-gold/40'
+                      : 'bg-blue-100 text-blue-600 border border-blue-300'
+                    : isGold
+                      ? 'bg-white/[0.04] border border-white/[0.04] text-gold-muted hover:text-gold hover:border-gold/40'
+                      : 'bg-gray-100 border border-gray-200 text-gray-400 hover:text-gray-700 hover:border-gray-300'
+                }`}
+                title="快捷指令"
+              >
+                <Zap size={14} />
+              </button>
+              {showQuickCommands && (
+                <div className={`absolute bottom-full left-0 mb-1 w-44 rounded-lg border shadow-lg z-50 overflow-hidden ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
+                  <div className={`px-2 py-1 text-[10px] font-medium ${isGold ? 'text-gold-muted/60' : 'text-gray-400'}`}>
+                    快捷指令
+                  </div>
+                  {quickCommands.map((cmd, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        setInput(prev => prev + cmd.prompt);
+                        setShowQuickCommands(false);
+                        textareaRef.current?.focus();
+                      }}
+                      className={`w-full flex items-center gap-2 px-2 py-1.5 text-xs transition-colors ${isGold ? 'text-white/80 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'}`}
+                    >
+                      <span>{cmd.icon}</span>
+                      <span>{cmd.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className={`flex-1 relative rounded-xl overflow-visible ${isGold ? 'bg-white/[0.03] border border-white/[0.04] focus-within:border-gold/40 focus-within:shadow-gold/10' : 'bg-white border border-gray-200 focus-within:border-gray-400 focus-within:shadow-sm'} transition-all`}>
               <Textarea
                 ref={textareaRef}
                 value={input}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setInput(e.target.value)}
-                placeholder="输入消息... (Ctrl+V 粘贴图片)"
+                onChange={handleInputChange}
+                placeholder={tabModeImage ? "描述你想对这张图片做什么..." : "输入消息... (@ 引用图片/品牌/提示词, Ctrl+V 粘贴图片)"}
                 className={`w-full resize-none min-h-[32px] max-h-[120px] border-0 bg-transparent px-3 py-1.5 text-xs focus:outline-none focus:ring-0 ${themeClasses.text} placeholder:${isGold ? 'text-gold-muted/50' : 'text-gray-400'}`}
                 onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+                  // Handle mention picker navigation
+                  if (mentionPickerOpen && mentionPickerItems.length > 0) {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setMentionPickerIndex(prev => Math.min(prev + 1, mentionPickerItems.length - 1));
+                      return;
+                    }
+                    if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setMentionPickerIndex(prev => Math.max(prev - 1, 0));
+                      return;
+                    }
+                    if (e.key === 'Enter' || e.key === 'Tab') {
+                      e.preventDefault();
+                      selectMentionItem(mentionPickerItems[mentionPickerIndex]);
+                      return;
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setMentionPickerOpen(false);
+                      return;
+                    }
+                  }
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     handleSend();
@@ -2346,6 +3107,33 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
                 }}
                 disabled={isLoading}
               />
+              {/* P1-1: @ Mention Picker Popup */}
+              {mentionPickerOpen && mentionPickerItems.length > 0 && (
+                <div className={`absolute bottom-full left-0 right-0 mb-1 rounded-lg border shadow-lg z-50 overflow-hidden ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
+                  <div className={`px-2 py-1 text-[10px] font-medium ${isGold ? 'text-gold-muted/60' : 'text-gray-400'}`}>
+                    @ 引用 — 输入筛选，↑↓选择，Enter确认
+                  </div>
+                  {mentionPickerItems.map((item, idx) => (
+                    <button
+                      key={`${item.type}-${item.id}`}
+                      onClick={() => selectMentionItem(item)}
+                      className={`w-full flex items-center gap-2 px-2 py-1.5 text-xs transition-colors ${
+                        idx === mentionPickerIndex
+                          ? isGold ? 'bg-gold/10 text-gold' : 'bg-blue-50 text-blue-700'
+                          : isGold ? 'text-white/80 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      {item.type === 'canvas-image' && <ImageIcon size={12} className="shrink-0" />}
+                      {item.type === 'brand' && <Palette size={12} className="shrink-0" />}
+                      {item.type === 'prompt' && <Sparkles size={12} className="shrink-0" />}
+                      <span className="truncate">{item.label}</span>
+                      <span className={`ml-auto text-[10px] ${isGold ? 'text-white/30' : 'text-gray-300'}`}>
+                        {item.type === 'canvas-image' ? '图片' : item.type === 'brand' ? '品牌' : '提示词'}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <button
               onClick={handleSend}
@@ -2594,6 +3382,229 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
         </div>
       </div>
       )}
+
+      {/* Skills Tab Content */}
+      {activeTab === 'skills' && (
+      <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="p-3 space-y-3">
+            {/* Skill 搜索 */}
+            <div className="relative">
+              <input
+                value={skillSearchQuery}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSkillSearchQuery(e.target.value)}
+                placeholder="搜索 Skills..."
+                className={`w-full px-3 py-2 rounded-lg text-xs ${isGold ? 'bg-white/[0.03] border border-white/[0.04] text-text-bright placeholder:text-gold-muted/40 focus:border-gold/40' : 'bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-gray-400'} focus:outline-none transition-colors`}
+              />
+            </div>
+
+            {/* Skill 保存对话框（内联） */}
+            {showSkillSaveDialog && messages.length >= 2 && (
+              <div className={`rounded-lg p-3 ${isGold ? 'bg-gold/8 border border-gold/20' : 'bg-blue-50 border border-blue-200'}`}>
+                <div className={`text-xs font-medium mb-2 flex items-center gap-1 ${isGold ? 'text-gold' : 'text-blue-600'}`}>
+                  <BookmarkCheck size={13} />
+                  保存为 Skill
+                </div>
+                <input
+                  value={skillSaveName}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSkillSaveName(e.target.value)}
+                  placeholder="Skill 名称..."
+                  className={`w-full px-2.5 py-1.5 rounded-md text-xs mb-2 ${isGold ? 'bg-[#0d0d0d] border border-white/[0.06] text-text-bright placeholder:text-gold-muted/40' : 'bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400'} focus:outline-none`}
+                />
+                <div className="flex gap-1.5 mb-2">
+                  {(['image', 'design', 'brand', 'editing', 'custom'] as const).map(cat => (
+                    <button
+                      key={cat}
+                      onClick={() => setSkillSaveCategory(cat)}
+                      className={`px-2 py-1 rounded text-[10px] font-medium transition-all ${
+                        skillSaveCategory === cat
+                          ? isGold ? 'bg-gold text-black' : 'bg-blue-500 text-white'
+                          : isGold ? 'bg-white/[0.04] text-gold-muted/60 border border-white/[0.04]' : 'bg-white text-gray-500 border border-gray-200'
+                      }`}
+                    >
+                      {{image: '图像', design: '设计', brand: '品牌', editing: '编辑', custom: '自定义'}[cat]}
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  value={skillSaveDescription}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setSkillSaveDescription(e.target.value)}
+                  placeholder="Skill 描述（可选）..."
+                  className={`w-full px-2.5 py-1.5 rounded-md text-xs min-h-[48px] resize-none mb-2 ${isGold ? 'bg-[#0d0d0d] border border-white/[0.06] text-text-bright placeholder:text-gold-muted/40' : 'bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400'} focus:outline-none`}
+                />
+                <div className="flex gap-1.5">
+                  <Button
+                    onClick={handleSaveAsSkill}
+                    disabled={!skillSaveName.trim()}
+                    className={`flex-1 h-7 text-xs font-medium rounded-md ${
+                      isGold ? 'bg-gradient-to-r from-gold to-gold-dark text-black hover:opacity-90' : 'bg-blue-500 text-white hover:bg-blue-600'
+                    }`}
+                  >
+                    保存
+                  </Button>
+                  <Button
+                    onClick={() => setShowSkillSaveDialog(false)}
+                    className={`h-7 px-3 text-xs rounded-md ${
+                      isGold ? 'bg-white/[0.04] text-gold-muted/70 border border-white/[0.04]' : 'bg-white text-gray-500 border border-gray-200'
+                    }`}
+                  >
+                    取消
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Skill 列表 */}
+            {chatSkills.length === 0 ? (
+              <div className={`text-center py-8 ${themeClasses.textMuted}`}>
+                <Bookmark size={24} className="mx-auto mb-2 opacity-30" />
+                <div className="text-xs">暂无 Skills</div>
+                <div className="text-[10px] mt-1 opacity-60">在对话中点击收藏按钮，将对话提炼为可复用 Skill</div>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <div className={`text-xs font-medium ${themeClasses.textMuted}`}>
+                    我的 Skills ({chatSkills.filter(s => !skillSearchQuery || s.name.includes(skillSearchQuery) || s.description.includes(skillSearchQuery)).length})
+                  </div>
+                  {chatSkills.length > 0 && (
+                    <button
+                      onClick={() => { if (confirm('确认清空所有 Skills？')) saveSkills([]); }}
+                      className={`text-[10px] ${themeClasses.textMuted} hover:text-red-400 transition-colors`}
+                    >
+                      清空
+                    </button>
+                  )}
+                </div>
+                {chatSkills
+                  .filter(s => !skillSearchQuery || s.name.includes(skillSearchQuery) || s.description.includes(skillSearchQuery))
+                  .map(skill => (
+                  <div
+                    key={skill.id}
+                    className={`rounded-lg p-2.5 transition-all ${
+                      activeSkill?.id === skill.id
+                        ? isGold ? 'bg-gold/12 border border-gold/30' : 'bg-blue-50 border border-blue-200'
+                        : isGold ? 'bg-white/[0.03] border border-white/[0.04] hover:border-white/[0.10]' : 'bg-white border border-gray-100 hover:border-gray-200'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 text-xs ${
+                        isGold ? 'bg-gold/10 text-gold' : 'bg-blue-50 text-blue-500'
+                      }`}>
+                        {{image: '🖼', design: '🎨', brand: '🏢', editing: '✏️', custom: '⚡'}[skill.category as 'image'|'design'|'brand'|'editing'|'custom'] || '⚡'}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-xs font-medium ${themeClasses.text}`}>{skill.name}</div>
+                        {skill.description && (
+                          <div className={`text-[10px] mt-0.5 ${themeClasses.textMuted} line-clamp-2`}>{skill.description}</div>
+                        )}
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className={`text-[10px] ${themeClasses.textMuted}`}>
+                            {{image: '图像', design: '设计', brand: '品牌', editing: '编辑', custom: '自定义'}[skill.category as 'image'|'design'|'brand'|'editing'|'custom'] || '自定义'}
+                          </span>
+                          <span className={`text-[10px] ${themeClasses.textMuted}`}>
+                            使用 {skill.usageCount} 次
+                          </span>
+                          <span className={`text-[10px] ${themeClasses.textMuted}`}>
+                            {skill.paramSlots.length > 0 ? `${skill.paramSlots.length} 个参数` : '无参数'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => {
+                            if (activeSkill?.id === skill.id) {
+                              setActiveSkill(null);
+                              setSkillParamValues({});
+                            } else {
+                              setActiveSkill(skill);
+                              setSkillParamValues(
+                                skill.paramSlots.reduce((acc, slot) => {
+                                  acc[slot.name] = slot.defaultValue || '';
+                                  return acc;
+                                }, {} as Record<string, string>)
+                              );
+                            }
+                          }}
+                          className={`p-1 rounded transition-colors ${
+                            isGold ? 'text-gold/70 hover:text-gold hover:bg-gold/10' : 'text-blue-400 hover:text-blue-600 hover:bg-blue-50'
+                          }`}
+                          title="使用此 Skill"
+                        >
+                          <Zap size={12} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteSkill(skill.id)}
+                          className={`p-1 rounded transition-colors ${
+                            isGold ? 'text-gold-muted/40 hover:text-red-400 hover:bg-red-400/10' : 'text-gray-300 hover:text-red-500 hover:bg-red-50'
+                          }`}
+                          title="删除"
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </div>
+                    </div>
+                    {/* 参数填写面板 */}
+                    {activeSkill?.id === skill.id && skill.paramSlots.length > 0 && (
+                      <div className={`mt-2 pt-2 border-t ${isGold ? 'border-white/[0.06]' : 'border-gray-100'}`}>
+                        <div className="space-y-1.5">
+                          {skill.paramSlots.map(slot => (
+                            <div key={slot.name}>
+                              <label className={`text-[10px] font-medium ${themeClasses.textMuted}`}>{slot.label}</label>
+                              <input
+                                value={skillParamValues[slot.name] || ''}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSkillParamValues(prev => ({...prev, [slot.name]: e.target.value}))}
+                                placeholder={slot.placeholder}
+                                className={`w-full px-2 py-1 rounded text-[11px] mt-0.5 ${isGold ? 'bg-[#0d0d0d] border border-white/[0.06] text-text-bright placeholder:text-gold-muted/30' : 'bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400'} focus:outline-none`}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                        <Button
+                          onClick={() => handleUseSkill(skill)}
+                          className={`w-full h-7 mt-2 text-xs font-medium rounded-md ${
+                            isGold ? 'bg-gradient-to-r from-gold to-gold-dark text-black hover:opacity-90' : 'bg-blue-500 text-white hover:bg-blue-600'
+                          }`}
+                        >
+                          <ArrowRight size={12} className="mr-1" />
+                          使用 Skill 开始对话
+                        </Button>
+                      </div>
+                    )}
+                    {/* 无参数直接使用 */}
+                    {activeSkill?.id === skill.id && skill.paramSlots.length === 0 && (
+                      <div className={`mt-2 pt-2 border-t ${isGold ? 'border-white/[0.06]' : 'border-gray-100'}`}>
+                        <Button
+                          onClick={() => handleUseSkill(skill)}
+                          className={`w-full h-7 text-xs font-medium rounded-md ${
+                            isGold ? 'bg-gradient-to-r from-gold to-gold-dark text-black hover:opacity-90' : 'bg-blue-500 text-white hover:bg-blue-600'
+                          }`}
+                        >
+                          <ArrowRight size={12} className="mr-1" />
+                          使用 Skill 开始对话
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 使用说明 */}
+            <div className={`rounded-lg p-3 ${isGold ? 'bg-white/[0.02] border border-white/[0.04]' : 'bg-gray-50 border border-gray-100'}`}>
+              <div className={`text-[10px] ${themeClasses.textMuted} space-y-1`}>
+                <div className="font-medium">Skill 使用说明</div>
+                <div>1. 在智能对话中完成一次满意的交互</div>
+                <div>2. 点击收藏按钮（<BookmarkCheck size={10} className="inline" />）将对话保存为 Skill</div>
+                <div>3. 在 Skills 面板中找到保存的 Skill，点击使用</div>
+                <div>4. Skill 会自动复用对话的智能体和提示词策略</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      )}
+
       {/* 第三方模型调用弹窗 */}
       <ThirdPartyModelDialog
         isOpen={showThirdPartyDialog}
