@@ -2726,7 +2726,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                     <Bot size={14} />
                   </div>
                 )}
-                <div className={`max-w-[82%] ${message.role === 'user' ? 'order-2' : ''}`}>
+                <div className={`max-w-[92%] ${message.role === 'user' ? 'order-2' : ''}`}>
                   {message.imageUrl && (
                     <div className={`rounded-xl overflow-hidden mb-0.5 ${isGold ? 'border border-white/[0.04]' : 'border border-gray-200'}`}>
                       <img src={message.imageUrl} alt="上传的图片" className="max-w-full max-h-40 object-contain" />
@@ -2734,15 +2734,15 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                   )}
                   {/* AI生成的图片 */}
                   {message.generatedImages && message.generatedImages.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mb-1">
+                    <div className="flex flex-col gap-2 mb-1">
                       {message.generatedImages.map((imgUrl, imgIdx) => (
                         <div key={imgIdx} className="relative group/chat-img inline-block">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={imgUrl}
                             alt={`AI生成图片${imgIdx + 1}`}
-                            className="max-w-full rounded-lg border cursor-pointer hover:opacity-90 transition-opacity"
-                            style={{ maxHeight: '200px' }}
+                            className="w-full rounded-lg border cursor-pointer hover:opacity-90 transition-opacity"
+                            style={{ maxHeight: '320px', objectFit: 'contain' }}
                             onClick={() => onAddImages?.([imgUrl])}
                             title="点击添加到画布"
                             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
@@ -2750,9 +2750,9 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                           {onAddImages && (
                             <button
                               onClick={() => onAddImages([imgUrl])}
-                              className="absolute bottom-1.5 right-1.5 opacity-0 group-hover/chat-img:opacity-100 transition-opacity bg-black/60 text-white text-xs px-2 py-1 rounded flex items-center gap-1"
+                              className="absolute bottom-2 right-2 opacity-0 group-hover/chat-img:opacity-100 transition-opacity bg-black/60 text-white text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1"
                             >
-                              <Plus size={12} /> 画布
+                              <Plus size={12} /> 添加到画布
                             </button>
                           )}
                         </div>
@@ -2775,7 +2775,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                         ? 'bg-white/5 text-text-bright border border-white/[0.04]'
                         : 'bg-white text-gray-800 border border-gray-100 shadow-sm'
                   }`}>
-                    <div className="text-xs leading-relaxed">
+                    <div className="text-sm leading-relaxed">
                       {message.role === 'assistant'
                         ? <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
@@ -2875,7 +2875,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
           {/* Pending image preview */}
           {pendingImage && (
             <div className="flex gap-2.5 justify-end">
-              <div className="max-w-[82%] order-2">
+              <div className="max-w-[92%] order-2">
                 <div className={`rounded-xl overflow-hidden relative ${isGold ? 'border border-white/[0.04]' : 'border border-gray-200'}`}>
                   <img src={pendingImage} alt="待分析的图片" className="max-w-full max-h-40 object-contain" />
                   <button
@@ -2921,7 +2921,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
         </div>
 
         {/* Input - 精致设计 */}
-        <div className={`px-3 py-2 border-t ${themeClasses.border} shrink-0 ${isGold ? 'bg-[#0d0d0d]/90' : 'bg-white'}`}>
+        <div className={`px-3 py-4 border-t ${themeClasses.border} shrink-0 ${isGold ? 'bg-[#0d0d0d]/90' : 'bg-white'}`}>
           {/* P1-2: Tab Mode Indicator */}
           {tabModeImage && (
             <div className={`mb-1.5 flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs ${isGold ? 'bg-gold/10 text-gold border border-gold/20' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
@@ -3075,7 +3075,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                 value={input}
                 onChange={handleInputChange}
                 placeholder={tabModeImage ? "描述你想对这张图片做什么..." : "输入消息... (@ 引用图片/品牌/提示词, Ctrl+V 粘贴图片)"}
-                className={`w-full resize-none min-h-[32px] max-h-[120px] border-0 bg-transparent px-3 py-1.5 text-xs focus:outline-none focus:ring-0 ${themeClasses.text} placeholder:${isGold ? 'text-gold-muted/50' : 'text-gray-400'}`}
+                className={`w-full resize-none min-h-[52px] max-h-[180px] border-0 bg-transparent px-4 py-3 text-[14px] leading-relaxed focus:outline-none focus:ring-0 ${themeClasses.text} placeholder:${isGold ? 'text-gold-muted/50' : 'text-gray-400'}`}
                 onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
                   // Handle mention picker navigation
                   if (mentionPickerOpen && mentionPickerItems.length > 0) {
@@ -3138,7 +3138,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
             <button
               onClick={handleSend}
               disabled={!input.trim() || isLoading}
-              className={`shrink-0 h-8 w-8 rounded-lg flex items-center justify-center transition-all ${
+              className={`shrink-0 h-9 w-9 rounded-xl flex items-center justify-center transition-all ${
                 !input.trim() || isLoading
                   ? isGold
                     ? 'bg-[#1a1a1a]/60 border border-white/[0.05] text-[#444] cursor-not-allowed'

@@ -2436,7 +2436,7 @@ function CanvasApp() {
       )}
 
       {/* Right Panel - with vertical collapse strip */}
-      <div className={`absolute top-0 right-0 bottom-0 z-30 flex transition-all duration-200 ${panelCollapsed ? '' : ''}`} style={{ width: panelCollapsed ? '20px' : '360px' }}>
+      <div className={`absolute top-0 right-0 bottom-0 z-30 flex transition-all duration-300 ease-in-out ${panelCollapsed ? '' : ''}`} style={{ width: panelCollapsed ? '20px' : (activePanel === 'chat' ? '480px' : '360px') }}>
         {/* Vertical collapse strip */}
         <button
           onClick={() => setPanelCollapsed(prev => !prev)}
@@ -2480,7 +2480,7 @@ function CanvasApp() {
           {/* Panel Tabs - 紧凑化 */}
           <div className="flex flex-shrink-0">
             <button
-              onClick={() => setActivePanel('chat')}
+              onClick={() => { setActivePanel('chat'); setChatTabOpen(true); }}
               className={`flex-1 py-2 px-3 flex items-center justify-center gap-1.5 transition-all text-sm relative ${
                 activePanel === 'chat'
                   ? themeStyle === 'monochrome' ? 'text-blue-600 font-semibold' : 'text-gold font-semibold'
@@ -2494,7 +2494,7 @@ function CanvasApp() {
               )}
             </button>
             <button
-              onClick={() => setActivePanel('generate')}
+              onClick={() => { setActivePanel('generate'); setChatTabOpen(false); }}
               className={`flex-1 py-2 px-3 flex items-center justify-center gap-1.5 transition-all text-sm relative ${
                 activePanel === 'generate'
                   ? themeStyle === 'monochrome' ? 'text-blue-600 font-semibold' : 'text-gold font-semibold'
