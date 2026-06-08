@@ -1128,7 +1128,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   const [hoveredMode, setHoveredMode] = useState<'enhance' | 'expand' | 'simplify' | null>(null);
   const [selectedOutputLang, setSelectedOutputLang] = useState<'en' | 'cn'>('en');
   // 图片上传相关状态
-  const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const [pendingImages, setPendingImages] = useState<Array<{id: string; url: string; name: string}>>([]);
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
   // 第三方模型相关状态
   const [showThirdPartyDialog, setShowThirdPartyDialog] = useState(false);
@@ -1266,6 +1266,14 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
       if (prev.some(m => m.type === item.type && m.id === item.id)) return prev;
       return [...prev, item];
     });
+    // Also add canvas images to pending images for visual thumbnail in input area
+    if (item.type === 'canvas-image' && item.imageUrl) {
+      const imgUrl = item.imageUrl;
+      setPendingImages(prev => {
+        if (prev.some(p => p.url === imgUrl)) return prev;
+        return [...prev, { id: item.id, url: imgUrl, name: item.label }];
+      });
+    }
     setMentionPickerOpen(false);
     mentionTriggerRef.current = null;
     // If brand, also inject into system prompt context
@@ -2663,10 +2671,10 @@ UI设计规范：
           const reader = new FileReader();
           reader.onload = (ev) => {
             const dataUrl = ev.target?.result as string;
-            setPendingImage(dataUrl);
+            setPendingImages(prev => [...prev, { id: `paste-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, url: dataUrl, name: file.name || '粘贴图片' }]);
           };
           reader.readAsDataURL(file);
-          break;
+          // Don't break - support pasting multiple images
         }
       }
     };
@@ -2676,32 +2684,41 @@ UI设计规范：
   }, [activeTab]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      setPendingImage(dataUrl);
-    };
-    reader.readAsDataURL(file);
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    for (const file of Array.from(files)) {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const dataUrl = ev.target?.result as string;
+        setPendingImages(prev => [...prev, { id: `upload-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, url: dataUrl, name: file.name }]);
+      };
+      reader.readAsDataURL(file);
+    }
     e.target.value = '';
   };
 
   const handleAnalyzeImage = useCallback(async () => {
-    if (!pendingImage || isAnalyzingImage) return;
+    if (pendingImages.length === 0 || isAnalyzingImage) return;
     setIsAnalyzingImage(true);
 
     try {
+      const imageContents = pendingImages.map(img => ({
+        type: 'image_url' as const,
+        image_url: { url: img.url, detail: 'high' as const }
+      }));
+
       const requestMessages = [
         {
           role: 'system',
-          content: '你是一个专业的AI图像分析专家。用户会给你一张图片，请详细分析图片内容并生成适合AI图像生成的关键词描述。请分别输出英文和中文两个版本，格式如下：\n\n【English】\n英文关键词描述\n\n【中文】\n中文关键词描述'
+          content: pendingImages.length > 1
+            ? '你是一个专业的AI图像分析专家。用户会给你多张图片，请逐张分析图片内容并生成适合AI图像生成的关键词描述。请分别输出英文和中文两个版本，格式如下：\n\n【English】\n英文关键词描述\n\n【中文】\n中文关键词描述'
+            : '你是一个专业的AI图像分析专家。用户会给你一张图片，请详细分析图片内容并生成适合AI图像生成的关键词描述。请分别输出英文和中文两个版本，格式如下：\n\n【English】\n英文关键词描述\n\n【中文】\n中文关键词描述'
         },
         {
           role: 'user',
           content: [
-            { type: 'text', text: '请分析这张图片，生成AI图像生成用的关键词描述。' },
-            { type: 'image_url', image_url: { url: pendingImage, detail: 'high' } }
+            { type: 'text', text: pendingImages.length > 1 ? `请分析这${pendingImages.length}张图片，生成AI图像生成用的关键词描述。` : '请分析这张图片，生成AI图像生成用的关键词描述。' },
+            ...imageContents
           ]
         }
       ];
@@ -2725,9 +2742,9 @@ UI设计规范：
       const userMsg: Message = {
         id: `user-${Date.now()}`,
         role: 'user',
-        content: '请分析这张图片并生成关键词',
+        content: pendingImages.length > 1 ? `请分析这${pendingImages.length}张图片并生成关键词` : '请分析这张图片并生成关键词',
         timestamp: Date.now(),
-        imageUrl: pendingImage,
+        imageAnchors: pendingImages.map(img => ({ imageId: img.id, imageUrl: img.url, imageName: img.name })),
       };
       const newMessages = [...messages, userMsg];
       setMessages(newMessages);
@@ -2742,7 +2759,7 @@ UI设计规范：
       setMessages(updatedMessages);
       saveSession(updatedMessages, model, systemPrompt);
 
-      setPendingImage(null);
+      setPendingImages([]);
     } catch (error) {
       console.error('Image analysis error:', error);
       const assistantMsg: Message = {
@@ -2755,7 +2772,7 @@ UI设计规范：
     } finally {
       setIsAnalyzingImage(false);
     }
-  }, [pendingImage, isAnalyzingImage, model, messages, systemPrompt, saveSession]);
+  }, [pendingImages, isAnalyzingImage, model, messages, systemPrompt, saveSession]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -2787,9 +2804,9 @@ UI设计规范：
     const trimmedInput = input.trim();
 
     // P0-3: 模糊意图主动追问 - 如果输入太模糊，添加追问标记
-    const isVague = isVagueInput(trimmedInput) && !pendingImage;
+    const isVague = isVagueInput(trimmedInput) && pendingImages.length === 0;
 
-    // 收集图片锚点（来自Tab模式图片和@图片引用）
+    // 收集图片锚点（来自Tab模式图片、@图片引用、和待发送图片）
     const imageAnchors: { imageId: string; imageUrl: string; imageName: string }[] = [];
     if (tabModeImage) {
       imageAnchors.push({ imageId: tabModeImage.id, imageUrl: tabModeImage.url, imageName: tabModeImage.prompt || '画布图片' });
@@ -2797,6 +2814,12 @@ UI设计规范：
     activeMentions.filter(m => m.type === 'canvas-image').forEach(m => {
       if (!imageAnchors.find(a => a.imageId === m.id)) {
         imageAnchors.push({ imageId: m.id, imageUrl: m.imageUrl || '', imageName: m.label });
+      }
+    });
+    // Add pending images as anchors
+    pendingImages.forEach(img => {
+      if (!imageAnchors.find(a => a.imageId === img.id)) {
+        imageAnchors.push({ imageId: img.id, imageUrl: img.url, imageName: img.name });
       }
     });
 
@@ -2811,6 +2834,9 @@ UI设计规范：
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
     setInput('');
+    // Capture pending images before clearing
+    const capturedPendingImages = [...pendingImages];
+    setPendingImages([]);
     setIsLoading(true);
 
     try {
@@ -2941,12 +2967,24 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
       }
 
       messages.forEach(msg => {
-        if (msg.imageUrl) {
+        // Include images from imageAnchors or legacy imageUrl as multimodal content
+        const msgImages: string[] = [];
+        if (msg.imageUrl) msgImages.push(msg.imageUrl);
+        if (msg.imageAnchors) {
+          msg.imageAnchors.forEach(a => {
+            if (a.imageUrl && !msgImages.includes(a.imageUrl)) msgImages.push(a.imageUrl);
+          });
+        }
+        if (msgImages.length > 0) {
+          const imageContents = msgImages.map(url => ({
+            type: 'image_url' as const,
+            image_url: { url }
+          }));
           requestMessages.push({
             role: msg.role,
             content: [
               { type: 'text', text: msg.content },
-              { type: 'image_url', image_url: { url: msg.imageUrl } }
+              ...imageContents
             ]
           });
         } else {
@@ -2967,11 +3005,30 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
         mentionContext += '\n\n[引用的提示词]\n' + mentionedPrompts.map(m => `- ${m.data!.content}`).join('\n');
       }
       
-      if (mentionedImages.length > 0) {
+      // Collect all images to send as multimodal content
+      const allImageUrls: string[] = [];
+      
+      // 1. Tab mode image - send as actual image_url so LLM can see it
+      if (tabModeImage?.url) {
+        allImageUrls.push(tabModeImage.url);
+      }
+      
+      // 2. @mentioned canvas images
+      mentionedImages.forEach(m => {
+        const url = m.data!.url as string;
+        if (!allImageUrls.includes(url)) allImageUrls.push(url);
+      });
+      
+      // 3. Pending uploaded/pasted images
+      capturedPendingImages.forEach(img => {
+        if (!allImageUrls.includes(img.url)) allImageUrls.push(img.url);
+      });
+      
+      if (allImageUrls.length > 0) {
         // Send as multimodal content with images
-        const imageContents = mentionedImages.map(m => ({
+        const imageContents = allImageUrls.map(url => ({
           type: 'image_url' as const,
-          image_url: { url: m.data!.url as string }
+          image_url: { url }
         }));
         requestMessages.push({
           role: 'user',
@@ -3114,9 +3171,12 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
               const aspectRatio = detectAspectRatioFromText(rawPrompt + ' ' + trimmedInput) || '1:1';
               const quality = /高清|高质量|hd|high.?quality|2k|4k/i.test(trimmedInput) ? '2K' : '1K';
 
-              // 如果用户选中了画布图片，作为参考图传入
+              // 如果用户选中了画布图片或有上传图片，作为参考图传入
               const sourceImageUrl = tabModeImage?.url || selectedCanvasImage?.url;
-              const referenceImages = sourceImageUrl ? [sourceImageUrl] : undefined;
+              const referenceImages = [
+                ...(sourceImageUrl ? [sourceImageUrl] : []),
+                ...capturedPendingImages.map(img => img.url),
+              ];
               const imageSourceId = tabModeImage?.id || selectedCanvasImage?.id;
 
               // 提交图像生成
@@ -3129,7 +3189,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                   providerId: imageModelInfo.providerId,
                   aspectRatio,
                   quality,
-                  referenceImages,
+                  ...(referenceImages.length > 0 ? { referenceImages } : {}),
                 }),
               });
               const generateData = await generateRes.json();
@@ -3271,7 +3331,10 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
             (async () => {
               try {
                 const sourceImageUrl = tabImage?.url || selectedCanvasImage?.url;
-                const referenceImages = sourceImageUrl ? [sourceImageUrl] : undefined;
+                const referenceImages = [
+                  ...(sourceImageUrl ? [sourceImageUrl] : []),
+                  ...capturedPendingImages.map(img => img.url),
+                ];
                 const imageSourceId = tabImage?.id || selectedCanvasImage?.id;
                 const aspectRatio = detectAspectRatioFromText(trimmedInput) || (tabImage ? '1:1' : '1:1');
                 const quality = /高清|高质量|hd|high.?quality|2k|4k/i.test(trimmedInput) ? '2K' : '1K';
@@ -3301,7 +3364,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                     providerId: imageModelInfo.providerId,
                     aspectRatio,
                     quality,
-                    referenceImages,
+                    ...(referenceImages.length > 0 ? { referenceImages } : {}),
                   }),
                 });
                 const generateData = await generateRes.json();
@@ -3425,7 +3488,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
       setIsLoading(false);
       abortControllerRef.current = null;
     }
-  }, [input, isLoading, messages, model, systemPrompt, isThinkingMode, saveSession, pendingImage, allAgents, activeMentions, tabModeImage, brandDna, tuneContextString, activeSkill, onAddImages]);
+  }, [input, isLoading, messages, model, systemPrompt, isThinkingMode, saveSession, pendingImages, allAgents, activeMentions, tabModeImage, brandDna, tuneContextString, activeSkill, onAddImages]);
 
   // 提示词大师功能 - Agent智能体化
   const handleOptimizePrompt = useCallback(async () => {
@@ -3817,17 +3880,24 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                   {canvasImages.map(img => (
                     <div
                       key={img.id}
-                      className={`aspect-square rounded-lg overflow-hidden border cursor-pointer transition-all hover:scale-105 ${
+                      className={`aspect-square rounded-lg overflow-hidden border cursor-pointer transition-all hover:scale-105 relative group ${
                         isGold ? 'border-white/[0.04] hover:border-gold/40' : 'border-gray-200 hover:border-gray-400'
                       }`}
                       onClick={() => {
+                        // Add to pending images for chat context
+                        if (!pendingImages.find(p => p.id === img.id)) {
+                          setPendingImages(prev => [...prev, { id: img.id, url: img.url, name: img.prompt?.slice(0, 20) || '画布图片' }]);
+                        }
                         if (onAddToPrompt && img.prompt) {
                           onAddToPrompt(img.prompt);
                         }
                       }}
-                      title={img.prompt || '点击发送提示词到生图'}
+                      title={img.prompt || '点击添加到聊天'}
                     >
                       <img src={img.url} alt="" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+                        <Plus size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -4020,7 +4090,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
 
         {/* Messages - 精致设计 */}
         <div className={`flex-1 min-h-0 overflow-y-auto p-3 space-y-3 ${isGold ? 'bg-[#090909]' : 'bg-gray-50/50'}`}>
-          {messages.length === 0 && !pendingImage ? (
+          {messages.length === 0 && pendingImages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center">
               <div className={`w-16 h-16 rounded-2xl ${isGold ? 'bg-gold/10 border border-gold/20' : 'bg-gray-100 border border-gray-200'} flex items-center justify-center mb-3`}>
                 <Bot size={32} className={isGold ? 'text-gold' : 'text-gray-400'} />
@@ -4255,23 +4325,46 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
             </div>
           )}
 
-          {/* Pending image preview */}
-          {pendingImage && (
+          {/* Pending images preview - multi-image strip */}
+          {pendingImages.length > 0 && (
             <div className="flex gap-2.5 justify-end">
               <div className="max-w-[92%] order-2">
                 <div className={`rounded-xl overflow-hidden relative ${isGold ? 'border border-white/[0.04]' : 'border border-gray-200'}`}>
-                  <img src={pendingImage} alt="待分析的图片" className="max-w-full max-h-40 object-contain" />
-                  <button
-                    onClick={() => setPendingImage(null)}
-                    className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80 transition-colors"
-                  >
-                    <X size={14} />
-                  </button>
-                  <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent">
+                  {/* Image strip - horizontal scrollable */}
+                  <div className="flex gap-1 p-1.5 overflow-x-auto" style={{ maxWidth: '100%' }}>
+                    {pendingImages.map((img, idx) => (
+                      <div key={img.id} className="relative shrink-0 group">
+                        <img src={img.url} alt={img.name} className="max-h-40 max-w-[200px] object-contain rounded-lg" />
+                        <button
+                          onClick={() => setPendingImages(prev => prev.filter((_, i) => i !== idx))}
+                          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80 transition-colors opacity-0 group-hover:opacity-100"
+                        >
+                          <X size={12} />
+                        </button>
+                        <div className={`absolute bottom-0 left-0 right-0 px-1.5 py-0.5 bg-gradient-to-t from-black/70 to-transparent rounded-b-lg`}>
+                          <span className="text-[9px] text-white/80 truncate block">{img.name.length > 12 ? img.name.slice(0, 12) + '...' : img.name}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Action bar */}
+                  <div className="flex items-center gap-2 p-2 border-t border-white/5">
+                    <span className={`text-[10px] ${isGold ? 'text-gold/60' : 'text-gray-400'}`}>{pendingImages.length}张图片</span>
+                    <div className="flex-1" />
+                    <Button
+                      onClick={() => setPendingImages([])}
+                      className={`h-7 px-2.5 text-[10px] font-medium rounded-md ${
+                        isGold
+                          ? 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white'
+                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                      }`}
+                    >
+                      清空
+                    </Button>
                     <Button
                       onClick={handleAnalyzeImage}
                       disabled={isAnalyzingImage}
-                      className={`w-full h-9 text-sm font-medium rounded-lg ${
+                      className={`h-7 px-3 text-[10px] font-medium rounded-md ${
                         isGold
                           ? 'bg-gradient-to-r from-gold to-gold-dark text-black hover:opacity-90'
                           : 'bg-blue-500 text-white hover:bg-blue-600'
@@ -4279,7 +4372,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                     >
                       {isAnalyzingImage ? (
                         <>
-                          <Loader2 className="h-5 w-5 animate-spin mr-1.5" />
+                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
                           分析中...
                         </>
                       ) : (
@@ -4305,23 +4398,60 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
 
         {/* Input - 精致设计 */}
         <div className={`px-3 py-4 border-t ${themeClasses.border} shrink-0 ${isGold ? 'bg-[#0d0d0d]/90' : 'bg-white'}`}>
-          {/* P1-2: Tab Mode Indicator - Lovart style image anchor */}
-          {tabModeImage && (
-            <div
-              className={`mb-1.5 flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] ${isGold ? 'bg-gold/10 border border-gold/20 hover:bg-gold/15' : 'bg-blue-50 border border-blue-200 hover:bg-blue-100'}`}
-              onClick={() => onNavigateToImage?.(tabModeImage.id)}
-              title="点击定位到画布图片"
-            >
-              <div className="w-8 h-8 rounded overflow-hidden shrink-0 border border-white/10">
-                <img src={tabModeImage.url} alt="" className="w-full h-full object-cover" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className={`font-medium truncate ${isGold ? 'text-gold' : 'text-blue-700'}`}>针对此图片</div>
-                <div className={`truncate text-[10px] ${isGold ? 'text-gold/50' : 'text-blue-400'}`}>{tabModeImage.prompt?.slice(0, 30) || tabModeImage.id.slice(0, 8)}</div>
-              </div>
-              <button onClick={(e) => { e.stopPropagation(); setTabModeImage(null); }} className="shrink-0 opacity-50 hover:opacity-100 transition-opacity">
-                <X size={14} />
-              </button>
+          {/* Image Context Strip - Tab mode + pending images (Lovart-style multi-image) */}
+          {(tabModeImage || pendingImages.length > 0) && (
+            <div className={`mb-1.5 flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs overflow-x-auto ${isGold ? 'bg-gold/10 border border-gold/20' : 'bg-blue-50 border border-blue-200'}`}>
+              {/* Tab mode canvas image */}
+              {tabModeImage && (
+                <div
+                  className="flex items-center gap-1.5 shrink-0 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] rounded-md px-1.5 py-1 hover:bg-white/5"
+                  onClick={() => onNavigateToImage?.(tabModeImage.id)}
+                  title="点击定位到画布图片"
+                >
+                  <div className="w-7 h-7 rounded overflow-hidden shrink-0 border border-white/10">
+                    <img src={tabModeImage.url} alt="" className="w-full h-full object-cover" />
+                  </div>
+                  <div className="min-w-0 max-w-[80px]">
+                    <div className={`font-medium truncate text-[10px] ${isGold ? 'text-gold' : 'text-blue-700'}`}>针对此图片</div>
+                  </div>
+                  <button onClick={(e) => { e.stopPropagation(); setTabModeImage(null); }} className="shrink-0 opacity-40 hover:opacity-100 transition-opacity">
+                    <X size={12} />
+                  </button>
+                </div>
+              )}
+              {/* Pending uploaded/pasted images */}
+              {pendingImages.map((img, idx) => (
+                <div
+                  key={img.id}
+                  className="flex items-center gap-1.5 shrink-0 rounded-md px-1.5 py-1 hover:bg-white/5"
+                >
+                  <div className="w-7 h-7 rounded overflow-hidden shrink-0 border border-white/10">
+                    <img src={img.url} alt="" className="w-full h-full object-cover" />
+                  </div>
+                  <div className="min-w-0 max-w-[60px]">
+                    <div className={`truncate text-[10px] ${isGold ? 'text-gold/70' : 'text-blue-600'}`}>{img.name.length > 8 ? img.name.slice(0, 8) + '...' : img.name}</div>
+                  </div>
+                  <button onClick={() => setPendingImages(prev => prev.filter((_, i) => i !== idx))} className="shrink-0 opacity-40 hover:opacity-100 transition-opacity">
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+              {/* Add canvas image button */}
+              {canvasImages.length > 0 && (
+                <button
+                  onClick={() => {
+                    // Add selected canvas image or show picker
+                    if (selectedCanvasImage && !pendingImages.find(p => p.url === selectedCanvasImage.url) && (!tabModeImage || tabModeImage.id !== selectedCanvasImage.id)) {
+                      setPendingImages(prev => [...prev, { id: selectedCanvasImage.id, url: selectedCanvasImage.url, name: selectedCanvasImage.prompt?.slice(0, 20) || '画布图片' }]);
+                    }
+                  }}
+                  className={`shrink-0 flex items-center gap-1 px-2 py-1 rounded-md text-[10px] transition-colors ${isGold ? 'text-gold/50 hover:text-gold hover:bg-gold/10' : 'text-blue-400 hover:text-blue-600 hover:bg-blue-100'}`}
+                  title="从画布添加图片"
+                >
+                  <Plus size={12} />
+                  <span>画布图片</span>
+                </button>
+              )}
             </div>
           )}
 
@@ -4411,6 +4541,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
               ref={fileInputRef}
               type="file"
               accept="image/*"
+              multiple
               onChange={handleImageUpload}
               className="hidden"
             />
@@ -4507,7 +4638,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
               ref={textareaRef}
               value={input}
               onChange={handleInputChange}
-              placeholder={tabModeImage ? "描述你想对这张图片做什么..." : "输入消息，@ 引用图片/品牌/提示词..."}
+              placeholder={pendingImages.length > 0 ? `描述你想对这${pendingImages.length}张图片做什么...` : tabModeImage ? "描述你想对这张图片做什么..." : "输入消息，@ 引用图片/品牌/提示词..."}
               className={`w-full resize-none min-h-[60px] max-h-[200px] border-0 bg-transparent px-4 py-3 text-[14px] leading-relaxed focus:outline-none focus:ring-0 ${themeClasses.text} placeholder:${isGold ? 'text-gold-muted/40' : 'text-gray-400'}`}
               onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
                 // Handle mention picker navigation
