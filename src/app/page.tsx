@@ -2568,7 +2568,7 @@ function CanvasApp() {
                   />
               </div>
               <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
-                <ChatPanel themeStyle={themeStyle} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} canvasImages={images} selectedCanvasImage={selectedImage} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} />
+                <ChatPanel themeStyle={themeStyle} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} canvasImages={images} selectedCanvasImage={selectedImage} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} />
               </div>
 
             {/* 固定在底部的开始生成按钮 */}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle } from 'lucide-react';
+import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -41,6 +41,7 @@ interface Message {
   generatedImages?: string[]; // AI生成的图片URL列表
   isGeneratingImage?: boolean; // 是否正在生成图片
   generateError?: string; // 生成失败时的错误信息
+  imageAnchors?: Array<{ imageId: string; imageUrl: string; imageName: string }>; // 画布图片锚点（Lovart风格）
   suggestions?: NextSuggestion[]; // 建议下一步操作
   isClarifying?: boolean; // 是否为追问消息
 }
@@ -303,6 +304,8 @@ interface ChatPanelProps {
   chatTabOpen?: boolean;
   /** Callback when chat tab open state changes */
   onChatTabOpenChange?: (open: boolean) => void;
+  /** Navigate canvas to a specific image */
+  onNavigateToImage?: (imageId: string) => void;
 }
 
 function isImageUrl(url: string): boolean {
@@ -1068,7 +1071,7 @@ ${outputSpec || '1. 设计理念（200字内）\n2. 详细方案描述\n3. 材�
   );
 }
 
-export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages = [], selectedCanvasImage, onChatModelChange, onSuggestionAction, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange }: ChatPanelProps) {
+export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages = [], selectedCanvasImage, onChatModelChange, onSuggestionAction, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [model, setModel] = useState('gemini-3.1-pro-preview');
@@ -1153,6 +1156,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
     type: 'canvas-image' | 'brand' | 'prompt' | 'model';
     id: string;
     label: string;
+    imageUrl?: string;
     data?: Record<string, unknown>;
   }
   const [activeMentions, setActiveMentions] = useState<MentionRef[]>([]);
@@ -1193,6 +1197,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
         type: 'canvas-image',
         id: img.id,
         label: img.prompt ? img.prompt.slice(0, 40) + (img.prompt.length > 40 ? '...' : '') : `图片 ${img.id.slice(0, 6)}`,
+        imageUrl: img.url,
         data: { url: img.url, prompt: img.prompt || '', width: img.width, height: img.height },
       });
     });
@@ -2782,11 +2787,23 @@ UI设计规范：
     // P0-3: 模糊意图主动追问 - 如果输入太模糊，添加追问标记
     const isVague = isVagueInput(trimmedInput) && !pendingImage;
 
+    // 收集图片锚点（来自Tab模式图片和@图片引用）
+    const imageAnchors: { imageId: string; imageUrl: string; imageName: string }[] = [];
+    if (tabModeImage) {
+      imageAnchors.push({ imageId: tabModeImage.id, imageUrl: tabModeImage.url, imageName: tabModeImage.prompt || '画布图片' });
+    }
+    activeMentions.filter(m => m.type === 'canvas-image').forEach(m => {
+      if (!imageAnchors.find(a => a.imageId === m.id)) {
+        imageAnchors.push({ imageId: m.id, imageUrl: m.imageUrl || '', imageName: m.label });
+      }
+    });
+
     const userMessage: Message = {
       id: `user-${Date.now()}`,
       role: 'user',
       content: trimmedInput,
       timestamp: Date.now(),
+      imageAnchors: imageAnchors.length > 0 ? imageAnchors : undefined,
     };
 
     const newMessages = [...messages, userMessage];
@@ -4008,6 +4025,33 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                       <span>图片生成失败: {message.generateError}</span>
                     </div>
                   )}
+                  {/* 图片锚点 */}
+                  {message.imageAnchors && message.imageAnchors.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-1.5">
+                      {message.imageAnchors.map((anchor, aIdx) => (
+                        <button
+                          key={aIdx}
+                          onClick={() => anchor.imageId && onNavigateToImage?.(anchor.imageId)}
+                          className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-black/30 border border-white/10 hover:bg-black/50 hover:border-white/20 transition-all cursor-pointer group/anchor"
+                          title={anchor.imageId ? '点击定位到画布' : undefined}
+                        >
+                          <div className="w-6 h-6 rounded overflow-hidden bg-white/10 flex-shrink-0">
+                            {anchor.imageUrl ? (
+                              <img src={anchor.imageUrl} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                              <ImageIcon size={12} className="text-white/40 m-auto" />
+                            )}
+                          </div>
+                          <span className="text-xs text-white/60 group-hover/anchor:text-white/80 truncate max-w-[80px]">
+                            {anchor.imageName || '图片'}
+                          </span>
+                          {anchor.imageId && (
+                            <LocateFixed size={10} className="text-white/30 group-hover/anchor:text-gold flex-shrink-0" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div className={`rounded-2xl px-3.5 py-2.5 ${
                     message.role === 'user'
                       ? isGold
@@ -4164,13 +4208,22 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
 
         {/* Input - 精致设计 */}
         <div className={`px-3 py-4 border-t ${themeClasses.border} shrink-0 ${isGold ? 'bg-[#0d0d0d]/90' : 'bg-white'}`}>
-          {/* P1-2: Tab Mode Indicator */}
+          {/* P1-2: Tab Mode Indicator - Lovart style image anchor */}
           {tabModeImage && (
-            <div className={`mb-1.5 flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs ${isGold ? 'bg-gold/10 text-gold border border-gold/20' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
-              <Target size={12} />
-              <span className="truncate">针对图片: {tabModeImage.prompt?.slice(0, 20) || tabModeImage.id.slice(0, 6)}</span>
-              <button onClick={() => setTabModeImage(null)} className="ml-auto shrink-0 opacity-60 hover:opacity-100">
-                <X size={12} />
+            <div
+              className={`mb-1.5 flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] ${isGold ? 'bg-gold/10 border border-gold/20 hover:bg-gold/15' : 'bg-blue-50 border border-blue-200 hover:bg-blue-100'}`}
+              onClick={() => onNavigateToImage?.(tabModeImage.id)}
+              title="点击定位到画布图片"
+            >
+              <div className="w-8 h-8 rounded overflow-hidden shrink-0 border border-white/10">
+                <img src={tabModeImage.url} alt="" className="w-full h-full object-cover" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className={`font-medium truncate ${isGold ? 'text-gold' : 'text-blue-700'}`}>针对此图片</div>
+                <div className={`truncate text-[10px] ${isGold ? 'text-gold/50' : 'text-blue-400'}`}>{tabModeImage.prompt?.slice(0, 30) || tabModeImage.id.slice(0, 8)}</div>
+              </div>
+              <button onClick={(e) => { e.stopPropagation(); setTabModeImage(null); }} className="shrink-0 opacity-50 hover:opacity-100 transition-opacity">
+                <X size={14} />
               </button>
             </div>
           )}
@@ -4217,22 +4270,40 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
 
           {/* P1-1: Active Mentions Tags */}
           {activeMentions.length > 0 && (
-            <div className="mb-1.5 flex flex-wrap gap-1">
+            <div className="mb-1.5 flex flex-wrap gap-1.5">
               {activeMentions.map((m, i) => (
-                <span key={`${m.type}-${m.id}`} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                  m.type === 'canvas-image' ? (isGold ? 'bg-gold/15 text-gold border border-gold/30' : 'bg-blue-50 text-blue-700 border border-blue-200') :
-                  m.type === 'brand' ? (isGold ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' : 'bg-amber-50 text-amber-700 border border-amber-200') :
-                  m.type === 'prompt' ? (isGold ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-emerald-50 text-emerald-700 border border-emerald-200') :
-                  (isGold ? 'bg-white/10 text-white/60 border border-white/10' : 'bg-gray-50 text-gray-600 border border-gray-200')
-                }`}>
-                  {m.type === 'canvas-image' && <ImageIcon size={10} />}
-                  {m.type === 'brand' && <Palette size={10} />}
-                  {m.type === 'prompt' && <Sparkles size={10} />}
-                  <span className="truncate max-w-[100px]">{m.label}</span>
-                  <button onClick={() => removeMention(i)} className="opacity-50 hover:opacity-100">
-                    <X size={10} />
-                  </button>
-                </span>
+                m.type === 'canvas-image' ? (
+                  /* Lovart-style image anchor with thumbnail */
+                  <div
+                    key={`${m.type}-${m.id}`}
+                    className={`inline-flex items-center gap-1.5 px-1.5 py-1 rounded-lg text-[10px] font-medium cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] ${isGold ? 'bg-gold/15 text-gold border border-gold/30 hover:bg-gold/20' : 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100'}`}
+                    onClick={() => onNavigateToImage?.(m.id!)}
+                    title="点击定位到画布图片"
+                  >
+                    {m.imageUrl && (
+                      <div className="w-5 h-5 rounded overflow-hidden shrink-0 border border-white/10">
+                        <img src={m.imageUrl} alt="" className="w-full h-full object-cover" />
+                      </div>
+                    )}
+                    <span className="truncate max-w-[80px]">{m.label}</span>
+                    <button onClick={(e) => { e.stopPropagation(); removeMention(i); }} className="opacity-50 hover:opacity-100">
+                      <X size={10} />
+                    </button>
+                  </div>
+                ) : (
+                  <span key={`${m.type}-${m.id}`} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                    m.type === 'brand' ? (isGold ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' : 'bg-amber-50 text-amber-700 border border-amber-200') :
+                    m.type === 'prompt' ? (isGold ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-emerald-50 text-emerald-700 border border-emerald-200') :
+                    (isGold ? 'bg-white/10 text-white/60 border border-white/10' : 'bg-gray-50 text-gray-600 border border-gray-200')
+                  }`}>
+                    {m.type === 'brand' && <Palette size={10} />}
+                    {m.type === 'prompt' && <Sparkles size={10} />}
+                    <span className="truncate max-w-[100px]">{m.label}</span>
+                    <button onClick={() => removeMention(i)} className="opacity-50 hover:opacity-100">
+                      <X size={10} />
+                    </button>
+                  </span>
+                )
               ))}
             </div>
           )}
