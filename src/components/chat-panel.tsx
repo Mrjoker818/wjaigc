@@ -40,6 +40,8 @@ interface Message {
   imageUrl?: string;
   generatedImages?: string[]; // AI生成的图片URL列表
   isGeneratingImage?: boolean; // 是否正在生成图片
+  generateModelName?: string; // 生成使用的模型名称
+  generateProgress?: number; // 生成进度 0-100
   generateError?: string; // 生成失败时的错误信息
   imageAnchors?: Array<{ imageId: string; imageUrl: string; imageName: string }>; // 画布图片锚点（Lovart风格）
   suggestions?: NextSuggestion[]; // 建议下一步操作
@@ -3086,14 +3088,15 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
         const rawPrompt = generateMatch[1].trim();
         // 从显示内容中移除 [GENERATE: ...] 标签
         const displayContent = assistantContent.replace(/\[GENERATE:\s*[\s\S]+?\]/g, '').trim();
+        // ★ 先获取模型信息，再使用
+        const imageModelInfo = getCurrentImageModelInfo();
         setMessages(prev => prev.map(msg => 
           msg.id === assistantMessageId 
-            ? { ...msg, content: displayContent, isGeneratingImage: true }
+            ? { ...msg, content: displayContent, isGeneratingImage: true, generateModelName: imageModelInfo.model || '图像生成', generateProgress: 0 }
             : msg
         ));
 
         // 检查是否有可用的图像模型
-        const imageModelInfo = getCurrentImageModelInfo();
         if (!imageModelInfo.model) {
           console.warn('[ChatImage] No image model selected');
           setMessages(prev => prev.map(msg => 
@@ -3142,43 +3145,83 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                 return;
               }
 
-              const taskIds: string[] = generateData.taskIds || [];
-              const genModel = generateData.model || imageModelInfo.model;
               const resultUrls: string[] = [];
+              const genModel = generateData.model || imageModelInfo.model;
 
-              // 轮询获取结果
-              for (const taskId of taskIds) {
-                for (let i = 0; i < 60; i++) {
-                  const interval = i <= 2 ? 800 : i <= 5 ? 1000 : i <= 15 ? 1500 : 2000;
-                  await new Promise(r => setTimeout(r, interval));
-
-                  const pollRes = await fetch('/api/poll-task', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ taskId, model: genModel }),
-                  });
-                  const pollData = await pollRes.json();
-
-                  if (pollData.status === 'completed' && pollData.imageUrl) {
-                    resultUrls.push(pollData.imageUrl);
-                    break;
-                  } else if (pollData.status === 'failed') {
-                    console.error('[ChatImage] Image generation failed:', pollData.error);
-                    break;
-                  }
-                }
+              // ★ 处理直接返回图片的情况 (mode: 'direct', imageUrls)
+              if (generateData.imageUrls && generateData.imageUrls.length > 0) {
+                resultUrls.push(...generateData.imageUrls);
+              } else if (generateData.imageUrl) {
+                resultUrls.push(generateData.imageUrl);
               }
 
-              // 处理直接返回imageUrl的情况
-              if (generateData.imageUrl && !resultUrls.includes(generateData.imageUrl)) {
-                resultUrls.push(generateData.imageUrl);
+              // ★ 轮询模式 (mode: 'polling', taskIds)
+              const taskIds: string[] = generateData.taskIds || [];
+              if (taskIds.length > 0 && resultUrls.length === 0) {
+                for (const taskId of taskIds) {
+                  for (let i = 0; i < 120; i++) {
+                    const interval = i <= 2 ? 800 : i <= 5 ? 1000 : i <= 15 ? 1500 : 2000;
+                    await new Promise(r => setTimeout(r, interval));
+
+                    // ★ 更新进度
+                    const progress = Math.min(90, 10 + Math.round((i / 120) * 80));
+                    setMessages(prev => prev.map(msg => 
+                      msg.id === assistantMessageId 
+                        ? { ...msg, generateProgress: progress }
+                        : msg
+                    ));
+
+                    try {
+                      const pollRes = await fetch('/api/poll-task', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ taskId, model: genModel, providerId: imageModelInfo.providerId }),
+                      });
+                      const pollData = await pollRes.json();
+
+                      if (pollData.status === 'completed') {
+                        // ★ 多种格式提取图片URL
+                        const extractedUrl = pollData.imageUrl
+                          || pollData.result?.imageUrl
+                          || (pollData.result?.image?.url)
+                          || (pollData.result?.images?.[0]?.url)
+                          || (pollData.result?.images?.[0]);
+                        if (extractedUrl && typeof extractedUrl === 'string') {
+                          resultUrls.push(extractedUrl);
+                        }
+                        break;
+                      } else if (pollData.status === 'failed') {
+                        console.error('[ChatImage] Image generation failed:', pollData.error);
+                        // ★ 记录失败原因，避免仅显示通用错误
+                        const failReason = pollData.error || '生成失败';
+                        setMessages(prev => prev.map(msg => 
+                          msg.id === assistantMessageId 
+                            ? { ...msg, isGeneratingImage: false, generateError: failReason }
+                            : msg
+                        ));
+                        return; // 退出异步函数
+                      } else if (pollData.retryable === false) {
+                        console.error('[ChatImage] Task not retryable:', pollData.error);
+                        const failReason = pollData.error || '任务不可重试';
+                        setMessages(prev => prev.map(msg => 
+                          msg.id === assistantMessageId 
+                            ? { ...msg, isGeneratingImage: false, generateError: failReason }
+                            : msg
+                        ));
+                        return;
+                      }
+                    } catch (pollErr) {
+                      console.warn('[ChatImage] Poll error, retrying:', pollErr);
+                    }
+                  }
+                }
               }
 
               if (resultUrls.length > 0) {
                 // 更新消息：添加生成图片，移除loading
                 setMessages(prev => prev.map(msg => 
                   msg.id === assistantMessageId 
-                    ? { ...msg, generatedImages: resultUrls, isGeneratingImage: false }
+                    ? { ...msg, generatedImages: resultUrls, isGeneratingImage: false, generateProgress: 100 }
                     : msg
                 ));
 
@@ -3211,13 +3254,13 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
         const userWantsImage = isImageGenerationIntent(trimmedInput);
         if (userWantsImage) {
           console.log('[ChatImage] Fallback: LLM did not output [GENERATE] tag but user intent is clear');
+          const imageModelInfo = getCurrentImageModelInfo();
           setMessages(prev => prev.map(msg => 
             msg.id === assistantMessageId 
-              ? { ...msg, isGeneratingImage: true }
+              ? { ...msg, isGeneratingImage: true, generateModelName: imageModelInfo.model || '图像生成', generateProgress: 0 }
               : msg
           ));
 
-          const imageModelInfo = getCurrentImageModelInfo();
           if (!imageModelInfo.model) {
             setMessages(prev => prev.map(msg => 
               msg.id === assistantMessageId 
@@ -3276,33 +3319,71 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                 const genModel = generateData.model || imageModelInfo.model;
                 const resultUrls: string[] = [];
 
-                for (const taskId of taskIds) {
-                  for (let i = 0; i < 60; i++) {
-                    const interval = i <= 2 ? 800 : i <= 5 ? 1000 : i <= 15 ? 1500 : 2000;
-                    await new Promise(r => setTimeout(r, interval));
-                    const pollRes = await fetch('/api/poll-task', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ taskId, model: genModel }),
-                    });
-                    const pollData = await pollRes.json();
-                    if (pollData.status === 'completed' && pollData.imageUrl) {
-                      resultUrls.push(pollData.imageUrl);
-                      break;
-                    } else if (pollData.status === 'failed') {
-                      break;
-                    }
-                  }
+                // ★ 处理直接返回图片的情况 (mode: 'direct', imageUrls)
+                if (generateData.imageUrls && generateData.imageUrls.length > 0) {
+                  resultUrls.push(...generateData.imageUrls);
+                } else if (generateData.imageUrl) {
+                  resultUrls.push(generateData.imageUrl);
                 }
 
-                if (generateData.imageUrl && !resultUrls.includes(generateData.imageUrl)) {
-                  resultUrls.push(generateData.imageUrl);
+                // ★ 轮询模式
+                if (taskIds.length > 0 && resultUrls.length === 0) {
+                  for (const taskId of taskIds) {
+                    for (let i = 0; i < 120; i++) {
+                      const interval = i <= 2 ? 800 : i <= 5 ? 1000 : i <= 15 ? 1500 : 2000;
+                      await new Promise(r => setTimeout(r, interval));
+
+                      // ★ 更新进度
+                      const progress = Math.min(90, 10 + Math.round((i / 120) * 80));
+                      setMessages(prev => prev.map(msg => 
+                        msg.id === assistantMessageId 
+                          ? { ...msg, generateProgress: progress }
+                          : msg
+                      ));
+
+                      try {
+                        const pollRes = await fetch('/api/poll-task', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ taskId, model: genModel, providerId: imageModelInfo.providerId }),
+                        });
+                        const pollData = await pollRes.json();
+                        if (pollData.status === 'completed') {
+                          const extractedUrl = pollData.imageUrl
+                            || pollData.result?.imageUrl
+                            || (pollData.result?.image?.url)
+                            || (pollData.result?.images?.[0]?.url)
+                            || (pollData.result?.images?.[0]);
+                          if (extractedUrl && typeof extractedUrl === 'string') {
+                            resultUrls.push(extractedUrl);
+                          }
+                          break;
+                        } else if (pollData.status === 'failed') {
+                          const failReason = pollData.error || '生成失败';
+                          setMessages(prev => prev.map(msg => 
+                            msg.id === assistantMessageId 
+                              ? { ...msg, isGeneratingImage: false, generateError: failReason }
+                              : msg
+                          ));
+                          return;
+                        } else if (pollData.retryable === false) {
+                          const failReason = pollData.error || '任务不可重试';
+                          setMessages(prev => prev.map(msg => 
+                            msg.id === assistantMessageId 
+                              ? { ...msg, isGeneratingImage: false, generateError: failReason }
+                              : msg
+                          ));
+                          return;
+                        }
+                      } catch { /* retry */ }
+                    }
+                  }
                 }
 
                 if (resultUrls.length > 0) {
                   setMessages(prev => prev.map(msg => 
                     msg.id === assistantMessageId 
-                      ? { ...msg, generatedImages: resultUrls, isGeneratingImage: false }
+                      ? { ...msg, generatedImages: resultUrls, isGeneratingImage: false, generateProgress: 100 }
                       : msg
                   ));
                   if (onAddImages) {
@@ -4012,10 +4093,26 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                     </div>
                   )}
                   {/* 正在生成图片的加载状态 */}
+                  {/* 正在生成图片 - 内嵌进度框 */}
                   {message.isGeneratingImage && (
-                    <div className={`flex items-center gap-2 mb-1 text-xs ${isGold ? 'text-gold/70' : 'text-muted-foreground'}`}>
-                      <Loader2 size={12} className="animate-spin" />
-                      <span>正在生成图片，请稍候...</span>
+                    <div className={`mt-2 rounded-lg p-3 ${isGold ? 'bg-black/40 border border-gold/20' : 'bg-muted/50 border border-border/50'}`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <Loader2 size={14} className={`animate-spin ${isGold ? 'text-gold' : 'text-primary'}`} />
+                          <span className={`text-xs font-medium ${isGold ? 'text-gold/90' : 'text-foreground/80'}`}>
+                            {message.generateModelName || '图像生成中'}
+                          </span>
+                        </div>
+                        <span className={`text-xs tabular-nums ${isGold ? 'text-gold/60' : 'text-muted-foreground'}`}>
+                          {message.generateProgress ? Math.round(message.generateProgress) + '%' : '准备中...'}
+                        </span>
+                      </div>
+                      <div className={`h-1.5 rounded-full overflow-hidden ${isGold ? 'bg-gold/10' : 'bg-muted'}`}>
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ease-out ${isGold ? 'bg-gold' : 'bg-primary'}`}
+                          style={{ width: (message.generateProgress || 5) + '%' }}
+                        />
+                      </div>
                     </div>
                   )}
                   {/* 生成失败提示 */}
