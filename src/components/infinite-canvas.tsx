@@ -316,6 +316,8 @@ export interface CanvasImage {
   threeDModelUrls?: Record<string, string>;
   negativePrompt?: string;
   modelName?: string;
+  /** ID of the source image that this image was generated from (for SVG connection lines) */
+  generatedFromImageId?: string;
   apiProvider?: string;
   apiBaseUrl?: string;
   thumbnailUrl?: string; // 缩略图URL，用于画布渲染（4K图片性能优化）
@@ -330,7 +332,7 @@ interface InfiniteCanvasProps {
   onGenerateVariation: (image: CanvasImage) => void;
   onExtractKeywords: (image: CanvasImage) => void;
   onFusion: (images: CanvasImage[]) => void;
-  onAddImages: (imageUrls: string[]) => void;
+  onAddImages: (imageUrls: string[], sourceImageId?: string) => void;
   onReferenceSelect?: (image: CanvasImage) => void;
   referenceIds?: string[];
   isGenerating?: boolean;
@@ -7160,6 +7162,62 @@ export function InfiniteCanvas({
                           </g>
                         );
                       })()}
+                    </g>
+                  );
+                })}
+              </svg>
+            );
+          })()}
+          {/* Permanent connection lines - from source images to their generated results */}
+          {(() => {
+            const generatedImages = images.filter(img => img.generatedFromImageId && !img.isProcessingPlaceholder);
+            if (generatedImages.length === 0) return null;
+            const lineColor = isMonochrome ? '#3b82f6' : '#d4af37';
+            return (
+              <svg style={{ position: 'absolute', left: 0, top: 0, width: '1px', height: '1px', overflow: 'visible', pointerEvents: 'none' }}>
+                {generatedImages.map(genImg => {
+                  const sourceImg = images.find(img => img.id === genImg.generatedFromImageId);
+                  if (!sourceImg) return null;
+                  // Source anchor: right edge center
+                  const srcX = sourceImg.x + sourceImg.width;
+                  const srcY = sourceImg.y + sourceImg.height / 2;
+                  // Target anchor: left edge center
+                  const tgtX = genImg.x;
+                  const tgtY = genImg.y + genImg.height / 2;
+                  const dx = tgtX - srcX;
+                  const dy = tgtY - srcY;
+                  const dist = Math.sqrt(dx * dx + dy * dy);
+                  const cpOffset = Math.min(Math.max(dist * 0.4, 40 / zoom), 200 / zoom);
+                  const cp1x = srcX + cpOffset;
+                  const cp1y = srcY;
+                  const cp2x = tgtX - cpOffset;
+                  const cp2y = tgtY;
+                  const pathD = `M ${srcX} ${srcY} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${tgtX} ${tgtY}`;
+                  return (
+                    <g key={`gen-conn-${genImg.id}`}>
+                      {/* Subtle glow */}
+                      <path
+                        d={pathD}
+                        fill="none"
+                        stroke={lineColor}
+                        strokeWidth={4 / zoom}
+                        strokeLinecap="round"
+                        opacity={0.08}
+                      />
+                      {/* Main line */}
+                      <path
+                        d={pathD}
+                        fill="none"
+                        stroke={lineColor}
+                        strokeWidth={1.2 / zoom}
+                        strokeLinecap="round"
+                        strokeDasharray={`${6 / zoom} ${4 / zoom}`}
+                        opacity={0.5}
+                      />
+                      {/* Source dot */}
+                      <circle cx={srcX} cy={srcY} r={2.5 / zoom} fill={lineColor} opacity={0.7} />
+                      {/* Target dot */}
+                      <circle cx={tgtX} cy={tgtY} r={2.5 / zoom} fill={lineColor} opacity={0.7} />
                     </g>
                   );
                 })}

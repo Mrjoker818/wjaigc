@@ -1384,10 +1384,14 @@ function CanvasApp() {
 
   // 加载图片真实尺寸
   // 添加多张图片到画布（自动排列布局）
-  const handleAddImages = useCallback(async (imageUrls: string[]) => {
+  const handleAddImages = useCallback(async (imageUrls: string[], sourceImageId?: string) => {
     const newImages: CanvasImage[] = [];
     
-    for (let rawUrl of imageUrls) {
+    // Find source image for positioning if provided
+    const sourceImg = sourceImageId ? images.find(img => img.id === sourceImageId) : null;
+    
+    for (let i = 0; i < imageUrls.length; i++) {
+      let rawUrl = imageUrls[i];
       // 将 blob: URL 转为 data URL（blob: 在页面刷新后失效）
       if (rawUrl.startsWith('blob:')) {
         try {
@@ -1426,27 +1430,37 @@ function CanvasApp() {
       const displaySize = getCanvasImageDisplaySize(natW, natH);
       
       const tempId = `ref-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      // If source image exists, position generated images to its right
+      const offsetX = sourceImg ? sourceImg.x + sourceImg.width + 30 : 0;
+      const offsetY = sourceImg ? sourceImg.y + i * (displaySize.height + 20) : 0;
+      
       newImages.push({
         id: tempId,
         url: rawUrl,
         prompt: '',
-        x: 0,
-        y: 0,
+        x: offsetX,
+        y: offsetY,
         width: displaySize.width,
         height: displaySize.height,
         originalWidth: natW,
         originalHeight: natH,
         createdAt: Date.now(),
+        generatedFromImageId: sourceImageId,
       });
     }
     
     if (newImages.length > 0) {
-      // 应用自动布局计算位置，然后添加到画布
-      setImages(prev => {
-        const laidOut = autoLayoutImages(prev, newImages);
-        stabilizeCanvasImages(laidOut.map(img => ({ id: img.id, url: img.url })));
-        return [...prev, ...laidOut];
-      });
+      if (sourceImg) {
+        // Direct placement next to source image
+        setImages(prev => [...prev, ...newImages]);
+      } else {
+        // 应用自动布局计算位置，然后添加到画布
+        setImages(prev => {
+          const laidOut = autoLayoutImages(prev, newImages);
+          stabilizeCanvasImages(laidOut.map(img => ({ id: img.id, url: img.url })));
+          return [...prev, ...laidOut];
+        });
+      }
       recordUserData({
         userId: currentUser?.id,
         area: 'images',
@@ -1455,10 +1469,17 @@ function CanvasApp() {
         content: JSON.stringify(newImages, null, 2),
         metadata: { imageCount: newImages.length },
       });
-      toast.success(`已添加 ${newImages.length} 张图片到画布`, {
-        description: '图片已自动排列到画布',
-        className: 'bg-[#141414] border-[#2a2a2a] text-white',
-      });
+      if (sourceImg && newImages.length > 1) {
+        toast.success(`已生成 ${newImages.length} 张图片，已与原图连线`, {
+          description: '图片组已自动排列在原图右侧',
+          className: 'bg-[#141414] border-[#2a2a2a] text-white',
+        });
+      } else {
+        toast.success(`已添加 ${newImages.length} 张图片到画布`, {
+          description: '图片已自动排列到画布',
+          className: 'bg-[#141414] border-[#2a2a2a] text-white',
+        });
+      }
     } else if (imageUrls.length > 0) {
       toast.info('图片已在画布中', {
         description: '所有图片已经存在于画布',

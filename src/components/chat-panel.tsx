@@ -288,7 +288,7 @@ interface ChatPanelProps {
   themeStyle: 'gold' | 'monochrome';
 
   onAddToPrompt?: (prompt: string) => void;
-  onAddImages?: (imageUrls: string[]) => void;
+  onAddImages?: (imageUrls: string[], sourceImageId?: string) => void;
   canvasImages?: CanvasImage[];
   selectedCanvasImage?: CanvasImage | null;
   onChatModelChange?: (info: { model: string; providerId: string; apiKey: string; baseUrl: string; providerPreset?: string } | null) => void;
@@ -646,6 +646,7 @@ function parseToolCalls(content: string): ToolCall[] {
     if (jsonEnd === -1) { searchStart = actionIdx + 1; continue; }
 
     const jsonStr = content.slice(jsonStart, jsonEnd + 1);
+
     try {
       const parsed = JSON.parse(jsonStr);
       if (parsed.action && parsed.action_input) {
@@ -2929,6 +2930,118 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
       // Clear mentions after sending
       setActiveMentions([]);
 
+      // ====== 图像生成意图检测（在LLM流之前，并行启动） ======
+      const isSkillImageIntent = activeSkill && (activeSkill.category === 'image' || activeSkill.category === 'design');
+      const shouldGenerateImage = isImageGenerationIntent(trimmedInput) || isSkillImageIntent;
+
+      // 如果检测到生图意图，立即并行启动图像生成（不等LLM流完成）
+      let imageGenPromise: Promise<{ imageUrls: string[]; sourceImageId?: string } | null> | null = null;
+      const imageSourceId = tabModeImage?.id || selectedCanvasImage?.id;
+
+      if (shouldGenerateImage) {
+        console.log('[ChatImage] Detected image generation intent, starting parallel generation for:', trimmedInput);
+        imageGenPromise = (async () => {
+          try {
+            // Step 1: 优化prompt
+            let optimizedPrompt = trimmedInput;
+            // 如果有Skill上下文，使用LLM的专业设计回复
+            const isDesignSkill = activeSkill && (activeSkill.category === 'image' || activeSkill.category === 'design');
+            if (!isDesignSkill) {
+              try {
+                const optRes = await fetch('/api/optimize-prompt', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    prompt: trimmedInput,
+                    model: actualModel,
+                    providerId,
+                    mode: 'enhance',
+                  }),
+                });
+                if (optRes.ok) {
+                  const optData = await optRes.json();
+                  if (optData.optimized) {
+                    let cleaned = optData.optimized.trim();
+                    cleaned = cleaned
+                      .replace(/<think[\s\S]*?<\/think>/gi, '')
+                      .replace(/<thinking[\s\S]*?<\/thinking>/gi, '')
+                      .replace(/【[^】]*】/g, '')
+                      .replace(/\*\*[^*]*\*\*/g, '')
+                      .trim();
+                    if (cleaned.length > 10) {
+                      optimizedPrompt = cleaned;
+                    }
+                  }
+                }
+              } catch { /* fallback to original */ }
+            }
+            console.log('[ChatImage] Using prompt:', optimizedPrompt.substring(0, 100) + '...');
+
+            // Step 2: 检测比例和质量
+            const aspectRatio = detectAspectRatioFromText(trimmedInput) || '1:1';
+            const quality = /高清|高质量|hd|high.?quality|2k|4k/i.test(trimmedInput) ? '2K' : '1K';
+
+            // Step 3: 提交图像生成
+            const imageModelInfo = getCurrentImageModelInfo();
+            const generateRes = await fetch('/api/generate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                prompt: optimizedPrompt,
+                model: imageModelInfo.model,
+                providerId: imageModelInfo.providerId,
+                aspectRatio,
+                quality,
+              }),
+            });
+            const generateData = await generateRes.json();
+            console.log('[ChatImage] Generate API response:', JSON.stringify(generateData).substring(0, 200));
+
+            if (!generateData.success) {
+              console.error('[ChatImage] Generate API failed:', generateData.error);
+              return null;
+            }
+
+            const taskIds: string[] = generateData.taskIds || [];
+            const genModel = generateData.model || imageModelInfo.model;
+            const resultUrls: string[] = [];
+
+            // Step 4: 轮询获取结果
+            for (const taskId of taskIds) {
+              for (let i = 0; i < 60; i++) {
+                const interval = i <= 2 ? 800 : i <= 5 ? 1000 : i <= 15 ? 1500 : 2000;
+                await new Promise(r => setTimeout(r, interval));
+
+                const pollRes = await fetch('/api/poll-task', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ taskId, model: genModel }),
+                });
+                const pollData = await pollRes.json();
+
+                if (pollData.status === 'completed' && pollData.imageUrl) {
+                  resultUrls.push(pollData.imageUrl);
+                  break;
+                } else if (pollData.status === 'failed') {
+                  console.error('[ChatImage] Image generation failed:', pollData.error);
+                  break;
+                }
+              }
+            }
+
+            // 处理直接返回imageUrl的情况
+            if (generateData.imageUrl && !resultUrls.includes(generateData.imageUrl)) {
+              resultUrls.push(generateData.imageUrl);
+            }
+
+            return { imageUrls: resultUrls, sourceImageId: imageSourceId };
+          } catch (err) {
+            console.error('[ChatImage] Parallel image generation error:', err);
+            return null;
+          }
+        })();
+      }
+
       // 创建 AbortController 以支持取消
       const controller = new AbortController();
       abortControllerRef.current = controller;
@@ -3015,13 +3128,9 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
         ));
       }
 
-      // After streaming completes, check if user intended to generate an image
-      // Use user's original message + optimize-prompt API to get a proper English prompt
-      const userText = trimmedInput;
-      // Skills with image/design category should always trigger image generation
-      const isSkillImageIntent = activeSkill && (activeSkill.category === 'image' || activeSkill.category === 'design');
-      if (isImageGenerationIntent(userText) || isSkillImageIntent) {
-        // Mark as generating
+      // ====== 等待并行图像生成结果 ======
+      if (imageGenPromise) {
+        // 标记正在生成图像
         setMessages(prev => prev.map(msg => 
           msg.id === assistantMessageId 
             ? { ...msg, isGeneratingImage: true }
@@ -3029,182 +3138,38 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
         ));
 
         try {
-          // Step 1: Build the image generation prompt
-          // For Skills, use the LLM's professional response as the prompt basis
-          // For regular requests, optimize the user's original text
-          let optimizedPrompt = userText;
-          console.log('[ChatImage] Starting image generation for:', userText, 'isSkillImageIntent:', !!isSkillImageIntent);
-          
-          // If a Skill triggered this, use the LLM's detailed response as the image prompt
-          // The LLM has already generated professional design guidance based on the Skill's systemPrompt
-          if (isSkillImageIntent && assistantContent.length > 20) {
-            // Extract the most relevant image description from the LLM response
-            // Remove markdown formatting, keep descriptive content
-            let skillPrompt = assistantContent
-              .replace(/#{1,6}\s/g, '') // remove headers
-              .replace(/\*\*([^*]*)\*\*/g, '$1') // remove bold
-              .replace(/\*([^*]*)\*/g, '$1') // remove italic
-              .replace(/```[\s\S]*?```/g, '') // remove code blocks
-              .replace(/- /g, '') // remove list markers
-              .replace(/\n{2,}/g, '. ') // replace double newlines with period
-              .trim();
-            // If the skill prompt is very long, use optimize-prompt to condense it
-            if (skillPrompt.length > 500) {
-              try {
-                const condenseRes = await fetch('/api/optimize-prompt', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    prompt: `Based on this design brief, generate a concise English image generation prompt (max 200 words, focus on visual description, style, composition, colors): ${skillPrompt.substring(0, 1500)}`,
-                    model: model,
-                    providerId: model.includes('::') ? model.split('::')[0] : undefined,
-                    mode: 'enhance',
-                  }),
-                });
-                if (condenseRes.ok) {
-                  const condenseData = await condenseRes.json();
-                  if (condenseData.optimized) {
-                    optimizedPrompt = condenseData.optimized
-                      .replace(/<think[\s\S]*?<\/think>/gi, '')
-                      .replace(/<thinking[\s\S]*?<\/thinking>/gi, '')
-                      .trim();
-                  }
-                }
-              } catch { /* fallback to original */ }
-            } else {
-              optimizedPrompt = skillPrompt;
-            }
-            console.log('[ChatImage] Skill-based prompt:', optimizedPrompt.substring(0, 150) + '...');
-          } else {
-            // Regular image generation: optimize the user's text
-            try {
-            const optRes = await fetch('/api/optimize-prompt', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                prompt: userText,
-                model: model,
-                providerId: model.includes('::') ? model.split('::')[0] : undefined,
-                mode: 'enhance',
-              }),
-            });
-            if (optRes.ok) {
-              const optData = await optRes.json();
-              console.log('[ChatImage] Optimize response:', JSON.stringify(optData).substring(0, 200));
-              if (optData.optimized) {
-                // 清理思考过程，保留中英文双语关键词
-                let cleaned = optData.optimized.trim();
-                cleaned = cleaned
-                  .replace(/<think[\s\S]*?<\/think>/gi, '')
-                  .replace(/<thinking[\s\S]*?<\/thinking>/gi, '')
-                  .replace(/【[^】]*】/g, '')
-                  .replace(/\*\*[^*]*\*\*/g, '')
-                  .trim();
-                optimizedPrompt = cleaned;
-                console.log('[ChatImage] Optimized prompt:', optimizedPrompt.substring(0, 100) + '...');
-              }
-            }
-          } catch (optErr) {
-            console.error('Prompt optimization failed, using original:', optErr);
-          }
-          } // end of else (regular image generation)
-
-          // Step 2: Detect aspect ratio from user's message
-          const aspectRatio = detectAspectRatioFromText(userText) || '1:1';
-
-          // Step 3: Generate image with the optimized prompt
-          const imageModelInfo = getCurrentImageModelInfo();
-          // Determine quality based on skill or user request
-          const quality = /高清|高质量|hd|high.?quality|2k|4k/i.test(userText) ? '2K' : '1K';
-          const generateRes = await fetch('/api/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              prompt: optimizedPrompt,
-              model: imageModelInfo.model,
-              providerId: imageModelInfo.providerId,
-              aspectRatio,
-              quality,
-    
-            }),
-          });
-
-          const generateData = await generateRes.json();
-          console.log('[ChatImage] Generate API response:', JSON.stringify(generateData));
-          
-          if (!generateData.success) {
-            console.error('[ChatImage] Generate API failed:', generateData.error);
-          } else if (generateData.taskIds && generateData.taskIds.length > 0) {
-            // 使用服务端实际使用的模型（可能因自动切换而与请求模型不同）
-            const actualModel = generateData.model || imageModelInfo.model;
-            // Poll for each task
-            for (const taskId of generateData.taskIds) {
-              const maxPolls = 60;
-              let gotImage = false;
-              for (let i = 0; i < maxPolls; i++) {
-                const interval = i <= 2 ? 800 : i <= 5 ? 1000 : i <= 15 ? 1500 : 2000;
-                await new Promise(r => setTimeout(r, interval));
-                
-                const pollRes = await fetch('/api/poll-task', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ taskId, model: actualModel }),
-                });
-                const pollData = await pollRes.json();
-                
-                if (pollData.status === 'completed' && pollData.imageUrl) {
-                  setMessages(prev => prev.map(msg => 
-                    msg.id === assistantMessageId 
-                      ? { 
-                          ...msg, 
-                          generatedImages: [...(msg.generatedImages || []), pollData.imageUrl],
-                          isGeneratingImage: false,
-                        }
-                      : msg
-                  ));
-                  // 自动添加到画布
-                  if (onAddImages && pollData.imageUrl) {
-                    onAddImages([pollData.imageUrl]);
-                  }
-                  gotImage = true;
-                  break;
-                } else if (pollData.status === 'failed') {
-                  console.error('Image generation failed:', pollData.error);
-                  setMessages(prev => prev.map(msg => 
-                    msg.id === assistantMessageId 
-                      ? { ...msg, isGeneratingImage: false, generateError: pollData.error || '生成失败' }
-                      : msg
-                  ));
-                  break;
-                }
-              }
-              if (!gotImage) {
-                // If no image after polling, just clear loading
-              }
-            }
-          } else if (generateData.imageUrl) {
-            // Direct image URL returned
+          const imageResult = await imageGenPromise;
+          if (imageResult && imageResult.imageUrls.length > 0) {
+            // 将生成的图片添加到助手消息中
             setMessages(prev => prev.map(msg => 
               msg.id === assistantMessageId 
                 ? { 
                     ...msg, 
-                    generatedImages: [...(msg.generatedImages || []), generateData.imageUrl],
+                    generatedImages: imageResult.imageUrls,
                     isGeneratingImage: false,
                   }
                 : msg
             ));
-            // 自动添加到画布
-            if (onAddImages && generateData.imageUrl) {
-              onAddImages([generateData.imageUrl]);
+
+            // 将图片添加到画布（通过 onAddImages），附带源图片ID用于SVG连线
+            if (onAddImages) {
+              onAddImages(imageResult.imageUrls, imageResult.sourceImageId);
             }
+
+            console.log('[ChatImage] Successfully added', imageResult.imageUrls.length, 'images to canvas');
+          } else {
+            // 没有生成图片，清除loading状态
+            setMessages(prev => prev.map(msg => 
+              msg.id === assistantMessageId 
+                ? { ...msg, isGeneratingImage: false, generateError: '图像生成未返回结果，请检查图像模型配置' }
+                : msg
+            ));
           }
         } catch (imgError) {
-          console.error('[ChatImage] Auto image generation error:', imgError);
-        } finally {
-          // Ensure loading state is cleared
+          console.error('[ChatImage] Image generation error:', imgError);
           setMessages(prev => prev.map(msg => 
             msg.id === assistantMessageId 
-              ? { ...msg, isGeneratingImage: false }
+              ? { ...msg, isGeneratingImage: false, generateError: '图像生成出错' }
               : msg
           ));
         }
