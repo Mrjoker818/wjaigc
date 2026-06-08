@@ -2366,9 +2366,10 @@ UI设计规范：
   // 使用 Skill 创建新对话
   const handleUseSkill = useCallback((skill: ChatSkill) => {
     const paramValues = { ...skillParamValues };
-    // 设置智能体
-    if (skill.agentId) {
-      setSystemPrompt(skill.agentId);
+    // 设置智能体 systemPrompt（优先 agentId，其次 skill.systemPrompt）
+    const skillSystemPrompt = skill.agentId || skill.systemPrompt;
+    if (skillSystemPrompt) {
+      setSystemPrompt(skillSystemPrompt);
     }
     // 构建首条消息 - 替换参数槽位
     let firstMessage = '';
@@ -2392,7 +2393,7 @@ UI设计规范：
       title: `Skill: ${skill.name}`,
       messages: [],
       model: model,
-      systemPrompt: skill.agentId || systemPrompt,
+      systemPrompt: skillSystemPrompt || systemPrompt,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -2759,11 +2760,16 @@ UI设计规范：
       const providerId = isThirdParty ? selectedModel.split('::')[0] : undefined;
       const actualModel = isThirdParty ? selectedModel.split('::').slice(1).join('::') : selectedModel;
 
-      const systemPromptObj = allAgents.find(p => p.id === systemPrompt);
-      const requestMessages = [];
-      
       // 构建增强版系统提示词
+      // systemPrompt 可能是 agentId（短ID）或直接是 Skill 的 systemPrompt 文本（长文本）
+      const systemPromptObj = allAgents.find(p => p.id === systemPrompt);
       let enhancedSystemPrompt = systemPromptObj?.prompt || '';
+      // 如果 systemPrompt 不是 agentId（未在 allAgents 中找到），则它本身就是 prompt 文本
+      if (!systemPromptObj && systemPrompt) {
+        enhancedSystemPrompt = systemPrompt;
+      }
+
+      const requestMessages = [];
       
       // P0-2: 生成后主动引导 - 在系统提示词中注入建议指令
       enhancedSystemPrompt += `
