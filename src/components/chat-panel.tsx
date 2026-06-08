@@ -1101,6 +1101,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   const [skillSaveCategory, setSkillSaveCategory] = useState<string>('custom');
   const [skillSaveDescription, setSkillSaveDescription] = useState('');
   const [skillSearchQuery, setSkillSearchQuery] = useState('');
+  const [skillCategoryFilter, setSkillCategoryFilter] = useState('');
   const [activeSkill, setActiveSkill] = useState<ChatSkill | null>(null);
   const [skillParamValues, setSkillParamValues] = useState<Record<string, string>>({});
 
@@ -1288,13 +1289,372 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
     } catch {}
   }, []);
 
-  // 加载 Skills
+  // ===== Lovart 风格预设 Skills =====
+  const LOVART_PRESET_SKILLS: ChatSkill[] = useMemo(() => [
+    {
+      id: 'preset-ecommerce-listing',
+      name: '电商商品套图',
+      category: 'image',
+      description: '基于产品图生成完整的电商A+内容套图，包含白底主图、卖点图、场景图、尺寸图等8张标准图，遵循亚马逊/淘宝规范',
+      systemPrompt: `你是电商视觉设计专家，擅长为产品生成符合平台规范的A+内容套图。
+
+设计规范：
+1. 白底主图：纯白背景，产品居中，占画幅70-80%，无文字无水印
+2. 卖点矩阵图：2x2或3x1网格布局，每格一个核心卖点+图标+简短描述，字号≥24pt
+3. 使用场景图：产品在真实场景中的使用效果，氛围感强
+4. 尺寸对比图：产品与常见参照物（手掌/硬币）的尺寸对比
+5. 参数规格图：关键技术参数以表格或信息图形式呈现
+6. 套装展示图：所有颜色/配件的家族展示
+7. 品牌故事图：品牌Logo+Slogan+品牌调性视觉
+8. 细节特写图：产品材质/工艺/接口等细节放大
+
+输出要求：
+- 统一配色体系，主色不超过3种
+- 信息层级清晰：标题>卖点>描述
+- 文字安全区域：距边缘≥40px
+- 移动端可读性：关键文字≥18pt
+- 每张图生成后标注图片类型和设计意图`,
+      paramSlots: [
+        { name: 'product', label: '产品名称', placeholder: '如：蓝牙音箱' },
+        { name: 'features', label: '核心卖点', placeholder: '如：360°音效, 30h续航, IP67防水' },
+        { name: 'style', label: '视觉风格', defaultValue: '高端科技感', placeholder: '如：黑金科技/清新自然/温暖家居' },
+        { name: 'platform', label: '目标平台', defaultValue: '亚马逊', placeholder: '如：亚马逊/淘宝/京东' },
+      ],
+      steps: [
+        { role: 'user', content: '为我的{{product}}设计一套{{platform}} A+内容套图，卖点是：{{features}}。风格：{{style}}' },
+        { role: 'assistant', content: '我来为您设计8张标准A+内容图。首先生成白底主图和卖点矩阵图...' },
+      ],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      usageCount: 0,
+    },
+    {
+      id: 'preset-logo-brand',
+      name: 'Logo与品牌设计',
+      category: 'brand',
+      description: '基于Logo/品牌标识生成完整的品牌视觉系统，包括Logo延展、产品周边（T恤/卫衣/帆布包/棒球帽/保温杯）、品牌规范手册',
+      systemPrompt: `你是品牌视觉识别系统设计专家，擅长将单一Logo延展为完整的品牌视觉体系。
+
+品牌延展规范：
+1. Logo延展原则：
+   - 保持核心图形/文字的完整性，不变形不裁切
+   - 在不同材质上适配透视角度（球面/圆柱/平面）
+   - 单色版/反白版/竖版/横版至少4种变体
+2. 产品周边设计：
+   - T恤：Logo位于左胸或中心，尺寸适中，考虑布料纹理
+   - 卫衣：Logo放大居中或背部大图，配合辅助图形
+   - 帆布包：Logo居中或偏下，考虑包的褶皱
+   - 棒球帽：Logo居中正面，尺寸占帽面40-50%
+   - 保温杯：Logo环绕或正面，考虑曲面贴合和反光
+3. 品牌色应用：从Logo提取主色+辅助色，所有衍生品统一配色
+4. 安全区域：Logo周围留出至少Logo高度1/4的空白
+5. 禁忌：Logo不得倾斜超过15°、不得拉伸变形、不得被其他元素遮挡超过10%
+
+输出要求：
+- 每个周边效果图需展示真实材质质感
+- Logo位置、大小、角度需精准贴合载体
+- 统一品牌色彩体系贯穿所有输出
+- 生成后标注每个设计的设计意图和品牌规范说明`,
+      paramSlots: [
+        { name: 'brandName', label: '品牌名称', placeholder: '如：SoundWave' },
+        { name: 'industry', label: '行业领域', placeholder: '如：科技/餐饮/时尚' },
+        { name: 'colorScheme', label: '品牌色彩', defaultValue: '黑金配色', placeholder: '如：黑金/蓝白/绿色系' },
+        { name: 'deliverables', label: '交付物', defaultValue: '全套周边', placeholder: '如：T恤+帽子+帆布包 / Logo变体+品牌手册' },
+      ],
+      steps: [
+        { role: 'user', content: '为{{brandName}}品牌设计{{deliverables}}，行业：{{industry}}，配色：{{colorScheme}}' },
+        { role: 'assistant', content: '我来为您设计完整的品牌视觉延展。首先确认品牌色彩体系，然后逐步生成周边效果图...' },
+      ],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      usageCount: 0,
+    },
+    {
+      id: 'preset-storyboard',
+      name: '分镜故事板',
+      category: 'image',
+      description: '根据产品/场景描述生成专业分镜故事板，包含镜头规划、场景设计、视觉描述、技术规格标注，适用于短视频/广告片',
+      systemPrompt: `你是专业影视分镜师，擅长将创意需求转化为可执行的分镜故事板。
+
+分镜规范：
+1. 镜头规划：
+   - 30秒视频标准8-10个镜头
+   - 60秒视频标准15-18个镜头
+   - 每个镜头标注：景别(全景/中景/近景/特写)、运镜(推/拉/摇/移/固定)、时长(精确到0.5秒)
+2. 画面描述：
+   - 主体：产品/人物在画面中的位置和姿态
+   - 环境：场景氛围、光线方向、色调倾向
+   - 动势：画面中的运动方向和速度感
+3. 技术规格：
+   - 画幅比例：16:9(横屏视频) / 9:16(竖屏短视频)
+   - 分辨率：至少1920x1080
+   - 色彩风格：统一调色方案（如电影感/日系/高饱和）
+4. 镜头语言标注：
+   - 每张分镜图下方标注镜头编号、时长、景别、运镜方式
+   - 转场方式标注（硬切/淡入淡出/划变）
+
+执行流程：
+1. 先输出完整的镜头规划表（文字）
+2. 逐镜头生成分镜图，风格统一
+3. 最终组装为专业分镜故事板排版`,
+      paramSlots: [
+        { name: 'concept', label: '创意概念', placeholder: '如：户外露营蓝牙音箱广告' },
+        { name: 'duration', label: '视频时长', defaultValue: '30秒', placeholder: '如：30秒/60秒/90秒' },
+        { name: 'scenes', label: '场景列表', placeholder: '如：户外露营,城市通勤,海滩派对,产品特写' },
+        { name: 'style', label: '视觉风格', defaultValue: '写实摄影，电影感', placeholder: '如：写实摄影/动画风格/概念艺术' },
+        { name: 'aspectRatio', label: '画幅比例', defaultValue: '16:9', placeholder: '如：16:9(横屏)/9:16(竖屏)' },
+      ],
+      steps: [
+        { role: 'user', content: '为{{concept}}设计{{duration}}广告分镜，场景：{{scenes}}，风格：{{style}}，画幅：{{aspectRatio}}' },
+        { role: 'assistant', content: '我来规划分镜。首先确定镜头数量和时长分配，然后输出完整的镜头规划表...' },
+      ],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      usageCount: 0,
+    },
+    {
+      id: 'preset-marketing-brochure',
+      name: '营销宣传册',
+      category: 'design',
+      description: '生成专业三折页/双折页宣传册设计，包含封面、内页、封底，自动排版文案与图片，遵循印刷规范',
+      systemPrompt: `你是专业印刷品设计师，擅长设计符合印刷规范的营销宣传册。
+
+宣传册设计规范：
+1. 三折页结构（6面）：
+   - 外页：封面(面1) + 封底(面6) + 内折页(面5)
+   - 内页：左页(面2) + 中页(面3) + 右页(面4)
+2. 双折页结构（4面）：
+   - 外页：封面(面1) + 封底(面4)
+   - 内页：左页(面2) + 右页(面3)
+3. 排版规范：
+   - 安全区域：距裁切线≥5mm
+   - 出血线：设计稿向外延伸3mm
+   - 文字区域：距折痕≥8mm
+   - 正文字号：≥9pt，标题≥18pt
+   - 折痕位置标注
+4. 视觉规范：
+   - 统一配色体系，主色≤3种
+   - 图片与文字比例建议 40:60
+   - 留白≥15%，避免信息过载
+   - 品牌元素（Logo/色彩）贯穿每页
+
+执行流程：
+1. 先确认折页类型和内容大纲
+2. 逐面生成设计图，确保视觉连贯
+3. 文字内容分区域标注`,
+      paramSlots: [
+        { name: 'product', label: '产品/服务', placeholder: '如：蓝牙音箱' },
+        { name: 'format', label: '折页类型', defaultValue: '三折页', placeholder: '如：三折页/双折页' },
+        { name: 'highlights', label: '核心内容', placeholder: '如：360°音效, 30h续航, IP67防水' },
+        { name: 'style', label: '视觉风格', defaultValue: '高端科技感', placeholder: '如：黑金科技/清新自然/商务简约' },
+      ],
+      steps: [
+        { role: 'user', content: '为{{product}}设计一份{{format}}宣传册，核心内容：{{highlights}}，风格：{{style}}' },
+        { role: 'assistant', content: '我来设计宣传册。首先确认内容大纲和页面分配，然后逐面生成设计...' },
+      ],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      usageCount: 0,
+    },
+    {
+      id: 'preset-social-media',
+      name: '社交媒体套图',
+      category: 'image',
+      description: '生成适配各社交平台（Instagram/小红书/微信朋友圈/微博）的统一风格套图，自动适配不同尺寸和排版规范',
+      systemPrompt: `你是社交媒体视觉设计专家，擅长生成符合各平台规范的统一风格套图。
+
+平台规范：
+1. Instagram：
+   - 方图 1080x1080px / 竖图 1080x1350px / 横图 1080x566px
+   - Stories/Reels: 1080x1920px
+   - 视觉优先，文字≤20%面积
+2. 小红书：
+   - 竖图 1080x1440px（3:4比例）
+   - 封面图必须有标题文字，字号≥36pt
+   - 内容图配合文字说明，信息密度适中
+3. 微信朋友圈：
+   - 方图 1080x1080px / 横图 1080x720px
+   - 九宫格切图支持
+   - 文字简洁，一图一核心信息
+4. 微博：
+   - 横图 1080x608px / 方图 1080x1080px
+   - 长图最大宽度1080px
+   - 支持多图轮播，首图最关键
+
+设计原则：
+- 统一色彩体系和字体风格
+- 每张图一个核心信息点
+- 品牌元素（Logo/色彩）一致
+- 文字可读性优先，避免花哨背景
+- 不同平台自动调整排版和信息密度`,
+      paramSlots: [
+        { name: 'subject', label: '推广主题', placeholder: '如：新品发布/节日促销/品牌故事' },
+        { name: 'platforms', label: '目标平台', defaultValue: '小红书+微信', placeholder: '如：Instagram/小红书/微信/微博' },
+        { name: 'count', label: '图片数量', defaultValue: '6', placeholder: '如：4/6/9' },
+        { name: 'tone', label: '品牌调性', placeholder: '如：年轻活力/高端奢华/温暖治愈' },
+      ],
+      steps: [
+        { role: 'user', content: '为{{subject}}设计{{count}}张{{platforms}}套图，品牌调性：{{tone}}' },
+        { role: 'assistant', content: '我来设计社交媒体套图。首先确认各平台的尺寸规范，然后统一视觉风格批量生成...' },
+      ],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      usageCount: 0,
+    },
+    {
+      id: 'preset-ip-character',
+      name: 'IP角色设计',
+      category: 'design',
+      description: '从零设计IP角色/吉祥物，包含角色三视图、表情包、动作延展、应用场景展示，确保角色一致性和可延展性',
+      systemPrompt: `你是IP角色设计专家，擅长创造具有高辨识度和商业延展性的IP形象。
+
+IP角色设计规范：
+1. 角色设定：
+   - 性格特征：3-5个核心性格关键词
+   - 视觉符号：至少1个独特识别元素（如帽子/围巾/形状）
+   - 配色方案：主色1种+辅色2种，色彩饱和度适中
+2. 三视图：
+   - 正面/侧面/背面标准站姿
+   - 比例标注（头身比/四肢长度）
+   - 细节标注（材质/纹理/配件）
+3. 表情系统（8-12个）：
+   - 基础：开心/悲伤/愤怒/惊讶
+   - 扩展：害羞/得意/懵圈/感动/酷/困/饿/爱
+   - 表情幅度大，特征元素保持不变
+4. 动作延展（6-8个）：
+   - 日常动作：走路/跑步/坐着/躺着
+   - 功能动作：招手/指路/搬运/工作
+   - 动态线条和辅助图形增强动感
+5. 应用场景：
+   - 周边产品：公仔/贴纸/帆布袋/手机壳
+   - 数字场景：头像/表情包/壁纸/直播挂件
+
+角色一致性原则：
+- 核心轮廓和比例在所有视角和表情中保持一致
+- 识别元素（配饰/特征形状）不可省略
+- 配色不可偏移超过±10%色相`,
+      paramSlots: [
+        { name: 'characterName', label: '角色名称', placeholder: '如：小星星/豆豆熊' },
+        { name: 'characterType', label: '角色类型', placeholder: '如：动物/人物/抽象生物/食物拟人' },
+        { name: 'personality', label: '性格特征', placeholder: '如：活泼开朗/慵懒可爱/酷帅高冷' },
+        { name: 'industry', label: '应用行业', placeholder: '如：儿童教育/餐饮/科技/文旅' },
+        { name: 'style', label: '视觉风格', defaultValue: '圆润可爱', placeholder: '如：圆润可爱/扁平极简/潮酷街头' },
+      ],
+      steps: [
+        { role: 'user', content: '设计一个IP角色「{{characterName}}」，类型：{{characterType}}，性格：{{personality}}，用于{{industry}}行业，风格：{{style}}' },
+        { role: 'assistant', content: '我来设计这个IP角色。首先确定角色设定和视觉符号，然后生成三视图、表情包和动作延展...' },
+      ],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      usageCount: 0,
+    },
+    {
+      id: 'preset-product-packaging',
+      name: '产品包装设计',
+      category: 'design',
+      description: '设计产品包装盒/袋/瓶身，包含正面主视觉、侧面信息、底部标签，遵循包装印刷规范和条码/营养标签标准',
+      systemPrompt: `你是产品包装设计专家，擅长设计符合印刷规范和法规要求的产品包装。
+
+包装设计规范：
+1. 正面（主视觉面）：
+   - 品牌Logo位于顶部1/4区域
+   - 产品名称突出，字号≥28pt
+   - 产品实物图或艺术图占50-60%面积
+   - 核心卖点标签（如"新品"/"有机"）≤3个
+2. 侧面/背面：
+   - 产品说明文字≥8pt
+   - 成分/参数表：表格形式，字号≥7pt
+   - 使用说明：步骤化+图标辅助
+   - 条码区域：EAN-13标准，尺寸≥80%标准
+3. 底部：
+   - 生产商信息
+   - 批号/日期区域预留
+   - 环保标识/认证标志
+4. 印刷规范：
+   - CMYK色值标注
+   - 出血3mm，安全区5mm
+   - 文字转曲标注
+   - 专色标注（如有）
+
+设计原则：
+- 货架吸引力：3米外可识别品牌和品类
+- 信息层级：品牌>产品名>卖点>详细说明
+- 材质适配：哑光纸/铜版纸/磨砂/烫金效果标注`,
+      paramSlots: [
+        { name: 'product', label: '产品名称', placeholder: '如：有机抹茶粉' },
+        { name: 'packagingType', label: '包装类型', placeholder: '如：纸盒/玻璃瓶/铝罐/软包装' },
+        { name: 'size', label: '规格尺寸', placeholder: '如：200g/330ml/30x20x5cm' },
+        { name: 'style', label: '设计风格', placeholder: '如：日系简约/中式国潮/北欧极简' },
+        { name: 'shelf', label: '货架场景', defaultValue: '商超货架', placeholder: '如：商超货架/电商详情/便利店' },
+      ],
+      steps: [
+        { role: 'user', content: '为{{product}}设计{{packagingType}}包装，规格{{size}}，风格{{style}}，货架场景：{{shelf}}' },
+        { role: 'assistant', content: '我来设计产品包装。首先确定主视觉方向，然后生成正面、侧面和底部的完整包装展开图...' },
+      ],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      usageCount: 0,
+    },
+    {
+      id: 'preset-concept-art',
+      name: '概念场景设计',
+      category: 'image',
+      description: '生成游戏/影视/建筑的概念场景设计，包含氛围图、建筑/场景白模、材质板、光影研究，适合前期概念阶段',
+      systemPrompt: `你是概念艺术设计师，擅长为游戏/影视/建筑项目创建高品质概念场景。
+
+概念设计流程：
+1. 氛围图（Mood Board）：
+   - 确定整体氛围基调（暗黑/梦幻/科幻/古风）
+   - 色彩方案：主色调+2-3种辅助色
+   - 光影方向：主光源方向+环境光色温
+   - 参考风格标注
+2. 场景构图：
+   - 透视类型：一点/两点/三点透视
+   - 视角：鸟瞰/仰视/平视
+   - 焦点区域标注
+   - 前景/中景/远景层次划分
+3. 材质与细节：
+   - 主要材质标注（石材/金属/木材/植被）
+   - 表面处理（风化/打磨/腐蚀/发光）
+   - 材质贴图参考板
+4. 光影研究：
+   - 日间/夜间/黄昏多时段方案
+   - 体积光/雾气/粒子效果标注
+   - 阴影投射方向确认
+
+输出规格：
+- 画面比例：16:9(影视) / 21:9(宽屏) / 1:1(社交媒体)
+- 分辨率要求标注
+- 每张图附带设计说明和材质/光影标注`,
+      paramSlots: [
+        { name: 'scene', label: '场景描述', placeholder: '如：悬浮在云层之上的古代神殿' },
+        { name: 'project', label: '项目类型', placeholder: '如：游戏/电影/建筑/动画' },
+        { name: 'mood', label: '氛围基调', placeholder: '如：史诗磅礴/神秘阴森/温馨治愈' },
+        { name: 'style', label: '艺术风格', defaultValue: '写实概念艺术', placeholder: '如：写实概念/赛博朋克/水墨国风' },
+      ],
+      steps: [
+        { role: 'user', content: '为{{project}}项目设计场景：{{scene}}，氛围：{{mood}}，风格：{{style}}' },
+        { role: 'assistant', content: '我来设计概念场景。首先确认氛围和色彩方案，然后生成氛围图和场景构图...' },
+      ],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      usageCount: 0,
+    },
+  ], []);
+
+  // 加载 Skills（合并预置+用户自定义）
   useEffect(() => {
     try {
       const stored = localStorage.getItem('chat-skills');
-      if (stored) setChatSkills(JSON.parse(stored));
-    } catch {}
-  }, []);
+      const userSkills: ChatSkill[] = stored ? JSON.parse(stored) : [];
+      // 预置Skills不重复添加（按id去重）
+      const userSkillIds = new Set(userSkills.map(s => s.id));
+      const merged = [...LOVART_PRESET_SKILLS.filter(s => !userSkillIds.has(s.id)), ...userSkills];
+      setChatSkills(merged);
+    } catch {
+      setChatSkills(LOVART_PRESET_SKILLS);
+    }
+  }, [LOVART_PRESET_SKILLS]);
 
   // 保存 Skills
   const saveSkills = useCallback((skills: ChatSkill[]) => {
@@ -3457,29 +3817,155 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
               </div>
             )}
 
-            {/* Skill 列表 */}
-            {chatSkills.length === 0 ? (
-              <div className={`text-center py-8 ${themeClasses.textMuted}`}>
-                <Bookmark size={24} className="mx-auto mb-2 opacity-30" />
-                <div className="text-xs">暂无 Skills</div>
-                <div className="text-[10px] mt-1 opacity-60">在对话中点击收藏按钮，将对话提炼为可复用 Skill</div>
+            {/* 类别筛选 */}
+            <div className="flex gap-1 flex-wrap">
+              {[
+                { key: '', label: '全部' },
+                { key: 'image', label: '图像' },
+                { key: 'design', label: '设计' },
+                { key: 'brand', label: '品牌' },
+                { key: 'storyboard', label: '分镜' },
+                { key: 'editing', label: '编辑' },
+                { key: 'custom', label: '自定义' },
+              ].map(cat => (
+                <button
+                  key={cat.key}
+                  onClick={() => setSkillCategoryFilter(cat.key)}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors ${
+                    skillCategoryFilter === cat.key
+                      ? isGold ? 'bg-gold/20 text-gold' : 'bg-blue-500 text-white'
+                      : isGold ? 'bg-white/[0.04] text-gold-muted/60 hover:text-gold-muted' : 'bg-gray-100 text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  {cat.label}
+                </button>
+              ))}
+            </div>
+
+            {/* 推荐技能 — 来自 Lovart 设计方法论 */}
+            {(!skillCategoryFilter || ['image', 'design', 'brand', 'storyboard'].includes(skillCategoryFilter)) && (
+              <div className="space-y-1.5">
+                <div className={`text-xs font-medium ${themeClasses.textMuted} flex items-center gap-1`}>
+                  <Sparkles size={11} />
+                  推荐技能
+                  <span className={`text-[10px] opacity-50`}>— 专业设计工作流</span>
+                </div>
+                {(() => {
+                  const categoryEmoji: Record<string, string> = { image: '🖼', design: '🎨', brand: '🏢', storyboard: '🎬', editing: '✏️', custom: '⚡' };
+                  const categoryLabel: Record<string, string> = { image: '图像', design: '设计', brand: '品牌', storyboard: '分镜', editing: '编辑', custom: '自定义' };
+                  return LOVART_PRESET_SKILLS
+                    .filter((s: ChatSkill) => !skillCategoryFilter || s.category === skillCategoryFilter)
+                    .filter((s: ChatSkill) => !skillSearchQuery || s.name.includes(skillSearchQuery) || s.description.includes(skillSearchQuery))
+                    .map((skill: ChatSkill) => {
+                    const isActive = activeSkill?.id === skill.id;
+                    return (
+                      <div
+                        key={skill.id}
+                        className={`rounded-lg p-2.5 transition-all cursor-pointer ${
+                          isActive
+                            ? isGold ? 'bg-gold/12 border border-gold/30' : 'bg-blue-50 border border-blue-200'
+                            : isGold ? 'bg-white/[0.03] border border-white/[0.04] hover:border-white/[0.10]' : 'bg-white border border-gray-100 hover:border-gray-200'
+                        }`}
+                        onClick={() => {
+                          if (isActive) { setActiveSkill(null); setSkillParamValues({}); }
+                          else {
+                            setActiveSkill(skill);
+                            setSkillParamValues(skill.paramSlots.reduce((acc: Record<string, string>, slot: ChatSkill['paramSlots'][0]) => { acc[slot.name] = slot.defaultValue || ''; return acc; }, {} as Record<string, string>));
+                          }
+                        }}
+                      >
+                        <div className="flex items-start gap-2">
+                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-sm ${
+                            isGold ? 'bg-gradient-to-br from-gold/20 to-gold-dark/10' : 'bg-gradient-to-br from-blue-50 to-indigo-50'
+                          }`}>
+                            {categoryEmoji[skill.category] || '⚡'}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className={`text-xs font-medium ${themeClasses.text}`}>{skill.name}</div>
+                            {skill.description && (
+                              <div className={`text-[10px] mt-0.5 ${themeClasses.textMuted} line-clamp-2`}>{skill.description}</div>
+                            )}
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
+                                isGold ? 'bg-gold/10 text-gold/70' : 'bg-blue-50 text-blue-500'
+                              }`}>
+                                {categoryLabel[skill.category] || '自定义'}
+                              </span>
+                            {skill.paramSlots.length > 0 && (
+                              <span className={`text-[9px] ${themeClasses.textMuted}`}>
+                                {skill.paramSlots.length} 个参数
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <Zap size={12} className={`shrink-0 mt-1 ${isActive ? (isGold ? 'text-gold' : 'text-blue-500') : (isGold ? 'text-gold-muted/30' : 'text-gray-300')}`} />
+                      </div>
+                      {/* 参数填写面板 */}
+                      {isActive && skill.paramSlots.length > 0 && (
+                        <div className={`mt-2 pt-2 border-t ${isGold ? 'border-white/[0.06]' : 'border-gray-100'}`}>
+                          <div className="space-y-1.5">
+                            {skill.paramSlots.map(slot => (
+                              <div key={slot.name}>
+                                <label className={`text-[10px] font-medium ${themeClasses.textMuted}`}>{slot.label}</label>
+                                <input
+                                  value={skillParamValues[slot.name] || ''}
+                                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSkillParamValues(prev => ({...prev, [slot.name]: e.target.value}))}
+                                  placeholder={slot.placeholder}
+                                  className={`w-full px-2 py-1 rounded text-[11px] mt-0.5 ${isGold ? 'bg-[#0d0d0d] border border-white/[0.06] text-text-bright placeholder:text-gold-muted/30' : 'bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400'} focus:outline-none`}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                          <Button
+                            onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleUseSkill(skill); }}
+                            className={`w-full h-7 mt-2 text-xs font-medium rounded-md ${
+                              isGold ? 'bg-gradient-to-r from-gold to-gold-dark text-black hover:opacity-90' : 'bg-blue-500 text-white hover:bg-blue-600'
+                            }`}
+                          >
+                            <ArrowRight size={12} className="mr-1" />
+                            使用 Skill 开始对话
+                          </Button>
+                        </div>
+                      )}
+                      {isActive && skill.paramSlots.length === 0 && (
+                        <div className={`mt-2 pt-2 border-t ${isGold ? 'border-white/[0.06]' : 'border-gray-100'}`}>
+                          <Button
+                            onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleUseSkill(skill); }}
+                            className={`w-full h-7 text-xs font-medium rounded-md ${
+                              isGold ? 'bg-gradient-to-r from-gold to-gold-dark text-black hover:opacity-90' : 'bg-blue-500 text-white hover:bg-blue-600'
+                            }`}
+                          >
+                            <ArrowRight size={12} className="mr-1" />
+                            使用 Skill 开始对话
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                )()}
               </div>
-            ) : (
+            )}
+
+            {/* 我的 Skills */}
+            {chatSkills
+              .filter(s => !skillCategoryFilter || s.category === skillCategoryFilter)
+              .filter(s => !skillSearchQuery || s.name.includes(skillSearchQuery) || s.description.includes(skillSearchQuery))
+              .length > 0 && (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <div className={`text-xs font-medium ${themeClasses.textMuted}`}>
-                    我的 Skills ({chatSkills.filter(s => !skillSearchQuery || s.name.includes(skillSearchQuery) || s.description.includes(skillSearchQuery)).length})
+                    我的 Skills
                   </div>
-                  {chatSkills.length > 0 && (
-                    <button
-                      onClick={() => { if (confirm('确认清空所有 Skills？')) saveSkills([]); }}
-                      className={`text-[10px] ${themeClasses.textMuted} hover:text-red-400 transition-colors`}
-                    >
-                      清空
-                    </button>
-                  )}
+                  <button
+                    onClick={() => { if (confirm('确认清空所有自定义 Skills？')) saveSkills([]); }}
+                    className={`text-[10px] ${themeClasses.textMuted} hover:text-red-400 transition-colors`}
+                  >
+                    清空
+                  </button>
                 </div>
                 {chatSkills
+                  .filter(s => !skillCategoryFilter || s.category === skillCategoryFilter)
                   .filter(s => !skillSearchQuery || s.name.includes(skillSearchQuery) || s.description.includes(skillSearchQuery))
                   .map(skill => (
                   <div
@@ -3494,7 +3980,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                       <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 text-xs ${
                         isGold ? 'bg-gold/10 text-gold' : 'bg-blue-50 text-blue-500'
                       }`}>
-                        {{image: '🖼', design: '🎨', brand: '🏢', editing: '✏️', custom: '⚡'}[skill.category as 'image'|'design'|'brand'|'editing'|'custom'] || '⚡'}
+                        {{image: 'IMG', design: 'DSN', brand: 'BRD', storyboard: 'STR', editing: 'EDT', custom: 'SKL'}[skill.category as 'image'|'design'|'brand'|'storyboard'|'editing'|'custom'] || 'SKL'}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className={`text-xs font-medium ${themeClasses.text}`}>{skill.name}</div>
@@ -3503,13 +3989,10 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                         )}
                         <div className="flex items-center gap-2 mt-1">
                           <span className={`text-[10px] ${themeClasses.textMuted}`}>
-                            {{image: '图像', design: '设计', brand: '品牌', editing: '编辑', custom: '自定义'}[skill.category as 'image'|'design'|'brand'|'editing'|'custom'] || '自定义'}
+                            {{image: '图像', design: '设计', brand: '品牌', storyboard: '分镜', editing: '编辑', custom: '自定义'}[skill.category as 'image'|'design'|'brand'|'storyboard'|'editing'|'custom'] || '自定义'}
                           </span>
                           <span className={`text-[10px] ${themeClasses.textMuted}`}>
                             使用 {skill.usageCount} 次
-                          </span>
-                          <span className={`text-[10px] ${themeClasses.textMuted}`}>
-                            {skill.paramSlots.length > 0 ? `${skill.paramSlots.length} 个参数` : '无参数'}
                           </span>
                         </div>
                       </div>
@@ -3574,7 +4057,6 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                         </Button>
                       </div>
                     )}
-                    {/* 无参数直接使用 */}
                     {activeSkill?.id === skill.id && skill.paramSlots.length === 0 && (
                       <div className={`mt-2 pt-2 border-t ${isGold ? 'border-white/[0.06]' : 'border-gray-100'}`}>
                         <Button
@@ -3590,6 +4072,15 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* 空状态 */}
+            {chatSkills.length === 0 && (!skillCategoryFilter || !['image', 'design', 'brand', 'storyboard'].includes(skillCategoryFilter)) && (
+              <div className={`text-center py-6 ${themeClasses.textMuted}`}>
+                <Bookmark size={20} className="mx-auto mb-2 opacity-30" />
+                <div className="text-xs">暂无自定义 Skills</div>
+                <div className="text-[10px] mt-1 opacity-60">在对话中点击收藏按钮，将对话提炼为可复用 Skill</div>
               </div>
             )}
 
