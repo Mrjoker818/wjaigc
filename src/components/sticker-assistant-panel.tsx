@@ -141,8 +141,171 @@ interface StickerAssistantPanelProps {
   onAddImages?: (urls: string[]) => void;
 }
 
-/* ──────────────────── 白色/浅色背景移除（参考 zinxtick production-qa：edge-flood + 结构化蒙版 + 边缘颜色修复 + 通道预乘抗锯齿） ──────────────────── */
-async function removeBackgroundToTransparent(imageUrl: string): Promise<string | null> {
+/* ──────────────────── 表情包背景统一处理（参考 zinxtick production-qa：structured masking + white border + edge anti-aliasing） ──────────────────── */
+
+/**
+ * 为透明PNG添加白边描边（die-cut sticker 标准效果）
+ * 在主体周围绘制2-3px白色描边，让贴纸在任意背景上都清晰可见
+ */
+async function addWhiteBorderStroke(imageUrl: string, borderWidth: number = 2): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const { width, height } = img;
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(null); return; }
+
+        // 1. 先绘制扩展版（描边层）：稍微放大后绘制白色剪影
+        const strokeCanvas = document.createElement('canvas');
+        strokeCanvas.width = width;
+        strokeCanvas.height = height;
+        const strokeCtx = strokeCanvas.getContext('2d');
+        if (!strokeCtx) { resolve(null); return; }
+
+        // 先画原图到临时canvas
+        strokeCtx.drawImage(img, 0, 0);
+        const strokeData = strokeCtx.getImageData(0, 0, width, height);
+        const sd = strokeData.data;
+
+        // 标记不透明像素
+        const opaque = new Uint8Array(width * height);
+        for (let i = 0; i < width * height; i++) {
+          opaque[i] = sd[i * 4 + 3] > 128 ? 1 : 0;
+        }
+
+        // 对不透明区域做膨胀（dilate），扩展 borderWidth 像素
+        const dilated = new Uint8Array(width * height);
+        dilated.set(opaque);
+        for (let pass = 0; pass < borderWidth; pass++) {
+          const prev = new Uint8Array(dilated);
+          for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+              const idx = y * width + x;
+              if (prev[idx]) { dilated[idx] = 1; continue; }
+              // 4邻域有不透明像素则膨胀
+              if ((x > 0 && prev[y * width + (x - 1)]) ||
+                  (x < width - 1 && prev[y * width + (x + 1)]) ||
+                  (y > 0 && prev[(y - 1) * width + x]) ||
+                  (y < height - 1 && prev[(y + 1) * width + x])) {
+                dilated[idx] = 1;
+              }
+            }
+          }
+        }
+
+        // 2. 在主canvas上绘制白边描边
+        // 白边区域 = dilated - opaque（膨胀多出来的部分）
+        ctx.fillStyle = 'white';
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const idx = y * width + x;
+            if (dilated[idx] && !opaque[idx]) {
+              ctx.fillRect(x, y, 1, 1);
+            }
+          }
+        }
+
+        // 3. 在白边之上绘制原始图像
+        ctx.drawImage(img, 0, 0);
+
+        // 4. 持久化
+        canvas.toBlob(async (blob) => {
+          if (!blob) { resolve(null); return; }
+          try {
+            const formData = new FormData();
+            formData.append('file', blob, 'sticker-bordered.png');
+            const res = await fetch('/api/save-image', { method: 'POST', body: formData });
+            if (res.ok) {
+              const result = await res.json();
+              resolve(result.url || null);
+            } else {
+              resolve(canvas.toDataURL('image/png'));
+            }
+          } catch {
+            resolve(canvas.toDataURL('image/png'));
+          }
+        }, 'image/png');
+      };
+      img.onerror = () => resolve(null);
+      img.src = imageUrl;
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+/**
+ * 表情包背景统一处理流程：
+ * 1. 优先使用服务端 RemoveBG（IOPaint BiRefNet / AI模型）— 最专业，支持任意背景
+ * 2. 服务端不可用时，回退到本地 BFS flood-fill 算法
+ * 3. 最后统一添加白边描边（die-cut sticker 标准效果）
+ */
+async function processStickerBackground(imageUrl: string, modelId?: string | null): Promise<string | null> {
+  // ── Step 1: 尝试服务端 RemoveBG ──
+  let transparentUrl: string | null = null;
+  try {
+    const pollModelId = modelId?.includes('::') ? modelId.split('::').pop()! : (modelId || undefined);
+    const pollProviderId = modelId?.includes('::') ? modelId.split('::')[0] : undefined;
+    const res = await fetch('/api/image-edit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'remove_background',
+        imageUrl,
+        model: pollModelId,
+        providerId: pollProviderId,
+        removeBgModel: 'birefnet-general-lite',
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.imageUrl) {
+        // 同步模式：直接拿到透明图
+        transparentUrl = data.imageUrl;
+      } else if (data.success && data.taskId) {
+        // 异步模式：轮询等待结果
+        const taskId = data.taskId;
+        const usedProviderId = pollProviderId || data.usedProviderId;
+        for (let attempt = 0; attempt < 60; attempt++) {
+          await new Promise(r => setTimeout(r, 2000));
+          const pollRes = await fetch('/api/poll-task', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ taskId, model: pollModelId, providerId: usedProviderId }),
+          });
+          if (!pollRes.ok) continue;
+          const pollData = await pollRes.json();
+          if (pollData.status === 'completed') {
+            transparentUrl = pollData.imageUrl || (pollData.imageUrls?.length > 0 ? pollData.imageUrls[0] : null);
+            break;
+          }
+          if (pollData.status === 'failed') break;
+        }
+      }
+    }
+  } catch { /* 服务端 RemoveBG 不可用 */ }
+
+  // ── Step 2: 回退到本地算法 ──
+  if (!transparentUrl) {
+    transparentUrl = await removeBackgroundLocal(imageUrl);
+  }
+
+  // ── Step 3: 统一添加白边描边 ──
+  if (transparentUrl) {
+    const borderedUrl = await addWhiteBorderStroke(transparentUrl, 2);
+    return borderedUrl || transparentUrl;
+  }
+
+  return null;
+}
+
+/* ── 本地背景移除算法（BFS flood-fill + edge-flood + 边缘颜色修复 + 通道预乘抗锯齿） ── */
+async function removeBackgroundLocal(imageUrl: string): Promise<string | null> {
   return new Promise((resolve) => {
     try {
       const img = new Image();
@@ -181,16 +344,16 @@ async function removeBackgroundToTransparent(imageUrl: string): Promise<string |
         bgG = Math.round(bgG / bgCount);
         bgB = Math.round(bgB / bgCount);
 
-        // 只处理浅色背景（亮度>180）
+        // 处理浅色到中等亮度背景（亮度>120），覆盖更多场景
         const bgBrightness = (bgR * 299 + bgG * 587 + bgB * 114) / 1000;
-        if (bgBrightness < 180) { resolve(null); return; }
+        if (bgBrightness < 120) { resolve(null); return; }
 
         // ── 2. 创建浮点 alpha mask（0=透明, 1=不透明），初始化全1 ──
         const mask = new Float32Array(width * height).fill(1.0);
 
         // ── 3. BFS flood-fill 从四边标记背景区域 ──
-        // 使用高容差(45)彻底清除背景，但遇到明显非背景像素时停止
-        const bgTolerance = 45;
+        // 使用较高容差(55)彻底清除背景，作为服务端RemoveBG的回退
+        const bgTolerance = 55;
         const visited = new Uint8Array(width * height);
         const isBackground = new Uint8Array(width * height);
         const queue: number[] = [];
@@ -931,11 +1094,11 @@ ${themeDesc}
       }
     } catch { /* keep original URL */ }
 
-    // 自动移除白色/浅色背景，确保输出为透明PNG
+    // 自动移除背景 → 透明PNG + 白边描边（参考 zinxtick：edge-flood + structured masking + white border）
     try {
       if (imageUrl) {
-        const transparentUrl = await removeBackgroundToTransparent(imageUrl);
-        if (transparentUrl) imageUrl = transparentUrl;
+        const processedUrl = await processStickerBackground(imageUrl, selectedModelId);
+        if (processedUrl) imageUrl = processedUrl;
       }
     } catch { /* 保留原图 */ }
 
