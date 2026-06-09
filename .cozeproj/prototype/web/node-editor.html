@@ -481,7 +481,6 @@
     .node-card:hover .resize-handle,
     .node-card.selected .resize-handle { opacity: 0.4; }
     .resize-handle:hover { opacity: 0.8 !important; }
-    }
 
     /* === 连线交互 === */
     .connection-hit-area {
@@ -682,6 +681,105 @@
       outline: 2px solid rgba(212,175,55,0.5);
       outline-offset: 2px;
       transform: rotate(-2deg);
+    }
+
+    /* === 节点库条目微交互 === */
+    .node-library-item {
+      transition: background var(--duration-fast, 120ms),
+                  transform var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1)),
+                  border-color var(--duration-fast, 120ms);
+    }
+    .node-library-item:hover {
+      transform: translateX(2px);
+    }
+    .node-library-item:active {
+      transform: scale(0.98);
+    }
+
+    /* === 弹窗微交互 === */
+    .modal-overlay {
+      animation: overlay-fade-in 200ms ease both;
+    }
+    @keyframes overlay-fade-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    .modal-content {
+      animation: modal-slide-up 250ms var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1)) both;
+    }
+    @keyframes modal-slide-up {
+      from { opacity: 0; transform: translateY(12px) scale(0.97); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* === 工具栏按钮按压反馈 === */
+    header button:active:not(:disabled) {
+      transform: scale(0.96);
+    }
+
+    /* === 面板滑入动画 === */
+    #node-library-panel {
+      transition: width 300ms var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1)),
+                  opacity 200ms ease;
+    }
+    #property-panel {
+      transition: width 300ms var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1)),
+                  opacity 200ms ease;
+    }
+
+    /* === 节点键盘焦点样式 === */
+    .node-card:focus-visible {
+      outline: 2px solid #d4af37;
+      outline-offset: 4px;
+    }
+
+    /* === 端口键盘焦点样式 === */
+    .port-dot:focus-visible {
+      outline: 2px solid #d4af37;
+      outline-offset: 4px;
+      transform: scale(1.4);
+    }
+
+    /* === 折叠切换按钮焦点样式 === */
+    .collapse-toggle:focus-visible {
+      outline: 2px solid #d4af37;
+      outline-offset: 2px;
+      border-radius: 6px;
+    }
+
+    /* === 图片加载骨架屏 === */
+    .image-preview.loading {
+      background: linear-gradient(90deg,
+        rgba(255,255,255,0.03) 25%,
+        rgba(255,255,255,0.06) 50%,
+        rgba(255,255,255,0.03) 75%);
+      background-size: 200% 100%;
+      animation: skeleton-shimmer 1.5s ease infinite;
+    }
+    @keyframes skeleton-shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    /* === 进度条动画 === */
+    .progress-bar {
+      height: 3px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 2px;
+      overflow: hidden;
+      position: relative;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #d4af37, #e6c55a, #d4af37);
+      background-size: 200% 100%;
+      border-radius: 2px;
+      animation: progress-flow 1.5s linear infinite;
+      transition: width var(--duration-normal, 200ms) ease;
+    }
+    @keyframes progress-flow {
+      0% { background-position: 0% 0; }
+      100% { background-position: 200% 0; }
     }
   </style>
 </head>
@@ -963,12 +1061,12 @@
               </div>
               <div style="display:flex;align-items:center;gap:4px;">
                 <span class="status-badge done"><span class="status-dot"></span>完成</span>
-                <div class="collapse-toggle" title="折叠"><i data-lucide="chevron-down" class="w-3.5 h-3.5"></i></div>
+                <div class="collapse-toggle" title="折叠" role="button" aria-label="折叠节点" tabindex="0"><i data-lucide="chevron-down" class="w-3.5 h-3.5"></i></div>
               </div>
             </div>
             <div class="node-body">
               <!-- Prompt textarea -->
-              <textarea class="prompt-textarea" rows="3" placeholder="输入提示词...">一只优雅的白猫坐在月光下的窗台上，梦幻柔和的光线</textarea>
+              <textarea class="prompt-textarea" rows="3" placeholder="输入提示词..." aria-label="提示词输入">一只优雅的白猫坐在月光下的窗台上，梦幻柔和的光线</textarea>
               <!-- 端口行: 提示词输出 -->
               <div class="port-row" style="margin-top:8px;">
                 <div class="port-dot input-port" style="visibility:hidden;"></div>
@@ -989,7 +1087,7 @@
               </div>
               <div style="display:flex;align-items:center;gap:4px;">
                 <span class="status-badge running"><span class="status-dot"></span>运行中</span>
-                <div class="collapse-toggle" title="折叠"><i data-lucide="chevron-down" class="w-3.5 h-3.5"></i></div>
+                <div class="collapse-toggle" title="折叠" role="button" aria-label="折叠节点" tabindex="0"><i data-lucide="chevron-down" class="w-3.5 h-3.5"></i></div>
               </div>
             </div>
             <div class="node-body">
@@ -999,7 +1097,7 @@
                   <i data-lucide="type" class="w-3.5 h-3.5" style="color:#3fb950;"></i>
                 </div>
                 <span class="input-card-name">提示词</span>
-                <div class="port-dot input-port" data-port-id="ai-gen-in-prompt" data-port-type="input" data-port-color="prompt" style="color:#3fb950;border-color:#3fb950;flex-shrink:0;"></div>
+                <div class="port-dot input-port" data-port-id="ai-gen-in-prompt" data-port-type="input" data-port-color="prompt" style="color:#3fb950;border-color:#3fb950;flex-shrink:0;" role="button" aria-label="输入提示词端口" tabindex="0"></div>
               </div>
               <!-- 输入卡片: 图片参考 -->
               <div class="input-card" style="margin-bottom:8px;">
@@ -1007,11 +1105,11 @@
                   <i data-lucide="image" class="w-3.5 h-3.5" style="color:#58a6ff;"></i>
                 </div>
                 <span class="input-card-name">图片参考</span>
-                <div class="port-dot input-port" data-port-id="ai-gen-in-ref" data-port-type="input" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;flex-shrink:0;"></div>
+                <div class="port-dot input-port" data-port-id="ai-gen-in-ref" data-port-type="input" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;flex-shrink:0;" role="button" aria-label="输入图片参考端口" tabindex="0"></div>
               </div>
               <!-- 模型选择 -->
               <div style="margin-bottom:6px;">
-                <select class="node-select" id="ai-gen-model-select">
+                <select class="node-select" id="ai-gen-model-select" aria-label="选择生成模型">
                   <option>FLUX.1 Pro</option>
                   <option>SDXL Turbo</option>
                   <option>Midjourney v6</option>
@@ -1020,7 +1118,7 @@
               </div>
               <!-- 画面比例 -->
               <div style="margin-bottom:8px;">
-                <select class="node-select" id="ai-gen-ratio-select">
+                <select class="node-select" id="ai-gen-ratio-select" aria-label="选择画面比例">
                   <option>1:1 正方形</option>
                   <option>4:3 横版</option>
                   <option selected>16:9 宽屏</option>
@@ -1033,7 +1131,11 @@
               <div class="port-row">
                 <div class="port-dot input-port" style="visibility:hidden;"></div>
                 <span class="port-label">图片</span>
-                <div class="port-dot output-port" data-port-id="ai-gen-out-image" data-port-type="output" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;"></div>
+                <div class="port-dot output-port" data-port-id="ai-gen-out-image" data-port-type="output" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;" role="button" aria-label="输出图片端口" tabindex="0"></div>
+              </div>
+              <!-- 进度条 - 运行中显示 -->
+              <div class="progress-bar" style="margin-top:8px;">
+                <div class="progress-bar-fill" style="width:65%;"></div>
               </div>
               <!-- RUN 按钮 -->
               <button class="run-btn" style="margin-top:8px;" id="ai-gen-run-btn" aria-label="运行AI生成节点">RUN</button>
@@ -1051,7 +1153,7 @@
               </div>
               <div style="display:flex;align-items:center;gap:4px;">
                 <span class="status-badge queued"><span class="status-dot"></span>排队中</span>
-                <div class="collapse-toggle" title="折叠"><i data-lucide="chevron-down" class="w-3.5 h-3.5"></i></div>
+                <div class="collapse-toggle" title="折叠" role="button" aria-label="折叠节点" tabindex="0"><i data-lucide="chevron-down" class="w-3.5 h-3.5"></i></div>
               </div>
             </div>
             <div class="node-body">
@@ -1061,13 +1163,13 @@
                   <i data-lucide="image" class="w-3.5 h-3.5" style="color:#58a6ff;"></i>
                 </div>
                 <span class="input-card-name">图片</span>
-                <div class="port-dot input-port" data-port-id="rm-bg-in-image" data-port-type="input" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;flex-shrink:0;"></div>
+                <div class="port-dot input-port" data-port-id="rm-bg-in-image" data-port-type="input" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;flex-shrink:0;" role="button" aria-label="输入图片端口" tabindex="0"></div>
               </div>
               <!-- 端口行: 图片输出 -->
               <div class="port-row">
                 <div class="port-dot input-port" style="visibility:hidden;"></div>
                 <span class="port-label">图片</span>
-                <div class="port-dot output-port" data-port-id="rm-bg-out-image" data-port-type="output" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;"></div>
+                <div class="port-dot output-port" data-port-id="rm-bg-out-image" data-port-type="output" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;" role="button" aria-label="输出图片端口" tabindex="0"></div>
               </div>
               <!-- RUN 按钮 -->
               <button class="run-btn" style="margin-top:8px;" id="rm-bg-run-btn" aria-label="运行移除背景节点">RUN</button>
@@ -1085,18 +1187,18 @@
               </div>
               <div style="display:flex;align-items:center;gap:4px;">
                 <span class="status-badge failed"><span class="status-dot"></span>失败</span>
-                <div class="collapse-toggle" title="折叠"><i data-lucide="chevron-down" class="w-3.5 h-3.5"></i></div>
+                <div class="collapse-toggle" title="折叠" role="button" aria-label="折叠节点" tabindex="0"><i data-lucide="chevron-down" class="w-3.5 h-3.5"></i></div>
               </div>
             </div>
             <div class="node-body">
               <!-- 输入端口行: 图片 -->
               <div class="port-row" style="margin-bottom:8px;">
-                <div class="port-dot input-port" data-port-id="out-img-in-image" data-port-type="input" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;"></div>
+                <div class="port-dot input-port" data-port-id="out-img-in-image" data-port-type="input" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;" role="button" aria-label="输入图片端口" tabindex="0"></div>
                 <span class="port-label">图片</span>
                 <div class="port-dot output-port" style="visibility:hidden;"></div>
               </div>
               <!-- 预览区域 - 空状态 -->
-              <div class="image-preview empty">
+              <div class="image-preview empty loading" aria-label="等待图片输入">
                 <i data-lucide="image" class="w-8 h-8" style="color:rgba(125,133,144,0.3);"></i>
               </div>
             </div>
@@ -1113,7 +1215,7 @@
               </div>
               <div style="display:flex;align-items:center;gap:4px;">
                 <span class="status-badge running"><span class="status-dot"></span>运行中</span>
-                <div class="collapse-toggle" title="折叠"><i data-lucide="chevron-down" class="w-3.5 h-3.5"></i></div>
+                <div class="collapse-toggle" title="折叠" role="button" aria-label="折叠节点" tabindex="0"><i data-lucide="chevron-down" class="w-3.5 h-3.5"></i></div>
               </div>
             </div>
             <div class="node-body">
@@ -1123,18 +1225,22 @@
                   <i data-lucide="type" class="w-3.5 h-3.5" style="color:#3fb950;"></i>
                 </div>
                 <span class="input-card-name">提示词</span>
-                <div class="port-dot input-port" data-port-id="font-m-in-prompt" data-port-type="input" data-port-color="prompt" style="color:#3fb950;border-color:#3fb950;flex-shrink:0;"></div>
+                <div class="port-dot input-port" data-port-id="font-m-in-prompt" data-port-type="input" data-port-color="prompt" style="color:#3fb950;border-color:#3fb950;flex-shrink:0;" role="button" aria-label="输入提示词端口" tabindex="0"></div>
               </div>
               <!-- 端口行: 图片输出 + 参考图输出 -->
               <div class="port-row">
                 <div class="port-dot input-port" style="visibility:hidden;"></div>
                 <span class="port-label">图片</span>
-                <div class="port-dot output-port" data-port-id="font-m-out-image" data-port-type="output" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;"></div>
+                <div class="port-dot output-port" data-port-id="font-m-out-image" data-port-type="output" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;" role="button" aria-label="输出图片端口" tabindex="0"></div>
               </div>
               <div class="port-row">
                 <div class="port-dot input-port" style="visibility:hidden;"></div>
                 <span class="port-label">参考图</span>
-                <div class="port-dot output-port" data-port-id="font-m-out-ref" data-port-type="output" data-port-color="reference" style="color:#bc8cff;border-color:#bc8cff;"></div>
+                <div class="port-dot output-port" data-port-id="font-m-out-ref" data-port-type="output" data-port-color="reference" style="color:#bc8cff;border-color:#bc8cff;" role="button" aria-label="输出参考图端口" tabindex="0"></div>
+              </div>
+              <!-- 进度条 - 运行中显示 -->
+              <div class="progress-bar" style="margin-top:8px;">
+                <div class="progress-bar-fill" style="width:30%;"></div>
               </div>
               <!-- RUN 按钮 -->
               <button class="run-btn" style="margin-top:8px;" id="font-m-run-btn" aria-label="运行字境大师节点">RUN</button>
@@ -1148,7 +1254,7 @@
       <!-- @main-content:end -->
 
       <!-- 小地图 -->
-      <div id="minimap" class="absolute bottom-4 right-4 w-48 h-36 bg-surface/90 backdrop-blur-sm rounded-xl border border-outline/20 shadow-float overflow-hidden z-30">
+      <div id="minimap" class="absolute bottom-4 right-4 w-48 h-36 bg-surface/90 backdrop-blur-sm rounded-xl border border-outline/20 shadow-float overflow-hidden z-30" role="img" aria-label="画布小地图">
         <div class="w-full h-full relative" style="background-color:#0d1117;">
           <!-- 小地图-节点点 -->
           <div class="absolute rounded-sm bg-port-prompt/60" style="left:8px;top:6px;width:14px;height:8px;"></div>
@@ -1169,7 +1275,7 @@
       </div>
 
       <!-- 画布助手浮动按钮 -->
-      <button id="btn-canvas-assistant" class="absolute bottom-4 left-4 w-10 h-10 rounded-full bg-primary text-on-primary flex items-center justify-center shadow-float hover:scale-105 transition-transform z-30" title="画布AI助手">
+      <button id="btn-canvas-assistant" class="absolute bottom-4 left-4 w-10 h-10 rounded-full bg-primary text-on-primary flex items-center justify-center shadow-float hover:scale-105 transition-transform z-30" title="画布AI助手" aria-label="画布AI助手">
         <i data-lucide="message-circle" class="w-5 h-5"></i>
       </button>
     </div>
@@ -1209,7 +1315,7 @@
         <!-- 模型选择器 -->
         <div class="px-4 py-2">
           <label class="block text-xs font-medium text-on-surface-variant mb-1.5">模型</label>
-          <select id="prop-model" class="w-full bg-surface-container-high border-none rounded-md px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer">
+          <select id="prop-model" class="w-full bg-surface-container-high border-none rounded-md px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer" aria-label="选择模型">
             <option selected>FLUX.1 Pro</option>
             <option>SDXL Turbo</option>
             <option>Midjourney v6</option>
@@ -1221,13 +1327,13 @@
         <!-- 提示词输入框 -->
         <div class="px-4 py-2">
           <label class="block text-xs font-medium text-on-surface-variant mb-1.5">提示词</label>
-          <textarea id="prop-prompt" class="w-full bg-surface-container-high border-none rounded-md px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none" rows="4" placeholder="描述你想要生成的图像...">一只优雅的白猫坐在月光下的窗台上，背景是繁星点点的夜空，梦幻柔和的光线，电影级构图</textarea>
+          <textarea id="prop-prompt" class="w-full bg-surface-container-high border-none rounded-md px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none" rows="4" placeholder="描述你想要生成的图像..." aria-label="提示词">一只优雅的白猫坐在月光下的窗台上，背景是繁星点点的夜空，梦幻柔和的光线，电影级构图</textarea>
         </div>
 
         <!-- 反向提示词 -->
         <div class="px-4 py-2">
           <label class="block text-xs font-medium text-on-surface-variant mb-1.5">反向提示词</label>
-          <textarea id="prop-negative-prompt" class="w-full bg-surface-container-high border-none rounded-md px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none" rows="2" placeholder="排除不想出现的元素...">低质量, 模糊, 变形, 水印, 文字</textarea>
+          <textarea id="prop-negative-prompt" class="w-full bg-surface-container-high border-none rounded-md px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none" rows="2" placeholder="排除不想出现的元素..." aria-label="反向提示词">低质量, 模糊, 变形, 水印, 文字</textarea>
         </div>
 
         <!-- 画面比例选择 -->
@@ -1305,8 +1411,8 @@
         <div class="px-4 py-2">
           <label class="block text-xs font-medium text-on-surface-variant mb-1.5">随机种子</label>
           <div class="flex gap-2">
-            <input id="prop-seed" type="text" value="42816739" class="flex-1 bg-surface-container-high border-none rounded-md px-3 py-2 text-sm text-on-surface font-mono focus:outline-none focus:ring-2 focus:ring-primary/30">
-            <button id="btn-random-seed" class="px-2 py-1.5 rounded-md bg-surface-container-high text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest transition-colors" title="随机种子">
+            <input id="prop-seed" type="text" value="42816739" class="flex-1 bg-surface-container-high border-none rounded-md px-3 py-2 text-sm text-on-surface font-mono focus:outline-none focus:ring-2 focus:ring-primary/30" aria-label="随机种子">
+            <button id="btn-random-seed" class="px-2 py-1.5 rounded-md bg-surface-container-high text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest transition-colors" title="随机种子" aria-label="生成随机种子">
               <i data-lucide="shuffle" class="w-4 h-4"></i>
             </button>
           </div>
@@ -1315,7 +1421,7 @@
         <div class="px-4 py-2 pb-6">
           <label class="block text-xs font-medium text-on-surface-variant mb-1.5">引导系数 (CFG)</label>
           <div class="flex items-center gap-3">
-            <input id="prop-cfg" type="range" min="1" max="20" value="7" class="flex-1 accent-primary">
+            <input id="prop-cfg" type="range" min="1" max="20" value="7" class="flex-1 accent-primary" aria-label="引导系数">
             <span id="cfg-value" class="text-xs font-mono text-on-surface w-8 text-right">7</span>
           </div>
         </div>
@@ -1325,7 +1431,7 @@
   </div>
 
   <!-- 底部执行日志面板 -->
-  <div id="exec-log-panel" class="exec-log-panel collapsed" style="height:192px;">
+  <div id="exec-log-panel" class="exec-log-panel collapsed" style="height:192px;" role="log" aria-label="执行日志">
     <div class="px-4 py-2 border-b border-outline/20 flex items-center justify-between cursor-pointer" id="exec-log-header">
       <div class="flex items-center gap-2">
         <i data-lucide="scroll-text" class="w-4 h-4 text-primary"></i>
@@ -1382,47 +1488,47 @@
   </div>
 
   <!-- 右键菜单 - 画布 -->
-  <div id="context-menu-canvas" class="context-menu" style="display:none;">
-    <div class="context-menu-item" data-action="add-node">
+  <div id="context-menu-canvas" class="context-menu" style="display:none;" role="menu" aria-label="画布菜单">
+    <div class="context-menu-item" data-action="add-node" role="menuitem">
       <i data-lucide="plus" class="w-4 h-4 text-on-surface-variant"></i>
       添加节点
     </div>
-    <div class="context-menu-item" data-action="paste">
+    <div class="context-menu-item" data-action="paste" role="menuitem">
       <i data-lucide="clipboard" class="w-4 h-4 text-on-surface-variant"></i>
       粘贴
     </div>
     <div class="context-menu-divider"></div>
-    <div class="context-menu-item" data-action="select-all">
+    <div class="context-menu-item" data-action="select-all" role="menuitem">
       <i data-lucide="box-select" class="w-4 h-4 text-on-surface-variant"></i>
       全选
     </div>
   </div>
 
   <!-- 右键菜单 - 节点 -->
-  <div id="context-menu-node" class="context-menu" style="display:none;">
-    <div class="context-menu-item" data-action="copy">
+  <div id="context-menu-node" class="context-menu" style="display:none;" role="menu" aria-label="节点菜单">
+    <div class="context-menu-item" data-action="copy" role="menuitem">
       <i data-lucide="copy" class="w-4 h-4 text-on-surface-variant"></i>
       复制
     </div>
-    <div class="context-menu-item" data-action="duplicate">
+    <div class="context-menu-item" data-action="duplicate" role="menuitem">
       <i data-lucide="clone" class="w-4 h-4 text-on-surface-variant"></i>
       副本
     </div>
     <div class="context-menu-divider"></div>
-    <div class="context-menu-item" data-action="disconnect">
+    <div class="context-menu-item" data-action="disconnect" role="menuitem">
       <i data-lucide="unlink" class="w-4 h-4 text-on-surface-variant"></i>
       断开连线
     </div>
     <div class="context-menu-divider"></div>
-    <div class="context-menu-item danger" data-action="delete">
+    <div class="context-menu-item danger" data-action="delete" role="menuitem">
       <i data-lucide="trash-2" class="w-4 h-4"></i>
       删除节点
     </div>
   </div>
 
   <!-- AI建图弹窗 -->
-  <div id="modal-ai-build" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" style="display:none;">
-    <div class="bg-surface rounded-xl shadow-dialog max-w-lg w-full mx-4 overflow-hidden">
+  <div id="modal-ai-build" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 modal-overlay" style="display:none;">
+    <div class="bg-surface rounded-xl shadow-dialog max-w-lg w-full mx-4 overflow-hidden modal-content">
       <!-- 弹窗头部 -->
       <div class="px-6 py-4 border-b border-outline/20 flex items-center justify-between">
         <div class="flex items-center gap-2">
@@ -1436,7 +1542,7 @@
       <!-- 弹窗内容 -->
       <div class="p-6">
         <label class="block text-sm font-medium text-on-surface mb-2">用自然语言描述你想要的工作流</label>
-        <textarea id="ai-build-input" class="w-full bg-surface-container border-none rounded-lg px-4 py-3 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none" rows="3" placeholder="例如：生成一张猫咪的图片，然后移除背景，最后输出透明背景图"></textarea>
+        <textarea id="ai-build-input" class="w-full bg-surface-container border-none rounded-lg px-4 py-3 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none" rows="3" placeholder="例如：生成一张猫咪的图片，然后移除背景，最后输出透明背景图" aria-label="工作流描述"></textarea>
 
         <!-- 历史建图记录 -->
         <div class="mt-4">
@@ -1482,8 +1588,8 @@
   </div>
 
   <!-- 预设工作流弹窗 -->
-  <div id="modal-preset" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" style="display:none;">
-    <div class="bg-surface rounded-xl shadow-dialog max-w-2xl w-full mx-4 max-h-[85vh] overflow-hidden flex flex-col">
+  <div id="modal-preset" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 modal-overlay" style="display:none;">
+    <div class="bg-surface rounded-xl shadow-dialog max-w-2xl w-full mx-4 max-h-[85vh] overflow-hidden flex flex-col modal-content">
       <!-- 弹窗头部 -->
       <div class="px-6 py-4 border-b border-outline/20 flex items-center justify-between shrink-0">
         <div class="flex items-center gap-2">
