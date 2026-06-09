@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   FolderOpen, Plus, Search, Star, Trash2, MoreVertical, Image,
   Sparkles, LayoutTemplate, Layers, Clock, ChevronRight, ArrowRight,
@@ -84,17 +84,30 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     return prompts;
   }, [projects]);
 
-  const recentActivity = useMemo(() =>
-    [...projects]
+  const [nowTs, setNowTs] = useState(0);
+  useEffect(() => { setNowTs(Date.now()); }, []);
+
+  const recentActivity = useMemo(() => {
+    if (!nowTs) return [];
+    function fmtTimeAgo(date: string | number | undefined): string {
+      if (!date) return '无时间记录';
+      const then = new Date(date).getTime();
+      const diff = nowTs - then;
+      if (diff < 60000) return '刚刚';
+      if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`;
+      if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`;
+      return `${Math.floor(diff / 86400000)} 天前`;
+    }
+    return [...projects]
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
       .slice(0, 4)
       .map(p => ({
         id: p.id,
         name: p.name,
-        time: formatTimeAgo(p.updatedAt),
+        time: fmtTimeAgo(p.updatedAt),
         imageCount: ((p.canvasImages as unknown as CanvasImage[]) || []).length,
-      })),
-    [projects]);
+      }));
+  }, [projects, nowTs]);
 
   const filteredProjects = useMemo(() => {
     let list = [...projects];
@@ -139,17 +152,6 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       setTimeout(() => setCopiedIdx(null), 2000);
     });
   }, []);
-
-  const nowRef = useRef(Date.now());
-  function formatTimeAgo(date: string | number | undefined): string {
-    if (!date) return '无时间记录';
-    const then = new Date(date).getTime();
-    const diff = nowRef.current - then;
-    if (diff < 60000) return '刚刚';
-    if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`;
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`;
-    return `${Math.floor(diff / 86400000)} 天前`;
-  }
 
   // Templates data (product built-in)
   const templates = [
@@ -424,7 +426,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                             <div className="min-w-0 flex-1">
                               <div className="font-medium text-sm truncate">{project.name}</div>
                               <div className={`text-xs mt-0.5 ${textSecondary}`}>
-                                {formatTimeAgo(project.updatedAt)}
+                                {project.updatedAt ? new Date(project.updatedAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '无时间记录'}
                               </div>
                             </div>
                             <div className="relative">
