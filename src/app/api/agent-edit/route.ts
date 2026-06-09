@@ -224,7 +224,9 @@ export async function POST(request: NextRequest) {
         };
 
         // 执行 Agent 循环
+        console.log('[agent-edit] Starting agent loop, chatModel:', chatModel, 'maxRounds:', context.maxRounds);
         const result: AgentResult = await executeAgentLoop(context, llmCall);
+        console.log('[agent-edit] Agent loop completed, steps:', result.steps.length, 'success:', result.success);
 
         // 实际执行所有图像编辑步骤（按轮次顺序）
         if (isCancelled()) return;
@@ -234,6 +236,7 @@ export async function POST(request: NextRequest) {
 
         if (allEditSteps.length > 0) {
           // 逐步执行所有 image_edit 操作，每步使用上一步的结果
+          console.log('[agent-edit] Executing', allEditSteps.length, 'image edit steps');
           for (let i = 0; i < allEditSteps.length; i++) {
             if (isCancelled()) break;
             const step = allEditSteps[i];
@@ -249,6 +252,7 @@ export async function POST(request: NextRequest) {
                 imageModel,
                 imageProviderId,
               );
+              console.log(`[agent-edit] Edit step ${i + 1} result:`, editResult.success, editResult.error || '');
               if (editResult.success && editResult.imageUrl) {
                 finalImageUrl = editResult.imageUrl;
                 // 更新步骤结果为实际编辑结果
@@ -438,19 +442,24 @@ async function performImageEdit(
   imageProviderIdFromFrontend?: string
 ): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
   // 优先使用前端传递的图像模型和提供商，遵循用户在图像生成面板的选择
+  console.log('[agent-edit] performImageEdit called, model:', imageModelFromFrontend, 'providerId:', imageProviderIdFromFrontend);
   let imageProvider: ApiProvider | null = null;
   if (imageProviderIdFromFrontend) {
     imageProvider = await findProviderById(imageProviderIdFromFrontend);
+    console.log('[agent-edit] findProviderById result:', imageProvider ? imageProvider.name : 'null');
   }
   if (!imageProvider && imageModelFromFrontend) {
     imageProvider = await findProviderForModel(imageModelFromFrontend, 'image');
+    console.log('[agent-edit] findProviderForModel result:', imageProvider ? imageProvider.name : 'null');
   }
   if (!imageProvider) {
     // 兜底：查找图像编辑提供商
     imageProvider = await findProviderForFeature('imageEdit');
+    console.log('[agent-edit] findProviderForFeature(imageEdit) result:', imageProvider ? imageProvider.name : 'null');
   }
   if (!imageProvider) {
-    return { success: false, error: '未配置图像模型' };
+    console.error('[agent-edit] No image provider configured');
+    return { success: false, error: '未配置图像模型，请在管理员面板添加图像模型提供商' };
   }
 
   const baseUrl = imageProvider.baseUrl?.replace(/\/+$/, '') || '';
@@ -458,7 +467,8 @@ async function performImageEdit(
   const imageModel = imageModelFromFrontend || imageProvider.selectedModels?.[0] || '';
 
   if (!baseUrl || !apiKey || !imageModel) {
-    return { success: false, error: '图像提供商配置不完整' };
+    console.error('[agent-edit] Image provider config incomplete:', { baseUrl: !!baseUrl, apiKey: !!apiKey, imageModel });
+    return { success: false, error: '图像提供商配置不完整（缺少 URL / Key / 模型名）' };
   }
 
   // 使用 API 兼容层确定正确的端点

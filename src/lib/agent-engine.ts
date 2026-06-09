@@ -193,9 +193,12 @@ export async function executeAgentLoop(
     // 调用 LLM — ★ 添加 try-catch 防止 LLM 调用异常导致 Agent 循环崩溃
     let llmResponse: Awaited<ReturnType<typeof llmCall>>;
     try {
+      console.log(`[agent-engine] Round ${currentRound}: calling LLM...`);
       llmResponse = await llmCall(messages, tools);
+      console.log(`[agent-engine] Round ${currentRound}: LLM responded, toolCalls:`, llmResponse.toolCalls?.length || 0, 'content:', (llmResponse.content || '').slice(0, 100));
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'LLM 调用异常';
+      console.error(`[agent-engine] Round ${currentRound}: LLM call failed:`, errMsg);
       return {
         success: false,
         output: context.imageUrl,
