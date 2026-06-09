@@ -972,7 +972,7 @@ export function InfiniteCanvas({
   const [annotationTool, setAnnotationTool] = useState<'pin' | 'region' | 'brush'>('pin');
   // Brush mask drawing state
   const [brushDrawingAnnId, setBrushDrawingAnnId] = useState<string | null>(null);
-  const [brushSize, setBrushSize] = useState(20);
+  const [annotationBrushSize, setAnnotationBrushSize] = useState(20);
   const brushCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const brushCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const isBrushDrawingRef = useRef(false);
@@ -2019,7 +2019,7 @@ export function InfiniteCanvas({
             const relY = canvasPos.y - targetImg.y;
             ctx.fillStyle = '#ffffff';
             ctx.beginPath();
-            ctx.arc(relX, relY, brushSize / 2, 0, Math.PI * 2);
+            ctx.arc(relX, relY, annotationBrushSize / 2, 0, Math.PI * 2);
             ctx.fill();
           }
         }
@@ -2132,7 +2132,7 @@ export function InfiniteCanvas({
           const relY = canvasPos.y - targetImg.y;
           brushCtxRef.current.fillStyle = '#ffffff';
           brushCtxRef.current.beginPath();
-          brushCtxRef.current.arc(relX, relY, brushSize / 2, 0, Math.PI * 2);
+          brushCtxRef.current.arc(relX, relY, annotationBrushSize / 2, 0, Math.PI * 2);
           brushCtxRef.current.fill();
         }
         return;
