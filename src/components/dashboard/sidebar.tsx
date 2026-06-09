@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -11,9 +11,10 @@ import {
   ImagePlus,
   Pencil,
   LayoutDashboard,
-  Download,
+  Clock,
 } from 'lucide-react';
 import { UserManager } from '@/lib/user-manager';
+import type { Project } from '@/lib/user-types';
 
 const navItems = [
   { href: '/projects', label: '我的项目', icon: FolderOpen },
@@ -21,26 +22,93 @@ const navItems = [
   { href: '/assets', label: '资产库', icon: Package },
 ];
 
-const recentActivities = [
-  { icon: ImagePlus, color: 'text-primary', text: '生成了赛博城市概念图', time: '5 分钟前' },
-  { icon: Pencil, color: 'text-[#16A37B]', text: '编辑了品牌Logo项目', time: '1 小时前' },
-  { icon: LayoutTemplate, color: 'text-[#F59E0B]', text: '使用了电商主图模板', time: '3 小时前' },
-  { icon: Download, color: 'text-muted-foreground', text: '保存了3张图片到资产库', time: '昨天' },
-];
+interface ActivityItem {
+  icon: React.ComponentType<{ className?: string }>;
+  color: string;
+  text: string;
+  time: string;
+  projectId?: string;
+}
+
+function formatTimeAgo(timestamp: number): string {
+  const now = Date.now();
+  const diff = now - timestamp;
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return '刚刚';
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} 天前`;
+  return new Date(timestamp).toLocaleDateString();
+}
+
+function extractActivities(projects: Project[]): ActivityItem[] {
+  const activities: ActivityItem[] = [];
+
+  // 按更新时间排序项目
+  const sorted = [...projects].sort((a, b) => b.updatedAt - a.updatedAt);
+
+  for (const project of sorted.slice(0, 6)) {
+    const images = project.canvasImages || [];
+    const lastImage = images[images.length - 1];
+    const timeAgo = formatTimeAgo(project.updatedAt);
+
+    if (lastImage && lastImage.prompt) {
+      // 有AI生成图片
+      activities.push({
+        icon: ImagePlus,
+        color: 'text-primary',
+        text: `在「${project.name}」中生成了图片`,
+        time: timeAgo,
+        projectId: project.id,
+      });
+    } else if (images.length > 0) {
+      // 有上传图片
+      activities.push({
+        icon: Pencil,
+        color: 'text-[#16A37B]',
+        text: `编辑了「${project.name}」`,
+        time: timeAgo,
+        projectId: project.id,
+      });
+    } else {
+      // 空项目
+      activities.push({
+        icon: Clock,
+        color: 'text-muted-foreground',
+        text: `创建了「${project.name}」`,
+        time: timeAgo,
+        projectId: project.id,
+      });
+    }
+  }
+
+  return activities.slice(0, 4);
+}
 
 export function DashboardSidebar() {
   const pathname = usePathname();
   const [userName, setUserName] = useState('用户');
   const [userInitial, setUserInitial] = useState('U');
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
 
-  useEffect(() => {
+  const loadData = useCallback(() => {
     const um = UserManager.getInstance();
     const currentUser = um.getUser();
     if (currentUser) {
       setUserName(currentUser.name || '用户');
       setUserInitial((currentUser.name || 'U').charAt(0).toUpperCase());
     }
+    const projects = um.getProjects();
+    setActivities(extractActivities(projects));
   }, []);
+
+  useEffect(() => {
+    loadData();
+    const interval = setInterval(loadData, 10000);
+    return () => clearInterval(interval);
+  }, [loadData]);
 
   return (
     <aside className="w-60 bg-sidebar border-r border-sidebar-border flex flex-col shrink-0 h-screen">
@@ -88,23 +156,39 @@ export function DashboardSidebar() {
         </ul>
       </nav>
 
-      {/* 创作动态 */}
+      {/* 创作动态 - 真实数据 */}
       <div className="px-4 pb-3 border-t border-sidebar-border pt-3">
         <h3 className="text-xs font-medium text-sidebar-foreground/50 mb-2.5 tracking-wide">创作动态</h3>
-        <ul className="space-y-2">
-          {recentActivities.map((activity, i) => (
-            <li
-              key={i}
-              className="flex items-start gap-2 text-xs cursor-pointer hover:bg-sidebar-accent/30 rounded px-1.5 py-1 -mx-1.5 transition-colors"
-            >
-              <activity.icon className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${activity.color}`} />
-              <div className="min-w-0">
-                <div className="text-sidebar-foreground/80 truncate">{activity.text}</div>
-                <div className="text-sidebar-foreground/40 mt-0.5">{activity.time}</div>
-              </div>
-            </li>
-          ))}
-        </ul>
+        {activities.length === 0 ? (
+          <p className="text-xs text-sidebar-foreground/40 py-2">暂无动态，创建项目开始创作</p>
+        ) : (
+          <ul className="space-y-2">
+            {activities.map((activity, i) => (
+              <li key={i}>
+                {activity.projectId ? (
+                  <Link
+                    href={`/?projectId=${activity.projectId}`}
+                    className="flex items-start gap-2 text-xs cursor-pointer hover:bg-sidebar-accent/30 rounded px-1.5 py-1 -mx-1.5 transition-colors"
+                  >
+                    {(() => { const Ic = activity.icon; return <Ic className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${activity.color}`} />; })()}
+                    <div className="min-w-0">
+                      <div className="text-sidebar-foreground/80 truncate">{activity.text}</div>
+                      <div className="text-sidebar-foreground/40 mt-0.5">{activity.time}</div>
+                    </div>
+                  </Link>
+                ) : (
+                  <div className="flex items-start gap-2 text-xs px-1.5 py-1 -mx-1.5">
+                    {(() => { const Ic = activity.icon; return <Ic className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${activity.color}`} />; })()}
+                    <div className="min-w-0">
+                      <div className="text-sidebar-foreground/80 truncate">{activity.text}</div>
+                      <div className="text-sidebar-foreground/40 mt-0.5">{activity.time}</div>
+                    </div>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {/* 用户信息 */}

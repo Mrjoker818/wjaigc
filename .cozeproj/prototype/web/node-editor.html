@@ -647,6 +647,140 @@
     }
 
     /* === 执行日志面板 === */
+    /* === 内容窗口：横向滚动资产条 === */
+    .content-strip-panel {
+      position: absolute;
+      bottom: 38px; /* above exec-log header */
+      left: 256px;
+      right: 288px;
+      background: rgba(13,17,23,0.96);
+      backdrop-filter: blur(20px) saturate(1.2);
+      -webkit-backdrop-filter: blur(20px) saturate(1.2);
+      border-top: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px 12px 0 0;
+      z-index: 41;
+      display: flex;
+      flex-direction: column;
+      transition: transform 300ms var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1)),
+                  opacity 200ms ease;
+    }
+    .content-strip-panel.collapsed {
+      transform: translateY(calc(100% - 0px));
+      opacity: 0;
+      pointer-events: none;
+    }
+    .content-strip-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      cursor: pointer;
+      user-select: none;
+    }
+    .content-strip-header:hover {
+      background: rgba(255,255,255,0.03);
+    }
+    .content-strip-body {
+      display: flex;
+      gap: 10px;
+      padding: 10px 16px 14px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scroll-behavior: smooth;
+    }
+    .content-strip-body::-webkit-scrollbar {
+      height: 6px;
+    }
+    .content-strip-body::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .content-strip-body::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,0.12);
+      border-radius: 3px;
+    }
+    .content-strip-body::-webkit-scrollbar-thumb:hover {
+      background: rgba(255,255,255,0.2);
+    }
+    .content-thumb {
+      width: 72px;
+      height: 72px;
+      border-radius: 10px;
+      flex-shrink: 0;
+      overflow: hidden;
+      position: relative;
+      border: 1.5px solid rgba(255,255,255,0.08);
+      transition: border-color 150ms ease, transform 150ms var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1)), box-shadow 150ms ease;
+      cursor: pointer;
+    }
+    .content-thumb:hover {
+      border-color: var(--color-primary, #d4af37);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(212,175,55,0.15);
+    }
+    .content-thumb.selected {
+      border-color: var(--color-primary, #d4af37);
+      box-shadow: 0 0 0 2px rgba(212,175,55,0.3);
+    }
+    .content-thumb img,
+    .content-thumb .thumb-placeholder {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    /* 透明素材棋盘格背景 */
+    .content-thumb.transparent-bg {
+      background-image:
+        linear-gradient(45deg, #2a2a2a 25%, transparent 25%),
+        linear-gradient(-45deg, #2a2a2a 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #2a2a2a 75%),
+        linear-gradient(-45deg, transparent 75%, #2a2a2a 75%);
+      background-size: 12px 12px;
+      background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+      background-color: #1e1e1e;
+    }
+    .thumb-placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      background: var(--color-surface-container-high, #1c2333);
+    }
+    /* 缩略图右上角标签 */
+    .content-thumb .thumb-badge {
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      font-size: 8px;
+      padding: 1px 4px;
+      border-radius: 4px;
+      background: rgba(0,0,0,0.7);
+      color: rgba(255,255,255,0.8);
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      pointer-events: none;
+    }
+    /* 添加按钮 */
+    .content-add-thumb {
+      width: 72px;
+      height: 72px;
+      border-radius: 10px;
+      flex-shrink: 0;
+      border: 1.5px dashed rgba(255,255,255,0.12);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: border-color 150ms ease, background 150ms ease;
+      color: rgba(255,255,255,0.3);
+    }
+    .content-add-thumb:hover {
+      border-color: var(--color-primary, #d4af37);
+      color: var(--color-primary, #d4af37);
+      background: rgba(212,175,55,0.05);
+    }
+
     .exec-log-panel {
       position: absolute;
       bottom: 0;
@@ -854,6 +988,9 @@
       </button>
       <button id="toggle-material" class="p-1.5 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="素材库" aria-label="切换素材库面板" aria-pressed="false">
         <i data-lucide="folder-open" class="w-4 h-4"></i>
+      </button>
+      <button id="toggle-content-strip" class="p-1.5 rounded-lg text-primary bg-primary/10 transition-colors" title="内容窗口" aria-label="切换内容窗口" aria-pressed="true">
+        <i data-lucide="layout-grid" class="w-4 h-4"></i>
       </button>
       <button id="toggle-prompt-library" class="p-1.5 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="提示词库" aria-label="切换提示词库面板" aria-pressed="false">
         <i data-lucide="book-text" class="w-4 h-4"></i>
@@ -1430,6 +1567,81 @@
     </aside>
   </div>
 
+  <!-- 内容窗口：横向滚动资产条 -->
+  <div id="content-strip-panel" class="content-strip-panel" role="region" aria-label="内容资产">
+    <div class="content-strip-header" id="content-strip-header">
+      <div class="flex items-center gap-2">
+        <i data-lucide="layout-grid" class="w-4 h-4 text-primary"></i>
+        <span class="text-sm font-semibold text-on-surface">内容</span>
+        <span class="text-xs text-on-surface-variant bg-surface-container-high px-2 py-0.5 rounded-full">10</span>
+      </div>
+      <div class="flex items-center gap-1">
+        <button id="btn-content-download" class="p-1 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="下载全部" aria-label="下载全部内容">
+          <i data-lucide="download" class="w-3.5 h-3.5"></i>
+        </button>
+        <button id="btn-content-collapse" class="p-1 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="收起内容窗口" aria-label="收起内容窗口">
+          <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+        </button>
+      </div>
+    </div>
+    <div class="content-strip-body" id="content-strip-body">
+      <!-- 素材1：卡通贴纸-透明背景 -->
+      <div class="content-thumb transparent-bg" title="鸭子-谢谢" aria-label="素材：鸭子-谢谢">
+        <div class="thumb-placeholder">🦆</div>
+        <span class="thumb-badge">PNG</span>
+      </div>
+      <!-- 素材2 -->
+      <div class="content-thumb transparent-bg" title="鸭子-加油" aria-label="素材：鸭子-加油">
+        <div class="thumb-placeholder">💪</div>
+        <span class="thumb-badge">PNG</span>
+      </div>
+      <!-- 素材3 -->
+      <div class="content-thumb transparent-bg" title="鸭子-在线" aria-label="素材：鸭子-在线">
+        <div class="thumb-placeholder">🟢</div>
+        <span class="thumb-badge">PNG</span>
+      </div>
+      <!-- 素材4 -->
+      <div class="content-thumb transparent-bg" title="鸭子-开心" aria-label="素材：鸭子-开心">
+        <div class="thumb-placeholder">😄</div>
+        <span class="thumb-badge">PNG</span>
+      </div>
+      <!-- 素材5 -->
+      <div class="content-thumb transparent-bg" title="鸭子-忙碌" aria-label="素材：鸭子-忙碌">
+        <div class="thumb-placeholder">⏳</div>
+        <span class="thumb-badge">PNG</span>
+      </div>
+      <!-- 素材6 -->
+      <div class="content-thumb transparent-bg" title="鸭子-庆祝" aria-label="素材：鸭子-庆祝">
+        <div class="thumb-placeholder">🎉</div>
+        <span class="thumb-badge">PNG</span>
+      </div>
+      <!-- 素材7 -->
+      <div class="content-thumb transparent-bg" title="鸭子-思考" aria-label="素材：鸭子-思考">
+        <div class="thumb-placeholder">🤔</div>
+        <span class="thumb-badge">PNG</span>
+      </div>
+      <!-- 素材8 -->
+      <div class="content-thumb transparent-bg" title="鸭子-爱心" aria-label="素材：鸭子-爱心">
+        <div class="thumb-placeholder">❤️</div>
+        <span class="thumb-badge">PNG</span>
+      </div>
+      <!-- 素材9 -->
+      <div class="content-thumb transparent-bg" title="鸭子-睡觉" aria-label="素材：鸭子-睡觉">
+        <div class="thumb-placeholder">😴</div>
+        <span class="thumb-badge">PNG</span>
+      </div>
+      <!-- 素材10：实物产品图-非透明背景 -->
+      <div class="content-thumb" title="产品图-金色管状" aria-label="素材：产品图-金色管状">
+        <div class="thumb-placeholder">💄</div>
+        <span class="thumb-badge">JPG</span>
+      </div>
+      <!-- 添加按钮 -->
+      <div class="content-add-thumb" title="添加更多素材" aria-label="添加更多素材" role="button" tabindex="0">
+        <i data-lucide="plus" class="w-5 h-5"></i>
+      </div>
+    </div>
+  </div>
+
   <!-- 底部执行日志面板 -->
   <div id="exec-log-panel" class="exec-log-panel collapsed" style="height:192px;" role="log" aria-label="执行日志">
     <div class="px-4 py-2 border-b border-outline/20 flex items-center justify-between cursor-pointer" id="exec-log-header">
@@ -1882,6 +2094,62 @@
     $(document).on('click', '.preset-card', function() {
       console.log('选择预设工作流 - 后续应根据预设模板自动创建对应节点和连线');
       $('#modal-preset').fadeOut(150);
+    });
+
+    // ============================================
+    // 内容窗口：展开/折叠 + 素材选中
+    // ============================================
+    var contentStripVisible = true;
+    // 点击header折叠
+    $('#content-strip-header').on('click', function() {
+      contentStripVisible = !contentStripVisible;
+      if (contentStripVisible) {
+        $('#content-strip-panel').removeClass('collapsed');
+      } else {
+        $('#content-strip-panel').addClass('collapsed');
+      }
+    });
+    // 收起按钮
+    $('#btn-content-collapse').on('click', function(e) {
+      e.stopPropagation();
+      contentStripVisible = false;
+      $('#content-strip-panel').addClass('collapsed');
+    });
+    // 素材选中
+    $('#content-strip-body').on('click', '.content-thumb', function() {
+      $('.content-thumb').removeClass('selected');
+      $(this).addClass('selected');
+    });
+    // 工具栏切换按钮
+    $('#toggle-content-strip').on('click', function() {
+      contentStripVisible = !contentStripVisible;
+      if (contentStripVisible) {
+        $('#content-strip-panel').removeClass('collapsed');
+        $(this).addClass('text-primary bg-primary/10').removeClass('text-on-surface-variant');
+        $(this).attr('aria-pressed', 'true');
+      } else {
+        $('#content-strip-panel').addClass('collapsed');
+        $(this).removeClass('text-primary bg-primary/10').addClass('text-on-surface-variant');
+        $(this).attr('aria-pressed', 'false');
+      }
+    });
+    // 添加素材按钮
+    $('#content-strip-body').on('click', '.content-add-thumb', function() {
+      var count = $('#content-strip-body .content-thumb').length + 1;
+      var newThumb = $('<div class="content-thumb transparent-bg" title="新素材 ' + count + '" aria-label="素材：新素材 ' + count + '">' +
+        '<div class="thumb-placeholder">✨</div>' +
+        '<span class="thumb-badge">PNG</span></div>');
+      $(this).before(newThumb);
+      // 更新计数
+      var total = $('#content-strip-body .content-thumb').length;
+      $('#content-strip-header .rounded-full').text(total);
+    });
+    // 键盘操作添加按钮
+    $('#content-strip-body').on('keydown', '.content-add-thumb', function(e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        $(this).click();
+      }
     });
 
     // ============================================
