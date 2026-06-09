@@ -5,7 +5,7 @@ import {
   FolderOpen, Plus, Search, Star, Trash2, MoreVertical, Image,
   Sparkles, LayoutTemplate, Layers, Clock, ChevronRight, ArrowRight,
   Box, Copy, Check, Palette, Type, BookOpen, Users, Settings,
-  LogOut, Shield, X, Eye
+  LogOut, Shield, X, Eye, Mail, Calendar, KeyRound, Zap, Pencil
 } from 'lucide-react';
 import { UserManager } from '@/lib/user-manager';
 import type { Project, CanvasImage, User, UsageStats } from '@/lib/user-types';
@@ -19,6 +19,7 @@ interface DashboardViewProps {
   onOpenProject: (project: Project) => void;
   onNewProject: () => void;
   onLogout?: () => void;
+  onOpenAdmin?: () => void;
   themeStyle?: 'dark' | 'light' | 'gold' | 'monochrome';
 }
 
@@ -28,7 +29,7 @@ interface PromptEntry {
   projectName: string;
 }
 
-export default function DashboardView({ user, onOpenProject, onNewProject, onLogout, themeStyle = 'dark' }: DashboardViewProps) {
+export default function DashboardView({ user, onOpenProject, onNewProject, onLogout, onOpenAdmin, themeStyle = 'dark' }: DashboardViewProps) {
   const [activeTab, setActiveTab] = useState<TabType>('projects');
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -40,6 +41,24 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   });
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showUserProfile, setShowUserProfile] = useState(false);
+  const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+
+  // Close menus on outside click
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (showUserMenu && !target.closest('[data-user-menu]')) {
+        setShowUserMenu(false);
+      }
+      if (menuOpenId && !target.closest('[data-project-menu]')) {
+        setMenuOpenId(null);
+      }
+    };
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, [showUserMenu, menuOpenId]);
 
   // Theme vars
   const isDark = themeStyle === 'dark' || themeStyle === 'gold' || themeStyle === 'monochrome';
@@ -153,6 +172,38 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     });
   }, []);
 
+  const handleRenameProject = useCallback((projectId: string, currentName: string) => {
+    setRenamingProjectId(projectId);
+    setRenameValue(currentName);
+    setMenuOpenId(null);
+  }, []);
+
+  const handleConfirmRename = useCallback(() => {
+    if (renamingProjectId && renameValue.trim()) {
+      mgr.updateProject(renamingProjectId, { name: renameValue.trim() });
+    }
+    setRenamingProjectId(null);
+    setRenameValue('');
+  }, [mgr, renamingProjectId, renameValue]);
+
+  const handleExportProject = useCallback(async (project: Project) => {
+    try {
+      const content = await mgr.exportProjectToWujie(project.id);
+      const blob = new Blob([content], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${project.name}.wujie`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('导出项目失败:', err);
+    }
+    setMenuOpenId(null);
+  }, [mgr]);
+
   // Templates data (product built-in)
   const templates = [
     { id: 'brand-logo', name: '品牌Logo设计', desc: '多场景Logo生成与变体', category: '品牌设计', image: 'https://images.unsplash.com/photo-1626785774625-ddcddc3445e9?w=400&h=250&fit=crop', usage: '2.1k' },
@@ -173,20 +224,33 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
   // =================== RENDER ===================
   return (
-    <div className="h-full w-full flex overflow-hidden">
+    <div className="h-screen w-screen flex overflow-hidden">
       {/* ===== Sidebar ===== */}
-      <aside className={`w-[260px] shrink-0 flex flex-col ${isDark ? 'bg-[#0e0e1a]' : 'bg-white'} border-r ${isDark ? 'border-white/5' : 'border-gray-200'}`}>
+      <aside className={`w-[260px] shrink-0 flex flex-col ${isDark ? 'bg-[#0e0e1a]' : 'bg-white'} border-r ${isDark ? 'border-white/5' : 'border-gray-200'} overflow-hidden`}>
         {/* User info */}
         <div className="p-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0" style={{ backgroundColor: accentColor }}>
+            <div
+              className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0 cursor-pointer hover:ring-2 hover:ring-[#d4af37]/40 transition-all"
+              style={{ backgroundColor: accentColor }}
+              onClick={() => setShowUserProfile(!showUserProfile)}
+              title="查看用户信息"
+            >
               {user.name.charAt(0).toUpperCase()}
             </div>
             <div className="min-w-0 flex-1">
               <div className={`text-sm font-semibold truncate ${textPrimary}`}>{user.name}</div>
-              <div className={`text-xs ${textSecondary}`}>{user.role === 'admin' ? '管理员' : '创作者'}</div>
+              <div className="flex items-center gap-1.5">
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium ${
+                  user.role === 'admin'
+                    ? `${accentBgLight} ${accentClass}`
+                    : isDark ? 'bg-white/5 text-gray-500' : 'bg-gray-100 text-gray-500'
+                }`}>
+                  {user.role === 'admin' ? '管理员' : '创作者'}
+                </span>
+              </div>
             </div>
-            <div className="relative">
+            <div className="relative" data-user-menu>
               <button
                 onClick={() => setShowUserMenu(!showUserMenu)}
                 className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'} transition-colors cursor-pointer`}
@@ -194,15 +258,22 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 <Settings className={`w-4 h-4 ${textSecondary}`} />
               </button>
               {showUserMenu && (
-                <div className={`absolute right-0 top-8 ${cardBg} rounded-xl shadow-2xl py-2 z-50 min-w-[160px] border ${borderClass}`}>
+                <div className={`absolute right-0 top-8 ${cardBg} rounded-xl shadow-2xl py-2 z-50 min-w-[180px] border ${borderClass}`}>
+                  <button
+                    onClick={() => { setShowUserMenu(false); setShowUserProfile(true); }}
+                    className={`w-full px-4 py-2 text-left text-xs flex items-center gap-2 ${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'} cursor-pointer`}
+                  >
+                    <Users className="w-3.5 h-3.5" /> 个人信息
+                  </button>
                   {user.role === 'admin' && (
                     <button
-                      onClick={() => { setShowUserMenu(false); }}
-                      className={`w-full px-4 py-2 text-left text-xs flex items-center gap-2 ${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'} cursor-pointer`}
+                      onClick={() => { setShowUserMenu(false); if (onOpenAdmin) onOpenAdmin(); }}
+                      className={`w-full px-4 py-2 text-left text-xs flex items-center gap-2 ${accentClass} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'} cursor-pointer`}
                     >
                       <Shield className="w-3.5 h-3.5" /> 管理员面板
                     </button>
                   )}
+                  <div className={`my-1 border-t ${isDark ? 'border-white/5' : 'border-gray-100'}`} />
                   <button
                     onClick={() => { setShowUserMenu(false); if (onLogout) onLogout(); }}
                     className="w-full px-4 py-2 text-left text-xs flex items-center gap-2 text-red-400 hover:bg-red-500/10 cursor-pointer"
@@ -213,10 +284,70 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               )}
             </div>
           </div>
+
+          {/* User profile expandable */}
+          {showUserProfile && (
+            <div className={`mt-3 rounded-xl p-3 space-y-2.5 ${isDark ? 'bg-[#12121e] border border-white/5' : 'bg-gray-50 border border-gray-100'}`}>
+              <div className="flex items-center justify-between">
+                <span className={`text-[10px] uppercase tracking-wider font-semibold ${textSecondary}`}>账户信息</span>
+                <button
+                  onClick={() => setShowUserProfile(false)}
+                  className={`p-0.5 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-200'}`}
+                >
+                  <X className={`w-3 h-3 ${textSecondary}`} />
+                </button>
+              </div>
+              <div className={`text-[11px] space-y-1.5 ${textSecondary}`}>
+                <div className="flex items-center gap-2">
+                  <Mail className="w-3 h-3 shrink-0" />
+                  <span className="truncate">{user.email || '未设置邮箱'}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-3 h-3 shrink-0" />
+                  <span>加入于 {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : '未知'}</span>
+                </div>
+              </div>
+              {/* API Permissions */}
+              <div>
+                <div className={`text-[10px] uppercase tracking-wider font-semibold mb-1.5 ${textSecondary}`}>功能权限</div>
+                <div className="flex flex-wrap gap-1">
+                  {[
+                    { key: 'image', label: '图像', icon: '🎨' },
+                    { key: 'chat', label: '对话', icon: '💬' },
+                    { key: 'threeD', label: '3D', icon: '🧊' },
+                    { key: 'imageEdit', label: '编辑', icon: '✏️' },
+                    { key: 'vectorize', label: '矢量', icon: '📐' },
+                    { key: 'layer', label: '分层', icon: '🗂️' },
+                  ].map(perm => {
+                    const enabled = user.apiPermissions?.[perm.key as keyof typeof user.apiPermissions] ?? false;
+                    return (
+                      <span key={perm.key} className={`text-[10px] px-1.5 py-0.5 rounded-md flex items-center gap-1 ${
+                        enabled
+                          ? `${accentBgLight} ${accentClass}`
+                          : isDark ? 'bg-white/5 text-gray-600' : 'bg-gray-100 text-gray-300'
+                      }`}>
+                        <span>{perm.icon}</span>
+                        <span>{perm.label}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+              {/* Admin badge */}
+              {user.role === 'admin' && (
+                <button
+                  onClick={() => { setShowUserProfile(false); if (onOpenAdmin) onOpenAdmin(); }}
+                  className={`w-full text-xs font-medium flex items-center justify-center gap-2 rounded-lg px-3 py-2 ${accentBgLight} ${accentClass} hover:opacity-80 transition-opacity cursor-pointer`}
+                >
+                  <Shield className="w-3.5 h-3.5" /> 打开管理员面板
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-3 space-y-1">
+        <nav className="flex-1 px-3 space-y-1 min-h-0 overflow-y-auto">
           {[
             { key: 'projects' as TabType, label: '我的项目', icon: FolderOpen, count: projects.length },
             { key: 'templates' as TabType, label: '模板广场', icon: LayoutTemplate, count: null },
@@ -240,10 +371,24 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               )}
             </button>
           ))}
+
+          {/* Admin Section */}
+          {user.role === 'admin' && (
+            <>
+              <div className={`text-[10px] uppercase tracking-wider font-semibold mt-3 mb-1 px-1 ${textSecondary}`}>管理员</div>
+              <button
+                onClick={() => { if (onOpenAdmin) onOpenAdmin(); }}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${isDark ? 'text-[#d4af37]/70 hover:bg-[#d4af37]/10' : 'text-[#b8860b] hover:bg-[#d4af37]/10'}`}
+              >
+                <Shield className="w-4.5 h-4.5" />
+                <span className="flex-1 text-left">管理员面板</span>
+              </button>
+            </>
+          )}
         </nav>
 
         {/* Recent Activity */}
-        <div className="px-3 pb-2">
+        <div className="px-3 pb-2 overflow-y-auto min-h-0">
           <div className={`text-[10px] uppercase tracking-wider font-semibold mb-2 ${textSecondary}`}>创作动态</div>
           <div className="space-y-0.5">
             {recentActivity.slice(0, 4).map(a => (
@@ -277,7 +422,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       </aside>
 
       {/* ===== Main Content ===== */}
-      <main className="flex-1 min-w-0 overflow-y-auto">
+      <main className="flex-1 min-w-0 min-h-0 overflow-y-auto">
         <div className="max-w-6xl mx-auto px-6 lg:px-8 py-6 space-y-6">
 
           {/* ===== Projects Tab ===== */}
@@ -424,7 +569,23 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                           {/* Info */}
                           <div className="p-3 flex items-start justify-between">
                             <div className="min-w-0 flex-1">
-                              <div className="font-medium text-sm truncate">{project.name}</div>
+                              {renamingProjectId === project.id ? (
+                                <input
+                                  type="text"
+                                  value={renameValue}
+                                  onChange={(e) => setRenameValue(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleConfirmRename();
+                                    if (e.key === 'Escape') { setRenamingProjectId(null); setRenameValue(''); }
+                                  }}
+                                  onBlur={handleConfirmRename}
+                                  autoFocus
+                                  className={`w-full text-sm font-medium bg-transparent outline-none border-b ${isDark ? 'border-[#d4af37]' : 'border-[#b8860b]'} ${textPrimary}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              ) : (
+                                <div className="font-medium text-sm truncate">{project.name}</div>
+                              )}
                               <div className={`text-xs mt-0.5 ${textSecondary}`}>
                                 {project.updatedAt ? new Date(project.updatedAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '无时间记录'}
                               </div>
@@ -437,7 +598,20 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                                 <MoreVertical className={`w-4 h-4 ${textSecondary}`} />
                               </button>
                               {menuOpenId === project.id && (
-                                <div className={`absolute right-0 top-6 ${cardBg} rounded-lg shadow-xl py-1 z-10 min-w-[120px] border ${borderClass}`}>
+                                <div className={`absolute right-0 top-6 ${cardBg} rounded-lg shadow-xl py-1 z-10 min-w-[140px] border ${borderClass}`}>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleRenameProject(project.id, project.name); }}
+                                    className={`w-full px-3 py-1.5 text-left text-xs flex items-center gap-2 ${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'} cursor-pointer`}
+                                  >
+                                    <Pencil className="w-3 h-3" /> 重命名
+                                  </button>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); void handleExportProject(project); }}
+                                    className={`w-full px-3 py-1.5 text-left text-xs flex items-center gap-2 ${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'} cursor-pointer`}
+                                  >
+                                    <Box className="w-3 h-3" /> 导出项目
+                                  </button>
+                                  <div className={`my-1 border-t ${isDark ? 'border-white/5' : 'border-gray-100'}`} />
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleDelete(project.id); }}
                                     className="w-full px-3 py-1.5 text-left text-xs text-red-400 hover:bg-red-500/10 flex items-center gap-2 cursor-pointer"

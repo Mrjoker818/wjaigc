@@ -2343,6 +2343,7 @@ function CanvasApp() {
 
   if (appMode === 'dashboard') {
     return (
+      <>
       <DashboardView
         user={currentUser!}
         onOpenProject={(project) => {
@@ -2359,8 +2360,91 @@ function CanvasApp() {
             console.error('创建项目失败:', e);
           }
         }}
+        onLogout={async () => {
+          // 退出前同步保存当前项目数据
+          try {
+            if (currentProject && images.length > 0) {
+              const mgr = UserManagerCore.getInstance();
+              const urlMapping: Record<string, string> = {};
+              const nonPersistent = images.filter(img => img.url.startsWith('data:') || img.url.startsWith('blob:'));
+              if (nonPersistent.length > 0) {
+                const results = await Promise.allSettled(nonPersistent.map(async (img) => {
+                  let urlToSave = img.url;
+                  if (urlToSave.startsWith('blob:')) {
+                    try {
+                      const resp = await fetch(urlToSave);
+                      const blob = await resp.blob();
+                      urlToSave = await new Promise<string>((resolve) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result as string);
+                        reader.readAsDataURL(blob);
+                      });
+                    } catch { return null; }
+                  }
+                  const saveResp = await fetch('/api/save-image', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ imageUrl: urlToSave, userId: currentUser?.id, sourceUrl: img.url }),
+                  });
+                  const saveData = await saveResp.json();
+                  if (saveData.success && saveData.url) return { original: img.url, persisted: saveData.url };
+                  return null;
+                }));
+                for (const r of results) {
+                  if (r.status === 'fulfilled' && r.value) urlMapping[r.value.original] = r.value.persisted;
+                }
+              }
+              const persistableCanvasImages = images
+                .map(img => ({
+                  id: img.id,
+                  url: urlMapping[img.url] || (img.url.startsWith('data:') || img.url.startsWith('blob:') ? '' : img.url),
+                  x: img.x, y: img.y, width: img.width, height: img.height,
+                  originalWidth: img.originalWidth || img.width * 2,
+                  originalHeight: img.originalHeight || img.height * 2,
+                  rotation: 0, zIndex: 0, createdAt: img.createdAt || Date.now(),
+                  prompt: img.prompt || '', modifyPrompt: img.modifyPrompt || '',
+                  model: img.model || '', quality: img.quality || '',
+                  aspectRatio: img.aspectRatio || '', stylePreset: img.stylePreset || '',
+                  category: img.category || '', size: img.size || '',
+                  groupId: img.groupId || '', threeDModelUrl: img.threeDModelUrl || '',
+                  threeDModelUrls: img.threeDModelUrls || undefined,
+                  modelName: img.modelName || '', apiProvider: img.apiProvider || '',
+                  apiBaseUrl: img.apiBaseUrl || '',
+                }))
+                .filter(img => img.url);
+              mgr.updateProject(currentProject.id, {
+                canvasImages: persistableCanvasImages,
+                metadata: { ...(currentProject.metadata || {}), groups: groupsRef.current },
+              });
+            }
+          } catch { /* save failed - non-blocking */ }
+          const userMgr = UserManagerCore.getInstance();
+          userMgr.logout();
+          setCurrentUser(null);
+          setCurrentProject(null);
+          setImages([]);
+          setInitialGroups([]);
+          setAppMode('canvas');
+          setShowUserManager(true);
+          toast.info('已退出登录', {
+            description: '请重新登录以继续使用',
+            className: themeStyle === 'monochrome'
+              ? 'bg-white border border-gray-200 text-gray-900'
+              : 'bg-[#141414] border border-[#2a2a2a] text-white',
+          });
+        }}
+        onOpenAdmin={() => setShowAdminSystem(true)}
         themeStyle={themeStyle}
       />
+
+      {/* Admin System Modal (also available from dashboard) */}
+      {showAdminSystem && currentUser?.role === 'admin' && (
+        <AdminSystem
+          themeStyle={themeStyle}
+          onClose={() => setShowAdminSystem(false)}
+        />
+      )}
+    </>
     );
   }
 
