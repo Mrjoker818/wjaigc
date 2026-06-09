@@ -14,7 +14,7 @@ import { PYTHON_BIN } from '@/lib/image-tools/config';
 type TraceMode = 'color' | 'bw' | 'cutting' | 'engraving' | 'lineart' | 'compress' | 'thumbnail';
 type VtracerHierarchical = 'stacked' | 'cutout';
 type VtracerCurveMode = 'polygon' | 'spline';
-type QualityPreset = 'fast' | 'balanced' | 'high' | 'max' | 'print';
+type QualityPreset = 'fast' | 'balanced' | 'high' | 'max' | 'print' | 'print-pro';
 
 interface TraceRequest {
   imageUrl: string;
@@ -127,6 +127,21 @@ const QUALITY_PRESETS: Record<QualityPreset, VtracerParams> = {
     curveMode: 'spline',
     layerDifference: 8,       // 精细层区分
     maxIterations: 12,        // 更多迭代
+  },
+  // ★ 丹青AI 对标预设: 极致还原，接近丹青AI全彩模式质量
+  // 核心差异: 更强去噪(减少碎块) + 极度平滑角点(路径最干净) + 粗层区分(颜色统一)
+  // + 更高坐标精度 + 更多迭代 + 渐变预处理(新增)
+  'print-pro': {
+    colorPrecision: 256,      // 256色: 最高色彩精度
+    filterSpeckle: 12,        // 比官方Photo更强去噪，极致减少碎块
+    cornerThreshold: 180,     // 官方Photo预设值: 极度平滑角点，路径最干净
+    lengthThreshold: 3.0,     // 更精细路径
+    spliceThreshold: 45,      // 官方默认
+    pathPrecision: 5,         // 高坐标精度
+    hierarchical: 'stacked',  // 官方默认: stacked无层间间隙
+    curveMode: 'spline',      // 贝塞尔曲线平滑
+    layerDifference: 64,      // 比 Photo(48) 更粗层区分，颜色更统一
+    maxIterations: 15,        // 更多迭代，颜色匹配更精确
   },
 };
 
@@ -251,16 +266,33 @@ async function preprocessForVTracer(
     pipeline = pipeline.flatten({ background: { r: 255, g: 255, b: 255 } });
   }
 
-  // Step 3: Minimal denoising
-  // Key insight from VTracer official Photo preset:
-  //   - filter_speckle=10 already does built-in denoising
-  //   - Adding extra blur on top causes double-blurring and loss of detail
-  //   - Only very light denoise for fast preset
-  if (params.filterSpeckle <= 4) {
-    pipeline = pipeline.median(1);  // 仅中值滤波去椒盐噪，不模糊
+  // Step 3: 丹青AI级别预处理 — 渐变区域平滑
+  // 丹青AI提示"请上传清晰、高分辨率且无渐变素材"，
+  // 说明其对渐变区域有专门的预处理：将渐变区域预量化为有限色阶，
+  // 避免VTracer在渐变区域产生大量碎块路径
+  // 策略：对高色数预设(>=128色)，使用轻微高斯模糊平滑渐变过渡
+  // 对低色数预设(<128色)，使用中值滤波去噪
+  if (params.colorPrecision >= 200 && params.filterSpeckle >= 10) {
+    // ★ print-pro / max 预设专用：渐变平滑 + 去噪
+    // 轻微高斯模糊(0.5)平滑渐变色带，VTracer的filter_speckle会处理噪声
+    pipeline = pipeline.blur(0.5);
+  } else if (params.filterSpeckle <= 4) {
+    // 快速预设: 仅中值滤波去椒盐噪，不模糊
+    pipeline = pipeline.median(1);
+  } else {
+    // balanced/high: 轻度去噪
+    pipeline = pipeline.median(1);
   }
 
-  // Step 4: Color pre-quantization — only for very low color count presets
+  // Step 4: 丹青AI级别预处理 — 自适应对比度增强
+  // 对比度增强有助于VTracer更精确地识别色彩边界
+  // 仅对高色数预设生效，低色数预设不需要（锐化会引入噪声）
+  if (params.colorPrecision >= 128) {
+    // 轻度锐化增强边缘(1.0 sigma)，帮助VTracer精确定位颜色边界
+    pipeline = pipeline.sharpen({ sigma: 1.0, m1: 0.5, m2: 0.3 });
+  }
+
+  // Step 5: Color pre-quantization — only for very low color count presets
   // colorPrecision is now the ACTUAL number of colors (2-256)
   // For presets with >= 64 colors, VTracer handles quantization well internally
   if (params.colorPrecision <= 32) {
@@ -336,8 +368,13 @@ async function runVTracer(
 
     const args = ['-c', pythonCode];
 
-    // Scale timeout with quality: max preset may take much longer
-    const timeout = params.colorPrecision >= 8 ? 300000 : 120000;
+    // Scale timeout with quality: high color count + high filter takes much longer
+    // colorPrecision is now actual color count (64-256), higher values = more processing
+    const timeout = params.colorPrecision >= 200 && params.filterSpeckle >= 10
+      ? 300000   // print-pro / max: 5min (high quality, complex processing)
+      : params.colorPrecision >= 128
+        ? 180000  // balanced/high: 3min
+        : 120000; // fast: 2min
 
     await new Promise<void>((resolve, reject) => {
       execFile(PYTHON_BIN, args, { timeout }, (error, _stdout, stderr) => {
@@ -586,6 +623,278 @@ function colorDistance(a: ColorInfo, b: ColorInfo): number {
     (a.g - b.g) ** 2 +
     (a.b - b.b) ** 2
   );
+}
+
+// ─── SVG Path Simplification ──────────────────────────────
+// 丹青AI 核心卖点: "锚点精准可调" — 减少冗余锚点，保持图形保真
+// Remove collinear intermediate points from SVG path data.
+
+function areCollinear(
+  x1: number, y1: number,
+  x2: number, y2: number,
+  x3: number, y3: number,
+  tolerance: number = 0.5
+): boolean {
+  const cross = Math.abs((x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1));
+  const dist = Math.sqrt((x3 - x1) ** 2 + (y3 - y1) ** 2);
+  if (dist === 0) return true;
+  return cross / dist < tolerance;
+}
+
+function simplifySvgPaths(svg: string): string {
+  return svg.replace(/d="([^"]+)"/g, (_match: string, d: string) => {
+    return 'd="' + simplifyPathData(d) + '"';
+  });
+}
+
+function simplifyPathData(d: string): string {
+  const commands: Array<{ cmd: string; coords: number[] }> = [];
+  let i = 0;
+  let currentCmd = '';
+
+  function skipWS() {
+    while (i < d.length && (d[i] === ' ' || d[i] === ',' || d[i] === '\t' || d[i] === '\n')) i++;
+  }
+  function readNum(): number {
+    skipWS();
+    let s = '';
+    if (i < d.length && (d[i] === '-' || d[i] === '+')) { s += d[i]; i++; }
+    while (i < d.length && ((d[i] >= '0' && d[i] <= '9') || d[i] === '.')) { s += d[i]; i++; }
+    return s ? parseFloat(s) : NaN;
+  }
+
+  while (i < d.length) {
+    const ch = d[i];
+    if ('MLCSQTAHVmlcsqtahv'.includes(ch)) {
+      currentCmd = ch;
+      commands.push({ cmd: ch, coords: [] });
+      i++;
+    } else if (ch === 'Z' || ch === 'z') {
+      commands.push({ cmd: ch, coords: [] });
+      i++;
+    } else if ((ch >= '0' && ch <= '9') || ch === '-' || ch === '+' || ch === '.') {
+      if (!commands.length || !currentCmd) { i++; continue; }
+      const num = readNum();
+      if (!Number.isNaN(num)) {
+        commands[commands.length - 1].coords.push(num);
+      }
+    } else {
+      i++;
+    }
+  }
+
+  // Simplify consecutive L commands: remove collinear intermediate points
+  const simplified: Array<{ cmd: string; coords: number[] }> = [];
+  let prevX = 0, prevY = 0;
+
+  for (let ci = 0; ci < commands.length; ci++) {
+    const c = commands[ci];
+
+    if (c.cmd === 'M') {
+      simplified.push(c);
+      if (c.coords.length >= 2) {
+        prevX = c.coords[c.coords.length - 2];
+        prevY = c.coords[c.coords.length - 1];
+      }
+    } else if (c.cmd === 'L' && c.coords.length >= 2) {
+      const points: Array<{ x: number; y: number }> = [{ x: prevX, y: prevY }];
+      for (let j = 0; j < c.coords.length - 1; j += 2) {
+        points.push({ x: c.coords[j], y: c.coords[j + 1] });
+      }
+
+      if (points.length >= 3) {
+        const filtered: Array<{ x: number; y: number }> = [points[0]];
+        for (let k = 1; k < points.length - 1; k++) {
+          const prev = filtered[filtered.length - 1];
+          const curr = points[k];
+          const next = points[k + 1];
+          if (!areCollinear(prev.x, prev.y, curr.x, curr.y, next.x, next.y, 1.0)) {
+            filtered.push(curr);
+          }
+        }
+        filtered.push(points[points.length - 1]);
+
+        if (filtered.length < points.length) {
+          const newCoords: number[] = [];
+          for (let k = 1; k < filtered.length; k++) {
+            newCoords.push(filtered[k].x, filtered[k].y);
+          }
+          simplified.push({ cmd: 'L', coords: newCoords });
+          prevX = filtered[filtered.length - 1].x;
+          prevY = filtered[filtered.length - 1].y;
+        } else {
+          simplified.push(c);
+          prevX = c.coords[c.coords.length - 2];
+          prevY = c.coords[c.coords.length - 1];
+        }
+      } else {
+        simplified.push(c);
+        prevX = c.coords[c.coords.length - 2];
+        prevY = c.coords[c.coords.length - 1];
+      }
+    } else {
+      simplified.push(c);
+      if (c.cmd === 'L' || c.cmd === 'C' || c.cmd === 'S' || c.cmd === 'Q' || c.cmd === 'T') {
+        if (c.coords.length >= 2) {
+          prevX = c.coords[c.coords.length - 2];
+          prevY = c.coords[c.coords.length - 1];
+        }
+      } else if (c.cmd === 'H') {
+        if (c.coords.length >= 1) prevX = c.coords[c.coords.length - 1];
+      } else if (c.cmd === 'V') {
+        if (c.coords.length >= 1) prevY = c.coords[c.coords.length - 1];
+      }
+    }
+  }
+
+  let result = '';
+  for (const c of simplified) {
+    if (c.cmd === 'Z' || c.cmd === 'z') {
+      result += c.cmd;
+    } else {
+      result += c.cmd;
+      for (let j = 0; j < c.coords.length; j++) {
+        if (j > 0 && j % 2 === 0) result += ' ';
+        else if (j > 0) result += ',';
+        const val = Math.round(c.coords[j] * 100) / 100;
+        result += String(val);
+      }
+    }
+  }
+  return result;
+}
+
+// ─── SVG Semantic Layer Naming ──────────────────────────────
+// 丹青AI 核心卖点: "多层元素独立可拖动"
+// Replace layer_N_COLORHEX with semantic names (background / subject / detail / accent)
+
+function optimizeSvgLayers(svg: string): string {
+  const gIdRegex = /<g\s+id="layer_(\d+)_([0-9a-fA-F]{3,8})"/g;
+  const colorBrightness = new Map<string, number>();
+
+  let match: RegExpExecArray | null;
+  while ((match = gIdRegex.exec(svg)) !== null) {
+    const hex = match[2];
+    if (!colorBrightness.has(hex)) {
+      const rgb = hexToRgb(hex);
+      if (rgb) {
+        const brightness = 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b;
+        colorBrightness.set(hex, brightness);
+      }
+    }
+  }
+
+  if (colorBrightness.size === 0) return svg;
+
+  const sorted = Array.from(colorBrightness.entries())
+    .sort((a, b) => b[1] - a[1]);
+
+  const labelMap = new Map<string, string>();
+  const total = sorted.length;
+
+  for (let idx = 0; idx < total; idx++) {
+    const [hex, brightness] = sorted[idx];
+    let label: string;
+
+    if (total <= 2) {
+      label = idx === 0 ? 'background' : 'foreground';
+    } else if (total <= 4) {
+      const labels = ['background', 'subject', 'detail', 'accent'];
+      label = labels[idx] || `layer-${idx + 1}`;
+    } else {
+      if (brightness >= 220) label = 'bg-light';
+      else if (brightness >= 160) label = 'bg-mid';
+      else if (brightness >= 100) label = 'subject-mid';
+      else if (brightness >= 50) label = 'subject-dark';
+      else label = 'detail-shadow';
+
+      const existing = Array.from(labelMap.values()).filter(l => l === label).length;
+      if (existing > 0) label = `${label}-${existing + 1}`;
+    }
+    labelMap.set(hex, label);
+  }
+
+  let result = svg;
+  for (const [hex, label] of labelMap) {
+    const escapedHex = hex.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`<g\\s+id="layer_\\d+_${escapedHex}"`, 'g');
+    result = result.replace(regex, `<g id="${label}"`);
+  }
+  return result;
+}
+
+// ─── SVG Same-Color Path Merging ──────────────────────────────
+// 丹青AI: "在保证图形保真的前提下压缩文件体积"
+
+function mergeSameColorPaths(svg: string): string {
+  const svgTagMatch = svg.match(/(<svg[^>]*>)([\s\S]*?)(<\/svg>)/);
+  if (!svgTagMatch) return svg;
+
+  const [, svgOpen, content, svgClose] = svgTagMatch;
+
+  const pathRegex = /<path\s+([^>]*)\/>/g;
+  const paths: Array<{ fill: string; xml: string; d: string }> = [];
+
+  let pathMatch: RegExpExecArray | null;
+  while ((pathMatch = pathRegex.exec(content)) !== null) {
+    const attrs = pathMatch[1];
+    const fillMatch = attrs.match(/fill="([^"]*)"/);
+    const dMatch = attrs.match(/d="([^"]+)"/);
+    const fill = fillMatch ? fillMatch[1] : 'none';
+    const d = dMatch ? dMatch[1] : '';
+    paths.push({ fill, xml: pathMatch[0], d });
+  }
+
+  if (paths.length < 5) return svg;
+
+  const colorGroups = new Map<string, Array<{ d: string; xml: string }>>();
+  for (const p of paths) {
+    if (!colorGroups.has(p.fill)) {
+      colorGroups.set(p.fill, []);
+    }
+    colorGroups.get(p.fill)!.push({ d: p.d, xml: p.xml });
+  }
+
+  let mergedCount = 0;
+  let newContent = content;
+
+  for (const [fill, group] of colorGroups) {
+    if (group.length < 3) continue;
+
+    const mergeableCount = Math.min(group.length, 20);
+    if (mergeableCount < 2) continue;
+
+    const mergedD = group.slice(0, mergeableCount)
+      .map(p => p.d)
+      .join(' Z M ');
+
+    const mergedPath = `<path fill="${fill}" d="M ${mergedD} Z"/>`;
+
+    for (let i = 0; i < mergeableCount; i++) {
+      newContent = newContent.replace(group[i].xml, '');
+      mergedCount++;
+    }
+    newContent = mergedPath + newContent;
+  }
+
+  if (mergedCount > 0) {
+    console.log(`[svg-trace] Path merge: ${mergedCount} paths merged into compound paths`);
+    return svgOpen + newContent + svgClose;
+  }
+  return svg;
+}
+
+// ─── SVG Comprehensive Post-Processing Pipeline ──────────────
+// 丹青AI级别 SVG 后处理管线
+
+function postProcessSvg(svg: string): string {
+  // 1. 路径简化: 删除共线冗余点，减少锚点数量
+  svg = simplifySvgPaths(svg);
+  // 2. 语义化图层命名: background/subject/detail 替代 layer_N_HEX
+  svg = optimizeSvgLayers(svg);
+  // 3. 同色路径合并: 减少文件体积，更易编辑
+  svg = mergeSameColorPaths(svg);
+  return svg;
 }
 
 // ─── SVG Sanitization for Adobe Illustrator ─────────────
@@ -1288,6 +1597,8 @@ async function tryDesignVectorizeFallback(req: NextRequest, imageUrl: string, mo
       return null;
     }
     svgContent = safetyResult.sanitized || svgContent;
+    // 丹青AI级别后处理
+    svgContent = postProcessSvg(svgContent);
     // SVG 标准化
     svgContent = normalizeVectorSvg(svgContent, 0, 0);
     const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
@@ -1391,6 +1702,9 @@ export async function POST(req: NextRequest) {
         // 温和颜色合并：仅合并视觉上无法区分的近色
         svgContent = mergeSvgColors(svgContent);
 
+        // 丹青AI级别后处理：路径简化 + 语义化图层命名 + 同色路径合并
+        svgContent = postProcessSvg(svgContent);
+
         // 标准化 SVG（统一 viewBox / width / height）
         svgContent = normalizeVectorSvg(svgContent, imgW, imgH);
 
@@ -1474,6 +1788,9 @@ export async function POST(req: NextRequest) {
           optCurveVal: body.optCurveVal,
           invert: body.invert,
         });
+
+        // 丹青AI级别后处理（黑白模式仅路径简化）
+        svgContent = simplifySvgPaths(svgContent);
 
         // 标准化 SVG（统一 viewBox / width / height）
         svgContent = normalizeVectorSvg(svgContent, bwImgW, bwImgH);
@@ -1565,6 +1882,9 @@ export async function POST(req: NextRequest) {
         svgContent = svgContent.replace(/fill="[^"]*"/g, 'fill="none"');
         svgContent = svgContent.replace(/<path/g, '<path stroke="#000" stroke-width="1"');
 
+        // 丹青AI级别后处理（切割模式：路径简化减少切割路径）
+        svgContent = simplifySvgPaths(svgContent);
+
         svgContent = normalizeVectorSvg(svgContent, cutImgW, cutImgH);
 
         const cutPathCount = (svgContent.match(/<path/g) || []).length;
@@ -1626,8 +1946,10 @@ export async function POST(req: NextRequest) {
           invert: false,
         });
 
-        svgContent = normalizeVectorSvg(svgContent, engImgW, engImgH);
+        // 丹青AI级别后处理（雕刻模式：路径简化）
+        svgContent = simplifySvgPaths(svgContent);
 
+        svgContent = normalizeVectorSvg(svgContent, engImgW, engImgH);
         const engPathCount = (svgContent.match(/<path/g) || []).length;
         if (engPathCount === 0) {
           return NextResponse.json({ success: false, error: '没有检测到可雕刻的轮廓路径' });
@@ -1685,6 +2007,9 @@ export async function POST(req: NextRequest) {
           optCurveVal: body.optCurveVal ?? 0.8,
           invert: body.invert ?? false,
         });
+
+        // 丹青AI级别后处理（线稿模式：路径简化）
+        svgContent = simplifySvgPaths(svgContent);
 
         svgContent = normalizeVectorSvg(svgContent, laImgW, laImgH);
 

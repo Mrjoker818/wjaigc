@@ -21,7 +21,7 @@ import {
   Search, ScanSearch, Eye, Pause, SkipForward, Workflow as WorkflowIcon, Timer,
   ArrowLeft, LayoutGrid, Sparkles, MessageCircle, Rotate3d, Box, ShoppingBag, Zap,
   Copy, Clipboard, Film, Bookmark, BookmarkPlus, GitCompare, Grid3X3, ArrowLeftFromLine, ImagePlus,
-  Shapes, BookOpen, Blocks, FolderOpen, ScrollText,
+  Shapes, BookOpen, Blocks, FolderOpen, ScrollText, MousePointer2, Maximize2,
 } from 'lucide-react';
 
 // ==================== 图标映射 ====================
@@ -686,10 +686,12 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   const [aiBuildInput, setAiBuildInput] = useState('');
   const [aiBuildLoading, setAiBuildLoading] = useState(false);
   const [aiBuildError, setAiBuildError] = useState<string | null>(null);
+  const [aiBuildOpen, setAiBuildOpen] = useState(false);
 
   // P1: 执行日志
   const [execLogs, setExecLogs] = useState<{ time: number; nodeId: string; label: string; status: string; message: string; duration?: number; nodeType?: string }[]>([]);  // P1: 节点复制粘贴
   const [showContentStrip, setShowContentStrip] = useState(true);
+  const [showLeftPanel, setShowLeftPanel] = useState(true);
   const [showExecLog, setShowExecLog] = useState(false);
   const [clipboard, setClipboard] = useState<{ nodes: WorkflowNode[]; connections: WorkflowConnection[] } | null>(null);
 
@@ -1661,358 +1663,23 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   // ─── 渲染 ───
 
   return (
+    <>
     <div className="node-editor-root h-screen w-screen flex flex-col text-foreground overflow-hidden select-none" data-theme={themeStyle === 'monochrome' ? 'monochrome' : 'gold'} style={{ ...neVars, background: T.canvasBg }}>
       {/* 全局图片上传 (foreignObject内input.click()不可靠, 统一由外部触发) */}
       <input ref={imageFileInputRef} type="file" accept="image/*" className="hidden" onChange={handleGlobalImageUpload} />
-      {/* 主内容行 */}
-      <div className="flex flex-1 min-h-0">
-      {/* 左侧栏：竖排图标导航 + 内容区 */}
-      <div className="flex flex-shrink-0 h-screen overflow-hidden border-r border-border">
-        {/* 竖排图标导航 */}
-        <div className="w-[54px] flex flex-col items-center py-2 gap-0.5 border-r border-border flex-shrink-0 bg-card">
-          {([
-            { key: 'nodes', label: '节点库', icon: <Shapes size={16} /> },
-            { key: 'props', label: '属性', icon: <Settings size={16} /> },
-            { key: 'ai-build', label: 'AI建图', icon: <Sparkles size={16} /> },
-            { key: 'presets', label: '预设', icon: <LayoutGrid size={16} /> },
-            { key: 'prompts', label: '词库', icon: <BookOpen size={16} /> },
-            { key: 'assistant', label: '助手', icon: <MessageCircle size={16} /> },
-          ] as const).map(tab => (
-            <button
-              key={tab.key}
-              onClick={() => setSidebarTab(tab.key)}
-              className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 cursor-pointer relative group ${sidebarTab === tab.key ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
-              title={tab.label}
-            >
-              {tab.icon}
-              {/* tooltip */}
-              <span className="absolute left-full ml-2 px-2 py-1 rounded-md text-[11px] whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 bg-card text-foreground border border-border shadow-lg">
-                {tab.label}
-              </span>
-              {/* 活跃指示条 */}
-              {sidebarTab === tab.key && (
-                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-primary" />
-              )}
-            </button>
-          ))}
-        </div>
-        {/* 内容区 */}
-        <div className="w-[256px] flex flex-col min-h-0 bg-card">
-
-        {/* 节点库 Tab */}
-        {sidebarTab === 'nodes' && (
-          <div className="flex-1 overflow-y-auto">
-            <div className="p-3 sticky top-0 z-10 bg-card">
-              <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="搜索节点..."
-                  className="w-full border border-border rounded-xl px-8 py-2 text-sm bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-                />
-              </div>
-            </div>
-            {Object.entries(groupedTemplates).map(([cat, templates]) => (
-              <div key={cat} className="mb-2">
-                <div className="px-3 py-2 text-[11px] uppercase tracking-wider text-muted-foreground font-semibold flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: NODE_TYPE_COLORS[cat as NodeCategory] }} />
-                  {NODE_CATEGORY_LABELS[cat as NodeCategory]}
-                </div>
-                {templates.map(t => (
-                  <button
-                    key={t.type}
-                    onClick={() => handleAddNode(t.type)}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all duration-200 cursor-pointer group hover:bg-muted/60 active:scale-[0.98]"
-                  >
-                    <span className="text-muted-foreground group-hover:text-primary transition-colors">
-                      {getNodeIcon(t.type, 16)}
-                    </span>
-                    <div className="flex-1 text-left min-w-0">
-                      <div className="text-foreground text-[13px] leading-tight">{t.label}</div>
-                      <div className="text-[11px] text-muted-foreground leading-tight mt-0.5">{t.desc}</div>
-                    </div>
-                    <Plus size={14} className="text-primary opacity-0 group-hover:opacity-100 transition-all shrink-0" />
-                  </button>
-                ))}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* 属性面板 Tab */}
-        {sidebarTab === 'props' && (
-          <PropertyPanel
-            node={selectedNode}
-            models={models}
-            modelsLoading={modelsLoading}
-            onUpdate={handleNodeUpdate}
-            onDelete={handleDeleteNode}
-            onImageUpload={handleImageUpload}
-            canvasImages={allCanvasImages}
-          />
-        )}
-
-        {/* AI建图 Tab */}
-        {sidebarTab === 'ai-build' && (
-          <div className="flex-1 flex flex-col p-3 min-h-0 overflow-hidden">
-            <div className="mb-3">
-              <div className="flex items-center gap-1.5 mb-2">
-                <Sparkles size={16} className="text-primary" />
-                <span className="text-sm font-semibold text-primary">AI 自然语言建图</span>
-              </div>
-              <p className="text-sm text-muted-foreground mb-3">描述你想要的图像处理需求，AI自动生成完整工作流</p>
-            </div>
-            <textarea
-              value={aiBuildInput}
-              onChange={e => setAiBuildInput(e.target.value)}
-              placeholder={"例如:\n帮我生成一张赛博朋克风格的城市夜景图，然后去除背景，再放大2倍\n\n或者:\n我要给产品图做商业精修，影棚灯光，白色背景，然后导出PNG"}
-              className="flex-1 min-h-[140px] bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 resize-none"
-              onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAIBuild(); }}
-            />
-            {aiBuildError && (
-              <div className="mt-2 text-sm text-red-400 bg-red-900/20 rounded px-2 py-1">{aiBuildError}</div>
-            )}
-            <button
-              onClick={handleAIBuild}
-              disabled={aiBuildLoading || !aiBuildInput.trim()}
-              className="mt-3 w-full py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed bg-primary/20 text-primary hover:bg-primary/30"
-            >
-              {aiBuildLoading ? <><Loader2 size={14} className="animate-spin" /> 生成中...</> : <><Sparkles size={14} /> 生成工作流</>}
-            </button>
-            <div className="mt-3 text-sm text-muted-foreground">
-              <p className="mb-1.5">快捷示例:</p>
-              <div className="space-y-1">
-                {['生成产品精修图，影棚灯光', '去背景+放大2倍导出PNG', '字境大师生成书法字体Logo', '多角度生成产品四视图'].map(ex => (
-                  <button
-                    key={ex}
-                    onClick={() => setAiBuildInput(ex)}
-                    className="block w-full text-left px-2.5 py-2 rounded bg-muted hover:bg-white/5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer text-sm"
-                  >
-                    {ex}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 预设模板 Tab */}
-        {sidebarTab === 'presets' && (
-          <div className="flex-1 overflow-y-auto p-2">
-            {filteredPresets.map(preset => {
-              const IconComp = ICON_MAP[preset.icon] || Settings;
-              return (
-                <button
-                  key={preset.id}
-                  onClick={() => handleLoadPreset(preset)}
-                  className="w-full flex items-start gap-2 p-2 mb-1 rounded-lg hover:bg-white/5 transition-colors cursor-pointer text-left group"
-                >
-                  <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center flex-shrink-0 group-hover:bg-primary/10 transition-colors">
-                    <IconComp size={14} className="text-muted-foreground group-hover:text-primary transition-colors" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-foreground group-hover:text-foreground">{preset.name}</div>
-                    <div className="text-xs text-muted-foreground">{preset.description}</div>
-                    <div className="flex flex-wrap gap-1 mt-0.5">
-                      {preset.tags.map(tag => (
-                        <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{tag}</span>
-                      ))}
-                    </div>
-                    <div className="text-[10px] text-muted-foreground mt-1">{preset.nodes.length} 节点 · {preset.connections.length} 连线</div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {/* P2: 提示词库 Tab */}
-        {sidebarTab === 'prompts' && (
-          <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
-            <div className="p-2 border-b border-border">
-              <div className="relative">
-                <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  value={promptSearch}
-                  onChange={e => setPromptSearch(e.target.value)}
-                  placeholder="搜索提示词..."
-                  className="w-full bg-muted border border-border rounded px-6 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50"
-                />
-              </div>
-            </div>
-            <div className="p-2 space-y-2 border-b border-border">
-              <textarea
-                value={newSnippetText}
-                onChange={e => setNewSnippetText(e.target.value)}
-                placeholder="输入新提示词..."
-                className="w-full bg-muted border border-border rounded px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 resize-none h-14"
-              />
-              <div className="flex gap-1">
-                <input
-                  value={newSnippetTags}
-                  onChange={e => setNewSnippetTags(e.target.value)}
-                  placeholder="标签(逗号分隔)"
-                  className="flex-1 bg-muted border border-border rounded px-3 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50"
-                />
-                <select
-                  value={newSnippetCategory}
-                  onChange={e => setNewSnippetCategory(e.target.value)}
-                  className="bg-muted border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none"
-                >
-                  <option value="通用">通用</option>
-                  <option value="人物">人物</option>
-                  <option value="风景">风景</option>
-                  <option value="产品">产品</option>
-                  <option value="风格">风格</option>
-                  <option value="质量">质量</option>
-                  <option value="反向">反向</option>
-                </select>
-              </div>
-              <button
-                onClick={() => {
-                  if (!newSnippetText.trim()) return;
-                  savePromptSnippet(newSnippetText.trim(), newSnippetTags.split(',').map(t => t.trim()).filter(Boolean), newSnippetCategory);
-                  setNewSnippetText('');
-                  setNewSnippetTags('');
-                }}
-                className="w-full py-1 text-[10px] rounded bg-primary/20 text-primary hover:bg-primary/30 transition-colors cursor-pointer"
-              >
-                保存提示词
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              {promptSnippets
-                .filter(s => !promptSearch || s.text.toLowerCase().includes(promptSearch.toLowerCase()) || s.tags.some(t => t.toLowerCase().includes(promptSearch.toLowerCase())))
-                .map(snippet => (
-                  <div key={snippet.id} className="px-2 py-1.5 border-b border-border/50 hover:bg-white/5 group">
-                    <div className="text-xs text-foreground line-clamp-2">{snippet.text}</div>
-                    <div className="flex items-center gap-1 mt-0.5">
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{snippet.category}</span>
-                      {snippet.tags.map(t => (
-                        <span key={t} className="text-[10px] text-muted-foreground">#{t}</span>
-                      ))}
-                      <div className="flex-1" />
-                      <button
-                        onClick={() => {
-                          const node = selectedNode;
-                          if (node && (node.type === 'input-text' || node.type === 'ai-generate' || node.type === 'ai-retouch')) {
-                            const currentText = String(node.config.text || node.config.prompt || '');
-                            handleNodeUpdate(node.id, { config: { text: currentText + (currentText ? ', ' : '') + snippet.text, prompt: currentText + (currentText ? ', ' : '') + snippet.text } });
-                          }
-                        }}
-                        className="text-[10px] text-primary opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                      >
-                        填入
-                      </button>
-                      <button
-                        onClick={() => {
-                          setPromptSnippets(prev => {
-                            const next = prev.filter(s => s.id !== snippet.id);
-                            localStorage.setItem('wujie-prompt-snippets', JSON.stringify(next));
-                            return next;
-                          });
-                        }}
-                        className="text-[10px] text-red-400 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                      >
-                        删除
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              {promptSnippets.length === 0 && (
-                <div className="p-4 text-center text-xs text-muted-foreground">暂无保存的提示词<br />在上方输入框添加</div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* P2: 画布助手 (节点感知) Tab */}
-        {sidebarTab === 'assistant' && (
-          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-            <div className="flex-1 overflow-y-auto p-2 space-y-2">
-              {selectedNode && (() => {
-                // P1: 计算上游节点链
-                const upstreamNodes: WorkflowNode[] = [];
-                const visited = new Set<string>();
-                const queue = [selectedNode.id];
-                visited.add(selectedNode.id);
-                while (queue.length > 0) {
-                  const currentId = queue.shift()!;
-                  const upstreamConns = wf.connections.filter(c => c.toNodeId === currentId);
-                  for (const conn of upstreamConns) {
-                    if (!visited.has(conn.fromNodeId)) {
-                      visited.add(conn.fromNodeId);
-                      const upNode = wf.nodes.find(n => n.id === conn.fromNodeId);
-                      if (upNode) { upstreamNodes.push(upNode); queue.push(conn.fromNodeId); }
-                    }
-                  }
-                }
-                return upstreamNodes.length > 0 ? (
-                  <div className="text-[10px] px-2 py-1.5 rounded bg-primary/10 text-primary/80 border border-primary/20">
-                    感知节点: [{selectedNode.type}] {selectedNode.label}
-                    <div className="mt-1 text-primary/60">
-                      上游链路: {upstreamNodes.map(n => `[${n.type}]${n.label}`).join(' → ')} → [{selectedNode.type}]{selectedNode.label}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-[9px] px-2 py-1 rounded bg-primary/10 text-primary/80 border border-primary/20">
-                    感知节点: [{selectedNode.type}] {selectedNode.label}
-                  </div>
-                );
-              })()}
-              {assistantMessages.length === 0 && (
-                <div className="text-center text-xs text-muted-foreground py-8">
-                  <MessageCircle size={20} className="mx-auto mb-2 text-muted-foreground" />
-                  工作流助手
-                  <br />
-                  <span className="text-muted-foreground">选中节点后可获取上下文感知建议</span>
-                </div>
-              )}
-              {assistantMessages.map((msg, i) => (
-                <div key={i} className={`text-xs px-2 py-1.5 rounded ${msg.role === 'user' ? 'bg-muted text-foreground ml-4' : 'bg-primary/10 text-foreground mr-4'}`}>
-                  <div className="text-[10px] text-muted-foreground mb-0.5">{msg.role === 'user' ? '你' : '助手'}</div>
-                  {msg.content}
-                </div>
-              ))}
-              {assistantLoading && (
-                <div className="text-xs px-2 py-1.5 rounded bg-primary/10 text-muted-foreground mr-4">
-                  <Loader2 size={10} className="animate-spin inline mr-1" />思考中...
-                </div>
-              )}
-            </div>
-            <div className="p-2 border-t border-border flex gap-1">
-              <input
-                value={assistantInput}
-                onChange={e => setAssistantInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAssistantMessage(); } }}
-                placeholder="输入问题..."
-                className="flex-1 bg-muted border border-border rounded px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50"
-              />
-              <button onClick={sendAssistantMessage} disabled={assistantLoading || !assistantInput.trim()} className="p-1 rounded bg-primary/20 text-primary hover:bg-primary/30 transition-colors cursor-pointer disabled:opacity-30">
-                <Zap size={12} />
-              </button>
-            </div>
-          </div>
-        )}
-        </div>{/* 内容区 end */}
-      </div>{/* 左侧栏外层 end */}
-
-      {/* 画布+内容面板 垂直容器 */}
-      <div className="flex flex-col flex-1 min-h-0">
-      {/* 顶部工具栏 - 固定header, 与原型对齐 */}
-      <header className="bg-muted h-12 flex items-center justify-between px-4 border-b border-border/20 z-50 shrink-0" role="toolbar" aria-label="工作流工具栏">
-        {/* 左侧：工具栏按钮组 */}
+      {/* ═══ 顶部工具栏 - 全宽, 与原型对齐 ═══ */}
+      <header className="bg-card h-12 flex items-center justify-between px-3 border-b border-border/20 z-50 shrink-0" role="toolbar" aria-label="工作流工具栏">
+        {/* 左侧：工作流操作 */}
         <div className="flex items-center gap-1" role="group" aria-label="工作流操作">
           {onBack && (
-            <button onClick={onBack} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-card text-sm transition-colors cursor-pointer" title="返回画布 (Esc)" aria-label="返回画布">
+            <button onClick={onBack} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted text-sm transition-colors cursor-pointer" title="返回画布 (Esc)" aria-label="返回画布">
               <ArrowLeft size={16} />
               <span>画布</span>
             </button>
           )}
           <div className="w-px h-6 bg-border/20 mx-1" aria-hidden="true" />
           {/* AI建图 */}
-          <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 text-sm font-medium transition-colors cursor-pointer" title="AI自然语言建图 (Ctrl+L)" aria-label="AI建图" onClick={() => setSidebarTab('ai-build')}>
+          <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 text-sm font-medium transition-colors cursor-pointer" title="AI自然语言建图 (Ctrl+L)" aria-label="AI建图" onClick={() => setAiBuildOpen(true)}>
             <Sparkles size={16} />
             <span>AI 建图</span>
           </button>
@@ -2023,20 +1690,20 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
           </button>
           <div className="w-px h-6 bg-border/20 mx-1" aria-hidden="true" />
           {/* 撤销/重做 */}
-          <button onClick={handleUndo} disabled={historyIndex <= 0} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-card transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="撤销 Ctrl+Z" aria-label="撤销">
+          <button onClick={handleUndo} disabled={historyIndex <= 0} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="撤销 Ctrl+Z" aria-label="撤销">
             <RotateCcw size={16} />
           </button>
-          <button onClick={handleRedo} disabled={historyIndex >= historyStack.length - 1} className="p-1.5 rounded-lg text-muted-foreground/40 hover:text-foreground hover:bg-card transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="重做 Ctrl+Shift+Z" aria-label="重做">
+          <button onClick={handleRedo} disabled={historyIndex >= historyStack.length - 1} className="p-1.5 rounded-lg text-muted-foreground/40 hover:text-foreground hover:bg-muted transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="重做 Ctrl+Shift+Z" aria-label="重做">
             <RotateCcw size={16} className="scale-x-[-1]" />
           </button>
           <div className="w-px h-6 bg-border/20 mx-1" aria-hidden="true" />
           {/* 预设 */}
-          <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-card text-sm transition-colors cursor-pointer" title="预设工作流模板 (Ctrl+P)" aria-label="预设工作流" onClick={() => setSidebarTab('presets')}>
+          <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted text-sm transition-colors cursor-pointer" title="预设工作流模板 (Ctrl+P)" aria-label="预设工作流" onClick={() => setSidebarTab(sidebarTab === 'presets' ? 'nodes' : 'presets')}>
             <LayoutGrid size={16} />
             <span>预设</span>
           </button>
           {/* 保存 */}
-          <button onClick={handleSaveWorkflow} disabled={saveStatus === 'saving'} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${saveStatus === 'saved' ? 'text-[var(--color-success,#3fb950)]' : saveStatus === 'error' ? 'text-destructive' : 'text-muted-foreground hover:text-foreground hover:bg-card'}`} title="保存工作流">
+          <button onClick={handleSaveWorkflow} disabled={saveStatus === 'saving'} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${saveStatus === 'saved' ? 'text-[var(--color-success,#3fb950)]' : saveStatus === 'error' ? 'text-destructive' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`} title="保存工作流">
             {saveStatus === 'saving' ? <Loader2 size={16} className="animate-spin" /> : saveStatus === 'saved' ? <Check size={16} /> : <Save size={16} />}
             <span>{saveStatus === 'saving' ? '保存中...' : saveStatus === 'saved' ? '已保存' : '保存'}</span>
           </button>
@@ -2058,7 +1725,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
               };
               input.click();
             }}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-card text-sm transition-colors cursor-pointer" title="导入工作流 (Ctrl+I)" aria-label="导入工作流"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted text-sm transition-colors cursor-pointer" title="导入工作流 (Ctrl+I)" aria-label="导入工作流"
           >
             <FileInput size={16} />
           </button>
@@ -2066,51 +1733,103 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
           {!isBuildMode && (
             <button
               onClick={() => { setJsonEditContent(JSON.stringify({ nodes: wf.nodes, connections: wf.connections }, null, 2)); setJsonEditorOpen(true); }}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-card text-sm transition-colors cursor-pointer" title="查看/编辑JSON"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted text-sm transition-colors cursor-pointer" title="查看/编辑JSON"
             >
               <Settings size={16} />
             </button>
           )}
         </div>
-        {/* 右侧：缩放控制 + 面板切换 */}
+        {/* 右侧：工作流信息 + 缩放控制 + 面板切换 */}
         <div className="flex items-center gap-1" role="group" aria-label="视图控制">
-          {/* 工作流名称 */}
-          <span className="text-sm font-semibold text-primary mr-2">{wf.name}</span>
-          <span className="text-xs text-muted-foreground mr-2">{wf.nodes.length} 节点 · {wf.connections.length} 连线</span>
+          {/* 工作流名称 + 统计 */}
+          <span className="text-sm font-semibold text-primary mr-1">{wf.name}</span>
+          <span className="text-[11px] text-muted-foreground mr-2">{wf.nodes.length} 节点 · {wf.connections.length} 连线</span>
           <div className="w-px h-6 bg-border/20 mx-1" aria-hidden="true" />
           {/* 缩放控制 */}
-          <button onClick={() => setViewport(v => ({ ...v, zoom: Math.max(0.2, v.zoom * 0.8) }))} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-card transition-colors cursor-pointer" title="缩小 (Ctrl+-)" aria-label="缩小">
+          <button onClick={() => setViewport(v => ({ ...v, zoom: Math.max(0.2, v.zoom * 0.8) }))} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer" title="缩小 (Ctrl+-)" aria-label="缩小">
             <ZoomOut size={16} />
           </button>
           <span className="text-xs text-muted-foreground font-mono w-12 text-center" aria-live="polite" aria-label="当前缩放">{Math.round(viewport.zoom * 100)}%</span>
-          <button onClick={() => setViewport(v => ({ ...v, zoom: Math.min(3, v.zoom * 1.2) }))} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-card transition-colors cursor-pointer" title="放大 (Ctrl++)" aria-label="放大">
+          <button onClick={() => setViewport(v => ({ ...v, zoom: Math.min(3, v.zoom * 1.2) }))} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer" title="放大 (Ctrl++)" aria-label="放大">
             <ZoomIn size={16} />
           </button>
-          <button onClick={() => setViewport({ x: 0, y: 0, zoom: 0.8 })} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-card transition-colors cursor-pointer" title="重置视图 (Ctrl+0)" aria-label="重置视图">
+          <button onClick={() => setViewport({ x: 0, y: 0, zoom: 0.8 })} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer" title="重置视图 (Ctrl+0)" aria-label="重置视图">
             <Maximize size={16} />
           </button>
           <div className="w-px h-6 bg-border/20 mx-1" aria-hidden="true" />
-          {/* 面板切换按钮 */}
-          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${sidebarTab === 'nodes' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-card'}`} title="节点库" aria-label="切换节点库面板" aria-pressed={sidebarTab === 'nodes'} onClick={() => setSidebarTab('nodes')}>
+          {/* 面板切换按钮组 - 与原型对齐 */}
+          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${showLeftPanel ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`} title="节点库" aria-label="切换节点库面板" aria-pressed={showLeftPanel} onClick={() => setShowLeftPanel(!showLeftPanel)}>
             <Blocks size={16} />
           </button>
-          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${sidebarTab === 'material' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-card'}`} title="素材库" aria-label="切换素材库面板" aria-pressed={sidebarTab === 'material'} onClick={() => setSidebarTab('material')}>
+          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${sidebarTab === 'material' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`} title="素材库" aria-label="切换素材库面板" aria-pressed={sidebarTab === 'material'} onClick={() => setSidebarTab(sidebarTab === 'material' ? 'nodes' : 'material')}>
             <FolderOpen size={16} />
           </button>
-          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${showContentStrip ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-card'}`} title="内容窗口" aria-label="切换内容窗口" aria-pressed={showContentStrip} onClick={() => setShowContentStrip(!showContentStrip)}>
+          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${showContentStrip ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`} title="内容窗口" aria-label="切换内容窗口" aria-pressed={showContentStrip} onClick={() => setShowContentStrip(!showContentStrip)}>
             <LayoutGrid size={16} />
           </button>
-          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${sidebarTab === 'prompt' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-card'}`} title="提示词库" aria-label="切换提示词库面板" aria-pressed={sidebarTab === 'prompt'} onClick={() => setSidebarTab('prompt')}>
+          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${sidebarTab === 'prompts' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`} title="提示词库" aria-label="切换提示词库面板" aria-pressed={sidebarTab === 'prompts'} onClick={() => setSidebarTab(sidebarTab === 'prompts' ? 'nodes' : 'prompts')}>
             <BookOpen size={16} />
           </button>
-          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${showExecLog ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-card'}`} title="执行日志" aria-label="切换执行日志面板" aria-pressed={showExecLog} onClick={() => setShowExecLog(!showExecLog)}>
+          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${showExecLog ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`} title="执行日志" aria-label="切换执行日志面板" aria-pressed={showExecLog} onClick={() => setShowExecLog(!showExecLog)}>
             <ScrollText size={16} />
           </button>
         </div>
       </header>
 
+      {/* ═══ 主体三栏布局 - 与原型对齐 ═══ */}
+      <div className="flex flex-1 min-h-0">
+      {/* ═══ 左侧节点库面板 - 与原型对齐: w-64, 搜索+分类列表 ═══ */}
+      {showLeftPanel && (
+      <aside className="w-64 shrink-0 bg-card border-r border-border/20 flex flex-col overflow-hidden">
+        {/* 搜索框 */}
+        <div className="p-3 sticky top-0 z-10 bg-card border-b border-border/10">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="搜索节点..."
+              className="w-full border border-border rounded-xl px-8 py-2 text-sm bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+        </div>
+        {/* 节点分类列表 */}
+        <div className="flex-1 overflow-y-auto">
+          {Object.entries(groupedTemplates).map(([cat, templates]) => (
+            <div key={cat} className="mb-1">
+              <div className="px-3 py-2 text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-bold flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: NODE_TYPE_COLORS[cat as NodeCategory] }} />
+                {NODE_CATEGORY_LABELS[cat as NodeCategory]}
+              </div>
+              {templates.map(t => (
+                <button
+                  key={t.type}
+                  onClick={() => handleAddNode(t.type)}
+                  className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm transition-all duration-200 cursor-pointer group hover:bg-muted/60 active:scale-[0.98]"
+                >
+                  <span className="text-muted-foreground group-hover:text-primary transition-colors">
+                    {getNodeIcon(t.type, 16)}
+                  </span>
+                  <div className="flex-1 text-left min-w-0">
+                    <div className="text-foreground text-[13px] leading-tight">{t.label}</div>
+                    <div className="text-[11px] text-muted-foreground leading-tight mt-0.5">{t.desc}</div>
+                  </div>
+                  <Plus size={14} className="text-primary opacity-0 group-hover:opacity-100 transition-all shrink-0" />
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      </aside>
+      )}
+
+
+
+      {/* ═══ 中间区域: 画布 + 右侧属性面板 ═══ */}
+      <div className="flex flex-1 min-h-0">
+
       {/* 主画布区域 */}
-      <div className="flex-1 relative min-h-0">
+      <div className="flex-1 relative min-h-0 overflow-hidden">
         {/* 画布容器 - HTML架构 (SVG连线层 + HTML节点层, 与原型对齐) */}
         <div
           ref={canvasContainerRef}
@@ -2475,11 +2194,97 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
         )}
       </div>{/* 主画布 end */}
 
-      {/* 底部内容面板 - 用户项目图片 */}
-      {showContentStrip && <ContentPanel canvasImages={canvasImages} onDragImage={() => {}} themeStyle={themeStyle} />}
-      </div>{/* 画布+内容面板 垂直容器 end */}
-      </div>{/* 主内容行 end */}
+      {/* ═══ 右侧属性面板 - 与原型对齐: w-72, 始终可见 ═══ */}
+      <aside className="w-72 shrink-0 bg-card border-l border-border/20 flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-4 h-11 border-b border-border/10">
+          <span className="text-[11px] uppercase tracking-[0.12em] font-bold text-muted-foreground">节点属性</span>
+          <button className="text-muted-foreground hover:text-foreground cursor-pointer"><Maximize2 size={12} /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {selectedNode ? (
+            <PropertyPanel
+              node={selectedNode}
+              models={models}
+              modelsLoading={modelsLoading}
+              onUpdate={handleNodeUpdate}
+              onDelete={handleDeleteNode}
+              onImageUpload={handleImageUpload}
+              canvasImages={allCanvasImages}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
+              <MousePointer2 size={24} className="opacity-40" />
+              <p className="text-xs">选中节点查看属性</p>
+            </div>
+          )}
+        </div>
+      </aside>
+      </div>{/* 中间区域 end */}
+      </div>{/* 主体水平行 end */}
 
+      {/* ═══ 底部面板: 内容条 + 执行日志 - 与原型对齐: 全宽底部 ═══ */}
+      <div className="shrink-0 border-t border-border/20 bg-card">
+        {/* 内容条 */}
+        {showContentStrip && (
+        <div className="border-b border-border/10">
+          <div className="flex items-center justify-between px-4 h-8">
+            <div className="flex items-center gap-2">
+              <FolderOpen size={12} className="text-primary" />
+              <span className="text-[11px] uppercase tracking-[0.12em] font-bold text-muted-foreground">内容</span>
+              <span className="text-[10px] text-muted-foreground/60">{canvasImages?.length || 0}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <button className="text-muted-foreground hover:text-foreground cursor-pointer p-0.5"><Download size={10} /></button>
+              <button onClick={() => setShowContentStrip(false)} className="text-muted-foreground hover:text-foreground cursor-pointer p-0.5"><ChevronDown size={10} /></button>
+            </div>
+          </div>
+          <div className="flex gap-2 px-4 pb-2 overflow-x-auto">
+            {(canvasImages || []).map((img, i) => (
+              <div key={i} className="shrink-0 w-14 h-14 rounded border border-border/20 overflow-hidden bg-muted/30 relative group cursor-pointer" title={img.description || img.name || `图片 ${i+1}`}>
+                <img src={img.url} alt="" className="w-full h-full object-cover" />
+                <span className="absolute bottom-0 left-0 right-0 text-[7px] text-center text-muted-foreground bg-card/80 py-px">
+                  {(img.url?.split('.').pop() || 'PNG').toUpperCase()}
+                </span>
+              </div>
+            ))}
+            <button className="shrink-0 w-14 h-14 rounded border border-dashed border-border/30 flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/30 transition-colors cursor-pointer">
+              <Plus size={14} />
+            </button>
+          </div>
+        </div>
+        )}
+
+        {/* 执行日志 */}
+        {showExecLog && (
+        <div>
+          <div className="flex items-center justify-between px-4 h-8">
+            <div className="flex items-center gap-2">
+              <ScrollText size={12} className="text-primary" />
+              <span className="text-[11px] uppercase tracking-[0.12em] font-bold text-muted-foreground">执行日志</span>
+              <span className="text-[10px] text-muted-foreground/60">{execLogs.length}条记录</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setExecLogs([])} className="text-muted-foreground hover:text-foreground cursor-pointer p-0.5"><Trash2 size={10} /></button>
+              <button onClick={() => setShowExecLog(false)} className="text-muted-foreground hover:text-foreground cursor-pointer p-0.5"><ChevronDown size={10} /></button>
+            </div>
+          </div>
+          <div className="max-h-[120px] overflow-y-auto text-[10px] px-4 pb-2">
+            {execLogs.length === 0 ? (
+              <div className="text-muted-foreground/50 py-2 text-center">暂无执行记录</div>
+            ) : (
+              execLogs.map((log, i) => (
+                <div key={i} className={`flex items-center gap-2 py-1 ${log.status === 'error' ? 'text-red-400/80' : ''}`}>
+                  {log.status === 'success' ? <Check size={8} className="text-green-400 shrink-0" /> : log.status === 'running' ? <Loader2 size={8} className="text-yellow-400 shrink-0 animate-spin" /> : <AlertCircle size={8} className="text-red-400 shrink-0" />}
+                  <span className="text-foreground/80 shrink-0 font-medium">{log.label}</span>
+                  <span className={`flex-1 truncate ${log.status === 'success' ? 'text-green-400/60' : log.status === 'running' ? 'text-yellow-400/60' : 'text-red-400/60'}`}>{log.message}</span>
+                  {log.duration != null && <span className="text-muted-foreground/40 shrink-0 tabular-nums">{log.duration >= 1000 ? `${(log.duration / 1000).toFixed(1)}s` : `${log.duration}ms`}</span>}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+        )}
+      </div>
       {/* 图片预览弹窗 */}
       {imagePreviewUrl && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center" onClick={() => setImagePreviewUrl(null)}>
@@ -2568,6 +2373,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
         </div>
       )}
     </div>
+    </>
   );
 }
 
@@ -2768,7 +2574,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
 
   return (
     <div
-      className="ne-node-enter absolute group/node"
+      className={`node-card ${isSelected ? 'selected' : ''} ${isCollapsed ? 'collapsed' : ''} ${isInputText ? 'prompt-node' : isInputImage || isOutputImage ? 'image-node' : 'generator-node'}`}
       style={{
         left: node.x,
         top: node.y,
@@ -2776,396 +2582,361 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
         height: isCollapsed ? 45 : node.height,
         zIndex: isSelected ? 10 : isHovered ? 5 : 1,
       }}
+      tabIndex={0}
+      onMouseDown={(e) => { e.stopPropagation(); onSelect(e); onDragStart(e); }}
       onMouseEnter={() => onHover(node.id)}
       onMouseLeave={() => onHover(null)}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      {/* 节点主体 - HTML div, 与原型node-card对齐 */}
-      <div
-        className="relative w-full h-full rounded-2xl overflow-hidden cursor-grab active:cursor-grabbing select-none"
-        style={{
-          background: 'rgba(22,27,34,0.92)',
-          backdropFilter: 'blur(20px) saturate(1.2)',
-          WebkitBackdropFilter: 'blur(20px) saturate(1.2)',
-          border: isSelected ? '1px solid rgba(212,175,55,0.15)' : isHovered ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(255,255,255,0.06)',
-          borderRadius: 16,
-          outline: isSelected ? '2px solid #d4af37' : '2px solid transparent',
-          outlineOffset: 2,
-          boxShadow: isSelected
-            ? '0 8px 32px rgba(0,0,0,0.45), 0 0 0 2px rgba(212,175,55,0.25), 0 0 24px rgba(212,175,55,0.08)'
-            : isHovered
-            ? '0 12px 40px rgba(0,0,0,0.45)'
-            : execResult
-            ? `0 8px 32px rgba(0,0,0,0.35), 0 0 0 2px ${statusColor}30`
-            : '0 8px 32px rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.25)',
-          transition: 'box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1), outline 120ms ease, transform 120ms ease, border-color 120ms ease',
-        }}
-        onMouseDown={(e) => { e.stopPropagation(); onSelect(e); onDragStart(e); }}
-      >
-        {/* 分类色条 - 顶部3px色条, 与原型node-type-bar对齐 */}
-        <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-2xl" style={{ background: color, opacity: 0.85 }} />
+      {/* 分类色条 - 顶部3px */}
+      <div className="node-type-bar" style={{ background: color, opacity: 0.85 }} />
 
-        {/* 执行成功光圈 */}
-        {execResult?.status === 'success' && !isSelected && (
-          <div className="absolute -inset-[3px] rounded-[18px] pointer-events-none" style={{ border: `1.5px solid ${T.statusSuccess}`, opacity: 0.5, animation: 'fadeOut 1.5s ease-out forwards' }} />
-        )}
+      {/* 执行成功光圈 */}
+      {execResult?.status === 'success' && !isSelected && (
+        <div className="absolute -inset-[3px] rounded-[18px] pointer-events-none" style={{ border: `1.5px solid ${T.statusSuccess}`, opacity: 0.5, animation: 'fadeOut 1.5s ease-out forwards' }} />
+      )}
 
-        {/* 画布模式专用标记 (右上角小徽章) */}
-        {isCanvasFeature && !isCondition && (
-          <div className="absolute top-[3px] right-2 w-6 h-6 flex items-center justify-center rounded-full text-[7px] font-bold z-10" style={{ background: color, color: T.badgeText, opacity: 0.8 }}>
-            {node.type === 'ai-font-design' ? '字' : node.type === 'ai-refine-engine' ? '精' : node.type === 'ai-brand-ecommerce' ? '品' : node.type === 'ai-segment' ? '层' : node.type === 'ai-multi-angle' ? '角' : '3D'}
-          </div>
-        )}
-
-        {/* ===== 节点标题区 — 42px高度, 与原型对齐 ===== */}
-        {!isCondition && (
-          <div className="relative" style={{ height: 42, background: `${color}0F` }}>
-            {/* 图标 */}
-            <div className="absolute left-2 top-[9px] flex items-center justify-center w-[22px] h-[22px] rounded-md" style={{ background: color + '20', color }}>
+      {/* ===== 节点标题区 — 42px高度 ===== */}
+      {!isCondition && (
+        <div className="node-header" style={{ background: `${color}0F` }}>
+          <div className="node-header-left">
+            <div className="flex items-center justify-center w-[22px] h-[22px] rounded-md" style={{ background: color + '20', color }}>
               {getNodeIcon(node.type, 12)}
             </div>
-            {/* 标题 - 大写, 11px, 800weight, 与原型color:#8b949e对齐 */}
-            <div className="absolute left-[34px] top-[8px] right-[52px] h-5 leading-5 overflow-hidden whitespace-nowrap text-muted-foreground" style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.12em' }}>
+            <div className="node-header-title">
               <span className="truncate block">{node.label.toUpperCase()}</span>
             </div>
-            {/* 折叠开关 */}
-            <button
-              className="absolute right-[28px] top-[12px] flex items-center justify-center w-[18px] h-[18px] rounded hover:bg-white/10 transition-colors cursor-pointer"
-              onClick={(e) => { e.stopPropagation(); onToggleCollapse?.(node.id); }}
-              aria-label={collapsedNodes?.has(node.id) ? '展开节点' : '折叠节点'}
-              tabIndex={0}
-            >
-              <ChevronDown size={12} style={{ color: T.textMuted, transition: 'transform 0.2s ease', transform: collapsedNodes?.has(node.id) ? 'rotate(0deg)' : 'rotate(180deg)' }} />
-            </button>
-            {/* 状态徽章 */}
-            <div className="absolute right-2 top-[12px] flex items-center justify-center w-[20px] h-[20px]">
-              {execResult?.status === 'running' && (
-                <span className="inline-block w-2 h-2 rounded-full animate-pulse" style={{ background: T.statusRunning }} title="运行中" />
-              )}
-              {execResult?.status === 'success' && (
-                <span className="inline-block w-2 h-2 rounded-full" style={{ background: T.statusSuccess }} title="已完成" />
-              )}
-              {execResult?.status === 'error' && (
-                <span className="inline-block w-2 h-2 rounded-full" style={{ background: T.statusError }} title="失败" />
-              )}
-              {!execResult && (
-                <span className="inline-block w-2 h-2 rounded-full" style={{ background: T.textMuted, opacity: 0.3 }} title="等待执行" />
-              )}
-            </div>
           </div>
-        )}
+          {/* 折叠开关 */}
+          <button
+            className="collapse-toggle"
+            onClick={(e) => { e.stopPropagation(); onToggleCollapse?.(node.id); }}
+            aria-label={collapsedNodes?.has(node.id) ? '展开节点' : '折叠节点'}
+            tabIndex={0}
+          >
+            <ChevronDown size={12} style={{ transition: 'transform 0.2s ease', transform: collapsedNodes?.has(node.id) ? 'rotate(0deg)' : 'rotate(180deg)' }} />
+          </button>
+          {/* 状态徽章 */}
+          {execResult?.status === 'running' && (
+            <span className="status-badge running"><span className="status-dot" />运行中</span>
+          )}
+          {execResult?.status === 'success' && (
+            <span className="status-badge done"><span className="status-dot" />完成</span>
+          )}
+          {execResult?.status === 'error' && (
+            <span className="status-badge failed"><span className="status-dot" />失败</span>
+          )}
+          {!execResult && !isRunning && (
+            <span className="status-badge queued"><span className="status-dot" />就绪</span>
+          )}
+          {isRunning && !execResult && (
+            <span className="status-badge running"><span className="status-dot" />运行中</span>
+          )}
+        </div>
+      )}
 
-        {/* ===== 节点体内容 (非折叠时显示) ===== */}
-        {!isCollapsed && !isCondition && (
-          <div className="relative" style={{ height: node.height - 45 }}>
-            {/* input-image 节点: 图片预览 + 拖拽上传区 */}
-            {isInputImage && (
-              <div className="w-full h-full flex flex-col gap-1 px-1.5" style={{ color: T.nodeTitle, fontSize: 10 }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      {/* ===== 节点体内容 (非折叠时显示) ===== */}
+      {!isCollapsed && !isCondition && (
+        <div className="node-body">
+          {/* input-text 节点: 文本编辑 + LLM优化 + 预设 */}
+          {isInputText && (
+            <div className="flex flex-col gap-1.5" style={{ color: T.nodeTitle, fontSize: 12 }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+              <textarea
+                className="prompt-textarea"
+                placeholder="输入提示词..."
+                value={textContent}
+                onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'textContent', e.target.value); }}
+                onMouseDown={(e) => e.stopPropagation()}
+                rows={3}
+              />
+              {canvasImages?.length && textContent.includes('[img:') && (
+                <div className="flex gap-0.5 flex-wrap">
+                  {textContent.split(/(\[img:[^\]]+\])/g).filter(p => p.match(/^\[img:/)).map((ref, i) => {
+                    const id = ref.match(/^\[img:(.+)\]$/)?.[1];
+                    const img = canvasImages.find(ci => ci.id === id);
+                    return img ? (
+                      <img key={i} src={img.url} alt="" className="w-5 h-5 rounded object-cover border border-border/50" title={img.name || id} onClick={(e) => { e.stopPropagation(); onPreviewImage(img.url); }} />
+                    ) : null;
+                  })}
+                </div>
+              )}
+              <div className="flex items-center gap-1">
+                <button
+                  className={`px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer transition-colors flex items-center gap-0.5 ${llmEnabled ? 'bg-primary text-white' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}
+                  onClick={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmEnabled', !llmEnabled); }}
+                  title="LLM 提示词优化"
+                >
+                  <Sparkles size={9} /> LLM
+                </button>
+                <div className="relative">
+                  <button
+                    className="px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer transition-colors bg-muted text-muted-foreground hover:bg-muted/80 flex items-center gap-0.5"
+                    onClick={(e) => { e.stopPropagation(); setPresetOpen(!presetOpen); }}
+                    title="提示词预设"
+                  >
+                    <Bookmark size={9} /> 预设
+                  </button>
+                  {presetOpen && (
+                    <div className="absolute left-0 top-full mt-0.5 z-50 bg-popover border border-border rounded shadow-lg min-w-[140px] max-h-[120px] overflow-y-auto" onMouseDown={(e) => e.stopPropagation()}>
+                      {!presetSaving ? (
+                        <button className="block w-full text-left px-2 py-1 text-[10px] hover:bg-muted text-primary flex items-center gap-1" onClick={(e) => { e.stopPropagation(); setPresetSaving(true); }}>
+                          <BookmarkPlus size={9} /> 保存为预设
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-1 px-2 py-1">
+                          <input type="text" className="flex-1 text-[9px] rounded px-1 py-0.5 outline-none min-w-0" style={{ background: T.nodeBody, color: T.text, border: `1px solid ${T.border}` }} placeholder="预设名称" value={presetName} onChange={(e) => setPresetName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { savePreset(presetName, textContent); } if (e.key === 'Escape') { setPresetSaving(false); setPresetName(''); } }} autoFocus />
+                          <button className="text-[9px] text-primary hover:opacity-80 shrink-0" onClick={() => savePreset(presetName, textContent)}>✓</button>
+                        </div>
+                      )}
+                      {presetList.length > 0 && <div className="border-t border-border" />}
+                      {presetList.map(p => (
+                        <div key={p.id} className="flex items-center gap-0.5 px-1 py-0.5 hover:bg-muted group">
+                          <button className="flex-1 text-left text-[10px] truncate cursor-pointer" onClick={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'textContent', p.text); setPresetOpen(false); }}>{p.name}</button>
+                          <button className="text-[8px] text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 shrink-0 cursor-pointer" onClick={(e) => { e.stopPropagation(); deletePreset(p.id); }} title="删除预设">×</button>
+                        </div>
+                      ))}
+                      {presetList.length === 0 && !presetSaving && (<div className="px-2 py-1 text-[9px] text-muted-foreground">暂无预设</div>)}
+                    </div>
+                  )}
+                </div>
+                <button className="px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer transition-colors bg-muted text-muted-foreground hover:bg-muted/80 flex items-center gap-0.5" onClick={(e) => { e.stopPropagation(); onCascadeRun?.(node.id); }} title="运行此链">
+                  <Play size={9} /> 运行链
+                </button>
+              </div>
+
+              {llmEnabled && (
+                <div className="mt-1 flex flex-col gap-1 p-1.5 rounded" style={{ background: T.inputBg, border: `1px solid ${T.border}` }}>
+                  <select className="w-full text-[9px] rounded px-1 py-0.5 outline-none" style={{ background: T.nodeBody, color: T.text, border: `1px solid ${T.border}` }} value={llmModel} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmModel', e.target.value); }} onMouseDown={(e) => e.stopPropagation()}>
+                    <option value="">选择模型</option>
+                    {(llmModels ?? []).map(m => <option key={m.id} value={m.id} style={{ background: T.optionBg, color: T.optionText }}>{m.apiDisplayName || m.name || getModelDisplayName(m.id)}{m.provider ? ` (${m.provider})` : ''}</option>)}
+                  </select>
+                  <input type="text" className="w-full text-[9px] rounded px-1 py-0.5 outline-none" style={{ background: T.nodeBody, color: T.text, border: `1px solid ${T.border}` }} placeholder="优化指令 (如: 优化为英文)" value={llmInstruction} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmInstruction', e.target.value); }} onMouseDown={(e) => e.stopPropagation()} />
+                  <div className="flex items-center gap-1">
+                    <button className={`text-[8px] cursor-pointer ${llmSystemEnabled ? 'text-primary' : 'text-muted-foreground'}`} onClick={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmSystemEnabled', !llmSystemEnabled); }}>
+                      {llmSystemEnabled ? '●' : '○'} 系统提示
+                    </button>
+                    <button className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer bg-primary text-white hover:opacity-80 flex items-center gap-0.5 disabled:opacity-50 disabled:cursor-not-allowed" onClick={(e) => { e.stopPropagation(); onLlmOptimize?.(node.id, String(node.config?.textContent || ''), String(node.config?.llmModel || ''), String(node.config?.llmSystemPrompt || ''), String(node.config?.llmInstruction || '')); }} disabled={isRunning || !!node.config?.llmOptimizing} title="运行 LLM 优化">
+                      {node.config?.llmOptimizing ? <Loader2 size={9} className="animate-spin" /> : <Sparkles size={9} />} {node.config?.llmOptimizing ? '优化中...' : '优化'}
+                    </button>
+                  </div>
+                  {llmSystemEnabled && (
+                    <input type="text" className="w-full text-[9px] rounded px-1 py-0.5 outline-none" style={{ background: T.nodeBody, color: T.text, border: `1px solid ${T.border}` }} placeholder="系统提示词" value={llmSystemPrompt} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmSystemPrompt', e.target.value); }} onMouseDown={(e) => e.stopPropagation()} />
+                  )}
+                </div>
+              )}
+              {/* 提示词标签 */}
+              <div className="text-[10px] text-muted-foreground/60 mt-0.5">提示词</div>
+            </div>
+          )}
+
+          {/* input-image 节点: 图片预览 + 拖拽上传区 */}
+          {isInputImage && (
+            <div className="flex flex-col gap-1.5" style={{ color: T.nodeTitle, fontSize: 10 }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+              <div className="image-preview has-image">
                 {hasImageOutput ? (
                   <div
-                    className="flex-1 relative group cursor-pointer flex items-center justify-center rounded overflow-hidden"
-                    style={{ background: T.nodeBg === '#161b22' ? '#1c2128' : '#f0f0f0' }}
+                    className="w-full h-full relative group cursor-pointer"
+                    style={{ background: '#1c2128' }}
                     onClick={() => onPreviewImage(hasImageOutput)}
                   >
-                    <img src={hasImageOutput} alt="" className="max-w-full max-h-full object-contain transition-opacity opacity-80 group-hover:opacity-100" />
+                    <img src={hasImageOutput} alt="" className="image-preview img" style={{ objectFit: 'cover' }} />
                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
                       <span className="opacity-0 group-hover:opacity-100 text-white text-xs bg-black/50 px-2 py-0.5 rounded transition-opacity">预览</span>
                     </div>
                   </div>
                 ) : (
                   <div
-                    className="flex-1 flex flex-col items-center justify-center gap-1 rounded border border-dashed cursor-pointer transition-colors"
-                    style={{
-                      borderColor: T.accent + '60',
-                      background: T.nodeBg === '#161b22' ? '#1c2128' : '#f5f5f5',
-                      color: T.nodeBody === '#0d1117' ? '#8b949e' : '#666'
-                    }}
+                    className="image-preview empty cursor-pointer"
+                    style={{ aspectRatio: '4/3' }}
                     onClick={() => onTriggerImageUpload?.(node.id)}
                   >
-                    <ImagePlus size={20} style={{ color: T.accent, opacity: 0.6 }} />
-                    <span className="text-[10px]">点击上传图片</span>
-                    <span className="text-[9px] opacity-60">或拖拽到节点</span>
+                    <div className="flex flex-col items-center gap-1.5 text-muted-foreground/50">
+                      <ImagePlus size={24} />
+                      <span className="text-[10px]">拖拽或点击上传</span>
+                    </div>
                   </div>
                 )}
-                {!hasImageOutput && (
-                  <input
-                    type="text"
-                    placeholder="粘贴图片 URL..."
-                    className="w-full px-2 py-0.5 rounded text-[10px] border outline-none transition-colors"
-                    style={{
-                      background: T.nodeBg === '#161b22' ? '#1c2128' : '#fff',
-                      borderColor: T.cardBorder,
-                      color: T.nodeTitle,
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        const url = (e.target as HTMLInputElement).value.trim();
-                        if (url) {
-                          onNodeFieldChange?.(node.id, 'imageUrl', url);
-                          onNodeFieldChange?.(node.id, 'source', 'url');
-                          onResizeNode?.(node.id, url);
-                          (e.target as HTMLInputElement).value = '';
-                        }
-                      }
-                    }}
-                  />
-                )}
               </div>
-            )}
-
-            {/* 非input-image/output-image节点: 执行后显示结果图 */}
-            {!isInputImage && !isOutputImage && !isOutputImageGroup && hasImageOutput && (
-              <div className="w-full h-full px-2 py-1">
-                <div className="w-full h-full relative group cursor-pointer flex items-center justify-center" onClick={() => onPreviewImage(hasImageOutput)} onWheel={(e) => e.stopPropagation()}>
-                  <img src={hasImageOutput} alt="" className="max-w-full max-h-full object-contain rounded opacity-70 group-hover:opacity-100 transition-opacity" />
-                </div>
-              </div>
-            )}
-
-            {/* output-image 节点 */}
-            {isOutputImage && (() => {
-              const imageUrls = (execResult?.output?.imageUrls as string[]) || [];
-              const singleUrl = hasImageOutput || '';
-              const allUrls = imageUrls.length > 0 ? imageUrls : (singleUrl ? [singleUrl] : []);
-              return (
-                <div className="w-full h-full px-1.5">
-                  {allUrls.length > 1 ? (
-                    <OutputImageGroupContent imageUrls={allUrls} theme={T} onPreviewImage={onPreviewImage} />
-                  ) : singleUrl ? (
-                    <div className="w-full h-full flex flex-col items-center justify-center gap-1" onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                      <div
-                        className="flex-1 w-full relative group cursor-pointer flex items-center justify-center rounded overflow-hidden"
-                        style={{ background: T.nodeBg === '#161b22' ? '#1c2128' : '#f0f0f0' }}
-                        onClick={() => onPreviewImage(singleUrl)}
-                      >
-                        <img src={singleUrl} alt="" className="max-w-full max-h-full object-contain transition-opacity opacity-90 group-hover:opacity-100" />
-                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
-                          <span className="opacity-0 group-hover:opacity-100 text-white text-xs bg-black/50 px-2 py-0.5 rounded transition-opacity">预览</span>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center gap-1" onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                      <div
-                        className="flex-1 w-full flex flex-col items-center justify-center gap-1.5 rounded border-2 border-dashed transition-colors"
-                        style={{ borderColor: T.accent + '40', background: T.nodeBg === '#161b22' ? '#1c2128' : '#fafafa' }}
-                      >
-                        <ImagePlus size={22} style={{ color: T.accent, opacity: 0.35 }} />
-                        <span className="text-[10px] font-medium" style={{ color: T.nodeBg === '#161b22' ? '#8b949e' : '#999' }}>等待图片</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-
-            {/* output-image-group 节点 */}
-            {isOutputImageGroup && (() => {
-              const imageUrls = (execResult?.output?.imageUrls as string[]) || [];
-              const singleUrl = (execResult?.output?.imageUrl as string) || '';
-              const allUrls = imageUrls.length > 0 ? imageUrls : (singleUrl ? [singleUrl] : []);
-              return (
-                <div className="w-full h-full px-1.5">
-                  <OutputImageGroupContent imageUrls={allUrls} theme={T} onPreviewImage={onPreviewImage} />
-                </div>
-              );
-            })()}
-
-            {/* input-text 节点: 文本编辑 + LLM优化 + 预设 */}
-            {isInputText && (
-              <div className="flex flex-col gap-1 h-full px-1.5" style={{ color: T.nodeTitle, fontSize: 12 }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                <div
-                  contentEditable
-                  suppressContentEditableWarning
-                  className="w-full flex-1 min-h-[32px] overflow-y-auto rounded px-2 py-1.5 text-[12px] leading-snug outline-none focus:ring-1 focus:ring-primary"
-                  style={{ background: T.inputBg, color: T.text, borderColor: T.border, wordBreak: 'break-word' }}
-                  onBlur={(e) => {
-                    const text = e.currentTarget.innerText || '';
-                    onNodeFieldChange?.(node.id, 'textContent', text);
+              {!hasImageOutput && (
+                <input
+                  type="text"
+                  placeholder="粘贴图片 URL..."
+                  className="w-full px-2 py-0.5 rounded text-[10px] border outline-none transition-colors"
+                  style={{
+                    background: '#1c2128',
+                    borderColor: T.cardBorder,
+                    color: T.nodeTitle,
                   }}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => e.stopPropagation()}
-                  onWheel={(e) => e.stopPropagation()}
-                >
-                  {textContent || ''}
-                </div>
-
-                {canvasImages?.length && textContent.includes('[img:') && (
-                  <div className="flex gap-0.5 flex-wrap mt-0.5">
-                    {textContent.split(/(\[img:[^\]]+\])/g).filter(p => p.match(/^\[img:/)).map((ref, i) => {
-                      const id = ref.match(/^\[img:(.+)\]$/)?.[1];
-                      const img = canvasImages.find(ci => ci.id === id);
-                      return img ? (
-                        <img key={i} src={img.url} alt="" className="w-5 h-5 rounded object-cover border border-border/50" title={img.name || id} onClick={(e) => { e.stopPropagation(); onPreviewImage(img.url); }} />
-                      ) : null;
-                    })}
-                  </div>
-                )}
-
-                <div className="flex items-center gap-1 mt-0.5">
-                  <button
-                    className={`px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer transition-colors flex items-center gap-0.5 ${llmEnabled ? 'bg-primary text-white' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}
-                    onClick={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmEnabled', !llmEnabled); }}
-                    title="LLM 提示词优化"
-                  >
-                    <Sparkles size={9} /> LLM
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const url = (e.target as HTMLInputElement).value.trim();
+                      if (url) {
+                        onNodeFieldChange?.(node.id, 'imageUrl', url);
+                        onNodeFieldChange?.(node.id, 'source', 'url');
+                        onResizeNode?.(node.id, url);
+                        (e.target as HTMLInputElement).value = '';
+                      }
+                    }
+                  }}
+                />
+              )}
+              {hasImageOutput && (
+                <div className="flex gap-0.5 items-center">
+                  <button className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5" onClick={(e) => { e.stopPropagation(); onExtractToSource?.(node.id); }} title="抽取为源节点">
+                    <ArrowLeftFromLine size={8} /> 抽取
                   </button>
-                  <div className="relative">
-                    <button
-                      className="px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer transition-colors bg-muted text-muted-foreground hover:bg-muted/80 flex items-center gap-0.5"
-                      onClick={(e) => { e.stopPropagation(); setPresetOpen(!presetOpen); }}
-                      title="提示词预设"
-                    >
-                      <Bookmark size={9} /> 预设
+                  <button className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5" onClick={(e) => { e.stopPropagation(); onGridSplit?.(node.id, Number(node.config?.gridCols || 2), Number(node.config?.gridRows || 2)); }} title="宫格切分">
+                    <Grid3X3 size={8} /> 切分
+                  </button>
+                  {upstreamImageUrl && (
+                    <button className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5" onClick={(e) => { e.stopPropagation(); onCompare?.(node.id); }} title="对比原图">
+                      <GitCompare size={8} /> 对比
                     </button>
-                    {presetOpen && (
-                      <div className="absolute left-0 top-full mt-0.5 z-50 bg-popover border border-border rounded shadow-lg min-w-[140px] max-h-[120px] overflow-y-auto" onMouseDown={(e) => e.stopPropagation()}>
-                        {!presetSaving ? (
-                          <button className="block w-full text-left px-2 py-1 text-[10px] hover:bg-muted text-primary flex items-center gap-1" onClick={(e) => { e.stopPropagation(); setPresetSaving(true); }}>
-                            <BookmarkPlus size={9} /> 保存为预设
-                          </button>
-                        ) : (
-                          <div className="flex items-center gap-1 px-2 py-1">
-                            <input type="text" className="flex-1 text-[9px] rounded px-1 py-0.5 outline-none min-w-0" style={{ background: T.nodeBody, color: T.text, border: `1px solid ${T.border}` }} placeholder="预设名称" value={presetName} onChange={(e) => setPresetName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { savePreset(presetName, textContent); } if (e.key === 'Escape') { setPresetSaving(false); setPresetName(''); } }} autoFocus />
-                            <button className="text-[9px] text-primary hover:opacity-80 shrink-0" onClick={() => savePreset(presetName, textContent)}>✓</button>
-                          </div>
-                        )}
-                        {presetList.length > 0 && <div className="border-t border-border" />}
-                        {presetList.map(p => (
-                          <div key={p.id} className="flex items-center gap-0.5 px-1 py-0.5 hover:bg-muted group">
-                            <button className="flex-1 text-left text-[10px] truncate cursor-pointer" onClick={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'textContent', p.text); setPresetOpen(false); }}>{p.name}</button>
-                            <button className="text-[8px] text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 shrink-0 cursor-pointer" onClick={(e) => { e.stopPropagation(); deletePreset(p.id); }} title="删除预设">×</button>
-                          </div>
-                        ))}
-                        {presetList.length === 0 && !presetSaving && (<div className="px-2 py-1 text-[9px] text-muted-foreground">暂无预设</div>)}
-                      </div>
-                    )}
-                  </div>
-                  <button className="px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer transition-colors bg-muted text-muted-foreground hover:bg-muted/80 flex items-center gap-0.5" onClick={(e) => { e.stopPropagation(); onCascadeRun?.(node.id); }} title="运行此链">
-                    <Play size={9} /> 运行链
+                  )}
+                  <button className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5 ml-auto" onClick={(e) => { e.stopPropagation(); onCascadeRun?.(node.id); }} title="运行此链">
+                    <Play size={8} /> 运行链
                   </button>
                 </div>
+              )}
+            </div>
+          )}
 
-                {llmEnabled && (
-                  <div className="mt-1 flex flex-col gap-1 p-1.5 rounded" style={{ background: T.inputBg, border: `1px solid ${T.border}` }}>
-                    <select className="w-full text-[9px] rounded px-1 py-0.5 outline-none" style={{ background: T.nodeBody, color: T.text, border: `1px solid ${T.border}` }} value={llmModel} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmModel', e.target.value); }} onMouseDown={(e) => e.stopPropagation()}>
-                      <option value="">选择模型</option>
-                      {(llmModels ?? []).map(m => <option key={m.id} value={m.id} style={{ background: T.optionBg, color: T.optionText }}>{m.apiDisplayName || m.name || getModelDisplayName(m.id)}{m.provider ? ` (${m.provider})` : ''}</option>)}
-                    </select>
-                    <input type="text" className="w-full text-[9px] rounded px-1 py-0.5 outline-none" style={{ background: T.nodeBody, color: T.text, border: `1px solid ${T.border}` }} placeholder="优化指令 (如: 优化为英文)" value={llmInstruction} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmInstruction', e.target.value); }} onMouseDown={(e) => e.stopPropagation()} />
-                    <div className="flex items-center gap-1">
-                      <button className={`text-[8px] cursor-pointer ${llmSystemEnabled ? 'text-primary' : 'text-muted-foreground'}`} onClick={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmSystemEnabled', !llmSystemEnabled); }}>
-                        {llmSystemEnabled ? '●' : '○'} 系统提示
-                      </button>
-                      <button className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer bg-primary text-white hover:opacity-80 flex items-center gap-0.5 disabled:opacity-50 disabled:cursor-not-allowed" onClick={(e) => { e.stopPropagation(); onLlmOptimize?.(node.id, String(node.config?.textContent || ''), String(node.config?.llmModel || ''), String(node.config?.llmSystemPrompt || ''), String(node.config?.llmInstruction || '')); }} disabled={isRunning || !!node.config?.llmOptimizing} title="运行 LLM 优化">
-                        {node.config?.llmOptimizing ? <Loader2 size={9} className="animate-spin" /> : <Sparkles size={9} />} {node.config?.llmOptimizing ? '优化中...' : '优化'}
-                      </button>
+          {/* AI 生成类节点: 端口行 + 下拉选择 + RUN按钮 */}
+          {!isInputText && !isInputImage && !isOutputImage && !isOutputImageGroup && !hasImageOutput && (node.type.startsWith('ai-') || node.type === 'output-image') && (
+            <div className="flex flex-col gap-2">
+              {/* 输入端口行 */}
+              {inputPorts.map((port) => {
+                const portColor = PORT_COLORS[port.type] || T.connColor;
+                return (
+                  <div key={port.id} className="port-row">
+                    <div
+                      className="port-dot input-port"
+                      style={{ borderColor: portColor, color: portColor }}
+                      onMouseUp={(e) => { e.stopPropagation(); onPortMouseUp(node.id, port); }}
+                      title={port.label}
+                    />
+                    <span className="port-label">{port.label}</span>
+                  </div>
+                );
+              })}
+              {/* 模型选择 */}
+              {node.type === 'ai-generate' && (
+                <div className="flex flex-col gap-1.5">
+                  <select className="node-select" value={String(node.config?.model || '')} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'model', e.target.value); }} onMouseDown={(e) => e.stopPropagation()}>
+                    <option value="">选择模型</option>
+                    <option value="flux-pro">FLUX.1 Pro</option>
+                    <option value="flux-dev">FLUX.1 Dev</option>
+                    <option value="dall-e-3">DALL-E 3</option>
+                  </select>
+                  <select className="node-select" value={String(node.config?.aspectRatio || '16:9')} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'aspectRatio', e.target.value); }} onMouseDown={(e) => e.stopPropagation()}>
+                    <option value="1:1">1:1 正方</option>
+                    <option value="16:9">16:9 宽屏</option>
+                    <option value="9:16">9:16 竖屏</option>
+                    <option value="4:3">4:3 标准</option>
+                    <option value="3:4">3:4 肖像</option>
+                  </select>
+                </div>
+              )}
+              {/* 运行中进度条 */}
+              {isRunning && (
+                <div className="progress-bar">
+                  <div className="progress-bar-fill" style={{ width: '60%' }} />
+                </div>
+              )}
+              {/* 输出端口标签 */}
+              {outputPorts.map((port) => (
+                <div key={port.id} className="port-row">
+                  <span className="port-label">{port.label}</span>
+                  <div
+                    className="port-dot output-port"
+                    style={{ borderColor: PORT_COLORS[port.type] || T.connColor, color: PORT_COLORS[port.type] || T.connColor }}
+                    onMouseDown={(e) => { e.stopPropagation(); onPortMouseDown(e, node.id, port); }}
+                    title={port.label}
+                  />
+                </div>
+              ))}
+              {/* RUN 按钮 */}
+              <button
+                className="run-btn"
+                onClick={(e) => { e.stopPropagation(); onCascadeRun?.(node.id); }}
+                title="运行此节点"
+              >
+                <Play size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />RUN
+              </button>
+            </div>
+          )}
+
+          {/* 非AI/非图片节点: 执行后显示结果图 */}
+          {!isInputText && !isInputImage && !isOutputImage && !isOutputImageGroup && hasImageOutput && (
+            <div className="w-full h-full px-2 py-1">
+              <div className="w-full h-full relative group cursor-pointer flex items-center justify-center" onClick={() => onPreviewImage(hasImageOutput)} onWheel={(e) => e.stopPropagation()}>
+                <img src={hasImageOutput} alt="" className="max-w-full max-h-full object-contain rounded opacity-70 group-hover:opacity-100 transition-opacity" />
+              </div>
+            </div>
+          )}
+
+          {/* output-image 节点 */}
+          {isOutputImage && (() => {
+            const imageUrls = (execResult?.output?.imageUrls as string[]) || [];
+            const singleUrl = hasImageOutput || '';
+            const allUrls = imageUrls.length > 0 ? imageUrls : (singleUrl ? [singleUrl] : []);
+            return (
+              <div className="w-full h-full">
+                {allUrls.length > 1 ? (
+                  <OutputImageGroupContent imageUrls={allUrls} theme={T} onPreviewImage={onPreviewImage} />
+                ) : singleUrl ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-1" onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                    <div className="image-preview has-image cursor-pointer" onClick={() => onPreviewImage(singleUrl)}>
+                      <img src={singleUrl} alt="" style={{ objectFit: 'cover' }} />
                     </div>
-                    {llmSystemEnabled && (
-                      <input type="text" className="w-full text-[9px] rounded px-1 py-0.5 outline-none" style={{ background: T.nodeBody, color: T.text, border: `1px solid ${T.border}` }} placeholder="系统提示词" value={llmSystemPrompt} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmSystemPrompt', e.target.value); }} onMouseDown={(e) => e.stopPropagation()} />
-                    )}
+                  </div>
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-1" onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                    <div className="image-preview empty" style={{ aspectRatio: '4/3' }}>
+                      <div className="flex flex-col items-center gap-1.5 text-muted-foreground/40">
+                        <ImagePlus size={22} />
+                        <span className="text-[10px] font-medium">等待图片</span>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
-            )}
+            );
+          })()}
 
-            {/* input-image 操作按钮 */}
-            {isInputImage && hasImageOutput && (
-              <div className="absolute bottom-1 left-1.5 right-1.5 flex gap-0.5 items-center" onWheel={(e) => e.stopPropagation()}>
-                <button className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5" onClick={(e) => { e.stopPropagation(); onExtractToSource?.(node.id); }} title="抽取为源节点">
-                  <ArrowLeftFromLine size={8} /> 抽取
-                </button>
-                <button className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5" onClick={(e) => { e.stopPropagation(); onGridSplit?.(node.id, Number(node.config?.gridCols || 2), Number(node.config?.gridRows || 2)); }} title="宫格切分">
-                  <Grid3X3 size={8} /> 切分
-                </button>
-                {upstreamImageUrl && (
-                  <button className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5" onClick={(e) => { e.stopPropagation(); onCompare?.(node.id); }} title="对比原图">
-                    <GitCompare size={8} /> 对比
-                  </button>
-                )}
-                <button className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5 ml-auto" onClick={(e) => { e.stopPropagation(); onCascadeRun?.(node.id); }} title="运行此链">
-                  <Play size={8} /> 运行链
-                </button>
+          {/* output-image-group 节点 */}
+          {isOutputImageGroup && (() => {
+            const imageUrls = (execResult?.output?.imageUrls as string[]) || [];
+            const singleUrl = (execResult?.output?.imageUrl as string) || '';
+            const allUrls = imageUrls.length > 0 ? imageUrls : (singleUrl ? [singleUrl] : []);
+            return (
+              <div className="w-full h-full">
+                <OutputImageGroupContent imageUrls={allUrls} theme={T} onPreviewImage={onPreviewImage} />
               </div>
-            )}
+            );
+          })()}
 
-            {/* 非AI/非图片节点显示级联运行 */}
-            {!isInputText && !isInputImage && !hasImageOutput && !isCondition && !(node.type.startsWith('ai-') || node.type === 'output-image') && (
-              <div className="absolute bottom-1 right-1.5 flex justify-end" onWheel={(e) => e.stopPropagation()}>
-                <button className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5" onClick={(e) => { e.stopPropagation(); onCascadeRun?.(node.id); }} title="运行此链">
-                  <Play size={8} /> 运行链
-                </button>
-              </div>
-            )}
+          {/* 非AI/非图片节点显示级联运行 */}
+          {!isInputText && !isInputImage && !hasImageOutput && !isCondition && !(node.type.startsWith('ai-') || node.type === 'output-image') && (
+            <div className="flex justify-end">
+              <button className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5" onClick={(e) => { e.stopPropagation(); onCascadeRun?.(node.id); }} title="运行此链">
+                <Play size={8} /> 运行链
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
-            {/* 全宽 RUN 按钮 — AI生成类节点 */}
-            {!isCondition && !isInputText && !isInputImage && (node.type.startsWith('ai-') || node.type === 'output-image') && (
-              <div className="absolute bottom-2 left-2 right-2">
-                <button
-                  className="w-full h-[18px] rounded-md text-[9px] font-extrabold tracking-[0.12em] uppercase cursor-pointer flex items-center justify-center gap-1 transition-all duration-200 hover:brightness-125 active:scale-[0.97]"
-                  style={{ background: `${color}18`, color, border: `1px solid ${color}40` }}
-                  onClick={(e) => { e.stopPropagation(); onCascadeRun?.(node.id); }}
-                  title="运行此节点"
-                >
-                  <Play size={9} /> RUN
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+      {/* 条件节点: 文字 */}
+      {isCondition && (
+        <div className="w-full h-full flex items-center justify-center">
+          <span className="text-[12px] font-medium truncate px-2" style={{ color: T.nodeTitle }}>{node.label}</span>
+        </div>
+      )}
 
-        {/* 条件节点: 文字 */}
-        {isCondition && (
-          <div className="w-full h-full flex items-center justify-center">
-            <span className="text-[12px] font-medium truncate px-2" style={{ color: T.nodeTitle }}>{node.label}</span>
-          </div>
-        )}
-      </div>
-
-      {/* ===== 输入端口 (绝对定位在节点左侧, 与原型port-dot对齐) ===== */}
-      {inputPorts.map((port, i) => {
-        const py = (i + 1) * ((isCollapsed ? 45 : node.height) / (inputPorts.length + 1));
-        const portColor = PORT_COLORS[port.type] || T.connColor;
-        return (
-          <div
-            key={port.id}
-            className="absolute group/port"
-            style={{ left: -18, top: py - 6, width: 12, height: 12, zIndex: 5 }}
-            onMouseUp={(e) => { e.stopPropagation(); onPortMouseUp(node.id, port); }}
-            title={port.label}
-          >
-            {/* 44px触摸目标 (不可见) */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[32px] h-[32px] rounded-full" />
-            {/* 端口圆点: 12px border circle, 与原型port-dot对齐 */}
-            <div
-              className="w-3 h-3 rounded-full cursor-crosshair transition-all duration-100"
-              style={{
-                border: `2px solid ${portColor}`,
-                background: T.nodeBody === '#0d1117' ? '#0d1117' : '#ffffff',
-                color: portColor,
-              }}
-              onMouseEnter={(e) => {
-                const el = e.currentTarget;
-                el.style.transform = 'scale(1.5)';
-                el.style.backgroundColor = portColor;
-                el.style.boxShadow = `0 0 8px ${portColor}`;
-              }}
-              onMouseLeave={(e) => {
-                const el = e.currentTarget;
-                el.style.transform = 'scale(1)';
-                el.style.backgroundColor = T.nodeBody === '#0d1117' ? '#0d1117' : '#ffffff';
-                el.style.boxShadow = 'none';
-              }}
-            />
-            {/* 端口标签 */}
-            <div className="absolute left-[14px] top-[-2px] whitespace-nowrap pointer-events-none select-none" style={{ color: T.portLabel, fontSize: 9, fontWeight: 500, letterSpacing: '0.02em' }}>{port.label}</div>
-          </div>
-        );
-      })}
-
-      {/* ===== 输出端口 (绝对定位在节点右侧, 与原型port-dot对齐) ===== */}
-      {outputPorts.map((port, i) => {
+      {/* ===== 输出端口 (绝对定位在节点右侧) - 仅非AI生成类节点 ===== */}
+      {(!node.type.startsWith('ai-') || isOutputImage || isOutputImageGroup || !isCollapsed && isInputText) && outputPorts.map((port, i) => {
         const py = (i + 1) * ((isCollapsed ? 45 : node.height) / (outputPorts.length + 1));
         const portColor = PORT_COLORS[port.type] || T.connColor;
         return (
@@ -3176,34 +2947,42 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
             onMouseDown={(e) => { e.stopPropagation(); onPortMouseDown(e, node.id, port); }}
             title={port.label}
           >
-            {/* 44px触摸目标 (不可见) */}
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[32px] h-[32px] rounded-full" />
-            {/* 端口圆点: 12px border circle, 与原型port-dot对齐 */}
             <div
-              className="w-3 h-3 rounded-full cursor-crosshair transition-all duration-100"
-              style={{
-                border: `2px solid ${portColor}`,
-                background: T.nodeBody === '#0d1117' ? '#0d1117' : '#ffffff',
-                color: portColor,
-              }}
-              onMouseEnter={(e) => {
-                const el = e.currentTarget;
-                el.style.transform = 'scale(1.5)';
-                el.style.backgroundColor = portColor;
-                el.style.boxShadow = `0 0 8px ${portColor}`;
-              }}
-              onMouseLeave={(e) => {
-                const el = e.currentTarget;
-                el.style.transform = 'scale(1)';
-                el.style.backgroundColor = T.nodeBody === '#0d1117' ? '#0d1117' : '#ffffff';
-                el.style.boxShadow = 'none';
-              }}
+              className="port-dot output-port"
+              style={{ borderColor: portColor, color: portColor }}
             />
-            {/* 端口标签 */}
-            <div className="absolute right-[14px] top-[-2px] whitespace-nowrap pointer-events-none select-none text-right" style={{ color: T.portLabel, fontSize: 9, fontWeight: 500, letterSpacing: '0.02em' }}>{port.label}</div>
           </div>
         );
       })}
+
+      {/* ===== 输入端口 (绝对定位在节点左侧) - 仅非AI生成类节点 ===== */}
+      {(!node.type.startsWith('ai-') || isOutputImage || isOutputImageGroup) && inputPorts.map((port, i) => {
+        const py = (i + 1) * ((isCollapsed ? 45 : node.height) / (inputPorts.length + 1));
+        const portColor = PORT_COLORS[port.type] || T.connColor;
+        return (
+          <div
+            key={port.id}
+            className="absolute group/port"
+            style={{ left: -18, top: py - 6, width: 12, height: 12, zIndex: 5 }}
+            onMouseUp={(e) => { e.stopPropagation(); onPortMouseUp(node.id, port); }}
+            title={port.label}
+          >
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[32px] h-[32px] rounded-full" />
+            <div
+              className="port-dot input-port"
+              style={{ borderColor: portColor, color: portColor }}
+            />
+          </div>
+        );
+      })}
+
+      {/* 画布模式专用标记 (右上角小徽章) */}
+      {isCanvasFeature && !isCondition && (
+        <div className="absolute top-[3px] right-2 w-6 h-6 flex items-center justify-center rounded-full text-[7px] font-bold z-10" style={{ background: color, color: T.badgeText, opacity: 0.8 }}>
+          {node.type === 'ai-font-design' ? '字' : node.type === 'ai-refine-engine' ? '精' : node.type === 'ai-brand-ecommerce' ? '品' : node.type === 'ai-segment' ? '层' : node.type === 'ai-multi-angle' ? '角' : '3D'}
+        </div>
+      )}
 
       {/* 断点标记 */}
       {node.breakpoint && (

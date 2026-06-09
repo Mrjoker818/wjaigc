@@ -995,7 +995,7 @@ export function InfiniteCanvas({
 
   // SVG智能描摹 state
   const [svgTraceMode, setSvgTraceMode] = useState<'color' | 'bw' | 'cutting' | 'engraving' | 'lineart' | 'compress' | 'thumbnail'>('color');
-  const [svgTraceQualityPreset, setSvgTraceQualityPreset] = useState<'fast' | 'balanced' | 'high' | 'max'>('balanced');
+  const [svgTraceQualityPreset, setSvgTraceQualityPreset] = useState<'fast' | 'balanced' | 'high' | 'max' | 'print' | 'print-pro'>('balanced');
   const [svgTraceOutputFormat, setSvgTraceOutputFormat] = useState<'svg' | 'eps' | 'dxf' | 'pdf'>('svg');
   const [svgTraceColorPrecision, setSvgTraceColorPrecision] = useState<number | null>(null);  // null = use preset
   const [svgTraceFilterSpeckle, setSvgTraceFilterSpeckle] = useState<number | null>(null);
@@ -8857,6 +8857,8 @@ export function InfiniteCanvas({
                           { key: 'balanced' as const, label: '均衡', color: '#d4af37' },
                           { key: 'high' as const, label: '精细', color: '#f97316' },
                           { key: 'max' as const, label: '极致', color: '#ef4444' },
+                          { key: 'print' as const, label: '印刷', color: '#8b5cf6' },
+                          { key: 'print-pro' as const, label: '丹青级', color: '#ec4899' },
                         ]).map(p => (
                           <button key={p.key}
                             onClick={(e) => {
@@ -8894,9 +8896,9 @@ export function InfiniteCanvas({
                             }}
                             className="px-2 py-0.5 rounded text-[10px] border transition-all"
                             style={{
-                              background: (svgTraceCurveMode ?? (svgTraceQualityPreset === 'high' || svgTraceQualityPreset === 'max' ? 'spline' : 'polygon')) === cm ? '#d4af3720' : '#111',
-                              borderColor: (svgTraceCurveMode ?? (svgTraceQualityPreset === 'high' || svgTraceQualityPreset === 'max' ? 'spline' : 'polygon')) === cm ? '#d4af37' : '#333',
-                              color: (svgTraceCurveMode ?? (svgTraceQualityPreset === 'high' || svgTraceQualityPreset === 'max' ? 'spline' : 'polygon')) === cm ? '#d4af37' : '#555',
+                              background: (svgTraceCurveMode ?? 'spline') === cm ? '#d4af3720' : '#111',
+                              borderColor: (svgTraceCurveMode ?? 'spline') === cm ? '#d4af37' : '#333',
+                              color: (svgTraceCurveMode ?? 'spline') === cm ? '#d4af37' : '#555',
                             }}
                           >
                             {cm === 'polygon' ? '折线' : '曲线'}
@@ -8917,9 +8919,9 @@ export function InfiniteCanvas({
                             }}
                             className="px-2 py-0.5 rounded text-[10px] border transition-all"
                             style={{
-                              background: (svgTraceHierarchical ?? (svgTraceQualityPreset === 'max' ? 'cutout' : 'stacked')) === h ? '#d4af3720' : '#111',
-                              borderColor: (svgTraceHierarchical ?? (svgTraceQualityPreset === 'max' ? 'cutout' : 'stacked')) === h ? '#d4af37' : '#333',
-                              color: (svgTraceHierarchical ?? (svgTraceQualityPreset === 'max' ? 'cutout' : 'stacked')) === h ? '#d4af37' : '#555',
+                              background: (svgTraceHierarchical ?? 'stacked') === h ? '#d4af3720' : '#111',
+                              borderColor: (svgTraceHierarchical ?? 'stacked') === h ? '#d4af37' : '#333',
+                              color: (svgTraceHierarchical ?? 'stacked') === h ? '#d4af37' : '#555',
                             }}
                           >
                             {h === 'stacked' ? '叠加' : '剪切'}
@@ -8934,34 +8936,34 @@ export function InfiniteCanvas({
                         <span className="text-[10px] text-gold-muted/70">精细调节（覆盖预设值）</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <label className="text-xs text-gold-muted">颜色精度</label>
-                        <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-blue-500' : 'text-gold'}`}>{svgTraceColorPrecision ?? (svgTraceQualityPreset === 'fast' ? 6 : svgTraceQualityPreset === 'balanced' ? 8 : svgTraceQualityPreset === 'high' ? 10 : 12)}bit</span>
+                        <label className="text-xs text-gold-muted">颜色数</label>
+                        <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-blue-500' : 'text-gold'}`}>{svgTraceColorPrecision ?? (svgTraceQualityPreset === 'fast' ? 64 : svgTraceQualityPreset === 'balanced' ? 128 : svgTraceQualityPreset === 'high' ? 256 : svgTraceQualityPreset === 'max' ? 256 : svgTraceQualityPreset === 'print' ? 256 : 256)}色</span>
                       </div>
-                      <input type="range" min={2} max={12} step={1} value={svgTraceColorPrecision ?? (svgTraceQualityPreset === 'fast' ? 6 : svgTraceQualityPreset === 'balanced' ? 8 : svgTraceQualityPreset === 'high' ? 10 : 12)}
+                      <input type="range" min={2} max={256} step={1} value={svgTraceColorPrecision ?? (svgTraceQualityPreset === 'fast' ? 64 : svgTraceQualityPreset === 'balanced' ? 128 : svgTraceQualityPreset === 'high' ? 256 : 256)}
                         onChange={e => setSvgTraceColorPrecision(Number(e.target.value))}
                         onClick={e => e.stopPropagation()}
                         className="w-full h-1 accent-blue-500 cursor-pointer" />
                       <div className="flex items-center justify-between">
                         <label className="text-xs text-gold-muted">去斑</label>
-                        <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-blue-500' : 'text-gold'}`}>{svgTraceFilterSpeckle ?? (svgTraceQualityPreset === 'fast' ? 12 : svgTraceQualityPreset === 'balanced' ? 6 : svgTraceQualityPreset === 'high' ? 4 : 2)}px</span>
+                        <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-blue-500' : 'text-gold'}`}>{svgTraceFilterSpeckle ?? (svgTraceQualityPreset === 'fast' ? 4 : svgTraceQualityPreset === 'balanced' ? 4 : svgTraceQualityPreset === 'high' ? 6 : svgTraceQualityPreset === 'max' ? 10 : svgTraceQualityPreset === 'print' ? 2 : 12)}px</span>
                       </div>
-                      <input type="range" min={0} max={20} step={1} value={svgTraceFilterSpeckle ?? (svgTraceQualityPreset === 'fast' ? 12 : svgTraceQualityPreset === 'balanced' ? 6 : svgTraceQualityPreset === 'high' ? 4 : 2)}
+                      <input type="range" min={0} max={20} step={1} value={svgTraceFilterSpeckle ?? (svgTraceQualityPreset === 'fast' ? 4 : svgTraceQualityPreset === 'balanced' ? 4 : svgTraceQualityPreset === 'high' ? 6 : svgTraceQualityPreset === 'max' ? 10 : svgTraceQualityPreset === 'print' ? 2 : 12)}
                         onChange={e => setSvgTraceFilterSpeckle(Number(e.target.value))}
                         onClick={e => e.stopPropagation()}
                         className="w-full h-1 accent-blue-500 cursor-pointer" />
                       <div className="flex items-center justify-between">
                         <label className="text-xs text-gold-muted">角点阈值</label>
-                        <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-blue-500' : 'text-gold'}`}>{svgTraceCornerThreshold ?? (svgTraceQualityPreset === 'fast' ? 1 : svgTraceQualityPreset === 'balanced' ? 1 : svgTraceQualityPreset === 'high' ? 1 : 1)}</span>
+                        <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-blue-500' : 'text-gold'}`}>{svgTraceCornerThreshold ?? (svgTraceQualityPreset === 'fast' ? 60 : svgTraceQualityPreset === 'balanced' ? 60 : svgTraceQualityPreset === 'high' ? 90 : svgTraceQualityPreset === 'max' ? 180 : svgTraceQualityPreset === 'print' ? 60 : 180)}</span>
                       </div>
-                      <input type="range" min={0} max={5} step={0.1} value={svgTraceCornerThreshold ?? (svgTraceQualityPreset === 'fast' ? 1 : svgTraceQualityPreset === 'balanced' ? 1 : svgTraceQualityPreset === 'high' ? 1 : 1)}
+                      <input type="range" min={0} max={180} step={5} value={svgTraceCornerThreshold ?? (svgTraceQualityPreset === 'fast' ? 60 : svgTraceQualityPreset === 'balanced' ? 60 : svgTraceQualityPreset === 'high' ? 90 : svgTraceQualityPreset === 'max' ? 180 : svgTraceQualityPreset === 'print' ? 60 : 180)}
                         onChange={e => setSvgTraceCornerThreshold(Number(e.target.value))}
                         onClick={e => e.stopPropagation()}
                         className="w-full h-1 accent-blue-500 cursor-pointer" />
                       <div className="flex items-center justify-between">
                         <label className="text-xs text-gold-muted">长度阈值</label>
-                        <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-blue-500' : 'text-gold'}`}>{svgTraceLengthThreshold ?? (svgTraceQualityPreset === 'fast' ? 10 : svgTraceQualityPreset === 'balanced' ? 6 : svgTraceQualityPreset === 'high' ? 4 : 2)}</span>
+                        <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-blue-500' : 'text-gold'}`}>{svgTraceLengthThreshold ?? (svgTraceQualityPreset === 'fast' ? 4 : svgTraceQualityPreset === 'balanced' ? 4 : svgTraceQualityPreset === 'high' ? 4 : svgTraceQualityPreset === 'max' ? 4 : svgTraceQualityPreset === 'print' ? 3 : 3)}</span>
                       </div>
-                      <input type="range" min={1} max={20} step={1} value={svgTraceLengthThreshold ?? (svgTraceQualityPreset === 'fast' ? 10 : svgTraceQualityPreset === 'balanced' ? 6 : svgTraceQualityPreset === 'high' ? 4 : 2)}
+                      <input type="range" min={1} max={20} step={1} value={svgTraceLengthThreshold ?? (svgTraceQualityPreset === 'fast' ? 4 : svgTraceQualityPreset === 'balanced' ? 4 : svgTraceQualityPreset === 'high' ? 4 : svgTraceQualityPreset === 'max' ? 4 : svgTraceQualityPreset === 'print' ? 3 : 3)}
                         onChange={e => setSvgTraceLengthThreshold(Number(e.target.value))}
                         onClick={e => e.stopPropagation()}
                         className="w-full h-1 accent-blue-500 cursor-pointer" />
