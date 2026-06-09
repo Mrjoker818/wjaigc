@@ -1168,21 +1168,35 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   const mentionTriggerRef = useRef<{ start: number; end: number } | null>(null);
 
   // ===== Tab Mode (selected image → chat targeting) =====
-  const [tabModeImage, setTabModeImage] = useState<CanvasImage | null>(null);
+  // All images are stored in pendingImages array - canvas images, pasted images, @mentioned images
+  // When a canvas image is selected, it's ADDED to pendingImages (not replacing)
 
-  // Sync with externally selected canvas image
+  // Sync with externally selected canvas image - ADD instead of replace
   useEffect(() => {
     if (selectedCanvasImage) {
-      setTabModeImage(selectedCanvasImage);
-    } else {
-      setTabModeImage(null);
+      setPendingImages(prev => {
+        // Don't add duplicate
+        if (prev.find(p => p.id === selectedCanvasImage.id)) return prev;
+        return [...prev, {
+          id: selectedCanvasImage.id,
+          url: selectedCanvasImage.url,
+          name: selectedCanvasImage.prompt?.slice(0, 20) || '画布图片',
+        }];
+      });
     }
   }, [selectedCanvasImage]);
 
   // P2-2: ChatCanvas - handle image sent from canvas right-click menu
   useEffect(() => {
     if (chatInitialImage) {
-      setTabModeImage(chatInitialImage);
+      setPendingImages(prev => {
+        if (prev.find(p => p.id === chatInitialImage.id)) return prev;
+        return [...prev, {
+          id: chatInitialImage.id,
+          url: chatInitialImage.url,
+          name: chatInitialImage.prompt?.slice(0, 20) || '画布图片',
+        }];
+      });
       setActiveTab('chat');
       setInput('请帮我修改这张图片：');
       if (onChatTabOpenChange) onChatTabOpenChange(true);
@@ -2806,11 +2820,8 @@ UI设计规范：
     // P0-3: 模糊意图主动追问 - 如果输入太模糊，添加追问标记
     const isVague = isVagueInput(trimmedInput) && pendingImages.length === 0;
 
-    // 收集图片锚点（来自Tab模式图片、@图片引用、和待发送图片）
+    // 收集图片锚点（来自pendingImages、@图片引用）
     const imageAnchors: { imageId: string; imageUrl: string; imageName: string }[] = [];
-    if (tabModeImage) {
-      imageAnchors.push({ imageId: tabModeImage.id, imageUrl: tabModeImage.url, imageName: tabModeImage.prompt || '画布图片' });
-    }
     activeMentions.filter(m => m.type === 'canvas-image').forEach(m => {
       if (!imageAnchors.find(a => a.imageId === m.id)) {
         imageAnchors.push({ imageId: m.id, imageUrl: m.imageUrl || '', imageName: m.label });
@@ -2907,18 +2918,18 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
 请确保所有图片生成、设计建议都符合以上品牌规范。`;
       }
 
-      // P1-2: Tab模式 - 如果有选中画布图片，注入图片上下文
-      const tabImage = tabModeImage;
-      if (tabImage) {
+      // P1-2: 图片上下文 - 如果有选中画布图片，注入图片上下文
+      const hasCanvasImages = pendingImages.length > 0;
+      if (hasCanvasImages) {
+        const imageDescriptions = pendingImages.map((img, i) => 
+          `图片${pendingImages.length > 1 ? (i + 1) : ''}: ${img.name}`
+        ).join('\n');
         enhancedSystemPrompt += `
 
 【当前编辑图片】
-用户正在编辑画布上的一张图片，请针对该图片给出建议或修改指令：
-- 图片URL: ${tabImage.url}
-- 图片尺寸: ${tabImage.width}×${tabImage.height}
-- 原始描述: ${tabImage.prompt || '无'}
-- 生成模型: ${tabImage.model || '未知'}
-用户的消息是针对这张图片的操作指令，请据此理解用户意图。
+用户正在编辑画布上的${pendingImages.length > 1 ? '多张' : '一张'}图片，请针对图片给出建议或修改指令：
+${imageDescriptions}
+用户的消息是针对这${pendingImages.length > 1 ? '些' : '张'}图片的操作指令，请据此理解用户意图。
 
 【⚠️ 图像生成指令 - 必须遵守⚠️】
 仅在用户明确要求"生成/画出/创建/制作/设计一张图片或某种视觉内容"时，才输出图像生成指令。
@@ -2940,8 +2951,8 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
         enhancedSystemPrompt += tuneContextString;
       }
 
-      // 通用图像生成指令 - 当没有选中画布图片时，也告诉LLM可以触发生图
-      if (!tabImage) {
+      // 通用图像生成指令 - 当没有图片时，也告诉LLM可以触发生图
+      if (!hasCanvasImages) {
         enhancedSystemPrompt += `
 
 【⚠️ 图像生成指令 - 必须遵守⚠️】
@@ -3008,18 +3019,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
       // Collect all images to send as multimodal content
       const allImageUrls: string[] = [];
       
-      // 1. Tab mode image - send as actual image_url so LLM can see it
-      if (tabModeImage?.url) {
-        allImageUrls.push(tabModeImage.url);
-      }
-      
-      // 2. @mentioned canvas images
-      mentionedImages.forEach(m => {
-        const url = m.data!.url as string;
-        if (!allImageUrls.includes(url)) allImageUrls.push(url);
-      });
-      
-      // 3. Pending uploaded/pasted images
+      // 1. Pending images (canvas images, pasted images, @mentioned images)
       capturedPendingImages.forEach(img => {
         if (!allImageUrls.includes(img.url)) allImageUrls.push(img.url);
       });
@@ -3171,13 +3171,9 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
               const aspectRatio = detectAspectRatioFromText(rawPrompt + ' ' + trimmedInput) || '1:1';
               const quality = /高清|高质量|hd|high.?quality|2k|4k/i.test(trimmedInput) ? '2K' : '1K';
 
-              // 如果用户选中了画布图片或有上传图片，作为参考图传入
-              const sourceImageUrl = tabModeImage?.url || selectedCanvasImage?.url;
-              const referenceImages = [
-                ...(sourceImageUrl ? [sourceImageUrl] : []),
-                ...capturedPendingImages.map(img => img.url),
-              ];
-              const imageSourceId = tabModeImage?.id || selectedCanvasImage?.id;
+              // 如果用户有图片，作为参考图传入
+              const referenceImages = capturedPendingImages.map(img => img.url);
+              const imageSourceId = capturedPendingImages.length > 0 ? capturedPendingImages[0].id : undefined;
 
               // 提交图像生成
               const generateRes = await fetch('/api/generate', {
@@ -3310,7 +3306,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
       }
 
       // ====== 兜底：如果LLM未输出 [GENERATE: ...] 但用户意图明确是生图 ======
-      if (!generateMatch && (tabImage || (activeSkill && ['image', 'design'].includes(activeSkill.category)))) {
+      if (!generateMatch && (pendingImages.length > 0 || (activeSkill && ['image', 'design'].includes(activeSkill.category)))) {
         const userWantsImage = isImageGenerationIntent(trimmedInput);
         if (userWantsImage) {
           console.log('[ChatImage] Fallback: LLM did not output [GENERATE] tag but user intent is clear');
@@ -3330,13 +3326,9 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
           } else {
             (async () => {
               try {
-                const sourceImageUrl = tabImage?.url || selectedCanvasImage?.url;
-                const referenceImages = [
-                  ...(sourceImageUrl ? [sourceImageUrl] : []),
-                  ...capturedPendingImages.map(img => img.url),
-                ];
-                const imageSourceId = tabImage?.id || selectedCanvasImage?.id;
-                const aspectRatio = detectAspectRatioFromText(trimmedInput) || (tabImage ? '1:1' : '1:1');
+                const referenceImages = capturedPendingImages.map(img => img.url);
+                const imageSourceId = capturedPendingImages.length > 0 ? capturedPendingImages[0].id : undefined;
+                const aspectRatio = detectAspectRatioFromText(trimmedInput) || '1:1';
                 const quality = /高清|高质量|hd|high.?quality|2k|4k/i.test(trimmedInput) ? '2K' : '1K';
 
                 // 用 optimize-prompt 优化用户的提示词
@@ -3488,7 +3480,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
       setIsLoading(false);
       abortControllerRef.current = null;
     }
-  }, [input, isLoading, messages, model, systemPrompt, isThinkingMode, saveSession, pendingImages, allAgents, activeMentions, tabModeImage, brandDna, tuneContextString, activeSkill, onAddImages]);
+  }, [input, isLoading, messages, model, systemPrompt, isThinkingMode, saveSession, pendingImages, allAgents, activeMentions, brandDna, tuneContextString, activeSkill, onAddImages]);
 
   // 提示词大师功能 - Agent智能体化
   const handleOptimizePrompt = useCallback(async () => {
@@ -4398,40 +4390,26 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
 
         {/* Input - 精致设计 */}
         <div className={`px-3 py-4 border-t ${themeClasses.border} shrink-0 ${isGold ? 'bg-[#0d0d0d]/90' : 'bg-white'}`}>
-          {/* Image Context Strip - Tab mode + pending images (Lovart-style multi-image) */}
-          {(tabModeImage || pendingImages.length > 0) && (
+          {/* Image Context Strip - all images in one unified bar (Lovart-style multi-image) */}
+          {pendingImages.length > 0 && (
             <div className={`mb-1.5 flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs overflow-x-auto ${isGold ? 'bg-gold/10 border border-gold/20' : 'bg-blue-50 border border-blue-200'}`}>
-              {/* Tab mode canvas image */}
-              {tabModeImage && (
-                <div
-                  className="flex items-center gap-1.5 shrink-0 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] rounded-md px-1.5 py-1 hover:bg-white/5"
-                  onClick={() => onNavigateToImage?.(tabModeImage.id)}
-                  title="点击定位到画布图片"
-                >
-                  <div className="w-7 h-7 rounded overflow-hidden shrink-0 border border-white/10">
-                    <img src={tabModeImage.url} alt="" className="w-full h-full object-cover" />
-                  </div>
-                  <div className="min-w-0 max-w-[80px]">
-                    <div className={`font-medium truncate text-[10px] ${isGold ? 'text-gold' : 'text-blue-700'}`}>针对此图片</div>
-                  </div>
-                  <button onClick={(e) => { e.stopPropagation(); setTabModeImage(null); }} className="shrink-0 opacity-40 hover:opacity-100 transition-opacity">
-                    <X size={12} />
-                  </button>
-                </div>
-              )}
-              {/* Pending uploaded/pasted images */}
+              {/* All images (canvas + uploaded + @mentioned) */}
               {pendingImages.map((img, idx) => (
                 <div
                   key={img.id}
-                  className="flex items-center gap-1.5 shrink-0 rounded-md px-1.5 py-1 hover:bg-white/5"
+                  className="flex items-center gap-1.5 shrink-0 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] rounded-md px-1.5 py-1 hover:bg-white/5"
+                  onClick={() => onNavigateToImage?.(img.id)}
+                  title="点击定位到画布图片"
                 >
                   <div className="w-7 h-7 rounded overflow-hidden shrink-0 border border-white/10">
                     <img src={img.url} alt="" className="w-full h-full object-cover" />
                   </div>
-                  <div className="min-w-0 max-w-[60px]">
-                    <div className={`truncate text-[10px] ${isGold ? 'text-gold/70' : 'text-blue-600'}`}>{img.name.length > 8 ? img.name.slice(0, 8) + '...' : img.name}</div>
+                  <div className="min-w-0 max-w-[70px]">
+                    <div className={`font-medium truncate text-[10px] ${isGold ? 'text-gold' : 'text-blue-700'}`}>
+                      {pendingImages.length === 1 ? '针对此图片' : (img.name.length > 6 ? img.name.slice(0, 6) + '..' : img.name)}
+                    </div>
                   </div>
-                  <button onClick={() => setPendingImages(prev => prev.filter((_, i) => i !== idx))} className="shrink-0 opacity-40 hover:opacity-100 transition-opacity">
+                  <button onClick={(e) => { e.stopPropagation(); setPendingImages(prev => prev.filter((_, i) => i !== idx)); }} className="shrink-0 opacity-40 hover:opacity-100 transition-opacity">
                     <X size={12} />
                   </button>
                 </div>
@@ -4440,8 +4418,8 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
               {canvasImages.length > 0 && (
                 <button
                   onClick={() => {
-                    // Add selected canvas image or show picker
-                    if (selectedCanvasImage && !pendingImages.find(p => p.url === selectedCanvasImage.url) && (!tabModeImage || tabModeImage.id !== selectedCanvasImage.id)) {
+                    // Add selected canvas image
+                    if (selectedCanvasImage && !pendingImages.find(p => p.id === selectedCanvasImage.id)) {
                       setPendingImages(prev => [...prev, { id: selectedCanvasImage.id, url: selectedCanvasImage.url, name: selectedCanvasImage.prompt?.slice(0, 20) || '画布图片' }]);
                     }
                   }}
@@ -4638,7 +4616,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
               ref={textareaRef}
               value={input}
               onChange={handleInputChange}
-              placeholder={pendingImages.length > 0 ? `描述你想对这${pendingImages.length}张图片做什么...` : tabModeImage ? "描述你想对这张图片做什么..." : "输入消息，@ 引用图片/品牌/提示词..."}
+              placeholder={pendingImages.length > 0 ? `描述你想对这${pendingImages.length}张图片做什么...` : "输入消息，@ 引用图片/品牌/提示词..."}
               className={`w-full resize-none min-h-[60px] max-h-[200px] border-0 bg-transparent px-4 py-3 text-[14px] leading-relaxed focus:outline-none focus:ring-0 ${themeClasses.text} placeholder:${isGold ? 'text-gold-muted/40' : 'text-gray-400'}`}
               onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
                 // Handle mention picker navigation
