@@ -252,7 +252,7 @@ export async function POST(request: NextRequest) {
                 imageModel,
                 imageProviderId,
               );
-              console.log(`[agent-edit] Edit step ${i + 1} result:`, editResult.success, editResult.error || '');
+              console.log(`[agent-edit] Edit step ${i + 1} result: success=${editResult.success} hasUrl=${!!editResult.imageUrl} url=${editResult.imageUrl?.substring(0, 80)} error=${editResult.error || ''}`);
               if (editResult.success && editResult.imageUrl) {
                 finalImageUrl = editResult.imageUrl;
                 // 更新步骤结果为实际编辑结果
@@ -328,13 +328,39 @@ export async function POST(request: NextRequest) {
         if (isCancelled()) return;
 
         // 根据 Agent 结果决定任务状态
+        console.log(`[agent-edit] Task ${taskId} finishing, result.success=${result.success} finalImageUrl=${finalImageUrl?.substring(0, 80) || 'none'}`);
+
+        // 持久化 base64 data URL 到服务器文件，避免轮询时序列化巨大 base64 字符串
+        let persistedImageUrl = finalImageUrl;
+        if (finalImageUrl && (finalImageUrl.startsWith('data:') || finalImageUrl.length > 500_000)) {
+          try {
+            const saveResp = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/save-image`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ imageData: finalImageUrl }),
+            });
+            if (saveResp.ok) {
+              const saveData = await saveResp.json();
+              if (saveData.url) {
+                const domainBase = process.env.COZE_PROJECT_DOMAIN_DEFAULT;
+                persistedImageUrl = domainBase
+                  ? `${domainBase.startsWith('http') ? '' : 'https://'}${domainBase}${saveData.url}`
+                  : saveData.url;
+                console.log(`[agent-edit] Persisted base64 image to ${persistedImageUrl.substring(0, 80)}`);
+              }
+            }
+          } catch (persistErr) {
+            console.warn('[agent-edit] Failed to persist image, keeping original URL:', persistErr);
+          }
+        }
+
         if (result.success) {
           localTaskStore.set(taskId, {
             status: 'completed',
             progress: 100,
             label: '完成',
             result: {
-              imageUrl: finalImageUrl,
+              imageUrl: persistedImageUrl,
               steps: result.steps,
               finalResponse: result.finalResponse,
             },
@@ -348,7 +374,7 @@ export async function POST(request: NextRequest) {
             label: '失败',
             error: translateApiError(result.error || result.finalResponse || 'Agent 执行失败'),
             result: {
-              imageUrl: finalImageUrl,
+              imageUrl: persistedImageUrl,
               steps: result.steps,
               finalResponse: result.finalResponse,
             },
@@ -528,9 +554,23 @@ async function performImageEdit(
       const data = await resp.json() as Record<string, unknown>;
       const images = data.data as Array<Record<string, unknown>> | undefined;
       if (images && images.length > 0) {
-        const resultUrl = String(images[0].url || images[0].b64_json || '');
-        console.log('[agent-edit] Path A: success, got result');
-        return { success: true, imageUrl: resultUrl.startsWith('data:') ? resultUrl : resultUrl };
+        let resultUrl = '';
+        const rawB64 = images[0].b64_json;
+        const rawUrl = images[0].url ? String(images[0].url) : '';
+        if (rawB64) {
+          resultUrl = `data:image/png;base64,${rawB64}`;
+        } else if (rawUrl) {
+          // 某些API在url字段直接返回base64字符串（无data:前缀）
+          if (rawUrl.startsWith('data:') || rawUrl.startsWith('http')) {
+            resultUrl = rawUrl;
+          } else if (/^[A-Za-z0-9+/=\s]+$/.test(rawUrl.slice(0, 100)) && rawUrl.length > 200) {
+            resultUrl = `data:image/png;base64,${rawUrl}`;
+          } else {
+            resultUrl = rawUrl;
+          }
+        }
+        console.log('[agent-edit] Path A: success, got result, b64_json:', !!rawB64, 'url type:', rawUrl.startsWith('http') ? 'http' : rawUrl.startsWith('data:') ? 'data-url' : rawUrl.length > 200 ? 'raw-base64' : 'short', 'length:', resultUrl.length);
+        return { success: true, imageUrl: resultUrl };
       }
 
       console.error('[agent-edit] Path A: no images in response', JSON.stringify(data).slice(0, 200));
@@ -623,19 +663,28 @@ async function performImageEdit(
           const pollData = await pollResp.json() as Record<string, unknown>;
           const status = String(pollData.status || '').toLowerCase();
 
+          function extractImgUrl(obj: Record<string, unknown>): string {
+            const rawB64 = obj.b64_json ? String(obj.b64_json) : '';
+            const rawUrl = obj.url ? String(obj.url) : '';
+            if (rawB64) return `data:image/png;base64,${rawB64}`;
+            if (!rawUrl) return '';
+            if (rawUrl.startsWith('data:') || rawUrl.startsWith('http')) return rawUrl;
+            if (/^[A-Za-z0-9+/=\s]+$/.test(rawUrl.slice(0, 100)) && rawUrl.length > 200) return `data:image/png;base64,${rawUrl}`;
+            return rawUrl;
+          }
           if (status === 'completed' || status === 'success' || status === 'succeeded') {
             const resultsRaw = pollData.results || pollData.images || pollData.data;
             if (Array.isArray(resultsRaw) && resultsRaw.length > 0) {
               const first = resultsRaw[0] as Record<string, unknown>;
-              const resultUrl = String(first.url || first.b64_json || '');
-              if (resultUrl) return { success: true, imageUrl: resultUrl.startsWith('data:') ? resultUrl : resultUrl };
+              const resultUrl = extractImgUrl(first);
+              if (resultUrl) return { success: true, imageUrl: resultUrl };
             } else if (resultsRaw && typeof resultsRaw === 'object' && !Array.isArray(resultsRaw)) {
               const dataObj = resultsRaw as Record<string, unknown>;
               const imagesArr = dataObj.images || dataObj.results;
               if (Array.isArray(imagesArr) && imagesArr.length > 0) {
                 const first = imagesArr[0] as Record<string, unknown>;
-                const resultUrl = String(first.url || first.b64_json || '');
-                if (resultUrl) return { success: true, imageUrl: resultUrl.startsWith('data:') ? resultUrl : resultUrl };
+                const resultUrl = extractImgUrl(first);
+                if (resultUrl) return { success: true, imageUrl: resultUrl };
               }
             }
             break;
@@ -723,6 +772,7 @@ async function performImageEdit(
       'Authorization': `Bearer ${apiKey}`,
     };
 
+    console.log('[agent-edit] Path C: sending request to', `${baseUrl}/chat/completions`);
     const chatResp = await fetchWithV1Retry(baseUrl, '/chat/completions', {
       method: 'POST',
       headers: chatHeaders,
@@ -732,6 +782,7 @@ async function performImageEdit(
 
     if (!chatResp.ok) {
       const errText = await chatResp.text().catch(() => '');
+      console.error('[agent-edit] Path C: API error', chatResp.status, errText.slice(0, 300));
       return { success: false, error: `编辑请求失败 (${chatResp.status}): ${errText.slice(0, 200)}` };
     }
 
@@ -778,7 +829,8 @@ async function performImageEdit(
 
     return { success: false, error: '模型未返回编辑后的图片' };
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : '编辑请求失败' };
+    console.error('[agent-edit] Path C: exception', err);
+    return { success: false, error: err instanceof Error ? translateApiError(err.message) : '编辑请求失败' };
   }
 }
 
