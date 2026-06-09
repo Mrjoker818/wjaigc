@@ -994,8 +994,9 @@ export function InfiniteCanvas({
   const [upscaleActualH, setUpscaleActualH] = useState(0);
 
   // SVG智能描摹 state
-  const [svgTraceMode, setSvgTraceMode] = useState<'color' | 'bw' | 'compress' | 'thumbnail'>('color');
+  const [svgTraceMode, setSvgTraceMode] = useState<'color' | 'bw' | 'cutting' | 'engraving' | 'lineart' | 'compress' | 'thumbnail'>('color');
   const [svgTraceQualityPreset, setSvgTraceQualityPreset] = useState<'fast' | 'balanced' | 'high' | 'max'>('balanced');
+  const [svgTraceOutputFormat, setSvgTraceOutputFormat] = useState<'svg' | 'eps' | 'dxf' | 'pdf'>('svg');
   const [svgTraceColorPrecision, setSvgTraceColorPrecision] = useState<number | null>(null);  // null = use preset
   const [svgTraceFilterSpeckle, setSvgTraceFilterSpeckle] = useState<number | null>(null);
   const [svgTraceCornerThreshold, setSvgTraceCornerThreshold] = useState<number | null>(null);
@@ -5602,8 +5603,11 @@ export function InfiniteCanvas({
     const modelInfo = getCurrentModel();
 
     const modeLabels: Record<string, string> = {
-      color: '彩色矢量化',
+      color: '全彩矢量化',
       bw: '黑白描摹',
+      cutting: '切割路径',
+      engraving: '雕刻路径',
+      lineart: '线稿提取',
       compress: '图片压缩',
       thumbnail: '缩略图生成',
     };
@@ -5635,6 +5639,7 @@ export function InfiniteCanvas({
         imageUrl,
         mode: svgTraceMode,
         qualityPreset: svgTraceQualityPreset,
+        outputFormat: svgTraceOutputFormat,
       };
 
       // Mode-specific params (only include if user has explicitly set, otherwise use preset)
@@ -5677,7 +5682,7 @@ export function InfiniteCanvas({
       if (data.success) {
         updateProcessingFrame(placeholderId, { progress: 88, status: '正在渲染预览...' });
 
-        if (svgTraceMode === 'color' || svgTraceMode === 'bw') {
+        if (svgTraceMode === 'color' || svgTraceMode === 'bw' || svgTraceMode === 'cutting' || svgTraceMode === 'engraving' || svgTraceMode === 'lineart') {
           // SVG结果 - 优先使用PNG预览图用于画布显示，保留SVG数据用于下载
           const displayUrl = data.pngPreviewUrl || data.dataUrl || data.url;
           const svgDataUrl = data.svgDataUrl || (data.dataUrl && !data.isSvgPreview ? data.dataUrl : undefined);
@@ -8780,10 +8785,13 @@ export function InfiniteCanvas({
           const pos = getToolbarPosition();
 
           const svgTraceModes = [
-            { key: 'color' as const, label: '彩色矢量化', icon: <Palette size={14} />, desc: 'Sharp + VTracer', accent: '#d4af37' },
-            { key: 'bw' as const, label: '黑白描摹', icon: <Contrast size={14} />, desc: 'ImageMagick + Potrace', accent: '#9ca3af' },
+            { key: 'color' as const, label: '全彩矢量化', icon: <Palette size={14} />, desc: 'VTracer全彩分层', accent: '#d4af37' },
+            { key: 'bw' as const, label: '黑白描摹', icon: <Contrast size={14} />, desc: 'Potrace轮廓', accent: '#9ca3af' },
+            { key: 'cutting' as const, label: '切割路径', icon: <Scissors size={14} />, desc: '激光切割用', accent: '#ef4444' },
+            { key: 'engraving' as const, label: '雕刻路径', icon: <PenTool size={14} />, desc: '激光雕刻用', accent: '#f59e0b' },
+            { key: 'lineart' as const, label: '线稿提取', icon: <Type size={14} />, desc: '纯净线条', accent: '#06b6d4' },
             { key: 'compress' as const, label: '图片压缩', icon: <Minimize2 size={14} />, desc: 'Sharp', accent: '#60a5fa' },
-            { key: 'thumbnail' as const, label: '缩略图生成', icon: <Frame size={14} />, desc: 'Sharp', accent: '#34d399' },
+            { key: 'thumbnail' as const, label: '缩略图', icon: <Frame size={14} />, desc: 'Sharp', accent: '#34d399' },
           ];
           const activeAccent = svgTraceModes.find(m => m.key === svgTraceMode)?.accent || '#d4af37';
 
@@ -9006,6 +9014,30 @@ export function InfiniteCanvas({
                   </div>
                 )}
 
+                {/* Cutting/Engraving/Lineart threshold controls */}
+                {(svgTraceMode === 'cutting' || svgTraceMode === 'engraving' || svgTraceMode === 'lineart') && (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-muted-foreground">
+                        {svgTraceMode === 'cutting' ? '轮廓阈值' : svgTraceMode === 'engraving' ? '细节阈值' : '线条阈值'}
+                      </label>
+                      <span className="text-xs tabular-nums font-mono text-[#9ca3af]">{svgTraceBwThreshold}%</span>
+                    </div>
+                    <input type="range" min={10} max={90} step={5} value={svgTraceBwThreshold}
+                      onChange={e => setSvgTraceBwThreshold(Number(e.target.value))}
+                      onClick={e => e.stopPropagation()}
+                      className="w-full h-1 accent-[#9ca3af] cursor-pointer" />
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-muted-foreground">去斑大小</label>
+                      <span className="text-xs tabular-nums font-mono text-[#9ca3af]">{svgTraceBwTurdSize}px</span>
+                    </div>
+                    <input type="range" min={1} max={50} step={1} value={svgTraceBwTurdSize}
+                      onChange={e => setSvgTraceBwTurdSize(Number(e.target.value))}
+                      onClick={e => e.stopPropagation()}
+                      className="w-full h-1 accent-[#9ca3af] cursor-pointer" />
+                  </div>
+                )}
+
                 {svgTraceMode === 'compress' && (
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-between">
@@ -9095,6 +9127,45 @@ export function InfiniteCanvas({
                         </button>
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {/* Output format selector (for SVG-producing modes) */}
+                {(svgTraceMode === 'color' || svgTraceMode === 'bw' || svgTraceMode === 'cutting' || svgTraceMode === 'engraving' || svgTraceMode === 'lineart') && (
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-muted-foreground">输出格式</label>
+                    <div className="flex items-center gap-1 ml-auto">
+                      {(['svg', 'eps', 'dxf', 'pdf'] as const).map(fmt => (
+                        <button key={fmt}
+                          onClick={(e) => { e.stopPropagation(); setSvgTraceOutputFormat(fmt); }}
+                          className="px-2 py-0.5 rounded text-[10px] font-medium border transition-all uppercase"
+                          style={{
+                            background: svgTraceOutputFormat === fmt ? `${activeAccent}20` : '#111',
+                            borderColor: svgTraceOutputFormat === fmt ? activeAccent : '#333',
+                            color: svgTraceOutputFormat === fmt ? activeAccent : '#555',
+                          }}
+                        >
+                          {fmt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Mode-specific hints for cutting/engraving/lineart */}
+                {svgTraceMode === 'cutting' && (
+                  <div className="text-[10px] text-amber-500/70 bg-amber-500/5 rounded px-2 py-1">
+                    切割模式：生成封闭轮廓路径，适合激光切割/剪纸/CNC加工
+                  </div>
+                )}
+                {svgTraceMode === 'engraving' && (
+                  <div className="text-[10px] text-yellow-500/70 bg-yellow-500/5 rounded px-2 py-1">
+                    雕刻模式：保留细节线条，适合激光雕刻/印章制作
+                  </div>
+                )}
+                {svgTraceMode === 'lineart' && (
+                  <div className="text-[10px] text-cyan-500/70 bg-cyan-500/5 rounded px-2 py-1">
+                    线稿模式：提取纯净线条，适合漫画线稿/设计草图矢量化
                   </div>
                 )}
 

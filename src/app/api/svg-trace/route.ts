@@ -11,10 +11,10 @@ import { PYTHON_BIN } from '@/lib/image-tools/config';
 
 // ─── Types ──────────────────────────────────────────────
 
-type TraceMode = 'color' | 'bw' | 'compress' | 'thumbnail';
+type TraceMode = 'color' | 'bw' | 'cutting' | 'engraving' | 'lineart' | 'compress' | 'thumbnail';
 type VtracerHierarchical = 'stacked' | 'cutout';
 type VtracerCurveMode = 'polygon' | 'spline';
-type QualityPreset = 'fast' | 'balanced' | 'high' | 'max';
+type QualityPreset = 'fast' | 'balanced' | 'high' | 'max' | 'print';
 
 interface TraceRequest {
   imageUrl: string;
@@ -1336,7 +1336,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: '缺少 imageUrl' }, { status: 400 });
     }
 
-    const validModes: TraceMode[] = ['color', 'bw', 'compress', 'thumbnail'];
+    const validModes: TraceMode[] = ['color', 'bw', 'cutting', 'engraving', 'lineart', 'compress', 'thumbnail'];
     if (!validModes.includes(mode)) {
       return NextResponse.json({ success: false, error: `无效模式: ${mode}，支持: ${validModes.join('/')}` }, { status: 400 });
     }
@@ -1358,7 +1358,7 @@ export async function POST(req: NextRequest) {
           error: 'VTracer 未安装，且AI矢量化兜底不可用。请安装: pip3 install vtracer，或在管理员系统配置可视觉理解的LLM/矢量模型。',
         }, { status: 503 });
       }
-    } else if (mode === 'bw') {
+    } else if (mode === 'bw' || mode === 'cutting' || mode === 'engraving' || mode === 'lineart') {
       const potraceCheck = await new Promise<boolean>((resolve) => {
         execFile('which', ['potrace'], { timeout: 5000 }, (error) => {
           resolve(!error);
@@ -1414,12 +1414,15 @@ export async function POST(req: NextRequest) {
             error: '没有检测到可转换的 SVG 路径，该素材不适合矢量化',
           });
         }
-        if (pathCountCheck > 900) {
+        if (pathCountCheck > 3000) {
           return NextResponse.json({
             success: false,
             error: `路径数量过多(${pathCountCheck}条)，该素材更适合保留为 PNG 格式`,
             stats: { pathCount: pathCountCheck },
           });
+        }
+        if (pathCountCheck > 900) {
+          console.warn(`[svg-trace] 路径数量较多: ${pathCountCheck}条，SVG文件可能较大`);
         }
 
         const filename = `svg-color-${uid}.svg`;
@@ -1495,12 +1498,15 @@ export async function POST(req: NextRequest) {
             error: '没有检测到可转换的 SVG 路径，该素材不适合黑白描摹',
           });
         }
-        if (bwPathCount > 700) {
+        if (bwPathCount > 2000) {
           return NextResponse.json({
             success: false,
             error: `路径数量过多(${bwPathCount}条)，该素材更适合保留为 PNG 格式`,
             stats: { pathCount: bwPathCount },
           });
+        }
+        if (bwPathCount > 700) {
+          console.warn(`[svg-trace] BW路径数量较多: ${bwPathCount}条`);
         }
 
         const filename = `svg-bw-${uid}.svg`;
@@ -1535,6 +1541,192 @@ export async function POST(req: NextRequest) {
             svgSize: Buffer.byteLength(svgContent, 'utf-8'),
             pathCount: (svgContent.match(/<path/g) || []).length,
           },
+        });
+      }
+
+      // ─── 切割模式：适合激光切割的封闭路径 ───
+      // Optimized for laser cutting: closed paths, no fills, clean outlines
+      case 'cutting': {
+        let cutImgW = 0, cutImgH = 0;
+        try {
+          const meta = await sharp(inputBuffer).metadata();
+          cutImgW = meta.width || 0;
+          cutImgH = meta.height || 0;
+        } catch { /* ignore */ }
+
+        // Preprocess: high contrast threshold + edge detection
+        const cutPreprocessed = await sharp(inputBuffer)
+          .grayscale()
+          .normalize()
+          .sharpen({ sigma: 1.5 })
+          .linear(1.5, -0.25 * 255) // Increase contrast
+          .threshold(128, { grayscale: false }) // Binary threshold
+          .png()
+          .toBuffer();
+
+        let svgContent = await runPotrace(cutPreprocessed, {
+          threshold: 128,
+          turdSize: 10,   // Remove small specks (important for clean cuts)
+          alphaMax: 0,     // Smooth corners
+          optCurve: true,
+          optCurveVal: 1.0,
+          invert: false,
+        });
+
+        // Remove fills (laser cutting needs stroke-only paths)
+        svgContent = svgContent.replace(/fill="[^"]*"/g, 'fill="none"');
+        svgContent = svgContent.replace(/<path/g, '<path stroke="#000" stroke-width="1"');
+
+        svgContent = normalizeVectorSvg(svgContent, cutImgW, cutImgH);
+
+        const cutPathCount = (svgContent.match(/<path/g) || []).length;
+        if (cutPathCount === 0) {
+          return NextResponse.json({ success: false, error: '没有检测到可切割的轮廓路径' });
+        }
+
+        const cutFilename = `svg-cutting-${uid}.svg`;
+        const { url: cutUrl } = await saveResult(svgContent, cutFilename, 'svg-trace', 'image/svg+xml');
+        const cutSvgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
+
+        let cutPngPreview: string | undefined;
+        try {
+          const pngBuf = await sharp(Buffer.from(svgContent))
+            .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
+            .png().toBuffer();
+          cutPngPreview = `data:image/png;base64,${pngBuf.toString('base64')}`;
+        } catch {}
+
+        return NextResponse.json({
+          success: true,
+          mode: 'cutting',
+          engine: 'potrace',
+          svg: svgContent,
+          url: cutUrl,
+          dataUrl: cutPngPreview || cutSvgDataUrl,
+          svgDataUrl: cutSvgDataUrl,
+          isSvgPreview: !!cutPngPreview,
+          stats: { svgSize: Buffer.byteLength(svgContent, 'utf-8'), pathCount: cutPathCount },
+        });
+      }
+
+      // ─── 雕刻模式：适合激光雕刻的细线轮廓 ───
+      // Optimized for laser engraving: thin lines, detail preservation
+      case 'engraving': {
+        let engImgW = 0, engImgH = 0;
+        try {
+          const meta = await sharp(inputBuffer).metadata();
+          engImgW = meta.width || 0;
+          engImgH = meta.height || 0;
+        } catch { /* ignore */ }
+
+        // Preprocess: edge detection + contrast enhancement for fine lines
+        const engPreprocessed = await sharp(inputBuffer)
+          .grayscale()
+          .normalize()
+          .sharpen({ sigma: 2.0 })
+          .linear(1.8, -0.4 * 255) // Strong contrast for fine line detection
+          .threshold(100, { grayscale: false }) // Lower threshold captures more detail
+          .png()
+          .toBuffer();
+
+        let svgContent = await runPotrace(engPreprocessed, {
+          threshold: 100,
+          turdSize: 2,    // Keep tiny details for engraving
+          alphaMax: 1.0,   // Preserve sharp corners for fine detail
+          optCurve: true,
+          optCurveVal: 0.5, // Less aggressive optimization to keep detail
+          invert: false,
+        });
+
+        svgContent = normalizeVectorSvg(svgContent, engImgW, engImgH);
+
+        const engPathCount = (svgContent.match(/<path/g) || []).length;
+        if (engPathCount === 0) {
+          return NextResponse.json({ success: false, error: '没有检测到可雕刻的轮廓路径' });
+        }
+
+        const engFilename = `svg-engraving-${uid}.svg`;
+        const { url: engUrl } = await saveResult(svgContent, engFilename, 'svg-trace', 'image/svg+xml');
+        const engSvgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
+
+        let engPngPreview: string | undefined;
+        try {
+          const pngBuf = await sharp(Buffer.from(svgContent))
+            .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
+            .png().toBuffer();
+          engPngPreview = `data:image/png;base64,${pngBuf.toString('base64')}`;
+        } catch {}
+
+        return NextResponse.json({
+          success: true,
+          mode: 'engraving',
+          engine: 'potrace',
+          svg: svgContent,
+          url: engUrl,
+          dataUrl: engPngPreview || engSvgDataUrl,
+          svgDataUrl: engSvgDataUrl,
+          isSvgPreview: !!engPngPreview,
+          stats: { svgSize: Buffer.byteLength(svgContent, 'utf-8'), pathCount: engPathCount },
+        });
+      }
+
+      // ─── 线稿模式：提取线条轮廓，纯线条SVG ───
+      // Like bw but optimized for line art / sketches
+      case 'lineart': {
+        let laImgW = 0, laImgH = 0;
+        try {
+          const meta = await sharp(inputBuffer).metadata();
+          laImgW = meta.width || 0;
+          laImgH = meta.height || 0;
+        } catch { /* ignore */ }
+
+        // Preprocess: adaptive threshold for line art (handles varying brightness)
+        const laPreprocessed = await sharp(inputBuffer)
+          .grayscale()
+          .normalise()
+          .sharpen({ sigma: 1.0 })
+          .linear(1.3, -0.15 * 255) // Moderate contrast
+          .png()
+          .toBuffer();
+
+        let svgContent = await runPotrace(laPreprocessed, {
+          threshold: body.threshold, // User can override
+          turdSize: body.turdSize ?? 5,
+          alphaMax: body.alphaMax ?? 1.0, // Keep corners for line art
+          optCurve: body.optCurve ?? true,
+          optCurveVal: body.optCurveVal ?? 0.8,
+          invert: body.invert ?? false,
+        });
+
+        svgContent = normalizeVectorSvg(svgContent, laImgW, laImgH);
+
+        const laPathCount = (svgContent.match(/<path/g) || []).length;
+        if (laPathCount === 0) {
+          return NextResponse.json({ success: false, error: '没有检测到线条路径' });
+        }
+
+        const laFilename = `svg-lineart-${uid}.svg`;
+        const { url: laUrl } = await saveResult(svgContent, laFilename, 'svg-trace', 'image/svg+xml');
+        const laSvgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
+
+        let laPngPreview: string | undefined;
+        try {
+          const pngBuf = await sharp(Buffer.from(svgContent))
+            .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
+            .png().toBuffer();
+          laPngPreview = `data:image/png;base64,${pngBuf.toString('base64')}`;
+        } catch {}
+
+        return NextResponse.json({
+          success: true,
+          mode: 'lineart',
+          engine: 'potrace',
+          svg: svgContent,
+          url: laUrl,
+          dataUrl: laPngPreview || laSvgDataUrl,
+          svgDataUrl: laSvgDataUrl,
+          isSvgPreview: !!laPngPreview,
+          stats: { svgSize: Buffer.byteLength(svgContent, 'utf-8'), pathCount: laPathCount },
         });
       }
 
