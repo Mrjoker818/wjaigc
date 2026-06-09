@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -12,11 +13,7 @@ import {
   LayoutDashboard,
   Download,
 } from 'lucide-react';
-
-interface DashboardSidebarProps {
-  userName?: string;
-  userInitial?: string;
-}
+import { UserManager } from '@/lib/user-manager';
 
 const navItems = [
   { href: '/projects', label: '我的项目', icon: FolderOpen },
@@ -31,8 +28,19 @@ const recentActivities = [
   { icon: Download, color: 'text-muted-foreground', text: '保存了3张图片到资产库', time: '昨天' },
 ];
 
-export function DashboardSidebar({ userName = '用户', userInitial = 'U' }: DashboardSidebarProps) {
+export function DashboardSidebar() {
   const pathname = usePathname();
+  const [userName, setUserName] = useState('用户');
+  const [userInitial, setUserInitial] = useState('U');
+
+  useEffect(() => {
+    const um = UserManager.getInstance();
+    const currentUser = um.getUser();
+    if (currentUser) {
+      setUserName(currentUser.name || '用户');
+      setUserInitial((currentUser.name || 'U').charAt(0).toUpperCase());
+    }
+  }, []);
 
   return (
     <aside className="w-60 bg-sidebar border-r border-sidebar-border flex flex-col shrink-0 h-screen">
@@ -101,7 +109,7 @@ export function DashboardSidebar({ userName = '用户', userInitial = 'U' }: Das
 
       {/* 用户信息 */}
       <div className="h-12 flex items-center gap-2.5 px-4 border-t border-sidebar-border">
-        <div className="w-7 h-7 rounded-full bg-primary-container flex items-center justify-center">
+        <div className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center">
           <span className="text-primary text-xs font-semibold">{userInitial}</span>
         </div>
         <span className="text-sidebar-foreground/80 text-sm truncate">{userName}</span>

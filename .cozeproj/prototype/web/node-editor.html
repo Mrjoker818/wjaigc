@@ -53,7 +53,8 @@
       --shadow-card:   0 2px 8px rgba(0,0,0,0.3);
       --shadow-float:  0 8px 32px rgba(0,0,0,0.5);
       --shadow-dialog: 0 16px 48px rgba(0,0,0,0.6);
-      --shadow-node-selected: 0 0 0 2px #d4af37, 0 4px 16px rgba(0,0,0,0.5);
+      --shadow-node:   0 16px 42px rgba(0,0,0,0.4);
+      --shadow-node-selected: 0 16px 42px rgba(0,0,0,0.5), 0 0 0 2px rgba(212,175,55,0.2);
       /* === 字体 === */
       --font-sans: "Space Grotesk", "Noto Sans SC", system-ui, sans-serif;
       --font-mono: "JetBrains Mono", "Fira Code", monospace;
@@ -86,60 +87,163 @@
       background-size: 20px 20px;
     }
 
-    /* 节点卡片 */
+    /* 节点卡片 - Infinite Canvas 风格 */
     .node-card {
       position: absolute;
-      width: 220px;
-      background: #1c2128;
-      border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      min-width: 240px;
+      background: rgba(22,27,34,0.96);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-radius: 16px;
+      box-shadow: 0 16px 42px rgba(0,0,0,0.4);
       cursor: grab;
       user-select: none;
-      transition: box-shadow 0.15s ease, border-color 0.15s ease;
-      border: 1.5px solid transparent;
+      transition: outline 0.15s ease, box-shadow 0.15s ease;
+      outline: 2px solid transparent;
+      outline-offset: 2px;
+      border: none;
     }
     .node-card:active {
       cursor: grabbing;
     }
     .node-card.selected {
-      border-color: #d4af37;
-      box-shadow: 0 0 0 2px #d4af37, 0 4px 16px rgba(0,0,0,0.5);
+      outline: 2px solid #d4af37;
+      outline-offset: 2px;
+      box-shadow: 0 16px 42px rgba(0,0,0,0.5), 0 0 0 2px rgba(212,175,55,0.2);
+    }
+    /* 节点类型特定宽度 */
+    .node-card.prompt-node { width: 310px; }
+    .node-card.image-node { width: 260px; }
+    .node-card.generator-node { width: 340px; }
+
+    /* 3px 顶部类型指示条 */
+    .node-type-bar {
+      height: 3px;
+      border-radius: 16px 16px 0 0;
     }
 
-    /* 节点标题栏 */
+    /* 节点标题栏 - Infinite Canvas 风格 */
     .node-header {
       display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 8px 12px;
-      border-radius: 6px 6px 0 0;
-      font-size: 13px;
-      font-weight: 600;
-      color: #e6edf3;
+      justify-content: space-between;
+      height: 42px;
+      padding: 0 12px;
+      border-radius: 13px 13px 0 0;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .node-header-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .node-header-title {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #7d8590;
     }
 
-    /* 端口行 */
+    /* 状态徽章 */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .status-badge .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+    .status-badge.queued {
+      background: rgba(125,133,144,0.15);
+      color: #7d8590;
+    }
+    .status-badge.queued .status-dot { background: #7d8590; }
+    .status-badge.running {
+      background: rgba(88,166,255,0.15);
+      color: #58a6ff;
+    }
+    .status-badge.running .status-dot { background: #58a6ff; animation: pulse-dot 1.2s ease-in-out infinite; }
+    .status-badge.done {
+      background: rgba(63,185,80,0.15);
+      color: #3fb950;
+    }
+    .status-badge.done .status-dot { background: #3fb950; }
+    .status-badge.failed {
+      background: rgba(248,81,73,0.15);
+      color: #f85149;
+    }
+    .status-badge.failed .status-dot { background: #f85149; }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.8); }
+    }
+
+    /* 折叠切换按钮 */
+    .collapse-toggle {
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      color: #7d8590;
+      cursor: pointer;
+      transition: background 0.1s, color 0.1s;
+      margin-left: 6px;
+    }
+    .collapse-toggle:hover {
+      background: rgba(255,255,255,0.06);
+      color: #e6edf3;
+    }
+    .node-card.collapsed .node-body {
+      display: none;
+    }
+    .node-card.collapsed .node-type-bar {
+      border-radius: 16px;
+    }
+    .node-card.collapsed .node-header {
+      border-radius: 13px;
+      border-bottom: none;
+    }
+
+    /* 节点内容区 */
+    .node-body {
+      padding: 12px;
+    }
+
+    /* 端口行 - 新布局: [input-dot] [label] [output-dot] */
     .port-row {
       display: flex;
       align-items: center;
-      padding: 3px 12px;
+      justify-content: space-between;
+      padding: 4px 0;
+      font-size: 11px;
+      color: #7d8590;
+      position: relative;
+    }
+    .port-label {
+      flex: 1;
+      text-align: center;
       font-size: 11px;
       color: #7d8590;
     }
-    .port-row.input-row {
-      justify-content: flex-start;
-    }
-    .port-row.output-row {
-      justify-content: flex-end;
-    }
 
-    /* 端口圆点 */
+    /* 端口圆点 - Infinite Canvas 风格 */
     .port-dot {
-      width: 10px;
-      height: 10px;
+      width: 12px;
+      height: 12px;
       border-radius: 50%;
       border: 2px solid;
-      background: #1c2128;
+      background: rgba(22,27,34,0.96);
       flex-shrink: 0;
       transition: transform 0.15s ease, background-color 0.15s ease;
       cursor: crosshair;
@@ -147,31 +251,30 @@
       z-index: 5;
     }
     .port-dot:hover {
-      transform: scale(1.5);
+      transform: scale(1.4);
       background-color: currentColor;
     }
     .port-dot.input-port {
       margin-left: -18px;
-      margin-right: 6px;
+      margin-right: 0;
     }
     .port-dot.output-port {
       margin-right: -18px;
-      margin-left: 6px;
+      margin-left: 0;
+    }
+    /* Input cards inline port positioning */
+    .input-card .port-dot.input-port {
+      margin-left: 0;
     }
 
-    /* 节点内容区 */
-    .node-content {
-      padding: 6px 12px 10px;
-    }
-
-    /* 模型选择下拉 */
+    /* 节点内容区样式 - Infinite Canvas */
     .node-select {
       width: 100%;
       background: #262c36;
       border: none;
-      border-radius: 4px;
-      padding: 4px 8px;
-      font-size: 11px;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12px;
       color: #e6edf3;
       outline: none;
       cursor: pointer;
@@ -180,15 +283,143 @@
       box-shadow: 0 0 0 1.5px rgba(212,175,55,0.4);
     }
 
-    /* 连线交互 */
-    .connection-path {
+    /* Prompt 节点 textarea */
+    .prompt-textarea {
+      width: 100%;
+      background: rgba(38,44,54,0.6);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 16px;
+      padding: 12px;
+      font-size: 13px;
+      line-height: 1.5;
+      color: #e6edf3;
+      resize: none;
+      outline: none;
+      min-height: 80px;
+    }
+    .prompt-textarea::placeholder {
+      color: rgba(125,133,144,0.6);
+    }
+    .prompt-textarea:focus {
+      border-color: rgba(212,175,55,0.3);
+      box-shadow: 0 0 0 2px rgba(212,175,55,0.1);
+    }
+
+    /* Image 节点预览区 */
+    .image-preview {
+      width: 100%;
+      aspect-ratio: 4/3;
+      border-radius: 16px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    .image-preview.has-image {
+      border: none;
+    }
+    .image-preview.empty {
+      border: 2px dashed rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.02);
+    }
+    .image-preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    /* Generator 输入卡片 */
+    .input-card {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      background: rgba(38,44,54,0.5);
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.04);
+    }
+    .input-card-thumb {
+      width: 28px;
+      height: 28px;
+      border-radius: 4px;
+      object-fit: cover;
+      flex-shrink: 0;
+      background: rgba(255,255,255,0.05);
+    }
+    .input-card-name {
+      font-size: 11px;
+      color: #e6edf3;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* RUN 按钮 */
+    .run-btn {
+      width: 100%;
+      padding: 8px 0;
+      border-radius: 8px;
+      border: 1.5px solid #d4af37;
+      background: rgba(212,175,55,0.08);
+      color: #d4af37;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
       cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .run-btn:hover {
+      background: rgba(212,175,55,0.18);
+      color: #e6c55a;
+    }
+    .run-btn:active {
+      background: rgba(212,175,55,0.25);
+    }
+
+    /* Resize handle */
+    .resize-handle {
+      position: absolute;
+      bottom: 4px;
+      right: 4px;
+      width: 12px;
+      height: 12px;
+      cursor: se-resize;
+      opacity: 0;
+      transition: opacity 0.15s;
+      color: #7d8590;
+    }
+    .node-card:hover .resize-handle,
+    .node-card.selected .resize-handle {
+      opacity: 0.6;
+    }
+    .resize-handle:hover {
+      opacity: 1 !important;
+    }
+
+    /* 连线交互 */
+    .connection-hit-area {
+      fill: none;
+      stroke: transparent;
+      stroke-width: 18;
+      cursor: pointer;
+      pointer-events: stroke;
+    }
+    .connection-path {
+      fill: none;
+      stroke-width: 2.5;
+      stroke-linecap: round;
+      cursor: pointer;
+      pointer-events: none;
       transition: stroke 0.15s ease;
     }
-    .connection-path:hover {
+    .connection-group:hover .connection-path {
       stroke: #6e7681;
     }
-    .connection-path.selected {
+    .connection-group.selected .connection-path {
       stroke: #d4af37;
     }
 
@@ -326,13 +557,15 @@
       opacity: 0.6;
       pointer-events: none;
       z-index: 300;
-      background: #1c2128;
-      border-radius: 8px;
+      background: rgba(22,27,34,0.96);
+      backdrop-filter: blur(16px);
+      border-radius: 16px;
       padding: 8px 14px;
       font-size: 13px;
       color: #e6edf3;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-      border: 1px dashed #d4af37;
+      box-shadow: 0 16px 42px rgba(0,0,0,0.4);
+      outline: 2px dashed #d4af37;
+      outline-offset: 2px;
     }
   </style>
 </head>
@@ -575,60 +808,88 @@
         <!-- SVG连线层 -->
         <svg id="connections-svg" class="absolute inset-0 w-full h-full pointer-events-none" style="z-index:1;">
           <!-- 连线1: 文本输入.prompt → AI生成.prompt -->
-          <path id="conn-1" class="connection-path pointer-events-auto"
-                d="M 370,75 C 430,75 430,145 470,145"
-                fill="none" stroke="#484f58" stroke-width="2.5" stroke-linecap="round"/>
+          <g class="connection-group" data-conn-id="conn-1">
+            <path class="connection-hit-area" d="M 330,165 C 420,165 420,230 490,230" pointer-events="stroke"/>
+            <path class="connection-path" d="M 330,165 C 420,165 420,230 490,230" stroke="#3fb950" stroke-width="2.5" stroke-linecap="round"/>
+          </g>
           <!-- 连线2: AI生成.image → 移除背景.image -->
-          <path id="conn-2" class="connection-path pointer-events-auto"
-                d="M 690,160 C 750,160 750,310 780,310"
-                fill="none" stroke="#484f58" stroke-width="2.5" stroke-linecap="round"/>
+          <g class="connection-group" data-conn-id="conn-2">
+            <path class="connection-hit-area" d="M 830,250 C 920,250 920,340 990,340" pointer-events="stroke"/>
+            <path class="connection-path" d="M 830,250 C 920,250 920,340 990,340" stroke="#58a6ff" stroke-width="2.5" stroke-linecap="round"/>
+          </g>
           <!-- 连线3: 移除背景.image → 输出图片.image -->
-          <path id="conn-3" class="connection-path pointer-events-auto"
-                d="M 1000,325 C 1060,325 1060,485 1090,485"
-                fill="none" stroke="#484f58" stroke-width="2.5" stroke-linecap="round"/>
+          <g class="connection-group" data-conn-id="conn-3">
+            <path class="connection-hit-area" d="M 1250,340 C 1340,340 1340,475 1410,475" pointer-events="stroke"/>
+            <path class="connection-path" d="M 1250,340 C 1340,340 1340,475 1410,475" stroke="#58a6ff" stroke-width="2.5" stroke-linecap="round"/>
+          </g>
           <!-- 连线4: 字境大师.image → AI生成.imageRef -->
-          <path id="conn-4" class="connection-path pointer-events-auto"
-                d="M 540,540 C 540,480 440,180 470,175"
-                fill="none" stroke="#484f58" stroke-width="2.5" stroke-linecap="round"/>
+          <g class="connection-group" data-conn-id="conn-4">
+            <path class="connection-hit-area" d="M 580,595 C 580,480 460,260 490,250" pointer-events="stroke"/>
+            <path class="connection-path" d="M 580,595 C 580,480 460,260 490,250" stroke="#58a6ff" stroke-width="2.5" stroke-linecap="round"/>
+          </g>
         </svg>
 
         <!-- 节点卡片层 -->
         <div id="nodes-container" class="absolute inset-0" style="z-index:2;">
 
-          <!-- 节点A: 文本输入 -->
-          <div id="node-text-input" class="node-card selected" data-node-id="text-input" style="left:150px;top:50px;">
-            <div class="node-header" style="background:linear-gradient(135deg, rgba(63,185,80,0.15), transparent);border-left:3px solid #3fb950;">
-              <i data-lucide="type" class="w-4 h-4 text-port-prompt"></i>
-              <span>文本输入</span>
-            </div>
-            <div class="node-content">
-              <!-- 输出端口: 提示词 -->
-              <div class="port-row output-row">
-                <span>提示词</span>
-                <div class="port-dot output-port text-port-prompt" data-port-id="text-input-out-prompt" data-port-type="output" data-port-color="prompt" style="color:#3fb950;border-color:#3fb950;"></div>
+          <!-- 节点A: 文本输入 (Prompt Node) -->
+          <div id="node-text-input" class="node-card prompt-node selected" data-node-id="text-input" style="left:150px;top:50px;">
+            <div class="node-type-bar" style="background:#3fb950;"></div>
+            <div class="node-header">
+              <div class="node-header-left">
+                <i data-lucide="type" class="w-3.5 h-3.5" style="color:#3fb950;"></i>
+                <span class="node-header-title">文本输入</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:4px;">
+                <span class="status-badge done"><span class="status-dot"></span>完成</span>
+                <div class="collapse-toggle" title="折叠"><i data-lucide="chevron-down" class="w-3.5 h-3.5"></i></div>
               </div>
             </div>
+            <div class="node-body">
+              <!-- Prompt textarea -->
+              <textarea class="prompt-textarea" rows="3" placeholder="输入提示词...">一只优雅的白猫坐在月光下的窗台上，梦幻柔和的光线</textarea>
+              <!-- 端口行: 提示词输出 -->
+              <div class="port-row" style="margin-top:8px;">
+                <div class="port-dot input-port" style="visibility:hidden;"></div>
+                <span class="port-label">提示词</span>
+                <div class="port-dot output-port" data-port-id="text-input-out-prompt" data-port-type="output" data-port-color="prompt" style="color:#3fb950;border-color:#3fb950;"></div>
+              </div>
+            </div>
+            <div class="resize-handle"><i data-lucide="grip-horizontal" class="w-3 h-3"></i></div>
           </div>
 
-          <!-- 节点B: AI 生成 -->
-          <div id="node-ai-generate" class="node-card" data-node-id="ai-generate" style="left:470px;top:110px;">
-            <div class="node-header" style="background:linear-gradient(135deg, rgba(212,175,55,0.15), transparent);border-left:3px solid #d4af37;">
-              <i data-lucide="wand" class="w-4 h-4 text-primary"></i>
-              <span>AI 生成</span>
-            </div>
-            <div class="node-content">
-              <!-- 输入端口: 提示词 -->
-              <div class="port-row input-row">
-                <div class="port-dot input-port text-port-prompt" data-port-id="ai-gen-in-prompt" data-port-type="input" data-port-color="prompt" style="color:#3fb950;border-color:#3fb950;"></div>
-                <span>提示词</span>
+          <!-- 节点B: AI 生成 (Generator Node) -->
+          <div id="node-ai-generate" class="node-card generator-node" data-node-id="ai-generate" style="left:490px;top:130px;">
+            <div class="node-type-bar" style="background:#d4af37;"></div>
+            <div class="node-header">
+              <div class="node-header-left">
+                <i data-lucide="wand" class="w-3.5 h-3.5" style="color:#d4af37;"></i>
+                <span class="node-header-title">AI 生成</span>
               </div>
-              <!-- 输入端口: 图片参考 -->
-              <div class="port-row input-row">
-                <div class="port-dot input-port text-port-image" data-port-id="ai-gen-in-ref" data-port-type="input" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;"></div>
-                <span>图片参考</span>
+              <div style="display:flex;align-items:center;gap:4px;">
+                <span class="status-badge running"><span class="status-dot"></span>运行中</span>
+                <div class="collapse-toggle" title="折叠"><i data-lucide="chevron-down" class="w-3.5 h-3.5"></i></div>
+              </div>
+            </div>
+            <div class="node-body">
+              <!-- 输入卡片: 提示词 -->
+              <div class="input-card" style="margin-bottom:6px;">
+                <div style="width:28px;height:28px;border-radius:4px;background:rgba(63,185,80,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                  <i data-lucide="type" class="w-3.5 h-3.5" style="color:#3fb950;"></i>
+                </div>
+                <span class="input-card-name">提示词</span>
+                <div class="port-dot input-port" data-port-id="ai-gen-in-prompt" data-port-type="input" data-port-color="prompt" style="color:#3fb950;border-color:#3fb950;flex-shrink:0;"></div>
+              </div>
+              <!-- 输入卡片: 图片参考 -->
+              <div class="input-card" style="margin-bottom:8px;">
+                <div style="width:28px;height:28px;border-radius:4px;background:rgba(88,166,255,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                  <i data-lucide="image" class="w-3.5 h-3.5" style="color:#58a6ff;"></i>
+                </div>
+                <span class="input-card-name">图片参考</span>
+                <div class="port-dot input-port" data-port-id="ai-gen-in-ref" data-port-type="input" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;flex-shrink:0;"></div>
               </div>
               <!-- 模型选择 -->
-              <div class="mt-2 mb-1.5">
+              <div style="margin-bottom:6px;">
                 <select class="node-select" id="ai-gen-model-select">
                   <option>FLUX.1 Pro</option>
                   <option>SDXL Turbo</option>
@@ -637,7 +898,7 @@
                 </select>
               </div>
               <!-- 画面比例 -->
-              <div class="mb-1.5">
+              <div style="margin-bottom:8px;">
                 <select class="node-select" id="ai-gen-ratio-select">
                   <option>1:1 正方形</option>
                   <option>4:3 横版</option>
@@ -647,76 +908,117 @@
                   <option>21:9 超宽</option>
                 </select>
               </div>
-              <!-- 输出端口: 图片 -->
-              <div class="port-row output-row">
-                <span>图片</span>
-                <div class="port-dot output-port text-port-image" data-port-id="ai-gen-out-image" data-port-type="output" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;"></div>
+              <!-- 端口行: 图片输出 -->
+              <div class="port-row">
+                <div class="port-dot input-port" style="visibility:hidden;"></div>
+                <span class="port-label">图片</span>
+                <div class="port-dot output-port" data-port-id="ai-gen-out-image" data-port-type="output" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;"></div>
               </div>
+              <!-- RUN 按钮 -->
+              <button class="run-btn" style="margin-top:8px;" id="ai-gen-run-btn">RUN</button>
             </div>
+            <div class="resize-handle"><i data-lucide="grip-horizontal" class="w-3 h-3"></i></div>
           </div>
 
-          <!-- 节点C: 移除背景 -->
-          <div id="node-remove-bg" class="node-card" data-node-id="remove-bg" style="left:780px;top:270px;">
-            <div class="node-header" style="background:linear-gradient(135deg, rgba(240,136,62,0.15), transparent);border-left:3px solid #f0883e;">
-              <i data-lucide="eraser" class="w-4 h-4 text-port-mask"></i>
-              <span>移除背景</span>
-            </div>
-            <div class="node-content">
-              <!-- 输入端口: 图片 -->
-              <div class="port-row input-row">
-                <div class="port-dot input-port text-port-image" data-port-id="rm-bg-in-image" data-port-type="input" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;"></div>
-                <span>图片</span>
+          <!-- 节点C: 移除背景 (Generator Node) -->
+          <div id="node-remove-bg" class="node-card generator-node" data-node-id="remove-bg" style="left:990px;top:270px;">
+            <div class="node-type-bar" style="background:#f0883e;"></div>
+            <div class="node-header">
+              <div class="node-header-left">
+                <i data-lucide="eraser" class="w-3.5 h-3.5" style="color:#f0883e;"></i>
+                <span class="node-header-title">移除背景</span>
               </div>
-              <!-- 输出端口: 图片 -->
-              <div class="port-row output-row">
-                <span>图片</span>
-                <div class="port-dot output-port text-port-image" data-port-id="rm-bg-out-image" data-port-type="output" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;"></div>
+              <div style="display:flex;align-items:center;gap:4px;">
+                <span class="status-badge queued"><span class="status-dot"></span>排队中</span>
+                <div class="collapse-toggle" title="折叠"><i data-lucide="chevron-down" class="w-3.5 h-3.5"></i></div>
               </div>
             </div>
+            <div class="node-body">
+              <!-- 输入卡片: 图片 -->
+              <div class="input-card" style="margin-bottom:8px;">
+                <div style="width:28px;height:28px;border-radius:4px;background:rgba(88,166,255,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                  <i data-lucide="image" class="w-3.5 h-3.5" style="color:#58a6ff;"></i>
+                </div>
+                <span class="input-card-name">图片</span>
+                <div class="port-dot input-port" data-port-id="rm-bg-in-image" data-port-type="input" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;flex-shrink:0;"></div>
+              </div>
+              <!-- 端口行: 图片输出 -->
+              <div class="port-row">
+                <div class="port-dot input-port" style="visibility:hidden;"></div>
+                <span class="port-label">图片</span>
+                <div class="port-dot output-port" data-port-id="rm-bg-out-image" data-port-type="output" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;"></div>
+              </div>
+              <!-- RUN 按钮 -->
+              <button class="run-btn" style="margin-top:8px;" id="rm-bg-run-btn">RUN</button>
+            </div>
+            <div class="resize-handle"><i data-lucide="grip-horizontal" class="w-3 h-3"></i></div>
           </div>
 
-          <!-- 节点D: 输出图片 -->
-          <div id="node-output-image" class="node-card" data-node-id="output-image" style="left:1090px;top:450px;">
-            <div class="node-header" style="background:linear-gradient(135deg, rgba(88,166,255,0.15), transparent);border-left:3px solid #58a6ff;">
-              <i data-lucide="image" class="w-4 h-4 text-port-image"></i>
-              <span>输出图片</span>
-            </div>
-            <div class="node-content">
-              <!-- 输入端口: 图片 -->
-              <div class="port-row input-row">
-                <div class="port-dot input-port text-port-image" data-port-id="out-img-in-image" data-port-type="input" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;"></div>
-                <span>图片</span>
+          <!-- 节点D: 输出图片 (Image Node) -->
+          <div id="node-output-image" class="node-card image-node" data-node-id="output-image" style="left:1410px;top:420px;">
+            <div class="node-type-bar" style="background:#58a6ff;"></div>
+            <div class="node-header">
+              <div class="node-header-left">
+                <i data-lucide="image" class="w-3.5 h-3.5" style="color:#58a6ff;"></i>
+                <span class="node-header-title">输出图片</span>
               </div>
-              <!-- 预览区域 -->
-              <div class="mt-2 rounded bg-surface-container-high h-20 flex items-center justify-center">
-                <i data-lucide="image" class="w-6 h-6 text-on-surface-variant/30"></i>
+              <div style="display:flex;align-items:center;gap:4px;">
+                <span class="status-badge failed"><span class="status-dot"></span>失败</span>
+                <div class="collapse-toggle" title="折叠"><i data-lucide="chevron-down" class="w-3.5 h-3.5"></i></div>
               </div>
             </div>
+            <div class="node-body">
+              <!-- 输入端口行: 图片 -->
+              <div class="port-row" style="margin-bottom:8px;">
+                <div class="port-dot input-port" data-port-id="out-img-in-image" data-port-type="input" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;"></div>
+                <span class="port-label">图片</span>
+                <div class="port-dot output-port" style="visibility:hidden;"></div>
+              </div>
+              <!-- 预览区域 - 空状态 -->
+              <div class="image-preview empty">
+                <i data-lucide="image" class="w-8 h-8" style="color:rgba(125,133,144,0.3);"></i>
+              </div>
+            </div>
+            <div class="resize-handle"><i data-lucide="grip-horizontal" class="w-3 h-3"></i></div>
           </div>
 
-          <!-- 节点E: 字境大师 -->
-          <div id="node-font-master" class="node-card" data-node-id="font-master" style="left:320px;top:470px;">
-            <div class="node-header" style="background:linear-gradient(135deg, rgba(188,140,255,0.15), transparent);border-left:3px solid #bc8cff;">
-              <i data-lucide="pen-tool" class="w-4 h-4 text-port-reference"></i>
-              <span>字境大师</span>
-            </div>
-            <div class="node-content">
-              <!-- 输入端口: 提示词 -->
-              <div class="port-row input-row">
-                <div class="port-dot input-port text-port-prompt" data-port-id="font-m-in-prompt" data-port-type="input" data-port-color="prompt" style="color:#3fb950;border-color:#3fb950;"></div>
-                <span>提示词</span>
+          <!-- 节点E: 字境大师 (Generator Node) -->
+          <div id="node-font-master" class="node-card generator-node" data-node-id="font-master" style="left:340px;top:460px;">
+            <div class="node-type-bar" style="background:#bc8cff;"></div>
+            <div class="node-header">
+              <div class="node-header-left">
+                <i data-lucide="pen-tool" class="w-3.5 h-3.5" style="color:#bc8cff;"></i>
+                <span class="node-header-title">字境大师</span>
               </div>
-              <!-- 输出端口: 图片 -->
-              <div class="port-row output-row">
-                <span>图片</span>
-                <div class="port-dot output-port text-port-image" data-port-id="font-m-out-image" data-port-type="output" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;"></div>
-              </div>
-              <!-- 输出端口: 参考图 -->
-              <div class="port-row output-row">
-                <span>参考图</span>
-                <div class="port-dot output-port text-port-reference" data-port-id="font-m-out-ref" data-port-type="output" data-port-color="reference" style="color:#bc8cff;border-color:#bc8cff;"></div>
+              <div style="display:flex;align-items:center;gap:4px;">
+                <span class="status-badge running"><span class="status-dot"></span>运行中</span>
+                <div class="collapse-toggle" title="折叠"><i data-lucide="chevron-down" class="w-3.5 h-3.5"></i></div>
               </div>
             </div>
+            <div class="node-body">
+              <!-- 输入卡片: 提示词 -->
+              <div class="input-card" style="margin-bottom:8px;">
+                <div style="width:28px;height:28px;border-radius:4px;background:rgba(63,185,80,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                  <i data-lucide="type" class="w-3.5 h-3.5" style="color:#3fb950;"></i>
+                </div>
+                <span class="input-card-name">提示词</span>
+                <div class="port-dot input-port" data-port-id="font-m-in-prompt" data-port-type="input" data-port-color="prompt" style="color:#3fb950;border-color:#3fb950;flex-shrink:0;"></div>
+              </div>
+              <!-- 端口行: 图片输出 + 参考图输出 -->
+              <div class="port-row">
+                <div class="port-dot input-port" style="visibility:hidden;"></div>
+                <span class="port-label">图片</span>
+                <div class="port-dot output-port" data-port-id="font-m-out-image" data-port-type="output" data-port-color="image" style="color:#58a6ff;border-color:#58a6ff;"></div>
+              </div>
+              <div class="port-row">
+                <div class="port-dot input-port" style="visibility:hidden;"></div>
+                <span class="port-label">参考图</span>
+                <div class="port-dot output-port" data-port-id="font-m-out-ref" data-port-type="output" data-port-color="reference" style="color:#bc8cff;border-color:#bc8cff;"></div>
+              </div>
+              <!-- RUN 按钮 -->
+              <button class="run-btn" style="margin-top:8px;" id="font-m-run-btn">RUN</button>
+            </div>
+            <div class="resize-handle"><i data-lucide="grip-horizontal" class="w-3 h-3"></i></div>
           </div>
 
         </div><!-- end nodes-container -->
@@ -1172,7 +1474,7 @@
     var dragState = { active: false, nodeId: null, offsetX: 0, offsetY: 0 };
 
     $(document).on('mousedown', '.node-card', function(e) {
-      if ($(e.target).hasClass('port-dot') || $(e.target).is('select') || $(e.target).is('input') || $(e.target).is('textarea')) return;
+      if ($(e.target).hasClass('port-dot') || $(e.target).is('select') || $(e.target).is('input') || $(e.target).is('textarea') || $(e.target).is('button') || $(e.target).closest('.collapse-toggle').length || $(e.target).closest('.run-btn').length || $(e.target).closest('.resize-handle').length) return;
       e.preventDefault();
       var $node = $(this);
       dragState.active = true;
@@ -1228,17 +1530,45 @@
     });
 
     // ============================================
+    // 节点折叠/展开
+    // ============================================
+    $(document).on('click', '.collapse-toggle', function(e) {
+      e.stopPropagation();
+      var $node = $(this).closest('.node-card');
+      $node.toggleClass('collapsed');
+      var $icon = $(this).find('[data-lucide]');
+      if ($node.hasClass('collapsed')) {
+        $icon.attr('data-lucide', 'chevron-right');
+      } else {
+        $icon.attr('data-lucide', 'chevron-down');
+      }
+      lucide.createIcons();
+    });
+
+    // ============================================
+    // RUN 按钮点击
+    // ============================================
+    $(document).on('click', '.run-btn', function(e) {
+      e.stopPropagation();
+      var $node = $(this).closest('.node-card');
+      var nodeId = $node.data('node-id');
+      console.log('RUN 按钮 - 节点:', nodeId, '- 后续应触发该节点的执行逻辑');
+      // 后续应实现：1. 更新节点状态徽章为 running 2. 调用对应AI接口
+      // 3. 执行完成后更新为 done 4. 失败时更新为 failed
+    });
+
+    // ============================================
     // 连线点击选中
     // ============================================
-    $(document).on('click', '.connection-path', function(e) {
+    $(document).on('click', '.connection-hit-area', function(e) {
       e.stopPropagation();
-      $('.connection-path').removeClass('selected');
-      $(this).addClass('selected');
+      $('.connection-group').removeClass('selected');
+      $(this).closest('.connection-group').addClass('selected');
     });
 
     $('#canvas-viewport').on('click', function(e) {
-      if ($(e.target).closest('.connection-path').length === 0) {
-        $('.connection-path').removeClass('selected');
+      if ($(e.target).closest('.connection-group').length === 0) {
+        $('.connection-group').removeClass('selected');
       }
     });
 

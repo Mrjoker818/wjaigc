@@ -2494,6 +2494,14 @@ function CanvasApp() {
                   {currentProject.name}
                 </span>
               )}
+              {currentUser && (
+                <a
+                  href="/projects"
+                  className={`text-xs px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer ${themeStyle === 'monochrome' ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-primary/10 text-primary hover:bg-primary/20'}`}
+                >
+                  工作台
+                </a>
+              )}
             </div>
           </div>
           <div className={`h-px ${themeStyle === 'monochrome' ? 'bg-gray-200' : 'bg-gradient-to-r from-transparent via-gold/15 to-transparent'}`} />
