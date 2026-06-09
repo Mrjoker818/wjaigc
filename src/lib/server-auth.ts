@@ -53,18 +53,13 @@ function defaultApiPermissions() {
 
 function authSecret(): string {
   const secret = process.env.WUJIE_AUTH_SECRET || process.env.NEXTAUTH_SECRET;
-  if (!secret) {
-    if (process.env.COZE_PROJECT_ENV === 'PROD') {
-      console.warn('[SECURITY] WUJIE_AUTH_SECRET/NEXTAUTH_SECRET not set! Using generated secret. Sessions will not persist across restarts.');
-    }
-    // Generate a per-process random fallback secret (sessions won't persist across restarts)
-    const _fallbackKey = '__wujie_auth_secret__';
-    if (!(globalThis as Record<string, unknown>)[_fallbackKey]) {
-      (globalThis as Record<string, unknown>)[_fallbackKey] = crypto.randomBytes(32).toString('hex');
-    }
-    return (globalThis as Record<string, unknown>)[_fallbackKey] as string;
+  if (secret) return secret;
+  // Use a stable fallback secret so passwords persist across process restarts
+  // In production, always set WUJIE_AUTH_SECRET env var for security
+  if (process.env.COZE_PROJECT_ENV === 'PROD') {
+    console.warn('[SECURITY] WUJIE_AUTH_SECRET/NEXTAUTH_SECRET not set! Using default secret. Set env var for production.');
   }
-  return secret;
+  return 'wujie-ai-stable-auth-secret-fallback-2024';
 }
 
 function hashPassword(password: string): string {

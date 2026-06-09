@@ -78,31 +78,31 @@ const QUALITY_PRESETS: Record<QualityPreset, VtracerParams> = {
     maxIterations: 2,
   },
   balanced: {
-    colorPrecision: 10,       // 1024色: 接近原图色彩还原（丹青AI默认品质）
-    filterSpeckle: 4,         // 保留更多细节
+    colorPrecision: 8,          // 256色: vtracer最大支持值，配合预处理实现更高质量
+    filterSpeckle: 4,           // 保留更多细节
     cornerThreshold: 1,
     lengthThreshold: 4,
     spliceThreshold: 45,
     pathPrecision: 6,
-    hierarchical: 'cutout',   // cutout: 精确裁切模式，边缘更干净（丹青AI同款策略）
+    hierarchical: 'cutout',     // cutout: 精确裁切模式，边缘更干净（丹青AI同款策略）
     curveMode: 'spline',
     layerDifference: 8,
     maxIterations: 4,
   },
   high: {
-    colorPrecision: 12,       // 4096色: 高保真色彩还原
+    colorPrecision: 8,          // 256色: vtracer最大值 + 预处理深度量化实现高保真
     filterSpeckle: 2,
     cornerThreshold: 1,
     lengthThreshold: 3,
     spliceThreshold: 45,
     pathPrecision: 8,
-    hierarchical: 'cutout',   // cutout: 精确裁切，边缘无锯齿
+    hierarchical: 'cutout',     // cutout: 精确裁切，边缘无锯齿
     curveMode: 'spline',
     layerDifference: 4,
     maxIterations: 6,
   },
   max: {
-    colorPrecision: 14,       // 16384色: 极致色彩精度，接近无损
+    colorPrecision: 8,          // 256色: vtracer最大值 + 最精细预处理实现极致还原
     filterSpeckle: 1,
     cornerThreshold: 1,
     lengthThreshold: 2,
@@ -114,15 +114,15 @@ const QUALITY_PRESETS: Record<QualityPreset, VtracerParams> = {
     maxIterations: 10,
   },
   print: {
-    colorPrecision: 12,       // 4096色: 印刷级色彩精度
-    filterSpeckle: 1,         // 保留所有细节，印刷不允许丢失
-    cornerThreshold: 0.5,     // 更锐利的角落
+    colorPrecision: 8,          // 256色: vtracer最大值 + 印刷级预处理
+    filterSpeckle: 1,           // 保留所有细节，印刷不允许丢失
+    cornerThreshold: 0.5,       // 更锐利的角落
     lengthThreshold: 2,
-    spliceThreshold: 30,      // 更精细的路径拼接
-    pathPrecision: 10,        // 最高坐标精度
-    hierarchical: 'cutout',   // cutout: 印刷需要精确边缘
+    spliceThreshold: 30,        // 更精细的路径拼接
+    pathPrecision: 10,          // 最高坐标精度
+    hierarchical: 'cutout',     // cutout: 印刷需要精确边缘
     curveMode: 'spline',
-    layerDifference: 2,       // 最小层差，保留最多色彩层
+    layerDifference: 2,         // 最小层差，保留最多色彩层
     maxIterations: 12,
   },
 };
@@ -261,34 +261,21 @@ async function preprocessForVTracer(
   // causing color noise in photos. Sharp's palette quantizer produces clean,
   // well-dithered colors that VTracer can trace precisely.
   //
-  // Strategy:
-  //   - colorPrecision <= 5: aggressive quantize (2^(cp*0.8) colors)
-  //   - colorPrecision 6-9: moderate quantize (2^(cp*0.9) colors) with dithering
-  //   - colorPrecision 10+: minimal quantize (preserve detail for print quality)
-  const targetColors = params.colorPrecision <= 5
-    ? Math.min(128, Math.max(8, Math.round(Math.pow(2, params.colorPrecision * 0.8))))
-    : params.colorPrecision <= 9
-      ? Math.min(512, Math.max(32, Math.round(Math.pow(2, params.colorPrecision * 0.9))))
-      : Math.min(4096, Math.round(Math.pow(2, params.colorPrecision * 0.95)));
+  // 丹青AI关键技巧：先让sharp预量化到VTracer色彩预算的70%，
+  // 这样VTracer专注于路径生成而非颜色决策，SVG更干净
+  // VTracer max color_precision=8 (256 colors)
+  const vtracerMaxColors = Math.pow(2, Math.min(8, params.colorPrecision));
+  const targetColors = Math.max(16, Math.round(vtracerMaxColors * 0.7));
 
-  if (targetColors < 4096) {
-    // Use sharp palette quantization — much cleaner than VTracer's internal quantizer
-    pipeline = pipeline.png({
-      quality: 100,
-      compressionLevel: 0,  // Fast write, we don't need small file
-      palette: true,
-      colors: targetColors,
-      effort: params.colorPrecision <= 6 ? 7 : 9,  // Higher effort for quality presets
-      dither: params.colorPrecision >= 8 ? 0.8 : 1.0,  // Floyd-Steinberg dithering
-    });
-  } else {
-    // Max quality: preserve all colors, let VTracer handle quantization
-    pipeline = pipeline.png({
-      quality: 100,
-      compressionLevel: 0,
-      effort: 1,  // Speed (VTracer does the real work)
-    });
-  }
+  // sharp调色板量化 — 比VTracer内部量化器更干净
+  pipeline = pipeline.png({
+    quality: 100,
+    compressionLevel: 0,
+    palette: true,
+    colors: targetColors,
+    effort: params.colorPrecision >= 8 ? 10 : 7,  // 高精度预设用最大努力
+    dither: params.colorPrecision >= 8 ? 0.6 : 0.9,  // 高精度低抖动，低精度高抖动
+  });
 
   const buf = await pipeline.toBuffer();
   const outMeta = await sharp(buf).metadata();
