@@ -83,4 +83,893 @@
       </button>
       <div class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center cursor-pointer">
         <span class="text-xs font-semibold text-primary">初</span>
-      </
+      </div>
+    </div>
+  </header>
+
+  <div class="flex" style="height: calc(100vh - 3.5rem)">
+    <aside class="w-56 shrink-0 bg-surface border-r border-outline-variant/20 overflow-y-auto">
+      <div class="p-3 space-y-0.5">
+        <a href="projects.html" class="flex items-center gap-3 px-3 py-2.5 rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-medium text-sm transition-colors cursor-pointer">
+          <i data-lucide="folder-open" class="w-4 h-4"></i>我的项目
+        </a>
+        <a href="templates.html" class="flex items-center gap-3 px-3 py-2.5 rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-medium text-sm transition-colors cursor-pointer">
+          <i data-lucide="layout-template" class="w-4 h-4"></i>模板广场
+        </a>
+        <a href="assets.html" class="flex items-center gap-3 px-3 py-2.5 rounded-md bg-primary/10 text-primary font-medium text-sm cursor-pointer" aria-current="page">
+          <i data-lucide="archive" class="w-4 h-4"></i>资产库
+        </a>
+      </div>
+      <div class="border-t border-outline-variant/20 mx-3 my-2"></div>
+      <div class="px-3 pb-3">
+        <div class="px-3 py-2 text-xs text-on-surface-variant uppercase tracking-wider">快速创建</div>
+        <button class="w-full mt-1 flex items-center gap-3 px-3 py-2.5 rounded-md bg-primary text-on-primary font-medium text-sm hover:opacity-90 transition-opacity cursor-pointer">
+          <i data-lucide="plus" class="w-4 h-4"></i>新建项目
+        </button>
+      </div>
+      <div class="border-t border-outline-variant/20 mx-3 my-2"></div>
+      <div class="px-3 pb-3">
+        <div class="px-3 py-2 text-xs text-on-surface-variant uppercase tracking-wider">存储用量</div>
+        <div class="px-3 py-2">
+          <div class="flex items-center justify-between text-xs text-on-surface-variant mb-1.5">
+            <span>已用 2.4 GB</span>
+            <span>/ 10 GB</span>
+          </div>
+          <div class="w-full h-1.5 bg-surface-container rounded-full overflow-hidden">
+            <div class="h-full bg-primary rounded-full" style="width: 24%"></div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- @main-content:start -->
+    <main class="flex-1 min-w-0 overflow-y-auto bg-background p-6">
+
+      <!-- 顶部区域：标题 + 上传按钮 -->
+      <div class="flex items-center justify-between mb-5">
+        <h1 class="text-2xl font-bold text-on-surface">资产库</h1>
+        <button id="btn-upload-asset" class="bg-surface-container text-on-surface px-4 py-2 rounded-md text-sm font-medium hover:bg-surface-container-high active:scale-[0.98] transition-all inline-flex items-center gap-2 cursor-pointer">
+          <i data-lucide="upload" class="w-3.5 h-3.5"></i>上传素材
+        </button>
+      </div>
+
+      <!-- 搜索栏 -->
+      <div class="relative mb-5">
+        <i data-lucide="search" class="w-4 h-4 text-on-surface-variant absolute left-3 top-1/2 -translate-y-1/2"></i>
+        <input id="input-search" type="text" placeholder="搜索素材、提示词或品牌资产..." class="w-full bg-surface-container border-none rounded-md pl-10 pr-3 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+      </div>
+
+      <!-- Tab 切换 -->
+      <div class="flex items-center gap-1 mb-6 border-b border-outline-variant/20 pb-0">
+        <button id="tab-images" class="px-4 py-2.5 text-sm font-medium rounded-t-md bg-primary text-on-primary transition-colors cursor-pointer" data-tab="images">
+          <i data-lucide="image" class="w-3.5 h-3.5 inline-block mr-1 -mt-0.5"></i>图片素材
+        </button>
+        <button id="tab-prompts" class="px-4 py-2.5 text-sm font-medium rounded-t-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container/50 transition-colors cursor-pointer" data-tab="prompts">
+          <i data-lucide="file-text" class="w-3.5 h-3.5 inline-block mr-1 -mt-0.5"></i>提示词库
+        </button>
+        <button id="tab-brands" class="px-4 py-2.5 text-sm font-medium rounded-t-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container/50 transition-colors cursor-pointer" data-tab="brands">
+          <i data-lucide="palette" class="w-3.5 h-3.5 inline-block mr-1 -mt-0.5"></i>品牌资产
+        </button>
+      </div>
+
+      <!-- ========== 图片素材 Tab 内容 ========== -->
+      <div id="panel-images">
+        <!-- 筛选标签栏 -->
+        <div class="flex items-center gap-2 mb-5">
+          <button class="filter-tag active px-3 py-1.5 rounded-md text-xs font-medium bg-primary/15 text-primary cursor-pointer transition-colors" data-filter="all">全部</button>
+          <button class="filter-tag px-3 py-1.5 rounded-md text-xs font-medium bg-surface-container text-on-surface-variant hover:text-on-surface cursor-pointer transition-colors" data-filter="generated">生成图</button>
+          <button class="filter-tag px-3 py-1.5 rounded-md text-xs font-medium bg-surface-container text-on-surface-variant hover:text-on-surface cursor-pointer transition-colors" data-filter="uploaded">上传图</button>
+          <button class="filter-tag px-3 py-1.5 rounded-md text-xs font-medium bg-surface-container text-on-surface-variant hover:text-on-surface cursor-pointer transition-colors" data-filter="favorited">收藏</button>
+        </div>
+
+        <!-- 图片网格 -->
+        <div id="image-grid" class="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+
+          <!-- 列表-图片1：人物肖像 -->
+          <div class="image-card group relative rounded-lg overflow-hidden bg-surface shadow-card cursor-pointer" data-category="generated" data-favorited="true">
+            <div class="aspect-square overflow-hidden">
+              <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&h=400&fit=crop" alt="女性人像特写" data-category="人物" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+            </div>
+            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="下载" data-action="download">
+                <i data-lucide="download" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="删除" data-action="delete">
+                <i data-lucide="trash-2" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="添加到项目" data-action="add-to-project">
+                <i data-lucide="folder-plus" class="w-4 h-4 text-white"></i>
+              </button>
+            </div>
+            <div class="absolute left-2 bottom-2">
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/80 text-on-primary">AI生成</span>
+            </div>
+            <div class="absolute right-2 bottom-2">
+              <button class="fav-star cursor-pointer" aria-label="取消收藏" data-fav="true">
+                <i data-lucide="star" class="w-4 h-4 text-primary fill-primary"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- 列表-图片2：自然风景 -->
+          <div class="image-card group relative rounded-lg overflow-hidden bg-surface shadow-card cursor-pointer" data-category="generated" data-favorited="false">
+            <div class="aspect-square overflow-hidden">
+              <img src="https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&h=400&fit=crop" alt="雪山湖泊壮丽景色" data-category="自然风景" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+            </div>
+            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="下载" data-action="download">
+                <i data-lucide="download" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="删除" data-action="delete">
+                <i data-lucide="trash-2" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="添加到项目" data-action="add-to-project">
+                <i data-lucide="folder-plus" class="w-4 h-4 text-white"></i>
+              </button>
+            </div>
+            <div class="absolute left-2 bottom-2">
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/80 text-on-primary">AI生成</span>
+            </div>
+            <div class="absolute right-2 bottom-2">
+              <button class="fav-star cursor-pointer" aria-label="收藏" data-fav="false">
+                <i data-lucide="star" class="w-4 h-4 text-on-surface-variant/60"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- 列表-图片3：建筑城市 -->
+          <div class="image-card group relative rounded-lg overflow-hidden bg-surface shadow-card cursor-pointer" data-category="uploaded" data-favorited="true">
+            <div class="aspect-square overflow-hidden">
+              <img src="https://images.unsplash.com/photo-1486325212027-8081e485255e?w=400&h=400&fit=crop" alt="现代建筑玻璃幕墙" data-category="建筑城市" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+            </div>
+            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="下载" data-action="download">
+                <i data-lucide="download" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="删除" data-action="delete">
+                <i data-lucide="trash-2" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="添加到项目" data-action="add-to-project">
+                <i data-lucide="folder-plus" class="w-4 h-4 text-white"></i>
+              </button>
+            </div>
+            <div class="absolute left-2 bottom-2">
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-surface-container-high/90 text-on-surface">上传</span>
+            </div>
+            <div class="absolute right-2 bottom-2">
+              <button class="fav-star cursor-pointer" aria-label="取消收藏" data-fav="true">
+                <i data-lucide="star" class="w-4 h-4 text-primary fill-primary"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- 列表-图片4：商品产品 -->
+          <div class="image-card group relative rounded-lg overflow-hidden bg-surface shadow-card cursor-pointer" data-category="uploaded" data-favorited="false">
+            <div class="aspect-square overflow-hidden">
+              <img src="https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&h=400&fit=crop" alt="极简手表产品照" data-category="商业科技" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+            </div>
+            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="下载" data-action="download">
+                <i data-lucide="download" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="删除" data-action="delete">
+                <i data-lucide="trash-2" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="添加到项目" data-action="add-to-project">
+                <i data-lucide="folder-plus" class="w-4 h-4 text-white"></i>
+              </button>
+            </div>
+            <div class="absolute left-2 bottom-2">
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-surface-container-high/90 text-on-surface">上传</span>
+            </div>
+            <div class="absolute right-2 bottom-2">
+              <button class="fav-star cursor-pointer" aria-label="收藏" data-fav="false">
+                <i data-lucide="star" class="w-4 h-4 text-on-surface-variant/60"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- 列表-图片5：概念艺术 -->
+          <div class="image-card group relative rounded-lg overflow-hidden bg-surface shadow-card cursor-pointer" data-category="generated" data-favorited="true">
+            <div class="aspect-square overflow-hidden">
+              <img src="https://images.unsplash.com/photo-1518837695005-2083093ee35b?w=400&h=400&fit=crop" alt="海洋光影概念艺术" data-category="艺术" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+            </div>
+            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="下载" data-action="download">
+                <i data-lucide="download" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="删除" data-action="delete">
+                <i data-lucide="trash-2" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="添加到项目" data-action="add-to-project">
+                <i data-lucide="folder-plus" class="w-4 h-4 text-white"></i>
+              </button>
+            </div>
+            <div class="absolute left-2 bottom-2">
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/80 text-on-primary">AI生成</span>
+            </div>
+            <div class="absolute right-2 bottom-2">
+              <button class="fav-star cursor-pointer" aria-label="取消收藏" data-fav="true">
+                <i data-lucide="star" class="w-4 h-4 text-primary fill-primary"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- 列表-图片6：赛博朋克城市 -->
+          <div class="image-card group relative rounded-lg overflow-hidden bg-surface shadow-card cursor-pointer" data-category="generated" data-favorited="false">
+            <div class="aspect-square overflow-hidden">
+              <img src="https://images.unsplash.com/photo-1515705576963-95cad62945b6?w=400&h=400&fit=crop" alt="霓虹城市夜景" data-category="建筑城市" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+            </div>
+            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="下载" data-action="download">
+                <i data-lucide="download" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="删除" data-action="delete">
+                <i data-lucide="trash-2" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="添加到项目" data-action="add-to-project">
+                <i data-lucide="folder-plus" class="w-4 h-4 text-white"></i>
+              </button>
+            </div>
+            <div class="absolute left-2 bottom-2">
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/80 text-on-primary">AI生成</span>
+            </div>
+            <div class="absolute right-2 bottom-2">
+              <button class="fav-star cursor-pointer" aria-label="收藏" data-fav="false">
+                <i data-lucide="star" class="w-4 h-4 text-on-surface-variant/60"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- 列表-图片7：时尚服饰 -->
+          <div class="image-card group relative rounded-lg overflow-hidden bg-surface shadow-card cursor-pointer" data-category="uploaded" data-favorited="false">
+            <div class="aspect-square overflow-hidden">
+              <img src="https://images.unsplash.com/photo-1445205170230-053b83016050?w=400&h=400&fit=crop" alt="时尚服饰穿搭" data-category="服饰时尚" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+            </div>
+            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="下载" data-action="download">
+                <i data-lucide="download" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="删除" data-action="delete">
+                <i data-lucide="trash-2" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="添加到项目" data-action="add-to-project">
+                <i data-lucide="folder-plus" class="w-4 h-4 text-white"></i>
+              </button>
+            </div>
+            <div class="absolute left-2 bottom-2">
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-surface-container-high/90 text-on-surface">上传</span>
+            </div>
+            <div class="absolute right-2 bottom-2">
+              <button class="fav-star cursor-pointer" aria-label="收藏" data-fav="false">
+                <i data-lucide="star" class="w-4 h-4 text-on-surface-variant/60"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- 列表-图片8：自然风光森林 -->
+          <div class="image-card group relative rounded-lg overflow-hidden bg-surface shadow-card cursor-pointer" data-category="generated" data-favorited="true">
+            <div class="aspect-square overflow-hidden">
+              <img src="https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=400&h=400&fit=crop" alt="茂密森林自然光" data-category="自然风景" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+            </div>
+            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="下载" data-action="download">
+                <i data-lucide="download" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="删除" data-action="delete">
+                <i data-lucide="trash-2" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="添加到项目" data-action="add-to-project">
+                <i data-lucide="folder-plus" class="w-4 h-4 text-white"></i>
+              </button>
+            </div>
+            <div class="absolute left-2 bottom-2">
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/80 text-on-primary">AI生成</span>
+            </div>
+            <div class="absolute right-2 bottom-2">
+              <button class="fav-star cursor-pointer" aria-label="取消收藏" data-fav="true">
+                <i data-lucide="star" class="w-4 h-4 text-primary fill-primary"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- 列表-图片9：产品包装 -->
+          <div class="image-card group relative rounded-lg overflow-hidden bg-surface shadow-card cursor-pointer" data-category="uploaded" data-favorited="false">
+            <div class="aspect-square overflow-hidden">
+              <img src="https://images.unsplash.com/photo-1586495777744-4413f21062fa?w=400&h=400&fit=crop" alt="产品包装设计展示" data-category="商业科技" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+            </div>
+            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="下载" data-action="download">
+                <i data-lucide="download" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="删除" data-action="delete">
+                <i data-lucide="trash-2" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="添加到项目" data-action="add-to-project">
+                <i data-lucide="folder-plus" class="w-4 h-4 text-white"></i>
+              </button>
+            </div>
+            <div class="absolute left-2 bottom-2">
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-surface-container-high/90 text-on-surface">上传</span>
+            </div>
+            <div class="absolute right-2 bottom-2">
+              <button class="fav-star cursor-pointer" aria-label="收藏" data-fav="false">
+                <i data-lucide="star" class="w-4 h-4 text-on-surface-variant/60"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- 列表-图片10：人物剪影 -->
+          <div class="image-card group relative rounded-lg overflow-hidden bg-surface shadow-card cursor-pointer" data-category="generated" data-favorited="false">
+            <div class="aspect-square overflow-hidden">
+              <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=400&fit=crop" alt="男性人像侧脸光" data-category="人物" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+            </div>
+            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="下载" data-action="download">
+                <i data-lucide="download" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="删除" data-action="delete">
+                <i data-lucide="trash-2" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="添加到项目" data-action="add-to-project">
+                <i data-lucide="folder-plus" class="w-4 h-4 text-white"></i>
+              </button>
+            </div>
+            <div class="absolute left-2 bottom-2">
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/80 text-on-primary">AI生成</span>
+            </div>
+            <div class="absolute right-2 bottom-2">
+              <button class="fav-star cursor-pointer" aria-label="收藏" data-fav="false">
+                <i data-lucide="star" class="w-4 h-4 text-on-surface-variant/60"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- 列表-图片11：抽象概念艺术 -->
+          <div class="image-card group relative rounded-lg overflow-hidden bg-surface shadow-card cursor-pointer" data-category="generated" data-favorited="true">
+            <div class="aspect-square overflow-hidden">
+              <img src="https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&h=400&fit=crop" alt="抽象色彩流动艺术" data-category="艺术" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+            </div>
+            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="下载" data-action="download">
+                <i data-lucide="download" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="删除" data-action="delete">
+                <i data-lucide="trash-2" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="添加到项目" data-action="add-to-project">
+                <i data-lucide="folder-plus" class="w-4 h-4 text-white"></i>
+              </button>
+            </div>
+            <div class="absolute left-2 bottom-2">
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/80 text-on-primary">AI生成</span>
+            </div>
+            <div class="absolute right-2 bottom-2">
+              <button class="fav-star cursor-pointer" aria-label="取消收藏" data-fav="true">
+                <i data-lucide="star" class="w-4 h-4 text-primary fill-primary"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- 列表-图片12：建筑内部 -->
+          <div class="image-card group relative rounded-lg overflow-hidden bg-surface shadow-card cursor-pointer" data-category="uploaded" data-favorited="false">
+            <div class="aspect-square overflow-hidden">
+              <img src="https://images.unsplash.com/photo-1487958449943-2429e8be8625?w=400&h=400&fit=crop" alt="现代建筑内部空间" data-category="建筑城市" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+            </div>
+            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="下载" data-action="download">
+                <i data-lucide="download" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="删除" data-action="delete">
+                <i data-lucide="trash-2" class="w-4 h-4 text-white"></i>
+              </button>
+              <button class="img-action-btn w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors cursor-pointer" aria-label="添加到项目" data-action="add-to-project">
+                <i data-lucide="folder-plus" class="w-4 h-4 text-white"></i>
+              </button>
+            </div>
+            <div class="absolute left-2 bottom-2">
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-surface-container-high/90 text-on-surface">上传</span>
+            </div>
+            <div class="absolute right-2 bottom-2">
+              <button class="fav-star cursor-pointer" aria-label="收藏" data-fav="false">
+                <i data-lucide="star" class="w-4 h-4 text-on-surface-variant/60"></i>
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ========== 提示词库 Tab 内容 ========== -->
+      <div id="panel-prompts" class="hidden">
+        <!-- 搜索提示词 -->
+        <div class="relative mb-5">
+          <i data-lucide="search" class="w-4 h-4 text-on-surface-variant absolute left-3 top-1/2 -translate-y-1/2"></i>
+          <input id="input-search-prompt" type="text" placeholder="搜索提示词..." class="w-full bg-surface-container border-none rounded-md pl-10 pr-3 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+        </div>
+
+        <!-- 标签筛选 -->
+        <div class="flex items-center gap-2 mb-5">
+          <button class="prompt-filter-tag active px-3 py-1.5 rounded-md text-xs font-medium bg-primary/15 text-primary cursor-pointer transition-colors" data-filter="all">全部</button>
+          <button class="prompt-filter-tag px-3 py-1.5 rounded-md text-xs font-medium bg-surface-container text-on-surface-variant hover:text-on-surface cursor-pointer transition-colors" data-filter="landscape">风景</button>
+          <button class="prompt-filter-tag px-3 py-1.5 rounded-md text-xs font-medium bg-surface-container text-on-surface-variant hover:text-on-surface cursor-pointer transition-colors" data-filter="portrait">人物</button>
+          <button class="prompt-filter-tag px-3 py-1.5 rounded-md text-xs font-medium bg-surface-container text-on-surface-variant hover:text-on-surface cursor-pointer transition-colors" data-filter="product">产品</button>
+          <button class="prompt-filter-tag px-3 py-1.5 rounded-md text-xs font-medium bg-surface-container text-on-surface-variant hover:text-on-surface cursor-pointer transition-colors" data-filter="concept">概念</button>
+          <button class="prompt-filter-tag px-3 py-1.5 rounded-md text-xs font-medium bg-surface-container text-on-surface-variant hover:text-on-surface cursor-pointer transition-colors" data-filter="stylized">风格化</button>
+        </div>
+
+        <!-- 提示词列表 -->
+        <div id="prompt-list" class="space-y-3">
+
+          <!-- 列表-提示词1 -->
+          <div class="prompt-item bg-surface rounded-lg shadow-card p-4 flex items-start gap-4" data-tags="landscape,concept">
+            <div class="flex-1 min-w-0">
+              <p class="text-sm text-on-surface leading-relaxed mb-2">cinematic lighting, volumetric fog, cyberpunk cityscape, neon reflections on wet streets, 8k detailed, atmospheric perspective</p>
+              <div class="flex items-center gap-2">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-primary/15 text-primary">风景</span>
+                <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-surface-container-high text-on-surface-variant">概念</span>
+              </div>
+            </div>
+            <div class="flex flex-col items-end gap-2 shrink-0">
+              <button class="btn-copy-prompt w-8 h-8 rounded-md bg-surface-container hover:bg-surface-container-high flex items-center justify-center transition-colors cursor-pointer" aria-label="复制提示词" data-prompt="cinematic lighting, volumetric fog, cyberpunk cityscape, neon reflections on wet streets, 8k detailed, atmospheric perspective">
+                <i data-lucide="copy" class="w-3.5 h-3.5 text-on-surface-variant"></i>
+              </button>
+              <span class="text-xs text-on-surface-variant flex items-center gap-1">
+                <i data-lucide="repeat-2" class="w-3 h-3"></i>128
+              </span>
+            </div>
+          </div>
+
+          <!-- 列表-提示词2 -->
+          <div class="prompt-item bg-surface rounded-lg shadow-card p-4 flex items-start gap-4" data-tags="portrait,stylized">
+            <div class="flex-1 min-w-0">
+              <p class="text-sm text-on-surface leading-relaxed mb-2">ethereal portrait, soft rim lighting, porcelain skin texture, delicate features, shallow depth of field, bokeh background, studio quality</p>
+              <div class="flex items-center gap-2">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-primary/15 text-primary">人物</span>
+                <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-surface-container-high text-on-surface-variant">风格化</span>
+              </div>
+            </div>
+            <div class="flex flex-col items-end gap-2 shrink-0">
+              <button class="btn-copy-prompt w-8 h-8 rounded-md bg-surface-container hover:bg-surface-container-high flex items-center justify-center transition-colors cursor-pointer" aria-label="复制提示词" data-prompt="ethereal portrait, soft rim lighting, porcelain skin texture, delicate features, shallow depth of field, bokeh background, studio quality">
+                <i data-lucide="copy" class="w-3.5 h-3.5 text-on-surface-variant"></i>
+              </button>
+              <span class="text-xs text-on-surface-variant flex items-center gap-1">
+                <i data-lucide="repeat-2" class="w-3 h-3"></i>95
+              </span>
+            </div>
+          </div>
+
+          <!-- 列表-提示词3 -->
+          <div class="prompt-item bg-surface rounded-lg shadow-card p-4 flex items-start gap-4" data-tags="product">
+            <div class="flex-1 min-w-0">
+              <p class="text-sm text-on-surface leading-relaxed mb-2">commercial product photography, clean white background, soft box lighting, minimal shadows, high-end cosmetic bottle, reflective surface, 4k</p>
+              <div class="flex items-center gap-2">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-primary/15 text-primary">产品</span>
+              </div>
+            </div>
+            <div class="flex flex-col items-end gap-2 shrink-0">
+              <button class="btn-copy-prompt w-8 h-8 rounded-md bg-surface-container hover:bg-surface-container-high flex items-center justify-center transition-colors cursor-pointer" aria-label="复制提示词" data-prompt="commercial product photography, clean white background, soft box lighting, minimal shadows, high-end cosmetic bottle, reflective surface, 4k">
+                <i data-lucide="copy" class="w-3.5 h-3.5 text-on-surface-variant"></i>
+              </button>
+              <span class="text-xs text-on-surface-variant flex items-center gap-1">
+                <i data-lucide="repeat-2" class="w-3 h-3"></i>76
+              </span>
+            </div>
+          </div>
+
+          <!-- 列表-提示词4 -->
+          <div class="prompt-item bg-surface rounded-lg shadow-card p-4 flex items-start gap-4" data-tags="landscape,stylized">
+            <div class="flex-1 min-w-0">
+              <p class="text-sm text-on-surface leading-relaxed mb-2">dreamy watercolor landscape, misty mountains at dawn, pastel color palette, flowing river through meadow, impressionist style, gentle light rays</p>
+              <div class="flex items-center gap-2">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-primary/15 text-primary">风景</span>
+                <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-surface-container-high text-on-surface-variant">风格化</span>
+              </div>
+            </div>
+            <div class="flex flex-col items-end gap-2 shrink-0">
+              <button class="btn-copy-prompt w-8 h-8 rounded-md bg-surface-container hover:bg-surface-container-high flex items-center justify-center transition-colors cursor-pointer" aria-label="复制提示词" data-prompt="dreamy watercolor landscape, misty mountains at dawn, pastel color palette, flowing river through meadow, impressionist style, gentle light rays">
+                <i data-lucide="copy" class="w-3.5 h-3.5 text-on-surface-variant"></i>
+              </button>
+              <span class="text-xs text-on-surface-variant flex items-center gap-1">
+                <i data-lucide="repeat-2" class="w-3 h-3"></i>64
+              </span>
+            </div>
+          </div>
+
+          <!-- 列表-提示词5 -->
+          <div class="prompt-item bg-surface rounded-lg shadow-card p-4 flex items-start gap-4" data-tags="concept">
+            <div class="flex-1 min-w-0">
+              <p class="text-sm text-on-surface leading-relaxed mb-2">surreal dreamscape, floating islands with waterfalls, bioluminescent flora, aurora borealis sky, fantasy concept art, detailed matte painting</p>
+              <div class="flex items-center gap-2">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-primary/15 text-primary">概念</span>
+              </div>
+            </div>
+            <div class="flex flex-col items-end gap-2 shrink-0">
+              <button class="btn-copy-prompt w-8 h-8 rounded-md bg-surface-container hover:bg-surface-container-high flex items-center justify-center transition-colors cursor-pointer" aria-label="复制提示词" data-prompt="surreal dreamscape, floating islands with waterfalls, bioluminescent flora, aurora borealis sky, fantasy concept art, detailed matte painting">
+                <i data-lucide="copy" class="w-3.5 h-3.5 text-on-surface-variant"></i>
+              </button>
+              <span class="text-xs text-on-surface-variant flex items-center gap-1">
+                <i data-lucide="repeat-2" class="w-3 h-3"></i>52
+              </span>
+            </div>
+          </div>
+
+          <!-- 列表-提示词6 -->
+          <div class="prompt-item bg-surface rounded-lg shadow-card p-4 flex items-start gap-4" data-tags="portrait,concept">
+            <div class="flex-1 min-w-0">
+              <p class="text-sm text-on-surface leading-relaxed mb-2">cybernetic portrait, half human half machine, glowing neural circuits, dark moody atmosphere, rain drops on metallic surface, blade runner aesthetic</p>
+              <div class="flex items-center gap-2">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-primary/15 text-primary">人物</span>
+                <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-surface-container-high text-on-surface-variant">概念</span>
+              </div>
+            </div>
+            <div class="flex flex-col items-end gap-2 shrink-0">
+              <button class="btn-copy-prompt w-8 h-8 rounded-md bg-surface-container hover:bg-surface-container-high flex items-center justify-center transition-colors cursor-pointer" aria-label="复制提示词" data-prompt="cybernetic portrait, half human half machine, glowing neural circuits, dark moody atmosphere, rain drops on metallic surface, blade runner aesthetic">
+                <i data-lucide="copy" class="w-3.5 h-3.5 text-on-surface-variant"></i>
+              </button>
+              <span class="text-xs text-on-surface-variant flex items-center gap-1">
+                <i data-lucide="repeat-2" class="w-3 h-3"></i>89
+              </span>
+            </div>
+          </div>
+
+          <!-- 列表-提示词7 -->
+          <div class="prompt-item bg-surface rounded-lg shadow-card p-4 flex items-start gap-4" data-tags="product,stylized">
+            <div class="flex-1 min-w-0">
+              <p class="text-sm text-on-surface leading-relaxed mb-2">luxury watch macro photography, golden hour light, diamond reflections, leather texture detail, premium lifestyle, hyper realistic, dramatic composition</p>
+              <div class="flex items-center gap-2">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-primary/15 text-primary">产品</span>
+                <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-surface-container-high text-on-surface-variant">风格化</span>
+              </div>
+            </div>
+            <div class="flex flex-col items-end gap-2 shrink-0">
+              <button class="btn-copy-prompt w-8 h-8 rounded-md bg-surface-container hover:bg-surface-container-high flex items-center justify-center transition-colors cursor-pointer" aria-label="复制提示词" data-prompt="luxury watch macro photography, golden hour light, diamond reflections, leather texture detail, premium lifestyle, hyper realistic, dramatic composition">
+                <i data-lucide="copy" class="w-3.5 h-3.5 text-on-surface-variant"></i>
+              </button>
+              <span class="text-xs text-on-surface-variant flex items-center gap-1">
+                <i data-lucide="repeat-2" class="w-3 h-3"></i>41
+              </span>
+            </div>
+          </div>
+
+          <!-- 列表-提示词8 -->
+          <div class="prompt-item bg-surface rounded-lg shadow-card p-4 flex items-start gap-4" data-tags="landscape">
+            <div class="flex-1 min-w-0">
+              <p class="text-sm text-on-surface leading-relaxed mb-2">dramatic aerial photography, volcanic island coastline, turquoise waters meeting dark sand, storm clouds gathering, golden sunlight breakthrough, national geographic</p>
+              <div class="flex items-center gap-2">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-primary/15 text-primary">风景</span>
+              </div>
+            </div>
+            <div class="flex flex-col items-end gap-2 shrink-0">
+              <button class="btn-copy-prompt w-8 h-8 rounded-md bg-surface-container hover:bg-surface-container-high flex items-center justify-center transition-colors cursor-pointer" aria-label="复制提示词" data-prompt="dramatic aerial photography, volcanic island coastline, turquoise waters meeting dark sand, storm clouds gathering, golden sunlight breakthrough, national geographic">
+                <i data-lucide="copy" class="w-3.5 h-3.5 text-on-surface-variant"></i>
+              </button>
+              <span class="text-xs text-on-surface-variant flex items-center gap-1">
+                <i data-lucide="repeat-2" class="w-3 h-3"></i>37
+              </span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ========== 品牌资产 Tab 内容 ========== -->
+      <div id="panel-brands" class="hidden">
+
+        <!-- 品牌卡片列表 -->
+        <div id="brand-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+
+          <!-- 列表-品牌1：TechVision -->
+          <div class="brand-item bg-surface rounded-lg shadow-card p-5">
+            <div class="flex items-center gap-3 mb-4">
+              <div class="w-10 h-10 rounded-lg flex items-center justify-center" style="background-color: #4A90D9;">
+                <span class="text-sm font-bold text-white">TV</span>
+              </div>
+              <div>
+                <h3 class="text-base font-semibold text-on-surface">TechVision</h3>
+                <p class="text-xs text-on-surface-variant">科技品牌</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 mb-4">
+              <div class="w-6 h-6 rounded-full border border-outline-variant/20" style="background-color: #4A90D9;" title="#4A90D9"></div>
+              <div class="w-6 h-6 rounded-full border border-outline-variant/20" style="background-color: #1A1A2E;" title="#1A1A2E"></div>
+              <div class="w-6 h-6 rounded-full border border-outline-variant/20" style="background-color: #E8E8E8;" title="#E8E8E8"></div>
+            </div>
+            <div class="flex flex-wrap gap-1.5 mb-4">
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-surface-container-high text-on-surface-variant">创新</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-surface-container-high text-on-surface-variant">科技</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-surface-container-high text-on-surface-variant">未来感</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-surface-container-high text-on-surface-variant">极简</span>
+            </div>
+            <div class="flex items-center gap-2 pt-3 border-t border-outline-variant/20">
+              <button id="btn-edit-brand-1" class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-surface-container text-on-surface hover:bg-surface-container-high transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer">
+                <i data-lucide="pencil" class="w-3 h-3"></i>编辑
+              </button>
+              <button id="btn-delete-brand-1" class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-surface-container text-error hover:bg-error/10 transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer">
+                <i data-lucide="trash-2" class="w-3 h-3"></i>删除
+              </button>
+            </div>
+          </div>
+
+          <!-- 列表-品牌2：GreenLeaf -->
+          <div class="brand-item bg-surface rounded-lg shadow-card p-5">
+            <div class="flex items-center gap-3 mb-4">
+              <div class="w-10 h-10 rounded-lg flex items-center justify-center" style="background-color: #4CAF50;">
+                <span class="text-sm font-bold text-white">GL</span>
+              </div>
+              <div>
+                <h3 class="text-base font-semibold text-on-surface">GreenLeaf</h3>
+                <p class="text-xs text-on-surface-variant">有机品牌</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 mb-4">
+              <div class="w-6 h-6 rounded-full border border-outline-variant/20" style="background-color: #4CAF50;" title="#4CAF50"></div>
+              <div class="w-6 h-6 rounded-full border border-outline-variant/20" style="background-color: #F5F0E8;" title="#F5F0E8"></div>
+              <div class="w-6 h-6 rounded-full border border-outline-variant/20" style="background-color: #8B6914;" title="#8B6914"></div>
+            </div>
+            <div class="flex flex-wrap gap-1.5 mb-4">
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-surface-container-high text-on-surface-variant">自然</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-surface-container-high text-on-surface-variant">有机</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-surface-container-high text-on-surface-variant">环保</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-surface-container-high text-on-surface-variant">清新</span>
+            </div>
+            <div class="flex items-center gap-2 pt-3 border-t border-outline-variant/20">
+              <button id="btn-edit-brand-2" class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-surface-container text-on-surface hover:bg-surface-container-high transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer">
+                <i data-lucide="pencil" class="w-3 h-3"></i>编辑
+              </button>
+              <button id="btn-delete-brand-2" class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-surface-container text-error hover:bg-error/10 transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer">
+                <i data-lucide="trash-2" class="w-3 h-3"></i>删除
+              </button>
+            </div>
+          </div>
+
+          <!-- 列表-品牌3：LuxeNoir -->
+          <div class="brand-item bg-surface rounded-lg shadow-card p-5">
+            <div class="flex items-center gap-3 mb-4">
+              <div class="w-10 h-10 rounded-lg flex items-center justify-center" style="background-color: #D4AF37;">
+                <span class="text-sm font-bold text-black">LN</span>
+              </div>
+              <div>
+                <h3 class="text-base font-semibold text-on-surface">LuxeNoir</h3>
+                <p class="text-xs text-on-surface-variant">奢侈品品牌</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 mb-4">
+              <div class="w-6 h-6 rounded-full border border-outline-variant/20" style="background-color: #D4AF37;" title="#D4AF37"></div>
+              <div class="w-6 h-6 rounded-full border border-outline-variant/20" style="background-color: #0A0A0F;" title="#0A0A0F"></div>
+              <div class="w-6 h-6 rounded-full border border-outline-variant/20" style="background-color: #FAFAFA;" title="#FAFAFA"></div>
+            </div>
+            <div class="flex flex-wrap gap-1.5 mb-4">
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-surface-container-high text-on-surface-variant">奢华</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-surface-container-high text-on-surface-variant">优雅</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-surface-container-high text-on-surface-variant">黑金</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-surface-container-high text-on-surface-variant">高级</span>
+            </div>
+            <div class="flex items-center gap-2 pt-3 border-t border-outline-variant/20">
+              <button id="btn-edit-brand-3" class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-surface-container text-on-surface hover:bg-surface-container-high transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer">
+                <i data-lucide="pencil" class="w-3 h-3"></i>编辑
+              </button>
+              <button id="btn-delete-brand-3" class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-surface-container text-error hover:bg-error/10 transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer">
+                <i data-lucide="trash-2" class="w-3 h-3"></i>删除
+              </button>
+            </div>
+          </div>
+
+          <!-- 创建品牌按钮（金色虚线边框卡片） -->
+          <div id="btn-create-brand" class="rounded-lg border-2 border-dashed border-primary/40 hover:border-primary/70 p-5 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors min-h-[200px]">
+            <div class="w-10 h-10 rounded-lg bg-primary/15 flex items-center justify-center">
+              <i data-lucide="plus" class="w-5 h-5 text-primary"></i>
+            </div>
+            <span class="text-sm font-medium text-primary">创建品牌</span>
+            <span class="text-xs text-on-surface-variant">定义品牌色彩与风格</span>
+          </div>
+
+        </div>
+      </div>
+
+    </main>
+    <!-- @main-content:end -->
+  </div>
+  <!-- @nav:end 导航组件 -->
+
+  <script>
+  $(function () {
+
+    // ====== Tab 切换逻辑 ======
+    var $tabs = $('[id^="tab-"]');
+    var $panels = $('[id^="panel-"]');
+
+    $tabs.on('click', function () {
+      var target = $(this).data('tab');
+      // 切换 tab 按钮样式
+      $tabs.removeClass('bg-primary text-on-primary').addClass('text-on-surface-variant hover:text-on-surface hover:bg-surface-container/50');
+      $(this).removeClass('text-on-surface-variant hover:text-on-surface hover:bg-surface-container/50').addClass('bg-primary text-on-primary');
+      // 切换面板显示
+      $panels.addClass('hidden');
+      $('#panel-' + target).removeClass('hidden');
+      // 重新渲染图标（因为 tab 切换后新面板的图标需要初始化）
+      lucide.createIcons();
+    });
+
+    // ====== 图片素材 - 筛选标签 ======
+    $('#panel-images').on('click', '.filter-tag', function () {
+      // 切换激活态
+      $('#panel-images .filter-tag').removeClass('active bg-primary/15 text-primary').addClass('bg-surface-container text-on-surface-variant');
+      $(this).removeClass('bg-surface-container text-on-surface-variant').addClass('active bg-primary/15 text-primary');
+      
+      var filter = $(this).data('filter');
+      var $cards = $('#image-grid .image-card');
+
+      if (filter === 'all') {
+        $cards.show();
+      } else if (filter === 'favorited') {
+        $cards.each(function () {
+          if ($(this).attr('data-favorited') === 'true') {
+            $(this).show();
+          } else {
+            $(this).hide();
+          }
+        });
+      } else {
+        // generated / uploaded
+        $cards.each(function () {
+          if ($(this).attr('data-category') === filter) {
+            $(this).show();
+          } else {
+            $(this).hide();
+          }
+        });
+      }
+    });
+
+    // ====== 图片素材 - 收藏星标切换 ======
+    $('#image-grid').on('click', '.fav-star', function (e) {
+      e.stopPropagation();
+      var $btn = $(this);
+      var isFav = $btn.attr('data-fav') === 'true';
+      if (isFav) {
+        $btn.attr('data-fav', 'false').attr('aria-label', '收藏');
+        $btn.closest('.image-card').attr('data-favorited', 'false');
+        $btn.html('<i data-lucide="star" class="w-4 h-4 text-on-surface-variant/60"></i>');
+      } else {
+        $btn.attr('data-fav', 'true').attr('aria-label', '取消收藏');
+        $btn.closest('.image-card').attr('data-favorited', 'true');
+        $btn.html('<i data-lucide="star" class="w-4 h-4 text-primary fill-primary"></i>');
+      }
+      lucide.createIcons();
+    });
+
+    // ====== 图片素材 - 操作按钮 ======
+    $('#image-grid').on('click', '.img-action-btn', function (e) {
+      e.stopPropagation();
+      var action = $(this).data('action');
+      var $card = $(this).closest('.image-card');
+      
+      if (action === 'download') {
+        console.log('下载图片:', $card.find('img').attr('alt'));
+      } else if (action === 'delete') {
+        // 简单交互：直接从 DOM 移除卡片
+        $card.fadeOut(300, function () { $(this).remove(); });
+      } else if (action === 'add-to-project') {
+        console.log('添加到项目:', $card.find('img').attr('alt'));
+        // 后续应实现：弹出项目选择弹窗，选择后调用接口将素材添加到指定项目
+      }
+    });
+
+    // ====== 提示词库 - 标签筛选 ======
+    $('#panel-prompts').on('click', '.prompt-filter-tag', function () {
+      $('#panel-prompts .prompt-filter-tag').removeClass('active bg-primary/15 text-primary').addClass('bg-surface-container text-on-surface-variant');
+      $(this).removeClass('bg-surface-container text-on-surface-variant').addClass('active bg-primary/15 text-primary');
+
+      var filter = $(this).data('filter');
+      var $items = $('#prompt-list .prompt-item');
+
+      if (filter === 'all') {
+        $items.show();
+      } else {
+        $items.each(function () {
+          var tags = $(this).attr('data-tags') || '';
+          if (tags.indexOf(filter) !== -1) {
+            $(this).show();
+          } else {
+            $(this).hide();
+          }
+        });
+      }
+    });
+
+    // ====== 提示词库 - 复制提示词 ======
+    $('#prompt-list').on('click', '.btn-copy-prompt', function () {
+      var prompt = $(this).data('prompt');
+      // 复制到剪贴板
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(prompt).then(function () {
+          console.log('已复制提示词到剪贴板');
+        });
+      } else {
+        console.log('复制提示词:', prompt);
+      }
+      // 视觉反馈：临时更换图标为 check
+      var $icon = $(this).find('[data-lucide]');
+      $icon.attr('data-lucide', 'check').removeClass('text-on-surface-variant').addClass('text-success');
+      lucide.createIcons();
+      var $btn = $(this);
+      setTimeout(function () {
+        $icon.attr('data-lucide', 'copy').removeClass('text-success').addClass('text-on-surface-variant');
+        lucide.createIcons();
+      }, 1500);
+    });
+
+    // ====== 品牌资产 - 编辑按钮 ======
+    // 编辑品牌 - 点击后应实现内联编辑或弹窗编辑：
+    // 1. 弹出品牌编辑弹窗，包含品牌名称、主色调选择器、关键词标签编辑
+    // 2. 用户修改后点击保存，更新品牌卡片的内容
+    // 3. 色调选择器应支持颜色拾取和手动输入色值
+    // 4. 关键词标签应支持添加和删除
+    $('#btn-edit-brand-1, #btn-edit-brand-2, #btn-edit-brand-3').on('click', function () {
+      var brandName = $(this).closest('.brand-item').find('h3').text();
+      console.log('编辑品牌:', brandName);
+    });
+
+    // ====== 品牌资产 - 删除按钮 ======
+    $('#btn-delete-brand-1, #btn-delete-brand-2, #btn-delete-brand-3').on('click', function () {
+      var $item = $(this).closest('.brand-item');
+      var brandName = $item.find('h3').text();
+      // 简单交互：确认后删除卡片
+      $item.fadeOut(300, function () { $(this).remove(); });
+      console.log('删除品牌:', brandName);
+    });
+
+    // ====== 品牌资产 - 创建品牌 ======
+    // 创建品牌 - 点击后应实现：
+    // 1. 弹出品牌创建弹窗，包含品牌名称输入、主色调选择器（至少3个色块）
+    // 2. 关键词标签输入（输入后回车添加，点击标签上的x删除）
+    // 3. 品牌缩写自动取名称首字母
+    // 4. 点击确认后在品牌列表中新增一个品牌卡片
+    $('#btn-create-brand').on('click', function () {
+      console.log('创建新品牌');
+    });
+
+    // ====== 上传素材按钮 ======
+    // 上传素材 - 点击后应实现：
+    // 1. 弹出文件选择对话框（支持 jpg/png/webp 格式）
+    // 2. 选择文件后显示上传进度
+    // 3. 上传完成后在图片网格中新增卡片
+    $('#btn-upload-asset').on('click', function () {
+      console.log('上传素材');
+    });
+
+    // ====== 全局搜索 ======
+    $('#input-search').on('input', function () {
+      var keyword = $(this).val().toLowerCase().trim();
+      // 图片素材搜索
+      $('#image-grid .image-card').each(function () {
+        var alt = $(this).find('img').attr('alt') || '';
+        if (keyword === '' || alt.toLowerCase().indexOf(keyword) !== -1) {
+          $(this).show();
+        } else {
+          $(this).hide();
+        }
+      });
+    });
+
+    // ====== 提示词搜索 ======
+    $('#input-search-prompt').on('input', function () {
+      var keyword = $(this).val().toLowerCase().trim();
+      $('#prompt-list .prompt-item').each(function () {
+        var text = $(this).find('p').text() || '';
+        if (keyword === '' || text.toLowerCase().indexOf(keyword) !== -1) {
+          $(this).show();
+        } else {
+          $(this).hide();
+        }
+      });
+    });
+
+  });
+  </script>
+
+  <script>lucide.createIcons();</script>
+</body>
+
+</html>
