@@ -29,7 +29,7 @@ import {
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
   Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play
 } from 'lucide-react';
-import type { CanvasAnnotation } from '@/lib/canvas-annotation';
+import type { CanvasAnnotation, AnnotationRegion } from '@/lib/canvas-annotation';
 import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, mergeAnnotationsForImage, ANNOTATION_COLORS, ANNOTATION_COLORS_MONO, computeAnnotationRegion } from '@/lib/canvas-annotation';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
 import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
@@ -955,7 +955,7 @@ export function InfiniteCanvas({
   const [annotationMode, setAnnotationMode] = useState(false);
   const [annotations, setAnnotations] = useState<CanvasAnnotation[]>([]);
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
-  const [activeAnnotationInput, setActiveAnnotationInput] = useState<string | null>(null);
+
   const [annotationInputText, setAnnotationInputText] = useState('');
   const [hoveredAnnotationId, setHoveredAnnotationId] = useState<string | null>(null);
   const annotationIdCounter = useRef(0);
@@ -2058,7 +2058,7 @@ export function InfiniteCanvas({
       setBoxSelectStart({ x: e.clientX, y: e.clientY });
       setBoxSelectEnd({ x: e.clientX, y: e.clientY });
     }
-  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages]);
+  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     // Annotation region drag tracking
@@ -2192,7 +2192,7 @@ export function InfiniteCanvas({
       const offsetY = e.clientY - hexCubeDragStart.y;
       setHexCubeDragOffset({ x: offsetX, y: offsetY });
     }
-  }, [editMode, isPanning, isMiddlePanning, panStart, boxSelectStart, isLongPressing, resizingImage, resizeCorner, images, dragTarget, dragStart, resizeStart, screenToCanvas, onImagesChange, handleEditMouseMove, groupDragTarget, groupDragStart, genGroupDragTarget, genGroupDragStart, hexCubeDragTarget, hexCubeDragStart]);
+  }, [editMode, isPanning, isMiddlePanning, panStart, boxSelectStart, isLongPressing, resizingImage, resizeCorner, images, dragTarget, dragStart, resizeStart, screenToCanvas, onImagesChange, handleEditMouseMove, groupDragTarget, groupDragStart, genGroupDragTarget, genGroupDragStart, hexCubeDragTarget, hexCubeDragStart, annotationMode, annotationRegionStart]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     // Annotation region drag completion
@@ -2206,9 +2206,22 @@ export function InfiniteCanvas({
       if (w > 15 && h > 15) {
         // Hit test to find target image
         const hitId = hitTestImage(annotationRegionStart.cx, annotationRegionStart.cy);
-        const newAnn = createAnnotation((x1 + x2) / 2, (y1 + y2) / 2, '', hitId, { x: x1, y: y1, w, h });
+        // Normalize region coordinates relative to target image
+        let region: AnnotationRegion | undefined;
+        if (hitId) {
+          const hitImg = images.find(i => i.id === hitId);
+          if (hitImg) {
+            region = {
+              x: Math.max(0, Math.min(1, (x1 - hitImg.x) / hitImg.width)),
+              y: Math.max(0, Math.min(1, (y1 - hitImg.y) / hitImg.height)),
+              w: Math.min(1, w / hitImg.width),
+              h: Math.min(1, h / hitImg.height),
+            };
+          }
+        }
+        const newAnn = createAnnotation((x1 + x2) / 2, (y1 + y2) / 2, '', hitId, region);
         setAnnotations(prev => [...prev, newAnn]);
-        setActiveAnnotationInput(newAnn.id);
+        setEditingAnnotationId(newAnn.id);
         setAnnotationInputText('');
         setTimeout(() => annotationInputRef.current?.focus(), 50);
       }
@@ -2217,8 +2230,20 @@ export function InfiniteCanvas({
       setIsDraggingRegion(false);
       return;
     }
-    // Clean up annotation region state even if drag was too small
+    // Clean up annotation region state — handle click (no drag) as Pin creation
     if (annotationRegionStart && annotationMode) {
+      // If not dragging region, treat as a simple click → create Pin + input
+      if (!isDraggingRegion) {
+        const canvasPos = screenToCanvas(e.clientX, e.clientY);
+        const targetImageId = hitTestImage(canvasPos.x, canvasPos.y);
+        if (targetImageId) {
+          const newAnn = createAnnotation(canvasPos.x, canvasPos.y, '', targetImageId);
+          setAnnotations(prev => [...prev, newAnn]);
+          setEditingAnnotationId(newAnn.id);
+          setAnnotationInputText('');
+          setTimeout(() => annotationInputRef.current?.focus(), 50);
+        }
+      }
       setAnnotationRegionStart(null);
       setAnnotationRegionCurrent(null);
       setIsDraggingRegion(false);
@@ -2452,7 +2477,7 @@ export function InfiniteCanvas({
     }
 
     mouseDownOnImageRef.current = false;
-  }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp, groupDragTarget, groupDragOffset, genGroupDragTarget, genGroupDragOffset, hexCubeDragTarget, hexCubeDragOffset, resizingImage, resizePreview]);
+  }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp, groupDragTarget, groupDragOffset, genGroupDragTarget, genGroupDragOffset, hexCubeDragTarget, hexCubeDragOffset, resizingImage, resizePreview, annotationMode, annotationRegionStart, annotationRegionCurrent, isDraggingRegion]);
 
   const handleMouseLeave = useCallback(() => {
     if (editMode !== 'none') {
@@ -4751,10 +4776,14 @@ export function InfiniteCanvas({
       }
 
       // 构建请求体（含蒙版）
+      // Calculate aspect ratio from original image
+      const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
+      const g = gcd(targetImg.width, targetImg.height);
+      const aspectRatio = `${targetImg.width / g}:${targetImg.height / g}`;
       const requestBody: Record<string, unknown> = {
         image: imageDataUrl,
         prompt,
-        size: '1:1',
+        size: aspectRatio,
         quality: 'high',
         model: 'gpt-image-2',
         count: 1,
@@ -4774,17 +4803,15 @@ export function InfiniteCanvas({
           mc.width = img.naturalWidth;
           mc.height = img.naturalHeight;
           const mctx = mc.getContext('2d');
-          if (mctx) {
+          if (mctx && annotation.region) {
             // 黑色背景（保留区域）
             mctx.fillStyle = '#000000';
             mctx.fillRect(0, 0, mc.width, mc.height);
-            // 白色蒙版（修改区域）
-            const scaleX = img.naturalWidth / targetImg.width;
-            const scaleY = img.naturalHeight / targetImg.height;
-            const rx = (annotation.region.x - targetImg.x) * scaleX;
-            const ry = (annotation.region.y - targetImg.y) * scaleY;
-            const rw = annotation.region.w * scaleX;
-            const rh = annotation.region.h * scaleY;
+            // 白色蒙版（修改区域）— region is normalized 0~1
+            const rx = annotation.region.x * img.naturalWidth;
+            const ry = annotation.region.y * img.naturalHeight;
+            const rw = annotation.region.w * img.naturalWidth;
+            const rh = annotation.region.h * img.naturalHeight;
             mctx.fillStyle = '#ffffff';
             mctx.fillRect(rx, ry, rw, rh);
             requestBody.mask = mc.toDataURL('image/png');
@@ -5068,7 +5095,7 @@ export function InfiniteCanvas({
     if (!annotationMode) {
       // Remove pending (unsubmitted) annotations when leaving mode
       setAnnotations(prev => prev.filter(a => a.status !== 'pending'));
-      setActiveAnnotationInput(null);
+      setEditingAnnotationId(null);
       setAnnotationInputText('');
       setFollowUpInputId(null);
       setFollowUpInputText('');
@@ -9975,10 +10002,13 @@ export function InfiniteCanvas({
                   )}
                   {/* Region rectangle */}
                   {ann.region && (() => {
-                    const rx = ann.region.x * zoom + viewOffset.x;
-                    const ry = ann.region.y * zoom + viewOffset.y;
-                    const rw = ann.region.w * zoom;
-                    const rh = ann.region.h * zoom;
+                    // Region is normalized (0~1) relative to target image — convert back to canvas coords then screen
+                    const hitImg = ann.targetImageId ? images.find(i => i.id === ann.targetImageId) : null;
+                    if (!hitImg || !ann.region) return null;
+                    const rx = (hitImg.x + ann.region.x * hitImg.width) * zoom + viewOffset.x;
+                    const ry = (hitImg.y + ann.region.y * hitImg.height) * zoom + viewOffset.y;
+                    const rw = ann.region.w * hitImg.width * zoom;
+                    const rh = ann.region.h * hitImg.height * zoom;
                     return (
                       <rect x={rx} y={ry} width={rw} height={rh} fill="none" stroke={fillColor} strokeWidth={1.5} strokeDasharray="6 3" rx={2} opacity={0.7} />
                     );
@@ -10004,8 +10034,8 @@ export function InfiniteCanvas({
         )}
 
         {/* ====== ANNOTATION INPUT POPUP ====== */}
-        {activeAnnotationInput && (() => {
-          const ann = annotations.find(a => a.id === activeAnnotationInput);
+        {editingAnnotationId && (() => {
+          const ann = annotations.find(a => a.id === editingAnnotationId);
           if (!ann) return null;
           const sx = ann.x * zoom + viewOffset.x;
           const sy = ann.y * zoom + viewOffset.y;
@@ -10032,7 +10062,7 @@ export function InfiniteCanvas({
                       submitAnnotationInput();
                     }
                     if (e.key === 'Escape') {
-                      setActiveAnnotationInput(null);
+                      setEditingAnnotationId(null);
                       setAnnotationInputText('');
                     }
                   }}
