@@ -650,7 +650,7 @@
     /* === 内容窗口：横向滚动资产条 === */
     .content-strip-panel {
       position: absolute;
-      bottom: 38px; /* above exec-log header */
+      bottom: 38px; /* above exec-log header bar */
       left: 256px;
       right: 288px;
       background: rgba(13,17,23,0.96);
@@ -661,11 +661,12 @@
       z-index: 41;
       display: flex;
       flex-direction: column;
+      max-height: 140px;
       transition: transform 300ms var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1)),
                   opacity 200ms ease;
     }
     .content-strip-panel.collapsed {
-      transform: translateY(calc(100% - 0px));
+      transform: translateY(100%);
       opacity: 0;
       pointer-events: none;
     }
