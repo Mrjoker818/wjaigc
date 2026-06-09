@@ -66,52 +66,64 @@ interface VtracerParams {
 
 const QUALITY_PRESETS: Record<QualityPreset, VtracerParams> = {
   fast: {
-    colorPrecision: 6,        // 64色: 快速但保留主要色彩
-    filterSpeckle: 12,
+    colorPrecision: 7,        // 128色: 快速同时保留主要色彩（丹青AI均衡策略）
+    filterSpeckle: 8,         // 适度去噪，保留细节
     cornerThreshold: 1,
-    lengthThreshold: 10,
-    spliceThreshold: 45,
-    pathPrecision: 2,
-    hierarchical: 'stacked',
-    curveMode: 'polygon',
-    layerDifference: 24,
-    maxIterations: 1,
-  },
-  balanced: {
-    colorPrecision: 8,        // 256色: 接近原图色彩，参考Vector Magic全彩描摹
-    filterSpeckle: 6,
-    cornerThreshold: 1,
-    lengthThreshold: 6,
+    lengthThreshold: 8,
     spliceThreshold: 45,
     pathPrecision: 4,
-    hierarchical: 'stacked',
-    curveMode: 'spline',
-    layerDifference: 16,
+    hierarchical: 'cutout',   // cutout: 精确裁切，边缘更干净（丹青AI同款策略）
+    curveMode: 'spline',      // spline: 贝塞尔曲线比 polygon 直边更平滑
+    layerDifference: 14,
     maxIterations: 2,
   },
-  high: {
-    colorPrecision: 10,       // 1024色: 高保真色彩还原
-    filterSpeckle: 4,
+  balanced: {
+    colorPrecision: 10,       // 1024色: 接近原图色彩还原（丹青AI默认品质）
+    filterSpeckle: 4,         // 保留更多细节
     cornerThreshold: 1,
     lengthThreshold: 4,
     spliceThreshold: 45,
     pathPrecision: 6,
-    hierarchical: 'stacked',
+    hierarchical: 'cutout',   // cutout: 精确裁切模式，边缘更干净（丹青AI同款策略）
     curveMode: 'spline',
     layerDifference: 8,
     maxIterations: 4,
   },
-  max: {
-    colorPrecision: 12,       // 4096色: 极致色彩精度
+  high: {
+    colorPrecision: 12,       // 4096色: 高保真色彩还原
     filterSpeckle: 2,
+    cornerThreshold: 1,
+    lengthThreshold: 3,
+    spliceThreshold: 45,
+    pathPrecision: 8,
+    hierarchical: 'cutout',   // cutout: 精确裁切，边缘无锯齿
+    curveMode: 'spline',
+    layerDifference: 4,
+    maxIterations: 6,
+  },
+  max: {
+    colorPrecision: 14,       // 16384色: 极致色彩精度，接近无损
+    filterSpeckle: 1,
     cornerThreshold: 1,
     lengthThreshold: 2,
     spliceThreshold: 45,
-    pathPrecision: 8,
+    pathPrecision: 10,
     hierarchical: 'cutout',
     curveMode: 'spline',
-    layerDifference: 4,
-    maxIterations: 8,
+    layerDifference: 2,
+    maxIterations: 10,
+  },
+  print: {
+    colorPrecision: 12,       // 4096色: 印刷级色彩精度
+    filterSpeckle: 1,         // 保留所有细节，印刷不允许丢失
+    cornerThreshold: 0.5,     // 更锐利的角落
+    lengthThreshold: 2,
+    spliceThreshold: 30,      // 更精细的路径拼接
+    pathPrecision: 10,        // 最高坐标精度
+    hierarchical: 'cutout',   // cutout: 印刷需要精确边缘
+    curveMode: 'spline',
+    layerDifference: 2,       // 最小层差，保留最多色彩层
+    maxIterations: 12,
   },
 };
 
@@ -242,23 +254,39 @@ async function preprocessForVTracer(
   // Reference: Figma-design sharp median(1) + blur(0.18)
   pipeline = pipeline.median(1).blur(0.3);
 
-  // Step 4: For low colorPrecision, pre-quantize with sharp to help VTracer
-  // This dramatically reduces output path count for faster/balanced presets
-  if (params.colorPrecision <= 5) {
-    // Quantize to fewer colors: 2^(colorPrecision*0.8) approximate unique colors
-    const numColors = Math.min(256, Math.max(8, Math.round(Math.pow(2, params.colorPrecision * 0.8))));
+  // Step 4: Smart color quantization preprocessing (inspired by Danqing AI)
+  // This dramatically improves SVG quality by giving VTracer cleaner, fewer colors
+  //
+  // Key insight: VTracer's internal quantizer treats every pixel independently,
+  // causing color noise in photos. Sharp's palette quantizer produces clean,
+  // well-dithered colors that VTracer can trace precisely.
+  //
+  // Strategy:
+  //   - colorPrecision <= 5: aggressive quantize (2^(cp*0.8) colors)
+  //   - colorPrecision 6-9: moderate quantize (2^(cp*0.9) colors) with dithering
+  //   - colorPrecision 10+: minimal quantize (preserve detail for print quality)
+  const targetColors = params.colorPrecision <= 5
+    ? Math.min(128, Math.max(8, Math.round(Math.pow(2, params.colorPrecision * 0.8))))
+    : params.colorPrecision <= 9
+      ? Math.min(512, Math.max(32, Math.round(Math.pow(2, params.colorPrecision * 0.9))))
+      : Math.min(4096, Math.round(Math.pow(2, params.colorPrecision * 0.95)));
+
+  if (targetColors < 4096) {
+    // Use sharp palette quantization — much cleaner than VTracer's internal quantizer
     pipeline = pipeline.png({
       quality: 100,
       compressionLevel: 0,  // Fast write, we don't need small file
       palette: true,
-      colors: numColors,
-      effort: 7,
+      colors: targetColors,
+      effort: params.colorPrecision <= 6 ? 7 : 9,  // Higher effort for quality presets
+      dither: params.colorPrecision >= 8 ? 0.8 : 1.0,  // Floyd-Steinberg dithering
     });
   } else {
+    // Max quality: preserve all colors, let VTracer handle quantization
     pipeline = pipeline.png({
       quality: 100,
       compressionLevel: 0,
-      effort: 1,  // Speed for high quality (VTracer does the real work)
+      effort: 1,  // Speed (VTracer does the real work)
     });
   }
 

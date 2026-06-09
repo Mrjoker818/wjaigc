@@ -142,8 +142,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const accentBgLight = isDark ? 'bg-[#d4af37]/15' : 'bg-[#d4af37]/10';
   const accentClass = 'text-[#d4af37]';
   // Admin styling
-  const softClass = isDark ? 'bg-[#171717] border-[#2a2a2a]' : 'bg-gray-50 border-gray-200';
-  const inputClass = isDark ? 'bg-[#0d0d0d] border-[#2a2a2a] text-white placeholder:text-[#555]' : 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-400';
+  const softClass = isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-gray-50 border-gray-200';
+  const inputClass = isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-[#555]' : 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-400';
   const labelClass = `block text-xs font-medium mb-1.5 ${isDark ? 'text-[#b8b8b8]' : 'text-gray-600'}`;
 
   // ─── Project data ───
@@ -950,6 +950,101 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           </div>
         )}
 
+        {/* ── Tab: Stats ── */}
+        {activeTab === 'stats' && (
+          <div className="h-full overflow-y-auto p-8">
+            <h1 className={`text-2xl font-bold mb-1 ${textPrimary}`}>统计</h1>
+            <p className={`text-sm mb-6 ${textSecondary}`}>用量统计（近 30 天）</p>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+              {[
+                { label: '请求数', value: statsArr.reduce((a, s) => a + (s.requests || 0), 0), icon: Zap, color: 'text-[#d4af37]' },
+                { label: '图片数', value: statsArr.reduce((a, s) => a + (s.imagesGenerated || 0), 0), icon: Image, color: 'text-blue-400' },
+                { label: 'Token', value: statsArr.reduce((a, s) => a + (s.tokensUsed || 0), 0).toLocaleString(), icon: BarChart3, color: 'text-green-400' },
+                { label: '费用', value: `$${statsArr.reduce((a, s) => a + (s.estimatedCost || 0), 0).toFixed(2)}`, icon: Wallet, color: 'text-purple-400' },
+              ].map((stat, i) => (
+                <div key={i} className={`rounded-xl border p-5 ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'}`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <stat.icon className={`w-4 h-4 ${stat.color}`} />
+                    <span className={`text-xs ${textSecondary}`}>{stat.label}</span>
+                  </div>
+                  <p className={`text-2xl font-bold ${textPrimary}`}>{stat.value}</p>
+                </div>
+              ))}
+            </div>
+            {statsArr.length === 0 && (
+              <div className={`flex flex-col items-center justify-center h-48 ${textSecondary}`}>
+                <BarChart3 className="w-12 h-12 mb-3 opacity-30" />
+                <p className="text-sm">暂无统计数据</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Tab: Settings ── */}
+        {activeTab === 'settings' && (
+          <div className="h-full overflow-y-auto p-8">
+            <h1 className={`text-2xl font-bold mb-1 ${textPrimary}`}>设置</h1>
+            <p className={`text-sm mb-6 ${textSecondary}`}>账户信息与偏好设置</p>
+
+            {/* User Info */}
+            <div className={`rounded-xl border p-5 mb-4 ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'}`}>
+              <div className="flex items-center gap-4 mb-4">
+                <div className={`w-14 h-14 rounded-xl flex items-center justify-center text-white font-bold text-xl ${isDark ? 'bg-gradient-to-br from-[#d4af37] to-[#b8860b]' : 'bg-gradient-to-br from-gray-600 to-gray-800'}`}>
+                  {user?.name?.charAt(0).toUpperCase() || 'U'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className={`text-base font-semibold ${textPrimary}`}>{user?.name || '未知用户'}</p>
+                  <p className={`text-sm ${textSecondary}`}>{user?.email || '未设置邮箱'}</p>
+                </div>
+                <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${user?.role === 'admin' ? (isDark ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'bg-amber-100 text-amber-700') : (isDark ? 'bg-white/5 text-[#888] border border-white/10' : 'bg-gray-100 text-gray-500')}`}>
+                  {user?.role === 'admin' ? '管理员' : '普通用户'}
+                </span>
+              </div>
+              <div className={`text-sm space-y-1 ${textSecondary}`}>
+                <p>用户ID: {user?.id || '-'}</p>
+                <p>加入时间: {user?.createdAt ? new Date(user.createdAt).toLocaleDateString() : '-'}</p>
+              </div>
+            </div>
+
+            {/* API Permissions */}
+            <div className={`rounded-xl border p-5 mb-4 ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'}`}>
+              <p className={`text-xs font-medium uppercase tracking-wider mb-3 ${textSecondary}`}>API 权限</p>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { key: 'image', label: '图像生成', icon: Image },
+                  { key: 'chat', label: 'AI 聊天', icon: Sparkles },
+                  { key: 'threeD', label: '3D 模型', icon: Box },
+                  { key: 'imageEdit', label: '图像编辑', icon: Pencil },
+                  { key: 'vectorize', label: '矢量化', icon: Palette },
+                  { key: 'layer', label: '图层分离', icon: Layers },
+                ].map(perm => {
+                  const enabled = user?.apiPermissions?.[perm.key as keyof typeof user.apiPermissions] ?? false;
+                  const PermIcon = perm.icon;
+                  return (
+                    <div key={perm.key} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${enabled ? (isDark ? 'bg-[#d4af37]/10 text-[#d4af37]' : 'bg-green-50 text-green-600') : (isDark ? 'bg-white/5 text-[#444]' : 'bg-gray-100 text-gray-300')}`}>
+                      <PermIcon className="w-3.5 h-3.5" />
+                      <span>{perm.label}</span>
+                      <span className={`ml-auto w-2 h-2 rounded-full ${enabled ? 'bg-green-400' : (isDark ? 'bg-white/10' : 'bg-gray-300')}`} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className={`rounded-xl border p-5 ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'}`}>
+              <div className="flex flex-col gap-3">
+                <button onClick={() => { if (user) { mgr.setCurrentUser(user.id); } }} className={`w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-medium transition-all cursor-pointer ${isDark ? 'bg-white/5 border border-white/10 text-[#d4af37] hover:bg-white/10' : 'bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200'}`}>
+                  <RotateCcw className="w-4 h-4" /> 刷新会话
+                </button>
+                <button onClick={onLogout} className="w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-medium transition-all cursor-pointer bg-red-900/20 text-red-400 border border-red-900/30 hover:bg-red-900/30">
+                  <LogOut className="w-4 h-4" /> 退出登录
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ══════════ ADMIN TABS ══════════ */}
 
         {/* ── Tab: Users ── */}
@@ -979,7 +1074,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                           <div className="flex items-center gap-2">
                             <input className={`h-8 px-2 rounded-lg border text-sm flex-1 ${inputClass}`} value={editName} onChange={e => setEditName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void handleRenameUser(u.id); if (e.key === 'Escape') { setEditingUser(null); setEditName(''); } }} autoFocus />
                             <button onClick={() => void handleRenameUser(u.id)} className="px-2 py-1 rounded-lg bg-[#d4af37] text-black text-xs font-semibold cursor-pointer">保存</button>
-                            <button onClick={() => { setEditingUser(null); setEditName(''); }} className={`px-2 py-1 rounded-lg text-xs border cursor-pointer ${isDark ? 'border-[#2a2a2a] text-[#888]' : 'border-gray-200 text-gray-500'}`}>取消</button>
+                            <button onClick={() => { setEditingUser(null); setEditName(''); }} className={`px-2 py-1 rounded-lg text-xs border cursor-pointer ${isDark ? 'border-white/10 text-[#888]' : 'border-gray-200 text-gray-500'}`}>取消</button>
                           </div>
                         ) : (
                           <div className="flex items-center gap-2">
@@ -995,12 +1090,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     <div className="mt-3 flex flex-wrap gap-1.5">
                       {(Object.keys(userPermissionLabels) as UserPermissionKey[]).map(key => {
                         const enabled = u.apiPermissions?.[key] ?? true;
-                        return (<button key={key} onClick={() => void handleToggleUserPermission(u, key)} className={`text-[10px] px-2 py-1 rounded-md border cursor-pointer ${enabled ? `${accentBgLight} ${accentClass} border-transparent` : isDark ? 'bg-[#0d0d0d] text-[#555] border-[#2a2a2a]' : 'bg-gray-50 text-gray-300 border-gray-200'}`}>{userPermissionLabels[key]}</button>);
+                        return (<button key={key} onClick={() => void handleToggleUserPermission(u, key)} className={`text-[10px] px-2 py-1 rounded-md border cursor-pointer ${enabled ? `${accentBgLight} ${accentClass} border-transparent` : isDark ? 'bg-white/5 text-[#555] border-white/10' : 'bg-gray-50 text-gray-300 border-gray-200'}`}>{userPermissionLabels[key]}</button>);
                       })}
                     </div>
                     {/* Actions */}
                     <div className="flex items-center gap-2 mt-3 pt-2 border-t border-current/5">
-                      <button onClick={() => { setEditingUser(u.id); setEditName(u.name); }} className={`text-xs px-2 py-1 rounded-lg cursor-pointer ${isDark ? 'hover:bg-[#222] text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`}><Pencil className="w-3 h-3 inline mr-1" />重命名</button>
+                      <button onClick={() => { setEditingUser(u.id); setEditName(u.name); }} className={`text-xs px-2 py-1 rounded-lg cursor-pointer ${isDark ? 'hover:bg-white/10 text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`}><Pencil className="w-3 h-3 inline mr-1" />重命名</button>
                       {resetPwdUser === u.id ? (
                         <div className="flex items-center gap-1">
                           <input type="password" className={`h-7 px-2 rounded-lg border text-xs w-24 ${inputClass}`} placeholder="新密码" value={newPassword} onChange={e => setNewPassword(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void handleResetPassword(u.id); }} autoFocus />
@@ -1008,11 +1103,11 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                           <button onClick={() => { setResetPwdUser(null); setNewPassword(''); }} className={`text-[10px] px-2 py-1 rounded-lg cursor-pointer ${isDark ? 'text-[#888]' : 'text-gray-500'}`}>取消</button>
                         </div>
                       ) : (
-                        <button onClick={() => { setResetPwdUser(u.id); setNewPassword(''); }} className={`text-xs px-2 py-1 rounded-lg cursor-pointer ${isDark ? 'hover:bg-[#222] text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`}><KeyRound className="w-3 h-3 inline mr-1" />重置密码</button>
+                        <button onClick={() => { setResetPwdUser(u.id); setNewPassword(''); }} className={`text-xs px-2 py-1 rounded-lg cursor-pointer ${isDark ? 'hover:bg-white/10 text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`}><KeyRound className="w-3 h-3 inline mr-1" />重置密码</button>
                       )}
                       {u.role !== 'admin' && (
                         <>
-                          <button onClick={() => void handleToggleUser(u)} className={`text-xs px-2 py-1 rounded-lg cursor-pointer ${u.status === 'disabled' ? 'text-green-400 hover:bg-green-500/10' : isDark ? 'hover:bg-[#222] text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`}>
+                          <button onClick={() => void handleToggleUser(u)} className={`text-xs px-2 py-1 rounded-lg cursor-pointer ${u.status === 'disabled' ? 'text-green-400 hover:bg-green-500/10' : isDark ? 'hover:bg-white/10 text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`}>
                             {u.status === 'disabled' ? <><CheckCircle2 className="w-3 h-3 inline mr-1" />启用</> : <><Ban className="w-3 h-3 inline mr-1" />禁用</>}
                           </button>
                           <button onClick={() => handleDeleteUser(u)} className="text-xs px-2 py-1 rounded-lg text-red-400 hover:bg-red-500/10 cursor-pointer"><Trash2 className="w-3 h-3 inline mr-1" />删除</button>
@@ -1039,7 +1134,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   <div><label className={labelClass}>API 类型</label>
                     <div className="grid grid-cols-2 gap-1.5">
                       {(Object.keys(apiKindLabels) as ApiKind[]).map(kind => (
-                        <button key={kind} onClick={() => setApiKind(kind)} className={`px-2 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer ${apiKind === kind ? 'bg-[#d4af37] text-black' : isDark ? 'bg-[#0d0d0d] text-[#999] border border-[#2a2a2a]' : 'bg-gray-50 text-gray-600 border border-gray-200'}`}>{apiKindLabels[kind]}</button>
+                        <button key={kind} onClick={() => setApiKind(kind)} className={`px-2 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer ${apiKind === kind ? 'bg-[#d4af37] text-black' : isDark ? 'bg-white/5 text-[#999] border border-white/10' : 'bg-gray-50 text-gray-600 border border-gray-200'}`}>{apiKindLabels[kind]}</button>
                       ))}
                     </div>
                     <p className={`mt-1 text-[10px] ${isDark ? 'text-[#555]' : 'text-gray-400'}`}>{apiKindDescriptions[apiKind]}</p>
@@ -1047,7 +1142,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   <div><label className={labelClass}>接口地址</label><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="https://接口域名" value={apiBaseUrl} onChange={e => setApiBaseUrl(e.target.value)} /></div>
                   <div><label className={labelClass}>固定 API 密钥</label><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="只保存在服务端配置" type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} /></div>
                   {/* Discover models */}
-                  <button onClick={() => void handleDiscoverModels()} disabled={isDiscovering || !apiBaseUrl.trim() || !apiKey.trim()} className="w-full h-9 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 border border-[#333] text-[#d4af37] hover:bg-[#1a1a1a] disabled:opacity-40 cursor-pointer">
+                  <button onClick={() => void handleDiscoverModels()} disabled={isDiscovering || !apiBaseUrl.trim() || !apiKey.trim()} className="w-full h-9 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 border border-white/20 text-[#d4af37] hover:bg-white/5 disabled:opacity-40 cursor-pointer">
                     <RefreshCw className={`w-3.5 h-3.5 ${isDiscovering ? 'animate-spin' : ''}`} />{isDiscovering ? '识别中...' : '自动识别模型'}
                   </button>
                   {discoveredModels.length > 0 && (
@@ -1056,14 +1151,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                         <button onClick={() => { const allIds = discoveredModels.map(m => m.id); setSelectedModels(selectedModels.length === allIds.length ? [] : allIds); }} className={`text-xs px-2 py-0.5 rounded border cursor-pointer ${isDark ? 'text-[#d4af37] border-[#d4af37]/30 hover:bg-[#d4af37]/10' : 'text-[#d4af37] border-[#d4af37]/30 hover:bg-[#d4af37]/10'}`}>{selectedModels.length === discoveredModels.length ? '取消全选' : '全选'}</button>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {(() => { const q = modelSearchQuery.toLowerCase().trim(); const sorted = q ? [...discoveredModels].sort((a, b) => { const aMatch = (a.name || a.id).toLowerCase().includes(q) ? 0 : 1; const bMatch = (b.name || b.id).toLowerCase().includes(q) ? 0 : 1; return aMatch - bMatch; }) : discoveredModels; return sorted.map(model => (<button key={model.id} onClick={() => setSelectedModels(prev => prev.includes(model.id) ? prev.filter(id => id !== model.id) : [...prev, model.id])} className={`px-2.5 py-1 rounded-md text-xs border cursor-pointer ${selectedModels.includes(model.id) ? 'bg-[#d4af37] text-black border-transparent' : isDark ? 'bg-[#151515] text-[#999] border-[#2a2a2a]' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>{model.name && model.name !== model.id ? model.name : getModelDisplayName(model.id)}</button>)); })()}
+                        {(() => { const q = modelSearchQuery.toLowerCase().trim(); const sorted = q ? [...discoveredModels].sort((a, b) => { const aMatch = (a.name || a.id).toLowerCase().includes(q) ? 0 : 1; const bMatch = (b.name || b.id).toLowerCase().includes(q) ? 0 : 1; return aMatch - bMatch; }) : discoveredModels; return sorted.map(model => (<button key={model.id} onClick={() => setSelectedModels(prev => prev.includes(model.id) ? prev.filter(id => id !== model.id) : [...prev, model.id])} className={`px-2.5 py-1 rounded-md text-xs border cursor-pointer ${selectedModels.includes(model.id) ? 'bg-[#d4af37] text-black border-transparent' : isDark ? 'bg-white/5 text-[#999] border-white/10' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>{model.name && model.name !== model.id ? model.name : getModelDisplayName(model.id)}</button>)); })()}
                       </div>
                     </div>
                   )}
                   <div><label className={labelClass}>显示名称</label><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="例如：图像生成接口" value={apiName} onChange={e => setApiName(e.target.value)} /></div>
                   <div><label className={labelClass}>默认模型 ID（可选）</label><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="未自动识别时填写" value={apiModel} onChange={e => setApiModel(e.target.value)} /></div>
                   <div><label className={labelClass}>API 兼容模式</label>
-                    <select className={`w-full h-10 px-3 rounded-lg border text-sm ${isDark ? 'bg-[#111] border-[#2a2a2a] text-[#ccc]' : 'bg-white border-gray-200 text-gray-800'}`} value={compatProfile} onChange={e => setCompatProfile(e.target.value)}>
+                    <select className={`w-full h-10 px-3 rounded-lg border text-sm ${isDark ? 'bg-white/5 border-white/10 text-[#ccc]' : 'bg-white border-gray-200 text-gray-800'}`} value={compatProfile} onChange={e => setCompatProfile(e.target.value)}>
                       <option value="auto">自动检测</option><option value="apimart">异步轮询 (宽高比)</option><option value="openai">OpenAI 兼容 (直接返回)</option><option value="openai-async">OpenAI 兼容 (异步轮询)</option>
                     </select>
                   </div>
@@ -1078,18 +1173,18 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     )}
                   </div>
                   <div className="flex gap-2">
-                    <button type="button" onClick={() => void handleTestNewConnection()} disabled={isTestingNew || !apiBaseUrl || !apiKey} className={`flex-1 h-9 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 border disabled:opacity-40 cursor-pointer ${isDark ? 'border-[#333] text-[#d4af37] hover:bg-[#1a1a1a]' : 'border-gray-300 text-[#d4af37] hover:bg-gray-50'}`}><RefreshCw className={`w-3.5 h-3.5 ${isTestingNew ? 'animate-spin' : ''}`} />{isTestingNew ? '测试中...' : '测试连接'}</button>
+                    <button type="button" onClick={() => void handleTestNewConnection()} disabled={isTestingNew || !apiBaseUrl || !apiKey} className={`flex-1 h-9 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 border disabled:opacity-40 cursor-pointer ${isDark ? 'border-white/20 text-[#d4af37] hover:bg-white/5' : 'border-gray-300 text-[#d4af37] hover:bg-gray-50'}`}><RefreshCw className={`w-3.5 h-3.5 ${isTestingNew ? 'animate-spin' : ''}`} />{isTestingNew ? '测试中...' : '测试连接'}</button>
                     <button onClick={() => editingProviderId ? void handleUpdateApi() : void handleAddApi()} className={`flex-1 h-9 rounded-lg text-sm font-semibold cursor-pointer ${editingProviderId ? 'bg-blue-600 text-white' : 'bg-[#d4af37] text-black'}`}>{editingProviderId ? '更新 API' : '添加 API'}</button>
                   </div>
                   {testNewResult && (<div className={`text-xs px-3 py-2 rounded-lg ${testNewResult.success ? (isDark ? 'bg-green-500/10 text-green-400' : 'bg-green-50 text-green-700') : (isDark ? 'bg-red-500/10 text-red-400' : 'bg-red-50 text-red-700')}`}>{testNewResult.success ? `连接成功 · ${testNewResult.modelCount ?? 0} 个模型可用` : `连接失败：${testNewResult.error || testNewResult.message}`}</div>)}
-                  {editingProviderId && (<button onClick={() => { setEditingProviderId(null); setApiName(''); setApiBaseUrl(''); setApiKey(''); setApiModel(''); setDiscoveredModels([]); setSelectedModels([]); setModelSearchQuery(''); }} className={`w-full h-9 rounded-lg text-sm border cursor-pointer ${isDark ? 'border-[#333] text-[#888] hover:bg-[#1a1a1a]' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>取消编辑</button>)}
+                  {editingProviderId && (<button onClick={() => { setEditingProviderId(null); setApiName(''); setApiBaseUrl(''); setApiKey(''); setApiModel(''); setDiscoveredModels([]); setSelectedModels([]); setModelSearchQuery(''); }} className={`w-full h-9 rounded-lg text-sm border cursor-pointer ${isDark ? 'border-white/20 text-[#888] hover:bg-white/5' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>取消编辑</button>)}
                 </div>
               </div>
               {/* Provider list */}
               <div className="space-y-2">
                 <div className="flex justify-end gap-2">
-                  <button onClick={() => void refreshBalances()} className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer ${isDark ? 'bg-[#1a1a1a] text-[#aaa]' : 'bg-gray-100 text-gray-600'}`}><Activity className="w-3 h-3" />刷新余额</button>
-                  <button onClick={() => void refreshAdmin()} className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer ${isDark ? 'bg-[#1a1a1a] text-[#aaa]' : 'bg-gray-100 text-gray-600'}`}><RefreshCw className="w-3 h-3" />刷新模型</button>
+                  <button onClick={() => void refreshBalances()} className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer ${isDark ? 'bg-white/5 text-[#aaa]' : 'bg-gray-100 text-gray-600'}`}><Activity className="w-3 h-3" />刷新余额</button>
+                  <button onClick={() => void refreshAdmin()} className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer ${isDark ? 'bg-white/5 text-[#aaa]' : 'bg-gray-100 text-gray-600'}`}><RefreshCw className="w-3 h-3" />刷新模型</button>
                 </div>
                 {providers.map((provider, providerIndex) => (
                   <div key={provider.id} className={`rounded-xl border p-4 ${softClass}`}>
@@ -1142,17 +1237,17 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 <div className="w-1/3 border-r pr-3">
                   <div className={`text-xs font-medium mb-2 ${isDark ? 'text-[#999]' : 'text-gray-500'}`}>选择用户</div>
                   <div className="space-y-1 max-h-[500px] overflow-y-auto">
-                    {adminUsers.map(u => (<button key={u.id} onClick={() => void loadUserData(u.id)} className={`w-full text-left rounded-lg px-3 py-2 text-sm transition-colors cursor-pointer ${selectedDataUser === u.id ? (isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-primary/10 text-primary') : isDark ? 'bg-[#0d0d0d] hover:bg-[#1a1a1a] text-gray-200' : 'bg-white hover:bg-gray-50 text-gray-700'}`}><div className="font-medium">{u.name}</div><div className={`text-xs mt-0.5 ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>{u.id}</div></button>))}
+                    {adminUsers.map(u => (<button key={u.id} onClick={() => void loadUserData(u.id)} className={`w-full text-left rounded-lg px-3 py-2 text-sm transition-colors cursor-pointer ${selectedDataUser === u.id ? (isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-primary/10 text-primary') : isDark ? 'bg-white/5 hover:bg-white/10 text-gray-200' : 'bg-white hover:bg-gray-50 text-gray-700'}`}><div className="font-medium">{u.name}</div><div className={`text-xs mt-0.5 ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>{u.id}</div></button>))}
                   </div>
                 </div>
                 <div className="flex-1 flex gap-4 min-w-0">
                   <div className="w-1/2 border-r pr-3">
                     <div className={`text-xs font-medium mb-2 ${isDark ? 'text-[#999]' : 'text-gray-500'}`}>{selectedDataUser ? '数据条目' : '请先选择用户'}</div>
-                    {selectedDataUser ? (userDataKeys.length > 0 ? (<div className="space-y-1 max-h-[500px] overflow-y-auto">{userDataKeys.map(dk => (<div key={dk.dataKey} className={`group rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors flex items-center justify-between gap-2 ${viewingDataKey === dk.dataKey ? (isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-primary/10 text-primary') : isDark ? 'bg-[#0d0d0d] hover:bg-[#1a1a1a]' : 'bg-white hover:bg-gray-50'}`} onClick={() => void loadDataDetail(selectedDataUser, dk.dataKey)}><div className="min-w-0 flex-1"><div className="truncate font-medium">{dk.dataKey}</div><div className={`text-xs mt-0.5 ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>{dk.updatedAt ? new Date(dk.updatedAt).toLocaleString('zh-CN') : ''}</div></div><button onClick={(e) => { e.stopPropagation(); void deleteUserData(selectedDataUser, dk.dataKey); }} className={`opacity-0 group-hover:opacity-100 shrink-0 p-1 rounded transition-opacity cursor-pointer ${isDark ? 'hover:bg-red-500/20 text-red-400' : 'hover:bg-red-50 text-red-500'}`} title="删除此数据"><Trash2 size={14} /></button></div>))}</div>) : (<div className={`text-xs ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>该用户暂无数据</div>)) : (<div className={`text-xs ${isDark ? 'text-[#555]' : 'text-gray-300'}`}>← 点击左侧用户查看数据</div>)}
+                    {selectedDataUser ? (userDataKeys.length > 0 ? (<div className="space-y-1 max-h-[500px] overflow-y-auto">{userDataKeys.map(dk => (<div key={dk.dataKey} className={`group rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors flex items-center justify-between gap-2 ${viewingDataKey === dk.dataKey ? (isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-primary/10 text-primary') : isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-white hover:bg-gray-50'}`} onClick={() => void loadDataDetail(selectedDataUser, dk.dataKey)}><div className="min-w-0 flex-1"><div className="truncate font-medium">{dk.dataKey}</div><div className={`text-xs mt-0.5 ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>{dk.updatedAt ? new Date(dk.updatedAt).toLocaleString('zh-CN') : ''}</div></div><button onClick={(e) => { e.stopPropagation(); void deleteUserData(selectedDataUser, dk.dataKey); }} className={`opacity-0 group-hover:opacity-100 shrink-0 p-1 rounded transition-opacity cursor-pointer ${isDark ? 'hover:bg-red-500/20 text-red-400' : 'hover:bg-red-50 text-red-500'}`} title="删除此数据"><Trash2 size={14} /></button></div>))}</div>) : (<div className={`text-xs ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>该用户暂无数据</div>)) : (<div className={`text-xs ${isDark ? 'text-[#555]' : 'text-gray-300'}`}>← 点击左侧用户查看数据</div>)}
                   </div>
                   <div className="w-1/2 min-w-0">
                     <div className={`text-xs font-medium mb-2 ${isDark ? 'text-[#999]' : 'text-gray-500'}`}>{viewingDataKey ? `数据详情: ${viewingDataKey}` : '数据内容'}</div>
-                    {viewingDataLoading ? (<div className={`text-xs ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>加载中...</div>) : viewingDataValue !== null ? (<div className={`rounded-lg p-3 text-xs font-mono max-h-[500px] overflow-auto ${isDark ? 'bg-[#0d0d0d] text-gray-300' : 'bg-gray-50 text-gray-700'}`}><pre className="whitespace-pre-wrap break-all">{typeof viewingDataValue === 'string' ? viewingDataValue : JSON.stringify(viewingDataValue, null, 2)}</pre></div>) : (<div className={`text-xs ${isDark ? 'text-[#555]' : 'text-gray-300'}`}>{selectedDataUser ? '← 点击左侧条目查看详情' : ''}</div>)}
+                    {viewingDataLoading ? (<div className={`text-xs ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>加载中...</div>) : viewingDataValue !== null ? (<div className={`rounded-lg p-3 text-xs font-mono max-h-[500px] overflow-auto ${isDark ? 'bg-white/5 text-gray-300' : 'bg-gray-50 text-gray-700'}`}><pre className="whitespace-pre-wrap break-all">{typeof viewingDataValue === 'string' ? viewingDataValue : JSON.stringify(viewingDataValue, null, 2)}</pre></div>) : (<div className={`text-xs ${isDark ? 'text-[#555]' : 'text-gray-300'}`}>{selectedDataUser ? '← 点击左侧条目查看详情' : ''}</div>)}
                   </div>
                 </div>
               </div>
@@ -1169,7 +1264,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             </div>
             <div className="space-y-2 max-h-[500px] overflow-y-auto">
               {ecomTemplates.length === 0 ? (<div className={`text-center py-8 text-sm ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>暂无自定义模板，点击"新增模板"添加</div>) : ecomTemplates.map((tpl, idx) => (
-                <div key={tpl.id as string} className={`flex items-center gap-3 rounded-lg px-4 py-3 ${isDark ? 'bg-[#0d0d0d] hover:bg-[#1a1a1a]' : 'bg-white hover:bg-gray-50'} transition-colors`}>
+                <div key={tpl.id as string} className={`flex items-center gap-3 rounded-lg px-4 py-3 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-white hover:bg-gray-50'} transition-colors`}>
                   <span className="text-lg">{tpl.icon as string || '📄'}</span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
@@ -1181,10 +1276,10 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     <div className={`text-xs mt-0.5 truncate ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>{tpl.description as string || '无描述'}</div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    <button onClick={() => void moveEcomTemplateOrder(tpl.id as string, 'up')} disabled={idx === 0} className={`p-1 rounded transition-colors cursor-pointer disabled:opacity-30 ${isDark ? 'hover:bg-[#2a2a2a] text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`} title="上移"><ArrowUp size={12} /></button>
-                    <button onClick={() => void moveEcomTemplateOrder(tpl.id as string, 'down')} disabled={idx === ecomTemplates.length - 1} className={`p-1 rounded transition-colors cursor-pointer disabled:opacity-30 ${isDark ? 'hover:bg-[#2a2a2a] text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`} title="下移"><ArrowDown size={12} /></button>
+                    <button onClick={() => void moveEcomTemplateOrder(tpl.id as string, 'up')} disabled={idx === 0} className={`p-1 rounded transition-colors cursor-pointer disabled:opacity-30 ${isDark ? 'hover:bg-white/10 text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`} title="上移"><ArrowUp size={12} /></button>
+                    <button onClick={() => void moveEcomTemplateOrder(tpl.id as string, 'down')} disabled={idx === ecomTemplates.length - 1} className={`p-1 rounded transition-colors cursor-pointer disabled:opacity-30 ${isDark ? 'hover:bg-white/10 text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`} title="下移"><ArrowDown size={12} /></button>
                     <button onClick={() => void toggleEcomTemplateEnabled(tpl.id as string, !tpl.is_enabled)} className={`p-1 rounded transition-colors cursor-pointer ${isDark ? 'hover:bg-[#2a2a2a]' : 'hover:bg-gray-100'}`} title={tpl.is_enabled ? '禁用' : '启用'}>{tpl.is_enabled ? <CheckCircle2 size={12} className="text-green-400" /> : <Ban size={12} className={isDark ? 'text-[#555]' : 'text-gray-300'} />}</button>
-                    <button onClick={() => { setEditingEcomTpl({ ...tpl }); setShowNewEcomTpl(false); }} className={`p-1 rounded transition-colors cursor-pointer ${isDark ? 'hover:bg-[#2a2a2a] text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`} title="编辑"><Pencil size={12} /></button>
+                    <button onClick={() => { setEditingEcomTpl({ ...tpl }); setShowNewEcomTpl(false); }} className={`p-1 rounded transition-colors cursor-pointer ${isDark ? 'hover:bg-white/10 text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`} title="编辑"><Pencil size={12} /></button>
                     <button onClick={() => void deleteEcomTemplate(tpl.id as string)} className={`p-1 rounded transition-colors cursor-pointer ${isDark ? 'hover:bg-red-500/20 text-red-400' : 'hover:bg-red-50 text-red-500'}`} title="删除"><Trash2 size={12} /></button>
                   </div>
                 </div>
@@ -1204,7 +1299,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 </div>
                 <div className="flex items-center gap-2 mt-3">
                   <button onClick={() => editingEcomTpl && void saveEcomTemplate(editingEcomTpl)} disabled={isEcomTplSaving || !(editingEcomTpl?.name) || !(editingEcomTpl?.prompt_template)} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-[#d4af37] text-black hover:bg-[#e0b840] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">{isEcomTplSaving ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}{isEcomTplSaving ? '保存中...' : '保存模板'}</button>
-                  <button onClick={() => { setEditingEcomTpl(null); setShowNewEcomTpl(false); }} className={`px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${isDark ? 'text-[#888] hover:bg-[#1a1a1a]' : 'text-gray-500 hover:bg-gray-100'}`}>取消</button>
+                  <button onClick={() => { setEditingEcomTpl(null); setShowNewEcomTpl(false); }} className={`px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${isDark ? 'text-[#888] hover:bg-white/5' : 'text-gray-500 hover:bg-gray-100'}`}>取消</button>
                 </div>
               </div>
             )}
