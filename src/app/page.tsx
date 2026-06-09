@@ -193,7 +193,7 @@ function CanvasApp() {
   }, []);
 
   const [appMode, setAppMode] = useState<'canvas' | 'node' | 'workflow-hub' | 'dashboard'>('canvas');
-  const [pendingModeSwitch, setPendingModeSwitch] = useState<'node' | 'workflow-hub' | null>(null);
+  const [pendingModeSwitch, setPendingModeSwitch] = useState<'node' | 'workflow-hub' | 'dashboard' | null>(null);
   const [showUserManager, setShowUserManager] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const router = useRouter();
@@ -235,7 +235,7 @@ function CanvasApp() {
   const hasActiveCanvasTasks = images.some(img => img.isProcessingPlaceholder || img.processing);
 
   // 安全切换模式：有进行中任务时弹窗确认
-  const safeSwitchMode = useCallback((targetMode: 'node' | 'workflow-hub') => {
+  const safeSwitchMode = useCallback((targetMode: 'node' | 'workflow-hub' | 'dashboard') => {
     if (hasActiveCanvasTasks) {
       setPendingModeSwitch(targetMode);
     } else {
@@ -2527,6 +2527,7 @@ function CanvasApp() {
           onToggleFavorites={() => setShowFavorites(true)}
           onSwitchToNodeMode={() => safeSwitchMode('node')}
           onSwitchToWorkflowHub={() => safeSwitchMode('workflow-hub')}
+          onSwitchToDashboard={() => safeSwitchMode('dashboard')}
           initialViewState={viewStateRef.current || undefined}
           isPanelCollapsed={panelCollapsed}
           navigateToImageId={navigateToImageId}
@@ -2653,14 +2654,6 @@ function CanvasApp() {
                 <span className={`text-xs px-2.5 py-0.5 rounded-lg font-medium transition-colors ${themeStyle === 'monochrome' ? 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100' : 'bg-gold/10 text-gold border border-gold/20 hover:bg-gold/15'}`}>
                   {currentProject.name}
                 </span>
-              )}
-              {currentUser && (
-                <button
-                  onClick={() => setAppMode('dashboard')}
-                  className={`text-xs px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer ${themeStyle === 'monochrome' ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-primary/10 text-primary hover:bg-primary/20'}`}
-                >
-                  工作台
-                </button>
               )}
             </div>
           </div>

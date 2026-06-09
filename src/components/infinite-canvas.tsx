@@ -27,7 +27,7 @@ import {
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
-  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play
+  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play
 } from 'lucide-react';
 import type { CanvasAnnotation, AnnotationRegion, AnnotationTool } from '@/lib/canvas-annotation';
 import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, mergeAnnotationsForImage, ANNOTATION_COLORS, ANNOTATION_COLORS_MONO, computeAnnotationRegion } from '@/lib/canvas-annotation';
@@ -383,6 +383,8 @@ interface InfiniteCanvasProps {
   onSwitchToNodeMode?: () => void;
   /** Switch to workflow hub */
   onSwitchToWorkflowHub?: () => void;
+  /** Switch to dashboard (workspace) */
+  onSwitchToDashboard?: () => void;
   /** Send canvas image to chat panel for AI modification */
   onSendToChat?: (image: CanvasImage) => void;
 }
@@ -485,6 +487,7 @@ export function InfiniteCanvas({
   onToggleFavorites,
   onSwitchToNodeMode,
   onSwitchToWorkflowHub,
+  onSwitchToDashboard,
   onSendToChat,
 }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
@@ -6936,6 +6939,15 @@ export function InfiniteCanvas({
             </div>
             {/* Divider */}
             <div className={ltDividerCls} />
+            {/* Workspace / Dashboard */}
+            <button
+              onClick={onSwitchToDashboard}
+              className={ltExpandedBtnCls}
+              title="工作台"
+            >
+              <LayoutDashboard className={`h-3.5 w-3.5 ${mIcon.layoutGrid}`} />
+              <span>工作台</span>
+            </button>
             {/* OMP Toggle */}
             <button
               onClick={() => {
@@ -7073,6 +7085,14 @@ export function InfiniteCanvas({
         ) : (
           /* Collapsed: icon column */
           <div className={`absolute top-4 left-4 z-50 flex flex-col items-center py-2 gap-1 rounded-xl ${isMonochrome ? 'bg-white border border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl'} transition-all duration-200`} style={{ width: 48 }}>
+            {/* Workspace / Dashboard */}
+            <button
+              onClick={onSwitchToDashboard}
+              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.layoutGrid} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
+              title="工作台"
+            >
+              <LayoutDashboard className="w-4 h-4" />
+            </button>
             <button
               onClick={() => { if (onToggleVisionPrompt) onToggleVisionPrompt(); }}
               className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${ohMyPromptOpen ? ltActiveBtnCls : isMonochrome ? `bg-gray-50 ${mIcon.ohMyPrompt} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
