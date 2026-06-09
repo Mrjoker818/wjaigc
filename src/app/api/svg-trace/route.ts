@@ -67,7 +67,10 @@ interface VtracerParams {
 const QUALITY_PRESETS: Record<QualityPreset, VtracerParams> = {
   // ★ 关键参数说明：Python vtracer 的 color_precision 是【颜色数量】(2-256)，不是位深度！
   // 之前误用6-8的值导致只有6-8种颜色，效果极差。修正后使用实际颜色数。
-  // 对齐 VTracer 官方预设 (visioncortex/vtracer Rust源码) 参数逻辑
+  // ★ 预设设计原则：
+  //   - cornerThreshold 不超过120：180是Photo预设值，会把卡通尖角全部磨圆
+  //   - layerDifference 不超过24：48/64太粗会把白色和浅色归入同一层，颜色串层
+  //   - filterSpeckle 不超过8：过大会删除小细节（眼睛、文字等）
   fast: {
     colorPrecision: 64,       // 64色: 快速出图，适合简单图形/图标
     filterSpeckle: 4,         // 官方默认
@@ -93,28 +96,28 @@ const QUALITY_PRESETS: Record<QualityPreset, VtracerParams> = {
     maxIterations: 10,
   },
   high: {
-    colorPrecision: 256,      // 256色: 官方Poster/Photo预设水平，最高色彩精度
-    filterSpeckle: 6,         // 比 balanced 多去噪
-    cornerThreshold: 90,      // 介于默认60和Photo 180之间
+    colorPrecision: 200,      // 200色: 高色彩精度，适合色彩丰富的插画
+    filterSpeckle: 6,         // 适度去噪
+    cornerThreshold: 90,      // 保留更多角点细节
     lengthThreshold: 4.0,
     spliceThreshold: 45,
     pathPrecision: 4,
     hierarchical: 'stacked',
     curveMode: 'spline',
-    layerDifference: 24,      // 比 balanced 更粗的层区分，减少碎层
+    layerDifference: 20,      // 适中层区分
     maxIterations: 10,
   },
   max: {
-    colorPrecision: 256,      // 256色: 官方Photo预设水平
-    filterSpeckle: 10,        // 官方Photo预设值: 更强去噪，减少碎块
-    cornerThreshold: 180,     // 官方Photo预设值: 极度平滑，路径最干净
+    colorPrecision: 256,      // 256色: 最高色彩精度
+    filterSpeckle: 8,         // 适度去噪，不会删除小细节
+    cornerThreshold: 120,     // 平滑角点但不至于磨平所有尖角
     lengthThreshold: 4.0,
     spliceThreshold: 45,
-    pathPrecision: 2,         // 官方默认: 足够精度
+    pathPrecision: 3,
     hierarchical: 'stacked',
     curveMode: 'spline',
-    layerDifference: 48,      // 官方Photo预设值: 粗层区分，颜色更统一
-    maxIterations: 10,
+    layerDifference: 24,      // 适中层区分，避免浅色区域合并
+    maxIterations: 12,
   },
   print: {
     colorPrecision: 256,      // 256色: 最高色彩精度
@@ -125,22 +128,23 @@ const QUALITY_PRESETS: Record<QualityPreset, VtracerParams> = {
     pathPrecision: 5,         // 高坐标精度
     hierarchical: 'stacked',
     curveMode: 'spline',
-    layerDifference: 8,       // 精细层区分
+    layerDifference: 16,      // 精细层区分
     maxIterations: 12,        // 更多迭代
   },
   // ★ 丹青AI 对标预设: 极致还原，接近丹青AI全彩模式质量
-  // 核心差异: 更强去噪(减少碎块) + 极度平滑角点(路径最干净) + 粗层区分(颜色统一)
-  // + 更高坐标精度 + 更多迭代 + 渐变预处理(新增)
+  // 核心差异: 256色最高精度 + 适度去噪 + 中等角点平滑 + 精细层区分
+  // 注意：不像VTracer Photo预设那样用cornerThreshold=180/layerDifference=48，
+  // 那些参数适用于渐变摄影图，但会严重破坏卡通/插画的清晰边缘和色彩分层
   'print-pro': {
     colorPrecision: 256,      // 256色: 最高色彩精度
-    filterSpeckle: 12,        // 比官方Photo更强去噪，极致减少碎块
-    cornerThreshold: 180,     // 官方Photo预设值: 极度平滑角点，路径最干净
+    filterSpeckle: 6,         // 适度去噪，保留小细节
+    cornerThreshold: 100,     // 中等角点平滑，保留卡通尖角
     lengthThreshold: 3.0,     // 更精细路径
     spliceThreshold: 45,      // 官方默认
     pathPrecision: 5,         // 高坐标精度
     hierarchical: 'stacked',  // 官方默认: stacked无层间间隙
     curveMode: 'spline',      // 贝塞尔曲线平滑
-    layerDifference: 64,      // 比 Photo(48) 更粗层区分，颜色更统一
+    layerDifference: 20,      // 适中层区分，避免白色被归入浅色层
     maxIterations: 15,        // 更多迭代，颜色匹配更精确
   },
 };
@@ -708,7 +712,7 @@ function simplifyPathData(d: string): string {
           const prev = filtered[filtered.length - 1];
           const curr = points[k];
           const next = points[k + 1];
-          if (!areCollinear(prev.x, prev.y, curr.x, curr.y, next.x, next.y, 1.0)) {
+          if (!areCollinear(prev.x, prev.y, curr.x, curr.y, next.x, next.y, 0.5)) {
             filtered.push(curr);
           }
         }
@@ -892,8 +896,9 @@ function postProcessSvg(svg: string): string {
   svg = simplifySvgPaths(svg);
   // 2. 语义化图层命名: background/subject/detail 替代 layer_N_HEX
   svg = optimizeSvgLayers(svg);
-  // 3. 同色路径合并: 减少文件体积，更易编辑
-  svg = mergeSameColorPaths(svg);
+  // NOTE: 不做同色路径合并(mergeSameColorPaths)——stacked模式下路径有严格的z-order层叠顺序，
+  // 合并后放到前面会破坏覆盖关系，导致颜色串层（白色区域被底层颜色覆盖）。
+  // 如需合并，应保持原始顺序，但VTracer stacked输出本身就是有序的，无需合并。
   return svg;
 }
 
