@@ -18,7 +18,7 @@ import { createDemoWorkflow, type Workflow } from '@/lib/workflow-engine';
 import { ImageEditor } from '@/components/image-editor';
 import { UserManager } from '@/components/user-manager';
 import { ProjectDataPanel } from '@/components/project-data-panel';
-import { AdminSystem } from '@/components/admin-system';
+
 import { HelpGuide } from '@/components/help-guide';
 import { FavoritesPanel } from '@/components/favorites-panel';
 import { taskEventsClient } from '@/lib/task-events-client';
@@ -198,7 +198,7 @@ function CanvasApp() {
   const [authChecked, setAuthChecked] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [showAdminSystem, setShowAdminSystem] = useState(false);
+
   const [showProjectData, setShowProjectData] = useState(false);
   const [navigateToImageId, setNavigateToImageId] = useState<string | null>(null);
   const [showHelpGuide, setShowHelpGuide] = useState(false);
@@ -2433,17 +2433,7 @@ function CanvasApp() {
               : 'bg-[#141414] border border-[#2a2a2a] text-white',
           });
         }}
-        onOpenAdmin={() => setShowAdminSystem(true)}
-        themeStyle={themeStyle}
       />
-
-      {/* Admin System Modal (also available from dashboard) */}
-      {showAdminSystem && currentUser?.role === 'admin' && (
-        <AdminSystem
-          themeStyle={themeStyle}
-          onClose={() => setShowAdminSystem(false)}
-        />
-      )}
     </>
     );
   }
@@ -2518,8 +2508,8 @@ function CanvasApp() {
           visionResult={visionResult}
           onToggleSettings={() => setPanelCollapsed(prev => !prev)}
           onToggleTheme={() => setThemeStyle(prev => prev === 'gold' ? 'monochrome' : 'gold')}
-          onToggleUserManager={() => setShowUserManager(prev => !prev)}
-          onToggleAdminSystem={() => setShowAdminSystem(prev => !prev)}
+          onToggleUserManager={() => setAppMode('dashboard')}
+          onToggleAdminSystem={() => setAppMode('dashboard')}
           isAdmin={currentUser?.role === 'admin'}
           onToggleProjectData={() => setShowProjectData(prev => !prev)}
           onToggleHelp={() => setShowHelpGuide(true)}
@@ -3053,13 +3043,6 @@ function CanvasApp() {
             // 项目切换完成，解除自动保存拦截
             switchingProjectRef.current = false;
           }}
-        />
-      )}
-
-      {showAdminSystem && currentUser?.role === 'admin' && (
-        <AdminSystem
-          themeStyle={themeStyle}
-          onClose={() => setShowAdminSystem(false)}
         />
       )}
 
