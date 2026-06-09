@@ -21,7 +21,7 @@ import {
   Search, ScanSearch, Eye, Pause, SkipForward, Workflow as WorkflowIcon, Timer,
   ArrowLeft, LayoutGrid, Sparkles, MessageCircle, Rotate3d, Box, ShoppingBag, Zap,
   Copy, Clipboard, Film, Bookmark, BookmarkPlus, GitCompare, Grid3X3, ArrowLeftFromLine, ImagePlus,
-  Shapes, BookOpen,
+  Shapes, BookOpen, Blocks, FolderOpen, ScrollText,
 } from 'lucide-react';
 
 // ==================== 图标映射 ====================
@@ -657,7 +657,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 0.8 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0, vx: 0, vy: 0 });
-  const [sidebarTab, setSidebarTab] = useState<'nodes' | 'props' | 'ai-build' | 'presets' | 'prompts' | 'assistant'>('nodes');
+  const [sidebarTab, setSidebarTab] = useState<'nodes' | 'props' | 'ai-build' | 'presets' | 'prompts' | 'assistant' | 'material' | 'prompt'>('nodes');
   const [searchQuery, setSearchQuery] = useState('');
   const [executionId, setExecutionId] = useState<string | null>(null);
   const [execStatus, setExecStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
@@ -689,6 +689,8 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
 
   // P1: 执行日志
   const [execLogs, setExecLogs] = useState<{ time: number; nodeId: string; label: string; status: string; message: string; duration?: number; nodeType?: string }[]>([]);  // P1: 节点复制粘贴
+  const [showContentStrip, setShowContentStrip] = useState(true);
+  const [showExecLog, setShowExecLog] = useState(false);
   const [clipboard, setClipboard] = useState<{ nodes: WorkflowNode[]; connections: WorkflowConnection[] } | null>(null);
 
   // P2: 提示词库
@@ -1998,144 +2000,117 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
 
       {/* 画布+内容面板 垂直容器 */}
       <div className="flex flex-col flex-1 min-h-0">
-      {/* 主画布 */}
-      <div className="flex-1 relative min-h-0">
-        {/* 顶部工具栏 */}
-        <div className="absolute top-3 left-3 right-3 z-20 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            {onBack && (
-              <button onClick={onBack} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/15 hover:bg-primary/25 text-primary transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer text-sm font-medium" title="切换到画布模式">
-                <ArrowLeft size={15} />
-                <span>画布模式</span>
-              </button>
-            )}
-            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted hover:bg-card text-muted-foreground hover:text-foreground transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer text-sm" title="工作流中心">
-              <WorkflowIcon size={15} />
-              <span>工作流中心</span>
+      {/* 顶部工具栏 - 固定header, 与原型对齐 */}
+      <header className="bg-muted h-12 flex items-center justify-between px-4 border-b border-border/20 z-50 shrink-0" role="toolbar" aria-label="工作流工具栏">
+        {/* 左侧：工具栏按钮组 */}
+        <div className="flex items-center gap-1" role="group" aria-label="工作流操作">
+          {onBack && (
+            <button onClick={onBack} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-card text-sm transition-colors cursor-pointer" title="返回画布 (Esc)" aria-label="返回画布">
+              <ArrowLeft size={16} />
+              <span>画布</span>
             </button>
-            <span className="text-base font-semibold text-primary">{wf.name}</span>
-            <span className="text-sm text-muted-foreground">v{wf.version}</span>
-            <span className="text-sm text-muted-foreground">|</span>
-            <span className="text-sm text-muted-foreground">{wf.nodes.length} 节点 · {wf.connections.length} 连线</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button onClick={handleAutoLayout} className="p-2 rounded bg-muted hover:bg-card text-muted-foreground hover:text-foreground transition-colors cursor-pointer" title="自动布局">
-              <LayoutGrid size={16} />
-            </button>
-            {/* P1: 复制粘贴按钮 */}
+          )}
+          <div className="w-px h-6 bg-border/20 mx-1" aria-hidden="true" />
+          {/* AI建图 */}
+          <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 text-sm font-medium transition-colors cursor-pointer" title="AI自然语言建图 (Ctrl+L)" aria-label="AI建图" onClick={() => setSidebarTab('ai-build')}>
+            <Sparkles size={16} />
+            <span>AI 建图</span>
+          </button>
+          {/* 执行/停止 */}
+          <button onClick={execStatus === 'running' ? handleStopWorkflow : handleRunWorkflow} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${execStatus === 'running' ? 'bg-destructive/10 text-destructive hover:bg-destructive/20' : 'bg-[var(--color-success,#3fb950)]/10 text-[var(--color-success,#3fb950)] hover:bg-[var(--color-success,#3fb950)]/20'}`} title={execStatus === 'running' ? '停止执行 (Ctrl+.)' : '执行工作流 (Ctrl+Enter)'} aria-label={execStatus === 'running' ? '停止执行' : '执行工作流'}>
+            {execStatus === 'running' ? <Square size={16} /> : <Play size={16} />}
+            <span>{execStatus === 'running' ? '停止' : '执行'}</span>
+          </button>
+          <div className="w-px h-6 bg-border/20 mx-1" aria-hidden="true" />
+          {/* 撤销/重做 */}
+          <button onClick={handleUndo} disabled={historyIndex <= 0} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-card transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="撤销 Ctrl+Z" aria-label="撤销">
+            <RotateCcw size={16} />
+          </button>
+          <button onClick={handleRedo} disabled={historyIndex >= historyStack.length - 1} className="p-1.5 rounded-lg text-muted-foreground/40 hover:text-foreground hover:bg-card transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="重做 Ctrl+Shift+Z" aria-label="重做">
+            <RotateCcw size={16} className="scale-x-[-1]" />
+          </button>
+          <div className="w-px h-6 bg-border/20 mx-1" aria-hidden="true" />
+          {/* 预设 */}
+          <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-card text-sm transition-colors cursor-pointer" title="预设工作流模板 (Ctrl+P)" aria-label="预设工作流" onClick={() => setSidebarTab('presets')}>
+            <LayoutGrid size={16} />
+            <span>预设</span>
+          </button>
+          {/* 保存 */}
+          <button onClick={handleSaveWorkflow} disabled={saveStatus === 'saving'} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${saveStatus === 'saved' ? 'text-[var(--color-success,#3fb950)]' : saveStatus === 'error' ? 'text-destructive' : 'text-muted-foreground hover:text-foreground hover:bg-card'}`} title="保存工作流">
+            {saveStatus === 'saving' ? <Loader2 size={16} className="animate-spin" /> : saveStatus === 'saved' ? <Check size={16} /> : <Save size={16} />}
+            <span>{saveStatus === 'saving' ? '保存中...' : saveStatus === 'saved' ? '已保存' : '保存'}</span>
+          </button>
+          {/* 导入 */}
+          <button
+            onClick={() => {
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.accept = '.json';
+              input.onchange = async (e) => {
+                const file = (e.target as HTMLInputElement).files?.[0];
+                if (!file) return;
+                try {
+                  const text = await file.text();
+                  const result = parseComfyUIWorkflow(text);
+                  if (!result || result.nodes.length === 0) { alert('未能识别有效的ComfyUI工作流节点'); return; }
+                  setWf(prev => ({ ...prev, nodes: [...prev.nodes, ...result.nodes], connections: [...prev.connections, ...result.connections] }));
+                } catch (err) { alert('导入失败: ' + (err instanceof Error ? err.message : '无效的JSON文件')); }
+              };
+              input.click();
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-card text-sm transition-colors cursor-pointer" title="导入工作流 (Ctrl+I)" aria-label="导入工作流"
+          >
+            <FileInput size={16} />
+          </button>
+          {/* JSON编辑器 (build_mode下隐藏) */}
+          {!isBuildMode && (
             <button
-              onClick={() => {
-                if (selectedNodeIds.size === 0) return;
-                const selectedNodes = wf.nodes.filter(n => selectedNodeIds.has(n.id));
-                const relatedConns = wf.connections.filter(c => selectedNodeIds.has(c.fromNodeId) && selectedNodeIds.has(c.toNodeId));
-                setClipboard({ nodes: selectedNodes, connections: relatedConns });
-              }}
-              disabled={selectedNodeIds.size === 0}
-              className="p-2 rounded bg-muted hover:bg-card text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-              title="复制节点 (Ctrl+C)"
-            >
-              <Copy size={16} />
-            </button>
-            <button
-              onClick={() => {
-                if (!clipboard) return;
-                const idMap = new Map<string, string>();
-                const newNodes = clipboard.nodes.map(n => {
-                  const newId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-                  idMap.set(n.id, newId);
-                  return { ...n, id: newId, x: n.x + 40, y: n.y + 40, label: n.label + ' (副本)' };
-                });
-                const newConns = clipboard.connections
-                  .map(c => {
-                    const newFrom = idMap.get(c.fromNodeId);
-                    const newTo = idMap.get(c.toNodeId);
-                    if (!newFrom || !newTo) return null;
-                    return createConnection(newFrom, c.fromPortId, newTo, c.toPortId, c.type);
-                  })
-                  .filter((c): c is WorkflowConnection => c !== null);
-                setWf(prev => ({ ...prev, nodes: [...prev.nodes, ...newNodes], connections: [...prev.connections, ...newConns] }));
-                if (newNodes.length > 0) { setSelectedNodeIds(new Set([newNodes[0].id])); setSidebarTab('props'); }
-              }}
-              disabled={!clipboard}
-              className="p-2 rounded bg-muted hover:bg-card text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-              title="粘贴节点 (Ctrl+V)"
-            >
-              <Clipboard size={16} />
-            </button>
-            <button onClick={() => setViewport(v => ({ ...v, zoom: Math.min(3, v.zoom * 1.2) }))} className="p-2 rounded bg-muted hover:bg-card text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
-              <ZoomIn size={16} />
-            </button>
-            <span className="text-xs text-muted-foreground w-12 text-center">{Math.round(viewport.zoom * 100)}%</span>
-            <button onClick={() => setViewport(v => ({ ...v, zoom: Math.max(0.2, v.zoom * 0.8) }))} className="p-2 rounded bg-muted hover:bg-card text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
-              <ZoomOut size={16} />
-            </button>
-            <button onClick={() => setViewport({ x: 0, y: 0, zoom: 0.8 })} className="p-2 rounded bg-muted hover:bg-card text-muted-foreground hover:text-foreground transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer">
-              <RotateCcw size={16} />
-            </button>
-            {/* P2: ComfyUI导入 */}
-            <button
-              onClick={() => {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.accept = '.json';
-                input.onchange = async (e) => {
-                  const file = (e.target as HTMLInputElement).files?.[0];
-                  if (!file) return;
-                  try {
-                    const text = await file.text();
-                    const result = parseComfyUIWorkflow(text);
-                    if (!result || result.nodes.length === 0) {
-                      alert('未能识别有效的ComfyUI工作流节点');
-                      return;
-                    }
-                    setWf(prev => ({
-                      ...prev,
-                      nodes: [...prev.nodes, ...result.nodes],
-                      connections: [...prev.connections, ...result.connections],
-                    }));
-                  } catch (err) {
-                    alert('导入失败: ' + (err instanceof Error ? err.message : '无效的JSON文件'));
-                  }
-                };
-                input.click();
-              }}
-              className="p-2 rounded bg-muted hover:bg-card text-muted-foreground hover:text-foreground transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer"
-              title="导入ComfyUI工作流"
-            >
-              <FileInput size={16} />
-            </button>
-            <div className="w-px h-5 bg-muted mx-1" />
-            {/* P2: 撤销重做按钮 */}
-            <button onClick={handleUndo} disabled={historyIndex <= 0} className="p-2 rounded bg-muted hover:bg-card text-muted-foreground hover:text-foreground transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="撤销 (Ctrl+Z)">
-              <RotateCcw size={16} />
-            </button>
-            <button onClick={handleRedo} disabled={historyIndex >= historyStack.length - 1} className="p-2 rounded bg-muted hover:bg-card text-muted-foreground hover:text-foreground transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="重做 (Ctrl+Shift+Z)">
-              <RotateCcw size={16} className="scale-x-[-1]" />
-            </button>
-            {/* P2: JSON编辑器（build_mode下隐藏） */}
-            {!isBuildMode && (
-            <button
-              onClick={() => {
-                setJsonEditContent(JSON.stringify({ nodes: wf.nodes, connections: wf.connections }, null, 2));
-                setJsonEditorOpen(true);
-              }}
-              className="p-2 rounded bg-muted hover:bg-card text-muted-foreground hover:text-foreground transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer"
-              title="查看/编辑JSON"
+              onClick={() => { setJsonEditContent(JSON.stringify({ nodes: wf.nodes, connections: wf.connections }, null, 2)); setJsonEditorOpen(true); }}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-card text-sm transition-colors cursor-pointer" title="查看/编辑JSON"
             >
               <Settings size={16} />
             </button>
-            )}
-            <div className="w-px h-5 bg-muted mx-1" />
-            <button onClick={handleSaveWorkflow} disabled={saveStatus === 'saving'} className={`px-3 py-2 rounded text-sm font-medium transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed ${saveStatus === 'saved' ? 'bg-green-900/30 text-green-400' : saveStatus === 'error' ? 'bg-red-900/30 text-red-400' : 'bg-muted hover:bg-card text-foreground'}`}>
-              {saveStatus === 'saving' ? <Loader2 size={14} className="animate-spin" /> : saveStatus === 'saved' ? <Check size={14} /> : <Save size={14} />}
-              {saveStatus === 'saving' ? '保存中...' : saveStatus === 'saved' ? '已保存' : '保存'}
-            </button>
-            <button onClick={execStatus === 'running' ? handleStopWorkflow : handleRunWorkflow} className={`px-3 py-2 rounded text-sm font-medium transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer flex items-center gap-1.5 ${execStatus === 'running' ? 'bg-red-900/30 text-red-400 hover:bg-red-900/50' : 'bg-primary/20 text-primary hover:bg-primary/30'}`}>
-              {execStatus === 'running' ? <><Square size={14} /> 停止</> : <><Play size={14} /> 运行</>}
-            </button>
-          </div>
+          )}
         </div>
+        {/* 右侧：缩放控制 + 面板切换 */}
+        <div className="flex items-center gap-1" role="group" aria-label="视图控制">
+          {/* 工作流名称 */}
+          <span className="text-sm font-semibold text-primary mr-2">{wf.name}</span>
+          <span className="text-xs text-muted-foreground mr-2">{wf.nodes.length} 节点 · {wf.connections.length} 连线</span>
+          <div className="w-px h-6 bg-border/20 mx-1" aria-hidden="true" />
+          {/* 缩放控制 */}
+          <button onClick={() => setViewport(v => ({ ...v, zoom: Math.max(0.2, v.zoom * 0.8) }))} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-card transition-colors cursor-pointer" title="缩小 (Ctrl+-)" aria-label="缩小">
+            <ZoomOut size={16} />
+          </button>
+          <span className="text-xs text-muted-foreground font-mono w-12 text-center" aria-live="polite" aria-label="当前缩放">{Math.round(viewport.zoom * 100)}%</span>
+          <button onClick={() => setViewport(v => ({ ...v, zoom: Math.min(3, v.zoom * 1.2) }))} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-card transition-colors cursor-pointer" title="放大 (Ctrl++)" aria-label="放大">
+            <ZoomIn size={16} />
+          </button>
+          <button onClick={() => setViewport({ x: 0, y: 0, zoom: 0.8 })} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-card transition-colors cursor-pointer" title="重置视图 (Ctrl+0)" aria-label="重置视图">
+            <Maximize size={16} />
+          </button>
+          <div className="w-px h-6 bg-border/20 mx-1" aria-hidden="true" />
+          {/* 面板切换按钮 */}
+          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${sidebarTab === 'nodes' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-card'}`} title="节点库" aria-label="切换节点库面板" aria-pressed={sidebarTab === 'nodes'} onClick={() => setSidebarTab('nodes')}>
+            <Blocks size={16} />
+          </button>
+          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${sidebarTab === 'material' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-card'}`} title="素材库" aria-label="切换素材库面板" aria-pressed={sidebarTab === 'material'} onClick={() => setSidebarTab('material')}>
+            <FolderOpen size={16} />
+          </button>
+          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${showContentStrip ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-card'}`} title="内容窗口" aria-label="切换内容窗口" aria-pressed={showContentStrip} onClick={() => setShowContentStrip(!showContentStrip)}>
+            <LayoutGrid size={16} />
+          </button>
+          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${sidebarTab === 'prompt' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-card'}`} title="提示词库" aria-label="切换提示词库面板" aria-pressed={sidebarTab === 'prompt'} onClick={() => setSidebarTab('prompt')}>
+            <BookOpen size={16} />
+          </button>
+          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${showExecLog ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-card'}`} title="执行日志" aria-label="切换执行日志面板" aria-pressed={showExecLog} onClick={() => setShowExecLog(!showExecLog)}>
+            <ScrollText size={16} />
+          </button>
+        </div>
+      </header>
 
+      {/* 主画布区域 */}
+      <div className="flex-1 relative min-h-0">
         {/* 画布容器 - HTML架构 (SVG连线层 + HTML节点层, 与原型对齐) */}
         <div
           ref={canvasContainerRef}
@@ -2461,7 +2436,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
         )}
 
         {/* P2: 执行日志面板 (增强版) */}
-        {execLogs.length > 0 && (
+        {(showExecLog || execLogs.length > 0) && (
           <div className="absolute bottom-12 right-3 w-[380px] max-h-[280px] bg-card/95 border border-border rounded-lg overflow-hidden flex flex-col shadow-lg">
             <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-muted/50">
               <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">执行日志</span>
@@ -2501,7 +2476,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
       </div>{/* 主画布 end */}
 
       {/* 底部内容面板 - 用户项目图片 */}
-      <ContentPanel canvasImages={canvasImages} onDragImage={() => {}} themeStyle={themeStyle} />
+      {showContentStrip && <ContentPanel canvasImages={canvasImages} onDragImage={() => {}} themeStyle={themeStyle} />}
       </div>{/* 画布+内容面板 垂直容器 end */}
       </div>{/* 主内容行 end */}
 
@@ -2808,34 +2783,32 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
     >
       {/* 节点主体 - HTML div, 与原型node-card对齐 */}
       <div
-        className="relative w-full h-full rounded-[22px] overflow-hidden cursor-move transition-shadow duration-200"
+        className="relative w-full h-full rounded-2xl overflow-hidden cursor-grab active:cursor-grabbing select-none"
         style={{
-          background: isSelected ? T.nodeSelected : T.nodeBody,
-          border: `${execResult ? 2 : isSelected ? 1.5 : 1}px solid ${execResult ? statusColor : isSelected ? color : isHovered ? color : T.nodeBorder}`,
-          borderColor: execResult ? statusColor : isSelected ? color : isHovered ? color : T.nodeBorder,
-          opacity: execResult ? 1 : isSelected ? 1 : isHovered ? 1 : 1,
+          background: 'rgba(22,27,34,0.92)',
+          backdropFilter: 'blur(20px) saturate(1.2)',
+          WebkitBackdropFilter: 'blur(20px) saturate(1.2)',
+          border: isSelected ? '1px solid rgba(212,175,55,0.15)' : isHovered ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(255,255,255,0.06)',
+          borderRadius: 16,
+          outline: isSelected ? '2px solid #d4af37' : '2px solid transparent',
+          outlineOffset: 2,
           boxShadow: isSelected
-            ? `0 0 0 2px ${color}66, 0 10px 40px rgba(0,0,0,0.55)`
+            ? '0 8px 32px rgba(0,0,0,0.45), 0 0 0 2px rgba(212,175,55,0.25), 0 0 24px rgba(212,175,55,0.08)'
             : isHovered
-            ? `0 0 0 1px ${color}44, 0 8px 30px rgba(0,0,0,0.45)`
-            : `0 4px 20px rgba(0,0,0,0.3)`,
+            ? '0 12px 40px rgba(0,0,0,0.45)'
+            : execResult
+            ? `0 8px 32px rgba(0,0,0,0.35), 0 0 0 2px ${statusColor}30`
+            : '0 8px 32px rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.25)',
+          transition: 'box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1), outline 120ms ease, transform 120ms ease, border-color 120ms ease',
         }}
         onMouseDown={(e) => { e.stopPropagation(); onSelect(e); onDragStart(e); }}
       >
-        {/* 分类色条 - 顶部3px色条 */}
-        <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-[22px]" style={{ background: color, opacity: 0.85 }} />
-
-        {/* 选中/高亮外框 (与原型outline+box-shadow对应) */}
-        {isSelected && (
-          <div className="absolute -inset-[3px] rounded-[24px] pointer-events-none" style={{ border: `2px solid ${color}`, opacity: 0.5 }} />
-        )}
-        {isHighlighted && !isSelected && (
-          <div className="absolute -inset-[2px] rounded-[20px] pointer-events-none" style={{ border: `1px solid ${color}`, opacity: 0.3 }} />
-        )}
+        {/* 分类色条 - 顶部3px色条, 与原型node-type-bar对齐 */}
+        <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-2xl" style={{ background: color, opacity: 0.85 }} />
 
         {/* 执行成功光圈 */}
-        {execResult?.status === 'success' && (
-          <div className="absolute -inset-[3px] rounded-[24px] pointer-events-none" style={{ border: `1.5px solid ${T.statusSuccess}`, opacity: 0.5, animation: 'fadeOut 1.5s ease-out forwards' }} />
+        {execResult?.status === 'success' && !isSelected && (
+          <div className="absolute -inset-[3px] rounded-[18px] pointer-events-none" style={{ border: `1.5px solid ${T.statusSuccess}`, opacity: 0.5, animation: 'fadeOut 1.5s ease-out forwards' }} />
         )}
 
         {/* 画布模式专用标记 (右上角小徽章) */}
@@ -2852,8 +2825,8 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
             <div className="absolute left-2 top-[9px] flex items-center justify-center w-[22px] h-[22px] rounded-md" style={{ background: color + '20', color }}>
               {getNodeIcon(node.type, 12)}
             </div>
-            {/* 标题 - 大写, 11px, 800weight */}
-            <div className="absolute left-[34px] top-[8px] right-[52px] h-5 leading-5 overflow-hidden whitespace-nowrap" style={{ color: T.nodeTitle, fontSize: 11, fontWeight: 800, letterSpacing: '0.12em' }}>
+            {/* 标题 - 大写, 11px, 800weight, 与原型color:#8b949e对齐 */}
+            <div className="absolute left-[34px] top-[8px] right-[52px] h-5 leading-5 overflow-hidden whitespace-nowrap text-muted-foreground" style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.12em' }}>
               <span className="truncate block">{node.label.toUpperCase()}</span>
             </div>
             {/* 折叠开关 */}
@@ -3150,7 +3123,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
         )}
       </div>
 
-      {/* ===== 输入端口 (绝对定位在节点左侧) ===== */}
+      {/* ===== 输入端口 (绝对定位在节点左侧, 与原型port-dot对齐) ===== */}
       {inputPorts.map((port, i) => {
         const py = (i + 1) * ((isCollapsed ? 45 : node.height) / (inputPorts.length + 1));
         const portColor = PORT_COLORS[port.type] || T.connColor;
@@ -3158,23 +3131,40 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
           <div
             key={port.id}
             className="absolute group/port"
-            style={{ left: -6, top: py - 6, width: 12, height: 12 }}
+            style={{ left: -18, top: py - 6, width: 12, height: 12, zIndex: 5 }}
             onMouseUp={(e) => { e.stopPropagation(); onPortMouseUp(node.id, port); }}
             title={port.label}
           >
-            {/* 端口发光背景 */}
-            <div className="absolute inset-0 rounded-full opacity-0 group-hover/port:opacity-30 transition-opacity" style={{ background: portColor }} />
-            {/* 端口外圈 */}
-            <div className="absolute left-[2px] top-[2px] w-[8px] h-[8px] rounded-full cursor-pointer" style={{ background: T.portFill, border: `1.5px solid ${portColor}` }} />
-            {/* 端口内点 */}
-            <div className="absolute left-[4px] top-[4px] w-[4px] h-[4px] rounded-full pointer-events-none" style={{ background: portColor, opacity: 0.6 }} />
+            {/* 44px触摸目标 (不可见) */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[32px] h-[32px] rounded-full" />
+            {/* 端口圆点: 12px border circle, 与原型port-dot对齐 */}
+            <div
+              className="w-3 h-3 rounded-full cursor-crosshair transition-all duration-100"
+              style={{
+                border: `2px solid ${portColor}`,
+                background: T.nodeBody === '#0d1117' ? '#0d1117' : '#ffffff',
+                color: portColor,
+              }}
+              onMouseEnter={(e) => {
+                const el = e.currentTarget;
+                el.style.transform = 'scale(1.5)';
+                el.style.backgroundColor = portColor;
+                el.style.boxShadow = `0 0 8px ${portColor}`;
+              }}
+              onMouseLeave={(e) => {
+                const el = e.currentTarget;
+                el.style.transform = 'scale(1)';
+                el.style.backgroundColor = T.nodeBody === '#0d1117' ? '#0d1117' : '#ffffff';
+                el.style.boxShadow = 'none';
+              }}
+            />
             {/* 端口标签 */}
-            <div className="absolute left-[14px] top-[-2px] whitespace-nowrap pointer-events-none select-none" style={{ color: T.portLabel, fontSize: 9, fontWeight: 500 }}>{port.label}</div>
+            <div className="absolute left-[14px] top-[-2px] whitespace-nowrap pointer-events-none select-none" style={{ color: T.portLabel, fontSize: 9, fontWeight: 500, letterSpacing: '0.02em' }}>{port.label}</div>
           </div>
         );
       })}
 
-      {/* ===== 输出端口 (绝对定位在节点右侧) ===== */}
+      {/* ===== 输出端口 (绝对定位在节点右侧, 与原型port-dot对齐) ===== */}
       {outputPorts.map((port, i) => {
         const py = (i + 1) * ((isCollapsed ? 45 : node.height) / (outputPorts.length + 1));
         const portColor = PORT_COLORS[port.type] || T.connColor;
@@ -3182,18 +3172,35 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
           <div
             key={port.id}
             className="absolute group/port"
-            style={{ right: -6, top: py - 6, width: 12, height: 12 }}
+            style={{ right: -18, top: py - 6, width: 12, height: 12, zIndex: 5 }}
             onMouseDown={(e) => { e.stopPropagation(); onPortMouseDown(e, node.id, port); }}
             title={port.label}
           >
-            {/* 端口发光背景 */}
-            <div className="absolute inset-0 rounded-full opacity-0 group-hover/port:opacity-35 transition-opacity" style={{ background: portColor }} />
-            {/* 端口外圈 (输出端口实心) */}
-            <div className="absolute left-[2px] top-[2px] w-[8px] h-[8px] rounded-full cursor-pointer" style={{ background: portColor, opacity: 0.9 }} />
-            {/* 端口内点 (白色) */}
-            <div className="absolute left-[4px] top-[4px] w-[4px] h-[4px] rounded-full pointer-events-none" style={{ background: 'white', opacity: 0.7 }} />
+            {/* 44px触摸目标 (不可见) */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[32px] h-[32px] rounded-full" />
+            {/* 端口圆点: 12px border circle, 与原型port-dot对齐 */}
+            <div
+              className="w-3 h-3 rounded-full cursor-crosshair transition-all duration-100"
+              style={{
+                border: `2px solid ${portColor}`,
+                background: T.nodeBody === '#0d1117' ? '#0d1117' : '#ffffff',
+                color: portColor,
+              }}
+              onMouseEnter={(e) => {
+                const el = e.currentTarget;
+                el.style.transform = 'scale(1.5)';
+                el.style.backgroundColor = portColor;
+                el.style.boxShadow = `0 0 8px ${portColor}`;
+              }}
+              onMouseLeave={(e) => {
+                const el = e.currentTarget;
+                el.style.transform = 'scale(1)';
+                el.style.backgroundColor = T.nodeBody === '#0d1117' ? '#0d1117' : '#ffffff';
+                el.style.boxShadow = 'none';
+              }}
+            />
             {/* 端口标签 */}
-            <div className="absolute right-[14px] top-[-2px] whitespace-nowrap pointer-events-none select-none text-right" style={{ color: T.portLabel, fontSize: 9, fontWeight: 500 }}>{port.label}</div>
+            <div className="absolute right-[14px] top-[-2px] whitespace-nowrap pointer-events-none select-none text-right" style={{ color: T.portLabel, fontSize: 9, fontWeight: 500, letterSpacing: '0.02em' }}>{port.label}</div>
           </div>
         );
       })}

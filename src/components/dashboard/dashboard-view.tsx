@@ -10,7 +10,7 @@ import {
   UserPlus, Ban, CheckCircle2, Plug, RefreshCw, Activity, Wallet,
   Loader2, Settings, ChevronDown, ShieldCheck, AlertTriangle,
   ArrowUp, ArrowDown, ShoppingBag, Users, Server, Database,
-  XCircle,
+  XCircle, BarChart3, Upload, RotateCcw,
 } from 'lucide-react';
 import { UserManager } from '@/lib/user-manager';
 import type { Project, CanvasImage, User, UsageStats } from '@/lib/user-types';
@@ -18,7 +18,7 @@ import { ConfirmDialog } from '@/components/custom-dialogs';
 import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
 import { getModelDisplayName } from '@/lib/model-name-map';
 
-type TabType = 'projects' | 'templates' | 'assets' | 'users' | 'apis' | 'data' | 'ecom-templates';
+type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates';
 type ProjectFilter = 'all' | 'recent' | 'starred';
 type AssetSubTab = 'images' | 'prompts' | 'brands';
 type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer';
