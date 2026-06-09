@@ -1382,7 +1382,7 @@ export function InfiniteCanvas({
     );
     onImagesChange(updatedImages);
     setGroups(prev => prev.filter(g => g.id !== groupId));
-  }, [images, onImagesChange]);
+  }, [images, onImagesChange, getCurrentModel]);
 
   // Toggle group collapse
   const handleToggleGroupCollapse = useCallback((groupId: string) => {
@@ -4776,6 +4776,9 @@ export function InfiniteCanvas({
       }
 
       // 构建请求体（含蒙版）
+      // Use currently selected model from generation panel
+      const { model: currentModel, providerId: currentProviderId } = getCurrentModel();
+      const effectiveModel = currentModel || 'gpt-image-2';
       // Calculate aspect ratio from original image
       const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
       const g = gcd(targetImg.width, targetImg.height);
@@ -4785,7 +4788,8 @@ export function InfiniteCanvas({
         prompt,
         size: aspectRatio,
         quality: 'high',
-        model: 'gpt-image-2',
+        model: effectiveModel,
+        providerId: currentProviderId || undefined,
         count: 1,
       };
 
@@ -4849,19 +4853,29 @@ export function InfiniteCanvas({
           const pollResp = await fetch('/api/poll-task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskId, model: 'gpt-image-2' }),
+            body: JSON.stringify({ taskId, model: effectiveModel }),
           });
           const pollData = await pollResp.json();
 
-          if (pollData.status === 'completed' && pollData.result?.url) {
+          // poll-task returns image URL in multiple formats:
+          // 1. result.url / result.imageUrl (local editTask or remote poll)
+          // 2. imageUrl (top-level, completedTaskCache)
+          // 3. result.image.url (images/generations format)
+          const resultUrl = pollData.result?.url || pollData.result?.imageUrl || pollData.imageUrl || (pollData.result?.image as Record<string,unknown>)?.url;
+          if (pollData.status === 'completed' && resultUrl) {
             completed = true;
-            // 用结果替换原图
-            const resultUrl = pollData.result.url;
-            onImagesChange(images.map(img =>
-              img.id === annotation.targetImageId
-                ? { ...img, url: resultUrl, prompt: prompt }
-                : img
-            ));
+            // 添加结果图片到原图右侧（不覆盖原图，方便对比）
+            const gap = 40;
+            const newImage: CanvasImage = {
+              id: `edit_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+              url: resultUrl,
+              x: targetImg.x + targetImg.width + gap,
+              y: targetImg.y,
+              width: targetImg.width,
+              height: targetImg.height,
+              prompt: prompt,
+            };
+            onImagesChange([...images, newImage]);
             setAnnotations(prev => prev.map(a =>
               a.id === annotation.id ? { ...a, status: 'done' as const, resultImageUrl: resultUrl, aiReply: '修改完成' } : a
             ));
@@ -5023,8 +5037,9 @@ export function InfiniteCanvas({
           image: imageUrl,
           prompt: combinedPrompt,
           model: modelInfo.model,
-          size: 'auto',
-          quality: 'medium',
+          providerId: modelInfo.providerId || undefined,
+          size: '1:1',
+          quality: 'high',
         }),
       });
 
@@ -5040,12 +5055,23 @@ export function InfiniteCanvas({
             body: JSON.stringify({ taskId: data.taskId, model: modelInfo.model }),
           });
           const pollData = await pollRes.json();
-          if (pollData.status === 'completed' && pollData.result?.imageUrl) {
-            const newImageUrl = pollData.result.imageUrl;
-            // Update the image on canvas
-            onImagesChange(images.map(img =>
-              img.id === ann.targetImageId ? { ...img, url: newImageUrl, prompt: combinedPrompt } : img
-            ));
+          const newImageUrl = pollData.result?.url || pollData.result?.imageUrl || pollData.imageUrl || (pollData.result?.image as Record<string,unknown>)?.url;
+          if (pollData.status === 'completed' && newImageUrl) {
+            // Add result image next to original (instead of replacing)
+            const targetImage = images.find(img => img.id === ann.targetImageId);
+            if (targetImage) {
+              const gap = 40;
+              const newImage: CanvasImage = {
+                id: `followup_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+                url: newImageUrl,
+                x: targetImage.x + targetImage.width + gap,
+                y: targetImage.y,
+                width: targetImage.width,
+                height: targetImage.height,
+                prompt: combinedPrompt,
+              };
+              onImagesChange([...images, newImage]);
+            }
             const aiReplyEntry = { role: 'assistant' as const, content: '已根据您的反馈完成修改' };
             setAnnotations(prev => prev.map(a =>
               a.id === annId ? {
