@@ -277,6 +277,29 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setMenuOpenId(null);
   }, [mgr]);
 
+  // ─── Import project ───
+  const importProjectInputRef = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.wujie,application/json,text/html';
+    input.onchange = (e: Event) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          mgr.importProjectFromWujie(String(reader.result || ''));
+          // Force re-render by toggling state
+          setActiveTab('projects');
+        } catch {
+          alert('导入失败，请选择有效的 .wujie 文件。');
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  }, [mgr]);
+
   // Close menus on outside click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -692,6 +715,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             { key: 'projects' as TabType, label: '我的项目', icon: FolderOpen, count: projects.length },
             { key: 'templates' as TabType, label: '模板广场', icon: LayoutTemplate, count: null },
             { key: 'assets' as TabType, label: '资产库', icon: Layers, count: allImages.length },
+            { key: 'stats' as TabType, label: '统计', icon: BarChart3, count: null },
+            { key: 'settings' as TabType, label: '设置', icon: Settings, count: null },
           ].map(item => (
             <button key={item.key} onClick={() => setActiveTab(item.key)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${activeTab === item.key ? `${accentBgLight} ${accentClass}` : `${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'}`}`}>
               <item.icon className="w-4.5 h-4.5" />
@@ -754,6 +779,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${textSecondary}`} />
                     <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="搜索项目..." className={`pl-9 pr-4 py-2 rounded-xl text-sm ${isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-gray-200'} border focus:outline-none focus:ring-1 focus:ring-[#d4af37]/30 w-56`} />
                   </div>
+                  <button onClick={importProjectInputRef} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer ${isDark ? 'bg-white/5 border border-white/10 text-[#d4af37] hover:bg-white/10' : 'bg-gray-100 border border-gray-200 text-gray-700 hover:bg-gray-200'}`}>
+                    <Upload className="w-4 h-4" /> 导入 .wujie
+                  </button>
                   <button onClick={onNewProject} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-[#d4af37] text-black hover:bg-[#e0b840] transition-colors cursor-pointer">
                     <Plus className="w-4 h-4" /> 新建项目
                   </button>
