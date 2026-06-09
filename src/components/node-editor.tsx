@@ -22,6 +22,7 @@ import {
   ArrowLeft, LayoutGrid, Sparkles, MessageCircle, Rotate3d, Box, ShoppingBag, Zap,
   Copy, Clipboard, Film, Bookmark, BookmarkPlus, GitCompare, Grid3X3, ArrowLeftFromLine, ImagePlus,
   Shapes, BookOpen, Blocks, FolderOpen, ScrollText, MousePointer2, Maximize2,
+  CopyPlus, Unlink, Shuffle, Paintbrush,
 } from 'lucide-react';
 
 // ==================== 图标映射 ====================
@@ -694,6 +695,8 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   const [showLeftPanel, setShowLeftPanel] = useState(true);
   const [showExecLog, setShowExecLog] = useState(false);
   const [clipboard, setClipboard] = useState<{ nodes: WorkflowNode[]; connections: WorkflowConnection[] } | null>(null);
+  // 右键菜单状态
+  const [contextMenu, setContextMenu] = useState<{ type: 'canvas' | 'node'; x: number; y: number; nodeId?: string } | null>(null);
 
   // P2: 提示词库
   const [promptSnippets, setPromptSnippets] = useState<PromptSnippet[]>(() => {
@@ -1346,6 +1349,126 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
     setViewport(v => ({ ...v, zoom: Math.max(0.15, Math.min(3, v.zoom * factor)) }));
   }, []);
 
+  // ─── 右键菜单 ───
+  const handleCanvasContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setContextMenu({ type: 'canvas', x: e.clientX, y: e.clientY });
+  }, []);
+
+  const handleNodeContextMenu = useCallback((e: React.MouseEvent, nodeId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ type: 'node', x: e.clientX, y: e.clientY, nodeId });
+  }, []);
+
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+  // ESC关闭右键菜单
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape' && contextMenu) closeContextMenu(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [contextMenu, closeContextMenu]);
+
+  const handleContextAction = useCallback((action: string) => {
+    if (contextMenu?.type === 'canvas') {
+      switch (action) {
+        case 'add-node': {
+          // 在右键位置添加一个AI生成节点
+          const canvasRect = canvasContainerRef.current?.getBoundingClientRect();
+          const vp = viewportRef.current;
+          const mx = canvasRect ? (contextMenu.x - canvasRect.left - vp.x) / vp.zoom : 100;
+          const my = canvasRect ? (contextMenu.y - canvasRect.top - vp.y) / vp.zoom : 100;
+          const newNode = createWorkflowNode('ai-generate', mx - 160, my - 60);
+          setWf(prev => ({ ...prev, nodes: [...prev.nodes, newNode] }));
+          setSelectedNodeIds(new Set([newNode.id]));
+          break;
+        }
+        case 'paste': {
+          if (!clipboard) break;
+          const canvasRect2 = canvasContainerRef.current?.getBoundingClientRect();
+          const vp2 = viewportRef.current;
+          const mx2 = canvasRect2 ? (contextMenu.x - canvasRect2.left - vp2.x) / vp2.zoom : 100;
+          const my2 = canvasRect2 ? (contextMenu.y - canvasRect2.top - vp2.y) / vp2.zoom : 100;
+          // 偏移粘贴避免完全重叠
+          const offset = 30;
+          const idMap = new Map<string, string>();
+          const newNodes = clipboard.nodes.map(n => {
+            const newId = n.id + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+            idMap.set(n.id, newId);
+            return { ...n, id: newId, x: mx2 + offset, y: my2 + offset };
+          });
+          const newConns = clipboard.connections
+            .map(c => {
+              const newFromId = idMap.get(c.fromNodeId);
+              const newToId = idMap.get(c.toNodeId);
+              if (!newFromId || !newToId) return null;
+              return { ...c, id: c.id + '_' + Date.now().toString(36), fromNodeId: newFromId, toNodeId: newToId };
+            })
+            .filter(Boolean) as WorkflowConnection[];
+          setWf(prev => ({ ...prev, nodes: [...prev.nodes, ...newNodes], connections: [...prev.connections, ...newConns] }));
+          setSelectedNodeIds(new Set(newNodes.map(n => n.id)));
+          break;
+        }
+        case 'select-all': {
+          setSelectedNodeIds(new Set(wf.nodes.map(n => n.id)));
+          break;
+        }
+      }
+    } else if (contextMenu?.type === 'node' && contextMenu.nodeId) {
+      const nodeId = contextMenu.nodeId;
+      switch (action) {
+        case 'copy': {
+          const selIds = selectedNodeIds.has(nodeId) ? selectedNodeIds : new Set([nodeId]);
+          const selNodes = wf.nodes.filter(n => selIds.has(n.id));
+          const selConns = wf.connections.filter(c => selIds.has(c.fromNodeId) && selIds.has(c.toNodeId));
+          setClipboard({ nodes: selNodes, connections: selConns });
+          break;
+        }
+        case 'duplicate': {
+          const selIds = selectedNodeIds.has(nodeId) ? selectedNodeIds : new Set([nodeId]);
+          const selNodes = wf.nodes.filter(n => selIds.has(n.id));
+          const selConns = wf.connections.filter(c => selIds.has(c.fromNodeId) && selIds.has(c.toNodeId));
+          const idMap = new Map<string, string>();
+          const newNodes = selNodes.map(n => {
+            const newId = n.id + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+            idMap.set(n.id, newId);
+            return { ...n, id: newId, x: n.x + 40, y: n.y + 40 };
+          });
+          const newConns = selConns
+            .map(c => {
+              const newFromId = idMap.get(c.fromNodeId);
+              const newToId = idMap.get(c.toNodeId);
+              if (!newFromId || !newToId) return null;
+              return { ...c, id: c.id + '_' + Date.now().toString(36), fromNodeId: newFromId, toNodeId: newToId };
+            })
+            .filter(Boolean) as WorkflowConnection[];
+          setWf(prev => ({ ...prev, nodes: [...prev.nodes, ...newNodes], connections: [...prev.connections, ...newConns] }));
+          setSelectedNodeIds(new Set(newNodes.map(n => n.id)));
+          break;
+        }
+        case 'disconnect': {
+          setWf(prev => ({
+            ...prev,
+            connections: prev.connections.filter(c => c.fromNodeId !== nodeId && c.toNodeId !== nodeId),
+          }));
+          break;
+        }
+        case 'delete': {
+          const selIds = selectedNodeIds.has(nodeId) ? selectedNodeIds : new Set([nodeId]);
+          setWf(prev => ({
+            ...prev,
+            nodes: prev.nodes.filter(n => !selIds.has(n.id)),
+            connections: prev.connections.filter(c => !selIds.has(c.fromNodeId) && !selIds.has(c.toNodeId)),
+          }));
+          setSelectedNodeIds(new Set());
+          break;
+        }
+      }
+    }
+    closeContextMenu();
+  }, [contextMenu, clipboard, wf, selectedNodeIds, closeContextMenu]);
+
   // ─── 执行工作流 ───
 
   const handleRunWorkflow = useCallback(async () => {
@@ -1608,14 +1731,31 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   }, []);
 
   const getPortPositionLocal = useCallback((node: WorkflowNode, port: NodePort) => {
+    // 优先从DOM元素读取端口实际位置（与原型port-row布局对齐）
+    const nodeEl = canvasContainerRef.current?.querySelector(`[data-node-id="${node.id}"]`);
+    const zoom = viewport.zoom || 1;
+    if (nodeEl) {
+      const dir = port.direction === 'in' ? 'in' : 'out';
+      const portEl = nodeEl.querySelector(`[data-port-id="${node.id}-${dir}-${port.id}"]`);
+      if (portEl) {
+        const nodeRect = nodeEl.getBoundingClientRect();
+        const portRect = portEl.getBoundingClientRect();
+        const x = port.direction === 'in' ? node.x : node.x + node.width;
+        const y = node.y + (portRect.top + portRect.height / 2 - nodeRect.top) / zoom;
+        return { x, y };
+      }
+    }
+    // Fallback: body区域内均匀分布
     const portIndex = node.ports.filter(p => p.direction === port.direction).findIndex(p => p.id === port.id);
     const total = node.ports.filter(p => p.direction === port.direction).length;
+    const headerH = 42;
     const effectiveHeight = collapsedNodes.has(node.id) ? 45 : node.height;
+    const bodyHeight = effectiveHeight - headerH;
     if (port.direction === 'in') {
-      return { x: node.x, y: node.y + (portIndex + 1) * (effectiveHeight / (total + 1)) };
+      return { x: node.x, y: node.y + headerH + (portIndex + 1) * (bodyHeight / (total + 1)) };
     }
-    return { x: node.x + node.width, y: node.y + (portIndex + 1) * (effectiveHeight / (total + 1)) };
-  }, [collapsedNodes]);
+    return { x: node.x + node.width, y: node.y + headerH + (portIndex + 1) * (bodyHeight / (total + 1)) };
+  }, [collapsedNodes, viewport.zoom]);
 
   // ─── 高亮连线 (选中节点时高亮上下游) ───
 
@@ -1845,6 +1985,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
           onWheel={handleWheel}
           onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
           onDrop={handleCanvasImageDrop}
+          onContextMenu={handleCanvasContextMenu}
         >
           {/* 网格背景 - 独立层, 不随viewport transform变化 */}
           <div className="absolute inset-0 pointer-events-none" style={{
@@ -2051,6 +2192,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 onResizeNode={resizeNodeForImageUrl}
                 collapsedNodes={collapsedNodes}
                 onToggleCollapse={toggleNodeCollapse}
+                onContextMenu={(e) => handleNodeContextMenu(e, node.id)}
               />
             ))}
           </div>
@@ -2372,6 +2514,56 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
           </div>
         </div>
       )}
+
+      {/* ═══ 右键菜单 — 与原型对齐 ═══ */}
+      {contextMenu && (
+        <div className="fixed inset-0 z-[199]" onClick={closeContextMenu} onContextMenu={(e) => { e.preventDefault(); closeContextMenu(); }}>
+          <div
+            className="context-menu"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onClick={e => e.stopPropagation()}
+          >
+            {contextMenu.type === 'canvas' ? (
+              <>
+                <div className="context-menu-item" onClick={() => handleContextAction('add-node')}>
+                  <Plus size={16} className="text-muted-foreground" />
+                  添加节点
+                </div>
+                <div className={`context-menu-item ${!clipboard ? 'opacity-40 pointer-events-none' : ''}`} onClick={() => handleContextAction('paste')}>
+                  <Clipboard size={16} className="text-muted-foreground" />
+                  粘贴
+                </div>
+                <div className="context-menu-divider" />
+                <div className="context-menu-item" onClick={() => handleContextAction('select-all')}>
+                  <BoxSelect size={16} className="text-muted-foreground" />
+                  全选
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="context-menu-item" onClick={() => handleContextAction('copy')}>
+                  <Copy size={16} className="text-muted-foreground" />
+                  复制
+                </div>
+                <div className="context-menu-item" onClick={() => handleContextAction('duplicate')}>
+                  <CopyPlus size={16} className="text-muted-foreground" />
+                  副本
+                </div>
+                <div className="context-menu-divider" />
+                <div className="context-menu-item" onClick={() => handleContextAction('disconnect')}>
+                  <Unlink size={16} className="text-muted-foreground" />
+                  断开连线
+                </div>
+                <div className="context-menu-divider" />
+                <div className="context-menu-item danger" onClick={() => handleContextAction('delete')}>
+                  <Trash2 size={16} />
+                  删除节点
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
     </>
   );
@@ -2410,6 +2602,7 @@ interface NodeCardProps {
   onResizeNode?: (nodeId: string, imageUrl: string) => void;
   collapsedNodes?: Set<string>;
   onToggleCollapse?: (nodeId: string) => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }
 
 /** output-image-group 节点内容: 多图分页浏览 */
@@ -2477,7 +2670,7 @@ function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
   );
 }
 
-function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRunning, theme, canvasImages, llmModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onDeselect, onPreviewImage, onResizeNode, collapsedNodes, onToggleCollapse }: NodeCardProps) {
+function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRunning, theme, canvasImages, llmModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onDeselect, onPreviewImage, onResizeNode, collapsedNodes, onToggleCollapse, onContextMenu }: NodeCardProps) {
   const T = theme;
   const cat = getNodeCategory(node.type);
   const color = NODE_TYPE_COLORS[cat];
@@ -2574,6 +2767,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
 
   return (
     <div
+      data-node-id={node.id}
       className={`node-card ${isSelected ? 'selected' : ''} ${isCollapsed ? 'collapsed' : ''} ${isInputText ? 'prompt-node' : isInputImage || isOutputImage ? 'image-node' : 'generator-node'}`}
       style={{
         left: node.x,
@@ -2586,6 +2780,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
       onMouseDown={(e) => { e.stopPropagation(); onSelect(e); onDragStart(e); }}
       onMouseEnter={() => onHover(node.id)}
       onMouseLeave={() => onHover(null)}
+      onContextMenu={onContextMenu}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
@@ -2725,8 +2920,23 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
                   )}
                 </div>
               )}
-              {/* 提示词标签 */}
-              <div className="text-[10px] text-muted-foreground/60 mt-0.5">提示词</div>
+              {/* 输出端口行 */}
+              {outputPorts.map((port) => {
+                const portColor = PORT_COLORS[port.type] || T.connColor;
+                return (
+                  <div key={port.id} className="port-row" style={{ marginTop: 8 }}>
+                    <div className="port-dot input-port" style={{ visibility: 'hidden' }} />
+                    <span className="port-label">{port.label}</span>
+                    <div
+                      className="port-dot output-port"
+                      data-port-id={`${node.id}-out-${port.id}`}
+                      style={{ borderColor: portColor, color: portColor }}
+                      onMouseDown={(e) => { e.stopPropagation(); onPortMouseDown(e, node.id, port); }}
+                      title={port.label}
+                    />
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -2802,67 +3012,86 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
             </div>
           )}
 
-          {/* AI 生成类节点: 端口行 + 下拉选择 + RUN按钮 */}
+          {/* AI 生成类节点: input-card + port-row + 下拉选择 + RUN按钮 */}
           {!isInputText && !isInputImage && !isOutputImage && !isOutputImageGroup && !hasImageOutput && (node.type.startsWith('ai-') || node.type === 'output-image') && (
-            <div className="flex flex-col gap-2">
-              {/* 输入端口行 */}
-              {inputPorts.map((port) => {
+            <div className="flex flex-col gap-0">
+              {/* 输入端口行 - input-card 模式（带图标+名称+端口点） */}
+              {inputPorts.map((port, idx) => {
                 const portColor = PORT_COLORS[port.type] || T.connColor;
+                const iconBg = portColor + '12';
                 return (
-                  <div key={port.id} className="port-row">
+                  <div key={port.id} className="input-card" style={{ marginBottom: idx < inputPorts.length - 1 ? 6 : 8 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 4, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      {port.type === 'prompt' ? <Type size={14} style={{ color: portColor }} /> :
+                       port.type === 'image' ? <ImageIcon size={14} style={{ color: portColor }} /> :
+                       port.type === 'mask' ? <Paintbrush size={14} style={{ color: portColor }} /> :
+                       <Bookmark size={14} style={{ color: portColor }} />}
+                    </div>
+                    <span className="input-card-name">{port.label}</span>
                     <div
                       className="port-dot input-port"
-                      style={{ borderColor: portColor, color: portColor }}
+                      data-port-id={`${node.id}-in-${port.id}`}
+                      style={{ borderColor: portColor, color: portColor, flexShrink: 0 }}
                       onMouseUp={(e) => { e.stopPropagation(); onPortMouseUp(node.id, port); }}
                       title={port.label}
                     />
-                    <span className="port-label">{port.label}</span>
                   </div>
                 );
               })}
               {/* 模型选择 */}
               {node.type === 'ai-generate' && (
-                <div className="flex flex-col gap-1.5">
+                <div style={{ marginBottom: 6 }}>
                   <select className="node-select" value={String(node.config?.model || '')} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'model', e.target.value); }} onMouseDown={(e) => e.stopPropagation()}>
                     <option value="">选择模型</option>
                     <option value="flux-pro">FLUX.1 Pro</option>
                     <option value="flux-dev">FLUX.1 Dev</option>
                     <option value="dall-e-3">DALL-E 3</option>
                   </select>
+                </div>
+              )}
+              {node.type === 'ai-generate' && (
+                <div style={{ marginBottom: 8 }}>
                   <select className="node-select" value={String(node.config?.aspectRatio || '16:9')} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'aspectRatio', e.target.value); }} onMouseDown={(e) => e.stopPropagation()}>
-                    <option value="1:1">1:1 正方</option>
+                    <option value="1:1">1:1 正方形</option>
+                    <option value="4:3">4:3 横版</option>
                     <option value="16:9">16:9 宽屏</option>
-                    <option value="9:16">9:16 竖屏</option>
-                    <option value="4:3">4:3 标准</option>
-                    <option value="3:4">3:4 肖像</option>
+                    <option value="9:16">9:16 竖版</option>
+                    <option value="3:4">3:4 竖版</option>
+                    <option value="21:9">21:9 超宽</option>
                   </select>
                 </div>
               )}
+              {/* 输出端口行 - port-row 模式（左隐藏+标签+右端口） */}
+              {outputPorts.map((port) => {
+                const portColor = PORT_COLORS[port.type] || T.connColor;
+                return (
+                  <div key={port.id} className="port-row">
+                    <div className="port-dot input-port" style={{ visibility: 'hidden' }} />
+                    <span className="port-label">{port.label}</span>
+                    <div
+                      className="port-dot output-port"
+                      data-port-id={`${node.id}-out-${port.id}`}
+                      style={{ borderColor: portColor, color: portColor }}
+                      onMouseDown={(e) => { e.stopPropagation(); onPortMouseDown(e, node.id, port); }}
+                      title={port.label}
+                    />
+                  </div>
+                );
+              })}
               {/* 运行中进度条 */}
               {isRunning && (
-                <div className="progress-bar">
+                <div className="progress-bar" style={{ marginTop: 8 }}>
                   <div className="progress-bar-fill" style={{ width: '60%' }} />
                 </div>
               )}
-              {/* 输出端口标签 */}
-              {outputPorts.map((port) => (
-                <div key={port.id} className="port-row">
-                  <span className="port-label">{port.label}</span>
-                  <div
-                    className="port-dot output-port"
-                    style={{ borderColor: PORT_COLORS[port.type] || T.connColor, color: PORT_COLORS[port.type] || T.connColor }}
-                    onMouseDown={(e) => { e.stopPropagation(); onPortMouseDown(e, node.id, port); }}
-                    title={port.label}
-                  />
-                </div>
-              ))}
               {/* RUN 按钮 */}
               <button
                 className="run-btn"
+                style={{ marginTop: 8 }}
                 onClick={(e) => { e.stopPropagation(); onCascadeRun?.(node.id); }}
                 title="运行此节点"
               >
-                <Play size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />RUN
+                RUN
               </button>
             </div>
           )}
@@ -2881,8 +3110,23 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
             const imageUrls = (execResult?.output?.imageUrls as string[]) || [];
             const singleUrl = hasImageOutput || '';
             const allUrls = imageUrls.length > 0 ? imageUrls : (singleUrl ? [singleUrl] : []);
+            // 输入端口行
+            const imageInputPort = inputPorts.find(p => p.type === 'image' || p.label === '图片');
             return (
-              <div className="w-full h-full">
+              <div className="w-full h-full flex flex-col">
+                {imageInputPort && (
+                  <div className="port-row" style={{ marginBottom: 8 }}>
+                    <div
+                      className="port-dot input-port"
+                      data-port-id={`${node.id}-in-${imageInputPort.id}`}
+                      style={{ borderColor: PORT_COLORS[imageInputPort.type] || T.connColor, color: PORT_COLORS[imageInputPort.type] || T.connColor }}
+                      onMouseUp={(e) => { e.stopPropagation(); onPortMouseUp(node.id, imageInputPort); }}
+                      title={imageInputPort.label}
+                    />
+                    <span className="port-label">{imageInputPort.label}</span>
+                    <div className="port-dot output-port" style={{ visibility: 'hidden' }} />
+                  </div>
+                )}
                 {allUrls.length > 1 ? (
                   <OutputImageGroupContent imageUrls={allUrls} theme={T} onPreviewImage={onPreviewImage} />
                 ) : singleUrl ? (
@@ -2950,6 +3194,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[32px] h-[32px] rounded-full" />
             <div
               className="port-dot output-port"
+              data-port-id={`${node.id}-out-${port.id}`}
               style={{ borderColor: portColor, color: portColor }}
             />
           </div>
@@ -2971,6 +3216,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[32px] h-[32px] rounded-full" />
             <div
               className="port-dot input-port"
+              data-port-id={`${node.id}-in-${port.id}`}
               style={{ borderColor: portColor, color: portColor }}
             />
           </div>
@@ -3025,11 +3271,8 @@ interface PropertyPanelProps {
 
 function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImageUpload, canvasImages }: PropertyPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({ basic: true, advanced: true, canvas: true });
-  // 文本输入本地缓存：避免每次按键触发 onUpdate → setWf → 重渲染 → 闪烁
   const [localTextValues, setLocalTextValues] = useState<Record<string, string>>({});
   const [focusedField, setFocusedField] = useState<string | null>(null);
-  // P0: @图片引用弹窗状态 (移到PropertyPanel内部管理)
   const [mentionPopup, setMentionPopup] = useState<MentionPopup>({ visible: false, nodeId: '', fieldKey: '', filter: '', position: { top: 0, left: 0 } });
 
   if (!node) {
@@ -3047,25 +3290,6 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
   const color = NODE_TYPE_COLORS[cat];
   const fields = getNodePropertyFields(node.type);
   const isCanvasFeature = ['ai-font-design', 'ai-refine-engine', 'ai-brand-ecommerce', 'ai-segment', 'ai-multi-angle', 'ai-3d-model'].includes(node.type);
-
-  // 分组: basic(前3个) + canvas(画布模式专用字段) + advanced(其余)
-  const basicFields = fields.slice(0, 3);
-  const restFields = fields.slice(3);
-
-  // 画布模式专用字段
-  const canvasFeatureKeys: Record<string, string[]> = {
-    'ai-font-design': ['textContent', 'styleCategory', 'scene', 'mode'],
-    'ai-refine-engine': ['mode', 'category', 'lighting', 'viewAngle', 'background'],
-    'ai-brand-ecommerce': ['templateType', 'brandName', 'brandStyle', 'productCategory'],
-    'ai-segment': ['model', 'exportFormat'],
-    'ai-multi-angle': ['angles', 'characterRef'],
-    'ai-3d-model': ['model', 'quality'],
-  };
-  const canvasKeys = canvasFeatureKeys[node.type] || [];
-  const canvasFields = isCanvasFeature ? restFields.filter(f => canvasKeys.includes(f.key)) : [];
-  const advancedFields = isCanvasFeature ? restFields.filter(f => !canvasKeys.includes(f.key)) : restFields;
-
-  const toggleSection = (key: string) => setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
 
   const renderField = (field: PropertyField) => {
     const externalValue = node.config?.[field.key] ?? (node as unknown as Record<string, unknown>)[field.key] ?? field.defaultValue ?? '';
@@ -3391,117 +3615,114 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
 
   return (
     <div className="flex-1 overflow-y-auto">
-      {/* 节点标题 */}
-      <div className="p-3 border-b border-border">
+      {/* 节点类型标识 — 与原型对齐: 彩色圆点 + 类型名 + 描述 */}
+      <div className="px-4 pt-4 pb-3">
         <div className="flex items-center gap-2 mb-1">
-          <span className="w-6 h-6 rounded flex items-center justify-center" style={{ backgroundColor: color + '20', color }}>
-            {getNodeIcon(node.type, 14)}
-          </span>
-          <div>
-            <div className="text-sm font-medium text-foreground">{NODE_TYPE_LABELS[node.type]}</div>
-            <div className="text-xs text-muted-foreground">{NODE_CATEGORY_LABELS[cat]}</div>
-          </div>
+          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
+          <span className="text-sm font-semibold text-foreground">{NODE_TYPE_LABELS[node.type]}</span>
           {isCanvasFeature && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium ml-auto">画布专用</span>
           )}
         </div>
+        <span className="text-xs text-muted-foreground">{NODE_CATEGORY_LABELS[cat]}</span>
       </div>
 
-      {/* 基础属性 */}
-      <div className="border-b border-border">
-        <button onClick={() => toggleSection('basic')} className="w-full flex items-center gap-1 px-3 py-2 text-xs uppercase tracking-wider text-muted-foreground font-semibold hover:text-foreground cursor-pointer">
-          {expandedSections.basic ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-          基础属性
-        </button>
-        {expandedSections.basic && (
-          <div className="px-3 pb-3 space-y-2">
-            {basicFields.map(field => (
-              <div key={field.key}>
-                <label className="block text-xs text-muted-foreground mb-1">{field.label}</label>
-                {renderField(field)}
-              </div>
-            ))}
-            {/* 断点开关 */}
-            <div className="flex items-center justify-between">
-              <label className="text-xs text-muted-foreground">断点</label>
+      {/* 属性字段 — 与原型对齐: 逐字段垂直排列, px-4 py-2 间距 */}
+      {fields.map(field => (
+        <div key={field.key} className="px-4 py-2">
+          <label className="block text-xs font-medium text-muted-foreground mb-1.5">{field.label}</label>
+          {field.key === 'aspectRatio' ? (
+            /* 比例选择器 — 与原型对齐: 4列grid + ratio-btn样式 */
+            <div className="grid grid-cols-4 gap-2">
+              {(field.options || [{ value: '1:1', label: '1:1' }, { value: '4:3', label: '4:3' }, { value: '16:9', label: '16:9' }, { value: '9:16', label: '9:16' }]).map(opt => {
+                const isActive = String(node.config?.aspectRatio ?? field.defaultValue ?? '1:1') === opt.value;
+                const ratioMap: Record<string, { w: number; h: number }> = { '1:1': { w: 20, h: 20 }, '4:3': { w: 24, h: 18 }, '16:9': { w: 28, h: 16 }, '9:16': { w: 14, h: 24 }, '3:4': { w: 18, h: 24 }, '3:2': { w: 24, h: 16 }, '2:3': { w: 16, h: 24 } };
+                const dim = ratioMap[opt.value] || { w: 20, h: 20 };
+                return (
+                  <button key={opt.value} className={`ratio-btn ${isActive ? 'active' : ''}`} onClick={() => onUpdate(node.id, { config: { aspectRatio: opt.value } })}>
+                    <div className="ratio-preview" style={{ width: dim.w, height: dim.h }} />
+                    <span className="text-[10px] text-muted-foreground">{opt.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : field.key === 'quality' ? (
+            /* 质量选择器 — 与原型对齐: 3按钮横排 */
+            <div className="flex gap-2">
+              {(field.options || [{ value: 'standard', label: '标准' }, { value: 'hd', label: '高清' }, { value: 'ultra', label: '极致' }]).map(opt => {
+                const isActive = String(node.config?.quality ?? field.defaultValue ?? 'hd') === opt.value;
+                return (
+                  <button key={opt.value} className={`quality-btn flex-1 ${isActive ? 'active' : ''}`} onClick={() => onUpdate(node.id, { config: { quality: opt.value } })}>
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : field.key === 'seed' ? (
+            /* 种子输入 — 与原型对齐: 输入框 + 随机按钮 */
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={String(node.config?.seed ?? field.defaultValue ?? '')}
+                onChange={e => onUpdate(node.id, { config: { seed: e.target.value } })}
+                placeholder={field.placeholder}
+                className="flex-1 bg-muted border-none rounded-md px-3 py-2 text-sm text-foreground font-mono focus:outline-none focus:ring-2 focus:ring-primary/30"
+              />
               <button
-                onClick={() => onUpdate(node.id, { breakpoint: !node.breakpoint })}
-                className={`relative w-9 h-5 rounded-full transition-colors cursor-pointer ${node.breakpoint ? 'bg-red-500' : 'bg-muted'}`}
+                onClick={() => onUpdate(node.id, { config: { seed: Math.floor(Math.random() * 99999999).toString() } })}
+                className="px-2 py-1.5 rounded-md bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors cursor-pointer"
+                title="随机种子"
               >
-                <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${node.breakpoint ? 'translate-x-4' : ''}`} />
+                <Shuffle size={16} />
               </button>
             </div>
-          </div>
-        )}
-      </div>
-
-      {/* 画布模式专用属性 */}
-      {canvasFields.length > 0 && (
-        <div className="border-b border-border">
-          <button onClick={() => toggleSection('canvas')} className="w-full flex items-center gap-1 px-3 py-2 text-[10px] uppercase tracking-wider text-primary font-semibold hover:text-primary/80 cursor-pointer">
-            {expandedSections.canvas ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-            {node.type === 'ai-font-design' ? '字境大师' : node.type === 'ai-refine-engine' ? '精修引擎' : node.type === 'ai-brand-ecommerce' ? '品牌电商' : node.type === 'ai-segment' ? '元素分层' : node.type === 'ai-multi-angle' ? '多角度' : '3D模型'}
-          </button>
-          {expandedSections.canvas && (
-            <div className="px-3 pb-3 space-y-2">
-              {canvasFields.map(field => (
-                <div key={field.key}>
-                  <label className="block text-xs text-muted-foreground mb-1">{field.label}</label>
-                  {renderField(field)}
-                </div>
-              ))}
+          ) : field.key === 'cfg' || field.key === 'guidanceScale' ? (
+            /* CFG/引导系数 — 与原型对齐: 滑块 + 数值显示 */
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                min={Number(field.min) || 1}
+                max={Number(field.max) || 20}
+                step={Number(field.step) || 0.5}
+                value={Number(node.config?.[field.key] ?? field.defaultValue ?? 7)}
+                onChange={e => onUpdate(node.id, { config: { [field.key]: Number(e.target.value) } })}
+                className="flex-1 accent-primary"
+              />
+              <span className="text-xs font-mono text-foreground w-8 text-right">{Number(node.config?.[field.key] ?? field.defaultValue ?? 7)}</span>
             </div>
+          ) : (
+            renderField(field)
           )}
         </div>
-      )}
-
-      {/* 高级属性 */}
-      {advancedFields.length > 0 && (
-        <div className="border-b border-border">
-          <button onClick={() => toggleSection('advanced')} className="w-full flex items-center gap-1 px-3 py-2 text-xs uppercase tracking-wider text-muted-foreground font-semibold hover:text-foreground cursor-pointer">
-            {expandedSections.advanced ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-            高级属性
-          </button>
-          {expandedSections.advanced && (
-            <div className="px-3 pb-3 space-y-2">
-              {advancedFields.map(field => (
-                <div key={field.key}>
-                  <label className="block text-xs text-muted-foreground mb-1">{field.label}</label>
-                  {renderField(field)}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      ))}
 
       {/* 端口信息 */}
-      <div className="px-3 py-2">
-        <div className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-1">端口</div>
+      <div className="px-4 py-2 border-t border-border/10 mt-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5">端口</div>
         <div className="space-y-1">
           {node.ports.filter(p => p.direction === 'in').map(p => (
             <div key={p.id} className="flex items-center gap-1.5 text-[10px]">
               <span className="w-2 h-2 rounded-full" style={{ backgroundColor: PORT_COLORS[p.type] }} />
               <span className="text-muted-foreground">→</span>
               <span className="text-muted-foreground">{p.label}</span>
-              <span className="text-muted-foreground ml-auto">{p.type}</span>
+              <span className="text-muted-foreground/50 ml-auto">{p.type}</span>
             </div>
           ))}
           {node.ports.filter(p => p.direction === 'out').map(p => (
             <div key={p.id} className="flex items-center gap-1.5 text-[10px]">
               <span className="w-2 h-2 rounded-full" style={{ backgroundColor: PORT_COLORS[p.type] }} />
               <span className="text-muted-foreground">{p.label}</span>
-              <span className="text-muted-foreground ml-auto">{p.type} →</span>
+              <span className="text-muted-foreground/50 ml-auto">{p.type} →</span>
             </div>
           ))}
         </div>
       </div>
 
-      {/* 删除按钮 */}
-      <div className="p-3 border-t border-border">
+      {/* 删除按钮 — 与原型对齐 */}
+      <div className="px-4 py-3">
         <button
           onClick={() => onDelete(node.id)}
-          className="w-full py-2 rounded text-sm text-red-400 hover:bg-red-900/20 transition-colors cursor-pointer flex items-center justify-center gap-1"
+          className="w-full py-2 rounded-md text-sm text-red-400 hover:bg-red-900/20 transition-colors cursor-pointer flex items-center justify-center gap-1.5 border border-dashed border-red-400/20"
         >
           <Trash2 size={12} /> 删除节点
         </button>

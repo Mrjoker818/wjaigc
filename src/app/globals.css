@@ -1117,6 +1117,102 @@ input[type="range"]::-moz-range-thumb {
   transform: scale(1.3);
 }
 
+/* === 右键菜单 — 与原型对齐 === */
+.context-menu {
+  position: fixed;
+  background: rgba(22,27,34,0.96);
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  box-shadow: 0 16px 42px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04);
+  padding: 4px;
+  z-index: 200;
+  min-width: 180px;
+  animation: menu-appear 150ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes menu-appear {
+  from { opacity: 0; transform: scale(0.95) translateY(-4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #e6edf3;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 120ms;
+}
+.context-menu-item:hover {
+  background: rgba(212,175,55,0.08);
+  color: #e6c55a;
+}
+.context-menu-item.danger {
+  color: #ff7b72;
+}
+.context-menu-item.danger:hover {
+  background: rgba(248,81,73,0.1);
+  color: #ff7b72;
+}
+.context-menu-divider {
+  height: 1px;
+  background: rgba(255,255,255,0.06);
+  margin: 4px 8px;
+}
+
+/* === 比例选择按钮 — 与原型对齐 === */
+.ratio-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: transparent;
+  cursor: pointer;
+  transition: all 150ms;
+  color: inherit;
+}
+.ratio-btn:hover {
+  border-color: rgba(212,175,55,0.3);
+  background: rgba(212,175,55,0.05);
+}
+.ratio-btn.active {
+  border-color: #d4af37;
+  background: rgba(212,175,55,0.1);
+  color: #d4af37;
+}
+.ratio-preview {
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+}
+
+/* === 质量选择按钮 — 与原型对齐 === */
+.quality-btn {
+  padding: 6px 0;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 150ms;
+  color: #9ca3af;
+}
+.quality-btn:hover {
+  border-color: rgba(212,175,55,0.3);
+  background: rgba(212,175,55,0.05);
+}
+.quality-btn.active {
+  border-color: #d4af37;
+  background: rgba(212,175,55,0.12);
+  color: #d4af37;
+  font-weight: 600;
+}
+
 /* 减少动画偏好 — 无障碍 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
