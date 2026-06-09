@@ -5,6 +5,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
+  <link href="https://lf-code-agent.coze.cn/obj/x-ai-cn/fonts/google/google-all-fonts.css" rel="stylesheet"/>
+
   <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/jquery/jquery-3.7.1.min.js"></script>
   <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/lucide/lucide-1.11.0.min.js"></script>
   <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/tailwindcss/tailwindcss-browser-4.2.4.min.js"></script>
@@ -12,39 +14,49 @@
   <style type="text/tailwindcss">
     @theme {
       /* === 品牌色 === */
-      --color-primary:              #D4AF37;
-      --color-primary-container:    #2A2410;
-      --color-on-primary:           #0A0A0F;
+      --color-primary:              #d4af37;
+      --color-primary-container:    #3d3420;
+      --color-on-primary:           #0d1117;
       /* === 背景 / 表面 === */
-      --color-background:                 #0A0A0F;
-      --color-surface-container-lowest:   #0E0E13;
-      --color-surface:                    #141418;
-      --color-surface-container:          #1C1C22;
-      --color-surface-container-high:     #242430;
-      --color-surface-container-highest:  #2C2C3A;
+      --color-background:                 #0d1117;
+      --color-surface-container-lowest:   #0d1117;
+      --color-surface:                    #1c2128;
+      --color-surface-container:          #161b22;
+      --color-surface-container-high:     #262c36;
+      --color-surface-container-highest:  #2d333b;
       /* === 文字 === */
-      --color-on-surface:           #F0F0F5;
-      --color-on-surface-variant:   #8B8B9E;
+      --color-on-surface:           #e6edf3;
+      --color-on-surface-variant:   #7d8590;
       /* === 功能色 === */
-      --color-success:  #16A37B;
-      --color-error:    #E5484D;
-      --color-warning:  #F59E0B;
+      --color-success:  #3fb950;
+      --color-error:    #f85149;
+      --color-warning:  #d29922;
+      /* === 端口颜色 === */
+      --color-port-prompt:     #3fb950;
+      --color-port-image:      #58a6ff;
+      --color-port-reference:  #bc8cff;
+      --color-port-mask:       #f0883e;
+      /* === 连线颜色 === */
+      --color-connection:      #484f58;
+      --color-connection-active: #d4af37;
       /* === 边框 === */
-      --color-outline:          rgba(255,255,255,0.15);
+      --color-outline:          rgba(255,255,255,0.08);
       --color-outline-variant:  rgba(255,255,255,0.06);
       /* === 圆角 === */
-      --radius-sm:   0.375rem;
-      --radius-md:   0.5rem;
-      --radius-lg:   0.75rem;
-      --radius-xl:   1rem;
-      --radius-2xl:  1.25rem;
+      --radius-sm:   0.25rem;
+      --radius-md:   0.375rem;
+      --radius-lg:   0.5rem;
+      --radius-xl:   0.75rem;
+      --radius-2xl:  1rem;
       --radius-full: 9999px;
       /* === 阴影 === */
-      --shadow-card:   0 2px 8px rgba(0,0,0,0.4);
-      --shadow-float:  0 10px 25px rgba(0,0,0,0.5);
-      --shadow-dialog: 0 25px 50px rgba(0,0,0,0.6);
+      --shadow-card:   0 2px 8px rgba(0,0,0,0.3);
+      --shadow-float:  0 8px 32px rgba(0,0,0,0.5);
+      --shadow-dialog: 0 16px 48px rgba(0,0,0,0.6);
+      --shadow-node-selected: 0 0 0 2px #d4af37, 0 4px 16px rgba(0,0,0,0.5);
       /* === 字体 === */
-      --font-sans: system-ui, -apple-system, sans-serif;
+      --font-sans: "Space Grotesk", "Noto Sans SC", system-ui, sans-serif;
+      --font-mono: "JetBrains Mono", "Fira Code", monospace;
     }
   </style>
 
@@ -61,74 +73,290 @@
       const icons = { '人物': '👤', '自然风景': '🏞', '动物': '🐾', '建筑城市': '🏙', '运动体育': '⚽', '交通工具': '🚗', '食物': '🍽', '服饰时尚': '👗', '商业科技': '💼', '游戏娱乐': '🎮', '艺术': '🎨', '其他': '🖼' };
       const icon = icons[cat] || '🖼';
       const w = img.width || 400, h = img.height || 300;
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="%23141418"/><text x="50%" y="45%" text-anchor="middle" font-size="${Math.min(w, h) * 0.18}">${icon}</text><text x="50%" y="68%" text-anchor="middle" font-size="${Math.min(w, h) * 0.07}" fill="%238B8B9E" font-family="system-ui,sans-serif" dominant-baseline="central">${label}</text></svg>`;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="%23f3f4f6"/><text x="50%" y="45%" text-anchor="middle" font-size="${Math.min(w, h) * 0.18}" dominant-baseline="central">${icon}</text><text x="50%" y="68%" text-anchor="middle" font-size="${Math.min(w, h) * 0.07}" fill="%239ca3af" font-family="system-ui,sans-serif" dominant-baseline="central">${label}</text></svg>`;
       img.src = 'data:image/svg+xml,' + svg;
     }, true);
   </script>
 </head>
 
-<body class="bg-background text-on-surface font-sans">
+<body class="bg-background text-on-surface font-sans overflow-hidden h-screen">
 
-  <!-- @nav:start 导航组件 -->
-  <header class="bg-surface sticky top-0 z-40 h-14 flex items-center justify-between px-5 border-b border-outline-variant/20">
-    <div class="flex items-center gap-3">
-      <div class="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
-        <i data-lucide="infinity" class="w-5 h-5 text-primary"></i>
-      </div>
-      <span class="font-bold text-base text-on-surface tracking-wide">无界AI</span>
-    </div>
-    <div class="flex items-center gap-2">
-      <button class="w-8 h-8 rounded-lg bg-surface-container flex items-center justify-center hover:bg-surface-container-high transition-colors cursor-pointer" aria-label="通知">
-        <i data-lucide="bell" class="w-4 h-4 text-on-surface-variant"></i>
+  <!-- @nav:start 导航组件 - 节点编辑器使用沉浸式全屏布局，无传统导航 -->
+  <!-- 顶部工具栏 -->
+  <header class="bg-surface-container h-12 flex items-center justify-between px-4 border-b border-outline/20 z-50 relative">
+    <!-- 左侧：工具栏按钮组 -->
+    <div class="flex items-center gap-1">
+      <!-- 返回画布按钮 -->
+      <button class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high text-sm transition-colors" title="返回画布">
+        <i data-lucide="arrow-left" class="w-4 h-4"></i>
+        <span>画布</span>
       </button>
-      <div class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center cursor-pointer">
-        <span class="text-xs font-semibold text-primary">初</span>
-      </div>
+      <div class="w-px h-6 bg-outline/20 mx-1"></div>
+      <!-- AI建图 -->
+      <button class="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary hover:bg-primary/20 text-sm font-medium transition-colors" title="AI自然语言建图">
+        <i data-lucide="sparkles" class="w-4 h-4"></i>
+        <span>AI 建图</span>
+      </button>
+      <!-- 执行按钮 -->
+      <button class="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-success/10 text-success hover:bg-success/20 text-sm font-medium transition-colors" title="执行工作流">
+        <i data-lucide="play" class="w-4 h-4"></i>
+        <span>执行</span>
+      </button>
+      <!-- 停止按钮 -->
+      <button class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-error/60 hover:text-error hover:bg-error/10 text-sm transition-colors" title="停止执行">
+        <i data-lucide="square" class="w-4 h-4"></i>
+      </button>
+      <div class="w-px h-6 bg-outline/20 mx-1"></div>
+      <!-- 撤销/重做 -->
+      <button class="p-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="撤销 Ctrl+Z">
+        <i data-lucide="undo" class="w-4 h-4"></i>
+      </button>
+      <button class="p-1.5 rounded-md text-on-surface-variant/40 hover:text-on-surface hover:bg-surface-container-high transition-colors" title="重做 Ctrl+Shift+Z">
+        <i data-lucide="redo" class="w-4 h-4"></i>
+      </button>
+      <div class="w-px h-6 bg-outline/20 mx-1"></div>
+      <!-- 预设工作流 -->
+      <button class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high text-sm transition-colors" title="预设工作流模板">
+        <i data-lucide="layout-template" class="w-4 h-4"></i>
+        <span>预设</span>
+      </button>
+      <!-- 导入 -->
+      <button class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high text-sm transition-colors" title="导入工作流">
+        <i data-lucide="upload" class="w-4 h-4"></i>
+      </button>
+      <!-- 导出 -->
+      <button class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high text-sm transition-colors" title="导出工作流">
+        <i data-lucide="download" class="w-4 h-4"></i>
+      </button>
+    </div>
+    <!-- 右侧：缩放控制 + 面板切换 -->
+    <div class="flex items-center gap-1">
+      <!-- 缩放控制 -->
+      <button class="p-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="缩小">
+        <i data-lucide="zoom-out" class="w-4 h-4"></i>
+      </button>
+      <span class="text-xs text-on-surface-variant font-mono w-12 text-center">100%</span>
+      <button class="p-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="放大">
+        <i data-lucide="zoom-in" class="w-4 h-4"></i>
+      </button>
+      <button class="p-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="重置视图">
+        <i data-lucide="maximize" class="w-4 h-4"></i>
+      </button>
+      <div class="w-px h-6 bg-outline/20 mx-1"></div>
+      <!-- 面板切换 -->
+      <button class="p-1.5 rounded-md text-primary bg-primary/10 transition-colors" title="节点库" id="toggle-node-library">
+        <i data-lucide="blocks" class="w-4 h-4"></i>
+      </button>
+      <button class="p-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="素材库" id="toggle-material">
+        <i data-lucide="folder-open" class="w-4 h-4"></i>
+      </button>
+      <button class="p-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="提示词库" id="toggle-prompt-library">
+        <i data-lucide="book-text" class="w-4 h-4"></i>
+      </button>
+      <button class="p-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="执行日志" id="toggle-exec-log">
+        <i data-lucide="scroll-text" class="w-4 h-4"></i>
+      </button>
     </div>
   </header>
+  <!-- @nav:end 导航组件 -->
 
-  <div class="flex" style="height: calc(100vh - 3.5rem)">
-    <aside class="w-56 shrink-0 bg-surface border-r border-outline-variant/20 overflow-y-auto">
-      <div class="p-3 space-y-0.5">
-        <a href="projects.html" class="flex items-center gap-3 px-3 py-2.5 rounded-md bg-primary/10 text-primary font-medium text-sm cursor-pointer" aria-current="page">
-          <i data-lucide="folder-open" class="w-4 h-4"></i>我的项目
-        </a>
-        <a href="templates.html" class="flex items-center gap-3 px-3 py-2.5 rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-medium text-sm transition-colors cursor-pointer">
-          <i data-lucide="layout-template" class="w-4 h-4"></i>模板广场
-        </a>
-        <a href="assets.html" class="flex items-center gap-3 px-3 py-2.5 rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-medium text-sm transition-colors cursor-pointer">
-          <i data-lucide="archive" class="w-4 h-4"></i>资产库
-        </a>
+  <!-- 主体区域：左节点库 + 中画布 + 右属性面板 -->
+  <div class="flex" style="height: calc(100vh - 3rem)">
+
+    <!-- 左侧节点库面板 -->
+    <aside class="w-64 shrink-0 bg-surface-container border-r border-outline/20 flex flex-col overflow-hidden transition-all duration-300" id="node-library-panel">
+      <!-- 搜索框 -->
+      <div class="p-3">
+        <div class="relative">
+          <i data-lucide="search" class="w-4 h-4 text-on-surface-variant absolute left-3 top-1/2 -translate-y-1/2"></i>
+          <input type="text" placeholder="搜索节点..." class="w-full bg-background border-none rounded-md pl-9 pr-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/30">
+        </div>
       </div>
-      <div class="border-t border-outline-variant/20 mx-3 my-2"></div>
-      <div class="px-3 pb-3">
-        <div class="px-3 py-2 text-xs text-on-surface-variant uppercase tracking-wider">快速创建</div>
-        <button class="w-full mt-1 flex items-center gap-3 px-3 py-2.5 rounded-md bg-primary text-on-primary font-medium text-sm hover:opacity-90 transition-opacity cursor-pointer">
-          <i data-lucide="plus" class="w-4 h-4"></i>新建项目
-        </button>
-      </div>
-      <div class="border-t border-outline-variant/20 mx-3 my-2"></div>
-      <div class="px-3 pb-3">
-        <div class="px-3 py-2 text-xs text-on-surface-variant uppercase tracking-wider">存储用量</div>
-        <div class="px-3 py-2">
-          <div class="flex items-center justify-between text-xs text-on-surface-variant mb-1.5">
-            <span>已用 2.4 GB</span>
-            <span>/ 10 GB</span>
+      <!-- 节点分类列表 -->
+      <nav class="flex-1 overflow-y-auto px-2 pb-4">
+        <!-- 输入节点 -->
+        <div class="mb-3">
+          <div class="flex items-center gap-2 px-2 py-1.5 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
+            <i data-lucide="log-in" class="w-3.5 h-3.5"></i>
+            输入
           </div>
-          <div class="w-full h-1.5 bg-surface-container rounded-full overflow-hidden">
-            <div class="h-full bg-primary rounded-full" style="width: 24%"></div>
+          <div class="space-y-0.5">
+            <div class="flex items-center gap-2 px-2.5 py-2 rounded-md text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer transition-colors" draggable="true">
+              <i data-lucide="type" class="w-4 h-4 text-port-prompt"></i>
+              文本输入
+            </div>
+            <div class="flex items-center gap-2 px-2.5 py-2 rounded-md text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer transition-colors" draggable="true">
+              <i data-lucide="image" class="w-4 h-4 text-port-image"></i>
+              图片输入
+            </div>
+          </div>
+        </div>
+        <!-- AI节点 -->
+        <div class="mb-3">
+          <div class="flex items-center gap-2 px-2 py-1.5 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+            AI 图像
+          </div>
+          <div class="space-y-0.5">
+            <div class="flex items-center gap-2 px-2.5 py-2 rounded-md text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer transition-colors" draggable="true">
+              <i data-lucide="wand" class="w-4 h-4 text-primary"></i>
+              AI 生成
+            </div>
+            <div class="flex items-center gap-2 px-2.5 py-2 rounded-md text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer transition-colors" draggable="true">
+              <i data-lucide="eraser" class="w-4 h-4 text-port-mask"></i>
+              移除背景
+            </div>
+            <div class="flex items-center gap-2 px-2.5 py-2 rounded-md text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer transition-colors" draggable="true">
+              <i data-lucide="maximize" class="w-4 h-4 text-port-image"></i>
+              无损放大
+            </div>
+            <div class="flex items-center gap-2 px-2.5 py-2 rounded-md text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer transition-colors" draggable="true">
+              <i data-lucide="paintbrush" class="w-4 h-4 text-port-mask"></i>
+              AI 修图
+            </div>
+            <div class="flex items-center gap-2 px-2.5 py-2 rounded-md text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer transition-colors" draggable="true">
+              <i data-lucide="pen-tool" class="w-4 h-4 text-port-reference"></i>
+              字境大师
+            </div>
+            <div class="flex items-center gap-2 px-2.5 py-2 rounded-md text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer transition-colors" draggable="true">
+              <i data-lucide="layers" class="w-4 h-4 text-port-reference"></i>
+              精修引擎
+            </div>
+            <div class="flex items-center gap-2 px-2.5 py-2 rounded-md text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer transition-colors" draggable="true">
+              <i data-lucide="shopping-bag" class="w-4 h-4 text-primary"></i>
+              品牌电商
+            </div>
+            <div class="flex items-center gap-2 px-2.5 py-2 rounded-md text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer transition-colors" draggable="true">
+              <i data-lucide="scan" class="w-4 h-4 text-port-reference"></i>
+              元素分层
+            </div>
+            <div class="flex items-center gap-2 px-2.5 py-2 rounded-md text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer transition-colors" draggable="true">
+              <i data-lucide="rotate-cw" class="w-4 h-4 text-port-image"></i>
+              多角度
+            </div>
+            <div class="flex items-center gap-2 px-2.5 py-2 rounded-md text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer transition-colors" draggable="true">
+              <i data-lucide="box" class="w-4 h-4 text-port-image"></i>
+              3D 模型
+            </div>
+          </div>
+        </div>
+        <!-- 控制节点 -->
+        <div class="mb-3">
+          <div class="flex items-center gap-2 px-2 py-1.5 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
+            <i data-lucide="git-branch" class="w-3.5 h-3.5"></i>
+            控制
+          </div>
+          <div class="space-y-0.5">
+            <div class="flex items-center gap-2 px-2.5 py-2 rounded-md text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer transition-colors" draggable="true">
+              <i data-lucide="git-merge" class="w-4 h-4 text-warning"></i>
+              条件分支
+            </div>
+            <div class="flex items-center gap-2 px-2.5 py-2 rounded-md text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer transition-colors" draggable="true">
+              <i data-lucide="repeat" class="w-4 h-4 text-warning"></i>
+              循环节点
+            </div>
+            <div class="flex items-center gap-2 px-2.5 py-2 rounded-md text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer transition-colors" draggable="true">
+              <i data-lucide="bot" class="w-4 h-4 text-primary"></i>
+              Agent 编排
+            </div>
+            <div class="flex items-center gap-2 px-2.5 py-2 rounded-md text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer transition-colors" draggable="true">
+              <i data-lucide="film" class="w-4 h-4 text-port-image"></i>
+              分镜串行
+            </div>
+          </div>
+        </div>
+        <!-- 输出节点 -->
+        <div class="mb-3">
+          <div class="flex items-center gap-2 px-2 py-1.5 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
+            <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
+            输出
+          </div>
+          <div class="space-y-0.5">
+            <div class="flex items-center gap-2 px-2.5 py-2 rounded-md text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer transition-colors" draggable="true">
+              <i data-lucide="image" class="w-4 h-4 text-port-image"></i>
+              输出图片
+            </div>
+            <div class="flex items-center gap-2 px-2.5 py-2 rounded-md text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer transition-colors" draggable="true">
+              <i data-lucide="file-down" class="w-4 h-4 text-port-reference"></i>
+              导出文件
+            </div>
+            <div class="flex items-center gap-2 px-2.5 py-2 rounded-md text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer transition-colors" draggable="true">
+              <i data-lucide="images" class="w-4 h-4 text-port-image"></i>
+              图片组
+            </div>
+          </div>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- 中间画布区域 -->
+    <div class="flex-1 min-w-0 relative overflow-hidden">
+
+      <!-- @main-content:start -->
+      <main class="w-full h-full relative">
+        <!-- 画布占位：点阵网格 + SVG连线 + 节点卡片 将由子Agent填充 -->
+      </main>
+      <!-- @main-content:end -->
+
+      <!-- 小地图 -->
+      <div class="absolute bottom-4 right-4 w-48 h-36 bg-surface/90 backdrop-blur-sm rounded-xl border border-outline/20 shadow-float overflow-hidden z-30">
+        <div class="w-full h-full relative">
+          <!-- 小地图内容由子Agent填充 -->
+          <div class="absolute inset-0 flex items-center justify-center text-xs text-on-surface-variant/40">
+            <i data-lucide="map" class="w-5 h-5 mr-1.5"></i>
+            小地图
           </div>
         </div>
       </div>
-    </aside>
 
-    <!-- @main-content:start -->
-    <main class="flex-1 min-w-0 overflow-y-auto bg-background p-6">
-      <!-- 页面内容由子 Agent 填充 -->
-    </main>
-    <!-- @main-content:end -->
+      <!-- 画布助手浮动按钮 -->
+      <button class="absolute bottom-4 left-4 w-10 h-10 rounded-full bg-primary text-on-primary flex items-center justify-center shadow-float hover:scale-105 transition-transform z-30" title="画布AI助手">
+        <i data-lucide="message-circle" class="w-5 h-5"></i>
+      </button>
+    </div>
+
+    <!-- 右侧属性面板 -->
+    <aside class="w-72 shrink-0 bg-surface-container border-l border-outline/20 flex flex-col overflow-hidden transition-all duration-300" id="property-panel">
+      <!-- 面板头部 -->
+      <div class="px-4 py-3 border-b border-outline/20 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <i data-lucide="settings" class="w-4 h-4 text-primary"></i>
+          <span class="text-sm font-semibold">节点属性</span>
+        </div>
+        <button class="p-1 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="关闭面板">
+          <i data-lucide="panel-right-close" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <!-- 属性内容区 -->
+      <div class="flex-1 overflow-y-auto p-4">
+        <div class="flex flex-col items-center justify-center h-full text-on-surface-variant/40 text-sm">
+          <i data-lucide="mouse-pointer-click" class="w-8 h-8 mb-2"></i>
+          <span>选中节点查看属性</span>
+        </div>
+      </div>
+    </aside>
   </div>
-  <!-- @nav:end 导航组件 -->
+
+  <!-- 底部执行日志面板 -->
+  <div class="absolute bottom-0 left-64 right-72 h-48 bg-surface-container/95 backdrop-blur-sm border-t border-outline/20 z-40 flex flex-col transition-all duration-300" id="exec-log-panel" style="display:none">
+    <div class="px-4 py-2 border-b border-outline/20 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <i data-lucide="scroll-text" class="w-4 h-4 text-primary"></i>
+        <span class="text-sm font-semibold">执行日志</span>
+      </div>
+      <div class="flex items-center gap-1">
+        <button class="p-1 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="清空日志">
+          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+        </button>
+        <button class="p-1 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="关闭面板">
+          <i data-lucide="x" class="w-3.5 h-3.5"></i>
+        </button>
+      </div>
+    </div>
+    <div class="flex-1 overflow-y-auto px-4 py-2 font-mono text-xs">
+      <!-- 日志内容由子Agent填充 -->
+    </div>
+  </div>
 
   <script>lucide.createIcons();</script>
 </body>

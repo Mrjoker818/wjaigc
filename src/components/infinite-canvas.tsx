@@ -2269,7 +2269,7 @@ export function InfiniteCanvas({
       const offsetY = e.clientY - hexCubeDragStart.y;
       setHexCubeDragOffset({ x: offsetX, y: offsetY });
     }
-  }, [editMode, isPanning, isMiddlePanning, panStart, boxSelectStart, isLongPressing, resizingImage, resizeCorner, images, dragTarget, dragStart, resizeStart, screenToCanvas, onImagesChange, handleEditMouseMove, groupDragTarget, groupDragStart, genGroupDragTarget, genGroupDragStart, hexCubeDragTarget, hexCubeDragStart, annotationMode, annotationTool, brushSize, brushDrawingAnnId, annotations, hitTestImage]);
+  }, [editMode, isPanning, isMiddlePanning, panStart, boxSelectStart, isLongPressing, resizingImage, resizeCorner, images, dragTarget, dragStart, resizeStart, screenToCanvas, onImagesChange, handleEditMouseMove, groupDragTarget, groupDragStart, genGroupDragTarget, genGroupDragStart, hexCubeDragTarget, hexCubeDragStart, annotationMode, annotationTool, annotationBrushSize, brushDrawingAnnId, annotations, hitTestImage, annotationRegionStart]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     // Brush drawing completion
@@ -2570,7 +2570,7 @@ export function InfiniteCanvas({
     }
 
     mouseDownOnImageRef.current = false;
-  }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp, groupDragTarget, groupDragOffset, genGroupDragTarget, genGroupDragOffset, hexCubeDragTarget, hexCubeDragOffset, resizingImage, resizePreview, annotationMode, annotationRegionStart, annotationRegionCurrent, isDraggingRegion, brushDrawingAnnId, annotations, brushSize]);
+  }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp, groupDragTarget, groupDragOffset, genGroupDragTarget, genGroupDragOffset, hexCubeDragTarget, hexCubeDragOffset, resizingImage, resizePreview, annotationMode, annotationRegionStart, annotationRegionCurrent, isDraggingRegion, brushDrawingAnnId, annotations, annotationBrushSize]);
 
   const handleMouseLeave = useCallback(() => {
     if (editMode !== 'none') {
