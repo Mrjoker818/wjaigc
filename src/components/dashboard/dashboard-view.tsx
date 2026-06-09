@@ -590,7 +590,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                                 {project.updatedAt ? new Date(project.updatedAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '无时间记录'}
                               </div>
                             </div>
-                            <div className="relative">
+                            <div className="relative" data-project-menu>
                               <button
                                 onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === project.id ? null : project.id); }}
                                 className={`p-1 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-100'} cursor-pointer`}
