@@ -27,8 +27,10 @@ import {
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
-  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, ChevronsRight, ChevronsLeft, Boxes
+  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play
 } from 'lucide-react';
+import type { CanvasAnnotation } from '@/lib/canvas-annotation';
+import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, mergeAnnotationsForImage, ANNOTATION_COLORS, ANNOTATION_COLORS_MONO, computeAnnotationRegion } from '@/lib/canvas-annotation';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
 import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
 import { getModelDisplayName } from '@/lib/model-name-map';
@@ -949,6 +951,24 @@ export function InfiniteCanvas({
   // Active tool panel
   const [activeTool, setActiveTool] = useState<ActiveTool>('none');
 
+  // ChatCanvas 批注模式
+  const [annotationMode, setAnnotationMode] = useState(false);
+  const [annotations, setAnnotations] = useState<CanvasAnnotation[]>([]);
+  const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
+  const [activeAnnotationInput, setActiveAnnotationInput] = useState<string | null>(null);
+  const [annotationInputText, setAnnotationInputText] = useState('');
+  const [hoveredAnnotationId, setHoveredAnnotationId] = useState<string | null>(null);
+  const annotationIdCounter = useRef(0);
+  const annotationContainerRef = useRef<HTMLDivElement>(null);
+  const annotationInputRef = useRef<HTMLTextAreaElement>(null);
+  const [followUpInputId, setFollowUpInputId] = useState<string | null>(null);
+  const [followUpInputText, setFollowUpInputText] = useState('');
+  const [expandedBubbleId, setExpandedBubbleId] = useState<string | null>(null);
+  // Region selection state for annotation drag
+  const [annotationRegionStart, setAnnotationRegionStart] = useState<{cx: number; cy: number} | null>(null);
+  const [annotationRegionCurrent, setAnnotationRegionCurrent] = useState<{cx: number; cy: number} | null>(null);
+  const [isDraggingRegion, setIsDraggingRegion] = useState(false);
+
   // Upscale state
   const [upscaleMultiplier, setUpscaleMultiplier] = useState(2);
   const [upscaylAvailable, setUpscaylAvailable] = useState(false);
@@ -1500,6 +1520,14 @@ export function InfiniteCanvas({
         }
         return;
       }
+      // C key: Toggle annotation mode (ChatCanvas)
+      if (e.code === 'KeyC' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
+        e.preventDefault();
+        setAnnotationMode(prev => !prev);
+        return;
+      }
       if (e.code === 'Space' && !e.repeat) {
         // Don't capture Space when user is typing in an input/textarea
         const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
@@ -1508,6 +1536,11 @@ export function InfiniteCanvas({
         setIsSpacePressed(true);
       }
       if (e.code === 'Escape') {
+        // 退出批注模式
+        if (annotationMode) {
+          setAnnotationMode(false);
+          setEditingAnnotationId(null);
+        }
         // 退出图片对比选择模式
         if (compareSelecting) {
           setCompareSelecting(false);
@@ -1927,6 +1960,20 @@ export function InfiniteCanvas({
       handleEditMouseDown(e);
       return;
     }
+
+    // ChatCanvas annotation mode: click=pin, drag=region selection
+    if (annotationMode && e.button === 0) {
+      const canvasPos = screenToCanvas(e.clientX, e.clientY);
+      const targetImageId = hitTestImage(canvasPos.x, canvasPos.y);
+      if (targetImageId) {
+        // Start potential region drag — resolve on mouseup
+        setAnnotationRegionStart({ cx: canvasPos.x, cy: canvasPos.y });
+        setAnnotationRegionCurrent({ cx: canvasPos.x, cy: canvasPos.y });
+        setIsDraggingRegion(false);
+      }
+      return;
+    }
+
     if (e.button === 2) return;
 
     const canvasPos = screenToCanvas(e.clientX, e.clientY);
@@ -2014,6 +2061,18 @@ export function InfiniteCanvas({
   }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    // Annotation region drag tracking
+    if (annotationRegionStart && annotationMode) {
+      const canvasPos = screenToCanvas(e.clientX, e.clientY);
+      setAnnotationRegionCurrent({ cx: canvasPos.x, cy: canvasPos.y });
+      const dx = canvasPos.x - annotationRegionStart.cx;
+      const dy = canvasPos.y - annotationRegionStart.cy;
+      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+        setIsDraggingRegion(true);
+      }
+      return;
+    }
+
     if (editMode !== 'none') {
       handleEditMouseMove(e);
       return;
@@ -2136,6 +2195,35 @@ export function InfiniteCanvas({
   }, [editMode, isPanning, isMiddlePanning, panStart, boxSelectStart, isLongPressing, resizingImage, resizeCorner, images, dragTarget, dragStart, resizeStart, screenToCanvas, onImagesChange, handleEditMouseMove, groupDragTarget, groupDragStart, genGroupDragTarget, genGroupDragStart, hexCubeDragTarget, hexCubeDragStart]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
+    // Annotation region drag completion
+    if (annotationRegionStart && annotationMode && isDraggingRegion && annotationRegionCurrent) {
+      const x1 = Math.min(annotationRegionStart.cx, annotationRegionCurrent.cx);
+      const y1 = Math.min(annotationRegionStart.cy, annotationRegionCurrent.cy);
+      const x2 = Math.max(annotationRegionStart.cx, annotationRegionCurrent.cx);
+      const y2 = Math.max(annotationRegionStart.cy, annotationRegionCurrent.cy);
+      const w = x2 - x1;
+      const h = y2 - y1;
+      if (w > 15 && h > 15) {
+        // Hit test to find target image
+        const hitId = hitTestImage(annotationRegionStart.cx, annotationRegionStart.cy);
+        const newAnn = createAnnotation((x1 + x2) / 2, (y1 + y2) / 2, '', hitId, { x: x1, y: y1, w, h });
+        setAnnotations(prev => [...prev, newAnn]);
+        setActiveAnnotationInput(newAnn.id);
+        setAnnotationInputText('');
+        setTimeout(() => annotationInputRef.current?.focus(), 50);
+      }
+      setAnnotationRegionStart(null);
+      setAnnotationRegionCurrent(null);
+      setIsDraggingRegion(false);
+      return;
+    }
+    // Clean up annotation region state even if drag was too small
+    if (annotationRegionStart && annotationMode) {
+      setAnnotationRegionStart(null);
+      setAnnotationRegionCurrent(null);
+      setIsDraggingRegion(false);
+    }
+
     if (editMode !== 'none') {
       handleEditMouseUp();
       return;
@@ -4585,6 +4673,410 @@ export function InfiniteCanvas({
     }
   }, [images, canvasGenFrameId, showCanvasGenerator]);
 
+  // ============ ChatCanvas 批注功能 ============
+
+  /** 批注模式：点击画布时创建批注Pin */
+  const handleAnnotationCanvasClick = useCallback((canvasX: number, canvasY: number) => {
+    // 碰撞检测：找到点击位置对应的图片
+    const targetId = hitTestAnnotationTarget(canvasX, canvasY, images);
+    if (!targetId) {
+      // 点击空白区域，提示用户
+      return;
+    }
+    // 创建批注并进入编辑状态
+    const ann = createAnnotation(canvasX, canvasY, '', targetId);
+    // 计算点击区域（用于告诉AI修改位置）
+    const targetImg = images.find(i => i.id === targetId);
+    if (targetImg) {
+      ann.region = computeAnnotationRegion(canvasX, canvasY, targetImg.x, targetImg.y, targetImg.width, targetImg.height);
+    }
+    annotationIdCounter.current += 1;
+    setAnnotations(prev => [...prev, ann]);
+    setEditingAnnotationId(ann.id);
+  }, [images]);
+
+  /** 提交批注文字（回车或点击提交按钮） */
+  const submitAnnotationText = useCallback((annotationId: string, text: string) => {
+    if (!text.trim()) {
+      // 空文字，删除批注
+      setAnnotations(prev => prev.filter(a => a.id !== annotationId));
+      setEditingAnnotationId(null);
+      return;
+    }
+    setAnnotations(prev => prev.map(a =>
+      a.id === annotationId ? { ...a, text: text.trim(), status: 'pending' as const } : a
+    ));
+    setEditingAnnotationId(null);
+  }, []);
+
+  /** 执行单条批注：调用 /api/edit 修图 */
+  const executeAnnotation = useCallback(async (annotation: CanvasAnnotation) => {
+    if (!annotation.targetImageId || !annotation.text.trim()) return;
+
+    const targetImg = images.find(i => i.id === annotation.targetImageId);
+    if (!targetImg) return;
+
+    // 标记为执行中
+    setAnnotations(prev => prev.map(a =>
+      a.id === annotation.id ? { ...a, status: 'running' as const } : a
+    ));
+
+    try {
+      // 构建提示词（包含区域描述）
+      const prompt = buildAnnotationPrompt(annotation);
+
+      // 将图片转为 data URL
+      const imgToDataUrl = (url: string): Promise<string> => new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          const c = document.createElement('canvas');
+          c.width = img.naturalWidth;
+          c.height = img.naturalHeight;
+          const ctx = c.getContext('2d');
+          if (!ctx) { reject(new Error('Canvas context failed')); return; }
+          ctx.drawImage(img, 0, 0);
+          resolve(c.toDataURL('image/png'));
+        };
+        img.onerror = () => reject(new Error('Image load failed'));
+        img.src = url;
+      });
+
+      let imageDataUrl: string;
+      try {
+        imageDataUrl = await imgToDataUrl(targetImg.url);
+      } catch {
+        // 如果跨域加载失败，直接用URL
+        imageDataUrl = targetImg.url;
+      }
+
+      // 构建请求体（含蒙版）
+      const requestBody: Record<string, unknown> = {
+        image: imageDataUrl,
+        prompt,
+        size: '1:1',
+        quality: 'high',
+        model: 'gpt-image-2',
+        count: 1,
+      };
+
+      // 如果有框选区域，生成蒙版并附加
+      if (annotation.region && targetImg) {
+        try {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          await new Promise<void>((resolve, reject) => {
+            img.onload = () => resolve();
+            img.onerror = () => reject(new Error('Image load failed for mask'));
+            img.src = targetImg.url;
+          });
+          const mc = document.createElement('canvas');
+          mc.width = img.naturalWidth;
+          mc.height = img.naturalHeight;
+          const mctx = mc.getContext('2d');
+          if (mctx) {
+            // 黑色背景（保留区域）
+            mctx.fillStyle = '#000000';
+            mctx.fillRect(0, 0, mc.width, mc.height);
+            // 白色蒙版（修改区域）
+            const scaleX = img.naturalWidth / targetImg.width;
+            const scaleY = img.naturalHeight / targetImg.height;
+            const rx = (annotation.region.x - targetImg.x) * scaleX;
+            const ry = (annotation.region.y - targetImg.y) * scaleY;
+            const rw = annotation.region.w * scaleX;
+            const rh = annotation.region.h * scaleY;
+            mctx.fillStyle = '#ffffff';
+            mctx.fillRect(rx, ry, rw, rh);
+            requestBody.mask = mc.toDataURL('image/png');
+          }
+        } catch {
+          // 蒙版生成失败，不附加蒙版
+        }
+      }
+
+      // 提交修图任务
+      const submitResp = await fetch('/api/edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const submitData = await submitResp.json();
+      if (!submitData.success || !submitData.taskId) {
+        const errMsg = submitData.error || '提交修改失败';
+        setAnnotations(prev => prev.map(a =>
+          a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply: errMsg } : a
+        ));
+        return;
+      }
+
+      // 轮询任务结果
+      const taskId = submitData.taskId;
+      const maxPollTime = 600000; // 10分钟
+      const pollStart = Date.now();
+      let completed = false;
+
+      while (!completed && Date.now() - pollStart < maxPollTime) {
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+          const pollResp = await fetch('/api/poll-task', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ taskId, model: 'gpt-image-2' }),
+          });
+          const pollData = await pollResp.json();
+
+          if (pollData.status === 'completed' && pollData.result?.url) {
+            completed = true;
+            // 用结果替换原图
+            const resultUrl = pollData.result.url;
+            onImagesChange(images.map(img =>
+              img.id === annotation.targetImageId
+                ? { ...img, url: resultUrl, prompt: prompt }
+                : img
+            ));
+            setAnnotations(prev => prev.map(a =>
+              a.id === annotation.id ? { ...a, status: 'done' as const, resultImageUrl: resultUrl, aiReply: '修改完成' } : a
+            ));
+          } else if (pollData.status === 'failed') {
+            completed = true;
+            setAnnotations(prev => prev.map(a =>
+              a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply: pollData.error || '修改失败' } : a
+            ));
+          }
+        } catch {
+          // 轮询网络错误，继续重试
+        }
+      }
+
+      if (!completed) {
+        setAnnotations(prev => prev.map(a =>
+          a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply: '修改超时' } : a
+        ));
+      }
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : '修改失败';
+      setAnnotations(prev => prev.map(a =>
+        a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply: errMsg } : a
+      ));
+    }
+  }, [images, onImagesChange]);
+
+  /** 执行所有 pending 批注 */
+  const executeAllAnnotations = useCallback(async () => {
+    const pendingAnnotations = annotations.filter(a => a.status === 'pending' && a.text.trim());
+    if (pendingAnnotations.length === 0) return;
+
+    // 按图片分组，同图批注串行执行
+    const grouped = new Map<string, CanvasAnnotation[]>();
+    for (const ann of pendingAnnotations) {
+      const key = ann.targetImageId || 'none';
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key)!.push(ann);
+    }
+
+    // 不同图片的批注可以并行
+    const promises: Promise<void>[] = [];
+    for (const [, groupAnns] of grouped) {
+      promises.push((async () => {
+        for (const ann of groupAnns) {
+          await executeAnnotation(ann);
+        }
+      })());
+    }
+    await Promise.all(promises);
+  }, [annotations, executeAnnotation]);
+
+  /** 删除批注 */
+  const deleteAnnotation = useCallback((id: string) => {
+    setAnnotations(prev => prev.filter(a => a.id !== id));
+    if (editingAnnotationId === id) setEditingAnnotationId(null);
+  }, [editingAnnotationId]);
+
+  /** 退出批注模式 */
+  const exitAnnotationMode = useCallback(() => {
+    setAnnotationMode(false);
+    setEditingAnnotationId(null);
+  }, []);
+
+  /** 提交批注输入框内容 */
+  const submitAnnotationInput = useCallback(() => {
+    if (!editingAnnotationId || !annotationInputText.trim()) return;
+    setAnnotations(prev => prev.map(a =>
+      a.id === editingAnnotationId ? { ...a, text: annotationInputText.trim() } : a
+    ));
+    setEditingAnnotationId(null);
+    setAnnotationInputText('');
+  }, [editingAnnotationId, annotationInputText]);
+
+  /** 执行当前图片的所有pending批注 */
+  const executePendingAnnotations = useCallback(async () => {
+    const pending = annotations.filter(a => a.status === 'pending' && a.text.trim());
+    if (pending.length === 0) return;
+
+    // Group annotations by targetImageId — same image annotations merged into one request
+    const groups = new Map<string, CanvasAnnotation[]>();
+    for (const ann of pending) {
+      const key = ann.targetImageId || '__no_target__';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(ann);
+    }
+
+    // Execute each group (different images can run in parallel)
+    const promises: Promise<void>[] = [];
+    for (const [, groupAnns] of groups) {
+      if (groupAnns.length === 1) {
+        // Single annotation — execute directly
+        promises.push(executeAnnotation(groupAnns[0]));
+      } else {
+        // Multiple annotations on same image — merge into one request
+        const mergedText = groupAnns.map((a, i) => `${i + 1}. ${a.text}`).join('\n');
+        const firstAnn = groupAnns[0];
+        // Mark all as running
+        setAnnotations(prev => prev.map(a =>
+          groupAnns.some(ga => ga.id === a.id) ? { ...a, status: 'running' as const } : a
+        ));
+        const mergedAnn: CanvasAnnotation = {
+          ...firstAnn,
+          id: `merged_${firstAnn.id}`,
+          text: mergedText,
+        };
+        promises.push(
+          executeAnnotation(mergedAnn).then(() => {
+            // Mark all as done
+            setAnnotations(prev => prev.map(a =>
+              groupAnns.some(ga => ga.id === a.id) ? { ...a, status: 'done' as const } : a
+            ));
+          }).catch(() => {
+            // Mark all as failed
+            setAnnotations(prev => prev.map(a =>
+              groupAnns.some(ga => ga.id === a.id) ? { ...a, status: 'failed' as const } : a
+            ));
+          })
+        );
+      }
+    }
+    await Promise.all(promises);
+  }, [annotations, executeAnnotation]);
+
+  // Follow-up question for a completed annotation
+  const handleAnnotationFollowUp = useCallback(async (annId: string, followUpText: string) => {
+    const ann = annotations.find(a => a.id === annId);
+    if (!ann || !ann.targetImageId) return;
+
+    const newEntry = { role: 'user' as const, content: followUpText };
+    setAnnotations(prev => prev.map(a =>
+      a.id === annId ? {
+        ...a,
+        followUpHistory: [...(a.followUpHistory || []), newEntry],
+        status: 'running' as const,
+      } : a
+    ));
+    setFollowUpInputId(null);
+    setFollowUpInputText('');
+
+    try {
+      // Find the target image
+      const targetImage = images.find(img => img.id === ann.targetImageId);
+      if (!targetImage) throw new Error('Target image not found');
+
+      const modelInfo = getCurrentModel();
+      const imageUrl = targetImage.url.startsWith('/') ? `${window.location.origin}${targetImage.url}` : targetImage.url;
+
+      // Build combined prompt: original + follow-up history
+      const historyPrompt = (ann.followUpHistory || []).map(h => `${h.role === 'user' ? 'User' : 'AI'}: ${h.content}`).join('\n');
+      const combinedPrompt = historyPrompt
+        ? `Previous edits:\n${historyPrompt}\n\nAdditional modification: ${followUpText}`
+        : followUpText;
+
+      const res = await fetch('/api/edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: imageUrl,
+          prompt: combinedPrompt,
+          model: modelInfo.model,
+          size: 'auto',
+          quality: 'medium',
+        }),
+      });
+
+      const data = await res.json();
+      if (data.taskId) {
+        // Poll for result
+        let completed = false;
+        while (!completed) {
+          await new Promise(r => setTimeout(r, 2000));
+          const pollRes = await fetch('/api/poll-task', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ taskId: data.taskId, model: modelInfo.model }),
+          });
+          const pollData = await pollRes.json();
+          if (pollData.status === 'completed' && pollData.result?.imageUrl) {
+            const newImageUrl = pollData.result.imageUrl;
+            // Update the image on canvas
+            onImagesChange(images.map(img =>
+              img.id === ann.targetImageId ? { ...img, url: newImageUrl, prompt: combinedPrompt } : img
+            ));
+            const aiReplyEntry = { role: 'assistant' as const, content: '已根据您的反馈完成修改' };
+            setAnnotations(prev => prev.map(a =>
+              a.id === annId ? {
+                ...a,
+                status: 'done' as const,
+                aiReply: '已根据您的反馈完成修改',
+                followUpHistory: [...(a.followUpHistory || []), aiReplyEntry],
+              } : a
+            ));
+            completed = true;
+          } else if (pollData.status === 'failed') {
+            throw new Error(pollData.error || 'Modification failed');
+          }
+        }
+      } else if (data.imageUrl) {
+        onImagesChange(images.map(img =>
+          img.id === ann.targetImageId ? { ...img, url: data.imageUrl, prompt: combinedPrompt } : img
+        ));
+        const aiReplyEntry = { role: 'assistant' as const, content: '已根据您的反馈完成修改' };
+        setAnnotations(prev => prev.map(a =>
+          a.id === annId ? {
+            ...a,
+            status: 'done' as const,
+            aiReply: '已根据您的反馈完成修改',
+            followUpHistory: [...(a.followUpHistory || []), aiReplyEntry],
+          } : a
+        ));
+      } else {
+        throw new Error(data.error || 'No result returned');
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Follow-up failed';
+      const aiReplyEntry = { role: 'assistant' as const, content: `修改失败: ${errorMsg}` };
+      setAnnotations(prev => prev.map(a =>
+        a.id === annId ? {
+          ...a,
+          status: 'failed' as const,
+          aiReply: `修改失败: ${errorMsg}`,
+          followUpHistory: [...(a.followUpHistory || []), aiReplyEntry],
+        } : a
+      ));
+    }
+  }, [annotations, images, getCurrentModel]);
+
+  // Clean up pending annotations when exiting annotation mode
+  useEffect(() => {
+    if (!annotationMode) {
+      // Remove pending (unsubmitted) annotations when leaving mode
+      setAnnotations(prev => prev.filter(a => a.status !== 'pending'));
+      setActiveAnnotationInput(null);
+      setAnnotationInputText('');
+      setFollowUpInputId(null);
+      setFollowUpInputText('');
+      setAnnotationRegionStart(null);
+      setAnnotationRegionCurrent(null);
+    }
+  }, [annotationMode]);
+
   // 1. UPSCALE - floating panel with size options
   const handleUpscaleMultiplierChange = useCallback((mult: number) => {
     setUpscaleMultiplier(mult);
@@ -6208,7 +6700,9 @@ export function InfiniteCanvas({
         ref={(el) => { canvasRef.current = el; canvasContainerRef.current = el; }}
         data-canvas-viewport
         className={`absolute inset-0 overflow-hidden select-none ${
-          altKeyHeld && editMode === 'none'
+          annotationMode
+            ? 'cursor-crosshair'
+            : altKeyHeld && editMode === 'none'
             ? 'cursor-copy'
             : ctrlKeyHeld && editMode === 'none'
             ? 'cursor-pointer'
@@ -9443,6 +9937,304 @@ export function InfiniteCanvas({
           );
         })()}
 
+        {/* ====== ANNOTATION PIN SVG OVERLAY ====== */}
+        {annotations.length > 0 && (
+          <svg
+            className="absolute inset-0 pointer-events-none"
+            style={{ width: '100%', height: '100%', overflow: 'visible' }}
+          >
+            {annotations.map((ann, idx) => {
+              const sx = ann.x * zoom + viewOffset.x;
+              const sy = ann.y * zoom + viewOffset.y;
+              const statusColors: Record<string, string> = {
+                pending: isMonochrome ? '#3b82f6' : '#d4af37',
+                running: isMonochrome ? '#60a5fa' : '#f0c040',
+                done: '#22c55e',
+                failed: '#ef4444',
+              };
+              const fillColor = statusColors[ann.status] || statusColors.pending;
+              const isHovered = hoveredAnnotationId === ann.id;
+              return (
+                <g key={ann.id} className="pointer-events-auto" style={{ cursor: 'pointer' }}
+                   onClick={(e) => { e.stopPropagation(); setHoveredAnnotationId(ann.id); }}
+                >
+                  {/* Pin dot */}
+                  <circle cx={sx} cy={sy} r={isHovered ? 10 : 7} fill={fillColor} stroke={isMonochrome ? '#fff' : '#1a1a1a'} strokeWidth={2} style={{ filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.4))' }} />
+                  {/* Number label */}
+                  <text x={sx} y={sy + 1} textAnchor="middle" dominantBaseline="central" fill={ann.status === 'done' ? '#fff' : isMonochrome ? '#fff' : '#1a1a1a'} fontSize={9} fontWeight="bold" fontFamily="system-ui">{idx + 1}</text>
+                  {/* Running spinner ring */}
+                  {ann.status === 'running' && (
+                    <circle cx={sx} cy={sy} r={11} fill="none" stroke={fillColor} strokeWidth={2} strokeDasharray="4 4" className="animate-spin" style={{ transformOrigin: `${sx}px ${sy}px` }} />
+                  )}
+                  {/* Hover tooltip with text */}
+                  {isHovered && ann.text && (
+                    <g>
+                      <rect x={sx + 12} y={sy - 14} width={Math.min(ann.text.length * 8 + 16, 200)} height={28} rx={6} fill={isMonochrome ? '#1e293b' : '#1a1a1a'} stroke={isMonochrome ? '#3b82f6' : '#d4af37'} strokeWidth={1} opacity={0.95} />
+                      <text x={sx + 20} y={sy + 2} fill={isMonochrome ? '#e2e8f0' : '#f5f0e0'} fontSize={11} fontFamily="system-ui">{ann.text.length > 20 ? ann.text.slice(0, 20) + '…' : ann.text}</text>
+                    </g>
+                  )}
+                  {/* Region rectangle */}
+                  {ann.region && (() => {
+                    const rx = ann.region.x * zoom + viewOffset.x;
+                    const ry = ann.region.y * zoom + viewOffset.y;
+                    const rw = ann.region.w * zoom;
+                    const rh = ann.region.h * zoom;
+                    return (
+                      <rect x={rx} y={ry} width={rw} height={rh} fill="none" stroke={fillColor} strokeWidth={1.5} strokeDasharray="6 3" rx={2} opacity={0.7} />
+                    );
+                  })()}
+                  {/* Done checkmark */}
+                  {ann.status === 'done' && (
+                    <text x={sx} y={sy + 1} textAnchor="middle" dominantBaseline="central" fill="#fff" fontSize={10} fontWeight="bold" fontFamily="system-ui">✓</text>
+                  )}
+                </g>
+              );
+            })}
+            {/* Selection drag rectangle (while drawing) */}
+            {isDraggingRegion && annotationRegionStart && annotationRegionCurrent && (() => {
+              const x1 = Math.min(annotationRegionStart.cx, annotationRegionCurrent.cx) * zoom + viewOffset.x;
+              const y1 = Math.min(annotationRegionStart.cy, annotationRegionCurrent.cy) * zoom + viewOffset.y;
+              const w = Math.abs(annotationRegionCurrent.cx - annotationRegionStart.cx) * zoom;
+              const h = Math.abs(annotationRegionCurrent.cy - annotationRegionStart.cy) * zoom;
+              return (
+                <rect x={x1} y={y1} width={w} height={h} fill={isMonochrome ? 'rgba(59,130,246,0.1)' : 'rgba(212,175,55,0.1)'} stroke={isMonochrome ? '#3b82f6' : '#d4af37'} strokeWidth={1.5} strokeDasharray="6 3" rx={2} />
+              );
+            })()}
+          </svg>
+        )}
+
+        {/* ====== ANNOTATION INPUT POPUP ====== */}
+        {activeAnnotationInput && (() => {
+          const ann = annotations.find(a => a.id === activeAnnotationInput);
+          if (!ann) return null;
+          const sx = ann.x * zoom + viewOffset.x;
+          const sy = ann.y * zoom + viewOffset.y;
+          const panelLeft = sx + 16;
+          const panelTop = sy - 20;
+          return (
+            <div
+              className={`absolute z-[60] pointer-events-auto ${isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-gold/30'} rounded-xl shadow-2xl`}
+              style={{ left: panelLeft, top: panelTop, width: 280 }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onWheel={(e) => e.stopPropagation()}
+            >
+              <div className="p-3">
+                <div className={`text-xs font-medium mb-2 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted/70'}`}>
+                  批注 #{annotations.indexOf(ann) + 1}
+                </div>
+                <textarea
+                  ref={annotationInputRef}
+                  value={annotationInputText}
+                  onChange={(e) => setAnnotationInputText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      submitAnnotationInput();
+                    }
+                    if (e.key === 'Escape') {
+                      setActiveAnnotationInput(null);
+                      setAnnotationInputText('');
+                    }
+                  }}
+                  placeholder="描述你想要的修改..."
+                  className={`w-full h-20 resize-none rounded-lg px-3 py-2 text-sm ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-blue-400' : 'bg-white/[0.06] border border-white/[0.12] text-text-bright placeholder:text-gold-muted/40 focus:border-gold/50'} border focus:outline-none`}
+                />
+                <div className="flex items-center justify-between mt-2">
+                  <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/50'}`}>Enter 提交 · Esc 取消</span>
+                  <button
+                    onClick={submitAnnotationInput}
+                    disabled={!annotationInputText.trim()}
+                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                      !annotationInputText.trim()
+                        ? isMonochrome ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-[#333] text-gold-muted/40 cursor-not-allowed'
+                        : isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-gold text-black hover:bg-[#e5c047]'
+                    }`}
+                  >
+                    提交
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ====== ANNOTATION DIALOG BUBBLES ====== */}
+        {annotations.filter(a => a.status === 'done' && a.aiReply).map(ann => {
+          const sx = ann.x * zoom + viewOffset.x;
+          const sy = ann.y * zoom + viewOffset.y;
+          const isFollowUpOpen = followUpInputId === ann.id;
+          return (
+            <div
+              key={`bubble-${ann.id}`}
+              className="absolute z-[59] pointer-events-auto"
+              style={{ left: sx + 16, top: sy - 10, maxWidth: 260 }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onWheel={(e) => e.stopPropagation()}
+            >
+              {/* AI Reply Bubble */}
+              <div
+                className={`rounded-xl shadow-lg cursor-pointer transition-all ${isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-gold/30'}`}
+                onClick={() => setFollowUpInputId(isFollowUpOpen ? null : ann.id)}
+              >
+                <div className="p-2.5">
+                  <div className="flex items-start gap-2">
+                    <div className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${isMonochrome ? 'bg-blue-400' : 'bg-gold'}`} />
+                    <div className={`text-xs leading-relaxed ${isMonochrome ? 'text-gray-700' : 'text-text-bright/80'}`}>
+                      {ann.aiReply}
+                    </div>
+                  </div>
+                  {/* Follow-up history */}
+                  {ann.followUpHistory && ann.followUpHistory.length > 0 && (
+                    <div className="mt-1.5 space-y-1">
+                      {ann.followUpHistory.map((fu, i) => (
+                        <div key={i} className="ml-3.5">
+                          <div className={`text-xs ${isMonochrome ? 'text-blue-500' : 'text-gold/70'}`}>↪ {fu.role === 'user' ? fu.content : ''}</div>
+                          <div className={`text-xs mt-0.5 ${isMonochrome ? 'text-gray-600' : 'text-text-bright/60'}`}>{fu.role === 'assistant' ? fu.content : ''}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/40'}`}>
+                    {isFollowUpOpen ? '收起' : '点击追问'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Follow-up Input */}
+              {isFollowUpOpen && (
+                <div className={`mt-1 rounded-xl shadow-lg ${isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-gold/30'}`}>
+                  <div className="p-2.5">
+                    <textarea
+                      value={followUpInputText}
+                      onChange={(e) => setFollowUpInputText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleAnnotationFollowUp(ann.id, followUpInputText);
+                          setFollowUpInputId(null);
+                          setFollowUpInputText('');
+                        }
+                        if (e.key === 'Escape') {
+                          setFollowUpInputId(null);
+                          setFollowUpInputText('');
+                        }
+                      }}
+                      placeholder="继续追问..."
+                      className={`w-full h-14 resize-none rounded-lg px-2.5 py-1.5 text-xs ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-blue-400' : 'bg-white/[0.06] border border-white/[0.12] text-text-bright placeholder:text-gold-muted/40 focus:border-gold/50'} border focus:outline-none`}
+                    />
+                    <div className="flex items-center justify-between mt-1.5">
+                      <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/50'}`}>Enter 发送</span>
+                      <button
+                        onClick={() => {
+                          handleAnnotationFollowUp(ann.id, followUpInputText);
+                          setFollowUpInputId(null);
+                          setFollowUpInputText('');
+                        }}
+                        disabled={!followUpInputText.trim()}
+                        className={`px-2 py-0.5 rounded-lg text-xs font-medium transition-all ${
+                          !followUpInputText.trim()
+                            ? isMonochrome ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-[#333] text-gold-muted/40 cursor-not-allowed'
+                            : isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-gold text-black hover:bg-[#e5c047]'
+                        }`}
+                      >
+                        发送
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* ====== ANNOTATION MODE BANNER ====== */}
+        {annotationMode && (
+          <div className={`absolute top-3 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-2 px-4 py-2 rounded-xl shadow-lg ${isMonochrome ? 'bg-white border border-blue-200' : 'bg-[#1a1a1a] border border-gold/30'}`}>
+            <MessageCircle size={16} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
+            <span className={`text-sm font-medium ${isMonochrome ? 'text-gray-700' : 'text-text-bright'}`}>批注模式</span>
+            <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/60'}`}>点击图片添加批注</span>
+            <div className={`w-px h-4 ${isMonochrome ? 'bg-gray-200' : 'bg-white/10'}`} />
+            <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/60'}`}>Esc 退出</span>
+            {annotations.filter(a => a.status === 'pending').length > 0 && (
+              <>
+                <div className={`w-px h-4 ${isMonochrome ? 'bg-gray-200' : 'bg-white/10'}`} />
+                <button
+                  onClick={executePendingAnnotations}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium ${isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-gold text-black hover:bg-[#e5c047]'}`}
+                >
+                  <Play size={12} />
+                  执行全部 ({annotations.filter(a => a.status === 'pending').length})
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ====== ANNOTATION LIST PANEL ====== */}
+        {annotations.length > 0 && (
+          <div className={`absolute bottom-16 left-1/2 -translate-x-1/2 z-[60] max-w-md w-max max-h-60 overflow-y-auto rounded-xl shadow-lg ${isMonochrome ? 'bg-white border border-blue-200' : 'bg-[#1a1a1a] border border-gold/20'}`}>
+            <div className={`flex items-center justify-between px-3 py-2 border-b ${isMonochrome ? 'border-gray-100' : 'border-white/5'}`}>
+              <span className={`text-xs font-medium ${isMonochrome ? 'text-gray-600' : 'text-gold-muted'}`}>
+                批注 ({annotations.length})
+              </span>
+              {annotations.some(a => a.status === 'pending') && (
+                <button
+                  onClick={executePendingAnnotations}
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-gold text-black hover:bg-[#e5c047]'}`}
+                >
+                  <Play size={10} />
+                  执行待处理
+                </button>
+              )}
+            </div>
+            {annotations.map(ann => {
+              const targetImg = images.find(img => img.id === ann.targetImageId);
+              return (
+                <div key={ann.id} className={`flex items-center gap-2 px-3 py-2 ${isMonochrome ? 'hover:bg-gray-50' : 'hover:bg-white/[0.03]'}`}>
+                  <span className={`shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                    ann.status === 'pending' ? (isMonochrome ? 'bg-gray-200 text-gray-600' : 'bg-gold/20 text-gold')
+                    : ann.status === 'running' ? (isMonochrome ? 'bg-blue-100 text-blue-600' : 'bg-blue-500/20 text-blue-400')
+                    : ann.status === 'done' ? (isMonochrome ? 'bg-green-100 text-green-600' : 'bg-green-500/20 text-green-400')
+                    : (isMonochrome ? 'bg-red-100 text-red-600' : 'bg-red-500/20 text-red-400')
+                  }`}>
+                    {ann.status === 'running' ? '⟳' : ann.status === 'done' ? '✓' : ann.status === 'failed' ? '✗' : '#'}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-xs truncate ${isMonochrome ? 'text-gray-700' : 'text-text-bright'}`}>{ann.text}</p>
+                    {targetImg && <p className={`text-[10px] truncate ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/40'}`}>{targetImg.prompt?.slice(0,30) || '图片'}</p>}
+                  </div>
+                  <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${
+                    ann.status === 'pending' ? (isMonochrome ? 'bg-gray-100 text-gray-600' : 'bg-white/5 text-gold-muted')
+                    : ann.status === 'running' ? (isMonochrome ? 'bg-blue-50 text-blue-600' : 'bg-blue-500/10 text-blue-400')
+                    : ann.status === 'done' ? (isMonochrome ? 'bg-green-50 text-green-600' : 'bg-green-500/10 text-green-400')
+                    : (isMonochrome ? 'bg-red-50 text-red-600' : 'bg-red-500/10 text-red-400')
+                  }`}>
+                    {ann.status === 'pending' ? '待执行' : ann.status === 'running' ? '执行中' : ann.status === 'done' ? '已完成' : '失败'}
+                  </span>
+                  {ann.status === 'pending' && (
+                    <button
+                      onClick={() => setAnnotations(prev => prev.filter(a => a.id !== ann.id))}
+                      className={`shrink-0 p-1 rounded ${isMonochrome ? 'text-gray-300 hover:text-red-400 hover:bg-red-50' : 'text-white/20 hover:text-red-400 hover:bg-red-500/10'}`}
+                      title="删除"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                  {ann.status === 'failed' && (
+                    <button
+                      onClick={() => { setAnnotations(prev => prev.map(a => a.id === ann.id ? { ...a, status: 'pending' as const } : a)); }}
+                      className={`shrink-0 p-1 rounded ${isMonochrome ? 'text-gray-400 hover:text-blue-500 hover:bg-blue-50' : 'text-white/30 hover:text-blue-400 hover:bg-blue-500/10'}`}
+                      title="重试"
+                    >
+                      <RotateCcw size={12} />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {/* ====== IMAGE-TO-IMAGE FLOATING PANEL ====== */}
         {/* ====== MULTI-ANGLE FLOATING PANEL ====== */}
         {activeTool === 'multiAngle' && selectedImageData && editMode === 'none' && (() => {
@@ -11496,6 +12288,16 @@ export function InfiniteCanvas({
             <path d="M3 8l9 5 9-5" />
           </svg>
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">六面体</span>
+        </button>
+
+        {/* ChatCanvas 批注模式 */}
+        <button
+          onClick={() => setAnnotationMode(prev => !prev)}
+          className={`tool-btn p-2 rounded-xl transition-all relative group ${annotationMode ? 'text-gold bg-gold/20 ring-1 ring-gold/40' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10'}`}
+          title="ChatCanvas 批注 (C)"
+        >
+          <MessageCircle className="h-4 w-4" />
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">ChatCanvas (C)</span>
         </button>
 
         <div className={`w-px h-5 ${separatorCls}`} />
