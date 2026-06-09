@@ -339,11 +339,11 @@ const nodeThemes = {
     nodeBg: '#161b22',
     nodeBorder: 'rgba(212,175,55,0.3)',
     nodeSelectedBorder: 'var(--ne-accent)',
-    nodeHoverBg: '#1c2129',
+    nodeHoverBg: '#1c2128',
     nodeHeaderText: '#f0f6fc',
     nodePortText: '#8b949e',
-    nodeBody: '#161b22',
-    nodeSelected: '#1c2129',
+    nodeBody: '#0d1117',
+    nodeSelected: '#1c2128',
     nodeTitle: '#f0f6fc',
     portFill: '#161b22',
     portLabel: '#8b949e',
@@ -358,7 +358,7 @@ const nodeThemes = {
     accentDim: 'rgba(212,175,55,0.15)',
     accentMuted: 'rgba(212,175,55,0.25)',
     // 卡片 — 与原型对齐 (rgba(15,23,42,0.96))
-    cardBg: '#0f172a',
+    cardBg: '#1c2128',
     cardBorder: 'rgba(212,175,55,0.15)',
     border: 'rgba(48,54,61,0.6)',
     text: '#f0f6fc',
@@ -1748,7 +1748,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                   <button
                     key={t.type}
                     onClick={() => handleAddNode(t.type)}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-white/5 transition-colors cursor-pointer group"
+                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-sm transition-all duration-120 cursor-pointer group hover:translate-x-0.5 active:scale-[0.98]"
                   >
                     <span className="text-muted-foreground group-hover:text-[var(--ne-accent)] transition-colors">
                       {getNodeIcon(t.type, 16)}
@@ -2712,7 +2712,7 @@ function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
         /* 有图片时显示当前页图片 */
         <div
           className="flex-1 w-full relative group cursor-pointer flex items-center justify-center rounded overflow-hidden"
-          style={{ background: T.nodeBg === '#161b22' ? '#1c2129' : '#f0f0f0' }}
+          style={{ background: T.nodeBg === '#161b22' ? '#1c2128' : '#f0f0f0' }}
           onClick={() => onPreviewImage(currentUrl)}
         >
           <img src={currentUrl} alt={`图片 ${page + 1}`} className="max-w-full max-h-full object-contain transition-opacity opacity-90 group-hover:opacity-100" />
@@ -2726,7 +2726,7 @@ function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
           className="flex-1 w-full flex flex-col items-center justify-center gap-1.5 rounded border-2 border-dashed transition-colors"
           style={{
             borderColor: T.accent + '40',
-            background: T.nodeBg === '#161b22' ? '#1c2129' : '#fafafa',
+            background: T.nodeBg === '#161b22' ? '#1c2128' : '#fafafa',
           }}
         >
           <Layers size={22} style={{ color: T.accent, opacity: 0.35 }} />
@@ -2881,9 +2881,9 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
       </defs>
       <rect x={node.x} y={node.y} width={node.width} height={node.height} rx={isCondition ? 55 : 22}
         fill={isSelected ? T.nodeSelected : T.nodeBody}
-        stroke={execResult ? statusColor : (isHovered && !isSelected) ? color : isSelected ? color : 'transparent'}
-        strokeWidth={execResult ? 2 : isSelected ? 1.5 : isHovered ? 1 : 0}
-        strokeOpacity={execResult ? 1 : isSelected ? 0.8 : isHovered ? 0.5 : 0}
+        stroke={execResult ? statusColor : isSelected ? color : isHovered ? color : T.nodeBorder}
+        strokeWidth={execResult ? 2 : isSelected ? 1.5 : 1}
+        strokeOpacity={execResult ? 1 : isSelected ? 0.9 : isHovered ? 0.6 : 0.4}
         filter={`url(#node-shadow-${node.id})`}
         onMouseDown={(e) => { e.stopPropagation(); onSelect(e); onDragStart(e as unknown as React.MouseEvent); }}
         className="cursor-move"
@@ -2971,7 +2971,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
                   /* 有图片时显示缩略图 */
                   <div
                     className="flex-1 relative group cursor-pointer flex items-center justify-center rounded overflow-hidden"
-                    style={{ background: T.nodeBg === '#161b22' ? '#1c2129' : '#f0f0f0' }}
+                    style={{ background: T.nodeBg === '#161b22' ? '#1c2128' : '#f0f0f0' }}
                     onClick={() => onPreviewImage(hasImageOutput)}
                   >
                     <img src={hasImageOutput} alt="" className="max-w-full max-h-full object-contain transition-opacity opacity-80 group-hover:opacity-100" />
@@ -2985,8 +2985,8 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
                     className="flex-1 flex flex-col items-center justify-center gap-1 rounded border border-dashed cursor-pointer transition-colors"
                     style={{
                       borderColor: T.accent + '60',
-                      background: T.nodeBg === '#161b22' ? '#1c2129' : '#f5f5f5',
-                      color: T.nodeBody === '#161b22' ? '#8b949e' : '#666'
+                      background: T.nodeBg === '#161b22' ? '#1c2128' : '#f5f5f5',
+                      color: T.nodeBody === '#0d1117' ? '#8b949e' : '#666'
                     }}
                     onClick={() => {
                       onTriggerImageUpload?.(node.id);
@@ -3004,7 +3004,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
                     placeholder="粘贴图片 URL..."
                     className="w-full px-2 py-0.5 rounded text-[10px] border outline-none transition-colors"
                     style={{
-                      background: T.nodeBg === '#161b22' ? '#1c2129' : '#fff',
+                      background: T.nodeBg === '#161b22' ? '#1c2128' : '#fff',
                       borderColor: T.cardBorder,
                       color: T.nodeTitle,
                     }}
@@ -3053,7 +3053,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
                   <div className="w-full h-full flex flex-col items-center justify-center gap-1" onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                     <div
                       className="flex-1 w-full relative group cursor-pointer flex items-center justify-center rounded overflow-hidden"
-                      style={{ background: T.nodeBg === '#161b22' ? '#1c2129' : '#f0f0f0' }}
+                      style={{ background: T.nodeBg === '#161b22' ? '#1c2128' : '#f0f0f0' }}
                       onClick={() => onPreviewImage(singleUrl)}
                     >
                       <img src={singleUrl} alt="" className="max-w-full max-h-full object-contain transition-opacity opacity-90 group-hover:opacity-100" />
@@ -3069,7 +3069,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
                       className="flex-1 w-full flex flex-col items-center justify-center gap-1.5 rounded border-2 border-dashed transition-colors"
                       style={{
                         borderColor: T.accent + '40',
-                        background: T.nodeBg === '#161b22' ? '#1c2129' : '#fafafa',
+                        background: T.nodeBg === '#161b22' ? '#1c2128' : '#fafafa',
                       }}
                     >
                       <ImagePlus size={22} style={{ color: T.accent, opacity: 0.35 }} />
@@ -3322,11 +3322,11 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
       {!isCondition && !isInputText && !isInputImage && (node.type.startsWith('ai-') || node.type === 'output-image') && (
         <foreignObject x={node.x + 8} y={node.y + node.height - 24} width={node.width - 16} height={18}>
           <button
-            className="w-full h-full rounded text-[9px] font-bold tracking-wider cursor-pointer flex items-center justify-center gap-1 transition-all duration-200 hover:brightness-110 active:scale-[0.98]"
+            className="w-full h-full rounded-md text-[9px] font-extrabold tracking-[0.12em] uppercase cursor-pointer flex items-center justify-center gap-1 transition-all duration-200 hover:brightness-125 active:scale-[0.97]"
             style={{
-              background: `linear-gradient(135deg, ${color}22, ${color}44)`,
+              background: `${color}18`,
               color: color,
-              border: `1px solid ${color}55`,
+              border: `1px solid ${color}40`,
             }}
             onClick={(e) => { e.stopPropagation(); onCascadeRun?.(node.id); }}
             title="运行此节点"

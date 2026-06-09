@@ -4,7 +4,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   FolderOpen, Plus, Search, Star, Trash2, MoreVertical, Image,
   Sparkles, LayoutTemplate, Layers, Clock, ChevronRight, ArrowRight,
-  Box, Copy, Check, Palette, Type, BookOpen, Users, Settings,
+  Box, Copy, Check, Palette, Type, BookOpen,
   LogOut, Shield, X, Eye, Mail, Calendar, KeyRound, Zap, Pencil
 } from 'lucide-react';
 import { UserManager } from '@/lib/user-manager';
@@ -40,7 +40,6 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     try { return new Set(JSON.parse(localStorage.getItem('wujie-starred-projects') || '[]')); } catch { return new Set(); }
   });
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
-  const [showUserMenu, setShowUserMenu] = useState(false);
   const [showUserProfile, setShowUserProfile] = useState(false);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -49,16 +48,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (showUserMenu && !target.closest('[data-user-menu]')) {
-        setShowUserMenu(false);
-      }
       if (menuOpenId && !target.closest('[data-project-menu]')) {
         setMenuOpenId(null);
       }
     };
     document.addEventListener('click', handleClick);
     return () => document.removeEventListener('click', handleClick);
-  }, [showUserMenu, menuOpenId]);
+  }, [menuOpenId]);
 
   // Theme vars
   const isDark = themeStyle === 'dark' || themeStyle === 'gold' || themeStyle === 'monochrome';
@@ -229,11 +225,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       <aside className={`w-[260px] shrink-0 flex flex-col ${isDark ? 'bg-[#0e0e1a]' : 'bg-white'} border-r ${isDark ? 'border-white/5' : 'border-gray-200'} overflow-hidden`}>
         {/* User info */}
         <div className="p-4">
-          <div className="flex items-center gap-3">
+          <div
+            className="flex items-center gap-3 cursor-pointer"
+            onClick={() => setShowUserProfile(!showUserProfile)}
+          >
             <div
-              className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0 cursor-pointer hover:ring-2 hover:ring-[#d4af37]/40 transition-all"
+              className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0 hover:ring-2 hover:ring-[#d4af37]/40 transition-all"
               style={{ backgroundColor: accentColor }}
-              onClick={() => setShowUserProfile(!showUserProfile)}
               title="查看用户信息"
             >
               {user.name.charAt(0).toUpperCase()}
@@ -250,39 +248,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 </span>
               </div>
             </div>
-            <div className="relative" data-user-menu>
-              <button
-                onClick={() => setShowUserMenu(!showUserMenu)}
-                className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'} transition-colors cursor-pointer`}
-              >
-                <Settings className={`w-4 h-4 ${textSecondary}`} />
-              </button>
-              {showUserMenu && (
-                <div className={`absolute right-0 top-8 ${cardBg} rounded-xl shadow-2xl py-2 z-50 min-w-[180px] border ${borderClass}`}>
-                  <button
-                    onClick={() => { setShowUserMenu(false); setShowUserProfile(true); }}
-                    className={`w-full px-4 py-2 text-left text-xs flex items-center gap-2 ${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'} cursor-pointer`}
-                  >
-                    <Users className="w-3.5 h-3.5" /> 个人信息
-                  </button>
-                  {user.role === 'admin' && (
-                    <button
-                      onClick={() => { setShowUserMenu(false); if (onOpenAdmin) onOpenAdmin(); }}
-                      className={`w-full px-4 py-2 text-left text-xs flex items-center gap-2 ${accentClass} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'} cursor-pointer`}
-                    >
-                      <Shield className="w-3.5 h-3.5" /> 管理员面板
-                    </button>
-                  )}
-                  <div className={`my-1 border-t ${isDark ? 'border-white/5' : 'border-gray-100'}`} />
-                  <button
-                    onClick={() => { setShowUserMenu(false); if (onLogout) onLogout(); }}
-                    className="w-full px-4 py-2 text-left text-xs flex items-center gap-2 text-red-400 hover:bg-red-500/10 cursor-pointer"
-                  >
-                    <LogOut className="w-3.5 h-3.5" /> 退出登录
-                  </button>
-                </div>
-              )}
-            </div>
+            <ChevronRight className={`w-4 h-4 ${textSecondary} transition-transform duration-200 ${showUserProfile ? 'rotate-90' : ''}`} />
           </div>
 
           {/* User profile expandable */}
@@ -291,7 +257,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               <div className="flex items-center justify-between">
                 <span className={`text-[10px] uppercase tracking-wider font-semibold ${textSecondary}`}>账户信息</span>
                 <button
-                  onClick={() => setShowUserProfile(false)}
+                  onClick={(e) => { e.stopPropagation(); setShowUserProfile(false); }}
                   className={`p-0.5 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-200'}`}
                 >
                   <X className={`w-3 h-3 ${textSecondary}`} />
@@ -342,6 +308,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   <Shield className="w-3.5 h-3.5" /> 打开管理员面板
                 </button>
               )}
+              {/* Logout */}
+              <button
+                onClick={() => { if (onLogout) onLogout(); }}
+                className="w-full text-xs font-medium flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-red-400 bg-red-500/10 hover:bg-red-500/20 transition-colors cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" /> 退出登录
+              </button>
             </div>
           )}
         </div>
@@ -422,7 +395,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       </aside>
 
       {/* ===== Main Content ===== */}
-      <main className="flex-1 min-w-0 min-h-0 overflow-y-auto">
+      <main className="dashboard-scrollable flex-1 min-w-0 min-h-0">
         <div className="max-w-6xl mx-auto px-6 lg:px-8 py-6 space-y-6">
 
           {/* ===== Projects Tab ===== */}

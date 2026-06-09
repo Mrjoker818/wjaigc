@@ -16,6 +16,12 @@ main {
   box-sizing: border-box;
 }
 
+/* Dashboard 可滚动主区域覆盖全局 main overflow:hidden */
+main.dashboard-scrollable {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
 /* 防止flex布局导致的高度问题 */
 .flex-col {
   min-height: 0;
@@ -94,62 +100,64 @@ main {
 :root {
   --radius: 0.5rem;
   /* === 品牌色（金色） — 原型 Design Tokens === */
-  --primary: #D4AF37;
-  --primary-foreground: #0A0A0F;
+  --primary: #d4af37;
+  --primary-foreground: #0d1117;
   --primary-container: #3d3420;
-  /* === 背景 / 表面（深色科技） === */
-  --background: #0A0A0F;
-  --foreground: #F0F0F5;
-  --card: #141418;
-  --card-foreground: #F0F0F5;
-  --popover: #141418;
-  --popover-foreground: #F0F0F5;
-  --secondary: #1E1E2C;
-  --secondary-foreground: #F0F0F5;
-  --muted: #1C1C22;
-  --muted-foreground: #8B8B9E;
-  --accent: #2A2410;
-  --accent-foreground: #F0F0F5;
-  --destructive: #E5484D;
-  --border: rgba(255,255,255,0.15);
-  --input: rgba(255,255,255,0.15);
-  --ring: #D4AF37;
-  --chart-1: #D4AF37;
-  --chart-2: #16A37B;
-  --chart-3: #F59E0B;
-  --chart-4: #60A5FA;
-  --chart-5: #E5484D;
+  /* === 背景 / 表面（GitHub Dark 风格 — 与原型一致） === */
+  --background: #0d1117;
+  --foreground: #e6edf3;
+  --card: #1c2128;
+  --card-foreground: #e6edf3;
+  --popover: #1c2128;
+  --popover-foreground: #e6edf3;
+  --secondary: #262c36;
+  --secondary-foreground: #e6edf3;
+  --muted: #161b22;
+  --muted-foreground: #8b949e;
+  --accent: #3d3420;
+  --accent-foreground: #e6edf3;
+  --destructive: #f85149;
+  --border: rgba(255,255,255,0.1);
+  --input: rgba(255,255,255,0.1);
+  --ring: #d4af37;
+  --chart-1: #d4af37;
+  --chart-2: #3fb950;
+  --chart-3: #d29922;
+  --chart-4: #58a6ff;
+  --chart-5: #f85149;
   /* === 侧边栏 === */
-  --sidebar: #141418;
-  --sidebar-foreground: #F0F0F5;
-  --sidebar-primary: #D4AF37;
-  --sidebar-primary-foreground: #0A0A0F;
-  --sidebar-accent: #1C1C22;
-  --sidebar-accent-foreground: #F0F0F5;
+  --sidebar: #161b22;
+  --sidebar-foreground: #e6edf3;
+  --sidebar-primary: #d4af37;
+  --sidebar-primary-foreground: #0d1117;
+  --sidebar-accent: #262c36;
+  --sidebar-accent-foreground: #e6edf3;
   --sidebar-border: rgba(255,255,255,0.06);
-  --sidebar-ring: #D4AF37;
-  /* === 画布专用色 === */
-  --canvas-bg: #0F1117;
-  --panel-bg: #141418;
-  --toolbar-bg: #1A1D27;
-  --toolbar-hover: #2A2D37;
-  --gold: #D4AF37;
-  --gold-muted: #8B8FA3;
-  --text-bright: #F0F0F5;
-  --text-dark: #0A0A0F;
-  --surface-container-lowest: #0E0E13;
-  --surface-container-high: #242430;
-  --surface-container-highest: #2C2C3A;
-  --success: #16A37B;
-  --warning: #F59E0B;
+  --sidebar-ring: #d4af37;
+  /* === 画布专用色（与原型一致） === */
+  --canvas-bg: #0d1117;
+  --panel-bg: #161b22;
+  --toolbar-bg: #1c2128;
+  --toolbar-hover: #262c36;
+  --gold: #d4af37;
+  --gold-muted: #8b949e;
+  --text-bright: #e6edf3;
+  --text-dark: #0d1117;
+  --surface-container-lowest: #0d1117;
+  --surface-container-high: #262c36;
+  --surface-container-highest: #2d333b;
+  --success: #3fb950;
+  --warning: #d29922;
   --outline-variant: rgba(255,255,255,0.06);
-  /* === 阴影 === */
-  --shadow-card: 0 2px 8px rgba(0,0,0,0.4);
-  --shadow-float: 0 10px 25px rgba(0,0,0,0.5);
-  --shadow-dialog: 0 25px 50px rgba(0,0,0,0.6);
+  /* === 阴影（与原型一致） === */
+  --shadow-card: 0 2px 8px rgba(0,0,0,0.3);
+  --shadow-float: 0 8px 32px rgba(0,0,0,0.5);
+  --shadow-dialog: 0 16px 48px rgba(0,0,0,0.6);
   --shadow-gold: 0 0 20px rgba(212,175,55,0.15);
-  --shadow-node-selected: 0 0 0 2px #d4af37, 0 4px 16px rgba(0,0,0,0.5);
-  /* === 节点编辑器端口色 === */
+  --shadow-node: 0 8px 32px rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.25);
+  --shadow-node-selected: 0 8px 32px rgba(0,0,0,0.45), 0 0 0 2px rgba(212,175,55,0.25), 0 0 20px rgba(212,175,55,0.08);
+  --shadow-node-hover: 0 12px 40px rgba(0,0,0,0.45);
+  /* === 节点编辑器端口色（与原型一致） === */
   --port-prompt: #3fb950;
   --port-image: #58a6ff;
   --port-reference: #bc8cff;
@@ -159,25 +167,25 @@ main {
 }
 
 .dark {
-  /* === 与 :root 保持一致，深色科技主题 === */
-  --background: #0A0A0F;
-  --foreground: #E8E8ED;
-  --card: #12121A;
-  --card-foreground: #E8E8ED;
-  --popover: #12121A;
-  --popover-foreground: #E8E8ED;
-  --primary: #D4AF37;
-  --primary-foreground: #0A0A0F;
-  --secondary: #1E1E2C;
-  --secondary-foreground: #E8E8ED;
-  --muted: #181824;
-  --muted-foreground: #8B8B9E;
-  --accent: #3D3420;
-  --accent-foreground: #E8E8ED;
-  --destructive: #F87171;
-  --border: #2A2A38;
-  --input: #2A2A38;
-  --ring: #D4AF37;
+  /* === 与 :root 保持一致，GitHub Dark 主题（与原型一致） === */
+  --background: #0d1117;
+  --foreground: #e6edf3;
+  --card: #1c2128;
+  --card-foreground: #e6edf3;
+  --popover: #1c2128;
+  --popover-foreground: #e6edf3;
+  --primary: #d4af37;
+  --primary-foreground: #0d1117;
+  --secondary: #262c36;
+  --secondary-foreground: #e6edf3;
+  --muted: #161b22;
+  --muted-foreground: #8b949e;
+  --accent: #3d3420;
+  --accent-foreground: #e6edf3;
+  --destructive: #f85149;
+  --border: #30363d;
+  --input: #30363d;
+  --ring: #d4af37;
   --chart-1: #D4AF37;
   --chart-2: #34D399;
   --chart-3: #FBBF24;
