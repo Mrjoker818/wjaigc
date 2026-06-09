@@ -3,25 +3,9 @@
     {
       "type": "html",
       "options": {
-        "path": ".cozeproj/prototype/web/projects.html"
+        "path": ".cozeproj/prototype/web/node-editor.html"
       },
-      "title": "我的项目",
-      "size": "web"
-    },
-    {
-      "type": "html",
-      "options": {
-        "path": ".cozeproj/prototype/web/templates.html"
-      },
-      "title": "模板广场",
-      "size": "web"
-    },
-    {
-      "type": "html",
-      "options": {
-        "path": ".cozeproj/prototype/web/assets.html"
-      },
-      "title": "资产库",
+      "title": "节点编辑器",
       "size": "web"
     }
   ]
