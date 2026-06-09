@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/jquery/jquery-3.7.1.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/lucide/lucide-1.11.0.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/tailwindcss/tailwindcss-browser-4.2.4.min.js"></script>
+
+  <style type="text/tailwindcss">
+    @theme {
+      /* === 品牌色 === */
+      --color-primary:              #D4AF37;
+      --color-primary-container:    #2A2410;
+      --color-on-primary:           #0A0A0F;
+      /* === 背景 / 表面 === */
+      --color-background:                 #0A0A0F;
+      --color-surface-container-lowest:   #0E0E13;
+      --color-surface:                    #141418;
+      --color-surface-container:          #1C1C22;
+      --color-surface-container-high:     #242430;
+      --color-surface-container-highest:  #2C2C3A;
+      /* === 文字 === */
+      --color-on-surface:           #F0F0F5;
+      --color-on-surface-variant:   #8B8B9E;
+      /* === 功能色 === */
+      --color-success:  #16A37B;
+      --color-error:    #E5484D;
+      --color-warning:  #F59E0B;
+      /* === 边框 === */
+      --color-outline:          rgba(255,255,255,0.15);
+      --color-outline-variant:  rgba(255,255,255,0.06);
+      /* === 圆角 === */
+      --radius-sm:   0.375rem;
+      --radius-md:   0.5rem;
+      --radius-lg:   0.75rem;
+      --radius-xl:   1rem;
+      --radius-2xl:  1.25rem;
+      --radius-full: 9999px;
+      /* === 阴影 === */
+      --shadow-card:   0 2px 8px rgba(0,0,0,0.4);
+      --shadow-float:  0 10px 25px rgba(0,0,0,0.5);
+      --shadow-dialog: 0 25px 50px rgba(0,0,0,0.6);
+      /* === 字体 === */
+      --font-sans: system-ui, -apple-system, sans-serif;
+    }
+  </style>
+
+  <!-- 图片兜底 -->
+  <script>
+    document.addEventListener('error', function (e) {
+      const img = e.target;
+      if (img.tagName !== 'IMG' || img.dataset.fallback) return;
+      img.dataset.fallback = '1';
+      const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const cat = img.getAttribute('data-category') || '其他';
+      const alt = img.getAttribute('alt') || '';
+      const label = esc(alt.length > 8 ? alt.slice(0, 8) + '…' : alt);
+      const icons = { '人物': '👤', '自然风景': '🏞', '动物': '🐾', '建筑城市': '🏙', '运动体育': '⚽', '交通工具': '🚗', '食物': '🍽', '服饰时尚': '👗', '商业科技': '💼', '游戏娱乐': '🎮', '艺术': '🎨', '其他': '🖼' };
+      const icon = icons[cat] || '🖼';
+      const w = img.width || 400, h = img.height || 300;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="%23141418"/><text x="50%" y="45%" text-anchor="middle" font-size="${Math.min(w, h) * 0.18}">${icon}</text><text x="50%" y="68%" text-anchor="middle" font-size="${Math.min(w, h) * 0.07}" fill="%238B8B9E" font-family="system-ui,sans-serif" dominant-baseline="central">${label}</text></svg>`;
+      img.src = 'data:image/svg+xml,' + svg;
+    }, true);
+  </script>
+
+  <style>
+    /* 闪烁效果 */
+    @keyframes shimmer {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    .shimmer-btn {
+      animation: shimmer 2s ease-in-out infinite;
+    }
+    /* 卡片hover金色光晕 */
+    .template-card {
+      transition: box-shadow 0.3s ease, border-color 0.3s ease;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .template-card:hover {
+      box-shadow: 0 0 20px rgba(212,175,55,0.15), 0 2px 8px rgba(0,0,0,0.4);
+      border-color: rgba(212,175,55,0.3);
+    }
+  </style>
+</head>
+
+<body class="bg-background text-on-surface font-sans">
+
+  <!-- @nav:start 导航组件 -->
+  <header class="bg-surface sticky top-0 z-40 h-14 flex items-center justify-between px-5 border-b border-outline-variant/20">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
+        <i data-lucide="infinity" class="w-5 h-5 text-primary"></i>
+      </div>
+      <span class="font-bold text-base text-on-surface tracking-wide">无界AI</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <button class="w-8 h-8 rounded-lg bg-surface-container flex items-center justify-center hover:bg-surface-container-high transition-colors cursor-pointer" aria-label="通知">
+        <i data-lucide="bell" class="w-4 h-4 text-on-surface-variant"></i>
+      </button>
+      <div class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center cursor-pointer">
+        <span class="text-xs font-semibold text-primary">初</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="flex" style="height: calc(100vh - 3.5rem)">
+    <aside class="w-56 shrink-0 bg-surface border-r border-outline-variant/20 overflow-y-auto">
+      <div class="p-3 space-y-0.5">
+        <a href="projects.html" class="flex items-center gap-3 px-3 py-2.5 rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-medium text-sm transition-colors cursor-pointer">
+          <i data-lucide="folder-open" class="w-4 h-4"></i>我的项目
+        </a>
+        <a href="templates.html" class="flex items-center gap-3 px-3 py-2.5 rounded-md bg-primary/10 text-primary font-medium text-sm cursor-pointer" aria-current="page">
+          <i data-lucide="layout-template" class="w-4 h-4"></i>模板广场
+        </a>
+        <a href="assets.html" class="flex items-center gap-3 px-3 py-2.5 rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-medium text-sm transition-colors cursor-pointer">
+          <i data-lucide="archive" class="w-4 h-4"></i>资产库
+        </a>
+      </div>
+      <div class="border-t border-outline-variant/20 mx-3 my-2"></div>
+      <div class="px-3 pb-3">
+        <div class="px-3 py-2 text-xs text-on-surface-variant uppercase tracking-wider">快速创建</div>
+        <button class="w-full mt-1 flex items-center gap-3 px-3 py-2.5 rounded-md bg-primary text-on-primary font-medium text-sm hover:opacity-90 transition-opacity cursor-pointer">
+          <i data-lucide="plus" class="w-4 h-4"></i>新建项目
+        </button>
+      </div>
+      <div class="border-t border-outline-variant/20 mx-3 my-2"></div>
+      <div class="px-3 pb-3">
+        <div class="px-3 py-2 text-xs text-on-surface-variant uppercase tracking-wider">存储用量</div>
+        <div class="px-3 py-2">
+          <div class="flex items-center justify-between text-xs text-on-surface-variant mb-1.5">
+            <span>已用 2.4 GB</span>
+            <span>/ 10 GB</span>
+          </div>
+          <div class="w-full h-1.5 bg-surface-container rounded-full overflow-hidden">
+            <div class="h-full bg-primary rounded-full" style="width: 24%"></div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- @main-content:start -->
+    <main class="flex-1 min-w-0 overflow-y-auto bg-background p-6">
+
+      <!-- 顶部区域：标题 + 搜索 + 分类 -->
+      <div class="mb-8">
+        <div class="flex items-end justify-between mb-5">
+          <div>
+            <h1 class="text-2xl font-bold text-on-surface tracking-tight">模板广场</h1>
+            <p class="text-sm text-on-surface-variant mt-1">选择模板，快速开始创作</p>
+          </div>
+          <div class="relative w-72">
+            <i data-lucide="search" class="w-4 h-4 text-on-surface-variant absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+            <input id="search-input" type="text" placeholder="搜索模板..." class="w-full bg-surface-container border-none rounded-lg pl-10 pr-4 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+          </div>
+        </div>
+
+        <!-- 分类标签栏 -->
+        <div id="category-bar" class="flex items-center gap-2">
+          <!-- 分类标签-全部 -->
+          <button class="category-tag px-4 py-1.5 rounded-full text-sm font-medium cursor-pointer transition-colors bg-primary text-on-primary" data-category="all">全部</button>
+          <!-- 分类标签-品牌设计 -->
+          <button class="category-tag px-4 py-1.5 rounded-full text-sm font-medium cursor-pointer transition-colors bg-surface-container text-on-surface-variant hover:bg-surface-container-high" data-category="品牌设计">品牌设计</button>
+          <!-- 分类标签-电商图 -->
+          <button class="category-tag px-4 py-1.5 rounded-full text-sm font-medium cursor-pointer transition-colors bg-surface-container text-on-surface-variant hover:bg-surface-container-high" data-category="电商图">电商图</button>
+          <!-- 分类标签-创意海报 -->
+          <button class="category-tag px-4 py-1.5 rounded-full text-sm font-medium cursor-pointer transition-colors bg-surface-container text-on-surface-variant hover:bg-surface-container-high" data-category="创意海报">创意海报</button>
+          <!-- 分类标签-人物肖像 -->
+          <button class="category-tag px-4 py-1.5 rounded-full text-sm font-medium cursor-pointer transition-colors bg-surface-container text-on-surface-variant hover:bg-surface-container-high" data-category="人物肖像">人物肖像</button>
+          <!-- 分类标签-概念场景 -->
+          <button class="category-tag px-4 py-1.5 rounded-full text-sm font-medium cursor-pointer transition-colors bg-surface-container text-on-surface-variant hover:bg-surface-container-high" data-category="概念场景">概念场景</button>
+          <!-- 分类标签-社交媒体 -->
+          <button class="category-tag px-4 py-1.5 rounded-full text-sm font-medium cursor-pointer transition-colors bg-surface-container text-on-surface-variant hover:bg-surface-container-high" data-category="社交媒体">社交媒体</button>
+        </div>
+      </div>
+
+      <!-- 精选推荐区 -->
+      <div class="mb-8">
+        <div class="flex items-center gap-2 mb-4">
+          <i data-lucide="sparkles" class="w-5 h-5 text-primary"></i>
+          <h2 class="text-lg font-semibold text-on-surface">精选推荐</h2>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <!-- 精选-大banner卡片 -->
+          <div class="relative bg-surface rounded-xl shadow-card overflow-hidden template-card group">
+            <img src="https://images.unsplash.com/photo-1626785774625-ddcddc3445e9?w=800&h=500&fit=crop" alt="品牌Logo设计套组预览" data-category="商业科技" class="w-full h-64 object-cover" />
+            <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent"></div>
+            <!-- 精选标签 -->
+            <span class="absolute top-3 left-3 px-2.5 py-0.5 rounded-sm text-xs font-semibold bg-primary text-on-primary">精选</span>
+            <div class="absolute bottom-0 left-0 right-0 p-5">
+              <h3 class="text-lg font-bold text-on-surface mb-1">品牌Logo设计套组</h3>
+              <p class="text-sm text-on-surface-variant mb-3 line-clamp-2">一键生成多场景Logo，涵盖品牌标识、图标、字体组合等完整设计方案</p>
+              <button id="btn-use-featured-1" class="bg-primary text-on-primary px-5 py-2 rounded-md text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-2">
+                <i data-lucide="zap" class="w-3.5 h-3.5"></i>立即使用
+              </button>
+            </div>
+          </div>
+
+          <!-- 精选-右侧2个小卡片 -->
+          <div class="flex flex-col gap-4">
+            <!-- 精选-小卡片1 -->
+            <div class="relative bg-surface rounded-xl shadow-card overflow-hidden template-card group flex-1">
+              <img src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&h=300&fit=crop" alt="电商商品主图预览" data-category="商业科技" class="w-full h-36 object-cover" />
+              <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
+              <!-- 精选标签 -->
+              <span class="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-sm text-xs font-semibold bg-primary text-on-primary">精选</span>
+              <div class="absolute bottom-0 left-0 right-0 p-4">
+                <h3 class="text-base font-bold text-on-surface mb-0.5">电商商品主图</h3>
+                <p class="text-xs text-on-surface-variant mb-2 truncate">白底/场景/细节三视图</p>
+                <button id="btn-use-featured-2" class="bg-primary text-on-primary px-4 py-1.5 rounded-md text-xs font-medium hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-1.5">
+                  <i data-lucide="zap" class="w-3 h-3"></i>立即使用
+                </button>
+              </div>
+            </div>
+
+            <!-- 精选-小卡片2 -->
+            <div class="relative bg-surface rounded-xl shadow-card overflow-hidden template-card group flex-1">
+              <img src="https://images.unsplash.com/photo-1558618666-fcd25c85f82e?w=800&h=300&fit=crop" alt="创意海报生成预览" data-category="艺术" class="w-full h-36 object-cover" />
+              <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
+              <!-- 精选标签 -->
+              <span class="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-sm text-xs font-semibold bg-primary text-on-primary">精选</span>
+              <div class="absolute bottom-0 left-0 right-0 p-4">
+                <h3 class="text-base font-bold text-on-surface mb-0.5">创意海报生成</h3>
+                <p class="text-xs text-on-surface-variant mb-2 truncate">活动推广海报设计</p>
+                <button id="btn-use-featured-3" class="bg-primary text-on-primary px-4 py-1.5 rounded-md text-xs font-medium hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-1.5">
+                  <i data-lucide="zap" class="w-3 h-3"></i>立即使用
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 模板网格区 -->
+      <div class="mb-8">
+        <div class="flex items-center gap-2 mb-4">
+          <i data-lucide="layout-grid" class="w-5 h-5 text-primary"></i>
+          <h2 class="text-lg font-semibold text-on-surface">全部模板</h2>
+          <span id="template-count" class="text-sm text-on-surface-variant ml-1">10 个模板</span>
+        </div>
+        <div id="template-grid" class="grid grid-cols-4 gap-4">
+
+          <!-- 列表-模板1: 品牌Logo设计套组 -->
+          <div class="template-card bg-surface rounded-xl shadow-card overflow-hidden" data-category="品牌设计">
+            <div class="relative">
+              <img src="https://images.unsplash.com/photo-1626785774625-ddcddc3445e9?w=600&h=375&fit=crop" alt="品牌Logo设计套组" data-category="商业科技" class="w-full aspect-[16/10] object-cover" />
+              <!-- 左下角分类标签 -->
+              <span class="absolute bottom-2 left-2 px-2 py-0.5 rounded-sm text-xs font-medium bg-black/60 text-on-surface backdrop-blur-sm">品牌设计</span>
+              <!-- 右下角使用人数 -->
+              <span class="absolute bottom-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs text-on-surface-variant bg-black/60 backdrop-blur-sm">
+                <i data-lucide="users" class="w-3 h-3"></i>2.8k人使用
+              </span>
+            </div>
+            <div class="p-4">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <h3 class="text-sm font-semibold text-on-surface truncate">品牌Logo设计套组</h3>
+                  <p class="text-xs text-on-surface-variant truncate mt-0.5">一键生成多场景Logo</p>
+                </div>
+                <button class="shrink-0 bg-primary/10 text-primary px-3 py-1 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all cursor-pointer">使用模板</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 列表-模板2: 电商商品主图 -->
+          <div class="template-card bg-surface rounded-xl shadow-card overflow-hidden" data-category="电商图">
+            <div class="relative">
+              <img src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&h=375&fit=crop" alt="电商商品主图" data-category="商业科技" class="w-full aspect-[16/10] object-cover" />
+              <span class="absolute bottom-2 left-2 px-2 py-0.5 rounded-sm text-xs font-medium bg-black/60 text-on-surface backdrop-blur-sm">电商图</span>
+              <span class="absolute bottom-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs text-on-surface-variant bg-black/60 backdrop-blur-sm">
+                <i data-lucide="users" class="w-3 h-3"></i>5.1k人使用
+              </span>
+            </div>
+            <div class="p-4">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <h3 class="text-sm font-semibold text-on-surface truncate">电商商品主图</h3>
+                  <p class="text-xs text-on-surface-variant truncate mt-0.5">白底/场景/细节三视图</p>
+                </div>
+                <button class="shrink-0 bg-primary/10 text-primary px-3 py-1 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all cursor-pointer">使用模板</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 列表-模板3: 创意海报生成 -->
+          <div class="template-card bg-surface rounded-xl shadow-card overflow-hidden" data-category="创意海报">
+            <div class="relative">
+              <img src="https://images.unsplash.com/photo-1558618666-fcd25c85f82e?w=600&h=375&fit=crop" alt="创意海报生成" data-category="艺术" class="w-full aspect-[16/10] object-cover" />
+              <span class="absolute bottom-2 left-2 px-2 py-0.5 rounded-sm text-xs font-medium bg-black/60 text-on-surface backdrop-blur-sm">创意海报</span>
+              <span class="absolute bottom-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs text-on-surface-variant bg-black/60 backdrop-blur-sm">
+                <i data-lucide="users" class="w-3 h-3"></i>3.4k人使用
+              </span>
+            </div>
+            <div class="p-4">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <h3 class="text-sm font-semibold text-on-surface truncate">创意海报生成</h3>
+                  <p class="text-xs text-on-surface-variant truncate mt-0.5">活动推广海报设计</p>
+                </div>
+                <button class="shrink-0 bg-primary/10 text-primary px-3 py-1 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all cursor-pointer">使用模板</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 列表-模板4: 人物肖像精修 -->
+          <div class="template-card bg-surface rounded-xl shadow-card overflow-hidden" data-category="人物肖像">
+            <div class="relative">
+              <img src="https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=600&h=375&fit=crop" alt="人物肖像精修" data-category="人物" class="w-full aspect-[16/10] object-cover" />
+              <span class="absolute bottom-2 left-2 px-2 py-0.5 rounded-sm text-xs font-medium bg-black/60 text-on-surface backdrop-blur-sm">人物肖像</span>
+              <span class="absolute bottom-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs text-on-surface-variant bg-black/60 backdrop-blur-sm">
+                <i data-lucide="users" class="w-3 h-3"></i>4.2k人使用
+              </span>
+            </div>
+            <div class="p-4">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <h3 class="text-sm font-semibold text-on-surface truncate">人物肖像精修</h3>
+                  <p class="text-xs text-on-surface-variant truncate mt-0.5">AI人像美化与风格化</p>
+                </div>
+                <button class="shrink-0 bg-primary/10 text-primary px-3 py-1 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all cursor-pointer">使用模板</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 列表-模板5: 赛博朋克城市场景 -->
+          <div class="template-card bg-surface rounded-xl shadow-card overflow-hidden" data-category="概念场景">
+            <div class="relative">
+              <img src="https://images.unsplash.com/photo-1515705576963-95cad62945b6?w=600&h=375&fit=crop" alt="赛博朋克城市场景" data-category="建筑城市" class="w-full aspect-[16/10] object-cover" />
+              <span class="absolute bottom-2 left-2 px-2 py-0.5 rounded-sm text-xs font-medium bg-black/60 text-on-surface backdrop-blur-sm">概念场景</span>
+              <span class="absolute bottom-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs text-on-surface-variant bg-black/60 backdrop-blur-sm">
+                <i data-lucide="users" class="w-3 h-3"></i>1.9k人使用
+              </span>
+            </div>
+            <div class="p-4">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <h3 class="text-sm font-semibold text-on-surface truncate">赛博朋克城市场景</h3>
+                  <p class="text-xs text-on-surface-variant truncate mt-0.5">科幻概念场景生成</p>
+                </div>
+                <button class="shrink-0 bg-primary/10 text-primary px-3 py-1 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all cursor-pointer">使用模板</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 列表-模板6: 社交媒体九宫格 -->
+          <div class="template-card bg-surface rounded-xl shadow-card overflow-hidden" data-category="社交媒体">
+            <div class="relative">
+              <img src="https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=600&h=375&fit=crop" alt="社交媒体九宫格" data-category="商业科技" class="w-full aspect-[16/10] object-cover" />
+              <span class="absolute bottom-2 left-2 px-2 py-0.5 rounded-sm text-xs font-medium bg-black/60 text-on-surface backdrop-blur-sm">社交媒体</span>
+              <span class="absolute bottom-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs text-on-surface-variant bg-black/60 backdrop-blur-sm">
+                <i data-lucide="users" class="w-3 h-3"></i>6.7k人使用
+              </span>
+            </div>
+            <div class="p-4">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <h3 class="text-sm font-semibold text-on-surface truncate">社交媒体九宫格</h3>
+                  <p class="text-xs text-on-surface-variant truncate mt-0.5">多平台适配图组</p>
+                </div>
+                <button class="shrink-0 bg-primary/10 text-primary px-3 py-1 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all cursor-pointer">使用模板</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 列表-模板7: 产品样机展示 -->
+          <div class="template-card bg-surface rounded-xl shadow-card overflow-hidden" data-category="品牌设计">
+            <div class="relative">
+              <img src="https://images.unsplash.com/photo-1512486130939-2c4f79935e4f?w=600&h=375&fit=crop" alt="产品样机展示" data-category="商业科技" class="w-full aspect-[16/10] object-cover" />
+              <span class="absolute bottom-2 left-2 px-2 py-0.5 rounded-sm text-xs font-medium bg-black/60 text-on-surface backdrop-blur-sm">品牌设计</span>
+              <span class="absolute bottom-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs text-on-surface-variant bg-black/60 backdrop-blur-sm">
+                <i data-lucide="users" class="w-3 h-3"></i>3.0k人使用
+              </span>
+            </div>
+            <div class="p-4">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <h3 class="text-sm font-semibold text-on-surface truncate">产品样机展示</h3>
+                  <p class="text-xs text-on-surface-variant truncate mt-0.5">Mockup场景化展示</p>
+                </div>
+                <button class="shrink-0 bg-primary/10 text-primary px-3 py-1 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all cursor-pointer">使用模板</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 列表-模板8: IP角色设计 -->
+          <div class="template-card bg-surface rounded-xl shadow-card overflow-hidden" data-category="创意海报">
+            <div class="relative">
+              <img src="https://images.unsplash.com/photo-1604076913837-52ab5f43f367?w=600&h=375&fit=crop" alt="IP角色设计" data-category="游戏娱乐" class="w-full aspect-[16/10] object-cover" />
+              <span class="absolute bottom-2 left-2 px-2 py-0.5 rounded-sm text-xs font-medium bg-black/60 text-on-surface backdrop-blur-sm">创意海报</span>
+              <span class="absolute bottom-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs text-on-surface-variant bg-black/60 backdrop-blur-sm">
+                <i data-lucide="users" class="w-3 h-3"></i>1.2k人使用
+              </span>
+            </div>
+            <div class="p-4">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <h3 class="text-sm font-semibold text-on-surface truncate">IP角色设计</h3>
+                  <p class="text-xs text-on-surface-variant truncate mt-0.5">从草稿到三视图</p>
+                </div>
+                <button class="shrink-0 bg-primary/10 text-primary px-3 py-1 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all cursor-pointer">使用模板</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 列表-模板9: 美食摄影风格 -->
+          <div class="template-card bg-surface rounded-xl shadow-card overflow-hidden" data-category="电商图">
+            <div class="relative">
+              <img src="https://images.unsplash.com/photo-1476224203421-9ac39bcb3327?w=600&h=375&fit=crop" alt="美食摄影风格" data-category="食物" class="w-full aspect-[16/10] object-cover" />
+              <span class="absolute bottom-2 left-2 px-2 py-0.5 rounded-sm text-xs font-medium bg-black/60 text-on-surface backdrop-blur-sm">电商图</span>
+              <span class="absolute bottom-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs text-on-surface-variant bg-black/60 backdrop-blur-sm">
+                <i data-lucide="users" class="w-3 h-3"></i>2.3k人使用
+              </span>
+            </div>
+            <div class="p-4">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <h3 class="text-sm font-semibold text-on-surface truncate">美食摄影风格</h3>
+                  <p class="text-xs text-on-surface-variant truncate mt-0.5">食物拍摄风格化</p>
+                </div>
+                <button class="shrink-0 bg-primary/10 text-primary px-3 py-1 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all cursor-pointer">使用模板</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 列表-模板10: 杂志封面设计 -->
+          <div class="template-card bg-surface rounded-xl shadow-card overflow-hidden" data-category="创意海报">
+            <div class="relative">
+              <img src="https://images.unsplash.com/photo-1586339949916-3e9457bef6d3?w=600&h=375&fit=crop" alt="杂志封面设计" data-category="服饰时尚" class="w-full aspect-[16/10] object-cover" />
+              <span class="absolute bottom-2 left-2 px-2 py-0.5 rounded-sm text-xs font-medium bg-black/60 text-on-surface backdrop-blur-sm">创意海报</span>
+              <span class="absolute bottom-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs text-on-surface-variant bg-black/60 backdrop-blur-sm">
+                <i data-lucide="users" class="w-3 h-3"></i>1.8k人使用
+              </span>
+            </div>
+            <div class="p-4">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <h3 class="text-sm font-semibold text-on-surface truncate">杂志封面设计</h3>
+                  <p class="text-xs text-on-surface-variant truncate mt-0.5">时尚杂志封面排版</p>
+                </div>
+                <button class="shrink-0 bg-primary/10 text-primary px-3 py-1 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all cursor-pointer">使用模板</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- 底部区域：AI建图入口 -->
+      <div class="text-center py-8">
+        <p class="text-sm text-on-surface-variant mb-3">没有找到合适的模板？试试AI建图</p>
+        <button id="btn-ai-create" class="shimmer-btn bg-primary text-on-primary px-6 py-2.5 rounded-lg text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-2 cursor-pointer">
+          <i data-lucide="wand-2" class="w-4 h-4"></i>AI智能建图
+        </button>
+      </div>
+
+    </main>
+    <!-- @main-content:end -->
+  </div>
+  <!-- @nav:end 导航组件 -->
+
+  <script>
+    $(function () {
+
+      // === 分类标签筛选 ===
+      $('#category-bar').on('click', '.category-tag', function () {
+        // 切换选中态样式
+        $('.category-tag').removeClass('bg-primary text-on-primary').addClass('bg-surface-container text-on-surface-variant hover:bg-surface-container-high');
+        $(this).removeClass('bg-surface-container text-on-surface-variant hover:bg-surface-container-high').addClass('bg-primary text-on-primary');
+
+        const category = $(this).data('category');
+
+        if (category === 'all') {
+          // 显示所有模板卡片
+          $('#template-grid .template-card').show();
+        } else {
+          // 按分类筛选
+          $('#template-grid .template-card').each(function () {
+            if ($(this).data('category') === category) {
+              $(this).show();
+            } else {
+              $(this).hide();
+            }
+          });
+        }
+
+        // 更新模板数量
+        const visibleCount = $('#template-grid .template-card:visible').length;
+        $('#template-count').text(visibleCount + ' 个模板');
+      });
+
+      // === 搜索筛选 ===
+      $('#search-input').on('input', function () {
+        const keyword = $(this).val().trim().toLowerCase();
+
+        if (!keyword) {
+          // 恢复当前分类筛选状态
+          const activeCategory = $('.category-tag.bg-primary').data('category');
+          if (activeCategory === 'all') {
+            $('#template-grid .template-card').show();
+          } else {
+            $('#template-grid .template-card').each(function () {
+              if ($(this).data('category') === activeCategory) {
+                $(this).show();
+              } else {
+                $(this).hide();
+              }
+            });
+          }
+        } else {
+          // 按关键词搜索
+          $('#template-grid .template-card').each(function () {
+            const name = $(this).find('h3').text().toLowerCase();
+            const desc = $(this).find('p').text().toLowerCase();
+            if (name.includes(keyword) || desc.includes(keyword)) {
+              $(this).show();
+            } else {
+              $(this).hide();
+            }
+          });
+        }
+
+        // 更新模板数量
+        const visibleCount = $('#template-grid .template-card:visible').length;
+        $('#template-count').text(visibleCount + ' 个模板');
+      });
+
+      // === 使用模板按钮 ===
+      $('#template-grid').on('click', 'button', function () {
+        const templateName = $(this).closest('.template-card').find('h3').text();
+        console.log('使用模板:', templateName);
+        // 跳转到项目页面，通过URL参数传递模板名称
+        window.location.href = 'projects.html?template=' + encodeURIComponent(templateName);
+      });
+
+      // === 精选区立即使用按钮 ===
+      $('#btn-use-featured-1').on('click', function () {
+        window.location.href = 'projects.html?template=' + encodeURIComponent('品牌Logo设计套组');
+      });
+      $('#btn-use-featured-2').on('click', function () {
+        window.location.href = 'projects.html?template=' + encodeURIComponent('电商商品主图');
+      });
+      $('#btn-use-featured-3').on('click', function () {
+        window.location.href = 'projects.html?template=' + encodeURIComponent('创意海报生成');
+      });
+
+      // === AI智能建图按钮 ===
+      $('#btn-ai-create').on('click', function () {
+        console.log('需要调用AI建图功能，跳转到新建项目页面');
+        window.location.href = 'projects.html?action=ai-create';
+      });
+
+    });
+  </script>
+
+  <script>lucide.createIcons();</script>
+</body>
+
+</html>

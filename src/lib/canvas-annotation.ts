@@ -19,6 +19,9 @@ export interface AnnotationRegion {
   h: number;
 }
 
+/** 批注子工具模式 */
+export type AnnotationTool = 'pin' | 'region' | 'brush';
+
 /** 画布批注数据 */
 export interface CanvasAnnotation {
   /** 唯一ID */
@@ -33,16 +36,22 @@ export interface CanvasAnnotation {
   targetImageId: string | null;
   /** 可选：框选区域（归一化坐标，相对于原图） */
   region?: AnnotationRegion;
+  /** 可选：画笔蒙版（base64 data URL，与原图同尺寸，白色=修改区域，黑色=保留区域） */
+  brushMaskDataUrl?: string;
   /** 当前状态 */
   status: AnnotationStatus;
   /** AI回复（执行完成后） */
   aiReply?: string;
   /** 修改后的图片URL（执行完成后） */
   resultImageUrl?: string;
+  /** 原始图片URL（用于对比） */
+  originalImageUrl?: string;
   /** 追问历史 */
   followUpHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
   /** 是否展开对话气泡 */
   chatExpanded?: boolean;
+  /** 是否显示前后对比 */
+  showComparison?: boolean;
   /** 创建时间 */
   createdAt: number;
 }
@@ -59,6 +68,7 @@ export function createAnnotation(
   text: string,
   targetImageId: string | null,
   region?: AnnotationRegion,
+  brushMaskDataUrl?: string,
 ): CanvasAnnotation {
   return {
     id: createAnnotationId(),
@@ -67,6 +77,7 @@ export function createAnnotation(
     text,
     targetImageId,
     region,
+    brushMaskDataUrl,
     status: 'pending',
     createdAt: Date.now(),
   };
@@ -123,13 +134,16 @@ export function computeAnnotationRegion(
 
 /**
  * 根据批注构建语言修图提示词
- * 包含区域描述（如果有框选区域）
+ * 包含区域描述（如果有框选区域或画笔蒙版）
  */
 export function buildAnnotationPrompt(annotation: CanvasAnnotation): string {
   let prompt = annotation.text;
 
-  // 如果有框选区域，补充位置描述
-  if (annotation.region) {
+  // 如果有画笔蒙版，补充描述
+  if (annotation.brushMaskDataUrl) {
+    prompt = `[用户已用画笔标记了需要修改的具体区域] ${prompt}`;
+  } else if (annotation.region) {
+    // 如果有框选区域，补充位置描述
     const { x, y, w, h } = annotation.region;
     // 判断区域大致位置
     const posH = y < 0.33 ? '上方' : y > 0.66 ? '下方' : '中间';

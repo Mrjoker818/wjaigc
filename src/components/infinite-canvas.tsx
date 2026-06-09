@@ -29,7 +29,7 @@ import {
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
   Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play
 } from 'lucide-react';
-import type { CanvasAnnotation, AnnotationRegion } from '@/lib/canvas-annotation';
+import type { CanvasAnnotation, AnnotationRegion, AnnotationTool } from '@/lib/canvas-annotation';
 import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, mergeAnnotationsForImage, ANNOTATION_COLORS, ANNOTATION_COLORS_MONO, computeAnnotationRegion } from '@/lib/canvas-annotation';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
 import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
@@ -967,6 +967,15 @@ export function InfiniteCanvas({
   // Region selection state for annotation drag
   const [annotationRegionStart, setAnnotationRegionStart] = useState<{cx: number; cy: number} | null>(null);
   const [annotationRegionCurrent, setAnnotationRegionCurrent] = useState<{cx: number; cy: number} | null>(null);
+
+  // Annotation sub-tool: pin / region / brush
+  const [annotationTool, setAnnotationTool] = useState<'pin' | 'region' | 'brush'>('pin');
+  // Brush mask drawing state
+  const [brushDrawingAnnId, setBrushDrawingAnnId] = useState<string | null>(null);
+  const [brushSize, setBrushSize] = useState(20);
+  const brushCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const brushCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const isBrushDrawingRef = useRef(false);
   const [isDraggingRegion, setIsDraggingRegion] = useState(false);
 
   // Upscale state
@@ -1526,6 +1535,21 @@ export function InfiniteCanvas({
         if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
         e.preventDefault();
         setAnnotationMode(prev => !prev);
+        if (!annotationMode) setAnnotationTool('pin'); // reset to pin when entering
+        return;
+      }
+      // B key to toggle brush tool in annotation mode
+      if (e.code === 'KeyB' && annotationMode && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
+        setAnnotationTool(prev => prev === 'brush' ? 'pin' : 'brush');
+        return;
+      }
+      // R key to toggle region tool in annotation mode
+      if (e.code === 'KeyR' && annotationMode && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
+        setAnnotationTool(prev => prev === 'region' ? 'pin' : 'region');
         return;
       }
       if (e.code === 'Space' && !e.repeat) {
@@ -1961,12 +1985,46 @@ export function InfiniteCanvas({
       return;
     }
 
-    // ChatCanvas annotation mode: click=pin, drag=region selection
+    // ChatCanvas annotation mode: click=pin, drag=region/brush
     if (annotationMode && e.button === 0) {
       const canvasPos = screenToCanvas(e.clientX, e.clientY);
       const targetImageId = hitTestImage(canvasPos.x, canvasPos.y);
-      if (targetImageId) {
-        // Start potential region drag — resolve on mouseup
+
+      if (annotationTool === 'brush' && targetImageId) {
+        // Brush mode: create annotation + start drawing on canvas overlay
+        const targetImg = images.find(i => i.id === targetImageId);
+        if (targetImg) {
+          const newAnn = createAnnotation(canvasPos.x, canvasPos.y, '', targetImageId, undefined, undefined);
+          setAnnotations(prev => [...prev, newAnn]);
+          setEditingAnnotationId(newAnn.id);
+          setBrushDrawingAnnId(newAnn.id);
+
+          // Initialize brush canvas overlay for this image
+          const overlayCanvas = document.createElement('canvas');
+          overlayCanvas.width = targetImg.width;
+          overlayCanvas.height = targetImg.height;
+          const ctx = overlayCanvas.getContext('2d');
+          if (ctx) {
+            // Black background = keep area
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+          }
+          brushCanvasRef.current = overlayCanvas;
+          brushCtxRef.current = ctx;
+          isBrushDrawingRef.current = true;
+
+          // Draw first brush point
+          if (ctx) {
+            const relX = canvasPos.x - targetImg.x;
+            const relY = canvasPos.y - targetImg.y;
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(relX, relY, brushSize / 2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      } else if (targetImageId) {
+        // Pin / Region mode: start potential region drag
         setAnnotationRegionStart({ cx: canvasPos.x, cy: canvasPos.y });
         setAnnotationRegionCurrent({ cx: canvasPos.x, cy: canvasPos.y });
         setIsDraggingRegion(false);
@@ -2061,14 +2119,33 @@ export function InfiniteCanvas({
   }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    // Annotation region drag tracking
-    if (annotationRegionStart && annotationMode) {
+    // Annotation region drag tracking or brush drawing
+    if (annotationMode && (annotationRegionStart || isBrushDrawingRef.current)) {
       const canvasPos = screenToCanvas(e.clientX, e.clientY);
-      setAnnotationRegionCurrent({ cx: canvasPos.x, cy: canvasPos.y });
-      const dx = canvasPos.x - annotationRegionStart.cx;
-      const dy = canvasPos.y - annotationRegionStart.cy;
-      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
-        setIsDraggingRegion(true);
+
+      // Brush drawing
+      if (isBrushDrawingRef.current && brushDrawingAnnId && brushCtxRef.current) {
+        const ann = annotations.find(a => a.id === brushDrawingAnnId);
+        const targetImg = ann?.targetImageId ? images.find(i => i.id === ann.targetImageId) : null;
+        if (targetImg) {
+          const relX = canvasPos.x - targetImg.x;
+          const relY = canvasPos.y - targetImg.y;
+          brushCtxRef.current.fillStyle = '#ffffff';
+          brushCtxRef.current.beginPath();
+          brushCtxRef.current.arc(relX, relY, brushSize / 2, 0, Math.PI * 2);
+          brushCtxRef.current.fill();
+        }
+        return;
+      }
+
+      // Region drag tracking
+      if (annotationRegionStart) {
+        setAnnotationRegionCurrent({ cx: canvasPos.x, cy: canvasPos.y });
+        const dx = canvasPos.x - annotationRegionStart.cx;
+        const dy = canvasPos.y - annotationRegionStart.cy;
+        if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+          setIsDraggingRegion(true);
+        }
       }
       return;
     }
@@ -2192,9 +2269,25 @@ export function InfiniteCanvas({
       const offsetY = e.clientY - hexCubeDragStart.y;
       setHexCubeDragOffset({ x: offsetX, y: offsetY });
     }
-  }, [editMode, isPanning, isMiddlePanning, panStart, boxSelectStart, isLongPressing, resizingImage, resizeCorner, images, dragTarget, dragStart, resizeStart, screenToCanvas, onImagesChange, handleEditMouseMove, groupDragTarget, groupDragStart, genGroupDragTarget, genGroupDragStart, hexCubeDragTarget, hexCubeDragStart, annotationMode, annotationRegionStart]);
+  }, [editMode, isPanning, isMiddlePanning, panStart, boxSelectStart, isLongPressing, resizingImage, resizeCorner, images, dragTarget, dragStart, resizeStart, screenToCanvas, onImagesChange, handleEditMouseMove, groupDragTarget, groupDragStart, genGroupDragTarget, genGroupDragStart, hexCubeDragTarget, hexCubeDragStart, annotationMode, annotationTool, brushSize, brushDrawingAnnId, annotations, hitTestImage]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
+    // Brush drawing completion
+    if (isBrushDrawingRef.current && brushDrawingAnnId && brushCanvasRef.current) {
+      isBrushDrawingRef.current = false;
+      // Export brush mask as data URL and save to annotation
+      const maskDataUrl = brushCanvasRef.current.toDataURL('image/png');
+      setAnnotations(prev => prev.map(a =>
+        a.id === brushDrawingAnnId ? { ...a, brushMaskDataUrl: maskDataUrl } : a
+      ));
+      setBrushDrawingAnnId(null);
+      brushCanvasRef.current = null;
+      brushCtxRef.current = null;
+      // Focus the annotation input
+      setTimeout(() => annotationInputRef.current?.focus(), 50);
+      return;
+    }
+
     // Annotation region drag completion
     if (annotationRegionStart && annotationMode && isDraggingRegion && annotationRegionCurrent) {
       const x1 = Math.min(annotationRegionStart.cx, annotationRegionCurrent.cx);
@@ -2477,7 +2570,7 @@ export function InfiniteCanvas({
     }
 
     mouseDownOnImageRef.current = false;
-  }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp, groupDragTarget, groupDragOffset, genGroupDragTarget, genGroupDragOffset, hexCubeDragTarget, hexCubeDragOffset, resizingImage, resizePreview, annotationMode, annotationRegionStart, annotationRegionCurrent, isDraggingRegion]);
+  }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp, groupDragTarget, groupDragOffset, genGroupDragTarget, genGroupDragOffset, hexCubeDragTarget, hexCubeDragOffset, resizingImage, resizePreview, annotationMode, annotationRegionStart, annotationRegionCurrent, isDraggingRegion, brushDrawingAnnId, annotations, brushSize]);
 
   const handleMouseLeave = useCallback(() => {
     if (editMode !== 'none') {
@@ -4741,14 +4834,24 @@ export function InfiniteCanvas({
     const targetImg = images.find(i => i.id === annotation.targetImageId);
     if (!targetImg) return;
 
-    // 标记为执行中
+    // 标记为执行中 + 保存原始图片URL用于对比
     setAnnotations(prev => prev.map(a =>
-      a.id === annotation.id ? { ...a, status: 'running' as const } : a
+      a.id === annotation.id ? { ...a, status: 'running' as const, originalImageUrl: a.originalImageUrl || targetImg.url } : a
     ));
 
     try {
       // 构建提示词（包含区域描述）
-      const prompt = buildAnnotationPrompt(annotation);
+      let prompt = buildAnnotationPrompt(annotation);
+
+      // Multi-image context: describe other images on canvas for AI understanding
+      const canvasImages = images.filter(i => !i.isProcessingPlaceholder && i.id !== targetImg.id);
+      if (canvasImages.length > 0) {
+        const contextParts = canvasImages.slice(0, 5).map((img, i) => {
+          const desc = img.prompt || '无描述';
+          return `图片${i + 1}: ${desc.slice(0, 60)}`;
+        });
+        prompt = `[画布上下文：当前画布上还有${canvasImages.length}张其他图片 — ${contextParts.join('；')}] ${prompt}`;
+      }
 
       // 将图片转为 data URL
       const imgToDataUrl = (url: string): Promise<string> => new Promise((resolve, reject) => {
@@ -4793,8 +4896,12 @@ export function InfiniteCanvas({
         count: 1,
       };
 
+      // 如果有画笔蒙版，直接使用
+      if (annotation.brushMaskDataUrl) {
+        requestBody.mask = annotation.brushMaskDataUrl;
+      }
       // 如果有框选区域，生成蒙版并附加
-      if (annotation.region && targetImg) {
+      else if (annotation.region && targetImg) {
         try {
           const img = new Image();
           img.crossOrigin = 'anonymous';
@@ -10009,15 +10116,30 @@ export function InfiniteCanvas({
               const isHovered = hoveredAnnotationId === ann.id;
               return (
                 <g key={ann.id} className="pointer-events-auto" style={{ cursor: 'pointer' }}
-                   onClick={(e) => { e.stopPropagation(); setHoveredAnnotationId(ann.id); }}
+                   onClick={(e) => {
+                     e.stopPropagation();
+                     setHoveredAnnotationId(ann.id);
+                     // Toggle chat bubble expansion on click
+                     if (ann.text && ann.status !== 'pending') {
+                       setAnnotations(prev => prev.map(a =>
+                         a.id === ann.id ? { ...a, chatExpanded: !a.chatExpanded } : a
+                       ));
+                     }
+                   }}
                 >
                   {/* Pin dot */}
                   <circle cx={sx} cy={sy} r={isHovered ? 10 : 7} fill={fillColor} stroke={isMonochrome ? '#fff' : '#1a1a1a'} strokeWidth={2} style={{ filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.4))' }} />
                   {/* Number label */}
                   <text x={sx} y={sy + 1} textAnchor="middle" dominantBaseline="central" fill={ann.status === 'done' ? '#fff' : isMonochrome ? '#fff' : '#1a1a1a'} fontSize={9} fontWeight="bold" fontFamily="system-ui">{idx + 1}</text>
-                  {/* Running spinner ring */}
+                  {/* Running spinner ring + pulse animation */}
                   {ann.status === 'running' && (
-                    <circle cx={sx} cy={sy} r={11} fill="none" stroke={fillColor} strokeWidth={2} strokeDasharray="4 4" className="animate-spin" style={{ transformOrigin: `${sx}px ${sy}px` }} />
+                    <>
+                      <circle cx={sx} cy={sy} r={11} fill="none" stroke={fillColor} strokeWidth={2} strokeDasharray="4 4" className="animate-spin" style={{ transformOrigin: `${sx}px ${sy}px` }} />
+                      {/* Pulse glow */}
+                      <circle cx={sx} cy={sy} r={14} fill={fillColor} opacity={0.2} className="animate-pulse" />
+                      {/* Progress label */}
+                      <text x={sx} y={sy + 22} textAnchor="middle" fill={fillColor} fontSize={9} fontFamily="system-ui" opacity={0.8}>处理中...</text>
+                    </>
                   )}
                   {/* Hover tooltip with text */}
                   {isHovered && ann.text && (
@@ -10037,6 +10159,18 @@ export function InfiniteCanvas({
                     const rh = ann.region.h * hitImg.height * zoom;
                     return (
                       <rect x={rx} y={ry} width={rw} height={rh} fill="none" stroke={fillColor} strokeWidth={1.5} strokeDasharray="6 3" rx={2} opacity={0.7} />
+                    );
+                  })()}
+                  {/* Brush mask overlay */}
+                  {ann.brushMaskDataUrl && (() => {
+                    const hitImg = ann.targetImageId ? images.find(i => i.id === ann.targetImageId) : null;
+                    if (!hitImg) return null;
+                    const imgSx = hitImg.x * zoom + viewOffset.x;
+                    const imgSy = hitImg.y * zoom + viewOffset.y;
+                    const imgSw = hitImg.width * zoom;
+                    const imgSh = hitImg.height * zoom;
+                    return (
+                      <image href={ann.brushMaskDataUrl} x={imgSx} y={imgSy} width={imgSw} height={imgSh} opacity={0.35} />
                     );
                   })()}
                   {/* Done checkmark */}
@@ -10115,7 +10249,8 @@ export function InfiniteCanvas({
         })()}
 
         {/* ====== ANNOTATION DIALOG BUBBLES ====== */}
-        {annotations.filter(a => a.status === 'done' && a.aiReply).map(ann => {
+        {/* Show inline bubble for any annotation that is clicked/expanded */}
+        {annotations.filter(a => a.chatExpanded || a.status === 'done' || a.status === 'failed' || (a.status === 'running' && a.text)).map(ann => {
           const sx = ann.x * zoom + viewOffset.x;
           const sy = ann.y * zoom + viewOffset.y;
           const isFollowUpOpen = followUpInputId === ann.id;
@@ -10127,37 +10262,89 @@ export function InfiniteCanvas({
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
             >
-              {/* AI Reply Bubble */}
+              {/* AI Reply / Status Bubble */}
               <div
-                className={`rounded-xl shadow-lg cursor-pointer transition-all ${isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-gold/30'}`}
-                onClick={() => setFollowUpInputId(isFollowUpOpen ? null : ann.id)}
+                className={`rounded-xl shadow-lg transition-all ${isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-gold/30'}`}
               >
                 <div className="p-2.5">
-                  <div className="flex items-start gap-2">
-                    <div className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${isMonochrome ? 'bg-blue-400' : 'bg-gold'}`} />
-                    <div className={`text-xs leading-relaxed ${isMonochrome ? 'text-gray-700' : 'text-text-bright/80'}`}>
-                      {ann.aiReply}
+                  {/* Running status */}
+                  {ann.status === 'running' && (
+                    <div className="flex items-center gap-2">
+                      <div className={`w-3 h-3 rounded-full border-2 ${isMonochrome ? 'border-blue-500' : 'border-gold'} border-t-transparent animate-spin`} />
+                      <span className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-text-bright/70'}`}>AI 正在处理...</span>
                     </div>
-                  </div>
-                  {/* Follow-up history */}
-                  {ann.followUpHistory && ann.followUpHistory.length > 0 && (
-                    <div className="mt-1.5 space-y-1">
-                      {ann.followUpHistory.map((fu, i) => (
-                        <div key={i} className="ml-3.5">
-                          <div className={`text-xs ${isMonochrome ? 'text-blue-500' : 'text-gold/70'}`}>↪ {fu.role === 'user' ? fu.content : ''}</div>
-                          <div className={`text-xs mt-0.5 ${isMonochrome ? 'text-gray-600' : 'text-text-bright/60'}`}>{fu.role === 'assistant' ? fu.content : ''}</div>
+                  )}
+                  {/* Failed status */}
+                  {ann.status === 'failed' && (
+                    <div className="flex items-start gap-2">
+                      <div className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 bg-red-500`} />
+                      <div>
+                        <div className={`text-xs ${isMonochrome ? 'text-red-600' : 'text-red-400'}`}>{ann.aiReply || '修改失败'}</div>
+                        <button
+                          onClick={() => {
+                            setAnnotations(prev => prev.map(a => a.id === ann.id ? { ...a, status: 'pending' as const, aiReply: undefined } : a));
+                          }}
+                          className={`text-[10px] mt-1 ${isMonochrome ? 'text-blue-500 hover:text-blue-600' : 'text-gold hover:text-gold-light'}`}
+                        >
+                          重试
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {/* Done status with AI reply */}
+                  {ann.status === 'done' && ann.aiReply && (
+                    <>
+                      <div className="flex items-start gap-2">
+                        <div className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${isMonochrome ? 'bg-blue-400' : 'bg-gold'}`} />
+                        <div className={`text-xs leading-relaxed ${isMonochrome ? 'text-gray-700' : 'text-text-bright/80'}`}>
+                          {ann.aiReply}
                         </div>
-                      ))}
+                      </div>
+                      {/* Compare toggle (only when original + result images exist) */}
+                      {ann.originalImageUrl && ann.resultImageUrl && (
+                        <button
+                          onClick={() => {
+                            setAnnotations(prev => prev.map(a =>
+                              a.id === ann.id ? { ...a, showComparison: !a.showComparison } : a
+                            ));
+                          }}
+                          className={`text-[10px] mt-1.5 flex items-center gap-1 ${isMonochrome ? 'text-blue-500 hover:text-blue-600' : 'text-gold hover:text-gold-light'}`}
+                        >
+                          <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="1" y="2" width="6" height="12" rx="1"/><rect x="9" y="2" width="6" height="12" rx="1"/></svg>
+                          {ann.showComparison ? '隐藏对比' : '前后对比'}
+                        </button>
+                      )}
+                      {/* Follow-up history */}
+                      {ann.followUpHistory && ann.followUpHistory.length > 0 && (
+                        <div className="mt-1.5 space-y-1">
+                          {ann.followUpHistory.map((fu, i) => (
+                            <div key={i} className="ml-3.5">
+                              <div className={`text-xs ${isMonochrome ? 'text-blue-500' : 'text-gold/70'}`}>↪ {fu.role === 'user' ? fu.content : ''}</div>
+                              <div className={`text-xs mt-0.5 ${isMonochrome ? 'text-gray-600' : 'text-text-bright/60'}`}>{fu.role === 'assistant' ? fu.content : ''}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {/* Pending status with text */}
+                  {ann.status === 'pending' && ann.text && (
+                    <div className="flex items-start gap-2">
+                      <div className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${isMonochrome ? 'bg-blue-400' : 'bg-gold'}`} />
+                      <div className={`text-xs leading-relaxed ${isMonochrome ? 'text-gray-700' : 'text-text-bright/80'}`}>
+                        {ann.text}
+                      </div>
                     </div>
                   )}
                   <div className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/40'}`}>
-                    {isFollowUpOpen ? '收起' : '点击追问'}
+                    {ann.status === 'done' && (isFollowUpOpen ? '收起' : '点击追问')}
+                    {ann.status === 'pending' && '等待执行'}
                   </div>
                 </div>
               </div>
 
-              {/* Follow-up Input */}
-              {isFollowUpOpen && (
+              {/* Follow-up Input (only for done annotations) */}
+              {isFollowUpOpen && ann.status === 'done' && (
                 <div className={`mt-1 rounded-xl shadow-lg ${isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-gold/30'}`}>
                   <div className="p-2.5">
                     <textarea
@@ -10199,6 +10386,21 @@ export function InfiniteCanvas({
                   </div>
                 </div>
               )}
+              {/* Before/After Comparison Overlay */}
+              {ann.showComparison && ann.originalImageUrl && ann.resultImageUrl && (
+                <div className={`mt-1 rounded-xl shadow-lg overflow-hidden ${isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-gold/30'}`}>
+                  <div className="grid grid-cols-2 gap-0.5 p-1">
+                    <div className="relative">
+                      <img src={ann.originalImageUrl} alt="原图" className="w-full h-20 object-cover rounded" />
+                      <span className={`absolute bottom-0.5 left-0.5 text-[9px] px-1 py-0.5 rounded ${isMonochrome ? 'bg-white/80 text-gray-600' : 'bg-black/60 text-gold'}`}>原图</span>
+                    </div>
+                    <div className="relative">
+                      <img src={ann.resultImageUrl} alt="结果" className="w-full h-20 object-cover rounded" />
+                      <span className={`absolute bottom-0.5 left-0.5 text-[9px] px-1 py-0.5 rounded ${isMonochrome ? 'bg-blue-500/80 text-white' : 'bg-gold/80 text-black'}`}>结果</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
@@ -10208,7 +10410,41 @@ export function InfiniteCanvas({
           <div className={`absolute top-3 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-2 px-4 py-2 rounded-xl shadow-lg ${isMonochrome ? 'bg-white border border-blue-200' : 'bg-[#1a1a1a] border border-gold/30'}`}>
             <MessageCircle size={16} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
             <span className={`text-sm font-medium ${isMonochrome ? 'text-gray-700' : 'text-text-bright'}`}>批注模式</span>
-            <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/60'}`}>点击图片添加批注</span>
+            {/* Tool selector */}
+            <div className={`flex items-center gap-1 ml-1 ${isMonochrome ? 'bg-gray-100' : 'bg-white/[0.06]'} rounded-lg p-0.5`}>
+              {([
+                { key: 'pin' as const, label: 'Pin', shortcut: 'C' },
+                { key: 'region' as const, label: '框选', shortcut: 'R' },
+                { key: 'brush' as const, label: '画笔', shortcut: 'B' },
+              ]).map(tool => (
+                <button
+                  key={tool.key}
+                  onClick={() => setAnnotationTool(tool.key)}
+                  className={`px-2 py-0.5 rounded-md text-xs font-medium transition-all ${
+                    annotationTool === tool.key
+                      ? isMonochrome ? 'bg-blue-500 text-white shadow-sm' : 'bg-gold text-black shadow-sm'
+                      : isMonochrome ? 'text-gray-500 hover:text-gray-700' : 'text-gold-muted/60 hover:text-gold-muted'
+                  }`}
+                >
+                  {tool.label}
+                </button>
+              ))}
+            </div>
+            {/* Brush size slider (only in brush mode) */}
+            {annotationTool === 'brush' && (
+              <div className="flex items-center gap-1.5 ml-1">
+                <span className={`text-[10px] ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/50'}`}>大小</span>
+                <input
+                  type="range"
+                  min={5}
+                  max={80}
+                  value={brushSize}
+                  onChange={(e) => setBrushSize(Number(e.target.value))}
+                  className="w-16 h-1 accent-current"
+                />
+                <span className={`text-[10px] w-5 text-right ${isMonochrome ? 'text-gray-500' : 'text-gold-muted/60'}`}>{brushSize}</span>
+              </div>
+            )}
             <div className={`w-px h-4 ${isMonochrome ? 'bg-gray-200' : 'bg-white/10'}`} />
             <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/60'}`}>Esc 退出</span>
             {annotations.filter(a => a.status === 'pending').length > 0 && (

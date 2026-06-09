@@ -3,17 +3,25 @@
     {
       "type": "html",
       "options": {
-        "path": ".cozeproj/prototype/web/login.html"
+        "path": ".cozeproj/prototype/web/projects.html"
       },
-      "title": "登录页",
+      "title": "我的项目",
       "size": "web"
     },
     {
       "type": "html",
       "options": {
-        "path": ".cozeproj/prototype/web/canvas.html"
+        "path": ".cozeproj/prototype/web/templates.html"
       },
-      "title": "画布模式工作区",
+      "title": "模板广场",
+      "size": "web"
+    },
+    {
+      "type": "html",
+      "options": {
+        "path": ".cozeproj/prototype/web/assets.html"
+      },
+      "title": "资产库",
       "size": "web"
     }
   ]
