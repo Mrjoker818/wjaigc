@@ -477,61 +477,73 @@ async function performImageEdit(
 
   // Path A: 支持 /images/edits 端点的提供商（OpenAI 官方等）
   if (resolvedEndpoint === '/images/edits') {
-    // OpenAI images/edits 路径
-    const headers: Record<string, string> = {
-      'Authorization': `Bearer ${apiKey}`,
-    };
+    console.log('[agent-edit] Path A: /images/edits, baseUrl:', baseUrl, 'model:', imageModel);
+    try {
+      const headers: Record<string, string> = {
+        'Authorization': `Bearer ${apiKey}`,
+      };
 
-    const formData = new FormData();
-    formData.append('model', imageModel);
-    formData.append('prompt', editPrompt);
-    formData.append('n', '1');
-    formData.append('size', '1024x1024');
+      const formData = new FormData();
+      formData.append('model', imageModel);
+      formData.append('prompt', editPrompt);
+      formData.append('n', '1');
+      formData.append('size', '1024x1024');
 
-    // 添加图片
-    if (imageUrl.startsWith('data:')) {
-      const blob = dataUrlToBlob(imageUrl);
-      formData.append('image', blob, 'image.png');
-    } else {
-      const imgResp = await fetch(imageUrl);
-      const imgBlob = await imgResp.blob();
-      formData.append('image', imgBlob, 'image.png');
-    }
-
-    // 添加蒙版
-    if (maskDataUrl?.startsWith('data:')) {
-      const maskBlob = dataUrlToBlob(maskDataUrl);
-      formData.append('mask', maskBlob, 'mask.png');
-    }
-
-    const resp = await fetchWithV1Retry(baseUrl, '/images/edits', {
-      method: 'POST',
-      headers,
-      body: formData,
-      signal: AbortSignal.timeout(120000),
-    });
-
-    if (!resp.ok) {
-      const errText = await resp.text().catch(() => '');
-      // ★ 渠道不可用 / 模型未找到 — 提供更明确提示
-      if (errText.includes('No available channel') || errText.includes('model_not_found') || errText.includes('not configured')) {
-        return { success: false, error: `模型在当前渠道暂不可用，请稍后重试或更换模型` };
+      // 添加图片
+      if (imageUrl.startsWith('data:')) {
+        const blob = dataUrlToBlob(imageUrl);
+        formData.append('image', blob, 'image.png');
+      } else {
+        const imgResp = await fetch(imageUrl.startsWith('/') ? `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}` : imageUrl, {
+          signal: AbortSignal.timeout(30000),
+        });
+        if (!imgResp.ok) return { success: false, error: `无法下载图片: ${imgResp.status}` };
+        const imgBlob = await imgResp.blob();
+        formData.append('image', imgBlob, 'image.png');
       }
-      return { success: false, error: `OpenAI edit 失败 (${resp.status}): ${errText.slice(0, 200)}` };
-    }
 
-    const data = await resp.json() as Record<string, unknown>;
-    const images = data.data as Array<Record<string, unknown>> | undefined;
-    if (images && images.length > 0) {
-      const resultUrl = String(images[0].url || images[0].b64_json || '');
-      return { success: true, imageUrl: resultUrl.startsWith('data:') ? resultUrl : resultUrl };
-    }
+      // 添加蒙版
+      if (maskDataUrl?.startsWith('data:')) {
+        const maskBlob = dataUrlToBlob(maskDataUrl);
+        formData.append('mask', maskBlob, 'mask.png');
+      }
 
-    return { success: false, error: 'OpenAI 未返回图片' };
+      console.log('[agent-edit] Path A: sending request to', `${baseUrl}/images/edits`);
+      const resp = await fetchWithV1Retry(baseUrl, '/images/edits', {
+        method: 'POST',
+        headers,
+        body: formData,
+        signal: AbortSignal.timeout(120000),
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => '');
+        console.error('[agent-edit] Path A: API error', resp.status, errText.slice(0, 300));
+        if (errText.includes('No available channel') || errText.includes('model_not_found') || errText.includes('not configured')) {
+          return { success: false, error: `模型在当前渠道暂不可用，请稍后重试或更换模型` };
+        }
+        return { success: false, error: `OpenAI edit 失败 (${resp.status}): ${errText.slice(0, 200)}` };
+      }
+
+      const data = await resp.json() as Record<string, unknown>;
+      const images = data.data as Array<Record<string, unknown>> | undefined;
+      if (images && images.length > 0) {
+        const resultUrl = String(images[0].url || images[0].b64_json || '');
+        console.log('[agent-edit] Path A: success, got result');
+        return { success: true, imageUrl: resultUrl.startsWith('data:') ? resultUrl : resultUrl };
+      }
+
+      console.error('[agent-edit] Path A: no images in response', JSON.stringify(data).slice(0, 200));
+      return { success: false, error: 'OpenAI 未返回图片' };
+    } catch (err) {
+      console.error('[agent-edit] Path A: exception', err);
+      return { success: false, error: err instanceof Error ? translateApiError(err.message) : '编辑请求异常' };
+    }
   }
 
   // Path B: /images/generations 端点（APImart 等兼容 API）
   if (resolvedEndpoint === '/images/generations') {
+    console.log('[agent-edit] Path B: /images/generations, baseUrl:', baseUrl, 'model:', imageModel);
     try {
       // 解析图片为 base64
       let imageBase64 = '';
@@ -570,6 +582,7 @@ async function performImageEdit(
         'Authorization': `Bearer ${apiKey}`,
       };
 
+      console.log('[agent-edit] Path B: sending request to', `${baseUrl}/images/generations`, 'with image_urls');
       const genResp = await fetchWithV1Retry(baseUrl, '/images/generations', {
         method: 'POST',
         headers: genHeaders,
@@ -579,6 +592,7 @@ async function performImageEdit(
 
       if (!genResp.ok) {
         const errText = await genResp.text().catch(() => '');
+        console.error('[agent-edit] Path B: API error', genResp.status, errText.slice(0, 300));
         const parsed = translateApiError(`编辑请求失败 (${genResp.status}): ${errText.slice(0, 200)}`);
         return { success: false, error: parsed };
       }
@@ -638,17 +652,21 @@ async function performImageEdit(
 
       // 直接返回结果
       if (parsedResult.directImageUrls.length > 0) {
+        console.log('[agent-edit] Path B: direct result, got', parsedResult.directImageUrls.length, 'images');
         return { success: true, imageUrl: parsedResult.directImageUrls[0] };
       }
 
+      console.error('[agent-edit] Path B: no images in response');
       return { success: false, error: '模型未返回编辑后的图片' };
     } catch (err) {
+      console.error('[agent-edit] Path B: exception', err);
       return { success: false, error: err instanceof Error ? translateApiError(err.message) : '编辑请求失败' };
     }
   }
 
   // 非 OpenAI: 使用 chat/completions + 图片输入 (Gemini / 兼容 API)
   // 直接调用提供商 API，不经过 /api/edit 路由（避免 Next.js dev 模式内存隔离问题）
+  console.log('[agent-edit] Path C: chat/completions, baseUrl:', baseUrl, 'model:', imageModel);
   try {
     // 解析图片为 base64
     let imageBase64 = '';
