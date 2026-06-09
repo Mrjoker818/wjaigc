@@ -329,72 +329,71 @@ interface NodeEditorProps {
 // ==================== 双主题配色 ====================
 const nodeThemes = {
   gold: {
-    // 侧边栏 — 与窗口模式面板 (#1a1a1a) 统一
-    sidebarBg: '#1a1a1a',
+    // 侧边栏 — 与原型对齐 (#161b22)
+    sidebarBg: '#161b22',
     sidebarBorder: 'rgba(212,175,55,0.15)',
-    sidebarText: '#e5e5e5',
-    sidebarMuted: '#888',
-    sidebarDimmed: '#555',
-    // 节点 — 与窗口模式浮窗统一 (#1a1a1a 主体 + 金色强调)
-    nodeBg: '#1a1a1a',
+    sidebarText: '#f0f6fc',
+    sidebarMuted: '#8b949e',
+    sidebarDimmed: '#484f58',
+    // 节点 — 与原型对齐 (毛玻璃 rgba(22,27,34,0.96) + 金色强调)
+    nodeBg: '#161b22',
     nodeBorder: 'rgba(212,175,55,0.3)',
     nodeSelectedBorder: 'var(--ne-accent)',
-    nodeHoverBg: '#222',
-    nodeHeaderText: '#e5e5e5',
-    nodePortText: '#999',
-    nodeTitleText: '#ccc',
-    nodeBody: '#1a1a1a',
-    nodeSelected: '#1e1e1e',
-    nodeTitle: '#ccc',
-    portFill: '#1a1a1a',
-    portLabel: '#999',
+    nodeHoverBg: '#1c2129',
+    nodeHeaderText: '#f0f6fc',
+    nodePortText: '#8b949e',
+    nodeBody: '#161b22',
+    nodeSelected: '#1c2129',
+    nodeTitle: '#f0f6fc',
+    portFill: '#161b22',
+    portLabel: '#8b949e',
     badgeText: '#000',
-    gridDot: '#333',
-    danger: '#ef4444',
-    success: '#22c55e',
-    arrowFill: '#555',
+    gridDot: '#21262d',
+    danger: '#f85149',
+    success: '#3fb950',
+    arrowFill: '#484f58',
     // 强调色
-    accent: 'var(--ne-accent)',
+    accent: '#d4af37',
     accentHover: '#c9a02e',
     accentDim: 'rgba(212,175,55,0.15)',
     accentMuted: 'rgba(212,175,55,0.25)',
-    // 卡片
-    cardBg: '#1a1a1a',
+    // 卡片 — 与原型对齐 (rgba(15,23,42,0.96))
+    cardBg: '#0f172a',
     cardBorder: 'rgba(212,175,55,0.15)',
-    border: 'rgba(212,175,55,0.15)',
-    text: '#e5e5e5',
-    textMuted: '#888',
-    // 输入框 — 与窗口模式输入框统一
-    inputBg: 'rgba(255,255,255,0.05)',
-    inputBorder: 'rgba(212,175,55,0.2)',
-    inputText: '#e5e5e5',
-    inputPlaceholder: '#666',
-    // 下拉选项（原生option需要不透明背景）
-    optionBg: '#2a2a2a',
-    optionText: '#e5e5e5',
-    // 按钮 — 与窗口模式按钮统一
+    border: 'rgba(48,54,61,0.6)',
+    text: '#f0f6fc',
+    textMuted: '#8b949e',
+    // 输入框 — 与原型对齐
+    inputBg: 'rgba(13,17,23,0.9)',
+    inputBorder: 'rgba(48,54,61,0.8)',
+    inputText: '#f0f6fc',
+    inputPlaceholder: '#484f58',
+    // 下拉选项
+    optionBg: '#21262d',
+    optionText: '#f0f6fc',
+    // 按钮 — 与原型对齐
     btnBg: 'rgba(212,175,55,0.1)',
     btnHoverBg: 'rgba(212,175,55,0.2)',
     btnText: 'var(--ne-accent)',
-    // 画布
-    canvasBg: '#111',
-    canvasGrid: 'rgba(255,255,255,0.03)',
-    canvasDot: 'rgba(255,255,255,0.08)',
-    // 连线
-    connColor: '#555',
+    // 画布 — 与原型对齐 (#0d1117 点阵网格)
+    canvasBg: '#0d1117',
+    canvasGrid: 'rgba(48,54,61,0.3)',
+    canvasDot: 'rgba(48,54,61,0.5)',
+    // 连线 — 与原型对齐 (金色流动)
+    connColor: '#30363d',
     connHighlight: 'var(--ne-accent)',
-    // 工具栏
-    toolbarBg: '#1a1a1a',
-    toolbarBorder: 'rgba(212,175,55,0.15)',
-    toolbarText: '#999',
+    // 工具栏 — 与原型对齐
+    toolbarBg: '#161b22',
+    toolbarBorder: 'rgba(48,54,61,0.6)',
+    toolbarText: '#8b949e',
     // 标签
     tabActiveBg: 'rgba(212,175,55,0.15)',
     tabActiveText: 'var(--ne-accent)',
-    tabInactiveText: '#777',
-    // 执行状态
-    statusRunning: 'var(--ne-accent)',
-    statusSuccess: '#4ade80',
-    statusError: '#f87171',
+    tabInactiveText: '#484f58',
+    // 执行状态 — 与原型对齐
+    statusRunning: '#58a6ff',
+    statusSuccess: '#3fb950',
+    statusError: '#f85149',
     // 滚动条
     scrollbarTrack: '#111',
     scrollbarThumb: 'rgba(212,175,55,0.2)',
@@ -493,7 +492,7 @@ function ContentPanel({ canvasImages, onDragImage, themeStyle }: { canvasImages?
       className={`border-t transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${collapsed ? 'h-[38px]' : 'h-[120px]'}`}
       style={{
         borderColor: T.sidebarBorder,
-        background: T.sidebarBg === '#1a1a1a'
+        background: T.sidebarBg === '#161b22'
           ? 'rgba(22, 27, 34, 0.85)'
           : 'rgba(248, 250, 252, 0.85)',
         backdropFilter: 'blur(12px)',
@@ -560,14 +559,14 @@ function ContentPanel({ canvasImages, onDragImage, themeStyle }: { canvasImages?
                   draggable
                   onDragStart={e => handleDragStart(e, img.url)}
                   onClick={() => setSelectedImgId(prev => prev === (img.id || idx) ? null : String(img.id || idx))}
-                  className={`group relative flex-shrink-0 w-[72px] h-[72px] rounded-lg overflow-hidden border cursor-grab active:cursor-grabbing transition-all duration-200 hover:-translate-y-0.5 ${isSelected ? 'ring-2 ring-offset-1' : ''}`}
+                  className={`group relative flex-shrink-0 w-[72px] h-[72px] rounded-lg overflow-hidden border cursor-grab active:cursor-grabbing transition-all duration-200 hover:-translate-y-0.5`}
                   style={{
                     borderColor: isSelected ? T.accent : `${T.accent}25`,
-                    background: T.nodeBg === '#1a1a1a'
-                      ? 'repeating-conic-gradient(#222 0% 25%, #1a1a1a 0% 50%) 0 0 / 12px 12px'
+                    background: T.nodeBg === '#161b22'
+                      ? 'repeating-conic-gradient(#1e242c 0% 25%, #161b22 0% 50%) 0 0 / 12px 12px'
                       : 'repeating-conic-gradient(#f0f0f0 0% 25%, #fff 0% 50%) 0 0 / 12px 12px',
                     boxShadow: isSelected
-                      ? `0 0 0 2px ${T.accent}40, 0 0 12px ${T.accent}20, 0 4px 12px rgba(0,0,0,0.3)`
+                      ? `0 0 0 2px ${T.accent}, 0 0 12px ${T.accent}30, 0 4px 12px rgba(0,0,0,0.3)`
                       : `0 2px 8px rgba(0,0,0,0.2)`,
                   }}
                   title={img.description || img.name || `图片 ${idx + 1} - 拖拽到画布添加节点`}
@@ -2244,8 +2243,8 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                         )}
                         <path
                           d={getConnPath(from.x, from.y, to.x, to.y)}
-                          fill="none" stroke={isBlocked ? '#666' : color} strokeWidth={isHighlighted ? 2.5 : 1.8}
-                          strokeOpacity={isBlocked ? 0.3 : isHighlighted ? 1 : isRunning ? 0.9 : 0.45}
+                          fill="none" stroke={isBlocked ? '#666' : color} strokeWidth={isHighlighted ? 3 : 2}
+                          strokeOpacity={isBlocked ? 0.3 : isHighlighted ? 1 : isRunning ? 0.9 : 0.5}
                           strokeLinecap="round"
                           strokeDasharray={isBlocked ? '4 4' : undefined}
                           markerEnd={isBlocked ? undefined : `url(#${markerId})`}
@@ -2257,14 +2256,14 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                             {/* 虚线流动 (与原型对齐) */}
                             <path
                               d={getConnPath(from.x, from.y, to.x, to.y)}
-                              fill="none" stroke={color} strokeWidth={1.5}
-                              strokeOpacity={0.6}
-                              strokeDasharray="8 4"
+                              fill="none" stroke={color} strokeWidth={2}
+                              strokeOpacity={0.5}
+                              strokeDasharray="10 5"
                               className="ne-conn-flowing"
                             />
                             {/* 流动粒子 */}
                             <circle r={3} fill={color}>
-                              <animateMotion dur="1.5s" repeatCount="indefinite" path={getConnPath(from.x, from.y, to.x, to.y)} />
+                              <animateMotion dur="1.2s" repeatCount="indefinite" path={getConnPath(from.x, from.y, to.x, to.y)} />
                             </circle>
                           </>
                         )}
@@ -2713,7 +2712,7 @@ function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
         /* 有图片时显示当前页图片 */
         <div
           className="flex-1 w-full relative group cursor-pointer flex items-center justify-center rounded overflow-hidden"
-          style={{ background: T.nodeBg === '#1a1a1a' ? '#252525' : '#f0f0f0' }}
+          style={{ background: T.nodeBg === '#161b22' ? '#1c2129' : '#f0f0f0' }}
           onClick={() => onPreviewImage(currentUrl)}
         >
           <img src={currentUrl} alt={`图片 ${page + 1}`} className="max-w-full max-h-full object-contain transition-opacity opacity-90 group-hover:opacity-100" />
@@ -2727,11 +2726,11 @@ function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
           className="flex-1 w-full flex flex-col items-center justify-center gap-1.5 rounded border-2 border-dashed transition-colors"
           style={{
             borderColor: T.accent + '40',
-            background: T.nodeBg === '#1a1a1a' ? '#1f1f1f' : '#fafafa',
+            background: T.nodeBg === '#161b22' ? '#1c2129' : '#fafafa',
           }}
         >
           <Layers size={22} style={{ color: T.accent, opacity: 0.35 }} />
-          <span className="text-[10px] font-medium" style={{ color: T.nodeBg === '#1a1a1a' ? '#555' : '#999' }}>等待图片组</span>
+          <span className="text-[10px] font-medium" style={{ color: T.nodeBg === '#161b22' ? '#8b949e' : '#999' }}>等待图片组</span>
         </div>
       )}
       {/* 分页控件 */}
@@ -2864,42 +2863,42 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      {/* 高亮光晕 */}
+      {/* 高亮光晕 (与原型 outline 对应) */}
       {isHighlighted && !isSelected && (
-        <rect x={node.x - 4} y={node.y - 4} width={node.width + 8} height={node.height + 8} rx={isCondition ? 55 : 12}
+        <rect x={node.x - 2} y={node.y - 2} width={node.width + 4} height={node.height + 4} rx={isCondition ? 55 : 18}
           fill="none" stroke={color} strokeWidth={1} strokeOpacity={0.3}
         />
       )}
 
-      {/* 选中光晕 (外发光效果) */}
-      {isSelected && (
-        <rect x={node.x - 6} y={node.y - 6} width={node.width + 12} height={node.height + 12} rx={isCondition ? 55 : 14}
-          fill="none" stroke={color} strokeWidth={2} strokeOpacity={0.25} style={{ filter: `blur(4px)` }} />
-      )}
-      {isSelected && (
-        <rect x={node.x - 2} y={node.y - 2} width={node.width + 4} height={node.height + 4} rx={isCondition ? 55 : 10}
-          fill="none" stroke={color} strokeWidth={1.5} strokeOpacity={0.7} />
-      )}
-
-      {/* 节点主体 - 带阴影和渐变边框 */}
+      {/* 节点主体 - 毛玻璃风格, 22px大圆角, 深阴影 (与原型对齐) */}
       <defs>
-        <filter id={`node-shadow-${node.id}`} x="-10%" y="-10%" width="120%" height="130%">
-          <feDropShadow dx="0" dy={isSelected || isHovered ? 3 : 2} stdDeviation={isSelected ? 6 : isHovered ? 5 : 4} floodColor={T.cardBg.startsWith('#1') || T.cardBg.startsWith('#0') ? '#000' : color} floodOpacity={isSelected ? 0.3 : isHovered ? 0.2 : 0.12} />
+        <filter id={`node-shadow-${node.id}`} x="-15%" y="-10%" width="130%" height="140%">
+          <feDropShadow dx="0" dy={isSelected || isHovered ? 10 : 6} stdDeviation={isSelected ? 16 : isHovered ? 14 : 10} floodColor="#000000" floodOpacity={isSelected ? 0.55 : isHovered ? 0.45 : 0.3} />
+        </filter>
+        <filter id={`node-glow-${node.id}`} x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="4" />
         </filter>
       </defs>
-      <rect x={node.x} y={node.y} width={node.width} height={node.height} rx={isCondition ? 55 : 10}
+      <rect x={node.x} y={node.y} width={node.width} height={node.height} rx={isCondition ? 55 : 22}
         fill={isSelected ? T.nodeSelected : T.nodeBody}
-        stroke={execResult ? statusColor : (isHovered && !isSelected) ? color : color}
-        strokeWidth={execResult ? 2 : isSelected ? 2 : isHovered ? 1.5 : isHighlighted ? 1 : 0.5}
-        strokeOpacity={execResult ? 1 : isSelected ? 0.9 : isHovered ? 0.6 : isHighlighted ? 0.5 : 0.2}
+        stroke={execResult ? statusColor : (isHovered && !isSelected) ? color : isSelected ? color : 'transparent'}
+        strokeWidth={execResult ? 2 : isSelected ? 1.5 : isHovered ? 1 : 0}
+        strokeOpacity={execResult ? 1 : isSelected ? 0.8 : isHovered ? 0.5 : 0}
         filter={`url(#node-shadow-${node.id})`}
         onMouseDown={(e) => { e.stopPropagation(); onSelect(e); onDragStart(e as unknown as React.MouseEvent); }}
         className="cursor-move"
       />
 
-      {/* 分类色条 - 顶部4px色条标识节点类型 */}
-      <rect x={node.x + 1} y={node.y + 1} width={node.width - 2} height={4} rx={isCondition ? 55 : 10}
-        fill={color} fillOpacity={0.7} className="pointer-events-none" />
+      {/* 选中金色外发光 (与原型 outline+box-shadow 对应) */}
+      {isSelected && (
+        <rect x={node.x - 3} y={node.y - 3} width={node.width + 6} height={node.height + 6} rx={isCondition ? 55 : 24}
+          fill="none" stroke={color} strokeWidth={2} strokeOpacity={0.5} />
+      )}
+
+      {/* 分类色条 - 顶部3px色条标识节点类型 (与原型对齐) */}
+      <rect x={node.x} y={node.y} width={node.width} height={3}
+        fill={color} fillOpacity={0.85} className="pointer-events-none"
+        style={{ clipPath: `inset(0 0 0 0 round ${isCondition ? 55 : 22}px ${isCondition ? 55 : 22}px 0 0)` }} />
 
       {/* 执行成功光圈 (渐现后消失, 不持续闪烁) */}
       {execResult?.status === 'success' && (
@@ -2920,8 +2919,8 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
       {/* 节点标题区 — 42px高度, 大写标签, 折叠开关, 状态徽章 (与原型对齐) */}
       {!isCondition && (
         <g>
-          {/* 标题栏背景 */}
-          <rect x={node.x} y={node.y + 4} width={node.width} height={38}
+          {/* 标题栏背景 (3px色条下方, 42px高度) */}
+          <rect x={node.x} y={node.y + 3} width={node.width} height={39}
             fill={color} fillOpacity={0.06} className="pointer-events-none" />
           {/* 图标 - 小圆形背景 */}
           <foreignObject x={node.x + 8} y={node.y + 12} width={22} height={22}>
@@ -2972,7 +2971,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
                   /* 有图片时显示缩略图 */
                   <div
                     className="flex-1 relative group cursor-pointer flex items-center justify-center rounded overflow-hidden"
-                    style={{ background: T.nodeBg === '#1a1a1a' ? '#252525' : '#f0f0f0' }}
+                    style={{ background: T.nodeBg === '#161b22' ? '#1c2129' : '#f0f0f0' }}
                     onClick={() => onPreviewImage(hasImageOutput)}
                   >
                     <img src={hasImageOutput} alt="" className="max-w-full max-h-full object-contain transition-opacity opacity-80 group-hover:opacity-100" />
@@ -2986,8 +2985,8 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
                     className="flex-1 flex flex-col items-center justify-center gap-1 rounded border border-dashed cursor-pointer transition-colors"
                     style={{
                       borderColor: T.accent + '60',
-                      background: T.nodeBg === '#1a1a1a' ? '#222222' : '#f5f5f5',
-                      color: T.nodeBody === '#1a1a1a' ? '#888' : '#666'
+                      background: T.nodeBg === '#161b22' ? '#1c2129' : '#f5f5f5',
+                      color: T.nodeBody === '#161b22' ? '#8b949e' : '#666'
                     }}
                     onClick={() => {
                       onTriggerImageUpload?.(node.id);
@@ -3005,7 +3004,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
                     placeholder="粘贴图片 URL..."
                     className="w-full px-2 py-0.5 rounded text-[10px] border outline-none transition-colors"
                     style={{
-                      background: T.nodeBg === '#1a1a1a' ? '#252525' : '#fff',
+                      background: T.nodeBg === '#161b22' ? '#1c2129' : '#fff',
                       borderColor: T.cardBorder,
                       color: T.nodeTitle,
                     }}
@@ -3054,7 +3053,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
                   <div className="w-full h-full flex flex-col items-center justify-center gap-1" onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                     <div
                       className="flex-1 w-full relative group cursor-pointer flex items-center justify-center rounded overflow-hidden"
-                      style={{ background: T.nodeBg === '#1a1a1a' ? '#252525' : '#f0f0f0' }}
+                      style={{ background: T.nodeBg === '#161b22' ? '#1c2129' : '#f0f0f0' }}
                       onClick={() => onPreviewImage(singleUrl)}
                     >
                       <img src={singleUrl} alt="" className="max-w-full max-h-full object-contain transition-opacity opacity-90 group-hover:opacity-100" />
@@ -3070,11 +3069,11 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
                       className="flex-1 w-full flex flex-col items-center justify-center gap-1.5 rounded border-2 border-dashed transition-colors"
                       style={{
                         borderColor: T.accent + '40',
-                        background: T.nodeBg === '#1a1a1a' ? '#1f1f1f' : '#fafafa',
+                        background: T.nodeBg === '#161b22' ? '#1c2129' : '#fafafa',
                       }}
                     >
                       <ImagePlus size={22} style={{ color: T.accent, opacity: 0.35 }} />
-                      <span className="text-[10px] font-medium" style={{ color: T.nodeBg === '#1a1a1a' ? '#555' : '#999' }}>等待图片</span>
+                      <span className="text-[10px] font-medium" style={{ color: T.nodeBg === '#161b22' ? '#8b949e' : '#999' }}>等待图片</span>
                     </div>
                   </div>
                 )}
