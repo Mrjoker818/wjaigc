@@ -475,9 +475,11 @@ const nodeThemes = {
 
 // 底部内容面板 - 显示项目图片，支持拖拽到画布创建节点
 function ContentPanel({ canvasImages, onDragImage, themeStyle }: { canvasImages?: CanvasImageRef[]; onDragImage: (url: string) => void; themeStyle: string }) {
-  const [expanded, setExpanded] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [selectedImgId, setSelectedImgId] = useState<string | null>(null);
   const images = canvasImages || [];
   const T = nodeThemes[themeStyle as keyof typeof nodeThemes];
+  const stripRef = useRef<HTMLDivElement>(null);
 
   const handleDragStart = (e: React.DragEvent, url: string) => {
     e.dataTransfer.setData('text/uri-list', url);
@@ -487,41 +489,120 @@ function ContentPanel({ canvasImages, onDragImage, themeStyle }: { canvasImages?
   };
 
   return (
-    <div className="border-t border-border bg-[var(--ne-sidebar-bg)]" data-popup="content-panel">
-      {/* 标题栏 - 点击折叠/展开 */}
+    <div
+      className={`border-t transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${collapsed ? 'h-[38px]' : 'h-[120px]'}`}
+      style={{
+        borderColor: T.sidebarBorder,
+        background: T.sidebarBg === '#1a1a1a'
+          ? 'rgba(22, 27, 34, 0.85)'
+          : 'rgba(248, 250, 252, 0.85)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+      }}
+      data-popup="content-strip"
+      role="region"
+      aria-label="内容资产"
+    >
+      {/* 标题栏 - 固定高度38px */}
       <button
-        onClick={() => setExpanded(prev => !prev)}
-        className="w-full flex items-center gap-2 px-4 py-2 hover:bg-[var(--ne-input-bg)] transition-colors cursor-pointer"
+        onClick={() => setCollapsed(prev => !prev)}
+        className="w-full h-[38px] flex items-center gap-2 px-4 hover:bg-[var(--ne-input-bg)] transition-colors cursor-pointer"
+        aria-expanded={!collapsed}
+        aria-label={collapsed ? '展开内容窗口' : '收起内容窗口'}
       >
-        <Layers size={14} className="text-[var(--ne-accent)]" />
-        <span className="text-xs font-medium text-foreground flex-1 text-left">内容</span>
+        <LayoutGrid size={14} style={{ color: T.accent }} />
+        <span className="text-xs font-semibold uppercase tracking-wider flex-1 text-left" style={{ color: T.text }}>内容</span>
         {images.length > 0 && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--ne-accent)]/15 text-[var(--ne-accent)]">{images.length}</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ background: `${T.accent}18`, color: T.accent }}>{images.length}</span>
         )}
-        <ChevronDown size={14} className={`text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        {/* 下载全部按钮 */}
+        {!collapsed && images.length > 0 && (
+          <button
+            onClick={(e) => { e.stopPropagation(); }}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] transition-colors cursor-pointer"
+            style={{ background: T.btnBg, color: T.btnText }}
+            aria-label="下载全部"
+          >
+            <Download size={10} /> 下载全部
+          </button>
+        )}
+        <ChevronDown size={14} style={{ color: T.textMuted }} className={`transition-transform duration-300 ${collapsed ? '' : 'rotate-180'}`} />
       </button>
 
-      {/* 展开内容 */}
-      {expanded && (
-        <div className="px-3 pb-3 max-h-[200px] overflow-y-auto">
+      {/* 横向滚动条 - 展开时显示 */}
+      {!collapsed && (
+        <div className="px-3 pb-2 h-[calc(100%-38px)]">
           {images.length === 0 ? (
-            <div className="flex items-center justify-center h-16 text-xs text-muted-foreground">暂无图片，生成后将自动出现在此处</div>
+            <div className="flex items-center justify-center h-full text-xs" style={{ color: T.textMuted }}>
+              暂无图片，生成后将自动出现在此处
+            </div>
           ) : (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-2">
-              {images.map((img, idx) => (
+            <div
+              ref={stripRef}
+              className="flex gap-2 h-full overflow-x-auto overflow-y-hidden pb-1"
+              style={{
+                scrollbarWidth: 'thin',
+                scrollbarColor: `${T.accent}30 transparent`,
+              }}
+              onWheel={(e) => {
+                // 横向滚动: 将纵向滚轮转为横向
+                if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+                  e.currentTarget.scrollLeft += e.deltaY;
+                  e.preventDefault();
+                }
+              }}
+            >
+              {images.map((img, idx) => {
+                const isSelected = selectedImgId === (img.id || idx);
+                return (
                 <div
                   key={img.id || idx}
                   draggable
                   onDragStart={e => handleDragStart(e, img.url)}
-                  className="group relative aspect-square rounded-lg overflow-hidden border border-border hover:border-[var(--ne-accent)]/50 cursor-grab active:cursor-grabbing transition-colors"
+                  onClick={() => setSelectedImgId(prev => prev === (img.id || idx) ? null : String(img.id || idx))}
+                  className={`group relative flex-shrink-0 w-[72px] h-[72px] rounded-lg overflow-hidden border cursor-grab active:cursor-grabbing transition-all duration-200 hover:-translate-y-0.5 ${isSelected ? 'ring-2 ring-offset-1' : ''}`}
+                  style={{
+                    borderColor: isSelected ? T.accent : `${T.accent}25`,
+                    background: T.nodeBg === '#1a1a1a'
+                      ? 'repeating-conic-gradient(#222 0% 25%, #1a1a1a 0% 50%) 0 0 / 12px 12px'
+                      : 'repeating-conic-gradient(#f0f0f0 0% 25%, #fff 0% 50%) 0 0 / 12px 12px',
+                    boxShadow: isSelected
+                      ? `0 0 0 2px ${T.accent}40, 0 0 12px ${T.accent}20, 0 4px 12px rgba(0,0,0,0.3)`
+                      : `0 2px 8px rgba(0,0,0,0.2)`,
+                  }}
                   title={img.description || img.name || `图片 ${idx + 1} - 拖拽到画布添加节点`}
                 >
                   <img src={img.url} alt="" className="w-full h-full object-cover" loading="lazy" />
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
-                    <ImagePlus size={16} className="text-white opacity-0 group-hover:opacity-80 transition-opacity" />
+                  {/* 格式标签 */}
+                  <span
+                    className="absolute top-1 right-1 text-[8px] font-bold px-1 py-0 rounded leading-tight"
+                    style={{ background: 'rgba(0,0,0,0.7)', color: '#fff' }}
+                  >
+                    {img.url?.includes('.svg') ? 'SVG' : img.url?.includes('.png') ? 'PNG' : 'JPG'}
+                  </span>
+                  {/* 悬停遮罩 */}
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                    <ImagePlus size={16} className="text-white" />
                   </div>
                 </div>
-              ))}
+              );
+              })}
+              {/* 添加按钮 */}
+              <div
+                className="flex-shrink-0 w-[72px] h-[72px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors"
+                style={{ borderColor: `${T.accent}40`, color: T.textMuted }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLDivElement).style.borderColor = T.accent;
+                  (e.currentTarget as HTMLDivElement).style.color = T.accent;
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLDivElement).style.borderColor = `${T.accent}40`;
+                  (e.currentTarget as HTMLDivElement).style.color = T.textMuted;
+                }}
+              >
+                <Plus size={16} />
+                <span className="text-[9px]">添加</span>
+              </div>
             </div>
           )}
         </div>
@@ -614,6 +695,15 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [compareImages, setCompareImages] = useState<{ before: string; after: string } | null>(null);
   const [comparePosition, setComparePosition] = useState(50);
+  const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(new Set());
+
+  const toggleNodeCollapse = useCallback((nodeId: string) => {
+    setCollapsedNodes(prev => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) next.delete(nodeId); else next.add(nodeId);
+      return next;
+    });
+  }, []);
   const [highlightNodeId, setHighlightNodeId] = useState<string | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
 
@@ -1942,12 +2032,12 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
         <div className="absolute top-3 left-3 right-3 z-20 flex items-center justify-between">
           <div className="flex items-center gap-2">
             {onBack && (
-              <button onClick={onBack} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--ne-accent)]/15 hover:bg-[var(--ne-accent)]/25 text-[var(--ne-accent)] transition-colors cursor-pointer text-sm font-medium" title="切换到画布模式">
+              <button onClick={onBack} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--ne-accent)]/15 hover:bg-[var(--ne-accent)]/25 text-[var(--ne-accent)] transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer text-sm font-medium" title="切换到画布模式">
                 <ArrowLeft size={15} />
                 <span>画布模式</span>
               </button>
             )}
-            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer text-sm" title="工作流中心">
+            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer text-sm" title="工作流中心">
               <WorkflowIcon size={15} />
               <span>工作流中心</span>
             </button>
@@ -2007,7 +2097,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
             <button onClick={() => setViewport(v => ({ ...v, zoom: Math.max(0.2, v.zoom * 0.8) }))} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
               <ZoomOut size={16} />
             </button>
-            <button onClick={() => setViewport({ x: 0, y: 0, zoom: 0.8 })} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+            <button onClick={() => setViewport({ x: 0, y: 0, zoom: 0.8 })} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer">
               <RotateCcw size={16} />
             </button>
             {/* P2: ComfyUI导入 */}
@@ -2037,17 +2127,17 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 };
                 input.click();
               }}
-              className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer"
               title="导入ComfyUI工作流"
             >
               <FileInput size={16} />
             </button>
             <div className="w-px h-5 bg-muted mx-1" />
             {/* P2: 撤销重做按钮 */}
-            <button onClick={handleUndo} disabled={historyIndex <= 0} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="撤销 (Ctrl+Z)">
+            <button onClick={handleUndo} disabled={historyIndex <= 0} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="撤销 (Ctrl+Z)">
               <RotateCcw size={16} />
             </button>
-            <button onClick={handleRedo} disabled={historyIndex >= historyStack.length - 1} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="重做 (Ctrl+Shift+Z)">
+            <button onClick={handleRedo} disabled={historyIndex >= historyStack.length - 1} className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="重做 (Ctrl+Shift+Z)">
               <RotateCcw size={16} className="scale-x-[-1]" />
             </button>
             {/* P2: JSON编辑器（build_mode下隐藏） */}
@@ -2057,18 +2147,18 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 setJsonEditContent(JSON.stringify({ nodes: wf.nodes, connections: wf.connections }, null, 2));
                 setJsonEditorOpen(true);
               }}
-              className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              className="p-2 rounded bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-muted-foreground hover:text-foreground transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer"
               title="查看/编辑JSON"
             >
               <Settings size={16} />
             </button>
             )}
             <div className="w-px h-5 bg-muted mx-1" />
-            <button onClick={handleSaveWorkflow} disabled={saveStatus === 'saving'} className={`px-3 py-2 rounded text-sm font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${saveStatus === 'saved' ? 'bg-green-900/30 text-green-400' : saveStatus === 'error' ? 'bg-red-900/30 text-red-400' : 'bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-foreground'}`}>
+            <button onClick={handleSaveWorkflow} disabled={saveStatus === 'saving'} className={`px-3 py-2 rounded text-sm font-medium transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed ${saveStatus === 'saved' ? 'bg-green-900/30 text-green-400' : saveStatus === 'error' ? 'bg-red-900/30 text-red-400' : 'bg-[var(--ne-input-bg)] hover:bg-[var(--ne-card-bg)] text-foreground'}`}>
               {saveStatus === 'saving' ? <Loader2 size={14} className="animate-spin" /> : saveStatus === 'saved' ? <Check size={14} /> : <Save size={14} />}
               {saveStatus === 'saving' ? '保存中...' : saveStatus === 'saved' ? '已保存' : '保存'}
             </button>
-            <button onClick={execStatus === 'running' ? handleStopWorkflow : handleRunWorkflow} className={`px-3 py-2 rounded text-sm font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${execStatus === 'running' ? 'bg-red-900/30 text-red-400 hover:bg-red-900/50' : 'bg-[var(--ne-accent)]/20 text-[var(--ne-accent)] hover:bg-[var(--ne-accent)]/30'}`}>
+            <button onClick={execStatus === 'running' ? handleStopWorkflow : handleRunWorkflow} className={`px-3 py-2 rounded text-sm font-medium transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer flex items-center gap-1.5 ${execStatus === 'running' ? 'bg-red-900/30 text-red-400 hover:bg-red-900/50' : 'bg-[var(--ne-accent)]/20 text-[var(--ne-accent)] hover:bg-[var(--ne-accent)]/30'}`}>
               {execStatus === 'running' ? <><Square size={14} /> 停止</> : <><Play size={14} /> 运行</>}
             </button>
           </div>
@@ -2161,11 +2251,22 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                           markerEnd={isBlocked ? undefined : `url(#${markerId})`}
                           className={isRunning && !isBlocked ? 'animate-pulse' : 'transition-all duration-200'}
                         />
-                        {/* 数据流动画 (执行中, 未阻断) */}
+                        {/* 数据流动画 (执行中, 未阻断) — 双层流动效果 */}
                         {isRunning && !isBlocked && (
-                          <circle r={3} fill={color}>
-                            <animateMotion dur="1.5s" repeatCount="indefinite" path={getConnPath(from.x, from.y, to.x, to.y)} />
-                          </circle>
+                          <>
+                            {/* 虚线流动 (与原型对齐) */}
+                            <path
+                              d={getConnPath(from.x, from.y, to.x, to.y)}
+                              fill="none" stroke={color} strokeWidth={1.5}
+                              strokeOpacity={0.6}
+                              strokeDasharray="8 4"
+                              className="ne-conn-flowing"
+                            />
+                            {/* 流动粒子 */}
+                            <circle r={3} fill={color}>
+                              <animateMotion dur="1.5s" repeatCount="indefinite" path={getConnPath(from.x, from.y, to.x, to.y)} />
+                            </circle>
+                          </>
                         )}
                         {/* 连线类型标签 */}
                         {(conn.type !== 'any' && (isHighlighted || viewport.zoom > 0.6)) && (
@@ -2320,6 +2421,8 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 llmModels={chatModels}
                 canvasImages={canvasImages}
                 onResizeNode={resizeNodeForImageUrl}
+                collapsedNodes={collapsedNodes}
+                onToggleCollapse={toggleNodeCollapse}
               />
             ))}
           </g>
@@ -2590,6 +2693,8 @@ interface NodeCardProps {
   onDeselect: () => void;
   onPreviewImage: (url: string) => void;
   onResizeNode?: (nodeId: string, imageUrl: string) => void;
+  collapsedNodes?: Set<string>;
+  onToggleCollapse?: (nodeId: string) => void;
 }
 
 /** output-image-group 节点内容: 多图分页浏览 */
@@ -2657,7 +2762,7 @@ function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
   );
 }
 
-function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRunning, theme, canvasImages, llmModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onDeselect, onPreviewImage, onResizeNode }: NodeCardProps) {
+function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRunning, theme, canvasImages, llmModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onDeselect, onPreviewImage, onResizeNode, collapsedNodes, onToggleCollapse }: NodeCardProps) {
   const T = theme;
   const cat = getNodeCategory(node.type);
   const color = NODE_TYPE_COLORS[cat];
@@ -2753,6 +2858,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
 
   return (
     <g
+      className="ne-node-enter"
       onMouseEnter={() => onHover(node.id)}
       onMouseLeave={() => onHover(null)}
       onDragOver={handleDragOver}
@@ -2811,25 +2917,56 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
         </g>
       )}
 
-      {/* 节点标题区 */}
+      {/* 节点标题区 — 42px高度, 大写标签, 折叠开关, 状态徽章 (与原型对齐) */}
       {!isCondition && (
         <g>
+          {/* 标题栏背景 */}
+          <rect x={node.x} y={node.y + 4} width={node.width} height={38}
+            fill={color} fillOpacity={0.06} className="pointer-events-none" />
           {/* 图标 - 小圆形背景 */}
-          <foreignObject x={node.x + 6} y={node.y + 5} width={18} height={18}>
-            <div className="flex items-center justify-center w-[18px] h-[18px] rounded" style={{ background: color + '18', color }}>
-              {getNodeIcon(node.type, 10)}
+          <foreignObject x={node.x + 8} y={node.y + 12} width={22} height={22}>
+            <div className="flex items-center justify-center w-[22px] h-[22px] rounded-md" style={{ background: color + '20', color }}>
+              {getNodeIcon(node.type, 12)}
             </div>
           </foreignObject>
-          {/* 标题 - 使用clipPath裁剪防止溢出 */}
+          {/* 标题 - 大写字母, 11px, 800weight, 0.12em letter-spacing (与原型对齐) */}
           <clipPath id={`title-clip-${node.id}`}>
-            <rect x={node.x + 28} y={node.y + 4} width={node.width - 36} height={18} />
+            <rect x={node.x + 34} y={node.y + 8} width={node.width - 72} height={20} />
           </clipPath>
-          <text x={node.x + 28} y={node.y + 17} fill={T.nodeTitle} fontSize={10.5} fontWeight={600} className="pointer-events-none select-none" clipPath={`url(#title-clip-${node.id})`}>
-            {node.label}
+          <text x={node.x + 34} y={node.y + 24} fill={T.nodeTitle} fontSize={11} fontWeight={800} letterSpacing="0.12em" className="pointer-events-none select-none" clipPath={`url(#title-clip-${node.id})`}>
+            {node.label.toUpperCase()}
           </text>
+          {/* 折叠开关 (ChevronDown) */}
+          <foreignObject x={node.x + node.width - 50} y={node.y + 12} width={18} height={18}>
+            <button
+              className="flex items-center justify-center w-[18px] h-[18px] rounded hover:bg-white/10 transition-colors"
+              onClick={(e) => { e.stopPropagation(); onToggleCollapse?.(node.id); }}
+              aria-label={collapsedNodes?.has(node.id) ? '展开节点' : '折叠节点'}
+              tabIndex={0}
+            >
+              <ChevronDown size={12} style={{ color: T.textMuted, transition: 'transform 0.2s ease', transform: collapsedNodes?.has(node.id) ? 'rotate(0deg)' : 'rotate(180deg)' }} />
+            </button>
+          </foreignObject>
+          {/* 状态徽章 (queued/running/done/failed) */}
+          <foreignObject x={node.x + node.width - 28} y={node.y + 12} width={20} height={20}>
+            <div className="flex items-center justify-center w-[20px] h-[20px]">
+              {execResult?.status === 'running' && (
+                <span className="inline-block w-2 h-2 rounded-full animate-pulse" style={{ background: T.statusRunning }} title="运行中" />
+              )}
+              {execResult?.status === 'success' && (
+                <span className="inline-block w-2 h-2 rounded-full" style={{ background: T.statusSuccess }} title="已完成" />
+              )}
+              {execResult?.status === 'error' && (
+                <span className="inline-block w-2 h-2 rounded-full" style={{ background: T.statusError }} title="失败" />
+              )}
+              {!execResult && (
+                <span className="inline-block w-2 h-2 rounded-full" style={{ background: T.textMuted, opacity: 0.3 }} title="等待执行" />
+              )}
+            </div>
+          </foreignObject>
           {/* ===== input-image 节点: 图片预览 + 拖拽上传区 ===== */}
           {isInputImage && (
-            <foreignObject x={node.x + 6} y={node.y + 26} width={node.width - 12} height={node.height - 30}>
+            <foreignObject x={node.x + 6} y={node.y + 46} width={node.width - 12} height={node.height - 50}>
               <div className="w-full h-full flex flex-col gap-1" style={{ color: T.nodeTitle, fontSize: 10 }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                 {hasImageOutput ? (
                   /* 有图片时显示缩略图 */
@@ -2891,7 +3028,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
 
           {/* 图片缩略图 — 非input-image/output-image节点(如ai-generate)执行后显示结果 */}
           {!isInputImage && !isOutputImage && !isOutputImageGroup && hasImageOutput && (
-            <foreignObject x={node.x + 8} y={node.y + 26} width={node.width - 16} height={node.height - 32}>
+            <foreignObject x={node.x + 8} y={node.y + 46} width={node.width - 16} height={node.height - 50}>
               <div className="w-full h-full relative group cursor-pointer flex items-center justify-center" onClick={() => onPreviewImage(hasImageOutput)} onWheel={(e) => e.stopPropagation()}>
                 <img src={hasImageOutput} alt="" className="max-w-full max-h-full object-contain rounded opacity-70 group-hover:opacity-100 transition-opacity" />
               </div>
@@ -2904,7 +3041,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
             const singleUrl = hasImageOutput || '';
             const allUrls = imageUrls.length > 0 ? imageUrls : (singleUrl ? [singleUrl] : []);
             return (
-              <foreignObject x={node.x + 6} y={node.y + 26} width={node.width - 12} height={node.height - 30}>
+              <foreignObject x={node.x + 6} y={node.y + 46} width={node.width - 12} height={node.height - 50}>
                 {allUrls.length > 1 ? (
                   /* 多图: 分页浏览 */
                   <OutputImageGroupContent
@@ -2951,7 +3088,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
             const singleUrl = (execResult?.output?.imageUrl as string) || '';
             const allUrls = imageUrls.length > 0 ? imageUrls : (singleUrl ? [singleUrl] : []);
             return (
-              <foreignObject x={node.x + 6} y={node.y + 26} width={node.width - 12} height={node.height - 30}>
+              <foreignObject x={node.x + 6} y={node.y + 46} width={node.width - 12} height={node.height - 50}>
                 <OutputImageGroupContent
                   imageUrls={allUrls}
                   theme={T}
@@ -2963,7 +3100,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
 
           {/* ===== P0: input-text 节点直接编辑 + LLM 优化 + 预设 ===== */}
           {isInputText && (
-            <foreignObject x={node.x + 6} y={node.y + 26} width={node.width - 12} height={node.height - 30}>
+            <foreignObject x={node.x + 6} y={node.y + 46} width={node.width - 12} height={node.height - 50}>
               <div className="flex flex-col gap-1 h-full" style={{ color: T.nodeTitle, fontSize: 12 }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                 {/* 可编辑文本区域 — 自适应内容 */}
                 <div
@@ -3165,8 +3302,8 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
             </foreignObject>
           )}
 
-          {/* ===== P0: 非input-text/input-image节点也显示级联运行 ===== */}
-          {!isInputText && !isInputImage && !hasImageOutput && !isCondition && (
+          {/* ===== P0: 非AI/非图片节点显示级联运行 ===== */}
+          {!isInputText && !isInputImage && !hasImageOutput && !isCondition && !(node.type.startsWith('ai-') || node.type === 'output-image') && (
             <foreignObject x={node.x + 6} y={node.y + node.height - 18} width={node.width - 12} height={14}>
               <div className="flex justify-end" onWheel={(e) => e.stopPropagation()}>
                 <button
@@ -3180,6 +3317,24 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
             </foreignObject>
           )}
         </g>
+      )}
+
+      {/* 全宽 RUN 按钮 — AI生成类节点 (与原型对齐) */}
+      {!isCondition && !isInputText && !isInputImage && (node.type.startsWith('ai-') || node.type === 'output-image') && (
+        <foreignObject x={node.x + 8} y={node.y + node.height - 24} width={node.width - 16} height={18}>
+          <button
+            className="w-full h-full rounded text-[9px] font-bold tracking-wider cursor-pointer flex items-center justify-center gap-1 transition-all duration-200 hover:brightness-110 active:scale-[0.98]"
+            style={{
+              background: `linear-gradient(135deg, ${color}22, ${color}44)`,
+              color: color,
+              border: `1px solid ${color}55`,
+            }}
+            onClick={(e) => { e.stopPropagation(); onCascadeRun?.(node.id); }}
+            title="运行此节点"
+          >
+            <Play size={9} /> RUN
+          </button>
+        </foreignObject>
       )}
 
       {/* 条件节点: 菱形内文字 */}

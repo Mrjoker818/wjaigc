@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { Image as ImageIcon, MessageSquare, Sparkles, GitBranch, CircleDot, ChevronLeft, ChevronRight } from 'lucide-react';
 import NodeEditor from '@/components/node-editor';
 import WorkflowHub from '@/components/workflow-hub';
+import DashboardView from '@/components/dashboard/dashboard-view';
 import { createDemoWorkflow, type Workflow } from '@/lib/workflow-engine';
 import { ImageEditor } from '@/components/image-editor';
 import { UserManager } from '@/components/user-manager';
@@ -42,7 +43,7 @@ interface FavoriteItem {
   source_type: string;
   created_at: number;
 }
-import { User, Project } from '@/lib/user-types';
+import { User, Project, ImageGroupData } from '@/lib/user-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { toStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
@@ -148,7 +149,50 @@ function CanvasApp() {
   const [themeStyle, setThemeStyle] = useState<ThemeStyle>('gold');
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [activePanel, setActivePanel] = useState<ActivePanel>('generate');
-  const [appMode, setAppMode] = useState<'canvas' | 'node' | 'workflow-hub'>('canvas');
+  // 从工作台加载指定项目
+  const loadProjectById = useCallback(async (projectId: string) => {
+    try {
+      const userMgr = UserManagerCore.getInstance();
+      const projects = userMgr.getProjects();
+      const targetProject = projects.find((p: Project) => p.id === projectId);
+      if (targetProject) {
+        setCurrentProject(targetProject);
+        if (targetProject.canvasImages && targetProject.canvasImages.length > 0) {
+          setImages((targetProject.canvasImages as unknown as Record<string, unknown>[]).map(img => ({
+            id: img.id as string,
+            url: img.url as string,
+            prompt: (img.prompt as string) || '',
+            modifyPrompt: (img.modifyPrompt as string) || '',
+            model: (img.model as string) || '',
+            quality: (img.quality as string) || '',
+            aspectRatio: (img.aspectRatio as string) || '',
+            stylePreset: (img.stylePreset as string) || '',
+            category: (img.category as string) || '',
+            size: (img.size as string) || '',
+            groupId: (img.groupId as string) || '',
+            threeDModelUrl: (img.threeDModelUrl as string) || '',
+            threeDModelUrls: (img.threeDModelUrls as Record<string, string>) || undefined,
+            x: img.x as number,
+            y: img.y as number,
+            width: (img.width as number) || 256,
+            height: (img.height as number) || 256,
+            originalWidth: (img.originalWidth as number) || 512,
+            originalHeight: (img.originalHeight as number) || 512,
+            svgDataUrl: (img.svgDataUrl as string) || undefined,
+          })));
+        } else {
+          setImages([]);
+        }
+        if (targetProject.metadata?.groups) {
+          groupsRef.current = targetProject.metadata.groups as ImageGroupData[];
+        }
+      }
+    } catch (e) {
+      console.error('加载项目失败:', e);
+    }
+  }, []);
+
+  const [appMode, setAppMode] = useState<'canvas' | 'node' | 'workflow-hub' | 'dashboard'>('canvas');
   const [pendingModeSwitch, setPendingModeSwitch] = useState<'node' | 'workflow-hub' | null>(null);
   const [showUserManager, setShowUserManager] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
@@ -297,10 +341,10 @@ function CanvasApp() {
               }
             } catch { /* non-blocking */ }
           } else {
-            // 无 projectId → 跳转到工作台（项目大厅）
+            // 无 projectId → 显示工作台视图（在画布页面内部）
             setShowUserManager(false);
             setAuthChecked(true);
-            router.replace('/projects');
+            setAppMode('dashboard');
             return;
           }
           setShowUserManager(false);
@@ -326,7 +370,7 @@ function CanvasApp() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [ohMyPromptOpen, setOhMyPromptOpen] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
-  const groupsRef = useRef<Array<{id: string; name: string; note: string; imageIds: string[]; x: number; y: number; collapsed: boolean}>>([]);
+  const groupsRef = useRef<ImageGroupData[]>([]);
 
   const stabilizeCanvasImages = useCallback((items: Array<{ id: string; url: string }>) => {
     const toStabilize = items.filter(({ url }) => url && !url.startsWith('data:'));
@@ -2297,6 +2341,29 @@ function CanvasApp() {
     return <WorkflowHub onBack={() => setAppMode('canvas')} onEditWorkflow={(wf) => { setNodeWorkflow(wf); setAppMode('node'); }} themeStyle={themeStyle} />;
   }
 
+  if (appMode === 'dashboard') {
+    return (
+      <DashboardView
+        user={currentUser!}
+        onOpenProject={(project) => {
+          setAppMode('canvas');
+          loadProjectById(project.id);
+        }}
+        onNewProject={async () => {
+          try {
+            const mgr = UserManagerCore.getInstance();
+            const newProject = await mgr.createProject('未命名项目');
+            loadProjectById(newProject.id);
+            setAppMode('canvas');
+          } catch (e) {
+            console.error('创建项目失败:', e);
+          }
+        }}
+        themeStyle={themeStyle}
+      />
+    );
+  }
+
   return (
     <div className={`h-screen w-screen relative overflow-hidden ${themeStyle === 'monochrome' ? 'bg-gradient-to-br from-blue-50 via-white to-purple-50/30' : 'bg-[#0a0a0a]'}`}>
       {/* ★ 模式切换确认对话框：有进行中生图任务时弹出 */}
@@ -2504,12 +2571,12 @@ function CanvasApp() {
                 </span>
               )}
               {currentUser && (
-                <a
-                  href="/projects"
+                <button
+                  onClick={() => setAppMode('dashboard')}
                   className={`text-xs px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer ${themeStyle === 'monochrome' ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-primary/10 text-primary hover:bg-primary/20'}`}
                 >
                   工作台
-                </a>
+                </button>
               )}
             </div>
           </div>
@@ -2664,8 +2731,8 @@ function CanvasApp() {
                   ? 'bg-white border border-gray-200 text-gray-900' 
                   : 'bg-[#141414] border border-[#2a2a2a] text-white',
               });
-              // 登录成功后跳转到工作台
-              router.push('/projects');
+              // 登录成功后进入工作台
+              setAppMode('dashboard');
             } else {
               setCurrentUser(null);
               setShowUserManager(false);
