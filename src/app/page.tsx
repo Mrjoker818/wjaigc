@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { InfiniteCanvas, CanvasImage, ImageGroup } from '@/components/infinite-canvas';
 import { GenerationPanel, GenerationParams, CtrlRefSelection } from '@/components/generation-panel';
 import { ImagePreview } from '@/components/image-preview';
@@ -151,6 +152,8 @@ function CanvasApp() {
   const [pendingModeSwitch, setPendingModeSwitch] = useState<'node' | 'workflow-hub' | null>(null);
   const [showUserManager, setShowUserManager] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [showAdminSystem, setShowAdminSystem] = useState(false);
   const [showProjectData, setShowProjectData] = useState(false);
   const [navigateToImageId, setNavigateToImageId] = useState<string | null>(null);
@@ -227,73 +230,79 @@ function CanvasApp() {
           setCurrentUser(hydratedUser);
           // 确保从服务器加载最新项目数据（跨设备同步保障）
           await userMgr.loadProjectsFromServer();
-          // Auto-load most recent project or create default
-          try {
-            const projects = userMgr.getProjects();
-            if (projects.length > 0) {
-              setCurrentProject(projects[0]);
-              // 加载项目画布数据，确保刷新后图片不丢失
-              if (projects[0].canvasImages && projects[0].canvasImages.length > 0) {
-                setImages((projects[0].canvasImages as unknown as Record<string, unknown>[]).map(img => ({
-                  id: img.id as string,
-                  url: img.url as string,
-                  prompt: (img.prompt as string) || '',
-                  modifyPrompt: (img.modifyPrompt as string) || '',
-                  model: (img.model as string) || '',
-                  quality: (img.quality as string) || '',
-                  aspectRatio: (img.aspectRatio as string) || '',
-                  stylePreset: (img.stylePreset as string) || '',
-                  category: (img.category as string) || '',
-                  size: (img.size as string) || '',
-                  groupId: (img.groupId as string) || '',
-                  threeDModelUrl: (img.threeDModelUrl as string) || '',
-                  threeDModelUrls: (img.threeDModelUrls as Record<string, string>) || undefined,
-                  x: img.x as number,
-                  y: img.y as number,
-                  width: (img.width as number) || 256,
-                  height: (img.height as number) || 256,
-                  originalWidth: (img.originalWidth as number) || 512,
-                  originalHeight: (img.originalHeight as number) || 512,
-                  createdAt: (img.createdAt as number) || Date.now(),
-                  modelName: (img.modelName as string) || '',
-                  apiProvider: (img.apiProvider as string) || '',
-                  apiBaseUrl: (img.apiBaseUrl as string) || '',
-                })));
-                // 恢复分组数据（优先 metadata，其次 localStorage 兜底）
-                const metaGroups = projects[0].metadata?.groups;
-                let restoredGroups: Array<{id: string; name: string; note: string; imageIds: string[]; x: number; y: number; collapsed: boolean}> = [];
-                if (metaGroups && metaGroups.length > 0) {
-                  restoredGroups = metaGroups.map(g => ({
-                    id: g.id,
-                    name: g.name,
-                    note: g.note || '',
-                    imageIds: g.imageIds,
-                    x: g.x || 0,
-                    y: g.y || 0,
-                    collapsed: g.collapsed || false,
-                  }));
-                } else {
-                  // localStorage 兜底：防止 metadata 未保存时分组丢失
-                  try {
-                    const lsGroups = localStorage.getItem(`wujie-groups-${projects[0].id}`);
-                    if (lsGroups) {
-                      restoredGroups = JSON.parse(lsGroups);
-                    }
-                  } catch {}
-                }
-                setInitialGroups(restoredGroups);
-                // 恢复视图状态（画布位置和缩放）
-                const metaViewState = projects[0].metadata?.viewState;
-                if (metaViewState && typeof metaViewState === 'object' && 'offsetX' in metaViewState) {
-                  setViewState(metaViewState as { offsetX: number; offsetY: number; zoom: number });
-                  viewStateRef.current = metaViewState as { offsetX: number; offsetY: number; zoom: number };
+
+          // 检查 URL 中是否有 projectId 参数（从工作台跳转过来）
+          const projectId = searchParams.get('projectId');
+          
+          if (projectId) {
+            // 从工作台跳转过来，加载指定项目
+            try {
+              const projects = userMgr.getProjects();
+              const targetProject = projects.find((p: Project) => p.id === projectId);
+              if (targetProject) {
+                setCurrentProject(targetProject);
+                if (targetProject.canvasImages && targetProject.canvasImages.length > 0) {
+                  setImages((targetProject.canvasImages as unknown as Record<string, unknown>[]).map(img => ({
+                    id: img.id as string,
+                    url: img.url as string,
+                    prompt: (img.prompt as string) || '',
+                    modifyPrompt: (img.modifyPrompt as string) || '',
+                    model: (img.model as string) || '',
+                    quality: (img.quality as string) || '',
+                    aspectRatio: (img.aspectRatio as string) || '',
+                    stylePreset: (img.stylePreset as string) || '',
+                    category: (img.category as string) || '',
+                    size: (img.size as string) || '',
+                    groupId: (img.groupId as string) || '',
+                    threeDModelUrl: (img.threeDModelUrl as string) || '',
+                    threeDModelUrls: (img.threeDModelUrls as Record<string, string>) || undefined,
+                    x: img.x as number,
+                    y: img.y as number,
+                    width: (img.width as number) || 256,
+                    height: (img.height as number) || 256,
+                    originalWidth: (img.originalWidth as number) || 512,
+                    originalHeight: (img.originalHeight as number) || 512,
+                    createdAt: (img.createdAt as number) || Date.now(),
+                    modelName: (img.modelName as string) || '',
+                    apiProvider: (img.apiProvider as string) || '',
+                    apiBaseUrl: (img.apiBaseUrl as string) || '',
+                  })));
+                  // 恢复分组数据
+                  const metaGroups = targetProject.metadata?.groups;
+                  let restoredGroups: Array<{id: string; name: string; note: string; imageIds: string[]; x: number; y: number; collapsed: boolean}> = [];
+                  if (metaGroups && metaGroups.length > 0) {
+                    restoredGroups = metaGroups.map(g => ({
+                      id: g.id,
+                      name: g.name,
+                      note: g.note || '',
+                      imageIds: g.imageIds,
+                      x: g.x || 0,
+                      y: g.y || 0,
+                      collapsed: g.collapsed || false,
+                    }));
+                  } else {
+                    try {
+                      const lsGroups = localStorage.getItem(`wujie-groups-${targetProject.id}`);
+                      if (lsGroups) restoredGroups = JSON.parse(lsGroups);
+                    } catch {}
+                  }
+                  setInitialGroups(restoredGroups);
+                  // 恢复视图状态
+                  const metaViewState = targetProject.metadata?.viewState;
+                  if (metaViewState && typeof metaViewState === 'object' && 'offsetX' in metaViewState) {
+                    setViewState(metaViewState as { offsetX: number; offsetY: number; zoom: number });
+                    viewStateRef.current = metaViewState as { offsetX: number; offsetY: number; zoom: number };
+                  }
                 }
               }
-            } else {
-              const defaultProject = userMgr.createProject('默认项目', '我的第一个创作项目');
-              setCurrentProject(defaultProject);
-            }
-          } catch { /* non-blocking */ }
+            } catch { /* non-blocking */ }
+          } else {
+            // 无 projectId → 跳转到工作台（项目大厅）
+            setShowUserManager(false);
+            setAuthChecked(true);
+            router.replace('/projects');
+            return;
+          }
           setShowUserManager(false);
           setAuthChecked(true);
           return;
@@ -2644,85 +2653,19 @@ function CanvasApp() {
             if (user) {
               setCurrentUser(user);
               setShowUserManager(false);
-              // Auto-load most recent project or create default
+              // 加载项目数据后跳转到工作台
               try {
                 const userMgr = UserManagerCore.getInstance();
-                // 确保从服务器加载最新项目数据（跨设备同步保障）
                 await userMgr.loadProjectsFromServer();
-                const projects = userMgr.getProjects();
-                if (projects.length > 0) {
-                  const project = projects[0];
-                  setCurrentProject(project);
-                  // 加载项目画布数据
-                  if (project.canvasImages && project.canvasImages.length > 0) {
-                    setImages((project.canvasImages as unknown as Record<string, unknown>[]).map(img => ({
-                      id: img.id as string,
-                      url: img.url as string,
-                      prompt: (img.prompt as string) || '',
-                      modifyPrompt: (img.modifyPrompt as string) || '',
-                      model: (img.model as string) || '',
-                      quality: (img.quality as string) || '',
-                      aspectRatio: (img.aspectRatio as string) || '',
-                      stylePreset: (img.stylePreset as string) || '',
-                      category: (img.category as string) || '',
-                      size: (img.size as string) || '',
-                      groupId: (img.groupId as string) || '',
-                      threeDModelUrl: (img.threeDModelUrl as string) || '',
-                      threeDModelUrls: (img.threeDModelUrls as Record<string, string>) || undefined,
-                      x: img.x as number,
-                      y: img.y as number,
-                      width: (img.width as number) || 256,
-                      height: (img.height as number) || 256,
-                      originalWidth: (img.originalWidth as number) || 512,
-                      originalHeight: (img.originalHeight as number) || 512,
-                      createdAt: (img.createdAt as number) || Date.now(),
-                      modelName: (img.modelName as string) || '',
-                      apiProvider: (img.apiProvider as string) || '',
-                      apiBaseUrl: (img.apiBaseUrl as string) || '',
-                    })));
-                    // 恢复分组数据（优先 metadata，其次 localStorage 兜底）
-                    const metaGroups = project.metadata?.groups;
-                    let restoredGroups: Array<{id: string; name: string; note: string; imageIds: string[]; x: number; y: number; collapsed: boolean}> = [];
-                    if (metaGroups && metaGroups.length > 0) {
-                      restoredGroups = metaGroups.map(g => ({
-                        id: g.id,
-                        name: g.name,
-                        note: g.note || '',
-                        imageIds: g.imageIds,
-                        x: g.x || 0,
-                        y: g.y || 0,
-                        collapsed: g.collapsed || false,
-                      }));
-                    } else {
-                      try {
-                        const lsGroups = localStorage.getItem(`wujie-groups-${project.id}`);
-                        if (lsGroups) restoredGroups = JSON.parse(lsGroups);
-                      } catch {}
-                    }
-                    setInitialGroups(restoredGroups);
-                    // 恢复视图状态
-                    const loginViewState = project.metadata?.viewState;
-                    if (loginViewState && typeof loginViewState === 'object' && 'offsetX' in loginViewState) {
-                      setViewState(loginViewState as { offsetX: number; offsetY: number; zoom: number });
-                      viewStateRef.current = loginViewState as { offsetX: number; offsetY: number; zoom: number };
-                    }
-                  } else {
-                    setImages([]);
-                    setInitialGroups([]);
-                  }
-                } else {
-                  const defaultProject = userMgr.createProject('默认项目', '我的第一个创作项目');
-                  setCurrentProject(defaultProject);
-                  setImages([]);
-                  setInitialGroups([]);
-                }
-              } catch { /* Project creation failed - non-blocking */ }
+              } catch { /* non-blocking */ }
               toast.success('登录成功', {
                 description: `欢迎回来，${user.name}`,
                 className: themeStyle === 'monochrome' 
                   ? 'bg-white border border-gray-200 text-gray-900' 
                   : 'bg-[#141414] border border-[#2a2a2a] text-white',
               });
+              // 登录成功后跳转到工作台
+              router.push('/projects');
             } else {
               setCurrentUser(null);
               setShowUserManager(false);
@@ -3062,5 +3005,13 @@ function CanvasApp() {
 }
 
 export default function Home() {
-  return <CanvasApp />;
+  return (
+    <Suspense fallback={
+      <div className="fixed inset-0 flex items-center justify-center bg-[#0a0a0a]">
+        <div className="w-10 h-10 border-2 border-[#d4af37] border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <CanvasApp />
+    </Suspense>
+  );
 }

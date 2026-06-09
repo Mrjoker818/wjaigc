@@ -17,12 +17,26 @@ export default function DashboardLayout({
   const pathname = usePathname();
 
   useEffect(() => {
-    const um = UserManager.getInstance();
-    const currentUser = um.getUser();
-    if (currentUser) {
-      setIsAuthenticated(true);
-    }
-    setAuthChecked(true);
+    const checkAuth = async () => {
+      try {
+        // 优先检查服务端 session
+        const response = await fetch('/api/auth/me', { cache: 'no-store', credentials: 'include' });
+        const data = await response.json() as { success?: boolean; user?: { id: string; name: string } };
+        if (data.success && data.user) {
+          setIsAuthenticated(true);
+          setAuthChecked(true);
+          return;
+        }
+      } catch {}
+      // Fallback: 检查本地存储
+      const um = UserManager.getInstance();
+      const currentUser = um.getUser();
+      if (currentUser) {
+        setIsAuthenticated(true);
+      }
+      setAuthChecked(true);
+    };
+    void checkAuth();
   }, []);
 
   // Listen for storage changes (logout from another tab etc.)

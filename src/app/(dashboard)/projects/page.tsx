@@ -151,7 +151,7 @@ export default function ProjectsPage() {
           {recentProjects.map((project) => (
             <Link
               key={project.id}
-              href={`/?project=${project.id}`}
+              href={`/?projectId=${project.id}`}
               className="bg-card rounded-lg shadow-card overflow-hidden cursor-pointer hover:border-primary/20 hover:scale-[1.02] transition-all border border-transparent"
             >
               <div className="aspect-video overflow-hidden">
@@ -180,9 +180,10 @@ export default function ProjectsPage() {
           {filteredProjects.map((project) => {
             const statusInfo = STATUS_MAP[project.status];
             return (
-              <div
+              <Link
                 key={project.id}
-                className="bg-card rounded-lg shadow-card overflow-hidden cursor-pointer hover:border-primary/20 hover:scale-[1.02] transition-all border border-transparent relative group"
+                href={`/?projectId=${project.id}`}
+                className="bg-card rounded-lg shadow-card overflow-hidden cursor-pointer hover:border-primary/20 hover:scale-[1.02] transition-all border border-transparent relative group block"
               >
                 <div className="aspect-[16/10] overflow-hidden relative">
                   <img
@@ -223,7 +224,7 @@ export default function ProjectsPage() {
                     <MoreVertical className="w-4 h-4 text-muted-foreground" />
                   </button>
                 </div>
-              </div>
+              </Link>
             );
           })}
         </div>
