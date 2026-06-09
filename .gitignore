@@ -124,3 +124,6 @@ public/upscaled/
 public/outputs/
 public/data/
 assets/
+
+# Preview files
+.preview
