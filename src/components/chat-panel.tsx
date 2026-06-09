@@ -1171,20 +1171,12 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   // All images are stored in pendingImages array - canvas images, pasted images, @mentioned images
   // When a canvas image is selected, it's ADDED to pendingImages (not replacing)
 
-  // Sync with externally selected canvas image - ADD instead of replace
-  useEffect(() => {
-    if (selectedCanvasImage) {
-      setPendingImages(prev => {
-        // Don't add duplicate
-        if (prev.find(p => p.id === selectedCanvasImage.id)) return prev;
-        return [...prev, {
-          id: selectedCanvasImage.id,
-          url: selectedCanvasImage.url,
-          name: selectedCanvasImage.prompt?.slice(0, 20) || '画布图片',
-        }];
-      });
-    }
-  }, [selectedCanvasImage]);
+  // NOTE: Canvas image selection (selectedCanvasImage) does NOT auto-add to pendingImages.
+  // Images should only be added explicitly via:
+  // 1. Right-click "发送到聊天修改" → chatInitialImage useEffect below
+  // 2. @image mention in input
+  // 3. File upload / paste
+  // 4. "+ 画布图片" button in the image context strip
 
   // P2-2: ChatCanvas - handle image sent from canvas right-click menu
   useEffect(() => {
