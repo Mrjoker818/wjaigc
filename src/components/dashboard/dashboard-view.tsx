@@ -129,8 +129,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [viewingDataValue, setViewingDataValue] = useState<unknown>(null);
   const [viewingDataLoading, setViewingDataLoading] = useState(false);
   const [dataSubTab, setDataSubTab] = useState<'kv' | 'images'>('images');
-  const [userImages, setUserImages] = useState<Array<{ id: string; url: string; prompt: string; model: string; quality: string; aspectRatio: string; createdAt: string; duration: number | null; projectName: string; size: string | null }>>([]);
+  const [userImages, setUserImages] = useState<Array<{ id: string; url: string; prompt: string; model: string; quality: string; aspectRatio: string; createdAt: string; duration: number | null; projectName: string; size: string | null; source: string }>>([]);
   const [userImagesLoading, setUserImagesLoading] = useState(false);
+  const [imageSourceFilter, setImageSourceFilter] = useState<'all' | 'generated' | 'uploaded'>('all');
   const [imageDetailId, setImageDetailId] = useState<string | null>(null);
 
   // ─── Admin: Ecom template state ───
@@ -620,8 +621,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     try {
       const resp = await fetch(`/api/admin/user-images?userId=${encodeURIComponent(userId)}`);
       const data = await resp.json();
-      if (data.success) {
-        setUserImages(data.images || []);
+      if (data.images) {
+        setUserImages(data.images);
       } else {
         setUserImages([]);
       }
@@ -1293,19 +1294,27 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     /* Images view */
                     <div>
                       {!selectedDataUser ? (
-                        <div className={`text-xs ${isDark ? 'text-[#555]' : 'text-gray-300'}`}>← 点击左侧用户查看生成图片</div>
+                        <div className={`text-xs ${isDark ? 'text-[#555]' : 'text-gray-300'}`}>← 点击左侧用户查看图片</div>
                       ) : userImagesLoading ? (
                         <div className={`text-xs ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>加载图片中...</div>
                       ) : userImages.length === 0 ? (
-                        <div className={`text-xs ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>该用户暂无生成图片</div>
+                        <div className={`text-xs ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>该用户暂无图片数据</div>
                       ) : (
                         <div>
-                          <div className={`text-xs font-medium mb-2 ${isDark ? 'text-[#999]' : 'text-gray-500'}`}>共 {userImages.length} 张图片</div>
+                          <div className="flex items-center justify-between mb-2">
+                            <div className={`text-xs font-medium ${isDark ? 'text-[#999]' : 'text-gray-500'}`}>共 {userImages.length} 张图片</div>
+                            <div className="flex gap-1.5">
+                              {(['all', 'generated', 'uploaded'] as const).map(f => (
+                                <button key={f} onClick={() => setImageSourceFilter(f)} className={`text-[10px] px-2 py-0.5 rounded cursor-pointer transition-colors ${imageSourceFilter === f ? (isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-primary/10 text-primary') : (isDark ? 'bg-white/5 text-[#888] hover:bg-white/10' : 'bg-gray-100 text-gray-500 hover:bg-gray-200')}`}>{f === 'all' ? '全部' : f === 'generated' ? 'AI生成' : '上传'}</button>
+                              ))}
+                            </div>
+                          </div>
                           <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 max-h-[500px] overflow-y-auto pr-1">
-                            {userImages.map((img, idx) => (
+                            {userImages.filter(img => imageSourceFilter === 'all' || img.source === imageSourceFilter).map((img, idx) => (
                               <div key={idx} className={`rounded-lg border overflow-hidden ${isDark ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-white'}`}>
                                 <div className="aspect-square bg-black/20 relative">
-                                  <img src={img.url} alt={img.prompt || '生成图片'} className="w-full h-full object-cover" loading="lazy" />
+                                  <img src={img.url} alt={img.prompt || '图片'} className="w-full h-full object-cover" loading="lazy" />
+                                  <span className={`absolute top-1 right-1 text-[9px] px-1.5 py-0.5 rounded font-medium ${img.source === 'generated' ? (isDark ? 'bg-[#d4af37]/80 text-black' : 'bg-primary text-primary-foreground') : (isDark ? 'bg-blue-500/80 text-white' : 'bg-blue-500 text-white')}`}>{img.source === 'generated' ? 'AI' : '上传'}</span>
                                 </div>
                                 <div className="p-2.5 space-y-1">
                                   {img.prompt && <div className={`text-[11px] truncate ${isDark ? 'text-gray-300' : 'text-gray-700'}`} title={img.prompt}>{img.prompt}</div>}
@@ -1316,7 +1325,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                                   </div>
                                   <div className={`flex items-center justify-between text-[10px] ${isDark ? 'text-[#555]' : 'text-gray-400'}`}>
                                     <span>{img.createdAt ? new Date(img.createdAt).toLocaleString('zh-CN') : '未知时间'}</span>
-                                    {img.duration != null && <span>耗时 {img.duration < 1000 ? `${img.duration}ms` : `${(img.duration / 1000).toFixed(1)}s`}</span>}
+                                    {img.duration != null && img.duration > 0 && <span>耗时 {img.duration < 1000 ? `${img.duration}ms` : `${(img.duration / 1000).toFixed(1)}s`}</span>}
                                   </div>
                                 </div>
                               </div>
