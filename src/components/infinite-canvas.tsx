@@ -1082,7 +1082,7 @@ export function InfiniteCanvas({
 
   // Download popup
   const [showDownloadPopup, setShowDownloadPopup] = useState(false);
-  const [downloadFormat, setDownloadFormat] = useState<'png' | 'svg' | 'psd' | '3d'>('png');
+  const [downloadFormat, setDownloadFormat] = useState<'png' | 'svg' | 'psd' | 'eps' | 'dxf' | 'pdf' | '3d'>('png');
   const [threeDDownloadFormat, setThreeDDownloadFormat] = useState('');
   const [psdMode, setPsdMode] = useState<'pro' | 'studio'>('pro');
   const [svgMode, setSvgMode] = useState<'pro' | 'studio'>('pro');
@@ -6532,48 +6532,122 @@ export function InfiniteCanvas({
         setActiveTool('none');
         return;
       }
-      if (format === 'svg') {
+      if (format === 'svg' || format === 'eps' || format === 'dxf' || format === 'pdf') {
         // 优先使用svgDataUrl（画布显示PNG预览时保留的完整SVG数据）
         const svgSource = image.svgDataUrl || image.url;
         // If image URL is already an SVG data URL (from SVG描摹), download directly
         if (svgSource.startsWith('data:image/svg+xml')) {
-          setDownloadProgress('正在导出矢量图...');
+          setDownloadProgress(format === 'svg' ? '正在导出矢量图...' : `正在转换为 ${format.toUpperCase()}...`);
           try {
             let svgContent = decodeURIComponent(svgSource.replace(/^data:image\/svg\+xml;charset=utf-8,/, ''));
             // Apply AI-compatible sanitization: add viewBox, ensure proper namespaces
             svgContent = ensureSvgAiCompatible(svgContent);
-            const blob = new Blob([svgContent], { type: 'image/svg+xml' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${image.prompt?.substring(0, 30) || 'vector'}.svg`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-          } catch {
-            // Fallback to re-vectorize if data URL parsing fails
-            const { downloadSVG } = await import('@/lib/svg-export');
-            await downloadSVG(svgSource, svgMode);
+
+            if (format === 'svg') {
+              const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `${image.prompt?.substring(0, 30) || 'vector'}.svg`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            } else {
+              // Convert SVG to EPS/DXF/PDF via backend API
+              const response = await fetch('/api/svg-convert', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  svgContent,
+                  format,
+                  filename: image.prompt?.substring(0, 30) || 'vector',
+                }),
+              });
+              if (!response.ok) {
+                const errData = await response.json().catch(() => ({ error: '转换失败' }));
+                throw new Error(errData.error || `转换 ${format.toUpperCase()} 失败`);
+              }
+              const blob = await response.blob();
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `${image.prompt?.substring(0, 30) || 'vector'}.${format}`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            }
+          } catch (e) {
+            if (format === 'svg') {
+              // Fallback to re-vectorize if data URL parsing fails
+              const { downloadSVG } = await import('@/lib/svg-export');
+              await downloadSVG(svgSource, svgMode);
+            } else {
+              console.error(`[Download] ${format.toUpperCase()} conversion error:`, e);
+            }
           }
           setDownloadProgress(null);
           setShowDownloadPopup(false);
           setActiveTool('none');
           return;
         }
-        setDownloadProgress('正在矢量化...');
-        const { downloadSVG } = await import('@/lib/svg-export');
-        await downloadSVG(image.url, svgMode, (stage, progress) => {
-          const stageLabels: Record<string, string> = {
-            preparing_image: '准备图片...',
-            tracing_vectors: '追踪矢量路径...',
-            recognizing_shapes: '识别形状...',
-            optimizing_paths: '优化路径...',
-            rendering_preview: '渲染预览...',
-            completed: '完成',
-          };
-          setDownloadProgress(`${stageLabels[stage] || stage} ${Math.round(progress)}%`);
-        });
+        // Non-data-URL SVG source
+        if (format === 'svg') {
+          setDownloadProgress('正在矢量化...');
+          const { downloadSVG } = await import('@/lib/svg-export');
+          await downloadSVG(image.url, svgMode, (stage, progress) => {
+            const stageLabels: Record<string, string> = {
+              preparing_image: '准备图片...',
+              tracing_vectors: '追踪矢量路径...',
+              recognizing_shapes: '识别形状...',
+              optimizing_paths: '优化路径...',
+              rendering_preview: '渲染预览...',
+              completed: '完成',
+            };
+            setDownloadProgress(`${stageLabels[stage] || stage} ${Math.round(progress)}%`);
+          });
+          setDownloadProgress(null);
+          setShowDownloadPopup(false);
+          setActiveTool('none');
+          return;
+        }
+        // For EPS/DXF/PDF from non-SVG source, first vectorize then convert
+        setDownloadProgress(`正在矢量化并转换为 ${format.toUpperCase()}...`);
+        try {
+          // First get SVG via trace API
+          const traceRes = await fetch('/api/svg-trace', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageUrl: image.url, mode: 'color', qualityPreset: 'high' }),
+          });
+          if (!traceRes.ok) throw new Error('矢量化失败');
+          const traceData = await traceRes.json();
+          if (!traceData.svg) throw new Error('矢量化未返回数据');
+          let svgContent = traceData.svg;
+          svgContent = ensureSvgAiCompatible(svgContent);
+          // Convert to target format
+          const convRes = await fetch('/api/svg-convert', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ svgContent, format, filename: image.prompt?.substring(0, 30) || 'vector' }),
+          });
+          if (!convRes.ok) {
+            const errData = await convRes.json().catch(() => ({ error: '转换失败' }));
+            throw new Error(errData.error || `转换 ${format.toUpperCase()} 失败`);
+          }
+          const blob = await convRes.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${image.prompt?.substring(0, 30) || 'vector'}.${format}`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        } catch (e) {
+          console.error(`[Download] ${format.toUpperCase()} conversion error:`, e);
+        }
         setDownloadProgress(null);
         setShowDownloadPopup(false);
         setActiveTool('none');
@@ -10820,6 +10894,9 @@ export function InfiniteCanvas({
                   {[
                     { format: 'png' as const, label: 'PNG 格式', desc: '位图格式，无损画质' },
                     { format: 'svg' as const, label: 'SVG 格式', desc: '矢量图形，可无损缩放' },
+                    { format: 'eps' as const, label: 'EPS 格式', desc: '矢量图形，Illustrator兼容' },
+                    { format: 'dxf' as const, label: 'DXF 格式', desc: '矢量图形，AutoCAD兼容' },
+                    { format: 'pdf' as const, label: 'PDF 格式', desc: '矢量图形，通用文档格式' },
                     { format: 'psd' as const, label: 'PSD 格式', desc: 'Photoshop 分层文件' },
                     ...(selectedImageData?.threeDModelUrl ? [{ format: '3d' as const, label: '3D 模型', desc: '下载3D模型文件' }] : []),
                   ].map(item => (
@@ -10841,8 +10918,8 @@ export function InfiniteCanvas({
                   ))}
                 </div>
 
-                {/* SVG Mode Selection */}
-                {downloadFormat === 'svg' && (
+                {/* SVG/EPS/DXF/PDF Mode Selection */}
+                {(downloadFormat === 'svg' || downloadFormat === 'eps' || downloadFormat === 'dxf' || downloadFormat === 'pdf') && (
                   <div className={`flex flex-col gap-1 pt-1 border-t ${isMonochrome ? 'border-gray-100' : 'border-white/[0.14]'}`}>
                     <span className={`text-xs font-medium ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}>矢量化模式</span>
                     {([

@@ -270,31 +270,25 @@ async function preprocessForVTracer(
     pipeline = pipeline.flatten({ background: { r: 255, g: 255, b: 255 } });
   }
 
-  // Step 3: 丹青AI级别预处理 — 渐变区域平滑
-  // 丹青AI提示"请上传清晰、高分辨率且无渐变素材"，
-  // 说明其对渐变区域有专门的预处理：将渐变区域预量化为有限色阶，
-  // 避免VTracer在渐变区域产生大量碎块路径
-  // 策略：对高色数预设(>=128色)，使用轻微高斯模糊平滑渐变过渡
-  // 对低色数预设(<128色)，使用中值滤波去噪
-  if (params.colorPrecision >= 200 && params.filterSpeckle >= 10) {
-    // ★ print-pro / max 预设专用：渐变平滑 + 去噪
-    // 轻微高斯模糊(0.5)平滑渐变色带，VTracer的filter_speckle会处理噪声
+  // Step 3: 丹青AI级别预处理 — 边缘平滑去锯齿
+  // 核心原则：VTracer沿像素边界追踪轮廓，输入边缘越平滑→输出路径越圆滑
+  // 策略：使用轻微高斯模糊平滑像素级锯齿，VTracer的spline模式会生成圆滑贝塞尔曲线
+  // 注意：不要锐化！锐化会放大像素锯齿→VTracer追踪出锯齿路径
+  if (params.colorPrecision >= 200) {
+    // ★ 高色数预设：0.8px高斯模糊平滑渐变+锯齿
+    pipeline = pipeline.blur(0.8);
+  } else if (params.colorPrecision >= 128) {
+    // ★ 中等色数预设：0.5px高斯模糊平滑锯齿
     pipeline = pipeline.blur(0.5);
-  } else if (params.filterSpeckle <= 4) {
-    // 快速预设: 仅中值滤波去椒盐噪，不模糊
-    pipeline = pipeline.median(1);
   } else {
-    // balanced/high: 轻度去噪
+    // ★ 低色数预设：中值滤波去椒盐噪，保留锐利边缘
     pipeline = pipeline.median(1);
   }
 
-  // Step 4: 丹青AI级别预处理 — 自适应对比度增强
-  // 对比度增强有助于VTracer更精确地识别色彩边界
-  // 仅对高色数预设生效，低色数预设不需要（锐化会引入噪声）
-  if (params.colorPrecision >= 128) {
-    // 轻度锐化增强边缘(1.0 sigma)，帮助VTracer精确定位颜色边界
-    pipeline = pipeline.sharpen({ sigma: 1.0, m1: 0.5, m2: 0.3 });
-  }
+  // Step 4: 跳过锐化
+  // ★ 重要：不使用sharpen！锐化会在像素边界产生振铃伪影，
+  //   VTracer追踪这些伪影导致输出路径边缘锯齿感严重。
+  //   边缘平滑由Step3的blur/median负责，VTracer内部filter_speckle负责去噪
 
   // Step 5: Color pre-quantization — only for very low color count presets
   // colorPrecision is now the ACTUAL number of colors (2-256)
@@ -961,15 +955,31 @@ function sanitizeSvgForIllustrator(svg: string, sourceWidth?: number, sourceHeig
   if (ptWidth) svg = svg.replace(/width="[\d.]+pt"/, `width="${parseFloat(ptWidth[1])}"`);
   if (ptHeight) svg = svg.replace(/height="[\d.]+pt"/, `height="${parseFloat(ptHeight[1])}"`);
 
-  // ─── VTracer-specific: remove transform="translate(x,y)" ───
-  // VTracer uses translate on each <path> for stacking; Illustrator sometimes fails to parse these.
-  // Simple approach: just strip transform attributes (they're usually 0,0 offsets from stacking).
+  // ─── VTracer-specific: bake transform="translate(x,y)" into path coordinates ───
+  // VTracer stacked mode outputs each path starting at (0,0) with a translate to its actual position.
+  // Simply removing the transform would break positioning — we must bake the offset into the path data.
   svg = svg.replace(/<path\s+([^>]*)\/>/g, (_match: string, attrs: string) => {
     const transformMatch = attrs.match(/transform="translate\(([^,]+),([^)]+)\)"/);
     if (!transformMatch) return _match; // no transform, keep as-is
-    // Just remove the transform attribute - VTracer translate offsets are stacking artifacts
-    const cleanAttrs = attrs.replace(/\s*transform="translate\([^)]+\)"/, '');
-    return `<path ${cleanAttrs}/>`;
+    const tx = parseFloat(transformMatch[1]);
+    const ty = parseFloat(transformMatch[2]);
+    // Skip if translate is (0,0) — just remove the attribute
+    if (tx === 0 && ty === 0) {
+      const cleanAttrs = attrs.replace(/\s*transform="translate\([^)]+\)"/, '');
+      return `<path ${cleanAttrs}/>`;
+    }
+    // Bake translate into path d coordinates: add (tx,ty) to all coordinate pairs
+    const dMatch = attrs.match(/d="([^"]+)"/);
+    if (!dMatch) {
+      // No d attribute, just remove transform (shouldn't happen for VTracer output)
+      const cleanAttrs = attrs.replace(/\s*transform="translate\([^)]+\)"/, '');
+      return `<path ${cleanAttrs}/>`;
+    }
+    const bakedD = bakeTranslateIntoPath(dMatch[1], tx, ty);
+    const newAttrs = attrs
+      .replace(/d="[^"]+"/, `d="${bakedD}"`)
+      .replace(/\s*transform="translate\([^)]+\)"/, '');
+    return `<path ${newAttrs}/>`;
   });
 
   // ─── Convert style="fill:#xxx" to fill="#xxx" (Illustrator prefers presentation attributes) ───
