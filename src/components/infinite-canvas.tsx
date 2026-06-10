@@ -872,11 +872,11 @@ export function InfiniteCanvas({
   const [toolbarExpanded, setToolbarExpanded] = useState(false);
   const [leftToolbarExpanded, setLeftToolbarExpanded] = useState(false);
   const toolBtnCls = isMonochrome
-    ? 'p-2 rounded-xl transition-all relative group text-gray-500 hover:text-gray-700 hover:bg-gray-100'
-    : 'p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10';
+    ? 'p-2 rounded-full transition-all relative group text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+    : 'p-2 rounded-full transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10';
   const toolBtnActiveCls = isMonochrome
-    ? 'bg-blue-500 text-white'
-    : 'bg-gold/20 text-gold';
+    ? 'bg-blue-500 text-white rounded-full'
+    : 'bg-gold/20 text-gold rounded-full';
   const separatorCls = isMonochrome ? 'w-px h-5 bg-gray-200' : 'w-px h-5 bg-white/[0.06]';
 
   // Left toolbar styles (expanded & collapsed)
@@ -7093,35 +7093,35 @@ export function InfiniteCanvas({
             {/* Workspace / Dashboard */}
             <button
               onClick={onSwitchToDashboard}
-              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.layoutGrid} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
+              className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.layoutGrid} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
               title="工作台"
             >
               <LayoutDashboard className="w-4 h-4" />
             </button>
             <button
               onClick={() => { if (onToggleVisionPrompt) onToggleVisionPrompt(); }}
-              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${ohMyPromptOpen ? ltActiveBtnCls : isMonochrome ? `bg-gray-50 ${mIcon.ohMyPrompt} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
+              className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-150 ${ohMyPromptOpen ? ltActiveBtnCls : isMonochrome ? `bg-gray-50 ${mIcon.ohMyPrompt} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
               title="Oh My Prompt"
             >
               <Sparkles className="w-4 h-4" />
             </button>
             <button
               onClick={onToggleUserManager}
-              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.users} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
+              className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.users} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
               title="用户管理"
             >
               <Users className="w-4 h-4" />
             </button>
             <button
               onClick={onToggleProjectData}
-              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.folder} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
+              className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.folder} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
               title="项目数据"
             >
               <FolderOpen className="w-4 h-4" />
             </button>
             <button
               onClick={onToggleTheme}
-              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.palette} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
+              className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.palette} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
               title={isMonochrome ? '切换彩色模式' : '切换黑白模式'}
             >
               {isMonochrome ? <Palette className="w-4 h-4" /> : <Contrast className="w-4 h-4" />}
@@ -7129,14 +7129,14 @@ export function InfiniteCanvas({
             <div className={`w-5 my-1 h-px ${isMonochrome ? 'bg-gray-200' : 'bg-white/[0.06]'}`} />
             <button
               onClick={onSwitchToNodeMode}
-              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.workflow} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
+              className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.workflow} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
               title="节点模式"
             >
               <Workflow className={`w-4 h-4 ${mIcon.workflow}`} />
             </button>
             <button
               onClick={onSwitchToWorkflowHub}
-              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.layoutGrid} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
+              className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.layoutGrid} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
               title="工作流中心"
             >
               <LayoutGrid className="w-4 h-4" />
@@ -7144,7 +7144,7 @@ export function InfiniteCanvas({
             <div className={`w-5 my-1 h-px ${isMonochrome ? 'bg-gray-200' : 'bg-white/[0.06]'}`} />
             <button
               onClick={() => setLeftToolbarExpanded(true)}
-              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.chevronsRight} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`} title="展开工具栏"
+              className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.chevronsRight} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`} title="展开工具栏"
             >
               <ChevronsRight className="w-4 h-4" />
             </button>
@@ -11865,12 +11865,12 @@ export function InfiniteCanvas({
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
             >
-              <div className={`flex items-center gap-0.5 px-1 py-1 rounded-xl border shadow-xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-white/[0.12]'}`}>
+              <div className={`flex items-center gap-0.5 px-1 py-1 rounded-full border shadow-xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-white/[0.12]'}`}>
                 {displayedActions.map((action, idx) => (
                   <div key={action.label} className="relative">
                     <button
                       onClick={(e) => { e.stopPropagation(); action.action(); }}
-                      className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      className={`flex items-center gap-1 px-2 py-1.5 rounded-full text-xs font-medium transition-all ${
                         isMonochrome
                           ? 'text-blue-600 hover:bg-blue-50'
                           : 'text-gold-muted hover:text-text-bright hover:bg-white/10'
@@ -11891,7 +11891,7 @@ export function InfiniteCanvas({
                 {hasMoreActions && (
                   <button
                     onClick={(e) => { e.stopPropagation(); setToolbarExpanded(!toolbarExpanded); }}
-                    className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    className={`flex items-center gap-1 px-2 py-1.5 rounded-full text-xs font-medium transition-all ${
                       isMonochrome
                         ? 'text-blue-500 hover:text-blue-700 hover:bg-blue-50'
                         : 'text-gold-muted hover:text-gold hover:bg-white/10'
@@ -11905,7 +11905,7 @@ export function InfiniteCanvas({
                 {/* 自定义按钮 */}
                 <button
                   onClick={(e) => { e.stopPropagation(); setShowToolbarCustomize(true); }}
-                  className={`flex items-center px-1.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  className={`flex items-center px-1.5 py-1.5 rounded-full text-xs font-medium transition-all ${
                     isMonochrome
                       ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
                       : 'text-gold-muted/60 hover:text-gold-muted hover:bg-white/10'
@@ -12509,7 +12509,7 @@ export function InfiniteCanvas({
       <div data-toolbar="bottom-toolbar" className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 rounded-2xl px-3 py-2 flex items-center gap-1.5 ${isMonochrome ? 'bg-white border border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl'}`}>
         {/* Select tool */}
         <button
-          className={`tool-btn ${isMonochrome ? `p-2 rounded-xl transition-all relative group ${mIcon.mousePointer} hover:text-gray-700 hover:bg-gray-100` : 'p-2 rounded-xl transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+          className={`tool-btn ${isMonochrome ? `p-2 rounded-full transition-all relative group ${mIcon.mousePointer} hover:text-gray-700 hover:bg-gray-100` : 'p-2 rounded-full transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
           title="选择工具"
         >
           <MousePointer2 className="h-4 w-4" />
@@ -12555,7 +12555,7 @@ export function InfiniteCanvas({
         {/* Image Generator - gold accent */}
         <button
           onClick={handleOpenCanvasGenerator}
-          className={`p-2 rounded-xl transition-all shadow-lg relative group ${showCanvasGenerator ? (isMonochrome ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white ring-2 ring-blue-500/50' : 'bg-gradient-to-r from-gold to-gold-dark text-black ring-2 ring-gold/50') : (isMonochrome ? 'bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-400 hover:to-indigo-400 text-white' : 'bg-gradient-to-r from-gold to-gold-dark hover:from-gold-light hover:to-gold text-black')}`}
+          className={`p-2 rounded-full transition-all shadow-lg relative group ${showCanvasGenerator ? (isMonochrome ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white ring-2 ring-blue-500/50' : 'bg-gradient-to-r from-gold to-gold-dark text-black ring-2 ring-gold/50') : (isMonochrome ? 'bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-400 hover:to-indigo-400 text-white' : 'bg-gradient-to-r from-gold to-gold-dark hover:from-gold-light hover:to-gold text-black')}`}
           title="图像生成器"
         >
           <Sparkles className="h-4 w-4" />
@@ -12607,7 +12607,7 @@ export function InfiniteCanvas({
         {/* Font Design - 字境大师 */}
         <button
           onClick={() => setShowFontDesign(true)}
-          className="tool-btn p-2 rounded-xl transition-all relative group text-gold hover:text-gold-light hover:bg-gold/10"
+          className="tool-btn p-2 rounded-full transition-all relative group text-gold hover:text-gold-light hover:bg-gold/10"
           title="字境大师"
         >
           <span className="text-sm font-bold leading-none">字</span>
@@ -12678,7 +12678,7 @@ export function InfiniteCanvas({
         {/* ChatCanvas 批注模式 */}
         <button
           onClick={() => setAnnotationMode(prev => !prev)}
-          className={`tool-btn p-2 rounded-xl transition-all relative group ${annotationMode ? 'text-gold bg-gold/20 ring-1 ring-gold/40' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10'}`}
+          className={`tool-btn p-2 rounded-full transition-all relative group ${annotationMode ? 'text-gold bg-gold/20 ring-1 ring-gold/40' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10'}`}
           title="ChatCanvas 批注 (C)"
         >
           <MessageCircle className="h-4 w-4" />
@@ -12691,7 +12691,7 @@ export function InfiniteCanvas({
         <div className="flex items-center gap-1 px-1">
           <button
             onClick={() => { setZoom(z => Math.max(0.1, z / 1.2)); }}
-            className="p-1.5 rounded-lg transition-all text-gold-muted hover:text-text-bright hover:bg-white/10"
+            className="p-1.5 rounded-full transition-all text-gold-muted hover:text-text-bright hover:bg-white/10"
             title="缩小"
           >
             <ZoomOut className={`h-3.5 w-3.5 ${mIcon.zoomOut}`} />
@@ -12701,7 +12701,7 @@ export function InfiniteCanvas({
           </span>
           <button
             onClick={() => { setZoom(z => Math.min(5, z * 1.2)); }}
-            className="p-1.5 rounded-lg transition-all text-gold-muted hover:text-text-bright hover:bg-white/10"
+            className="p-1.5 rounded-full transition-all text-gold-muted hover:text-text-bright hover:bg-white/10"
             title="放大"
           >
             <ZoomIn className={`h-3.5 w-3.5 ${mIcon.zoomIn}`} />
