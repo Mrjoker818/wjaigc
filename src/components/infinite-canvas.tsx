@@ -6936,7 +6936,7 @@ export function InfiniteCanvas({
         <div ref={leftToolbarRef}>
         {leftToolbarExpanded ? (
           /* Expanded: full toolbar */
-          <div className={`absolute top-4 left-4 z-50 flex flex-col gap-1 min-w-[160px] p-2 rounded-xl ${isMonochrome ? 'bg-white border border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl'} transition-all duration-200`}>
+          <div className={`absolute top-4 left-4 z-50 flex flex-col gap-1 min-w-[160px] p-2 rounded-full ${isMonochrome ? 'bg-white border border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl'} transition-all duration-200`}>
             {/* Logo header */}
             <div className="flex items-center gap-2 px-2 py-1.5">
               <img src="/logo.png" alt="无界AI" className="w-6 h-6 object-contain rounded" />
@@ -7089,7 +7089,7 @@ export function InfiniteCanvas({
           </div>
         ) : (
           /* Collapsed: icon column */
-          <div className={`absolute top-4 left-4 z-50 flex flex-col items-center py-2 gap-1 rounded-xl ${isMonochrome ? 'bg-white border border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl'} transition-all duration-200`} style={{ width: 48 }}>
+          <div className={`absolute top-4 left-4 z-50 flex flex-col items-center py-2 gap-1 rounded-full ${isMonochrome ? 'bg-white border border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl'} transition-all duration-200`} style={{ width: 48 }}>
             {/* Workspace / Dashboard */}
             <button
               onClick={onSwitchToDashboard}
@@ -12506,7 +12506,7 @@ export function InfiniteCanvas({
       })()}
 
       {/* Floating pill toolbar - always on top (z-50) */}
-      <div data-toolbar="bottom-toolbar" className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 rounded-2xl px-3 py-2 flex items-center gap-1.5 ${isMonochrome ? 'bg-white border border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl'}`}>
+      <div data-toolbar="bottom-toolbar" className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 rounded-full px-3 py-2 flex items-center gap-1.5 ${isMonochrome ? 'bg-white border border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl'}`}>
         {/* Select tool */}
         <button
           className={`tool-btn ${isMonochrome ? `p-2 rounded-full transition-all relative group ${mIcon.mousePointer} hover:text-gray-700 hover:bg-gray-100` : 'p-2 rounded-full transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
