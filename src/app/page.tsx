@@ -4,13 +4,14 @@ import { useState, useCallback, useRef, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { InfiniteCanvas, CanvasImage, ImageGroup } from '@/components/infinite-canvas';
 import { GenerationPanel, GenerationParams, CtrlRefSelection } from '@/components/generation-panel';
+import VideoGenerationPanel, { VideoGenerateParams } from '@/components/video-generation-panel';
 import { ImagePreview } from '@/components/image-preview';
 import { ChatPanel } from '@/components/chat-panel';
 import { PromptEquation } from '@/components/prompt-equation';
 
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
-import { Image as ImageIcon, MessageSquare, Sparkles, GitBranch, CircleDot, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Image as ImageIcon, MessageSquare, Sparkles, GitBranch, CircleDot, ChevronLeft, ChevronRight, Film } from 'lucide-react';
 import NodeEditor from '@/components/node-editor';
 import WorkflowHub from '@/components/workflow-hub';
 import DashboardView from '@/components/dashboard/dashboard-view';
@@ -49,7 +50,7 @@ import { toStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 
 type ThemeStyle = 'gold' | 'monochrome';
-type ActivePanel = 'generate' | 'chat';
+type ActivePanel = 'generate' | 'video' | 'chat';
 
 
 function recordUserData(input: {
@@ -2914,6 +2915,20 @@ function CanvasApp() {
                 <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-blue-500' : 'bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]'}`} />
               )}
             </button>
+            <button
+              onClick={() => { setActivePanel('video'); setChatTabOpen(false); }}
+              className={`flex-1 py-2 px-3 flex items-center justify-center gap-1.5 transition-all text-sm relative ${
+                activePanel === 'video'
+                  ? themeStyle === 'monochrome' ? 'text-blue-600 font-semibold' : 'text-gold font-semibold'
+                  : themeStyle === 'monochrome' ? 'text-gray-500 hover:text-gray-800 hover:bg-gray-50' : 'text-gold-muted hover:text-text-bright hover:bg-white/5'
+              }`}
+            >
+              <Film size={15} />
+              <span className="text-sm">视频生成</span>
+              {activePanel === 'video' && (
+                <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-blue-500' : 'bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]'}`} />
+              )}
+            </button>
           </div>
           <div className={`h-px ${themeStyle === 'monochrome' ? 'bg-gray-200' : 'bg-gradient-to-r from-transparent via-gold/15 to-transparent'}`} />
 
@@ -2925,9 +2940,6 @@ function CanvasApp() {
             }}>
               <GenerationPanel
                     onGenerate={handleGenerate}
-                    onVideoGenerate={handleVideoGenerate}
-                    selectedImageUrl={selectedImage?.url}
-                    selectedVideoUrl={selectedImage?.mediaType === 'video' ? selectedImage?.videoUrl : undefined}
                     onAnalyzeImage={handleAnalyzeImage}
                     onAddToCanvas={handleAddToCanvas}
                     onExtractPrompt={handleExtractPrompt}
@@ -2945,6 +2957,7 @@ function CanvasApp() {
                     onOpenPromptEquation={() => setShowPromptEquation(true)}
                     applyFavoriteParams={favoriteParams}
                     onFavoriteParamsApplied={() => setFavoriteParams(null)}
+                    selectedImageUrl={selectedImage?.url}
                     onError={(error: string) => {
                       toast.error('生成失败', {
                         description: error,
@@ -2958,6 +2971,25 @@ function CanvasApp() {
               </div>
               <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
                 <ChatPanel themeStyle={themeStyle} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} canvasImages={images} selectedCanvasImage={selectedImage} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} />
+              </div>
+              <div className={activePanel === 'video' ? 'flex-1 overflow-y-auto scroll-smooth' : 'hidden'} style={{
+                scrollbarWidth: 'thin',
+                scrollbarColor: themeStyle === 'monochrome' ? '#d1d5db transparent' : '#444 transparent'
+              }}>
+                <VideoGenerationPanel
+                    onVideoGenerate={handleVideoGenerate}
+                    onError={(error: string) => {
+                      toast.error('视频生成失败', {
+                        description: error,
+                        className: themeStyle === 'monochrome' 
+                          ? 'bg-white border border-gray-200 text-gray-900' 
+                          : 'bg-[#141414] border-[#2a2a2a] text-white',
+                      });
+                    }}
+                    themeStyle={themeStyle}
+                    selectedImageUrl={selectedImage?.mediaType !== 'video' ? selectedImage?.url : undefined}
+                    selectedVideoUrl={selectedImage?.mediaType === 'video' ? selectedImage?.videoUrl : undefined}
+                  />
               </div>
 
             {/* 固定在底部的开始生成按钮 */}

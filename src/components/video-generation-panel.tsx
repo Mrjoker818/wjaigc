@@ -202,6 +202,7 @@ export default function VideoGenerationPanel({
   // 合并服务器模型与内置注册表
   const [videoModels, setVideoModels] = useState<{ id: string; name: string; providerId: string; providerName: string; region: 'cn' | 'global'; features: VideoModelInfo['features'] }[]>([]);
 
+  // 自动从服务器加载视频模型（如果未通过 props 传入）
   useEffect(() => {
     if (serverVideoModels && serverVideoModels.length > 0) {
       const merged = serverVideoModels.map(sm => {
@@ -222,7 +223,54 @@ export default function VideoGenerationPanel({
       if (merged.length > 0 && !model) {
         setModel(merged[0].id);
       }
+      return;
     }
+    // 自动加载
+    (async () => {
+      try {
+        const res = await fetch('/api/models?type=video');
+        if (res.ok) {
+          const data = await res.json();
+          const vModels: { id: string; name: string; providerId: string; providerName: string }[] = [];
+          const providerMap = new Map<string, string>();
+          if (data.providers && Array.isArray(data.providers)) {
+            for (const p of data.providers) {
+              providerMap.set(p.id, p.name || p.displayName || '');
+            }
+          }
+          if (data.models && Array.isArray(data.models)) {
+            for (const m of data.models) {
+              vModels.push({
+                id: m.id || m.name,
+                name: m.name || m.id || '',
+                providerId: m.providerId || '',
+                providerName: providerMap.get(m.providerId) || m.providerId || '',
+              });
+            }
+          }
+          const merged = vModels.map(sm => {
+            const registry = VIDEO_MODEL_REGISTRY[sm.id];
+            return {
+              id: sm.id,
+              name: sm.name || registry?.name || sm.id,
+              providerId: sm.providerId,
+              providerName: sm.providerName || registry?.provider || '',
+              region: registry?.region || 'cn' as const,
+              features: registry?.features || {
+                firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false,
+                audio: false, maxDuration: 10, aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p']
+              },
+            };
+          });
+          setVideoModels(merged);
+          if (merged.length > 0 && !model) {
+            setModel(merged[0].id);
+          }
+        }
+      } catch {
+        // 静默失败
+      }
+    })();
   }, [serverVideoModels, model]);
 
   // 当前模型信息

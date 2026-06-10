@@ -61,7 +61,7 @@ src/
 │       └── design/
 │           └── vectorize/route.ts  # 矢量化 API (支持管理员配置的矢量模型 + PY_VECTORIZE_ENDPOINT)
 ├── components/
-│   ├── generation-panel.tsx        # 图像生成控制面板
+│   ├── generation-panel.tsx        # 图像生成控制面板（仅图像，视频已独立）
 │   ├── infinite-canvas.tsx         # 无限画布组件
 │   ├── chat-panel.tsx              # AI 聊天面板
 │   ├── image-preview.tsx           # 图片预览组件
