@@ -498,7 +498,7 @@ function CanvasApp() {
           .filter(img => !img.isProcessingPlaceholder) // 不保存正在处理的占位框到项目数据
           .map(img => ({
             id: img.id,
-            url: img.url.startsWith('data:') || img.url.startsWith('blob:') ? '' : img.url,
+            url: img.url,
             x: img.x,
             y: img.y,
             width: img.width,
@@ -567,10 +567,11 @@ function CanvasApp() {
       if (!currentProject) return;
       try {
         const mgr = UserManagerCore.getInstance();
+        // 保留所有图片URL，包括 data: URL（避免异步持久化未完成时丢失图片）
         const persistableCanvasImages = latestImagesRef.current
           .map(img => ({
             id: img.id,
-            url: img.url.startsWith('data:') || img.url.startsWith('blob:') ? '' : img.url,
+            url: img.url,
             x: img.x,
             y: img.y,
             width: img.width,
