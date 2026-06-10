@@ -1115,6 +1115,8 @@ export async function POST(request: NextRequest) {
           result: {
             imageUrl: persistedUrls[i],
             usedModel: usedModelId,
+            modelName: usedModelName,
+            providerName: usedProviderName,
             apiBaseUrl: usedApiBaseUrl,
             apiKey: provider?.apiKey || serverApiKey,
             providerId: usedProviderId,
@@ -1146,6 +1148,8 @@ export async function POST(request: NextRequest) {
         progress: 5,
         result: {
           usedModel: usedModelId,
+          modelName: usedModelName,
+          providerName: usedProviderName,
           apiBaseUrl: usedApiBaseUrl,
           apiKey: provider?.apiKey || serverApiKey,
           providerId: usedProviderId,

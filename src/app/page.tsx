@@ -922,7 +922,7 @@ function CanvasApp() {
         const perTaskMaxPollTime = Math.min(600, Math.max(120, estimatedTime * 4 + 120)) * 1000;
         const globalStartTime = Date.now();
 
-        const completedImages: Array<{ id: string; url: string; prompt: string; model?: string; quality?: string; aspectRatio?: string; stylePreset?: string; category?: string; size?: string; sourceUrl?: string }> = [];        let consecutiveErrors = 0;
+        const completedImages: Array<{ id: string; url: string; prompt: string; model?: string; quality?: string; aspectRatio?: string; stylePreset?: string; category?: string; size?: string; sourceUrl?: string; modelName?: string; apiProvider?: string }> = [];        let consecutiveErrors = 0;
 
         for (let taskIdx = 0; taskIdx < taskIds.length; taskIdx++) {
           const currentTaskId = taskIds[taskIdx];
@@ -1020,6 +1020,8 @@ function CanvasApp() {
                   category: params.imageCategory || params.productCategory,
                   size: params.size,
                   sourceUrl: imageUrl,
+                  modelName: pollData.modelName || undefined,
+                  apiProvider: pollData.providerName || undefined,
                 });
                 taskCompleted = true;
                 consecutiveErrors = 0;
@@ -1635,7 +1637,7 @@ function CanvasApp() {
         const perTaskMaxPollTime = Math.min(600, Math.max(120, estimatedTime * 4 + 120)) * 1000;
         const globalStartTime = Date.now();
 
-        const completedImages: Array<{ id: string; url: string; prompt: string; model?: string; quality?: string; aspectRatio?: string; stylePreset?: string; category?: string; size?: string; sourceUrl?: string }> = [];        let consecutiveErrors = 0;
+        const completedImages: Array<{ id: string; url: string; prompt: string; model?: string; quality?: string; aspectRatio?: string; stylePreset?: string; category?: string; size?: string; sourceUrl?: string; modelName?: string; apiProvider?: string }> = [];        let consecutiveErrors = 0;
 
         for (let taskIdx = 0; taskIdx < taskIds.length; taskIdx++) {
           const currentTaskId = taskIds[taskIdx];
@@ -1702,6 +1704,8 @@ function CanvasApp() {
                   category: params.imageCategory || params.productCategory,
                   size: params.size,
                   sourceUrl: imageUrl,
+                  modelName: pollData.modelName || '',
+                  apiProvider: pollData.providerName || '',
                 });
                 taskCompleted = true;
                 consecutiveErrors = 0;
@@ -1745,6 +1749,8 @@ function CanvasApp() {
             height: originalImg.height,
             originalWidth: originalImg.originalWidth,
             originalHeight: originalImg.originalHeight,
+            modelName: img.modelName,
+            apiProvider: img.apiProvider,
             createdAt: Date.now(),
           }));
 

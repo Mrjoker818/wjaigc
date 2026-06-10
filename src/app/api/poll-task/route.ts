@@ -423,13 +423,16 @@ export async function POST(request: NextRequest) {
             taskResult = cached;
           }
         }
+        const taskResultObj = (taskResult as unknown as Record<string, unknown>) || {};
         return NextResponse.json({
           success: true,
           status: 'completed',
           progress: registryTask.progress,
           result: taskResult,
-          imageUrl: (taskResult as unknown as Record<string, unknown>)?.imageUrl as string | undefined,
-          maskUrl: (taskResult as unknown as Record<string, unknown>)?.maskUrl as string | undefined,
+          imageUrl: taskResultObj?.imageUrl as string | undefined,
+          maskUrl: taskResultObj?.maskUrl as string | undefined,
+          modelName: (taskResultObj?.usedModel as string) || (taskResultObj?.modelName as string) || '',
+          providerName: (taskResultObj?.providerName as string) || (taskResultObj?.providerId as string) || '',
         }, { status: 200 });
       }
       if (registryTask.status === 'failed') {
@@ -992,6 +995,14 @@ export async function POST(request: NextRequest) {
       if (cachedImageUrl) {
         completedTaskCache.set(taskId, { imageUrl: cachedImageUrl, maskUrl: cachedMaskUrl || '', timestamp: Date.now() });
       }
+      // ★ 附加模型名称和提供商名称，前端画布图片标签需要
+      if (existingResult.modelName) {
+        (pollResult as Record<string, unknown>).modelName = existingResult.modelName;
+      }
+      if (existingResult.providerName) {
+        (pollResult as Record<string, unknown>).providerName = existingResult.providerName;
+      }
+
       if (!pollResult.imageUrl) {
         const taskError = taskData?.error as Record<string, unknown> | undefined;
         const errorDetail = (taskError?.message as string) || '';

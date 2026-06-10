@@ -698,6 +698,48 @@ export function InfiniteCanvas({
     return unsubscribe;
   }, [onImagesChange]);
 
+  // ★ 自动回填 originalWidth/originalHeight：当图片缺少真实尺寸时，异步加载并补全
+  useEffect(() => {
+    const imagesNeedingSize = images.filter(img => !img.originalWidth || !img.originalHeight);
+    if (imagesNeedingSize.length === 0) return;
+
+    let cancelled = false;
+    let filledCount = 0;
+    const updates = new Map<string, { originalWidth: number; originalHeight: number }>();
+
+    Promise.all(imagesNeedingSize.map(img => {
+      return new Promise<void>((resolve) => {
+        const imageEl = new window.Image();
+        imageEl.onload = () => {
+          if (!cancelled && imageEl.naturalWidth && imageEl.naturalHeight) {
+            updates.set(img.id, { originalWidth: imageEl.naturalWidth, originalHeight: imageEl.naturalHeight });
+          }
+          resolve();
+        };
+        imageEl.onerror = () => resolve();
+        imageEl.src = img.url;
+      });
+    })).then(() => {
+      if (cancelled || updates.size === 0) return;
+      const currentImages = imagesRef.current;
+      let changed = false;
+      const updated = currentImages.map(img => {
+        const sizeUpdate = updates.get(img.id);
+        if (sizeUpdate) {
+          changed = true;
+          return { ...img, ...sizeUpdate };
+        }
+        return img;
+      });
+      if (changed) {
+        filledCount = updates.size;
+        onImagesChange(updated);
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, [images, onImagesChange]);
+
   // Navigate to image when navigateToImageId changes
   useEffect(() => {
     if (!navigateToImageId) return;
@@ -3408,6 +3450,8 @@ export function InfiniteCanvas({
           originalHeight: actualH,
           prompt: toolbar.prompt,
           aspectRatio: toolbar.aspectRatio,
+          modelName: data.modelName || model,
+          apiProvider: data.providerName,
         }));
         onImagesChange([...imagesRef.current, ...newImages]);
         // Reset group: keep toolbar visible, clear result for next generation
@@ -3512,6 +3556,8 @@ export function InfiniteCanvas({
                     originalHeight: actualH,
                     prompt: toolbar.prompt,
                     aspectRatio: toolbar.aspectRatio,
+                    modelName: pollData.modelName || model,
+                    apiProvider: pollData.providerName,
                   }));
                   onImagesChange([...imagesRef.current, ...resultImages]);
                   setGenGroups(prev => prev.map(g => {
@@ -4651,7 +4697,10 @@ export function InfiniteCanvas({
             // Replace the placeholder frame with the first result
             onImagesChange(images.map(img => {
               if (img.id === canvasGenFrameId) {
-                return { ...img, url: savedUrls[i], isProcessingPlaceholder: false, processing: undefined, prompt: canvasGenPrompt };
+                return { ...img, url: savedUrls[i], isProcessingPlaceholder: false, processing: undefined, prompt: canvasGenPrompt,
+                  modelName: data.modelName || (canvasGenModel?.includes('::') ? canvasGenModel.split('::')[1] : canvasGenModel),
+                  apiProvider: data.providerName,
+                };
               }
               return img;
             }));
@@ -4688,6 +4737,7 @@ export function InfiniteCanvas({
       }
 
       // Poll for results
+      let lastPollData: Record<string, unknown> | null = null;
       const pollForResult = async (taskId: string): Promise<string | null> => {
         const maxAttempts = 300; // 兼容慢速API
         const getPollInterval = (attempt: number) => {
@@ -4722,6 +4772,7 @@ export function InfiniteCanvas({
             if (!pollRes.ok) continue;
             const pollData = await pollRes.json();
             if (pollData.status === 'completed' && pollData.imageUrl) {
+              lastPollData = pollData;
               return pollData.imageUrl;
             }
             if (pollData.status === 'failed') {
@@ -4753,13 +4804,15 @@ export function InfiniteCanvas({
               return {
                 ...img,
                 url: validUrls[0],
-                isProcessingPlaceholder: false,
-                processing: undefined,
+                isProcessingPlaceholder: false as const,
+                processing: undefined as string | undefined,
                 prompt: canvasGenPrompt,
                 model: canvasGenModel,
                 quality: canvasGenQuality,
                 aspectRatio: canvasGenAspectRatio,
-              };
+                modelName: lastPollData?.modelName || canvasGenModel,
+                apiProvider: lastPollData?.providerName || '',
+              } as CanvasImage;
             }
             return img;
           }));
@@ -4780,7 +4833,9 @@ export function InfiniteCanvas({
             model: canvasGenModel,
             quality: canvasGenQuality,
             aspectRatio: canvasGenAspectRatio,
-          }));
+            modelName: lastPollData?.modelName || canvasGenModel,
+            apiProvider: lastPollData?.providerName || '',
+          } as CanvasImage));
           onImagesChange([...imagesRef.current, ...additionalImages]);
         }
         // Close generator panel
