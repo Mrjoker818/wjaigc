@@ -104,6 +104,8 @@ export class UserManager {
       this.ensureDefaultAdmin();
       // 规范化图片 URL：将旧格式 /uploads/xxx 转换为 /api/serve-upload/uploads/xxx
       this.normalizeImageUrls();
+      // 持久化规范化后的 URL 到 localStorage，避免每次重复转换
+      this.saveData();
     } catch (error) {
       console.error('Failed to load user data:', error);
       this.multiUserData = {

@@ -2424,7 +2424,7 @@ function CanvasApp() {
               const persistableCanvasImages = images
                 .map(img => ({
                   id: img.id,
-                  url: urlMapping[img.url] || (img.url.startsWith('data:') || img.url.startsWith('blob:') ? '' : img.url),
+                  url: urlMapping[img.url] || img.url,
                   x: img.x, y: img.y, width: img.width, height: img.height,
                   originalWidth: img.originalWidth || img.width * 2,
                   originalHeight: img.originalHeight || img.height * 2,
@@ -2569,7 +2569,7 @@ function CanvasApp() {
                 const mgr = UserManagerCore.getInstance();
                 const persistable = images.map(img => ({
                   id: img.id,
-                  url: img.url.startsWith('data:') || img.url.startsWith('blob:') ? '' : img.url,
+                  url: img.url,
                   x: img.x, y: img.y,
                   width: img.width, height: img.height,
                   originalWidth: img.originalWidth || img.width,
@@ -2871,7 +2871,7 @@ function CanvasApp() {
                 const persistableCanvasImages = images
                   .map(img => ({
                     id: img.id,
-                    url: urlMapping[img.url] || (img.url.startsWith('data:') || img.url.startsWith('blob:') ? '' : img.url),
+                    url: urlMapping[img.url] || img.url,
                     x: img.x,
                     y: img.y,
                     width: img.width,
@@ -2968,7 +2968,7 @@ function CanvasApp() {
                 const persistableCanvasImages = images
                   .map(img => ({
                     id: img.id,
-                    url: urlMapping[img.url] || (img.url.startsWith('data:') || img.url.startsWith('blob:') ? '' : img.url),
+                    url: urlMapping[img.url] || img.url,
                     x: img.x, y: img.y, width: img.width, height: img.height,
                     originalWidth: img.originalWidth || img.width * 2,
                     originalHeight: img.originalHeight || img.height * 2,
