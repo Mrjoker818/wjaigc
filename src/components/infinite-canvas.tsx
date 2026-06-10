@@ -8678,8 +8678,8 @@ export function InfiniteCanvas({
                   ))}
                 </div>
               )}
-              {/* Processing overlay */}
-              {isEditProcessing && (
+              {/* Processing overlay (not for SVG trace - has its own progress UI) */}
+              {isEditProcessing && editMode !== 'svg-trace' && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-50 pointer-events-auto">
                   <div className="flex flex-col items-center gap-2">
                     <div className="w-8 h-8 border-2 border-gold border-t-transparent rounded-full animate-spin" />

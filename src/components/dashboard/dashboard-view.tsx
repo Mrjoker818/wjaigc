@@ -128,6 +128,10 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [viewingDataKey, setViewingDataKey] = useState<string | null>(null);
   const [viewingDataValue, setViewingDataValue] = useState<unknown>(null);
   const [viewingDataLoading, setViewingDataLoading] = useState(false);
+  const [dataSubTab, setDataSubTab] = useState<'kv' | 'images'>('images');
+  const [userImages, setUserImages] = useState<Array<{ id: string; url: string; prompt: string; model: string; quality: string; aspectRatio: string; createdAt: string; duration: number | null; projectName: string; size: string | null }>>([]);
+  const [userImagesLoading, setUserImagesLoading] = useState(false);
+  const [imageDetailId, setImageDetailId] = useState<string | null>(null);
 
   // ─── Admin: Ecom template state ───
   const [ecomTemplates, setEcomTemplates] = useState<Array<Record<string, unknown>>>([]);
@@ -608,6 +612,22 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       if (data.success) { await loadUserData(userId); if (viewingDataKey === key) { setViewingDataValue(null); setViewingDataKey(null); } }
     } catch { /* ignore */ }
   }, [loadUserData, viewingDataKey]);
+
+  // ─── Admin: User images ───
+  const loadUserImages = useCallback(async (userId: string) => {
+    setUserImagesLoading(true);
+    setImageDetailId(null);
+    try {
+      const resp = await fetch(`/api/admin/user-images?userId=${encodeURIComponent(userId)}`);
+      const data = await resp.json();
+      if (data.success) {
+        setUserImages(data.images || []);
+      } else {
+        setUserImages([]);
+      }
+    } catch { setUserImages([]); }
+    setUserImagesLoading(false);
+  }, []);
 
   // ─── Admin: Ecom template handlers ───
   const loadEcomTemplates = useCallback(async () => {
@@ -1240,24 +1260,72 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         {activeTab === 'data' && isAdmin && (
           <div className="h-full overflow-y-auto p-6">
             <h1 className={`text-xl font-bold mb-1 ${textPrimary}`}>数据管理</h1>
-            <p className={`text-sm mb-6 ${textSecondary}`}>浏览和管理用户项目数据</p>
+            <p className={`text-sm mb-4 ${textSecondary}`}>浏览和管理用户项目数据与生成图片</p>
+            {/* Sub-tab switcher */}
+            <div className={`flex gap-1 mb-4 p-1 rounded-lg ${isDark ? 'bg-white/5' : 'bg-gray-100'}`}>
+              <button onClick={() => setDataSubTab('kv')} className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${dataSubTab === 'kv' ? (isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-primary/10 text-primary') : (isDark ? 'text-[#888] hover:text-gray-200' : 'text-gray-500 hover:text-gray-700')}`}>用户数据</button>
+              <button onClick={() => setDataSubTab('images')} className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${dataSubTab === 'images' ? (isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-primary/10 text-primary') : (isDark ? 'text-[#888] hover:text-gray-200' : 'text-gray-500 hover:text-gray-700')}`}>生成图片</button>
+            </div>
             <div className={`rounded-xl border p-5 ${softClass}`}>
               <div className="flex gap-4 min-h-[400px]">
-                <div className="w-1/3 border-r pr-3">
+                {/* Left: User list */}
+                <div className="w-1/4 border-r pr-3">
                   <div className={`text-xs font-medium mb-2 ${isDark ? 'text-[#999]' : 'text-gray-500'}`}>选择用户</div>
                   <div className="space-y-1 max-h-[500px] overflow-y-auto">
-                    {adminUsers.map(u => (<button key={u.id} onClick={() => void loadUserData(u.id)} className={`w-full text-left rounded-lg px-3 py-2 text-sm transition-colors cursor-pointer ${selectedDataUser === u.id ? (isMonochrome ? 'bg-[#3b82f6]/20 text-[#3b82f6]' : isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-primary/10 text-primary') : isDark ? 'bg-white/5 hover:bg-white/10 text-gray-200' : 'bg-white hover:bg-gray-50 text-gray-700'}`}><div className="font-medium">{u.name}</div><div className={`text-xs mt-0.5 ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>{u.id}</div></button>))}
+                    {adminUsers.map(u => (<button key={u.id} onClick={() => { void loadUserData(u.id); void loadUserImages(u.id); }} className={`w-full text-left rounded-lg px-3 py-2 text-sm transition-colors cursor-pointer ${selectedDataUser === u.id ? (isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-primary/10 text-primary') : isDark ? 'bg-white/5 hover:bg-white/10 text-gray-200' : 'bg-white hover:bg-gray-50 text-gray-700'}`}><div className="font-medium">{u.name}</div><div className={`text-xs mt-0.5 ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>{u.id}</div></button>))}
                   </div>
                 </div>
-                <div className="flex-1 flex gap-4 min-w-0">
-                  <div className="w-1/2 border-r pr-3">
-                    <div className={`text-xs font-medium mb-2 ${isDark ? 'text-[#999]' : 'text-gray-500'}`}>{selectedDataUser ? '数据条目' : '请先选择用户'}</div>
-                    {selectedDataUser ? (userDataKeys.length > 0 ? (<div className="space-y-1 max-h-[500px] overflow-y-auto">{userDataKeys.map(dk => (<div key={dk.dataKey} className={`group rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors flex items-center justify-between gap-2 ${viewingDataKey === dk.dataKey ? (isMonochrome ? 'bg-[#3b82f6]/20 text-[#3b82f6]' : isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-primary/10 text-primary') : isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-white hover:bg-gray-50'}`} onClick={() => void loadDataDetail(selectedDataUser, dk.dataKey)}><div className="min-w-0 flex-1"><div className="truncate font-medium">{dk.dataKey}</div><div className={`text-xs mt-0.5 ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>{dk.updatedAt ? new Date(dk.updatedAt).toLocaleString('zh-CN') : ''}</div></div><button onClick={(e) => { e.stopPropagation(); void deleteUserData(selectedDataUser, dk.dataKey); }} className={`opacity-0 group-hover:opacity-100 shrink-0 p-1 rounded transition-opacity cursor-pointer ${isDark ? 'hover:bg-red-500/20 text-red-400' : 'hover:bg-red-50 text-red-500'}`} title="删除此数据"><Trash2 size={14} /></button></div>))}</div>) : (<div className={`text-xs ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>该用户暂无数据</div>)) : (<div className={`text-xs ${isDark ? 'text-[#555]' : 'text-gray-300'}`}>← 点击左侧用户查看数据</div>)}
-                  </div>
-                  <div className="w-1/2 min-w-0">
-                    <div className={`text-xs font-medium mb-2 ${isDark ? 'text-[#999]' : 'text-gray-500'}`}>{viewingDataKey ? `数据详情: ${viewingDataKey}` : '数据内容'}</div>
-                    {viewingDataLoading ? (<div className={`text-xs ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>加载中...</div>) : viewingDataValue !== null ? (<div className={`rounded-lg p-3 text-xs font-mono max-h-[500px] overflow-auto ${isDark ? 'bg-white/5 text-gray-300' : 'bg-gray-50 text-gray-700'}`}><pre className="whitespace-pre-wrap break-all">{typeof viewingDataValue === 'string' ? viewingDataValue : JSON.stringify(viewingDataValue, null, 2)}</pre></div>) : (<div className={`text-xs ${isDark ? 'text-[#555]' : 'text-gray-300'}`}>{selectedDataUser ? '← 点击左侧条目查看详情' : ''}</div>)}
-                  </div>
+                {/* Right: Content based on sub-tab */}
+                <div className="flex-1 min-w-0">
+                  {dataSubTab === 'kv' ? (
+                    /* KV data view */
+                    <div className="flex gap-4 min-h-[400px]">
+                      <div className="w-1/2 border-r pr-3">
+                        <div className={`text-xs font-medium mb-2 ${isDark ? 'text-[#999]' : 'text-gray-500'}`}>{selectedDataUser ? '数据条目' : '请先选择用户'}</div>
+                        {selectedDataUser ? (userDataKeys.length > 0 ? (<div className="space-y-1 max-h-[500px] overflow-y-auto">{userDataKeys.map(dk => (<div key={dk.dataKey} className={`group rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors flex items-center justify-between gap-2 ${viewingDataKey === dk.dataKey ? (isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-primary/10 text-primary') : isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-white hover:bg-gray-50'}`} onClick={() => void loadDataDetail(selectedDataUser, dk.dataKey)}><div className="min-w-0 flex-1"><div className="truncate font-medium">{dk.dataKey}</div><div className={`text-xs mt-0.5 ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>{dk.updatedAt ? new Date(dk.updatedAt).toLocaleString('zh-CN') : ''}</div></div><button onClick={(e) => { e.stopPropagation(); void deleteUserData(selectedDataUser, dk.dataKey); }} className={`opacity-0 group-hover:opacity-100 shrink-0 p-1 rounded transition-opacity cursor-pointer ${isDark ? 'hover:bg-red-500/20 text-red-400' : 'hover:bg-red-50 text-red-500'}`} title="删除此数据"><Trash2 size={14} /></button></div>))}</div>) : (<div className={`text-xs ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>该用户暂无数据</div>)) : (<div className={`text-xs ${isDark ? 'text-[#555]' : 'text-gray-300'}`}>← 点击左侧用户查看数据</div>)}
+                      </div>
+                      <div className="w-1/2 min-w-0">
+                        <div className={`text-xs font-medium mb-2 ${isDark ? 'text-[#999]' : 'text-gray-500'}`}>{viewingDataKey ? `数据详情: ${viewingDataKey}` : '数据内容'}</div>
+                        {viewingDataLoading ? (<div className={`text-xs ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>加载中...</div>) : viewingDataValue !== null ? (<div className={`rounded-lg p-3 text-xs font-mono max-h-[500px] overflow-auto ${isDark ? 'bg-white/5 text-gray-300' : 'bg-gray-50 text-gray-700'}`}><pre className="whitespace-pre-wrap break-all">{typeof viewingDataValue === 'string' ? viewingDataValue : JSON.stringify(viewingDataValue, null, 2)}</pre></div>) : (<div className={`text-xs ${isDark ? 'text-[#555]' : 'text-gray-300'}`}>{selectedDataUser ? '← 点击左侧条目查看详情' : ''}</div>)}
+                      </div>
+                    </div>
+                  ) : (
+                    /* Images view */
+                    <div>
+                      {!selectedDataUser ? (
+                        <div className={`text-xs ${isDark ? 'text-[#555]' : 'text-gray-300'}`}>← 点击左侧用户查看生成图片</div>
+                      ) : userImagesLoading ? (
+                        <div className={`text-xs ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>加载图片中...</div>
+                      ) : userImages.length === 0 ? (
+                        <div className={`text-xs ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>该用户暂无生成图片</div>
+                      ) : (
+                        <div>
+                          <div className={`text-xs font-medium mb-2 ${isDark ? 'text-[#999]' : 'text-gray-500'}`}>共 {userImages.length} 张图片</div>
+                          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 max-h-[500px] overflow-y-auto pr-1">
+                            {userImages.map((img, idx) => (
+                              <div key={idx} className={`rounded-lg border overflow-hidden ${isDark ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-white'}`}>
+                                <div className="aspect-square bg-black/20 relative">
+                                  <img src={img.url} alt={img.prompt || '生成图片'} className="w-full h-full object-cover" loading="lazy" />
+                                </div>
+                                <div className="p-2.5 space-y-1">
+                                  {img.prompt && <div className={`text-[11px] truncate ${isDark ? 'text-gray-300' : 'text-gray-700'}`} title={img.prompt}>{img.prompt}</div>}
+                                  <div className="flex flex-wrap gap-1">
+                                    {img.model && <span className={`text-[10px] px-1.5 py-0.5 rounded ${isDark ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'bg-primary/10 text-primary'}`}>{img.model.length > 20 ? img.model.slice(0, 20) + '…' : img.model}</span>}
+                                    {img.aspectRatio && <span className={`text-[10px] px-1.5 py-0.5 rounded ${isDark ? 'bg-white/10 text-[#888]' : 'bg-gray-100 text-gray-500'}`}>{img.aspectRatio}</span>}
+                                    {img.quality && <span className={`text-[10px] px-1.5 py-0.5 rounded ${isDark ? 'bg-white/10 text-[#888]' : 'bg-gray-100 text-gray-500'}`}>{img.quality}</span>}
+                                  </div>
+                                  <div className={`flex items-center justify-between text-[10px] ${isDark ? 'text-[#555]' : 'text-gray-400'}`}>
+                                    <span>{img.createdAt ? new Date(img.createdAt).toLocaleString('zh-CN') : '未知时间'}</span>
+                                    {img.duration != null && <span>耗时 {img.duration < 1000 ? `${img.duration}ms` : `${(img.duration / 1000).toFixed(1)}s`}</span>}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

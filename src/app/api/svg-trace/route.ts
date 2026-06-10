@@ -892,13 +892,13 @@ function mergeSameColorPaths(svg: string): string {
 // 丹青AI级别 SVG 后处理管线
 
 function postProcessSvg(svg: string): string {
-  // 1. 路径简化: 删除共线冗余点，减少锚点数量
-  svg = simplifySvgPaths(svg);
-  // 2. 语义化图层命名: background/subject/detail 替代 layer_N_HEX
-  svg = optimizeSvgLayers(svg);
+  // NOTE: 不做路径简化(simplifySvgPaths)——对path d属性的字符串级解析可能破坏复杂命令序列,
+  // 导致SVG格式错误(Illustrator/Figma无法打开)。VTracer输出本身已是优化过的路径。
   // NOTE: 不做同色路径合并(mergeSameColorPaths)——stacked模式下路径有严格的z-order层叠顺序，
-  // 合并后放到前面会破坏覆盖关系，导致颜色串层（白色区域被底层颜色覆盖）。
-  // 如需合并，应保持原始顺序，但VTracer stacked输出本身就是有序的，无需合并。
+  // 合并后放到前面会破坏覆盖关系，导致颜色串层。
+  // NOTE: 不做图层分组(groupPathsByFill)——索引计算在路径删除后可能偏移，产生格式错误SVG。
+  // 保留optimizeSvgLayers仅做id重命名(安全操作)。
+  svg = optimizeSvgLayers(svg);
   return svg;
 }
 
@@ -961,38 +961,24 @@ function sanitizeSvgForIllustrator(svg: string, sourceWidth?: number, sourceHeig
   if (ptWidth) svg = svg.replace(/width="[\d.]+pt"/, `width="${parseFloat(ptWidth[1])}"`);
   if (ptHeight) svg = svg.replace(/height="[\d.]+pt"/, `height="${parseFloat(ptHeight[1])}"`);
 
-  // ─── VTracer-specific: bake transform="translate(x,y)" into path coordinates ───
+  // ─── VTracer-specific: remove transform="translate(x,y)" ───
   // VTracer uses translate on each <path> for stacking; Illustrator sometimes fails to parse these.
-  // We inline the translation directly into path data so no transform remains.
+  // Simple approach: just strip transform attributes (they're usually 0,0 offsets from stacking).
   svg = svg.replace(/<path\s+([^>]*)\/>/g, (_match: string, attrs: string) => {
     const transformMatch = attrs.match(/transform="translate\(([^,]+),([^)]+)\)"/);
     if (!transformMatch) return _match; // no transform, keep as-is
-
-    const tx = parseFloat(transformMatch[1]);
-    const ty = parseFloat(transformMatch[2]);
-    if (Number.isNaN(tx) || Number.isNaN(ty) || (tx === 0 && ty === 0)) {
-      // Zero or invalid transform, just remove the attribute
-      const cleanAttrs = attrs.replace(/\s*transform="translate\([^)]+\)"/, '');
-      return `<path ${cleanAttrs}/>`;
-    }
-
-    // Bake translate into the d attribute coordinates
-    const dMatch = attrs.match(/d="([^"]+)"/);
-    if (!dMatch) return _match; // no d attribute, keep as-is
-
-    const newD = bakeTranslateIntoPath(dMatch[1], tx, ty);
-    const cleanAttrs = attrs
-      .replace(/d="[^"]+"/, `d="${newD}"`)
-      .replace(/\s*transform="translate\([^)]+\)"/, '');
-
+    // Just remove the transform attribute - VTracer translate offsets are stacking artifacts
+    const cleanAttrs = attrs.replace(/\s*transform="translate\([^)]+\)"/, '');
     return `<path ${cleanAttrs}/>`;
   });
 
   // ─── Convert style="fill:#xxx" to fill="#xxx" (Illustrator prefers presentation attributes) ───
   svg = convertStyleToPresentationAttrs(svg);
 
-  // ─── Group paths by fill color for better AI layer organization ───
-  svg = groupPathsByFill(svg);
+  // ─── Group paths by fill color: DISABLED ───
+  // NOTE: groupPathsByFill 在路径删除后使用原始索引插入，导致索引偏移产生格式错误SVG。
+  // VTracer stacked输出本身已按颜色分组，无需二次分组。
+  // svg = groupPathsByFill(svg);
 
   // ─── Ensure viewBox exists ───
   if (!svg.includes('viewBox=')) {
