@@ -128,6 +128,10 @@ export class UserManager {
               if (img.url && img.url.startsWith('/uploads/') && !img.url.startsWith('/api/')) {
                 img.url = `/api/serve-upload${img.url}`;
               }
+              // 回填：历史数据 modelName 为空但 model 有值时，用 model 补充
+              if ((!img.modelName || img.modelName === '') && img.model) {
+                img.modelName = img.model;
+              }
             }
           }
         }
@@ -305,7 +309,14 @@ export class UserManager {
       const serverHasData = serverProjects.length > 0;
 
       if (!localHasData && serverHasData) {
-        // 本地无数据，直接使用服务器数据
+        // 本地无数据，直接使用服务器数据，但回填 modelName（历史数据可能缺失）
+        for (const sp of serverProjects) {
+          for (const img of sp.canvasImages) {
+            if ((!img.modelName || img.modelName === '') && img.model) {
+              img.modelName = img.model;
+            }
+          }
+        }
         userData.projects = serverProjects;
       } else if (localHasData && serverHasData) {
         // 双方都有数据，按项目 ID 逐个合并
@@ -320,7 +331,38 @@ export class UserManager {
             const localImgMap = new Map(lp.canvasImages.map(img => [img.id, img]));
             const serverImgMap = new Map(sp.canvasImages.map(img => [img.id, img]));
             // 以服务器版本为基础，补充本地独有的图片
-            const mergedImages = [...sp.canvasImages];
+            // ★ 关键修复：对于本地和服务器都存在的图片，进行字段级合并
+            // 服务器可能缺少 modelName/apiProvider 等字段（历史遗留），
+            // 此时保留本地非空值，避免每次30秒同步都丢失这些字段
+            const mergedImages = sp.canvasImages.map(sImg => {
+              const lImg = localImgMap.get(sImg.id);
+              const enriched = { ...sImg };
+              // 回填：历史数据 modelName 为空但 model 有值时，用 model 补充
+              if ((!enriched.modelName || enriched.modelName === '') && enriched.model) {
+                enriched.modelName = enriched.model;
+              }
+              if (!lImg) return enriched;
+              // 逐字段检查，从本地补充服务器缺失的字段
+              if ((!enriched.modelName || enriched.modelName === '') && lImg.modelName) {
+                enriched.modelName = lImg.modelName;
+              }
+              if ((!enriched.apiProvider || enriched.apiProvider === '') && lImg.apiProvider) {
+                enriched.apiProvider = lImg.apiProvider;
+              }
+              if ((!enriched.model || enriched.model === '') && lImg.model) {
+                enriched.model = lImg.model;
+              }
+              if (!enriched.originalWidth && lImg.originalWidth) {
+                enriched.originalWidth = lImg.originalWidth;
+              }
+              if (!enriched.originalHeight && lImg.originalHeight) {
+                enriched.originalHeight = lImg.originalHeight;
+              }
+              if ((!enriched.apiBaseUrl || enriched.apiBaseUrl === '') && lImg.apiBaseUrl) {
+                enriched.apiBaseUrl = lImg.apiBaseUrl;
+              }
+              return enriched;
+            });
             for (const [imgId, img] of localImgMap) {
               if (!serverImgMap.has(imgId)) {
                 mergedImages.push(img);

@@ -662,6 +662,15 @@ UPSCALE_TIMEOUT_MS=300000
 
 ### v3.1.0 (当前版本)
 
+**P0: 图片模型信息(modelName/apiProvider)持久化修复**
+- user-types.ts CanvasImage 新增 modelName/apiProvider 可选字段定义
+- loadProjectsFromServer 合并逻辑升级：服务器+本地都有图片时做字段级合并，保留本地非空的 modelName/apiProvider/model/originalWidth/originalHeight
+- 服务器独有数据路径：回填 modelName（历史数据 model 有值但 modelName 为空时，用 model 字段值补充）
+- normalizeImageUrls 同步回填 modelName（数据加载/迁移时自动补全）
+- onProjectsChanged 字段保留逻辑：从 latestImagesRef 保留本地非空字段，避免30秒同步覆盖
+- completedCanvasImages modelName 回退链：img.modelName || pollingModelName || img.model，确保模型名称始终有值
+- 自动保存类型修复：PersistableCanvasImage 类型别名 + as 类型断言，解决 user-types 与 infinite-canvas CanvasImage 类型兼容问题
+
 **P0: 扩展命令 gemini-image 协议修复**
 - submitImageTask 新增 gemini-image 协议检测与 chat 格式转换（buildGeminiChatImageRequest）
 - 编辑操作（扩展/擦除/蒙版）遇到真正的 Gemini 图像模型时自动跳过，回退到支持 /images/edits 的模型
