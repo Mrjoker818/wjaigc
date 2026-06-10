@@ -22,7 +22,7 @@ export function normalizeApiBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '');
 }
 
-type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'imageEdit' | 'universal' | 'general';
+type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'imageEdit' | 'universal' | 'general';
 
 /**
  * Normalize advancedParams from DB storage format to Record<string, string>.
@@ -104,19 +104,46 @@ function normalizeBaseUrl(baseUrl: string): string {
   return trimmed;
 }
 
-function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' {
+function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' {
   if (provider.modelType === 'chat') return 'chat';
   if (provider.modelType === '3d') return '3d';
   if (provider.modelType === 'vectorize') return 'vectorize';
   if (provider.modelType === 'layer') return 'layer';
+  if (provider.modelType === 'video') return 'video';
   // General/universal: default to 'chat' since most models are chat
   // Individual model types from inferModelType override this in getPublicModels
   if (provider.modelType === 'imageEdit' || provider.modelType === 'universal' || provider.modelType === 'general') return 'chat';
   return 'image';
 }
 
-function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 'vectorize' | 'layer'): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' {
+function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video'): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' {
   const id = modelId.toLowerCase();
+  // 视频模型关键词匹配 — 必须在图像之前检查，避免视频模型被误判为图像
+  if (
+    id.includes('video-generation') ||
+    id.includes('video-generation') ||
+    id.includes('kling-v3-video') ||
+    id.includes('kling-v3-omni-video') ||
+    id.includes('seedance') ||
+    id.includes('vidu-') ||
+    id.includes('hailuo-') ||
+    id.includes('minimax-video') ||
+    id.includes('wan2.7-video') ||
+    id.includes('wan2-video') ||
+    id.includes('veo-') ||
+    id.includes('veo3') ||
+    id.includes('gen-3-alpha') ||
+    id.includes('gen-4') ||
+    id.includes('pika-') ||
+    id.includes('ray2') ||
+    id.includes('ray3') ||
+    id.includes('sora-2') ||
+    (id.includes('sora') && !id.includes('sorafenib'))
+  ) {
+    // 例外：如果同时包含 image 关键词，则不是视频模型
+    if (id.includes('image')) return 'image';
+    return 'video';
+  }
   // 矢量化模型关键词匹配
   if (id.includes('vectorize') || id.includes('vector') || id.includes('vtracer') || id.includes('starvector') || id.includes('svg-convert') || id.includes('svgconvert')) return 'vectorize';
   // 分层模型关键词匹配
@@ -222,7 +249,7 @@ function normalizeSelectedModels(val: unknown): string[] {
 
 /** Normalize discovered_models from DB: handle JSON string or array */
 function normalizeDiscoveredModels(val: unknown, providerId: string, modelType: string): ModelInfo[] {
-  const validTypes = ['image', 'chat', '3d', 'vectorize', 'layer'] as const;
+  const validTypes = ['image', 'chat', '3d', 'vectorize', 'layer', 'video'] as const;
   type ModelType = typeof validTypes[number];
   const resolveType = (t: unknown): ModelType => {
     if (typeof t === 'string' && validTypes.includes(t as ModelType)) return t as ModelType;
@@ -704,13 +731,14 @@ export async function findProviderById(providerId: string): Promise<ApiProvider 
 }
 
 /** 根据功能类型查找对应的 API 提供商（矢量化/分层/3D/聊天等） */
-export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3d' | 'imageEdit' | 'chat'): Promise<ApiProvider | null> {
+export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3d' | 'imageEdit' | 'chat' | 'video'): Promise<ApiProvider | null> {
   const kindMap: Record<string, ApiKind> = {
     vectorize: 'vectorize',
     layer: 'layer',
     '3d': '3d',
     imageEdit: 'image',
     chat: 'chat',
+    video: 'video',
   };
   const kind = kindMap[feature];
   if (!kind) return null;

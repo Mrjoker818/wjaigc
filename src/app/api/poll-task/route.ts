@@ -454,6 +454,139 @@ export async function POST(request: NextRequest) {
           retryable: false,
         }, { status: 200 });
       }
+      // ★ 视频任务轮询：使用 video-api 协议适配器
+      if (registryTask.type === 'video') {
+        const regResult = (registryTask.result as Record<string, unknown>) || {};
+        const thirdPartyTaskId = regResult.thirdPartyTaskId as string | undefined;
+        const videoProfile = regResult.profile as string | undefined;
+        const videoBaseUrl = regResult.baseUrl as string | undefined;
+        const videoApiKey = regResult.apiKey as string | undefined;
+        const videoModel = regResult.model as string | undefined;
+        const videoProviderId = regResult.providerId as string | undefined;
+
+        if (!thirdPartyTaskId) {
+          // 尚未获得第三方任务ID（可能提交还在进行中）
+          return NextResponse.json({
+            success: true,
+            status: registryTask.status,
+            progress: registryTask.progress,
+            label: registryTask.label,
+          }, { status: 200 });
+        }
+
+        // 查找提供商信息
+        let vApiKey = videoApiKey;
+        let vBaseUrl = videoBaseUrl;
+        if (!vApiKey || !vBaseUrl) {
+          const vProvider = videoProviderId
+            ? await findProviderById(videoProviderId)
+            : videoModel ? await findProviderForModel(videoModel) : null;
+          vApiKey = vProvider?.apiKey || '';
+          vBaseUrl = normalizeApiBaseUrl(vProvider?.baseUrl || '');
+        }
+
+        if (!vApiKey || !vBaseUrl) {
+          return NextResponse.json({
+            success: false, status: 'failed',
+            error: '未找到视频 API 提供商信息',
+            retryable: false,
+          }, { status: 200 });
+        }
+
+        try {
+          const {
+            buildVideoPollRequest,
+            parseVideoPollResponse,
+          } = await import('@/lib/video-api');
+
+          const pollReq = buildVideoPollRequest(
+            (videoProfile || 'rest-generic') as any,
+            vBaseUrl,
+            vApiKey || '',
+            thirdPartyTaskId,
+          );
+
+          const pollResp = await fetchWithV1Retry(pollReq.url, {
+            method: pollReq.method,
+            headers: pollReq.headers,
+            signal: AbortSignal.timeout(30000),
+          });
+
+          if (!pollResp.ok) {
+            return NextResponse.json({
+              success: true, status: 'processing',
+              progress: registryTask.progress,
+              label: registryTask.label,
+            }, { status: 200 });
+          }
+
+          const pollData = await pollResp.json();
+          const videoResult = parseVideoPollResponse(
+            (videoProfile || 'rest-generic') as any,
+            pollData,
+          );
+
+          if ((videoResult.status === 'succeeded' || videoResult.status === 'completed') && videoResult.videoUrl) {
+            // 持久化视频文件
+            let persistedVideoUrl = videoResult.videoUrl;
+            try {
+              const { persistRemoteImage } = await import('@/lib/s3-storage');
+              const persisted = await persistRemoteImage(videoResult.videoUrl, `video/${taskId}`);
+              if (persisted) persistedVideoUrl = persisted;
+            } catch (persistErr) {
+              console.warn('[poll-task] Video persist failed, using source URL:', persistErr);
+            }
+
+            updateTaskProgress(taskId, { status: 'completed', progress: 100 });
+            releaseQueueSlot(taskId);
+            completedTaskCache.set(taskId, { imageUrl: persistedVideoUrl, timestamp: Date.now() });
+
+            return NextResponse.json({
+              success: true,
+              status: 'completed',
+              progress: 100,
+              imageUrl: persistedVideoUrl,
+              mediaType: 'video',
+              videoUrl: persistedVideoUrl,
+              videoDuration: videoResult.duration,
+              watermarkVideoUrl: videoResult.watermarkVideoUrl,
+              modelName: videoModel || '',
+            }, { status: 200 });
+          }
+
+          if (videoResult.status === 'failed') {
+            updateTaskProgress(taskId, { status: 'failed', error: videoResult.error || '视频生成失败', progress: 0 });
+            releaseQueueSlot(taskId);
+            failedTaskCache.set(taskId, { error: videoResult.error || '视频生成失败', timestamp: Date.now() });
+            return NextResponse.json({
+              success: false, status: 'failed',
+              error: translateApiError(videoResult.error || '视频生成失败'),
+              retryable: true,
+            }, { status: 200 });
+          }
+
+          // 仍在处理中 - 更新进度
+          const progress = videoResult.progress || Math.min(registryTask.progress + 5, 90);
+          updateTaskProgress(taskId, {
+            progress,
+            label: `${registryTask.label?.split('·')[0] || '视频生成'} · ${videoResult.status === 'running' ? '生成中' : '排队中'}...`,
+          });
+
+          return NextResponse.json({
+            success: true, status: 'processing',
+            progress,
+            label: registryTask.label,
+          }, { status: 200 });
+        } catch (videoPollErr) {
+          console.warn('[poll-task] Video poll error:', videoPollErr instanceof Error ? videoPollErr.message : videoPollErr);
+          return NextResponse.json({
+            success: true, status: 'processing',
+            progress: registryTask.progress,
+            label: registryTask.label,
+          }, { status: 200 });
+        }
+      }
+
       // ★ 关键修复：queued / processing 状态不直接返回！
       // 对于所有远端异步任务类型，必须继续查询远端API获取真实状态
       // 只有纯本地任务（edit/agent-edit）才由后端自行更新 registry，直接返回

@@ -9,7 +9,7 @@ interface ModelNameEntry {
   /** Short alias for compact display */
   short?: string;
   /** Model type category */
-  type: 'image' | 'chat' | '3d' | 'imageEdit' | 'vectorize' | 'layer';
+  type: 'image' | 'chat' | '3d' | 'imageEdit' | 'vectorize' | 'layer' | 'video';
   /** Optional provider/brand */
   provider?: string;
 }
@@ -274,6 +274,34 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'vtracer', entry: { name: 'VTracer', type: 'vectorize' } },
   { pattern: 'starvector', entry: { name: 'StarVector', type: 'vectorize' } },
   { pattern: 'vectorize', entry: { name: '矢量化', type: 'vectorize' } },
+
+  // ===== Video Models (国内) =====
+  { pattern: 'kling-v3-omni-video-generation', entry: { name: '可灵 V3 Omni 视频', short: 'Kling V3 Omni', type: 'video', provider: 'Kuaishou' } },
+  { pattern: 'kling-v3-video-generation', entry: { name: '可灵 V3 视频', short: 'Kling V3', type: 'video', provider: 'Kuaishou' } },
+  { pattern: 'doubao-seedance-2-3-fast', entry: { name: 'Seedance 2.3 Fast', short: 'SD 2.3F', type: 'video', provider: 'ByteDance' } },
+  { pattern: 'doubao-seedance-2-3', entry: { name: 'Seedance 2.3', short: 'SD 2.3', type: 'video', provider: 'ByteDance' } },
+  { pattern: 'doubao-seedance-2-0-fast', entry: { name: 'Seedance 2.0 Fast', short: 'SD 2.0F', type: 'video', provider: 'ByteDance' } },
+  { pattern: 'doubao-seedance-2-0', entry: { name: 'Seedance 2.0', short: 'SD 2.0', type: 'video', provider: 'ByteDance' } },
+  { pattern: 'doubao-seedance-1-0-lite', entry: { name: 'Seedance 1.0 Lite', short: 'SD 1.0L', type: 'video', provider: 'ByteDance' } },
+  { pattern: 'hailuo-2.3', entry: { name: '海螺 Hailuo 2.3', short: 'Hailuo 2.3', type: 'video', provider: 'MiniMax' } },
+  { pattern: 'hailuo-02', entry: { name: '海螺 Hailuo 02', short: 'Hailuo 02', type: 'video', provider: 'MiniMax' } },
+  { pattern: 'video-01', entry: { name: '海螺 Video-01', short: 'Video-01', type: 'video', provider: 'MiniMax' } },
+  { pattern: 'vidu-q2', entry: { name: 'Vidu Q2', short: 'Vidu Q2', type: 'video', provider: 'ShengShu' } },
+  { pattern: 'vidu-q1', entry: { name: 'Vidu Q1', short: 'Vidu Q1', type: 'video', provider: 'ShengShu' } },
+
+  // ===== Video Models (海外) =====
+  { pattern: 'gen-4', entry: { name: 'Runway Gen-4', short: 'Gen-4', type: 'video', provider: 'Runway' } },
+  { pattern: 'gen-3-alpha-turbo', entry: { name: 'Runway Gen-3 Turbo', short: 'Gen-3T', type: 'video', provider: 'Runway' } },
+  { pattern: 'gen-3-alpha', entry: { name: 'Runway Gen-3', short: 'Gen-3', type: 'video', provider: 'Runway' } },
+  { pattern: 'pika-2.2', entry: { name: 'Pika 2.2', short: 'Pika 2.2', type: 'video', provider: 'Pika' } },
+  { pattern: 'pika-2.0', entry: { name: 'Pika 2.0', short: 'Pika 2.0', type: 'video', provider: 'Pika' } },
+  { pattern: 'pika-1.5', entry: { name: 'Pika 1.5', short: 'Pika 1.5', type: 'video', provider: 'Pika' } },
+  { pattern: 'ray3.14', entry: { name: 'Luma Ray3.14', short: 'Ray3.14', type: 'video', provider: 'Luma' } },
+  { pattern: 'ray3', entry: { name: 'Luma Ray3', short: 'Ray3', type: 'video', provider: 'Luma' } },
+  { pattern: 'ray2', entry: { name: 'Luma Ray2', short: 'Ray2', type: 'video', provider: 'Luma' } },
+  { pattern: 'sora', entry: { name: 'OpenAI Sora', short: 'Sora', type: 'video', provider: 'OpenAI' } },
+  { pattern: 'veo-3', entry: { name: 'Google Veo 3', short: 'Veo 3', type: 'video', provider: 'Google' } },
+  { pattern: 'veo-2', entry: { name: 'Google Veo 2', short: 'Veo 2', type: 'video', provider: 'Google' } },
 
   // ===== Layer Models =====
   { pattern: 'sam2', entry: { name: 'SAM 2', type: 'layer', provider: 'Meta' } },

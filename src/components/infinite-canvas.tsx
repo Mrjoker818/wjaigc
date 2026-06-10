@@ -42,6 +42,7 @@ import OhMyPrompt from '@/components/oh-my-prompt';
 import dynamic from 'next/dynamic';
 
 const ModelViewer3D = dynamic(() => import('@/components/model-viewer-3d'), { ssr: false });
+const VideoPlayer = dynamic(() => import('@/components/video-player'), { ssr: false });
 
 const PsdLayerEditor = lazy(() => import('@/components/psd-editor/PsdLayerEditor'));
 const AgentEditor = lazy(() => import('@/components/agent-editor').then(m => ({ default: m.AgentEditor })));
@@ -323,6 +324,11 @@ export interface CanvasImage {
   apiProvider?: string;
   apiBaseUrl?: string;
   thumbnailUrl?: string; // 缩略图URL，用于画布渲染（4K图片性能优化）
+  // 视频媒体扩展
+  mediaType?: 'image' | 'video';
+  videoUrl?: string;
+  videoDuration?: number;
+  videoThumbnailUrl?: string;
 }
 
 interface InfiniteCanvasProps {
@@ -1019,6 +1025,12 @@ export function InfiniteCanvas({
   const annotationContainerRef = useRef<HTMLDivElement>(null);
   const annotationInputRef = useRef<HTMLTextAreaElement>(null);
   const [followUpInputId, setFollowUpInputId] = useState<string | null>(null);
+  const annotationPanelRef = useRef<HTMLDivElement>(null);
+  const annotationPanelPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const annotationPanelDragging = useRef(false);
+  const annotationPanelDragStart = useRef({ mx: 0, my: 0, px: 0, py: 0 });
+  const [annotationPanelOffset, setAnnotationPanelOffset] = useState({ x: 0, y: 0 });
+  const annotationPanelDragRef = useRef<{ startX: number; startY: number; startOffsetX: number; startOffsetY: number } | null>(null);
   const [followUpInputText, setFollowUpInputText] = useState('');
   const [expandedBubbleId, setExpandedBubbleId] = useState<string | null>(null);
   // Region selection state for annotation drag
@@ -1113,6 +1125,10 @@ export function InfiniteCanvas({
   const [viewer3DModelUrl, setViewer3DModelUrl] = useState('');
   const [viewer3DPreviewUrl, setViewer3DPreviewUrl] = useState('');
   const [viewer3DModelUrls, setViewer3DModelUrls] = useState<Record<string, string>>({});
+
+  // Video player state
+  const [videoPlayerUrl, setVideoPlayerUrl] = useState('');
+  const [videoPlayerVisible, setVideoPlayerVisible] = useState(false);
 
   const [threeDQuality, setThreeDQuality] = useState('high');
   const [threeDTexture, setThreeDTexture] = useState('4k');
@@ -5077,12 +5093,12 @@ export function InfiniteCanvas({
             };
             onImagesChange([...images, newImage]);
             setAnnotations(prev => prev.map(a =>
-              a.id === annotation.id ? { ...a, status: 'done' as const, resultImageUrl: resultUrl, aiReply: '修改完成' } : a
+              a.id === annotation.id ? { ...a, status: 'done' as const, resultImageUrl: resultUrl, aiReply: '修改完成', chatExpanded: true } : a
             ));
           } else if (pollData.status === 'failed') {
             completed = true;
             setAnnotations(prev => prev.map(a =>
-              a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply: pollData.error || '修改失败' } : a
+              a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply: pollData.error || '修改失败', chatExpanded: true } : a
             ));
           }
         } catch {
@@ -7716,6 +7732,34 @@ export function InfiniteCanvas({
                     }}
                   />
                 ) : null}
+                {/* Video play button overlay */}
+                {image.mediaType === 'video' && !image.isProcessingPlaceholder && (
+                  <div
+                    className="absolute inset-0 flex items-center justify-center z-20 cursor-pointer group/play"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (image.videoUrl) {
+                        setVideoPlayerUrl(image.videoUrl);
+                        setVideoPlayerVisible(true);
+                      }
+                    }}
+                  >
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all duration-200 ${isMonochrome ? 'bg-black/60 hover:bg-black/80' : 'bg-black/60 hover:bg-gold/90'}`}>
+                      <Play className={`w-5 h-5 ml-0.5 ${isMonochrome ? 'text-white group-hover/play:text-white' : 'text-white group-hover/play:text-black'}`} fill="currentColor" />
+                    </div>
+                    {/* Video duration badge */}
+                    {image.videoDuration && (
+                      <div className={`absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded text-[10px] font-mono ${isMonochrome ? 'bg-black/70 text-white' : 'bg-black/70 text-white'}`}>
+                        {Math.floor(image.videoDuration / 60)}:{String(Math.floor(image.videoDuration % 60)).padStart(2, '0')}
+                      </div>
+                    )}
+                    {/* Video label */}
+                    <div className={`absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold ${isMonochrome ? 'bg-blue-500/90 text-white' : 'bg-gold/90 text-black'}`}
+                      style={{ fontSize: `${Math.max(9, 10 / zoom)}px` }}>
+                      VIDEO
+                    </div>
+                  </div>
+                )}
                 {/* 3D model badge - click to open 3D viewer */}
                 {image.threeDModelUrl && !image.isProcessingPlaceholder && (
                   <div className="absolute top-1 left-1 z-30"
@@ -10510,7 +10554,7 @@ export function InfiniteCanvas({
 
         {/* ====== ANNOTATION DIALOG BUBBLES ====== */}
         {/* Show inline bubble for any annotation that is clicked/expanded */}
-        {annotations.filter(a => a.chatExpanded || a.status === 'done' || a.status === 'failed' || (a.status === 'running' && a.text)).map(ann => {
+        {annotations.filter(a => a.chatExpanded || a.status === 'running' || a.status === 'pending').map(ann => {
           const sx = ann.x * zoom + viewOffset.x;
           const sy = ann.y * zoom + viewOffset.y;
           const isFollowUpOpen = followUpInputId === ann.id;
@@ -10556,9 +10600,20 @@ export function InfiniteCanvas({
                     <>
                       <div className="flex items-start gap-2">
                         <div className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${isMonochrome ? 'bg-blue-400' : 'bg-gold'}`} />
-                        <div className={`text-xs leading-relaxed ${isMonochrome ? 'text-gray-700' : 'text-text-bright/80'}`}>
+                        <div className={`text-xs leading-relaxed flex-1 ${isMonochrome ? 'text-gray-700' : 'text-text-bright/80'}`}>
                           {ann.aiReply}
                         </div>
+                        <button
+                          onClick={() => {
+                            setAnnotations(prev => prev.map(a =>
+                              a.id === ann.id ? { ...a, chatExpanded: false } : a
+                            ));
+                          }}
+                          className={`flex-shrink-0 w-4 h-4 flex items-center justify-center rounded-full ${isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted/50 hover:text-gold hover:bg-gold/10'}`}
+                          title="关闭"
+                        >
+                          ✕
+                        </button>
                       </div>
                       {/* Compare toggle (only when original + result images exist) */}
                       {ann.originalImageUrl && ann.resultImageUrl && (
@@ -10723,69 +10778,126 @@ export function InfiniteCanvas({
         )}
 
         {/* ====== ANNOTATION LIST PANEL ====== */}
-        {annotations.length > 0 && (
-          <div className={`absolute bottom-16 left-1/2 -translate-x-1/2 z-[60] max-w-md w-max max-h-60 overflow-y-auto rounded-xl shadow-lg ${isMonochrome ? 'bg-white border border-blue-200' : 'bg-[#1a1a1a] border border-gold/20'}`}>
-            <div className={`flex items-center justify-between px-3 py-2 border-b ${isMonochrome ? 'border-gray-100' : 'border-white/5'}`}>
-              <span className={`text-xs font-medium ${isMonochrome ? 'text-gray-600' : 'text-gold-muted'}`}>
-                批注 ({annotations.length})
-              </span>
-              {annotations.some(a => a.status === 'pending') && (
-                <button
-                  onClick={executePendingAnnotations}
-                  className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-gold text-black hover:bg-[#e5c047]'}`}
-                >
-                  <Play size={10} />
-                  执行待处理
-                </button>
-              )}
-            </div>
-            {annotations.map(ann => {
-              const targetImg = images.find(img => img.id === ann.targetImageId);
-              return (
-                <div key={ann.id} className={`flex items-center gap-2 px-3 py-2 ${isMonochrome ? 'hover:bg-gray-50' : 'hover:bg-white/[0.03]'}`}>
-                  <span className={`shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                    ann.status === 'pending' ? (isMonochrome ? 'bg-gray-200 text-gray-600' : 'bg-gold/20 text-gold')
-                    : ann.status === 'running' ? (isMonochrome ? 'bg-blue-100 text-blue-600' : 'bg-blue-500/20 text-blue-400')
-                    : ann.status === 'done' ? (isMonochrome ? 'bg-green-100 text-green-600' : 'bg-green-500/20 text-green-400')
-                    : (isMonochrome ? 'bg-red-100 text-red-600' : 'bg-red-500/20 text-red-400')
-                  }`}>
-                    {ann.status === 'running' ? '⟳' : ann.status === 'done' ? '✓' : ann.status === 'failed' ? '✗' : '#'}
+        {annotations.length > 0 && (() => {
+          const panelPos = annotationPanelPos;
+          const dragging = annotationPanelDragging;
+          const dragStart = annotationPanelDragStart;
+
+          const onPointerDown = (e: React.PointerEvent) => {
+            /* Only drag from header area */
+            if ((e.target as HTMLElement).closest('[data-panel-body]')) return;
+            dragging.current = true;
+            dragStart.current = { mx: e.clientX, my: e.clientY, px: panelPos.current.x, py: panelPos.current.y };
+            (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+            e.preventDefault();
+          };
+          const onPointerMove = (e: React.PointerEvent) => {
+            if (!dragging.current) return;
+            panelPos.current = {
+              x: dragStart.current.px + (e.clientX - dragStart.current.mx),
+              y: dragStart.current.py + (e.clientY - dragStart.current.my),
+            };
+            if (annotationPanelRef.current) {
+              annotationPanelRef.current.style.transform = `translate(${panelPos.current.x}px, ${panelPos.current.y}px)`;
+            }
+          };
+          const onPointerUp = () => { dragging.current = false; };
+
+          return (
+            <div
+              ref={annotationPanelRef}
+              style={{ transform: `translate(${panelPos.current.x}px, ${panelPos.current.y}px)` }}
+              className={`absolute bottom-20 right-4 z-[60] max-w-md w-max max-h-60 rounded-xl shadow-lg ${isMonochrome ? 'bg-white border border-blue-200' : 'bg-[#1a1a1a] border border-gold/20'}`}
+            >
+              <div
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                className={`flex items-center justify-between px-3 py-2 border-b cursor-move select-none ${isMonochrome ? 'border-gray-100' : 'border-white/5'}`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <GripVertical size={12} className={isMonochrome ? 'text-gray-300' : 'text-white/20'} />
+                  <span className={`text-xs font-medium ${isMonochrome ? 'text-gray-600' : 'text-gold-muted'}`}>
+                    批注 ({annotations.length})
                   </span>
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-xs truncate ${isMonochrome ? 'text-gray-700' : 'text-text-bright'}`}>{ann.text}</p>
-                    {targetImg && <p className={`text-[10px] truncate ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/40'}`}>{targetImg.prompt?.slice(0,30) || '图片'}</p>}
-                  </div>
-                  <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${
-                    ann.status === 'pending' ? (isMonochrome ? 'bg-gray-100 text-gray-600' : 'bg-white/5 text-gold-muted')
-                    : ann.status === 'running' ? (isMonochrome ? 'bg-blue-50 text-blue-600' : 'bg-blue-500/10 text-blue-400')
-                    : ann.status === 'done' ? (isMonochrome ? 'bg-green-50 text-green-600' : 'bg-green-500/10 text-green-400')
-                    : (isMonochrome ? 'bg-red-50 text-red-600' : 'bg-red-500/10 text-red-400')
-                  }`}>
-                    {ann.status === 'pending' ? '待执行' : ann.status === 'running' ? '执行中' : ann.status === 'done' ? '已完成' : '失败'}
-                  </span>
-                  {ann.status === 'pending' && (
-                    <button
-                      onClick={() => setAnnotations(prev => prev.filter(a => a.id !== ann.id))}
-                      className={`shrink-0 p-1 rounded ${isMonochrome ? 'text-gray-300 hover:text-red-400 hover:bg-red-50' : 'text-white/20 hover:text-red-400 hover:bg-red-500/10'}`}
-                      title="删除"
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
-                  {ann.status === 'failed' && (
-                    <button
-                      onClick={() => { setAnnotations(prev => prev.map(a => a.id === ann.id ? { ...a, status: 'pending' as const } : a)); }}
-                      className={`shrink-0 p-1 rounded ${isMonochrome ? 'text-gray-400 hover:text-blue-500 hover:bg-blue-50' : 'text-white/30 hover:text-blue-400 hover:bg-blue-500/10'}`}
-                      title="重试"
-                    >
-                      <RotateCcw size={12} />
-                    </button>
-                  )}
                 </div>
-              );
-            })}
-          </div>
-        )}
+                <div className="flex items-center gap-2">
+                  {annotations.some(a => a.status === 'pending') && (
+                    <button
+                      onClick={executePendingAnnotations}
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-gold text-black hover:bg-[#e5c047]'}`}
+                    >
+                      <Play size={10} />
+                      执行待处理
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setAnnotations([])}
+                    className={`p-0.5 rounded ${isMonochrome ? 'text-gray-300 hover:text-red-400' : 'text-white/20 hover:text-red-400'}`}
+                    title="清空全部"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+              <div data-panel-body="" className="overflow-y-auto max-h-44">
+              {annotations.map(ann => {
+                const targetImg = images.find(img => img.id === ann.targetImageId);
+                return (
+                  <div key={ann.id} className={`flex items-center gap-2 px-3 py-2 ${isMonochrome ? 'hover:bg-gray-50' : 'hover:bg-white/[0.03]'} ${ann.status === 'done' ? 'cursor-pointer' : ''}`}
+                    onClick={() => {
+                      if (ann.status === 'done') {
+                        setAnnotations(prev => prev.map(a =>
+                          a.id === ann.id ? { ...a, chatExpanded: !a.chatExpanded } : a
+                        ));
+                      }
+                    }}
+                  >
+                    <span className={`shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                      ann.status === 'pending' ? (isMonochrome ? 'bg-gray-200 text-gray-600' : 'bg-gold/20 text-gold')
+                      : ann.status === 'running' ? (isMonochrome ? 'bg-blue-100 text-blue-600' : 'bg-blue-500/20 text-blue-400')
+                      : ann.status === 'done' ? (isMonochrome ? 'bg-green-100 text-green-600' : 'bg-green-500/20 text-green-400')
+                      : (isMonochrome ? 'bg-red-100 text-red-600' : 'bg-red-500/20 text-red-400')
+                    }`}>
+                      {ann.status === 'running' ? '⟳' : ann.status === 'done' ? '✓' : ann.status === 'failed' ? '✗' : '#'}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-xs truncate ${isMonochrome ? 'text-gray-700' : 'text-text-bright'}`}>{ann.text}</p>
+                      {targetImg && <p className={`text-[10px] truncate ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/40'}`}>{targetImg.prompt?.slice(0,30) || '图片'}</p>}
+                    </div>
+                    <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${
+                      ann.status === 'pending' ? (isMonochrome ? 'bg-gray-100 text-gray-600' : 'bg-white/5 text-gold-muted')
+                      : ann.status === 'running' ? (isMonochrome ? 'bg-blue-50 text-blue-600' : 'bg-blue-500/10 text-blue-400')
+                      : ann.status === 'done' ? (isMonochrome ? 'bg-green-50 text-green-600' : 'bg-green-500/10 text-green-400')
+                      : (isMonochrome ? 'bg-red-50 text-red-600' : 'bg-red-500/10 text-red-400')
+                    }`}>
+                      {ann.status === 'pending' ? '待执行' : ann.status === 'running' ? '执行中' : ann.status === 'done' ? '已完成' : '失败'}
+                    </span>
+                    {ann.status === 'pending' && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setAnnotations(prev => prev.filter(a => a.id !== ann.id)); }}
+                        className={`shrink-0 p-1 rounded ${isMonochrome ? 'text-gray-300 hover:text-red-400 hover:bg-red-50' : 'text-white/20 hover:text-red-400 hover:bg-red-500/10'}`}
+                        title="删除"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                    {ann.status === 'failed' && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setAnnotations(prev => prev.map(a => a.id === ann.id ? { ...a, status: 'pending' as const } : a)); }}
+                        className={`shrink-0 p-1 rounded ${isMonochrome ? 'text-gray-400 hover:text-blue-500 hover:bg-blue-50' : 'text-white/30 hover:text-blue-400 hover:bg-blue-500/10'}`}
+                        title="重试"
+                      >
+                        <RotateCcw size={12} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ====== IMAGE-TO-IMAGE FLOATING PANEL ====== */}
         {/* ====== MULTI-ANGLE FLOATING PANEL ====== */}
@@ -11317,6 +11429,15 @@ export function InfiniteCanvas({
             modelUrls={viewer3DModelUrls}
             previewImageUrl={viewer3DPreviewUrl}
             onClose={() => { setShow3DViewer(false); setViewer3DModelUrl(''); setViewer3DPreviewUrl(''); setViewer3DModelUrls({}); }}
+          />
+        )}
+
+        {/* ====== VIDEO PLAYER MODAL ====== */}
+        {videoPlayerVisible && videoPlayerUrl && (
+          <VideoPlayer
+            videoUrl={videoPlayerUrl}
+            onClose={() => { setVideoPlayerVisible(false); setVideoPlayerUrl(''); }}
+            isMonochrome={isMonochrome}
           />
         )}
 

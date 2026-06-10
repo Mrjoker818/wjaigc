@@ -12,9 +12,8 @@ interface AdminSystemProps {
   onClose: () => void;
 }
 
-type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer';
-type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'imageEdit' | 'vectorize' | 'layer';
-type AdminProvider = ApiProvider & { apiKeyPreview?: string };
+type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video';
+type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'imageEdit' | 'vectorize' | 'layer' | 'video';
 
 const apiKindLabels: Record<ApiKind, string> = {
   general: '通用模型',
@@ -23,6 +22,7 @@ const apiKindLabels: Record<ApiKind, string> = {
   '3d': '3D 模型',
   vectorize: '矢量模型',
   layer: '图片分层模型',
+  video: '视频模型',
 };
 
 const apiKindDescriptions: Record<ApiKind, string> = {
@@ -32,6 +32,7 @@ const apiKindDescriptions: Record<ApiKind, string> = {
   '3d': '支持自动识别模型，管理员选择后对接到一键转3D功能',
   vectorize: '添加API后系统自动识别 vectorize 模型，对接到矢量化工具和导出SVG',
   layer: '添加API后系统自动识别 qwen-image-layered 模型，对接到编辑元素和下载PSD',
+  video: '添加API后系统自动识别视频模型（可灵/Seedance/海螺/Vidu/Runway/Pika/Sora等），对接到文生视频和图生视频功能',
 };
 
 const userPermissionLabels: Record<UserPermissionKey, string> = {
@@ -41,6 +42,7 @@ const userPermissionLabels: Record<UserPermissionKey, string> = {
   imageEdit: '编辑',
   vectorize: '矢量',
   layer: '分层',
+  video: '视频',
 };
 
 export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) {
@@ -453,6 +455,16 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
         });
         if (layerModels.length > 0) {
           setSelectedModels(layerModels.map((m: ModelInfo) => m.id));
+        } else if (models.length > 0) {
+          setSelectedModels([]);
+        }
+      } else if (apiKind === 'video') {
+        const videoModels = models.filter((m: ModelInfo) => {
+          const id = m.id.toLowerCase();
+          return id.includes('video-generation') || id.includes('seedance') || id.includes('hailuo') || id.includes('vidu') || id.includes('kling-v3') || id.includes('runway') || id.includes('gen-3') || id.includes('gen-4') || id.includes('pika') || id.includes('ray2') || id.includes('ray3') || id.includes('sora') || id.includes('veo') || id.includes('minimax-video') || id.includes('video-01');
+        });
+        if (videoModels.length > 0) {
+          setSelectedModels(videoModels.map((m: ModelInfo) => m.id));
         } else if (models.length > 0) {
           setSelectedModels([]);
         }
@@ -873,7 +885,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                     <p className={`text-xs mt-1 ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>{apiKindDescriptions[apiKind]}</p>
                   </div>
                   <button onClick={() => void handleDiscoverModels()} disabled={isDiscovering} className={`w-full h-9 rounded-lg text-sm font-semibold ${isGold ? 'bg-[#1a1a1a] text-[#d4af37] border border-[#2a2a2a]' : 'bg-gray-100 text-gray-700 border border-gray-200'}`}>
-                    {isDiscovering ? '识别模型中...' : (apiKind === 'general' ? '识别所有模型' : apiKind === 'vectorize' ? '识别矢量化模型' : apiKind === 'layer' ? '识别分层模型' : '自动识别模型')}
+                    {isDiscovering ? '识别模型中...' : (apiKind === 'general' ? '识别所有模型' : apiKind === 'vectorize' ? '识别矢量化模型' : apiKind === 'layer' ? '识别分层模型' : apiKind === 'video' ? '识别视频模型' : '自动识别模型')}
                   </button>
                   {apiKind === 'general' && !isDiscovering && discoveredModels.length === 0 && (
                     <p className={`text-xs ${isGold ? 'text-[#777]' : 'text-gray-500'}`}>选择此类型后将显示当前API接口的所有可用模型，不按类型过滤</p>

@@ -85,6 +85,11 @@ export interface CanvasImage {
   processing?: string;
   generatedFromImageId?: string;
   svgDataUrl?: string;
+  // 视频媒体扩展
+  mediaType?: 'image' | 'video';
+  videoUrl?: string;
+  videoDuration?: number;
+  videoThumbnailUrl?: string;
 }
 
 export interface ApiKey {
