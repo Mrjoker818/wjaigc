@@ -6936,7 +6936,7 @@ export function InfiniteCanvas({
         <div ref={leftToolbarRef}>
         {leftToolbarExpanded ? (
           /* Expanded: full toolbar */
-          <div className={`absolute top-4 left-4 z-50 flex flex-col gap-1 min-w-[160px] p-2 rounded-full ${isMonochrome ? 'bg-white border border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl'} transition-all duration-200`}>
+          <div className={`absolute top-4 left-4 z-50 flex flex-col gap-1 min-w-[160px] p-2 rounded-xl ${isMonochrome ? 'bg-white border border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl'} transition-all duration-200`}>
             {/* Logo header */}
             <div className="flex items-center gap-2 px-2 py-1.5">
               <img src="/logo.png" alt="无界AI" className="w-6 h-6 object-contain rounded" />
