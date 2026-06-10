@@ -846,6 +846,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   viewportRef.current = viewport; // 始终保持最新值，避免拖动时stale closure
   const { models, loading: modelsLoading } = useModelList();
   const chatModels = useMemo(() => models.filter(m => m.type === 'chat'), [models]);
+  const imageModels = useMemo(() => models.filter(m => m.type === 'image'), [models]);
 
   // 工作流节点图片列表 (用于 @mention 引用和输入引用阻断)
   // 合并: 画布传入的图片 + 工作流内节点输出的图片
@@ -1617,6 +1618,15 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
     img.src = imageUrl;
   }, [setWf]);
 
+  const updateNodeSize = useCallback((nodeId: string, width: number, height: number) => {
+    setWf(prev => ({
+      ...prev,
+      nodes: prev.nodes.map((n: WorkflowNode) =>
+        n.id === nodeId ? { ...n, width, height } : n
+      ),
+    }));
+  }, [setWf]);
+
   const handleGlobalImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     const nodeId = pendingImageUploadNodeId.current;
@@ -1740,19 +1750,23 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
       if (portEl) {
         const nodeRect = nodeEl.getBoundingClientRect();
         const portRect = portEl.getBoundingClientRect();
-        const x = port.direction === 'in' ? node.x : node.x + node.width;
+        // 使用端口实际中心位置，而非假设左进右出
+        const x = node.x + (portRect.left + portRect.width / 2 - nodeRect.left) / zoom;
         const y = node.y + (portRect.top + portRect.height / 2 - nodeRect.top) / zoom;
         return { x, y };
       }
     }
-    // Fallback: body区域内均匀分布
+    // Fallback: 从节点宽度推断（input-card输入端口在右, port-row输入端口在左, 输出端口在右）
     const portIndex = node.ports.filter(p => p.direction === port.direction).findIndex(p => p.id === port.id);
     const total = node.ports.filter(p => p.direction === port.direction).length;
     const headerH = 42;
+    const isInputCardPort = port.direction === 'in' && (node.type.startsWith('ai-') || node.type.startsWith('agent'));
     const effectiveHeight = collapsedNodes.has(node.id) ? 45 : node.height;
     const bodyHeight = effectiveHeight - headerH;
     if (port.direction === 'in') {
-      return { x: node.x, y: node.y + headerH + (portIndex + 1) * (bodyHeight / (total + 1)) };
+      // input-card模式的输入端口在右边缘, 其他在左边缘
+      const x = isInputCardPort ? node.x + node.width : node.x;
+      return { x, y: node.y + headerH + (portIndex + 1) * (bodyHeight / (total + 1)) };
     }
     return { x: node.x + node.width, y: node.y + headerH + (portIndex + 1) * (bodyHeight / (total + 1)) };
   }, [collapsedNodes, viewport.zoom]);
@@ -2188,8 +2202,10 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                   return url || undefined;
                 })()}
                 llmModels={chatModels}
+                imageModels={imageModels}
                 canvasImages={canvasImages}
                 onResizeNode={resizeNodeForImageUrl}
+                onUpdateNodeSize={updateNodeSize}
                 collapsedNodes={collapsedNodes}
                 onToggleCollapse={toggleNodeCollapse}
                 onContextMenu={(e) => handleNodeContextMenu(e, node.id)}
@@ -2583,6 +2599,7 @@ interface NodeCardProps {
   theme: NodeThemeType;
   canvasImages?: CanvasImageRef[];
   llmModels?: ModelOption[];
+  imageModels?: ModelOption[];
   onNodeFieldChange?: (nodeId: string, fieldId: string, value: unknown) => void;
   onLlmOptimize?: (nodeId: string, prompt: string, model: string, systemPrompt: string, instruction: string) => void;
   onCascadeRun?: (nodeId: string) => void;
@@ -2600,6 +2617,7 @@ interface NodeCardProps {
   onDeselect: () => void;
   onPreviewImage: (url: string) => void;
   onResizeNode?: (nodeId: string, imageUrl: string) => void;
+  onUpdateNodeSize?: (nodeId: string, width: number, height: number) => void;
   collapsedNodes?: Set<string>;
   onToggleCollapse?: (nodeId: string) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
@@ -2670,10 +2688,26 @@ function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
   );
 }
 
-function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRunning, theme, canvasImages, llmModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onDeselect, onPreviewImage, onResizeNode, collapsedNodes, onToggleCollapse, onContextMenu }: NodeCardProps) {
+function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRunning, theme, canvasImages, llmModels, imageModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onDeselect, onPreviewImage, onResizeNode, onUpdateNodeSize, collapsedNodes, onToggleCollapse, onContextMenu }: NodeCardProps) {
   const T = theme;
   const cat = getNodeCategory(node.type);
   const color = NODE_TYPE_COLORS[cat];
+  const nodeRef = useRef<HTMLDivElement>(null);
+
+  // 自动测量节点实际尺寸并同步到node.width/height
+  useEffect(() => {
+    if (!nodeRef.current || !onUpdateNodeSize) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (Math.abs(width - node.width) > 2 || Math.abs(height - node.height) > 2) {
+          onUpdateNodeSize(node.id, width, height);
+        }
+      }
+    });
+    observer.observe(nodeRef.current);
+    return () => observer.disconnect();
+  }, [node.id, node.width, node.height, onUpdateNodeSize]);
   const inputPorts = node.ports.filter(p => p.direction === 'in');
   const outputPorts = node.ports.filter(p => p.direction === 'out');
   const isCondition = node.type.startsWith('condition-');
@@ -2767,13 +2801,13 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
 
   return (
     <div
+      ref={nodeRef}
       data-node-id={node.id}
       className={`node-card ${isSelected ? 'selected' : ''} ${isCollapsed ? 'collapsed' : ''} ${isInputText ? 'prompt-node' : isInputImage || isOutputImage ? 'image-node' : 'generator-node'}`}
       style={{
         left: node.x,
         top: node.y,
-        width: node.width,
-        height: isCollapsed ? 45 : node.height,
+        height: isCollapsed ? 45 : 'auto',
         zIndex: isSelected ? 10 : isHovered ? 5 : 1,
       }}
       tabIndex={0}
@@ -3009,6 +3043,21 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
                   </button>
                 </div>
               )}
+              {/* 输出端口行 */}
+              {outputPorts.map((port) => {
+                const portColor = PORT_COLORS[port.type] || T.connColor;
+                return (
+                  <div key={port.id} className="port-row" style={{ padding: '4px 12px' }}>
+                    <div className="port-dot hidden" />
+                    <span className="port-label" style={{ color: T.nodePortText, fontSize: 10 }}>{port.label}</span>
+                    <div className="port-dot output-port"
+                      data-port-id={`${node.id}-out-${port.id}`}
+                      style={{ borderColor: portColor, color: portColor }}
+                      onMouseDown={(e) => { e.stopPropagation(); onPortMouseDown(e, node.id, port); }}
+                    />
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -3043,9 +3092,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
                 <div style={{ marginBottom: 6 }}>
                   <select className="node-select" value={String(node.config?.model || '')} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'model', e.target.value); }} onMouseDown={(e) => e.stopPropagation()}>
                     <option value="">选择模型</option>
-                    <option value="flux-pro">FLUX.1 Pro</option>
-                    <option value="flux-dev">FLUX.1 Dev</option>
-                    <option value="dall-e-3">DALL-E 3</option>
+                    {(imageModels ?? []).map(m => <option key={m.id} value={m.id} style={{ background: '#2a2a2a', color: '#e0e0e0' }}>{m.apiDisplayName || m.name || m.id}{m.provider ? ` (${m.provider})` : ''}</option>)}
                   </select>
                 </div>
               )}
@@ -3178,50 +3225,6 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
           <span className="text-[12px] font-medium truncate px-2" style={{ color: T.nodeTitle }}>{node.label}</span>
         </div>
       )}
-
-      {/* ===== 输出端口 (绝对定位在节点右侧) - 仅非AI生成类节点 ===== */}
-      {(!node.type.startsWith('ai-') || isOutputImage || isOutputImageGroup || !isCollapsed && isInputText) && outputPorts.map((port, i) => {
-        const py = (i + 1) * ((isCollapsed ? 45 : node.height) / (outputPorts.length + 1));
-        const portColor = PORT_COLORS[port.type] || T.connColor;
-        return (
-          <div
-            key={port.id}
-            className="absolute group/port"
-            style={{ right: -18, top: py - 6, width: 12, height: 12, zIndex: 5 }}
-            onMouseDown={(e) => { e.stopPropagation(); onPortMouseDown(e, node.id, port); }}
-            title={port.label}
-          >
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[32px] h-[32px] rounded-full" />
-            <div
-              className="port-dot output-port"
-              data-port-id={`${node.id}-out-${port.id}`}
-              style={{ borderColor: portColor, color: portColor }}
-            />
-          </div>
-        );
-      })}
-
-      {/* ===== 输入端口 (绝对定位在节点左侧) - 仅非AI生成类节点 ===== */}
-      {(!node.type.startsWith('ai-') || isOutputImage || isOutputImageGroup) && inputPorts.map((port, i) => {
-        const py = (i + 1) * ((isCollapsed ? 45 : node.height) / (inputPorts.length + 1));
-        const portColor = PORT_COLORS[port.type] || T.connColor;
-        return (
-          <div
-            key={port.id}
-            className="absolute group/port"
-            style={{ left: -18, top: py - 6, width: 12, height: 12, zIndex: 5 }}
-            onMouseUp={(e) => { e.stopPropagation(); onPortMouseUp(node.id, port); }}
-            title={port.label}
-          >
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[32px] h-[32px] rounded-full" />
-            <div
-              className="port-dot input-port"
-              data-port-id={`${node.id}-in-${port.id}`}
-              style={{ borderColor: portColor, color: portColor }}
-            />
-          </div>
-        );
-      })}
 
       {/* 画布模式专用标记 (右上角小徽章) */}
       {isCanvasFeature && !isCondition && (

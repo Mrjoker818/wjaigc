@@ -760,6 +760,8 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: 0 8px 32px rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.25);
   cursor: grab;
   user-select: none;
+  box-sizing: border-box;
+  overflow: visible;
   transition: box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1),
               outline 120ms ease,
               transform 120ms ease;
@@ -887,7 +889,15 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* 节点内容区 */
-.node-body { padding: 12px; }
+.node-body {
+  padding: 12px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.node-body > * {
+  box-sizing: border-box;
+  max-width: 100%;
+}
 
 /* 端口行 */
 .port-row {
@@ -948,7 +958,7 @@ input[type="range"]::-moz-range-thumb {
   margin-left: 0;
 }
 .input-card .port-dot.input-port {
-  margin-left: 0;
+  margin-left: auto;
 }
 
 /* 节点内部控件 */
