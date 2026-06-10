@@ -1118,9 +1118,22 @@ export async function POST(request: NextRequest) {
     }
 
     // 返回task_ids给前端，由前端负责轮询
-    // ★ 注册任务到统一注册中心（SSE推送 + 取消支持）
+    // ★ 注册任务到统一注册中心（SSE推送 + 取消支持 + 存储提供商信息供 poll-task 使用）
     for (const tid of taskIds) {
       registerTask(tid, 'generate', '生成图片');
+      // ★ 关键修复：存储提供商信息到 task-registry，确保 poll-task 能直接使用正确的提供商
+      // 而不需要通过 findProviderForModel 重新查找（可能找不到或找到错误的提供商）
+      updateTaskProgress(tid, {
+        status: 'processing',
+        progress: 5,
+        result: {
+          usedModel: usedModelId,
+          apiBaseUrl: usedApiBaseUrl,
+          apiKey: provider?.apiKey || serverApiKey,
+          providerId: usedProviderId,
+          advancedParams: provider?.advancedParams,
+        }
+      });
     }
     return NextResponse.json({
       success: true,
