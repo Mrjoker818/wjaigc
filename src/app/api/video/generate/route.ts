@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 30000); // 30s 提交超时
 
-        const response = await fetchWithV1Retry(req.url, {
+        const response = await fetch(req.url, {
           method: req.method,
           headers: req.headers,
           body: req.body,

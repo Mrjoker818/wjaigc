@@ -17,6 +17,7 @@ const defaultApiPermissions = () => ({
   imageEdit: true,
   vectorize: true,
   layer: true,
+  video: true,
 });
 
 interface MultiUserData {
@@ -144,9 +145,7 @@ export class UserManager {
       this.multiUserData = { users: [], userData: {} };
     }
 
-    let admin = this.multiUserData.users.find(u => u.name === DEFAULT_ADMIN_NAME);
-    if (!admin) {
-      admin = {
+    const admin = this.multiUserData.users.find(u => u.name === DEFAULT_ADMIN_NAME) ?? {
         id: 'admin_mr_joker',
         name: DEFAULT_ADMIN_NAME,
         password: '',  // Password is managed server-side; client never stores it
@@ -157,6 +156,8 @@ export class UserManager {
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
+    const isNewAdmin = !this.multiUserData.users.find(u => u.name === DEFAULT_ADMIN_NAME);
+    if (isNewAdmin) {
       this.multiUserData.users.unshift(admin);
       this.multiUserData.userData[admin.id] = {
         user: admin,
@@ -455,7 +456,7 @@ export class UserManager {
       password: password ?? user.password,
       role: user.role || 'user',
       status: user.status || 'active',
-      apiPermissions: user.apiPermissions || defaultApiPermissions(),
+      apiPermissions: { ...defaultApiPermissions(), ...(user.apiPermissions || {}) },
       storageFolder: user.storageFolder?.startsWith('data/users/') ? user.storageFolder : userStorageFolder(user.id),
       updatedAt: user.updatedAt || Date.now(),
     };

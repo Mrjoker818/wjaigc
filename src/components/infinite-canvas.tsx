@@ -1609,7 +1609,7 @@ export function InfiniteCanvas({
         if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
         e.preventDefault();
         setAnnotationMode(prev => !prev);
-        if (!annotationMode) setAnnotationTool('pin'); // reset to pin when entering
+        if (!annotationMode) { setAnnotationTool('pin'); setEditMode('none'); } // reset to pin + exit any edit mode when entering
         return;
       }
       // B key to toggle brush tool in annotation mode
@@ -2053,6 +2053,21 @@ export function InfiniteCanvas({
 
     // Close any open model dropdown
     setOpenModelDropdownGroupId(null);
+
+    // Click on blank canvas area: close done annotation bubbles
+    if (!annotationMode && editMode === 'none' && e.button === 0) {
+      const canvasPos = screenToCanvas(e.clientX, e.clientY);
+      const hitId = hitTestImage(canvasPos.x, canvasPos.y);
+      if (!hitId) {
+        // Clicked blank area - close any "done" annotation bubbles that aren't explicitly expanded
+        const hasDoneBubbles = annotations.some(a => a.status === 'done' && a.chatExpanded !== false);
+        if (hasDoneBubbles) {
+          setAnnotations(prev => prev.map(a =>
+            a.status === 'done' ? { ...a, chatExpanded: false } : a
+          ));
+        }
+      }
+    }
 
     if (editMode !== 'none') {
       handleEditMouseDown(e);
@@ -4507,6 +4522,8 @@ export function InfiniteCanvas({
   // Poll for task completion
   // 存储最近一次 pollForResult 的错误信息，供调用方展示更精准的错误提示
   const lastPollErrorRef = useRef<string>('');
+  // ★ 视频任务结果暂存（pollForResult返回imageUrl后，调用方从这里读取视频元数据）
+  const lastVideoResultRef = useRef<{ videoUrl?: string; videoDuration?: number; videoThumbnailUrl?: string } | null>(null);
 
   // ★ 取消控制器：当前正在轮询的任务可通过 cancelTask 取消
   const pollingAbortRef = useRef<AbortController | null>(null);
@@ -4578,6 +4595,14 @@ export function InfiniteCanvas({
         }
 
         if (data.status === 'completed' && data.imageUrl) {
+          // ★ 视频任务：将视频元数据暂存到全局变量，供调用方使用
+          if (data.taskType === 'video' && data.videoUrl) {
+            lastVideoResultRef.current = {
+              videoUrl: data.videoUrl,
+              videoDuration: data.videoDuration,
+              videoThumbnailUrl: data.videoThumbnailUrl,
+            };
+          }
           return data.imageUrl;
         }
         if (data.status === 'failed' || data.status === 'error') {
@@ -7006,6 +7031,7 @@ export function InfiniteCanvas({
     { label: '复制', shortcut: 'Ctrl+C', action: () => { const img = selectedImageData; if (img) handleCopyImage(img); } },
     { label: '下载', action: () => { handleOpenDownload(); } },
     ...(selectedImageData?.threeDModelUrl ? [{ label: '3D 预览', action: () => { setViewer3DModelUrl(selectedImageData.threeDModelUrl || ''); setViewer3DPreviewUrl(selectedImageData.url); setViewer3DModelUrls(selectedImageData.threeDModelUrls || {}); setShow3DViewer(true); } }] : []),
+    ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '播放视频', action: () => { setVideoPlayerUrl(selectedImageData.videoUrl!); setVideoPlayerVisible(true); } }] : []),
     { label: '删除', shortcut: 'Delete', action: () => { onImagesChange(images.filter(i => !selectedIds.has(i.id))); setSelectedIds(new Set()); selectImage(null); } },
     { label: '发送参考图', action: () => { const img = selectedImageData; if (img) onGenerateVariation(img); } },
     { label: '提取关键词', action: () => { const img = selectedImageData; if (img) onExtractKeywords(img); } },
@@ -7568,6 +7594,7 @@ export function InfiniteCanvas({
                   e.stopPropagation();
                   if (image.isProcessingPlaceholder) return;
                   if (editMode !== 'none') return;
+                  if (annotationMode) return; // annotation mode handles its own clicks via mousedown
                   if (e.altKey) {
                     // 【调整2】Alt+Click: 创建/追加参考图组
                     handleAltClickAddToGroup(image);
@@ -10554,7 +10581,7 @@ export function InfiniteCanvas({
 
         {/* ====== ANNOTATION DIALOG BUBBLES ====== */}
         {/* Show inline bubble for any annotation that is clicked/expanded */}
-        {annotations.filter(a => a.chatExpanded || a.status === 'running' || a.status === 'pending').map(ann => {
+        {annotations.filter(a => a.chatExpanded || a.status === 'running' || a.status === 'pending' || a.status === 'done').map(ann => {
           const sx = ann.x * zoom + viewOffset.x;
           const sy = ann.y * zoom + viewOffset.y;
           const isFollowUpOpen = followUpInputId === ann.id;
@@ -10615,18 +10642,23 @@ export function InfiniteCanvas({
                           ✕
                         </button>
                       </div>
-                      {/* Compare toggle (only when original + result images exist) */}
+                      {/* Compare button - open built-in image comparison dialog */}
                       {ann.originalImageUrl && ann.resultImageUrl && (
                         <button
                           onClick={() => {
-                            setAnnotations(prev => prev.map(a =>
-                              a.id === ann.id ? { ...a, showComparison: !a.showComparison } : a
-                            ));
+                            // Find the image objects for original and result
+                            const origImg = images.find(i => i.url === ann.originalImageUrl);
+                            const resultImg = images.find(i => i.url === ann.resultImageUrl);
+                            setCompareImages({
+                              left: origImg || { id: `ann-orig-${ann.id}`, url: ann.originalImageUrl, prompt: ann.text || '', x: 0, y: 0, width: 512, height: 512 } as CanvasImage,
+                              right: resultImg || { id: `ann-result-${ann.id}`, url: ann.resultImageUrl, prompt: ann.aiReply || '', x: 0, y: 0, width: 512, height: 512 } as CanvasImage,
+                            });
+                            setShowCompareDialog(true);
                           }}
                           className={`text-[10px] mt-1.5 flex items-center gap-1 ${isMonochrome ? 'text-blue-500 hover:text-blue-600' : 'text-gold hover:text-gold-light'}`}
                         >
                           <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="1" y="2" width="6" height="12" rx="1"/><rect x="9" y="2" width="6" height="12" rx="1"/></svg>
-                          {ann.showComparison ? '隐藏对比' : '前后对比'}
+                          前后对比
                         </button>
                       )}
                       {/* Follow-up history */}
@@ -11437,7 +11469,6 @@ export function InfiniteCanvas({
           <VideoPlayer
             videoUrl={videoPlayerUrl}
             onClose={() => { setVideoPlayerVisible(false); setVideoPlayerUrl(''); }}
-            isMonochrome={isMonochrome}
           />
         )}
 

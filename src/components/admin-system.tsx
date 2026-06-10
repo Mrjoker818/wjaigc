@@ -48,7 +48,7 @@ const userPermissionLabels: Record<UserPermissionKey, string> = {
 export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) {
   const isGold = themeStyle === 'gold';
   const [users, setUsers] = useState<User[]>([]);
-  const [providers, setProviders] = useState<AdminProvider[]>([]);
+  const [providers, setProviders] = useState<ApiProvider[]>([]);
   const [activeTab, setActiveTab] = useState<'users' | 'apis' | 'data' | 'ecom-templates'>('users');
   const [newUserName, setNewUserName] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('123456');
@@ -397,6 +397,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
       imageEdit: user.apiPermissions?.imageEdit ?? true,
       vectorize: user.apiPermissions?.vectorize ?? true,
       layer: user.apiPermissions?.layer ?? true,
+      video: user.apiPermissions?.video ?? true,
     };
     await fetch('/api/admin/users', {
       method: 'POST',
@@ -516,7 +517,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     await refresh();
   };
 
-  const handleEditApi = (provider: AdminProvider) => {
+  const handleEditApi = (provider: ApiProvider) => {
     // Fill the left form with provider data for editing
     setEditingProviderId(provider.id);
     setApiName(provider.displayName || provider.name);
@@ -581,7 +582,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     await refresh();
   };
 
-  const handleTestConnection = async (provider: AdminProvider) => {
+  const handleTestConnection = async (provider: ApiProvider) => {
     setIsTesting(true);
     setTestResult(null);
     try {
@@ -609,7 +610,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     }
   };
 
-  const handleVerifyProtocol = async (provider: AdminProvider) => {
+  const handleVerifyProtocol = async (provider: ApiProvider) => {
     setIsVerifying(true);
     setVerifyResult(null);
     try {
@@ -675,7 +676,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     }
   };
 
-  const handleToggleApi = async (provider: AdminProvider) => {
+  const handleToggleApi = async (provider: ApiProvider) => {
     await fetch('/api/admin/apis', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -685,7 +686,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     await refresh();
   };
 
-  const handleRefreshApi = async (provider: AdminProvider) => {
+  const handleRefreshApi = async (provider: ApiProvider) => {
     await fetch('/api/admin/apis', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -695,7 +696,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
     await refresh();
   };
 
-  const handleDeleteApi = (provider: AdminProvider) => {
+  const handleDeleteApi = (provider: ApiProvider) => {
     setConfirmDlg({
       open: true,
       title: '删除 API',
@@ -1087,13 +1088,13 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                           )}
                         </div>
                         <p className={`text-xs mt-1 truncate ${isGold ? 'text-[#666]' : 'text-gray-500'}`}>{provider.baseUrl}</p>
-                        <p className={`text-xs mt-1 font-mono ${isGold ? 'text-[#555]' : 'text-gray-400'}`}>{provider.apiKeyPreview || `${provider.apiKey.slice(0, 8)}****************`}</p>
+                        <p className={`text-xs mt-1 font-mono ${isGold ? 'text-[#555]' : 'text-gray-400'}`}>{(provider as any).apiKeyPreview || `${provider.apiKey.slice(0, 8)}****************`}</p>
                         {/* 当前选择的模型 */}
                         {provider.selectedModels && provider.selectedModels.length > 0 && (
                           <div className="mt-2">
                             <p className={`text-xs mb-1 ${isGold ? 'text-[#888]' : 'text-gray-500'}`}>当前模型：</p>
                             <div className="flex flex-wrap gap-1">
-                              {provider.selectedModels.map(modelId => {
+                              {provider.selectedModels.map((modelId: string) => {
                                 const discovered = (provider.discoveredModels || []).find((dm: { id: string }) => dm.id === modelId);
                                 const displayName = discovered?.name && discovered.name !== modelId ? discovered.name : getModelDisplayName(modelId);
                                 return (

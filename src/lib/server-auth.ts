@@ -67,6 +67,7 @@ function defaultApiPermissions() {
     imageEdit: true,
     vectorize: true,
     layer: true,
+    video: true,
   };
 }
 

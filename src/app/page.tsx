@@ -1840,6 +1840,157 @@ function CanvasApp() {
     setPreviewImage(image);
   }, []);
 
+  // 视频生成处理
+  const handleVideoGenerate = useCallback(async (params: {
+    prompt: string;
+    model: string;
+    imageUrl?: string;
+    mode: 'text2video' | 'image2video-first' | 'image2video-firstlast' | 'image2video-ref';
+    aspectRatio: string;
+    duration: number;
+    quality: string;
+  }) => {
+    setActiveGenerationCount(prev => prev + 1);
+
+    const placeholderBaseSize = 400;
+    const aspectRatio = params.aspectRatio || '16:9';
+    const [arW, arH] = aspectRatio.split(':').map(Number);
+    const arRatio = (arW || 16) / (arH || 9);
+    const phWidth = arRatio >= 1 ? placeholderBaseSize : Math.round(placeholderBaseSize * arRatio);
+    const phHeight = arRatio >= 1 ? Math.round(placeholderBaseSize / arRatio) : placeholderBaseSize;
+
+    const phId = `vid-ph-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const canvasEl = document.querySelector('[data-canvas-viewport]') as HTMLElement | null;
+    const viewportWidth = canvasEl ? canvasEl.clientWidth : 1200;
+    const viewportHeight = canvasEl ? canvasEl.clientHeight : 800;
+    let viewOffsetX = 0, viewOffsetY = 0, currentZoom = 1;
+    const transformLayer = canvasEl?.querySelector('[style*="transform"]') as HTMLElement | null;
+    if (transformLayer) {
+      const match = transformLayer.style.transform?.match(/translate\(([^,]+)px,\s*([^)]+)px\)\s*scale\(([^)]+)\)/);
+      if (match) { viewOffsetX = parseFloat(match[1]); viewOffsetY = parseFloat(match[2]); currentZoom = parseFloat(match[3]); }
+    }
+    const canvasCenterX = (viewportWidth / 2 - viewOffsetX) / currentZoom;
+    const canvasCenterY = (viewportHeight / 2 - viewOffsetY) / currentZoom;
+
+    setImages(prev => [...prev, {
+      id: phId,
+      url: '',
+      x: canvasCenterX - phWidth / 2,
+      y: canvasCenterY - phHeight / 2,
+      width: phWidth, height: phHeight,
+      originalWidth: phWidth * 2, originalHeight: phHeight * 2,
+      isProcessingPlaceholder: true,
+      processing: {
+        label: '视频生成中',
+        status: 'submitting',
+        progress: 5,
+        startTime: Date.now(),
+      },
+      aspectRatio: params.aspectRatio,
+      model: params.model,
+      prompt: params.prompt,
+      createdAt: Date.now(),
+      mediaType: 'video' as const,
+    }]);
+
+    try {
+      const res = await fetch('/api/video/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: params.prompt,
+          model: params.model,
+          imageUrl: params.imageUrl,
+          mode: params.mode,
+          aspectRatio: params.aspectRatio,
+          duration: params.duration,
+          quality: params.quality,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || '视频生成提交失败');
+      }
+
+      const taskId = data.taskId;
+      setImages(prev => prev.map(img =>
+        img.id === phId ? {
+          ...img,
+          processing: { ...img.processing, status: 'processing' as const, progress: 10, taskId },
+        } as CanvasImage : img
+      ));
+
+      // 轮询视频任务
+      const pollInterval = setInterval(async () => {
+        try {
+          const pollRes = await fetch('/api/poll-task', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ taskId, model: params.model }),
+          });
+          const pollData = await pollRes.json();
+
+          if (pollData.status === 'completed') {
+            clearInterval(pollInterval);
+            const videoUrl = pollData.videoUrl || pollData.url;
+            const thumbnailUrl = pollData.thumbnailUrl || pollData.url;
+            if (videoUrl) {
+              setImages(prev => prev.map(img =>
+                img.id === phId ? {
+                  ...img,
+                  url: thumbnailUrl || '',
+                  videoUrl: videoUrl,
+                  videoDuration: params.duration,
+                  mediaType: 'video' as const,
+                  originalWidth: pollData.width || 1920,
+                  originalHeight: pollData.height || 1080,
+                  isProcessingPlaceholder: false,
+                  processing: undefined,
+                  prompt: params.prompt,
+                  modelName: params.model,
+                } as CanvasImage : img
+              ));
+            } else {
+              setImages(prev => prev.filter(img => img.id !== phId));
+              toast.error('视频生成失败', { description: '未获取到视频地址', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
+            }
+            setActiveGenerationCount(prev => Math.max(0, prev - 1));
+          } else if (pollData.status === 'failed') {
+            clearInterval(pollInterval);
+            setImages(prev => prev.filter(img => img.id !== phId));
+            toast.error('视频生成失败', { description: pollData.error || '未知错误', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
+            setActiveGenerationCount(prev => Math.max(0, prev - 1));
+          } else {
+            // 更新进度
+            const progress = pollData.progress || 0;
+            setImages(prev => prev.map(img =>
+              img.id === phId ? {
+                ...img,
+                processing: { ...img.processing, progress: Math.max(10, progress), status: 'processing' as const, label: pollData.label || '视频生成中' },
+              } as CanvasImage : img
+            ));
+          }
+        } catch {
+          // 轮询错误，继续
+        }
+      }, 3000);
+
+      // 5分钟超时
+      setTimeout(() => clearInterval(pollInterval), 300000);
+
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : '视频生成失败';
+      setImages(prev => prev.filter(img => img.id !== phId));
+      toast.error('视频生成失败', {
+        description: errorMsg,
+        className: themeStyle === 'monochrome'
+          ? 'bg-white border border-gray-200 text-gray-900'
+          : 'bg-[#141414] border-[#2a2a2a] text-white',
+      });
+      setActiveGenerationCount(prev => Math.max(0, prev - 1));
+    }
+  }, [themeStyle]);
+
   const handleAnalyzeImage = useCallback(async (imageData: string): Promise<string> => {
     try {
       const response = await fetch('/api/analyze', {
@@ -2749,6 +2900,7 @@ function CanvasApp() {
             }}>
               <GenerationPanel
                     onGenerate={handleGenerate}
+                    onVideoGenerate={handleVideoGenerate}
                     onAnalyzeImage={handleAnalyzeImage}
                     onAddToCanvas={handleAddToCanvas}
                     onExtractPrompt={handleExtractPrompt}

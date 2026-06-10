@@ -20,7 +20,7 @@ export const dynamic = 'force-dynamic';
 // ★ 本地完成缓存：避免同一任务重复查远端API和重复持久化
 // （Next.js dev模式下不同路由可能使用不同的 task-registry 实例，
 //   所以在 poll-task 内部维护自己的缓存更可靠）
-const completedTaskCache = new Map<string, { imageUrl: string; maskUrl?: string; timestamp: number }>();
+const completedTaskCache = new Map<string, { imageUrl: string; maskUrl?: string; modelName?: string; providerName?: string; timestamp: number }>();
 const FAILED_CACHE = Symbol('failed');
 const failedTaskCache = new Map<string, { error: string; timestamp: number }>();
 
@@ -388,6 +388,8 @@ export async function POST(request: NextRequest) {
         progress: 100,
         imageUrl: cachedCompleted.imageUrl,
         maskUrl: cachedCompleted.maskUrl || '',
+        modelName: cachedCompleted.modelName || '',
+        providerName: cachedCompleted.providerName || '',
       }, { status: 200 });
     }
     const cachedFailed = failedTaskCache.get(taskId);
@@ -506,7 +508,7 @@ export async function POST(request: NextRequest) {
             thirdPartyTaskId,
           );
 
-          const pollResp = await fetchWithV1Retry(pollReq.url, {
+          const pollResp = await fetch(pollReq.url, {
             method: pollReq.method,
             headers: pollReq.headers,
             signal: AbortSignal.timeout(30000),
@@ -526,7 +528,7 @@ export async function POST(request: NextRequest) {
             pollData,
           );
 
-          if ((videoResult.status === 'succeeded' || videoResult.status === 'completed') && videoResult.videoUrl) {
+          if ((videoResult.status === 'succeeded' || (videoResult as any).status === 'completed') && videoResult.videoUrl) {
             // 持久化视频文件
             let persistedVideoUrl = videoResult.videoUrl;
             try {
@@ -539,7 +541,7 @@ export async function POST(request: NextRequest) {
 
             updateTaskProgress(taskId, { status: 'completed', progress: 100 });
             releaseQueueSlot(taskId);
-            completedTaskCache.set(taskId, { imageUrl: persistedVideoUrl, timestamp: Date.now() });
+            completedTaskCache.set(taskId, { imageUrl: persistedVideoUrl, modelName: '', providerName: '', timestamp: Date.now() });
 
             return NextResponse.json({
               success: true,
@@ -674,6 +676,8 @@ export async function POST(request: NextRequest) {
     const regApiKey = regResultForProvider.apiKey as string | undefined;
     const regAdvancedParams = regResultForProvider.advancedParams as Record<string, string> | undefined;
     const regUsedModel = regResultForProvider.usedModel as string | undefined;
+    const regModelName = regResultForProvider.modelName as string | undefined;
+    const regProviderName = regResultForProvider.providerName as string | undefined;
 
     let apiKey: string | undefined;
     let apiBaseUrl: string;
@@ -915,7 +919,7 @@ export async function POST(request: NextRequest) {
           const persistedUrl = await persistRemoteImage(sourceImageUrl, `generate/${taskId}`);
           if (persistedUrl) {
             pollResult.imageUrl = persistedUrl;
-            completedTaskCache.set(taskId, { imageUrl: persistedUrl, timestamp: Date.now() });
+            completedTaskCache.set(taskId, { imageUrl: persistedUrl, modelName: regModelName || model || '', providerName: regProviderName || providerName || '', timestamp: Date.now() });
             // Save source mapping for future reference
             try {
               const { saveImageDataMapping } = await import('@/lib/image-source-map');
@@ -924,12 +928,12 @@ export async function POST(request: NextRequest) {
             } catch {}
           } else {
             // 持久化返回null（文件已存在或失败），使用源URL
-            completedTaskCache.set(taskId, { imageUrl: sourceImageUrl, timestamp: Date.now() });
+            completedTaskCache.set(taskId, { imageUrl: sourceImageUrl, modelName: regModelName || model || '', providerName: regProviderName || providerName || '', timestamp: Date.now() });
           }
         } catch (persistErr) {
           console.warn('[poll-task] Synchronous persist failed:', persistErr);
           // 持久化失败时仍设置缓存，避免重复查询远端
-          completedTaskCache.set(taskId, { imageUrl: sourceImageUrl, timestamp: Date.now() });
+          completedTaskCache.set(taskId, { imageUrl: sourceImageUrl, modelName: regModelName || model || '', providerName: regProviderName || providerName || '', timestamp: Date.now() });
         }
 
         // ★ Outpaint 扩展后处理：直接返回 AI API 扩展结果，不合成原图
@@ -1107,7 +1111,10 @@ export async function POST(request: NextRequest) {
       const regInfo = getTaskInfo(taskId);
       const existingResult = (regInfo?.result as Record<string, unknown>) || {};
       const maskUrl = (pollResult as Record<string, unknown>).maskUrl as string | undefined;
-      updateTaskProgress(taskId, { status: 'completed', progress: 100, result: { ...existingResult, imageUrl: pollResult.imageUrl, maskUrl: maskUrl || '' } });
+      // ★ 保留模型名称和供应商信息到 result，确保后续 poll 和前端能获取到
+      const finalModelName = existingResult.modelName || regModelName || (model || regUsedModel || '');
+      const finalProviderName = existingResult.providerName || regProviderName || '';
+      updateTaskProgress(taskId, { status: 'completed', progress: 100, result: { ...existingResult, imageUrl: pollResult.imageUrl, maskUrl: maskUrl || '', usedModel: model || regUsedModel || existingResult.usedModel, modelName: finalModelName, providerName: finalProviderName } });
 
       // ★ 将 cropInfo（蒙版修图需要）和 targetWidth/Height（扩展需要）等元数据附加到 pollResult
       if (existingResult.cropInfo) {
@@ -1119,21 +1126,15 @@ export async function POST(request: NextRequest) {
         if (oi.targetH) (pollResult as Record<string, unknown>).targetHeight = oi.targetH;
       }
 
-      if (existingResult.usedModel) {
-        (pollResult as Record<string, unknown>).usedModel = existingResult.usedModel;
-      }
+      // ★ 将模型信息附加到 pollResult（前端需要）
+      (pollResult as Record<string, unknown>).usedModel = model || regUsedModel || existingResult.usedModel;
+      (pollResult as Record<string, unknown>).modelName = finalModelName;
+      (pollResult as Record<string, unknown>).providerName = finalProviderName;
       // ★ 同时更新本地完成缓存（Next.js dev模式下 registry 实例可能不一致）
       const cachedImageUrl = pollResult.imageUrl as string | undefined;
       const cachedMaskUrl = (pollResult as Record<string, unknown>).maskUrl as string | undefined;
       if (cachedImageUrl) {
-        completedTaskCache.set(taskId, { imageUrl: cachedImageUrl, maskUrl: cachedMaskUrl || '', timestamp: Date.now() });
-      }
-      // ★ 附加模型名称和提供商名称，前端画布图片标签需要
-      if (existingResult.modelName) {
-        (pollResult as Record<string, unknown>).modelName = existingResult.modelName;
-      }
-      if (existingResult.providerName) {
-        (pollResult as Record<string, unknown>).providerName = existingResult.providerName;
+        completedTaskCache.set(taskId, { imageUrl: cachedImageUrl, maskUrl: cachedMaskUrl || '', modelName: finalModelName, providerName: finalProviderName, timestamp: Date.now() });
       }
 
       if (!pollResult.imageUrl) {

@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Upload, X, Plus, Cpu, GitMerge, GripHorizontal, Zap } from 'lucide-react';
+import { Upload, X, Plus, Cpu, GitMerge, GripHorizontal, Zap, Image, Video } from 'lucide-react';
 import { toast } from 'sonner';
 import { UniversalApiManager } from '@/lib/universal-api-manager';
 import { ApiProvider } from '@/lib/universal-api-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { ThirdPartyModelDialog } from '@/components/third-party-model-dialog';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import VideoGenerationPanel, { VideoGenerateParams, VIDEO_MODEL_REGISTRY } from '@/components/video-generation-panel';
 import { MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS, MODEL_QUALITIES as SHARED_MODEL_QUALITIES, QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE as SHARED_QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES, findModelConfig as sharedFindModelConfig, calculateActualPixels as sharedCalculateActualPixels } from '@/lib/canvas-generation-group';
 
 export interface GenerationParams {
@@ -47,6 +48,7 @@ export interface AltRefMarker {
 
 interface GenerationPanelProps {
     onGenerate: (params: GenerationParams) => void;
+    onVideoGenerate?: (params: VideoGenerateParams) => void;
     onAnalyzeImage?: (imageData: string) => Promise<string>;
     onAddToCanvas?: (imageUrl: string) => void;
     onExtractPrompt?: (imageUrl: string) => Promise<string>;
@@ -247,6 +249,7 @@ const findModelConfig = sharedFindModelConfig;
 export function GenerationPanel(
     {
         onGenerate,
+        onVideoGenerate,
         onAddToCanvas,
         onError,
         themeStyle = 'gold',
@@ -266,6 +269,7 @@ export function GenerationPanel(
         onFavoriteParamsApplied
     }: GenerationPanelProps
 ) {
+    const [genTab, setGenTab] = useState<'image' | 'video'>('image');
     const [prompt, setPrompt] = useState("");
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
     const [externalPromptApplied, setExternalPromptApplied] = useState(false);
@@ -641,6 +645,7 @@ export function GenerationPanel(
 
     // 万能API相关函数
     const [discoveredModels, setDiscoveredModels] = useState<{id: string, providerId: string, providerName: string, is3DProvider?: boolean, displayLabel?: string, apiDisplayName?: string}[]>([]);
+  const [serverVideoModels, setServerVideoModels] = useState<{id: string, name: string, providerId: string, providerName: string}[]>([]);
 
     // 迁移旧版纯 modelId → 复合键 providerId::modelId
     useEffect(() => {
@@ -749,19 +754,51 @@ export function GenerationPanel(
         }
     }, []);
 
+    // 从服务器加载管理员配置的视频模型
+    const loadServerVideoModels = useCallback(async () => {
+        try {
+            const res = await fetch('/api/models?type=video');
+            if (res.ok) {
+                const data = await res.json();
+                const vModels: {id: string, name: string, providerId: string, providerName: string}[] = [];
+                const providerMap = new Map<string, string>();
+                if (data.providers && Array.isArray(data.providers)) {
+                    for (const p of data.providers) {
+                        providerMap.set(p.id, p.name || p.displayName || '');
+                    }
+                }
+                if (data.models && Array.isArray(data.models)) {
+                    for (const m of data.models) {
+                        vModels.push({
+                            id: m.id || m.name,
+                            name: m.name || m.id || '',
+                            providerId: m.providerId || '',
+                            providerName: providerMap.get(m.providerId) || m.providerId || '',
+                        });
+                    }
+                }
+                setServerVideoModels(vModels);
+            }
+        } catch {
+            // 静默失败
+        }
+    }, []);
+
     useEffect(() => {
         loadServerModels();
+        loadServerVideoModels();
         // 页面重新可见时刷新模型列表（用户可能刚从管理面板切回）
         const handleVisibility = () => {
             if (document.visibilityState === 'visible') {
                 loadServerModels();
+                loadServerVideoModels();
             }
         };
         document.addEventListener('visibilitychange', handleVisibility);
         return () => {
             document.removeEventListener('visibilitychange', handleVisibility);
         };
-    }, [loadServerModels]);
+    }, [loadServerModels, loadServerVideoModels]);
 
     const handleAddUniversalApi = async () => {
         if (!universalApiManager || !universalApiName.trim() || !universalApiUrl.trim() || !universalApiKey.trim()) {
@@ -920,6 +957,43 @@ export function GenerationPanel(
 
     return (
         <div className={`h-full flex flex-col ${containerClass}`}>
+            {/* === 图像/视频 Tab 切换 === */}
+            <div className="flex px-3 pt-2 pb-0">
+                <button
+                    onClick={() => setGenTab('image')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all cursor-pointer rounded-t-md"
+                    style={{
+                        background: genTab === 'image' ? (mc ? 'rgba(59,130,246,0.1)' : 'rgba(212,175,55,0.1)') : 'transparent',
+                        color: genTab === 'image' ? (mc ? '#3b82f6' : '#d4af37') : '#666',
+                        borderBottom: genTab === 'image' ? `2px solid ${mc ? '#3b82f6' : '#d4af37'}` : '2px solid transparent',
+                    }}
+                >
+                    <Image className="w-3.5 h-3.5" />
+                    图像
+                </button>
+                <button
+                    onClick={() => setGenTab('video')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all cursor-pointer rounded-t-md"
+                    style={{
+                        background: genTab === 'video' ? (mc ? 'rgba(59,130,246,0.1)' : 'rgba(212,175,55,0.1)') : 'transparent',
+                        color: genTab === 'video' ? (mc ? '#3b82f6' : '#d4af37') : '#666',
+                        borderBottom: genTab === 'video' ? `2px solid ${mc ? '#3b82f6' : '#d4af37'}` : '2px solid transparent',
+                    }}
+                >
+                    <Video className="w-3.5 h-3.5" />
+                    视频
+                </button>
+            </div>
+
+            {/* === 视频 Tab === */}
+            {genTab === 'video' ? (
+                <VideoGenerationPanel
+                    onVideoGenerate={onVideoGenerate || (() => {})}
+                    onError={onError}
+                    themeStyle={themeStyle}
+                    serverVideoModels={serverVideoModels}
+                />
+            ) : (
             <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3 custom-scrollbar">
                 {/* 模型选择 */}
                 <div className="space-y-1">
@@ -1470,6 +1544,7 @@ export function GenerationPanel(
                     <Plus className="h-3.5 w-3.5" />
                 </button>
             </div>
+            )}
             {/* 第三方模型调用弹窗 */}
             <ThirdPartyModelDialog
                 isOpen={showThirdPartyDialog}

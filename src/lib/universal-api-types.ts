@@ -6,11 +6,11 @@ export interface ApiProvider {
   baseUrl: string;
   apiKey: string;
   isEnabled: boolean;
-  type: 'image' | 'chat' | 'imageEdit' | 'universal' | 'general' | '3d' | 'vectorize' | 'layer';
+  type: 'image' | 'chat' | 'imageEdit' | 'universal' | 'general' | '3d' | 'vectorize' | 'layer' | 'video';
   createdAt: number;
   updatedAt: number;
   // 新增：模型类型区分
-  modelType?: 'image' | 'chat' | '3d' | 'imageEdit' | 'universal' | 'general' | 'vectorize' | 'layer';
+  modelType?: 'image' | 'chat' | '3d' | 'imageEdit' | 'universal' | 'general' | 'vectorize' | 'layer' | 'video';
   // 新增：显示名称
   displayName?: string;
   // 新增：提供商预设ID
@@ -38,7 +38,7 @@ export interface ModelInfo {
   id: string;
   name: string;
   providerId: string;
-  type: 'image' | 'chat' | '3d' | 'vectorize' | 'layer';
+  type: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video';
   description?: string;
   supportedAspectRatios?: string[];
   supportedQualities?: string[];
@@ -138,7 +138,7 @@ export interface ThirdPartyModelForm {
   // 高级参数
   advancedParams: Record<string, string>;
   // 模型类型
-  modelType: 'image' | 'chat' | '3d' | 'imageEdit';
+  modelType: 'image' | 'chat' | '3d' | 'imageEdit' | 'video';
 }
 
 // 预设的API提供商配置模板

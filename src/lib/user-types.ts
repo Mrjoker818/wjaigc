@@ -13,6 +13,7 @@ export interface User {
     imageEdit: boolean;
     vectorize: boolean;
     layer: boolean;
+    video: boolean;
   };
   storageFolder?: string;
   email?: string;
