@@ -3320,22 +3320,32 @@ export function InfiniteCanvas({
         return;
       }
 
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: fullPrompt,
-          negativePrompt: toolbar.negativePrompt,
-          model,
-          providerId,
-          aspectRatio: toolbar.aspectRatio,
-          quality: toolbar.quality,
+      // 提交生成请求（带超时保护）
+      const genController = new AbortController();
+      const genTimeout = setTimeout(() => genController.abort(), 30000);
+
+      let res: Response;
+      try {
+        res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: fullPrompt,
+            negativePrompt: toolbar.negativePrompt,
+            model,
+            providerId,
+            aspectRatio: toolbar.aspectRatio,
+            quality: toolbar.quality,
           outputCount: toolbar.outputCount,
           referenceImages,
           referenceMode: group.type === 'fusion' ? 'fusion' : 'reference',
           ...(calculatedStrength != null && calculatedStrength > 0 ? { strength: calculatedStrength } : {}),
         }),
+        signal: genController.signal,
       });
+      } finally {
+        clearTimeout(genTimeout);
+      }
 
       // 安全解析响应：优先尝试 JSON，回退到纯文本
       let data: any;
@@ -4583,20 +4593,30 @@ export function InfiniteCanvas({
     try {
       const canvasGenPureModel = canvasGenModel?.includes('::') ? canvasGenModel.split('::')[1] : canvasGenModel || undefined;
       const canvasGenProviderId = canvasGenModel?.includes('::') ? canvasGenModel.split('::')[0] : undefined;
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: canvasGenPrompt,
-          negativePrompt: canvasGenNegativePrompt || undefined,
-          model: canvasGenPureModel,
-          providerId: canvasGenProviderId,
-          aspectRatio: canvasGenAspectRatio,
-          quality: canvasGenQuality,
-          n: canvasGenCount,
-          referenceImages: canvasGenRefImages.length > 0 ? canvasGenRefImages : undefined,
-        }),
-      });
+      // 提交生成请求（带超时保护）
+      const canvasGenController = new AbortController();
+      const canvasGenTimeout = setTimeout(() => canvasGenController.abort(), 30000);
+
+      let res: Response;
+      try {
+        res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: canvasGenPrompt,
+            negativePrompt: canvasGenNegativePrompt || undefined,
+            model: canvasGenPureModel,
+            providerId: canvasGenProviderId,
+            aspectRatio: canvasGenAspectRatio,
+            quality: canvasGenQuality,
+            n: canvasGenCount,
+            referenceImages: canvasGenRefImages.length > 0 ? canvasGenRefImages : undefined,
+          }),
+          signal: canvasGenController.signal,
+        });
+      } finally {
+        clearTimeout(canvasGenTimeout);
+      }
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -11862,19 +11882,28 @@ export function InfiniteCanvas({
                           const fullPrompt = `${faceDescriptions} ${hcg.toolbar.prompt}`;
                           setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'generating', progress: 10 } : g));
                           try {
-                            const res = await fetch('/api/generate', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({
-                                prompt: fullPrompt,
-                                model: hcg.toolbar.model,
-                                providerId: hcg.toolbar.providerId,
-                                aspectRatio: hcg.toolbar.aspectRatio,
-                                quality: hcg.toolbar.quality,
-                                n: hcg.toolbar.outputCount,
-                                referenceImageUrls: hcg.faces.filter(f => f.imageUrl).map(f => f.imageUrl!),
-                              }),
-                            });
+                            // 提交生成请求（带超时保护）
+                            const hexCubeController = new AbortController();
+                            const hexCubeTimeout = setTimeout(() => hexCubeController.abort(), 30000);
+                            let res: Response;
+                            try {
+                              res = await fetch('/api/generate', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  prompt: fullPrompt,
+                                  model: hcg.toolbar.model,
+                                  providerId: hcg.toolbar.providerId,
+                                  aspectRatio: hcg.toolbar.aspectRatio,
+                                  quality: hcg.toolbar.quality,
+                                  n: hcg.toolbar.outputCount,
+                                  referenceImageUrls: hcg.faces.filter(f => f.imageUrl).map(f => f.imageUrl!),
+                                }),
+                                signal: hexCubeController.signal,
+                              });
+                            } finally {
+                              clearTimeout(hexCubeTimeout);
+                            }
                             if (!res.ok) throw new Error(`HexCube生成失败: HTTP ${res.status}`);
                             const data = await res.json();
                             if (data.taskId || data.taskIds) {

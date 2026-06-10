@@ -746,11 +746,21 @@ function CanvasApp() {
       const isThirdParty = !!(params as GenerationParams & { universalBaseUrl?: string }).universalBaseUrl;
       const apiEndpoint = isThirdParty ? '/api/universal-generate' : '/api/generate';
       
-      const response = await fetch(apiEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...params, userId: currentUserRef.current?.id }),
-      });
+      // 提交生成请求（带超时保护，避免网络异常导致无限等待）
+      const submitController = new AbortController();
+      const submitTimeout = setTimeout(() => submitController.abort(), 30000); // 30秒超时
+
+      let response: Response;
+      try {
+        response = await fetch(apiEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...params, userId: currentUserRef.current?.id }),
+          signal: submitController.signal,
+        });
+      } finally {
+        clearTimeout(submitTimeout);
+      }
 
       const data = await response.json();
 
@@ -1304,8 +1314,9 @@ function CanvasApp() {
       // 清理占位框
       setImages(prev => prev.filter(img => !img.isProcessingPlaceholder || !placeholderIds.includes(img.id)));
       console.error('Generation error:', error);
+      const isAbort = error instanceof DOMException && error.name === 'AbortError';
       toast.error('生成失败', {
-        description: '网络错误，请重试',
+        description: isAbort ? '请求超时，请检查网络后重试' : '网络错误，请重试',
         className: 'bg-[#141414] border border-red-900 text-white',
       });
     } finally {

@@ -8,7 +8,7 @@ import { translateApiError } from '@/lib/api-error-translate';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse } from '@/lib/api-compatibility';
-import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
+import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
 import { persistRemoteImage } from '@/lib/s3-storage';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
@@ -1089,7 +1089,9 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
 
-    // 如果有直接返回的图片URL，同步持久化后再返回（确保4K图片可靠性）
+    // ★ 统一使用 polling 模式返回，避免直接模式导致前端 fetch 长时间等待超时
+    // 即使是直接返回的图片 URL，也注册到 task-registry 并返回 taskIds，
+    // 让前端通过 poll-task 获取结果，确保请求快速响应
     if (directImageUrls.length > 0) {
       const persistedUrls: string[] = [];
       for (const rawUrl of directImageUrls) {
@@ -1101,25 +1103,41 @@ export async function POST(request: NextRequest) {
           persistedUrls.push(rawUrl);
         }
       }
+      // 为每个直接返回的图片创建一个 taskId 并注册到 task-registry
+      for (let i = 0; i < persistedUrls.length; i++) {
+        const directTid = `direct-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`;
+        taskIds.push(directTid);
+        registerTask(directTid, 'generate', '生成图片');
+        // 直接标记为已完成，结果存储在 task-registry 中
+        updateTaskProgress(directTid, {
+          status: 'completed',
+          progress: 100,
+          result: {
+            imageUrl: persistedUrls[i],
+            usedModel: usedModelId,
+            apiBaseUrl: usedApiBaseUrl,
+            apiKey: provider?.apiKey || serverApiKey,
+            providerId: usedProviderId,
+            advancedParams: provider?.advancedParams,
+          }
+        });
+      }
+    }
+
+    if (taskIds.length === 0) {
       return NextResponse.json({
-        success: true,
-        mode: 'direct',
-        imageUrls: persistedUrls,
-        model: usedModelId,
+        success: false,
+        error: `所有可用模型均提交失败，请稍后重试或联系管理员配置`,
         modelName: usedModelName,
-        providerName: usedProviderName,
-        apiBaseUrl: usedApiBaseUrl,
-        prompt: enhancedPrompt,
-        originalPrompt: prompt,
-        category: imageCategory,
-        style: stylePreset,
-        count: persistedUrls.length,
-      });
+      }, { status: 500 });
     }
 
     // 返回task_ids给前端，由前端负责轮询
-    // ★ 注册任务到统一注册中心（SSE推送 + 取消支持 + 存储提供商信息供 poll-task 使用）
+    // ★ 注册异步任务到统一注册中心（SSE推送 + 取消支持 + 存储提供商信息供 poll-task 使用）
     for (const tid of taskIds) {
+      // 跳过已经注册的直接模式任务（上面已注册并标记完成）
+      const existingTask = getTaskInfo(tid);
+      if (existingTask) continue;
       registerTask(tid, 'generate', '生成图片');
       // ★ 关键修复：存储提供商信息到 task-registry，确保 poll-task 能直接使用正确的提供商
       // 而不需要通过 findProviderForModel 重新查找（可能找不到或找到错误的提供商）

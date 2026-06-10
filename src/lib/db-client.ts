@@ -18,7 +18,9 @@ function getPool(): Pool {
       ssl: connectionString.includes('supabase') || connectionString.includes('aidap') ? { rejectUnauthorized: false } : undefined,
       max: 5,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 5000,
+      connectionTimeoutMillis: 10000,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
     };
     pool = new Pool(config);
 
@@ -36,13 +38,35 @@ export interface SqlResult {
 
 export async function execSql(query: string, params?: unknown[]): Promise<SqlResult> {
   const client = getPool();
-  try {
-    const result = await client.query(query, params);
-    return { rows: result.rows, rowCount: result.rowCount ?? 0 };
-  } catch (e) {
-    console.error('[db-client] SQL error:', e);
-    throw e;
+  const maxRetries = 2;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await client.query(query, params);
+      return { rows: result.rows, rowCount: result.rowCount ?? 0 };
+    } catch (e: unknown) {
+      lastError = e;
+      const errMsg = e instanceof Error ? e.message : String(e);
+      const isTransient = errMsg.includes('Connection terminated')
+        || errMsg.includes('ECONNRESET')
+        || errMsg.includes('ETIMEDOUT')
+        || errMsg.includes('timeout')
+        || errMsg.includes('connection is closed');
+
+      if (isTransient && attempt < maxRetries) {
+        console.warn(`[db-client] Transient SQL error (attempt ${attempt + 1}/${maxRetries + 1}), retrying...`, errMsg.substring(0, 100));
+        // Brief delay before retry
+        await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+        continue;
+      }
+
+      console.error('[db-client] SQL error:', e);
+      throw e;
+    }
   }
+
+  throw lastError;
 }
 
 export async function testConnection(): Promise<boolean> {
