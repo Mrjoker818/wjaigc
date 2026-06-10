@@ -1,5 +1,5 @@
 // 用户数据管理器 - localStorage + 服务器数据库双重存储
-import { User, Project, ApiKey, UsageStats, UserData, WujieProjectFile } from './user-types';
+import { User, Project, ApiKey, UsageStats, UserData, WujieProjectFile, ImageGroupData } from './user-types';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
 
 const STORAGE_KEY = 'unbounded_ai_user_data';
@@ -102,6 +102,8 @@ export class UserManager {
         };
       }
       this.ensureDefaultAdmin();
+      // 规范化图片 URL：将旧格式 /uploads/xxx 转换为 /api/serve-upload/uploads/xxx
+      this.normalizeImageUrls();
     } catch (error) {
       console.error('Failed to load user data:', error);
       this.multiUserData = {
@@ -109,6 +111,25 @@ export class UserManager {
         userData: {}
       };
       this.ensureDefaultAdmin();
+    }
+  }
+
+  /** 规范化图片 URL：将旧格式 /uploads/xxx 转换为 /api/serve-upload/uploads/xxx
+   *  确保跨环境（开发/生产）和跨浏览器图片可访问 */
+  private normalizeImageUrls(): void {
+    if (!this.multiUserData) return;
+    for (const userData of Object.values(this.multiUserData.userData)) {
+      if (userData.projects) {
+        for (const project of userData.projects) {
+          if (project.canvasImages) {
+            for (const img of project.canvasImages) {
+              if (img.url && img.url.startsWith('/uploads/') && !img.url.startsWith('/api/')) {
+                img.url = `/api/serve-upload${img.url}`;
+              }
+            }
+          }
+        }
+      }
     }
   }
 
@@ -285,18 +306,46 @@ export class UserManager {
         // 本地无数据，直接使用服务器数据
         userData.projects = serverProjects;
       } else if (localHasData && serverHasData) {
-        // 双方都有数据，按项目 ID 逐个合并：保留 updatedAt 更新的版本
+        // 双方都有数据，按项目 ID 逐个合并
+        // 关键修复：不再用 "updatedAt 更大者覆盖" 策略（会丢失另一方的图片），
+        // 而是对 canvasImages 按图片 ID 做并集合并，确保双方图片都不丢失
         const localProjectMap = new Map(userData.projects.map(p => [p.id, p]));
         const mergedProjects: Project[] = [];
         for (const sp of serverProjects) {
           const lp = localProjectMap.get(sp.id);
           if (lp) {
-            // 同 ID 项目：取更新时间更晚的版本
+            // 同 ID 项目：合并 canvasImages（按图片 ID 去重，保留双方全部图片）
+            const localImgMap = new Map(lp.canvasImages.map(img => [img.id, img]));
+            const serverImgMap = new Map(sp.canvasImages.map(img => [img.id, img]));
+            // 以服务器版本为基础，补充本地独有的图片
+            const mergedImages = [...sp.canvasImages];
+            for (const [imgId, img] of localImgMap) {
+              if (!serverImgMap.has(imgId)) {
+                mergedImages.push(img);
+              }
+            }
+            // 取双方较新的 updatedAt
             const localTime = lp.updatedAt || lp.createdAt || 0;
             const serverTime = sp.updatedAt || sp.createdAt || 0;
-            mergedProjects.push(serverTime >= localTime ? sp : lp);
+            const baseProject: Project = serverTime >= localTime
+              ? { ...sp, canvasImages: mergedImages }
+              : { ...lp, canvasImages: mergedImages, updatedAt: Math.max(localTime, serverTime) };
+            // 补充合并 metadata.groups（按 group ID 并集）
+            if (lp.metadata?.groups || sp.metadata?.groups) {
+              const localGroups = new Map(((lp.metadata?.groups ?? []) as ImageGroupData[]).map(g => [g.id, g]));
+              const serverGroups = ((sp.metadata?.groups ?? []) as ImageGroupData[]);
+              const mergedGroups = [...serverGroups];
+              for (const [gid, g] of localGroups) {
+                if (!mergedGroups.some(mg => mg.id === gid)) {
+                  mergedGroups.push(g);
+                }
+              }
+              baseProject.metadata = { ...baseProject.metadata, groups: mergedGroups };
+            }
+            mergedProjects.push(baseProject);
             localProjectMap.delete(sp.id);
           } else {
+            // 服务器独有的项目，直接添加
             mergedProjects.push(sp);
           }
         }
@@ -307,6 +356,18 @@ export class UserManager {
         userData.projects = mergedProjects;
       }
       // 如果只有本地数据，不做任何修改
+
+      // 规范化图片 URL：将旧格式 /uploads/xxx 转换为 /api/serve-upload/uploads/xxx
+      // 确保跨环境（开发/生产）和跨浏览器图片可访问
+      for (const project of userData.projects) {
+        if (project.canvasImages) {
+          for (const img of project.canvasImages) {
+            if (img.url && img.url.startsWith('/uploads/') && !img.url.startsWith('/api/')) {
+              img.url = `/api/serve-upload${img.url}`;
+            }
+          }
+        }
+      }
 
       this._serverSyncReady = true; // 标记服务器数据已加载，允许后续 syncToServer
       this.saveData();

@@ -421,6 +421,8 @@ function CanvasApp() {
   const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 项目切换中标记：防止自动保存回调用旧闭包数据覆盖刚保存的新数据
   const switchingProjectRef = useRef(false);
+  // 服务器同步合并中标记：防止自动保存用旧闭包数据覆盖刚从服务器合并的新数据
+  const serverSyncMergeRef = useRef(false);
   // Keep a ref to latest images to avoid stale closure in setTimeout
   const latestImagesRef = useRef(images);
   latestImagesRef.current = images;
@@ -430,6 +432,8 @@ function CanvasApp() {
     if (!currentProject) return;
     // 项目切换进行中时，跳过自动保存，避免旧闭包数据覆盖
     if (switchingProjectRef.current) return;
+    // 服务器同步合并中，跳过自动保存，避免旧闭包数据覆盖刚合并的服务器数据
+    if (serverSyncMergeRef.current) return;
     // 防抖：1秒后保存
     if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
     autoSaveRef.current = setTimeout(async () => {
@@ -643,6 +647,8 @@ function CanvasApp() {
     const userMgr = UserManagerCore.getInstance();
     const unsubscribe = userMgr.onProjectsChanged(() => {
       try {
+        // 标记服务器同步合并中，防止自动保存用旧闭包数据覆盖
+        serverSyncMergeRef.current = true;
         const projects = userMgr.getProjects();
         const curProjectId = currentProject?.id;
         if (curProjectId) {
@@ -672,7 +678,9 @@ function CanvasApp() {
         }
         // 项目列表可能变化（如其他设备新建了项目）
         setCurrentUser({ ...currentUser }); // 触发 UI 刷新
-      } catch { /* best effort */ }
+        // 延迟清除同步合并标记，确保 setImages 引起的自动保存跳过本轮
+        setTimeout(() => { serverSyncMergeRef.current = false; }, 2000);
+      } catch { /* best effort */ serverSyncMergeRef.current = false; }
     });
     return () => { if (typeof unsubscribe === 'function') unsubscribe(); };
   }, [currentUser, currentProject?.id]);
