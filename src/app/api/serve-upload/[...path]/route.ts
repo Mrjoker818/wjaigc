@@ -16,7 +16,7 @@ export async function GET(
     const dataRoot = getServerDataRoot();
     const possibleDirs = [
       path.join(dataRoot, 'uploads'),
-      dataRoot, // root level for subdirs like outpaint/, upscale/
+      dataRoot, // root level for subdirs like generate/, outpaint/, upscale/
     ];
     
     // 1. 尝试从本地文件系统读取
@@ -33,6 +33,30 @@ export async function GET(
           },
         });
       }
+    }
+    
+    // 1.5 回退: 检查 Next.js public/uploads 目录
+    // 旧版本图片可能只存在于 public/uploads/ 而不在 dataRoot 中
+    const publicUploadsDir = path.join(process.cwd(), 'public', 'uploads');
+    const publicPath = path.join(publicUploadsDir, path.basename(filePath));
+    if (fs.existsSync(publicPath)) {
+      const buffer = await fs.promises.readFile(publicPath);
+      const ext = path.extname(filePath).toLowerCase();
+      const contentType = getContentType(ext);
+      
+      // 同时复制到 dataRoot 确保后续请求也能访问
+      try {
+        const destDir = path.join(dataRoot, 'uploads');
+        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+        fs.writeFileSync(path.join(destDir, path.basename(filePath)), buffer);
+      } catch {}
+      
+      return new NextResponse(buffer, {
+        headers: {
+          'Content-Type': contentType,
+          'Cache-Control': 'public, max-age=86400',
+        },
+      });
     }
     
     // 2. 本地文件不存在，尝试从 S3 下载
