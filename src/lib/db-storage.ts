@@ -404,27 +404,36 @@ export async function migrateFileDataToDb(): Promise<void> {
     const providers = JSON.parse(providersContent);
 
     if (Array.isArray(providers)) {
+      // Only migrate providers that don't already exist in DB
+      // (prevent stale file data from overwriting newer DB records, e.g. updated selectedModels)
+      const existingDbProviders = await dbGetApiProviders();
+      const existingIds = new Set(existingDbProviders.map(p => p.id));
+
+      let migrated = 0;
       for (const p of providers) {
-        await dbUpsertApiProvider({
-          id: p.id,
-          name: p.name,
-          display_name: p.displayName || p.display_name || p.name,
-          base_url: p.baseUrl || p.base_url || '',
-          api_key: p.apiKey || p.api_key || '',
-          is_enabled: p.isEnabled ?? p.is_enabled ?? true,
-          type: p.type || 'image',
-          model_type: p.modelType || p.model_type || p.type || 'image',
-          request_style: p.requestStyle || p.request_style || 'images-generations',
-          selected_models: p.selectedModels || p.selected_models || [],
-          advanced_params: p.advancedParams || p.advanced_params || {},
-          is_default: p.isDefault ?? p.is_default ?? false,
-          created_at: p.createdAt || p.created_at || Date.now(),
-          updated_at: p.updatedAt || p.updated_at || Date.now(),
-          connection_status: p.connectionStatus || p.connection_status,
-          discovered_models: p.discoveredModels || p.discovered_models || [],
-        });
+        if (!existingIds.has(p.id)) {
+          await dbUpsertApiProvider({
+            id: p.id,
+            name: p.name,
+            display_name: p.displayName || p.display_name || p.name,
+            base_url: p.baseUrl || p.base_url || '',
+            api_key: p.apiKey || p.api_key || '',
+            is_enabled: p.isEnabled ?? p.is_enabled ?? true,
+            type: p.type || 'image',
+            model_type: p.modelType || p.model_type || p.type || 'image',
+            request_style: p.requestStyle || p.request_style || 'images-generations',
+            selected_models: p.selectedModels || p.selected_models || [],
+            advanced_params: p.advancedParams || p.advanced_params || {},
+            is_default: p.isDefault ?? p.is_default ?? false,
+            created_at: p.createdAt || p.created_at || Date.now(),
+            updated_at: p.updatedAt || p.updated_at || Date.now(),
+            connection_status: p.connectionStatus || p.connection_status,
+            discovered_models: p.discoveredModels || p.discovered_models || [],
+          });
+          migrated++;
+        }
       }
-      console.log(`[db-storage] Migrated ${providers.length} API providers`);
+      console.log(`[db-storage] Migrated ${migrated} new API providers (${existingDbProviders.length} already in DB)`);
     }
   } catch {
     // File may not exist, that's OK
