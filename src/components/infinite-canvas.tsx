@@ -10650,8 +10650,8 @@ export function InfiniteCanvas({
                             const origImg = images.find(i => i.url === ann.originalImageUrl);
                             const resultImg = images.find(i => i.url === ann.resultImageUrl);
                             setCompareImages({
-                              left: origImg || { id: `ann-orig-${ann.id}`, url: ann.originalImageUrl, prompt: ann.text || '', x: 0, y: 0, width: 512, height: 512 } as CanvasImage,
-                              right: resultImg || { id: `ann-result-${ann.id}`, url: ann.resultImageUrl, prompt: ann.aiReply || '', x: 0, y: 0, width: 512, height: 512 } as CanvasImage,
+                              left: (origImg || { id: `ann-orig-${ann.id}`, url: ann.originalImageUrl, prompt: ann.text || '', x: 0, y: 0, width: 512, height: 512 }) as CanvasImage,
+                              right: (resultImg || { id: `ann-result-${ann.id}`, url: ann.resultImageUrl, prompt: ann.aiReply || '', x: 0, y: 0, width: 512, height: 512 }) as CanvasImage,
                             });
                             setShowCompareDialog(true);
                           }}

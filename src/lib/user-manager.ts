@@ -174,7 +174,7 @@ export class UserManager {
       password: admin.password || '',  // Password managed server-side
       role: 'admin',
       status: admin.status || 'active',
-      apiPermissions: admin.apiPermissions || defaultApiPermissions(),
+      apiPermissions: { ...defaultApiPermissions(), ...(admin.apiPermissions || {}) },
       storageFolder: admin.storageFolder?.startsWith('data/users/') ? admin.storageFolder : userStorageFolder(admin.id),
       updatedAt: Date.now(),
     };
@@ -182,8 +182,7 @@ export class UserManager {
       ...u,
       role: u.role || 'user',
       status: u.status || 'active',
-      apiPermissions: u.apiPermissions || defaultApiPermissions(),
-      storageFolder: u.storageFolder?.startsWith('data/users/') ? u.storageFolder : userStorageFolder(u.id),
+      apiPermissions: { ...defaultApiPermissions(), ...(u.apiPermissions || {}) },
     });
     if (this.multiUserData.userData[normalizedAdmin.id]) {
       this.multiUserData.userData[normalizedAdmin.id].user = normalizedAdmin;

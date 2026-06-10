@@ -1112,8 +1112,8 @@ export async function POST(request: NextRequest) {
       const existingResult = (regInfo?.result as Record<string, unknown>) || {};
       const maskUrl = (pollResult as Record<string, unknown>).maskUrl as string | undefined;
       // ★ 保留模型名称和供应商信息到 result，确保后续 poll 和前端能获取到
-      const finalModelName = existingResult.modelName || regModelName || (model || regUsedModel || '');
-      const finalProviderName = existingResult.providerName || regProviderName || '';
+      const finalModelName = (existingResult.modelName as string) || regModelName || (model || regUsedModel || '');
+      const finalProviderName = (existingResult.providerName as string) || regProviderName || '';
       updateTaskProgress(taskId, { status: 'completed', progress: 100, result: { ...existingResult, imageUrl: pollResult.imageUrl, maskUrl: maskUrl || '', usedModel: model || regUsedModel || existingResult.usedModel, modelName: finalModelName, providerName: finalProviderName } });
 
       // ★ 将 cropInfo（蒙版修图需要）和 targetWidth/Height（扩展需要）等元数据附加到 pollResult

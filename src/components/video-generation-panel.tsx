@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import {
   Play, Video, ImagePlus, Clock, Settings2,
   ChevronDown, Loader2, Sparkles, Volume2, VolumeX,
@@ -248,7 +248,7 @@ export default function VideoGenerationPanel({
   }, [model]);
 
   // 模式切换
-  const modeOptions: { value: VideoGenerateParams['mode']; label: string; icon: React.ReactNode }[] = [
+  const modeOptions: { value: VideoGenerateParams['mode']; label: string; icon: ReactNode }[] = [
     { value: 'text2video' as const, label: '文生视频', icon: <Video className="w-4 h-4" /> },
     { value: 'image2video-first' as const, label: '图生视频', icon: <ImagePlus className="w-4 h-4" /> },
   ];
