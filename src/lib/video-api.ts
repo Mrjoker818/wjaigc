@@ -46,6 +46,9 @@ export interface VideoGenerateParams {
   duration?: number;            // 视频时长(秒)
   mode?: 'std' | 'pro';        // 生成模式 (标准/高品质)
   generateAudio?: boolean;      // 是否生成音效
+  action?: 'generate' | 'extend' | 'edit'; // 操作类型: 生成/延长/编辑
+  videoUrl?: string;            // 延长/编辑源视频 URL
+  extendDuration?: number;      // 延长时长(秒)
   negativePrompt?: string;      // 反向提示词
   seed?: number;                // 随机种子
   providerId?: string;          // 提供商ID
@@ -816,6 +819,172 @@ function parseRestGenericPoll(data: any): VideoTaskPollResult {
     return { status: 'pending', progress: 10 };
   }
   return { status: 'pending', progress: 0 };
+}
+
+// ==================== Video Extend Protocol Adapters ====================
+
+/**
+ * Build the submit request for a video extend task.
+ * Extends an existing video by generating additional frames.
+ */
+export function buildVideoExtendRequest(
+  profile: VideoCompatProfile,
+  params: VideoGenerateParams,
+): { url: string; headers: Record<string, string>; body: string; method: string } {
+  const baseUrl = (params.baseUrl || '').replace(/\/+$/, '');
+  const apiKey = params.apiKey || '';
+
+  switch (profile) {
+    case 'dashscope':
+      return buildDashscopeExtend(baseUrl, apiKey, params);
+    case 'volcengine-ark':
+      return buildVolcengineExtend(baseUrl, apiKey, params);
+    case 'vidu':
+      return buildViduExtend(baseUrl, apiKey, params);
+    case 'openai-video':
+      return buildOpenAIVideoExtend(baseUrl, apiKey, params);
+    case 'fal-video':
+      return buildFalVideoExtend(baseUrl, apiKey, params);
+    case 'minimax':
+    case 'rest-generic':
+    default:
+      return buildRestGenericExtend(baseUrl, apiKey, params);
+  }
+}
+
+function buildDashscopeExtend(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
+  const body: Record<string, any> = {
+    model: params.model,
+    input: {
+      video_url: params.videoUrl,
+      prompt: params.prompt || '请延长视频',
+    },
+    parameters: {
+      ...(params.extendDuration ? { duration: params.extendDuration } : { duration: 5 }),
+      ...(params.generateAudio ? { audio: true } : {}),
+    },
+  };
+
+  return {
+    url: `${baseUrl}/api/v1/services/aigc/video-generation/video-extension`,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      'X-DashScope-Async': 'enable',
+    },
+    body: JSON.stringify(body),
+    method: 'POST',
+  };
+}
+
+function buildVolcengineExtend(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
+  const content: Array<Record<string, any>> = [
+    { type: 'text', text: params.prompt || '请延长视频' },
+  ];
+  if (params.videoUrl) {
+    content.push({ type: 'video_url', video_url: { url: params.videoUrl } });
+  }
+
+  const body: Record<string, any> = {
+    model: params.model,
+    content,
+    action: 'extend',
+    ...(params.extendDuration ? { duration: params.extendDuration } : { duration: 5 }),
+    ...(params.generateAudio ? { generate_audio: true } : {}),
+  };
+
+  return {
+    url: `${baseUrl}/contents/generations/tasks`,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    method: 'POST',
+  };
+}
+
+function buildViduExtend(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
+  const body: Record<string, any> = {
+    model: params.model,
+    prompt: params.prompt || '请延长视频',
+    video_url: params.videoUrl,
+    ...(params.extendDuration ? { duration: params.extendDuration } : { duration: 4 }),
+    ...(params.generateAudio ? { audio: true } : {}),
+  };
+
+  return {
+    url: `${baseUrl}/api/v1/video/extend`,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    method: 'POST',
+  };
+}
+
+function buildOpenAIVideoExtend(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
+  const body: Record<string, any> = {
+    model: params.model,
+    prompt: params.prompt || 'Extend this video',
+    video_url: params.videoUrl,
+    ...(params.extendDuration ? { duration: params.extendDuration } : {}),
+    n: 1,
+  };
+
+  return {
+    url: `${baseUrl}/v1/videos`,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    method: 'POST',
+  };
+}
+
+function buildFalVideoExtend(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
+  const body: Record<string, any> = {
+    prompt: params.prompt || 'Extend this video',
+    video_url: params.videoUrl,
+    ...(params.extendDuration ? { duration: params.extendDuration } : {}),
+  };
+
+  const submitUrl = baseUrl.includes('fal.run')
+    ? `${baseUrl}/${params.model}`
+    : `${baseUrl}/queue/${params.model}`;
+
+  return {
+    url: submitUrl,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Key ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    method: 'POST',
+  };
+}
+
+function buildRestGenericExtend(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
+  const body: Record<string, any> = {
+    model: params.model,
+    prompt: params.prompt || '请延长视频',
+    video_url: params.videoUrl,
+    action: 'extend',
+    ...(params.extendDuration ? { duration: params.extendDuration } : { duration: 5 }),
+    ...(params.generateAudio ? { audio: true } : {}),
+  };
+
+  return {
+    url: `${baseUrl}/v1/video/extend`,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    method: 'POST',
+  };
 }
 
 // ==================== Utility Functions ====================

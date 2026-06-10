@@ -22,7 +22,7 @@ import {
   ArrowLeft, LayoutGrid, Sparkles, MessageCircle, Rotate3d, Box, ShoppingBag, Zap,
   Copy, Clipboard, Film, Bookmark, BookmarkPlus, GitCompare, Grid3X3, ArrowLeftFromLine, ImagePlus,
   Shapes, BookOpen, Blocks, FolderOpen, ScrollText, MousePointer2, Maximize2,
-  CopyPlus, Unlink, Shuffle, Paintbrush,
+  CopyPlus, Unlink, Shuffle, Paintbrush, Video, FileVideo,
 } from 'lucide-react';
 
 // ==================== 图标映射 ====================
@@ -31,7 +31,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: 
   Image: ImageIcon, Type, SlidersHorizontal, Wand2, Pencil, Maximize, Scissors,
   PenTool, Palette, Sun, GitBranch, GitMerge, Repeat, RefreshCw, Layers,
   Bot, MessageSquare, ImageDown, Save, Download, BoxSelect, Group,
-  ScanSearch, Sparkles, Rotate3d, Box, ShoppingBag, Film,
+  ScanSearch, Sparkles, Rotate3d, Box, ShoppingBag, Film, Video, FileVideo,
 };
 
 function getNodeIcon(type: NodeType, size = 14, className = '') {

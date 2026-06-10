@@ -33,10 +33,11 @@ export type NodeType =
   | 'input-image' | 'input-text' | 'input-param'
   | 'ai-generate' | 'ai-edit' | 'ai-retouch' | 'ai-upscale' | 'ai-removebg' | 'ai-vectorize' | 'ai-style-transfer' | 'ai-color-adjust' | 'ai-analyze'
   | 'ai-font-design' | 'ai-refine-engine' | 'ai-brand-ecommerce' | 'ai-segment' | 'ai-multi-angle' | 'ai-3d-model'
+  | 'ai-video-generate' | 'ai-video-i2v'
   | 'condition-if' | 'condition-switch' | 'loop-for' | 'loop-while' | 'loop-each' | 'parallel'
   | 'agent-auto' | 'agent-chat'
   | 'subgraph' | 'group' | 'storyboard-sequence'
-  | 'output-image' | 'output-save' | 'output-export' | 'output-image-group';
+  | 'output-image' | 'output-save' | 'output-export' | 'output-image-group' | 'output-video';
 
 export type NodeCategory = 'input' | 'ai' | 'logic' | 'agent' | 'subgraph' | 'output';
 
@@ -132,6 +133,9 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   'output-save': '保存',
   'output-export': '导出',
   'output-image-group': '图片组',
+  'ai-video-generate': '文生视频',
+  'ai-video-i2v': '图生视频',
+  'output-video': '视频输出',
 };
 
 /** 节点类型 → 图标名 */
@@ -169,11 +173,14 @@ export const NODE_TYPE_ICONS: Record<NodeType, string> = {
   'output-save': 'Save',
   'output-export': 'Download',
   'output-image-group': 'Layers',
+  'ai-video-generate': 'Video',
+  'ai-video-i2v': 'Video',
+  'output-video': 'FileVideo',
 };
 
 // ==================== 端口类型 ====================
 
-export type PortType = 'image' | 'mask' | 'prompt' | 'condition' | 'any' | 'data';
+export type PortType = 'image' | 'mask' | 'prompt' | 'condition' | 'any' | 'data' | 'video';
 
 export const PORT_COLORS: Record<PortType, string> = {
   image: '#3b82f6',
@@ -182,6 +189,7 @@ export const PORT_COLORS: Record<PortType, string> = {
   condition: '#f59e0b',
   any: '#7d8590',
   data: '#22d3ee',
+  video: '#f97316',
 };
 
 /** 端口类型兼容矩阵：哪些输出类型可以连到哪些输入类型 */
@@ -192,6 +200,7 @@ export const PORT_COMPATIBILITY: Record<PortType, PortType[]> = {
   condition: ['condition', 'any'],
   any: ['any'],
   data: ['data', 'any', 'prompt', 'image'],
+  video: ['video', 'any', 'image'],
 };
 
 /** 检查两个端口是否可以连线 */
@@ -299,6 +308,9 @@ export const NODE_TEMPLATES: { type: NodeType; category: NodeCategory; label: st
   { type: 'output-save', category: 'output', label: '保存', desc: '保存到项目/本地' },
   { type: 'output-export', category: 'output', label: '导出', desc: 'PSD/SVG/PNG导出' },
   { type: 'output-image-group', category: 'output', label: '图片组', desc: '批量图片叠卡预览' },
+  { type: 'ai-video-generate', category: 'ai', label: '视频生成', desc: 'AI文生视频/图生视频' },
+  { type: 'ai-video-i2v', category: 'ai', label: '图生视频', desc: '图片转视频（首帧/首尾帧/参考图）' },
+  { type: 'output-video', category: 'output', label: '视频输出', desc: '输出视频结果' },
 ];
 
 /** 创建默认端口 */
@@ -317,11 +329,15 @@ function createDefaultPorts(type: NodeType): NodePort[] {
       ports.push({ id: 'in-image', label: '图片', type: 'image', direction: 'in' });
       ports.push({ id: 'in-prompt', label: '指令', type: 'prompt', direction: 'in' });
     } else if (cat === 'output') {
-      ports.push({ id: 'in-image', label: '图片', type: 'image', direction: 'in' });
-      if (type === 'output-image-group') {
-        ports.push({ id: 'in-image-2', label: '图片2', type: 'image', direction: 'in' });
-        ports.push({ id: 'in-image-3', label: '图片3', type: 'image', direction: 'in' });
-        ports.push({ id: 'in-image-4', label: '图片4', type: 'image', direction: 'in' });
+      if (type === 'output-video') {
+        ports.push({ id: 'in-video', label: '视频', type: 'video', direction: 'in' });
+      } else {
+        ports.push({ id: 'in-image', label: '图片', type: 'image', direction: 'in' });
+        if (type === 'output-image-group') {
+          ports.push({ id: 'in-image-2', label: '图片2', type: 'image', direction: 'in' });
+          ports.push({ id: 'in-image-3', label: '图片3', type: 'image', direction: 'in' });
+          ports.push({ id: 'in-image-4', label: '图片4', type: 'image', direction: 'in' });
+        }
       }
     }
   }
@@ -337,7 +353,12 @@ function createDefaultPorts(type: NodeType): NodePort[] {
         }
       }
     } else if (type.startsWith('ai-')) {
-      ports.push({ id: 'out-image', label: '图片', type: 'image', direction: 'out' });
+      // 视频节点输出video端口
+      if (type === 'ai-video-generate' || type === 'ai-video-i2v') {
+        ports.push({ id: 'out-video', label: '视频', type: 'video', direction: 'out' });
+      } else {
+        ports.push({ id: 'out-image', label: '图片', type: 'image', direction: 'out' });
+      }
       if (type === 'ai-analyze' || type === 'ai-font-design') {
         ports.push({ id: 'out-text', label: '文本', type: 'prompt', direction: 'out' });
       }
@@ -380,7 +401,7 @@ export function createWorkflowNode(type: NodeType, x: number, y: number, label?:
   const isCondition = type.startsWith('condition-');
   // 根据节点类型确定尺寸：文字/图片节点需要更大的空间来展示内容
   const isTextNode = type === 'input-text';
-  const isImageNode = type === 'input-image' || type === 'output-image' || type === 'output-image-group';
+  const isImageNode = type === 'input-image' || type === 'output-image' || type === 'output-image-group' || type === 'output-video';
   const isEditorNode = type.startsWith('ai-') && type !== 'ai-generate';
   let width: number;
   let height: number;
@@ -457,7 +478,7 @@ export interface PropertyField {
   max?: number;
   step?: number;
   defaultValue?: unknown;
-  modelFilter?: 'image' | 'chat' | '3d' | 'vector' | 'segment'; // model-select 字段过滤模型类型
+  modelFilter?: 'image' | 'chat' | '3d' | 'vector' | 'segment' | 'video'; // model-select 字段过滤模型类型
   placeholder?: string;
   hint?: string; // 字段提示文字
 }
@@ -732,6 +753,57 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
       { label: '独立生成', value: 'independent' }, { label: '图生图续接', value: 'img2img' }
     ], defaultValue: 'independent' });
     fields.push({ key: 'strength', label: '续接强度', type: 'slider', min: 0, max: 100, step: 5, defaultValue: 50 });
+  }
+
+  // ─── 视频节点 ───
+  if (type === 'ai-video-generate') {
+    fields.push({ key: 'prompt', label: '视频描述', type: 'textarea', placeholder: '描述你想要生成的视频内容...' });
+    fields.push({ key: 'model', label: '视频模型', type: 'model-select', modelFilter: 'video' });
+    fields.push({ key: 'mode', label: '生成模式', type: 'select', options: [
+      { label: '文生视频', value: 'text2video' }, { label: '图生视频(首帧)', value: 'image2video-first' },
+      { label: '图生视频(首尾帧)', value: 'image2video-firstlast' }, { label: '参考生视频', value: 'image2video-ref' }
+    ], defaultValue: 'text2video' });
+    fields.push({ key: 'aspectRatio', label: '画面比例', type: 'select', options: [
+      { label: '1:1', value: '1:1' }, { label: '4:3', value: '4:3' }, { label: '3:4', value: '3:4' },
+      { label: '16:9', value: '16:9' }, { label: '9:16', value: '9:16' }, { label: '21:9', value: '21:9' }
+    ], defaultValue: '16:9' });
+    fields.push({ key: 'duration', label: '时长(秒)', type: 'select', options: [
+      { label: '5秒', value: '5' }, { label: '10秒', value: '10' }
+    ], defaultValue: '5' });
+    fields.push({ key: 'quality', label: '生成质量', type: 'select', options: [
+      { label: '标准', value: 'std' }, { label: '高品质', value: 'pro' }
+    ], defaultValue: 'std' });
+    fields.push({ key: 'generateAudio', label: '生成音效', type: 'toggle', defaultValue: false });
+  }
+
+  if (type === 'ai-video-i2v') {
+    fields.push({ key: 'prompt', label: '视频描述', type: 'textarea', placeholder: '描述视频的动态效果和变化...' });
+    fields.push({ key: 'model', label: '视频模型', type: 'model-select', modelFilter: 'video' });
+    fields.push({ key: 'mode', label: '图生视频模式', type: 'select', options: [
+      { label: '首帧驱动', value: 'image2video-first' },
+      { label: '首尾帧驱动', value: 'image2video-firstlast' },
+      { label: '多参考图', value: 'image2video-ref' }
+    ], defaultValue: 'image2video-first' });
+    fields.push({ key: 'aspectRatio', label: '画面比例', type: 'select', options: [
+      { label: '1:1', value: '1:1' }, { label: '4:3', value: '4:3' }, { label: '3:4', value: '3:4' },
+      { label: '16:9', value: '16:9' }, { label: '9:16', value: '9:16' }, { label: '21:9', value: '21:9' }
+    ], defaultValue: '16:9' });
+    fields.push({ key: 'duration', label: '时长(秒)', type: 'select', options: [
+      { label: '5秒', value: '5' }, { label: '10秒', value: '10' }
+    ], defaultValue: '5' });
+    fields.push({ key: 'quality', label: '生成质量', type: 'select', options: [
+      { label: '标准', value: 'std' }, { label: '高品质', value: 'pro' }
+    ], defaultValue: 'std' });
+    fields.push({ key: 'generateAudio', label: '生成音效', type: 'toggle', defaultValue: false });
+  }
+
+  if (type === 'output-video') {
+    fields.push({ key: 'format', label: '输出格式', type: 'select', options: [
+      { label: 'MP4', value: 'mp4' }, { label: 'WebM', value: 'webm' }, { label: 'GIF', value: 'gif' }
+    ], defaultValue: 'mp4' });
+    fields.push({ key: 'quality', label: '质量', type: 'select', options: [
+      { label: '原始', value: 'original' }, { label: '压缩', value: 'compressed' }
+    ], defaultValue: 'original' });
   }
 
   // ─── 输出节点 ───
@@ -1168,6 +1240,40 @@ export function buildNodeExecutionRequest(
       };
     }
 
+    case 'ai-video-generate':
+      return {
+        endpoint: '/api/video/generate',
+        method: 'POST',
+        body: {
+          prompt: config.prompt || config.textContent || config.text || '',
+          model: config.model || '',
+          mode: 'text2video',
+          aspectRatio: config.aspectRatio || '16:9',
+          duration: config.duration || 5,
+          quality: config.quality || 'std',
+        }
+      };
+
+    case 'ai-video-i2v':
+      return {
+        endpoint: '/api/video/generate',
+        method: 'POST',
+        body: {
+          prompt: config.prompt || config.textContent || config.text || '',
+          model: config.model || '',
+          mode: config.videoMode || 'image2video-first',
+          imageUrl: config.imageUrl || inputs.imageUrl || '',
+          lastFrameImageUrl: config.lastFrameImageUrl || '',
+          aspectRatio: config.aspectRatio || '16:9',
+          duration: config.duration || 5,
+          quality: config.quality || 'std',
+        }
+      };
+
+    case 'output-video':
+      // 视频输出节点：直接传递结果，不需要API调用
+      return null;
+
     case 'ai-3d-model':
       return {
         endpoint: '/api/poll-3d-task',
@@ -1244,6 +1350,7 @@ export function buildNodeExecutionRequest(
     case 'parallel':
     case 'input-param':
     case 'output-image':
+    case 'output-video':
     case 'subgraph':
     case 'group':
       return null;

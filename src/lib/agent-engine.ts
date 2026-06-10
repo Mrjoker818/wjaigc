@@ -61,6 +61,8 @@ export interface AgentContext {
   imagePrompt?: string;
   /** 蒙版图片（可选） */
   maskDataUrl?: string;
+  /** 视频 URL（可选，用于视频延长等操作） */
+  videoUrl?: string;
   /** 用户 ID（用于 API Key 查找） */
   userId?: string;
   /** 模型名 */
@@ -178,6 +180,9 @@ export async function executeAgentLoop(
   let userContent = context.userPrompt;
   if (context.imageUrl) {
     userContent += `\n\n[用户提供的图片: ${context.imageUrl}]`;
+  }
+  if (context.videoUrl) {
+    userContent += `\n[用户提供的视频: ${context.videoUrl}]`;
   }
   if (context.maskDataUrl) {
     userContent += '\n[用户提供了编辑蒙版]';
@@ -304,7 +309,7 @@ function buildSystemPrompt(context: AgentContext): string {
     .map(t => `- ${t.name}: ${t.description}`)
     .join('\n');
 
-  return `你是一个专业的AI图像编辑助手。用户会给你一个图像编辑请求，你需要选择合适的工具来完成任务。
+  return `你是一个专业的AI图像与视频编辑助手。用户会给你一个图像或视频编辑请求，你需要选择合适的工具来完成任务。
 
 可用工具:
 ${toolDescriptions}
@@ -316,6 +321,7 @@ ${toolDescriptions}
 4. 最多执行 ${context.maxRounds || DEFAULT_MAX_ROUNDS} 轮操作
 5. 任务完成后，不要调用任何工具，直接描述完成的结果
 6. 如果无法完成，也直接说明原因
+7. 如果用户需要生成视频，使用 generate_video 工具；如需延长视频，使用 extend_video 工具
 
 当前任务: ${context.userPrompt}
 ${context.imageUrl ? `图片已提供` : '没有图片'}
@@ -402,6 +408,38 @@ registerTool({
       success: true,
       data: ctx.imageUrl,
       description: `SVG描摹指令已记录 (${params.mode || 'color'} 模式)`,
+    };
+  },
+});
+
+registerTool({
+  name: 'generate_video',
+  description: '根据文字描述或参考图片生成视频。支持文生视频和图生视频两种模式。适用于从文本或图片创建动态视频内容。',
+  parameters: [
+    { name: 'prompt', type: 'string', description: '视频内容描述，描述想要生成的视频画面和动态效果', required: true },
+    { name: 'mode', type: 'string', description: '生成模式: text2video=纯文字生成, image2video=图片转视频', enum: ['text2video', 'image2video'] },
+    { name: 'duration', type: 'string', description: '视频时长(秒)', enum: ['5', '10'] },
+    { name: 'aspect_ratio', type: 'string', description: '画面比例', enum: ['16:9', '9:16', '1:1', '4:3', '3:4'] },
+  ],
+  execute: async (params) => {
+    return {
+      success: true,
+      description: `视频生成指令已记录: ${params.prompt} (${params.mode || 'text2video'} 模式, ${params.duration || '5'}秒)`,
+    };
+  },
+});
+
+registerTool({
+  name: 'extend_video',
+  description: '延长视频时长，在现有视频末尾继续生成内容。适用于需要更长视频的场景。需要提供原始视频URL。',
+  parameters: [
+    { name: 'prompt', type: 'string', description: '延续内容的描述，描述视频后续的画面发展' },
+    { name: 'duration', type: 'string', description: '延长的时长(秒)', enum: ['5', '10'] },
+  ],
+  execute: async (params) => {
+    return {
+      success: true,
+      description: `视频延长指令已记录: ${params.prompt || '自动延续'} (+${params.duration || '5'}秒)`,
     };
   },
 });

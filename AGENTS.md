@@ -2,7 +2,7 @@
 
 ## 项目概览
 
-这是一个基于 Next.js 16 + React 19 + TypeScript 的 AI 图像生成与协作平台，支持无限画布操作、AI 聊天、图像生成与编辑、图生图、PSD/SVG 导出等功能。
+这是一个基于 Next.js 16 + React 19 + TypeScript 的 AI 图像与视频生成协作平台，支持无限画布操作、AI 聊天、图像/视频生成与编辑、图生图、PSD/SVG 导出等功能。
 
 ### 核心技术栈
 - **框架**: Next.js 16 (App Router)
@@ -10,7 +10,8 @@
 - **语言**: TypeScript 5
 - **AI 集成**: 通用 API 兼容层（支持 OpenAI / Gemini / 任意兼容格式 API）
 - **图像生成**: DALL-E 3、Midjourney、Stable Diffusion 等多种模型
-- **特色功能**: 无限画布、图生图、PSD/SVG 导出、3D 模型预览、语言修图、SVG智能描摹、Agent编排、工作流节点模式、Ctrl+Z 撤回
+- **视频生成**: 可灵 V3、Seedance 2.0/2.3、Vidu Q1/Q2、Runway Gen-3/4、Sora、Veo 等多种模型
+- **特色功能**: 无限画布、图生图、图生视频、视频延长、PSD/SVG 导出、3D 模型预览、语言修图、SVG智能描摹、Agent编排、工作流节点模式、Ctrl+Z 撤回
 
 ### 项目结构
 ```
@@ -25,6 +26,9 @@ src/
 │       ├── save-image/route.ts     # 图片持久化 API（data:/blob:→服务器文件）
 │       ├── serve-upload/[filename]/route.ts  # 上传文件服务 API（生产环境）
 │       ├── chat/route.ts           # AI 聊天 API
+│       ├── video/
+│       │   ├── generate/route.ts   # 视频生成 API (文生视频/图生视频/首尾帧, 异步提交+轮询)
+│       │   └── extend/route.ts     # 视频延长 API (基于可灵/Seedance等, 异步提交+轮询)
 │       ├── optimize-prompt/route.ts # 提示词优化 API
 │       ├── analyze-psd/route.ts    # AI 视觉分析图片结构 API
 │       ├── vision-prompt/route.ts  # 图片识词 API (SSE流+JSON双模式)
@@ -62,6 +66,9 @@ src/
 │   ├── chat-panel.tsx              # AI 聊天面板
 │   ├── image-preview.tsx           # 图片预览组件
 │   ├── image-editor.tsx             # 语言修图编辑器组件 (自然语言描述修改图片)
+│   ├── video-player.tsx             # 视频播放器组件 (进度条/音量/倍速/全屏, 黑金主题)
+│   ├── video-generation-panel.tsx   # 视频生成面板组件 (文生视频/图生视频/首尾帧/多参考图/延长/音效)
+│   ├── video-edit-panel.tsx         # 视频编辑面板组件 (语言编辑/视频延长, 黑金主题)
 │   ├── agent-editor.tsx             # Agent编排编辑器组件 (智能选择工具，多轮编辑)
 │   ├── font-design-panel.tsx        # 字境大师Pro字体设计面板 (黑金/单色双主题, 左右分栏)
 │   ├── node-editor.tsx              # 节点编辑器组件 (工作流DAG编辑, AI建图, 提示词库, 画布助手, 撤销重做)
@@ -86,6 +93,7 @@ src/
 │   ├── svg-export.ts               # SVG 矢量化导出
 │   ├── config.ts                   # 配置文件
 │   ├── api-compatibility.ts        # API 兼容层（通用多提供商适配，自动推断请求格式）
+│   ├── video-api.ts                # 视频API协议适配层（6种协议适配器, 20+视频模型注册表）
 │   └── image-tools/
 │       ├── config.ts               # 本地图像工具配置 (环境变量/目录/超时)
 │       ├── file.ts                 # 文件工具 (读取/缩放/保存/清理)
@@ -441,7 +449,7 @@ scripts/
 基于 DAG 拓扑排序的可视化工作流编排系统，支持自然语言建图、连线语义类型、节点间数据传递。
 
 - **核心架构**:
-  - `workflow-engine.ts`: DAG 拓扑排序 (Kahn 算法)、节点输入解析 (`getNodeInputs`)、执行请求构建 (`buildNodeExecutionRequest`)、27+ 节点类型定义、ComfyUI工作流导入
+  - `workflow-engine.ts`: DAG 拓扑排序 (Kahn 算法)、节点输入解析 (`getNodeInputs`)、执行请求构建 (`buildNodeExecutionRequest`)、30+ 节点类型定义、ComfyUI工作流导入
   - `node-editor.tsx`: 前端节点编辑器（SVG 画布 + 侧边栏属性面板 + 素材库 + 画布助手 + 小地图）
   - `api/workflow/`: 执行/模型/保存/AI建图 4 个 API 端点
 - **P0 核心功能**:
@@ -470,17 +478,44 @@ scripts/
   - **小地图增强**: 视口指示框（金色半透明矩形），点击小地图直接跳转到对应画布位置
   - **build_mode 检测**: 检测生产环境 `COZE_PROJECT_ENV=PROD`，自动隐藏开发工具（JSON编辑器等）
   - **ComfyUI 工作流导入**: 解析 ComfyUI 前端格式（nodes+links）和 API 格式（class_type+inputs），自动映射节点类型，工具栏一键导入 .json 文件
-- **27+ 节点类型**:
+- **30+ 节点类型**:
   - 输入: input-text, input-image
   - AI图像: ai-generate, ai-remove-bg, ai-upscale, ai-retouch, ai-font-design, ai-refine-engine, ai-brand-ecommerce, ai-segment, ai-multi-angle, ai-3d-model
+  - AI视频: ai-video-generate, ai-video-i2v
   - 控制: condition, loop, agent, storyboard-sequence
-  - 输出: output-image, output-export, output-image-group
+  - 输出: output-image, output-export, output-image-group, output-video
   - 每种类型含完整 fields 定义（text/textarea/number/select/toggle/slider/model-select/color）
 - **API 接口**:
   - POST `/api/workflow/execute` - 执行工作流 (action: start/status/cancel)
   - GET `/api/workflow/models` - 获取模型列表 (type: image/chat/all)
   - POST `/api/workflow/save` - 保存工作流
   - POST `/api/workflow/ai-build` - AI 自然语言建图
+
+### 20. 视频生成与编辑 (video-api.ts + video-generation-panel.tsx + video-edit-panel.tsx)
+
+基于6种视频API协议适配层的视频生成与编辑功能，支持文生视频、图生视频、视频延长等。
+
+- **6种视频API协议适配器**: dashscope-kling(可灵) / volcengine-ark(豆包/Seedance) / minimax(海螺AI) / vidu(Vidu) / openai-video(Sora等) / fal-video(Runway/Pika/Luma)
+- **20+视频模型注册表** (VIDEO_MODEL_REGISTRY): 每个模型含协议、提供商、区域(cn/global)、特征(首尾帧/多参考图/视频编辑/延长/音效)
+- **文生视频**: 纯文字描述生成视频，支持画面比例/时长/质量选择
+- **图生视频**: 首帧驱动、首尾帧驱动、多参考图三种模式
+  - 首帧驱动: 上传首帧图片，AI 生成后续视频内容
+  - 首尾帧驱动: 上传首帧+尾帧图片，AI 生成中间过渡（仅支持 firstLastFrame 特征的模型）
+  - 多参考图: 上传多张参考图，AI 综合参考生成（仅支持 multiReference 特征的模型）
+- **视频延长**: 在现有视频末尾继续生成内容（仅支持 videoExtend 特征的模型）
+- **音效生成**: 生成视频时可选同时生成音效（仅支持 audio 特征的模型）
+- **视频播放器**: 黑金主题播放器，支持进度条/音量/倍速(0.5x-2x)/全屏/ESC关闭
+- **视频编辑面板**: 语言编辑(描述修改意图) + 视频延长两个Tab，黑金/单色双主题
+- **画布视频渲染**: 无限画布中视频图片显示播放按钮覆盖层，点击播放/右键菜单
+- **节点模式**: 3个视频节点类型(ai-video-generate / ai-video-i2v / output-video)
+- **Agent编排**: 注册 generate_video / extend_video 两个视频工具
+- **管理员后台**: 视频模型类型支持，自动识别视频模型关键词
+- **异步提交+轮询**: 所有视频API均采用POST提交+GET轮询，复用task-registry/poll-task/SSE架构
+- **API 接口**:
+  - POST `/api/video/generate` - 视频生成 (prompt/model/imageUrl/mode/aspectRatio/duration等)
+  - GET `/api/video/generate` - 获取默认视频配置(比例/时长/模式列表)
+  - POST `/api/video/extend` - 视频延长 (videoUrl/model/prompt/extendDuration等)
+  - GET `/api/video/extend` - 获取视频延长API说明
 
 ## 构建和测试命令
 
@@ -660,7 +695,38 @@ UPSCALE_TIMEOUT_MS=300000
 
 ## 更新日志
 
-### v3.1.0 (当前版本)
+### v3.2.0 (当前版本)
+
+**P0: 视频生成核心功能**
+- 新增 `video-api.ts`: 6种视频API协议适配层（dashscope-kling/volcengine-ark/minimax/vidu/openai-video/fal-video）
+- 20+视频模型注册表 (VIDEO_MODEL_REGISTRY)，包含模型名/协议/提供商/区域/特征
+- 新增 `/api/video/generate` 视频生成API（文生视频/图生视频，异步提交+轮询）
+- 新增 `video-player.tsx` 视频播放器组件（进度条/音量/倍速/全屏，黑金主题）
+- 新增 `video-generation-panel.tsx` 视频生成面板（模型选择/提示词/比例/时长/模式）
+- generation-panel.tsx 新增图像/视频 Tab 切换
+- infinite-canvas.tsx 新增视频渲染（播放按钮覆盖层/VideoPlayer弹窗/右键菜单）
+- 管理员后台新增视频模型类型、自动识别、权限控制
+- user-types.ts CanvasImage 新增 mediaType/videoUrl/videoDuration/videoThumbnailUrl/isPlaying
+- poll-task/route.ts 新增 video 任务轮询分支
+- model-name-map.ts 新增 20+ 视频模型名称映射
+
+**P1: 视频增强功能**
+- 首尾帧模式: 图生视频支持首帧驱动/首尾帧驱动/多参考图三种模式
+- 多参考图上传: 支持上传多张参考图生视频
+- 视频延长: 新增 `/api/video/extend` API，支持可灵V3/Seedance等模型延长
+- video-generation-panel 新增延长Tab（选择视频+时长+描述）
+- 音效生成: 根据模型特征动态显示音效开关，参数传递到API
+- page.tsx 新增 handleVideoExtend 处理函数
+
+**P2: 视频节点与编辑**
+- workflow-engine.ts 新增3个视频节点类型: ai-video-generate / ai-video-i2v / output-video
+- 视频节点完整字段/端口/执行逻辑定义，modelFilter 扩展支持 'video'
+- node-editor.tsx 新增视频节点图标映射（Film/FileVideo）
+- agent-engine.ts 注册 generate_video / extend_video 两个视频工具
+- 新增 `video-edit-panel.tsx` 视频编辑面板（语言编辑+视频延长，黑金/单色双主题）
+- infinite-canvas.tsx 右键菜单新增"视频编辑"/"视频延长"选项
+
+### v3.1.0
 
 **P0: 图片模型信息(modelName/apiProvider)持久化修复**
 - user-types.ts CanvasImage 新增 modelName/apiProvider 可选字段定义

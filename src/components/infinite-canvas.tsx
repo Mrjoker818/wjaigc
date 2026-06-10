@@ -43,6 +43,7 @@ import dynamic from 'next/dynamic';
 
 const ModelViewer3D = dynamic(() => import('@/components/model-viewer-3d'), { ssr: false });
 const VideoPlayer = dynamic(() => import('@/components/video-player'), { ssr: false });
+const VideoEditPanel = dynamic(() => import('@/components/video-edit-panel').then(m => ({ default: m.VideoEditPanel })), { ssr: false });
 
 const PsdLayerEditor = lazy(() => import('@/components/psd-editor/PsdLayerEditor'));
 const AgentEditor = lazy(() => import('@/components/agent-editor').then(m => ({ default: m.AgentEditor })));
@@ -1129,6 +1130,9 @@ export function InfiniteCanvas({
   // Video player state
   const [videoPlayerUrl, setVideoPlayerUrl] = useState('');
   const [videoPlayerVisible, setVideoPlayerVisible] = useState(false);
+  const [showVideoEditPanel, setShowVideoEditPanel] = useState(false);
+  const [videoEditTarget, setVideoEditTarget] = useState<CanvasImage | null>(null);
+  const [videoEditTab, setVideoEditTab] = useState<'edit' | 'extend'>('edit');
 
   const [threeDQuality, setThreeDQuality] = useState('high');
   const [threeDTexture, setThreeDTexture] = useState('4k');
@@ -7032,6 +7036,8 @@ export function InfiniteCanvas({
     { label: '下载', action: () => { handleOpenDownload(); } },
     ...(selectedImageData?.threeDModelUrl ? [{ label: '3D 预览', action: () => { setViewer3DModelUrl(selectedImageData.threeDModelUrl || ''); setViewer3DPreviewUrl(selectedImageData.url); setViewer3DModelUrls(selectedImageData.threeDModelUrls || {}); setShow3DViewer(true); } }] : []),
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '播放视频', action: () => { setVideoPlayerUrl(selectedImageData.videoUrl!); setVideoPlayerVisible(true); } }] : []),
+    ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '视频编辑', action: () => { setVideoEditTarget(selectedImageData); setShowVideoEditPanel(true); } }] : []),
+    ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '视频延长', action: () => { setVideoEditTarget(selectedImageData); setShowVideoEditPanel(true); setVideoEditTab('extend'); } }] : []),
     { label: '删除', shortcut: 'Delete', action: () => { onImagesChange(images.filter(i => !selectedIds.has(i.id))); setSelectedIds(new Set()); selectImage(null); } },
     { label: '发送参考图', action: () => { const img = selectedImageData; if (img) onGenerateVariation(img); } },
     { label: '提取关键词', action: () => { const img = selectedImageData; if (img) onExtractKeywords(img); } },
@@ -11469,6 +11475,28 @@ export function InfiniteCanvas({
           <VideoPlayer
             videoUrl={videoPlayerUrl}
             onClose={() => { setVideoPlayerVisible(false); setVideoPlayerUrl(''); }}
+          />
+        )}
+
+        {/* ====== VIDEO EDIT PANEL ====== */}
+        {showVideoEditPanel && videoEditTarget && (
+          <VideoEditPanel
+            isOpen={showVideoEditPanel}
+            videoUrl={videoEditTarget.videoUrl || videoEditTarget.url}
+            thumbnailUrl={videoEditTarget.videoThumbnailUrl}
+            originalPrompt={videoEditTarget.prompt}
+            themeStyle={isMonochrome ? 'monochrome' : 'gold'}
+            onClose={() => { setShowVideoEditPanel(false); setVideoEditTarget(null); setVideoEditTab('edit'); }}
+            onEdit={(params) => {
+              // TODO: 视频编辑 API 调用
+              console.log('[video-edit] edit params:', params);
+              setShowVideoEditPanel(false);
+            }}
+            onExtend={(params) => {
+              // TODO: 视频延长 API 调用
+              console.log('[video-edit] extend params:', params);
+              setShowVideoEditPanel(false);
+            }}
           />
         )}
 

@@ -69,6 +69,10 @@ interface GenerationPanelProps {
     onOpenPromptEquation?: () => void;
     applyFavoriteParams?: { prompt?: string; model?: string; aspectRatio?: string; quality?: string } | null;
     onFavoriteParamsApplied?: () => void;
+    /** 当前画布选中的图片URL，自动用作图生视频首帧 */
+    selectedImageUrl?: string | null;
+    /** 当前画布选中的视频URL，自动用作视频延长源 */
+    selectedVideoUrl?: string | null;
 }
 
 // 产品品类
@@ -266,7 +270,9 @@ export function GenerationPanel(
         onExternalReferenceImageConsumed,
         onOpenPromptEquation,
         applyFavoriteParams,
-        onFavoriteParamsApplied
+        onFavoriteParamsApplied,
+        selectedImageUrl,
+        selectedVideoUrl,
     }: GenerationPanelProps
 ) {
     const [genTab, setGenTab] = useState<'image' | 'video'>('image');
@@ -992,6 +998,8 @@ export function GenerationPanel(
                     onError={onError}
                     themeStyle={themeStyle}
                     serverVideoModels={serverVideoModels}
+                    selectedImageUrl={selectedImageUrl}
+                    selectedVideoUrl={selectedVideoUrl}
                 />
             ) : (
             <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3 custom-scrollbar">

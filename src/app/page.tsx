@@ -1845,10 +1845,18 @@ function CanvasApp() {
     prompt: string;
     model: string;
     imageUrl?: string;
-    mode: 'text2video' | 'image2video-first' | 'image2video-firstlast' | 'image2video-ref';
+    mode: 'text2video' | 'image2video-first' | 'image2video-firstlast' | 'image2video-ref' | 'video-extend';
     aspectRatio: string;
     duration: number;
     quality: string;
+    videoUrl?: string;
+    extendDuration?: number;
+    generateAudio?: boolean;
+    providerId?: string;
+    firstFrameUrl?: string;
+    lastFrameUrl?: string;
+    referenceImages?: string[];
+    resolution?: string;
   }) => {
     setActiveGenerationCount(prev => prev + 1);
 
@@ -1881,7 +1889,7 @@ function CanvasApp() {
       originalWidth: phWidth * 2, originalHeight: phHeight * 2,
       isProcessingPlaceholder: true,
       processing: {
-        label: '视频生成中',
+        label: params.mode === 'video-extend' ? '视频延长中' : '视频生成中',
         status: 'submitting',
         progress: 5,
         startTime: Date.now(),
@@ -1894,18 +1902,35 @@ function CanvasApp() {
     }]);
 
     try {
-      const res = await fetch('/api/video/generate', {
+      // 视频延长使用 /api/video/extend，其他使用 /api/video/generate
+      const isExtend = params.mode === 'video-extend';
+      const apiEndpoint = isExtend ? '/api/video/extend' : '/api/video/generate';
+      const requestBody = isExtend ? {
+        videoUrl: params.videoUrl,
+        prompt: params.prompt,
+        model: params.model,
+        extendDuration: params.extendDuration || params.duration,
+        generateAudio: params.generateAudio,
+        providerId: params.providerId,
+      } : {
+        prompt: params.prompt,
+        model: params.model,
+        imageUrl: params.firstFrameUrl || params.imageUrl,
+        lastFrameImageUrl: params.lastFrameUrl,
+        referenceImages: params.referenceImages,
+        mode: params.mode,
+        aspectRatio: params.aspectRatio,
+        duration: params.duration,
+        quality: params.quality,
+        generateAudio: params.generateAudio,
+        providerId: params.providerId,
+        resolution: params.resolution,
+      };
+
+      const res = await fetch(apiEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: params.prompt,
-          model: params.model,
-          imageUrl: params.imageUrl,
-          mode: params.mode,
-          aspectRatio: params.aspectRatio,
-          duration: params.duration,
-          quality: params.quality,
-        }),
+        body: JSON.stringify(requestBody),
       });
       const data = await res.json();
       if (!res.ok || data.error) {
@@ -2901,6 +2926,8 @@ function CanvasApp() {
               <GenerationPanel
                     onGenerate={handleGenerate}
                     onVideoGenerate={handleVideoGenerate}
+                    selectedImageUrl={selectedImage?.url}
+                    selectedVideoUrl={selectedImage?.mediaType === 'video' ? selectedImage?.videoUrl : undefined}
                     onAnalyzeImage={handleAnalyzeImage}
                     onAddToCanvas={handleAddToCanvas}
                     onExtractPrompt={handleExtractPrompt}

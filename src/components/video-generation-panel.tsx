@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import {
   Play, Video, ImagePlus, Clock, Settings2,
   ChevronDown, Loader2, Sparkles, Volume2, VolumeX,
-  Upload, X, AlertCircle, Info
+  Upload, X, AlertCircle, Info, FastForward
 } from 'lucide-react';
 
 // === 视频模型信息 ===
@@ -129,7 +129,7 @@ const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
 
 export interface VideoGenerateParams {
   prompt: string;
-  mode: 'text2video' | 'image2video-first' | 'image2video-firstlast' | 'image2video-ref';
+  mode: 'text2video' | 'image2video-first' | 'image2video-firstlast' | 'image2video-ref' | 'video-extend';
   model: string;
   providerId?: string;
   aspectRatio: string;
@@ -140,6 +140,8 @@ export interface VideoGenerateParams {
   lastFrameUrl?: string;
   referenceImages?: string[];
   resolution?: string;
+  videoUrl?: string;
+  extendDuration?: number;
 }
 
 interface VideoGenerationPanelProps {
@@ -148,6 +150,8 @@ interface VideoGenerationPanelProps {
   themeStyle?: 'gold' | 'monochrome';
   /** 当前画布选中的图片URL，自动用作图生视频首帧 */
   selectedImageUrl?: string | null;
+  /** 当前画布选中的视频URL，自动用作视频延长源 */
+  selectedVideoUrl?: string | null;
   /** 从 /api/models?type=video 加载的服务器端视频模型列表 */
   serverVideoModels?: { id: string; name: string; providerId: string; providerName: string }[];
 }
@@ -175,10 +179,11 @@ export default function VideoGenerationPanel({
   onError,
   themeStyle = 'gold',
   selectedImageUrl,
+  selectedVideoUrl,
   serverVideoModels,
 }: VideoGenerationPanelProps) {
   // === 状态 ===
-  const [mode, setMode] = useState<'text2video' | 'image2video-first' | 'image2video-firstlast' | 'image2video-ref'>('text2video');
+  const [mode, setMode] = useState<'text2video' | 'image2video-first' | 'image2video-firstlast' | 'image2video-ref' | 'video-extend'>('text2video');
   const [prompt, setPrompt] = useState('');
   const [model, setModel] = useState('');
   const [aspectRatio, setAspectRatio] = useState('16:9');
@@ -191,6 +196,8 @@ export default function VideoGenerationPanel({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [resolution, setResolution] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [videoUrl, setVideoUrl] = useState<string>('');
+  const [extendDuration, setExtendDuration] = useState(5);
 
   // 合并服务器模型与内置注册表
   const [videoModels, setVideoModels] = useState<{ id: string; name: string; providerId: string; providerName: string; region: 'cn' | 'global'; features: VideoModelInfo['features'] }[]>([]);
@@ -235,6 +242,13 @@ export default function VideoGenerationPanel({
     }
   }, [selectedImageUrl, mode]);
 
+  // 画布选中视频自动设为延长源
+  useEffect(() => {
+    if (selectedVideoUrl && mode === 'video-extend') {
+      setVideoUrl(selectedVideoUrl);
+    }
+  }, [selectedVideoUrl, mode]);
+
   // 切换模型时重置不支持的参数
   useEffect(() => {
     if (currentFeatures) {
@@ -242,6 +256,7 @@ export default function VideoGenerationPanel({
       if (!availableDurations.includes(duration)) setDuration(availableDurations[0]);
       if (!currentFeatures.firstLastFrame && mode === 'image2video-firstlast') setMode('image2video-first');
       if (!currentFeatures.multiReference && mode === 'image2video-ref') setMode('image2video-first');
+      if (!currentFeatures.videoExtend && mode === 'video-extend') setMode('text2video');
       if (!currentFeatures.audio && generateAudio) setGenerateAudio(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -258,6 +273,9 @@ export default function VideoGenerationPanel({
   if (currentFeatures?.multiReference) {
     modeOptions.push({ value: 'image2video-ref' as const, label: '多参考图', icon: <ImagePlus className="w-4 h-4" /> });
   }
+  if (currentFeatures?.videoExtend) {
+    modeOptions.push({ value: 'video-extend' as const, label: '视频延长', icon: <FastForward className="w-4 h-4" /> });
+  }
 
   const handleGenerate = useCallback(() => {
     if (!prompt.trim() && mode === 'text2video') {
@@ -270,6 +288,10 @@ export default function VideoGenerationPanel({
     }
     if (mode === 'image2video-firstlast' && !lastFrameUrl) {
       onError?.('请上传尾帧图片');
+      return;
+    }
+    if (mode === 'video-extend' && !videoUrl) {
+      onError?.('请提供源视频URL');
       return;
     }
     if (!model) {
@@ -293,12 +315,14 @@ export default function VideoGenerationPanel({
       duration,
       quality,
       generateAudio,
-      firstFrameUrl: (mode !== 'text2video') ? firstFrameUrl : undefined,
+      firstFrameUrl: (mode !== 'text2video' && mode !== 'video-extend') ? firstFrameUrl : undefined,
       lastFrameUrl: (mode === 'image2video-firstlast') ? lastFrameUrl : undefined,
       referenceImages: (mode === 'image2video-ref') ? referenceImages : undefined,
       resolution,
+      videoUrl: (mode === 'video-extend') ? videoUrl : undefined,
+      extendDuration: (mode === 'video-extend') ? extendDuration : undefined,
     });
-  }, [prompt, mode, model, aspectRatio, duration, quality, generateAudio, firstFrameUrl, lastFrameUrl, referenceImages, resolution, onVideoGenerate, onError]);
+  }, [prompt, mode, model, aspectRatio, duration, quality, generateAudio, firstFrameUrl, lastFrameUrl, referenceImages, resolution, videoUrl, extendDuration, onVideoGenerate, onError]);
 
   // 处理图片上传
   const handleImageUpload = useCallback((target: 'first' | 'last' | 'ref') => {
@@ -486,6 +510,79 @@ export default function VideoGenerationPanel({
         </div>
       )}
 
+      {/* === 视频延长区（视频延长模式时显示） === */}
+      {mode === 'video-extend' && (
+        <div className="px-3 pt-3 space-y-3">
+          {/* 源视频 */}
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">源视频</label>
+            {videoUrl ? (
+              <div className="relative group flex items-center gap-2 p-2 rounded-md" style={{ background: inputBg, border: `1px solid ${borderColor}` }}>
+                <Video className="w-5 h-5 shrink-0" style={{ color: accentColor }} />
+                <span className="text-xs text-gray-400 truncate flex-1">{videoUrl.length > 60 ? videoUrl.substring(0, 60) + '...' : videoUrl}</span>
+                <button
+                  onClick={() => setVideoUrl('')}
+                  className="w-5 h-5 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer shrink-0"
+                >
+                  <X className="w-3 h-3 text-white" />
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {selectedVideoUrl && (
+                  <button
+                    onClick={() => setVideoUrl(selectedVideoUrl)}
+                    className="w-full py-2 rounded-md flex items-center justify-center gap-2 cursor-pointer transition-colors text-xs"
+                    style={{ background: isGold ? 'rgba(212,175,55,0.1)' : 'rgba(139,139,139,0.1)', border: `1px solid ${borderColor}`, color: accentColor }}
+                  >
+                    <FastForward className="w-3.5 h-3.5" />
+                    使用画布选中的视频
+                  </button>
+                )}
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="输入视频URL..."
+                    className="flex-1 px-3 py-2 rounded-md text-xs"
+                    style={{ background: inputBg, color: '#e0e0e0', border: `1px solid ${borderColor}`, outline: 'none' }}
+                    onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value; if (v) setVideoUrl(v); } }}
+                    onBlur={(e: React.FocusEvent<HTMLInputElement>) => { if (e.target.value) setVideoUrl(e.target.value); }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 延长时长 */}
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">延长时长</label>
+            <div className="flex gap-1.5">
+              {[4, 5, 8, 10].filter(d => d <= (currentFeatures?.maxDuration || 10)).map(d => (
+                <button
+                  key={d}
+                  onClick={() => setExtendDuration(d)}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs transition-all cursor-pointer"
+                  style={{
+                    background: extendDuration === d ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(139,139,139,0.15)') : inputBg,
+                    color: extendDuration === d ? accentColor : '#888',
+                    border: `1px solid ${extendDuration === d ? borderColor : 'transparent'}`,
+                  }}
+                >
+                  <Clock className="w-3 h-3" />
+                  +{d}秒
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 延长提示 */}
+          <div className="flex items-start gap-1.5 p-2 rounded-md" style={{ background: 'rgba(212,175,55,0.05)', border: `1px solid rgba(212,175,55,0.1)` }}>
+            <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: accentColor }} />
+            <span className="text-xs text-gray-500">视频延长将在源视频末尾追加新内容，保持画面连贯性。可在描述中指定延长内容的方向。</span>
+          </div>
+        </div>
+      )}
+
       {/* === 画面比例 === */}
       <div className="px-3 pt-3">
         <label className="text-xs text-gray-500 mb-1 block">画面比例</label>
@@ -624,7 +721,7 @@ export default function VideoGenerationPanel({
       <div className="px-3 pt-4 pb-3 mt-auto">
         <button
           onClick={handleGenerate}
-          disabled={isGenerating || !model || !prompt.trim()}
+          disabled={isGenerating || !model || (!prompt.trim() && mode !== 'video-extend')}
           className="w-full py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           style={{
             background: isGold
