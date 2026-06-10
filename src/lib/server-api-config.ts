@@ -32,7 +32,16 @@ type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'imageEdit' | '
  * Returns a flat Record<string, string> in all cases.
  */
 function normalizeAdvancedParams(raw: unknown): Record<string, string> {
-  if (!raw || typeof raw !== 'object') return {};
+  if (!raw) return {};
+  // PostgreSQL may return JSONB as a string
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return {};
+    try {
+      const parsed = JSON.parse(trimmed);
+      return normalizeAdvancedParams(parsed);
+    } catch { return {}; }
+  }
   if (Array.isArray(raw)) {
     const result: Record<string, string> = {};
     for (const item of raw) {
@@ -43,8 +52,10 @@ function normalizeAdvancedParams(raw: unknown): Record<string, string> {
     }
     return result;
   }
-  // Already a Record<string, string>
-  return raw as Record<string, string>;
+  if (typeof raw === 'object') {
+    return raw as Record<string, string>;
+  }
+  return {};
 }
 
 interface StoredApiConfig {
@@ -192,6 +203,60 @@ function formatModel(model: Record<string, unknown>, provider: ApiProvider): Mod
   };
 }
 
+/** Normalize selected_models from DB: handle JSON string, comma-separated string, or array */
+function normalizeSelectedModels(val: unknown): string[] {
+  if (Array.isArray(val)) return val.filter((m): m is string => typeof m === 'string');
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed) return [];
+    // Try JSON parse first (handles '["a","b"]' format from PostgreSQL)
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed.filter((m): m is string => typeof m === 'string');
+    } catch { /* not JSON */ }
+    // Fallback: comma-separated string
+    return trimmed.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+/** Normalize discovered_models from DB: handle JSON string or array */
+function normalizeDiscoveredModels(val: unknown, providerId: string, modelType: string): ModelInfo[] {
+  const validTypes = ['image', 'chat', '3d', 'vectorize', 'layer'] as const;
+  type ModelType = typeof validTypes[number];
+  const resolveType = (t: unknown): ModelType => {
+    if (typeof t === 'string' && validTypes.includes(t as ModelType)) return t as ModelType;
+    if (validTypes.includes(modelType as ModelType)) return modelType as ModelType;
+    return 'image';
+  };
+  let arr: unknown[] = [];
+  if (Array.isArray(val)) {
+    arr = val;
+  } else if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) arr = parsed;
+    } catch { /* not JSON */ }
+  }
+  return arr.map((m: unknown) => {
+    if (m && typeof m === 'object' && !Array.isArray(m)) {
+      const rec = m as Record<string, unknown>;
+      return {
+        id: (rec.id as string) || '',
+        name: (rec.name as string) || (rec.id as string) || '',
+        providerId,
+        type: resolveType(rec.type),
+      } satisfies ModelInfo;
+    }
+    if (typeof m === 'string') {
+      return { id: m, name: m, providerId, type: resolveType(modelType) } satisfies ModelInfo;
+    }
+    return null;
+  }).filter((m): m is ModelInfo => m !== null && m.id !== '');
+}
+
 async function readConfig(): Promise<StoredApiConfig> {
   // Try database first (persistent across deployments)
   try {
@@ -207,18 +272,13 @@ async function readConfig(): Promise<StoredApiConfig> {
         type: p.type as ApiProvider['type'],
         modelType: p.model_type as ApiKind,
         requestStyle: p.request_style as ApiProvider['requestStyle'],
-        selectedModels: Array.isArray(p.selected_models) ? p.selected_models : [],
+        selectedModels: normalizeSelectedModels(p.selected_models),
         advancedParams: normalizeAdvancedParams(p.advanced_params),
         isDefault: p.is_default,
         createdAt: p.created_at,
         updatedAt: p.updated_at,
         connectionStatus: (['untested', 'success', 'failed'].includes(p.connection_status || '') ? p.connection_status as ApiProvider['connectionStatus'] : undefined),
-        discoveredModels: Array.isArray(p.discovered_models) ? p.discovered_models.map((m: Record<string, unknown>) => ({
-          id: (m.id as string) || (m as unknown as string),
-          name: (m.name as string) || (typeof m === 'string' ? m : m.id as string),
-          providerId: p.id,
-          type: (m.type as string) || p.model_type,
-        })) as ModelInfo[] : [],
+        discoveredModels: normalizeDiscoveredModels(p.discovered_models, p.id, p.model_type),
         sortOrder: p.sort_order ?? i,
       }));
       return {
