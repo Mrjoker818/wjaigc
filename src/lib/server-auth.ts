@@ -9,6 +9,25 @@ import { ensureUserDataDirs, getUserDataDir } from './server-user-storage';
 import { getServerSystemDir, getServerUsersDir } from './server-data-root';
 import { dbReadUsers, dbWriteUsers, dbDeleteUser, dbDeleteUserData } from './db-storage';
 
+/** Normalize api_permissions: PostgreSQL JSONB may return as string or object */
+function normalizeApiPermissions(val: unknown): User['apiPermissions'] {
+  const defaultPerms = defaultApiPermissions();
+  if (!val) return defaultPerms;
+  if (typeof val === 'object' && !Array.isArray(val)) {
+    // Merge with defaults to ensure all required keys exist
+    return { ...defaultPerms, ...(val as Record<string, boolean>) };
+  }
+  if (typeof val === 'string') {
+    try {
+      const parsed = JSON.parse(val);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return { ...defaultPerms, ...(parsed as Record<string, boolean>) };
+      }
+    } catch { /* ignore */ }
+  }
+  return defaultPerms;
+}
+
 const SYSTEM_DIR = getServerSystemDir();
 const USERS_PATH = path.join(SYSTEM_DIR, 'users.json');
 
@@ -145,7 +164,7 @@ async function readStore(): Promise<StoredUsersFile> {
           passwordHash: u.password_hash,
           role: (u.role || 'user') as 'admin' | 'user',
           status: (u.status || 'active') as 'active' | 'disabled',
-          apiPermissions: u.api_permissions && typeof u.api_permissions === 'object' ? u.api_permissions as User['apiPermissions'] : defaultApiPermissions(),
+          apiPermissions: normalizeApiPermissions(u.api_permissions),
           storageFolder: u.storage_folder || storageFolder(u.id),
           email: u.email || undefined,
           createdAt: u.created_at,
