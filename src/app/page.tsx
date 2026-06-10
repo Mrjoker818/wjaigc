@@ -2345,6 +2345,7 @@ function CanvasApp() {
     return (
       <>
       <DashboardView
+        isMonochrome={themeStyle === 'monochrome'}
         user={currentUser!}
         onOpenProject={(project) => {
           setAppMode('canvas');

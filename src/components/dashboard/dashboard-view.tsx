@@ -57,6 +57,7 @@ interface DashboardViewProps {
   onOpenProject: (project: Project) => void;
   onNewProject: () => void;
   onLogout?: () => void;
+  isMonochrome?: boolean;
 }
 
 interface PromptEntry {
@@ -65,7 +66,7 @@ interface PromptEntry {
   projectName: string;
 }
 
-export default function DashboardView({ user, onOpenProject, onNewProject, onLogout }: DashboardViewProps) {
+export default function DashboardView({ user, onOpenProject, onNewProject, onLogout, isMonochrome }: DashboardViewProps) {
   const isAdmin = user.role === 'admin';
 
   // ─── Navigation state ───
@@ -135,12 +136,20 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [showNewEcomTpl, setShowNewEcomTpl] = useState(false);
 
   // ─── Theme vars ───
-  const isDark = true; // 工作台固定深色主题
-  const accentColor = '#d4af37';
+  const isDark = !isMonochrome; // 单色模式用浅色主题，默认深色
+  const accentHex = isMonochrome ? '#3b82f6' : '#d4af37';
+  const accentColor = accentHex;
   const textPrimary = isDark ? 'text-white' : 'text-gray-900';
   const textSecondary = isDark ? 'text-gray-400' : 'text-gray-500';
-  const accentBgLight = isDark ? 'bg-[#d4af37]/15' : 'bg-[#d4af37]/10';
-  const accentClass = 'text-[#d4af37]';
+  const accentBgLight = isMonochrome ? 'bg-[#3b82f6]/10' : isDark ? 'bg-[#d4af37]/15' : 'bg-[#d4af37]/10';
+  const accentClass = isMonochrome ? 'text-[#3b82f6]' : 'text-[#d4af37]';
+  const accentBgClass = isMonochrome ? 'bg-[#3b82f6]' : 'bg-[#d4af37]';
+  const accentHoverBgClass = isMonochrome ? 'hover:bg-[#2563eb]' : 'hover:bg-[#e0b840]';
+  const accentBorderClass = isMonochrome ? 'border-[#3b82f6]' : 'border-[#d4af37]';
+  const accentTextOnBgClass = isMonochrome ? 'text-white' : 'text-black';
+  const accentRingClass = isMonochrome ? 'focus:ring-[#3b82f6]/30' : 'focus:ring-[#d4af37]/30';
+  const accentShadowClass = isMonochrome ? 'hover:shadow-[#3b82f6]/5' : 'hover:shadow-[#d4af37]/5';
+  const accentHoverBorderClass = isMonochrome ? 'hover:border-[#3b82f6]/30' : 'hover:border-[#d4af37]/30';
   // Admin styling
   const softClass = isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-gray-50 border-gray-200';
   const inputClass = isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-[#555]' : 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-400';
@@ -657,13 +666,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
   // =================== RENDER ===================
   return (
-    <div className="h-screen w-screen flex overflow-hidden">
+    <div className="h-screen w-screen flex overflow-hidden" style={{ '--dash-accent': accentHex, '--dash-accent-light': isMonochrome ? 'rgba(59,130,246,0.1)' : 'rgba(212,175,55,0.15)', '--dash-accent-mid': isMonochrome ? 'rgba(59,130,246,0.2)' : 'rgba(212,175,55,0.2)', '--dash-accent-ring': isMonochrome ? 'rgba(59,130,246,0.3)' : 'rgba(212,175,55,0.3)', '--dash-accent-hover': isMonochrome ? '#2563eb' : '#e0b840', '--dash-accent-text': isMonochrome ? '#fff' : '#000', } as React.CSSProperties }>
       {/* ===== Sidebar ===== */}
       <aside className={`w-[260px] shrink-0 flex flex-col ${isDark ? 'bg-[#0e0e1a]' : 'bg-white'} border-r ${isDark ? 'border-white/5' : 'border-gray-200'} overflow-hidden`}>
         {/* User info */}
         <div className="p-4">
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => setShowUserProfile(!showUserProfile)}>
-            <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0 hover:ring-2 hover:ring-[#d4af37]/40 transition-all" style={{ backgroundColor: accentColor }} title="查看用户信息">
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0 hover:ring-2 ${accentRingClass} transition-all`} style={{ backgroundColor: accentColor }} title="查看用户信息">
               {user.name.charAt(0).toUpperCase()}
             </div>
             <div className="min-w-0 flex-1">
@@ -777,12 +786,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 <div className="flex items-center gap-3">
                   <div className="relative">
                     <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${textSecondary}`} />
-                    <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="搜索项目..." className={`pl-9 pr-4 py-2 rounded-xl text-sm ${isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-gray-200'} border focus:outline-none focus:ring-1 focus:ring-[#d4af37]/30 w-56`} />
+                    <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="搜索项目..." className={`pl-9 pr-4 py-2 rounded-xl text-sm ${isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-gray-200'} border focus:outline-none focus:ring-1 ${accentRingClass} w-56`} />
                   </div>
-                  <button onClick={importProjectInputRef} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer ${isDark ? 'bg-white/5 border border-white/10 text-[#d4af37] hover:bg-white/10' : 'bg-gray-100 border border-gray-200 text-gray-700 hover:bg-gray-200'}`}>
+                  <button onClick={importProjectInputRef} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer ${isDark ? `bg-white/5 border border-white/10 ${accentClass} hover:bg-white/10` : `bg-gray-100 border border-gray-200 ${isMonochrome ? 'text-[#3b82f6]' : 'text-gray-700'} hover:bg-gray-200`}`}>
                     <Upload className="w-4 h-4" /> 导入 .wujie
                   </button>
-                  <button onClick={onNewProject} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-[#d4af37] text-black hover:bg-[#e0b840] transition-colors cursor-pointer">
+                  <button onClick={onNewProject} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium ${accentBgClass} ${accentTextOnBgClass} ${accentHoverBgClass} transition-colors cursor-pointer`}>
                     <Plus className="w-4 h-4" /> 新建项目
                   </button>
                 </div>
@@ -810,11 +819,11 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     const thumb = imgs.length > 0 ? imgs[imgs.length - 1]?.url : null;
                     const isRenaming = renamingProjectId === project.id;
                     return (
-                      <div key={project.id} onClick={() => !isRenaming && onOpenProject(project)} className={`group rounded-xl border cursor-pointer transition-all hover:shadow-lg hover:shadow-[#d4af37]/5 ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20 hover:border-[#d4af37]/30' : 'bg-white border-gray-200 hover:border-[#d4af37]/30'}`}>
+                      <div key={project.id} onClick={() => !isRenaming && onOpenProject(project)} className={`group rounded-xl border cursor-pointer transition-all hover:shadow-lg ${accentShadowClass} ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'} ${accentHoverBorderClass}`}>
                         {/* Thumbnail */}
-                        <div className="relative h-36 overflow-hidden rounded-t-xl bg-gradient-to-br from-[#1a1a2e] to-[#0a0a0f]">
+                        <div className={`relative h-36 overflow-hidden rounded-t-xl ${isDark ? 'bg-gradient-to-br from-[#1a1a2e] to-[#0a0a0f]' : 'bg-gradient-to-br from-blue-50 to-gray-50'}`}>
                           {thumb ? <img src={thumb} alt={project.name} className="w-full h-full object-cover" /> : <div className="flex items-center justify-center h-full"><Image className={`w-8 h-8 ${textSecondary} opacity-30`} /></div>}
-                          {starredIds.has(project.id) && <Star className="absolute top-2 right-2 w-4 h-4 text-[#d4af37] fill-[#d4af37]" />}
+                          {starredIds.has(project.id) && <Star className={`absolute top-2 right-2 w-4 h-4 ${accentClass} fill-current`} style={{ color: accentHex }} />}
                         </div>
                         {/* Info */}
                         <div className="p-3">
@@ -830,7 +839,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                             <span className={`text-xs ${textSecondary}`}>{imgs.length} 张图片</span>
                             <div className="flex items-center gap-1">
                               <button onClick={(e) => toggleStar(project.id, e)} className={`p-1 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}>
-                                <Star className={`w-3 h-3 ${starredIds.has(project.id) ? 'text-[#d4af37] fill-[#d4af37]' : textSecondary}`} />
+                                <Star className={`w-3 h-3 ${starredIds.has(project.id) ? accentClass : textSecondary}`} style={starredIds.has(project.id) ? { color: accentHex, fill: accentHex } : undefined} />
                               </button>
                               <div className="relative" data-project-menu>
                                 <button onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === project.id ? null : project.id); }} className={`p-1 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}>
@@ -863,7 +872,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             <p className={`text-sm mb-6 ${textSecondary}`}>选择模板快速开始创作</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {templates.map(t => (
-                <div key={t.id} className={`group rounded-xl border overflow-hidden cursor-pointer transition-all hover:shadow-lg hover:shadow-[#d4af37]/5 ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20 hover:border-[#d4af37]/30' : 'bg-white border-gray-200'}`} onClick={() => handleUseTemplate(t)}>
+                <div key={t.id} className={`group rounded-xl border overflow-hidden cursor-pointer transition-all hover:shadow-lg ${accentShadowClass} ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'} ${accentHoverBorderClass}`} onClick={() => handleUseTemplate(t)}>
                   <div className="relative h-40 overflow-hidden">
                     <img src={t.image} alt={t.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                     <div className="absolute top-2 left-2"><span className={`text-[10px] px-2 py-0.5 rounded-full ${accentBgLight} ${accentClass} font-medium`}>{t.category}</span></div>
@@ -872,7 +881,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   <div className="p-3">
                     <h3 className={`text-sm font-semibold ${textPrimary}`}>{t.name}</h3>
                     <p className={`text-xs mt-1 ${textSecondary}`}>{t.desc}</p>
-                    <button className="mt-2 w-full py-1.5 rounded-lg text-xs font-medium bg-[#d4af37]/10 text-[#d4af37] hover:bg-[#d4af37]/20 transition-colors">使用模板</button>
+                    <button className={`mt-2 w-full py-1.5 rounded-lg text-xs font-medium ${accentBgLight} ${accentClass} ${isMonochrome ? 'hover:bg-[#3b82f6]/20' : 'hover:bg-[#d4af37]/20'} transition-colors`}>使用模板</button>
                   </div>
                 </div>
               ))}
@@ -911,7 +920,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     {filteredImages.map((img, idx) => (
                       <div key={idx} className={`rounded-xl border overflow-hidden ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'}`}>
                         <div className="h-28 overflow-hidden"><img src={img.url} alt="" className="w-full h-full object-cover" /></div>
-                        <div className="p-2"><p className={`text-[10px] truncate ${textSecondary}`}>{img.projectName}</p>{img.model && <p className="text-[9px] text-[#d4af37] truncate">{img.model}</p>}</div>
+                        <div className="p-2"><p className={`text-[10px] truncate ${textSecondary}`}>{img.projectName}</p>{img.model && <p className={`text-[9px] ${accentClass} truncate`}>{img.model}</p>}</div>
                       </div>
                     ))}
                   </div>
@@ -957,7 +966,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             <p className={`text-sm mb-6 ${textSecondary}`}>用量统计（近 30 天）</p>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
               {[
-                { label: '请求数', value: statsArr.reduce((a, s) => a + (s.requests || 0), 0), icon: Zap, color: 'text-[#d4af37]' },
+                { label: '请求数', value: statsArr.reduce((a, s) => a + (s.requests || 0), 0), icon: Zap, color: accentClass },
                 { label: '图片数', value: statsArr.reduce((a, s) => a + (s.imagesGenerated || 0), 0), icon: Image, color: 'text-blue-400' },
                 { label: 'Token', value: statsArr.reduce((a, s) => a + (s.tokensUsed || 0), 0).toLocaleString(), icon: BarChart3, color: 'text-green-400' },
                 { label: '费用', value: `$${statsArr.reduce((a, s) => a + (s.estimatedCost || 0), 0).toFixed(2)}`, icon: Wallet, color: 'text-purple-400' },
@@ -989,14 +998,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             {/* User Info */}
             <div className={`rounded-xl border p-5 mb-4 ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'}`}>
               <div className="flex items-center gap-4 mb-4">
-                <div className={`w-14 h-14 rounded-xl flex items-center justify-center text-white font-bold text-xl ${isDark ? 'bg-gradient-to-br from-[#d4af37] to-[#b8860b]' : 'bg-gradient-to-br from-gray-600 to-gray-800'}`}>
+                <div className={`w-14 h-14 rounded-xl flex items-center justify-center text-white font-bold text-xl ${isMonochrome ? 'bg-gradient-to-br from-[#3b82f6] to-[#1d4ed8]' : isDark ? 'bg-gradient-to-br from-[#d4af37] to-[#b8860b]' : 'bg-gradient-to-br from-gray-600 to-gray-800'}`}>
                   {user?.name?.charAt(0).toUpperCase() || 'U'}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className={`text-base font-semibold ${textPrimary}`}>{user?.name || '未知用户'}</p>
                   <p className={`text-sm ${textSecondary}`}>{user?.email || '未设置邮箱'}</p>
                 </div>
-                <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${user?.role === 'admin' ? (isDark ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'bg-amber-100 text-amber-700') : (isDark ? 'bg-white/5 text-[#888] border border-white/10' : 'bg-gray-100 text-gray-500')}`}>
+                <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${user?.role === 'admin' ? (isDark ? `bg-[${accentHex}]/15 ${accentClass}` : isMonochrome ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700') : (isDark ? 'bg-white/5 text-[#888] border border-white/10' : 'bg-gray-100 text-gray-500')}`}>
                   {user?.role === 'admin' ? '管理员' : '普通用户'}
                 </span>
               </div>
@@ -1021,7 +1030,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   const enabled = user?.apiPermissions?.[perm.key as keyof typeof user.apiPermissions] ?? false;
                   const PermIcon = perm.icon;
                   return (
-                    <div key={perm.key} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${enabled ? (isDark ? 'bg-[#d4af37]/10 text-[#d4af37]' : 'bg-green-50 text-green-600') : (isDark ? 'bg-white/5 text-[#444]' : 'bg-gray-100 text-gray-300')}`}>
+                    <div key={perm.key} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${enabled ? (isDark ? `${accentBgLight} ${accentClass}` : 'bg-green-50 text-green-600') : (isDark ? 'bg-white/5 text-[#444]' : 'bg-gray-100 text-gray-300')}`}>
                       <PermIcon className="w-3.5 h-3.5" />
                       <span>{perm.label}</span>
                       <span className={`ml-auto w-2 h-2 rounded-full ${enabled ? 'bg-green-400' : (isDark ? 'bg-white/10' : 'bg-gray-300')}`} />
@@ -1034,7 +1043,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             {/* Actions */}
             <div className={`rounded-xl border p-5 ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'}`}>
               <div className="flex flex-col gap-3">
-                <button onClick={() => { if (user) { mgr.setCurrentUser(user.id); } }} className={`w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-medium transition-all cursor-pointer ${isDark ? 'bg-white/5 border border-white/10 text-[#d4af37] hover:bg-white/10' : 'bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200'}`}>
+                <button onClick={() => { if (user) { mgr.setCurrentUser(user.id); } }} className={`w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-medium transition-all cursor-pointer ${isDark ? `bg-white/5 border border-white/10 ${accentClass} hover:bg-white/10` : 'bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200'}`}>
                   <RotateCcw className="w-4 h-4" /> 刷新会话
                 </button>
                 <button onClick={onLogout} className="w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-medium transition-all cursor-pointer bg-red-900/20 text-red-400 border border-red-900/30 hover:bg-red-900/30">
@@ -1060,7 +1069,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   <div><label className={labelClass} htmlFor="admin-new-user-name">用户名</label><input id="admin-new-user-name" className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="例如 设计师01" value={newUserName} onChange={e => setNewUserName(e.target.value)} /></div>
                   <div><label className={labelClass} htmlFor="admin-new-user-password">初始密码</label><input id="admin-new-user-password" type="password" className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="至少 6 位" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} /></div>
                   <div><label className={labelClass} htmlFor="admin-new-user-email">邮箱（可选）</label><input id="admin-new-user-email" type="email" className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="邮箱地址" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} /></div>
-                  <button onClick={() => void handleCreateUser()} className="w-full h-9 rounded-lg bg-[#d4af37] text-black text-sm font-semibold cursor-pointer">创建用户</button>
+                  <button onClick={() => void handleCreateUser()} className={`w-full h-9 rounded-lg ${accentBgClass} ${accentTextOnBgClass} text-sm font-semibold cursor-pointer`}>创建用户</button>
                 </div>
               </div>
               {/* User list */}
@@ -1068,18 +1077,18 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 {adminUsers.map(u => (
                   <div key={u.id} className={`rounded-xl border p-4 ${softClass}`}>
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-[#d4af37] text-black flex items-center justify-center font-bold shrink-0">{u.name.slice(0, 1).toUpperCase()}</div>
+                      <div className={`w-10 h-10 rounded-xl ${accentBgClass} ${accentTextOnBgClass} flex items-center justify-center font-bold shrink-0`}>{u.name.slice(0, 1).toUpperCase()}</div>
                       <div className="flex-1 min-w-0">
                         {editingUser === u.id ? (
                           <div className="flex items-center gap-2">
                             <input className={`h-8 px-2 rounded-lg border text-sm flex-1 ${inputClass}`} value={editName} onChange={e => setEditName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void handleRenameUser(u.id); if (e.key === 'Escape') { setEditingUser(null); setEditName(''); } }} autoFocus />
-                            <button onClick={() => void handleRenameUser(u.id)} className="px-2 py-1 rounded-lg bg-[#d4af37] text-black text-xs font-semibold cursor-pointer">保存</button>
+                            <button onClick={() => void handleRenameUser(u.id)} className={`px-2 py-1 rounded-lg ${accentBgClass} ${accentTextOnBgClass} text-xs font-semibold cursor-pointer`}>保存</button>
                             <button onClick={() => { setEditingUser(null); setEditName(''); }} className={`px-2 py-1 rounded-lg text-xs border cursor-pointer ${isDark ? 'border-white/10 text-[#888]' : 'border-gray-200 text-gray-500'}`}>取消</button>
                           </div>
                         ) : (
                           <div className="flex items-center gap-2">
                             <p className="text-sm font-semibold truncate">{u.name}</p>
-                            {u.role === 'admin' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#d4af37]/20 text-[#d4af37]">管理员</span>}
+                            {u.role === 'admin' && <span className={`text-[10px] px-1.5 py-0.5 rounded ${isMonochrome ? 'bg-[#3b82f6]/20 text-[#3b82f6]' : 'bg-[#d4af37]/20 text-[#d4af37]'}`}>管理员</span>}
                             {u.status === 'disabled' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400">已禁用</span>}
                           </div>
                         )}
@@ -1099,7 +1108,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                       {resetPwdUser === u.id ? (
                         <div className="flex items-center gap-1">
                           <input type="password" className={`h-7 px-2 rounded-lg border text-xs w-24 ${inputClass}`} placeholder="新密码" value={newPassword} onChange={e => setNewPassword(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void handleResetPassword(u.id); }} autoFocus />
-                          <button onClick={() => void handleResetPassword(u.id)} className="text-[10px] px-2 py-1 rounded-lg bg-[#d4af37] text-black font-semibold cursor-pointer">确定</button>
+                          <button onClick={() => void handleResetPassword(u.id)} className={`text-[10px] px-2 py-1 rounded-lg ${accentBgClass} ${accentTextOnBgClass} font-semibold cursor-pointer`}>确定</button>
                           <button onClick={() => { setResetPwdUser(null); setNewPassword(''); }} className={`text-[10px] px-2 py-1 rounded-lg cursor-pointer ${isDark ? 'text-[#888]' : 'text-gray-500'}`}>取消</button>
                         </div>
                       ) : (
@@ -1134,7 +1143,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   <div><label className={labelClass}>API 类型</label>
                     <div className="grid grid-cols-2 gap-1.5">
                       {(Object.keys(apiKindLabels) as ApiKind[]).map(kind => (
-                        <button key={kind} onClick={() => setApiKind(kind)} className={`px-2 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer ${apiKind === kind ? 'bg-[#d4af37] text-black' : isDark ? 'bg-white/5 text-[#999] border border-white/10' : 'bg-gray-50 text-gray-600 border border-gray-200'}`}>{apiKindLabels[kind]}</button>
+                        <button key={kind} onClick={() => setApiKind(kind)} className={`px-2 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer ${apiKind === kind ? `${accentBgClass} ${accentTextOnBgClass}` : isDark ? 'bg-white/5 text-[#999] border border-white/10' : 'bg-gray-50 text-gray-600 border border-gray-200'}`}>{apiKindLabels[kind]}</button>
                       ))}
                     </div>
                     <p className={`mt-1 text-[10px] ${isDark ? 'text-[#555]' : 'text-gray-400'}`}>{apiKindDescriptions[apiKind]}</p>
@@ -1142,16 +1151,16 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   <div><label className={labelClass}>接口地址</label><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="https://接口域名" value={apiBaseUrl} onChange={e => setApiBaseUrl(e.target.value)} /></div>
                   <div><label className={labelClass}>固定 API 密钥</label><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="只保存在服务端配置" type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} /></div>
                   {/* Discover models */}
-                  <button onClick={() => void handleDiscoverModels()} disabled={isDiscovering || !apiBaseUrl.trim() || !apiKey.trim()} className="w-full h-9 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 border border-white/20 text-[#d4af37] hover:bg-white/5 disabled:opacity-40 cursor-pointer">
+                  <button onClick={() => void handleDiscoverModels()} disabled={isDiscovering || !apiBaseUrl.trim() || !apiKey.trim()} className={`w-full h-9 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 border ${isDark ? 'border-white/20 hover:bg-white/5' : 'border-gray-200 hover:bg-gray-50'} ${accentClass} disabled:opacity-40 cursor-pointer`}>
                     <RefreshCw className={`w-3.5 h-3.5 ${isDiscovering ? 'animate-spin' : ''}`} />{isDiscovering ? '识别中...' : '自动识别模型'}
                   </button>
                   {discoveredModels.length > 0 && (
                     <div>
                       <div className="flex items-center justify-between mb-1"><p className={`text-xs ${isDark ? 'text-[#777]' : 'text-gray-500'}`}>选择前端可见模型</p>
-                        <button onClick={() => { const allIds = discoveredModels.map(m => m.id); setSelectedModels(selectedModels.length === allIds.length ? [] : allIds); }} className={`text-xs px-2 py-0.5 rounded border cursor-pointer ${isDark ? 'text-[#d4af37] border-[#d4af37]/30 hover:bg-[#d4af37]/10' : 'text-[#d4af37] border-[#d4af37]/30 hover:bg-[#d4af37]/10'}`}>{selectedModels.length === discoveredModels.length ? '取消全选' : '全选'}</button>
+                        <button onClick={() => { const allIds = discoveredModels.map(m => m.id); setSelectedModels(selectedModels.length === allIds.length ? [] : allIds); }} className={`text-xs px-2 py-0.5 rounded border cursor-pointer ${accentClass} ${accentBorderClass} ${accentBgLight}`}>{selectedModels.length === discoveredModels.length ? '取消全选' : '全选'}</button>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {(() => { const q = modelSearchQuery.toLowerCase().trim(); const sorted = q ? [...discoveredModels].sort((a, b) => { const aMatch = (a.name || a.id).toLowerCase().includes(q) ? 0 : 1; const bMatch = (b.name || b.id).toLowerCase().includes(q) ? 0 : 1; return aMatch - bMatch; }) : discoveredModels; return sorted.map(model => (<button key={model.id} onClick={() => setSelectedModels(prev => prev.includes(model.id) ? prev.filter(id => id !== model.id) : [...prev, model.id])} className={`px-2.5 py-1 rounded-md text-xs border cursor-pointer ${selectedModels.includes(model.id) ? 'bg-[#d4af37] text-black border-transparent' : isDark ? 'bg-white/5 text-[#999] border-white/10' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>{model.name && model.name !== model.id ? model.name : getModelDisplayName(model.id)}</button>)); })()}
+                        {(() => { const q = modelSearchQuery.toLowerCase().trim(); const sorted = q ? [...discoveredModels].sort((a, b) => { const aMatch = (a.name || a.id).toLowerCase().includes(q) ? 0 : 1; const bMatch = (b.name || b.id).toLowerCase().includes(q) ? 0 : 1; return aMatch - bMatch; }) : discoveredModels; return sorted.map(model => (<button key={model.id} onClick={() => setSelectedModels(prev => prev.includes(model.id) ? prev.filter(id => id !== model.id) : [...prev, model.id])} className={`px-2.5 py-1 rounded-md text-xs border cursor-pointer ${selectedModels.includes(model.id) ? `${accentBgClass} ${accentTextOnBgClass} border-transparent` : isDark ? 'bg-white/5 text-[#999] border-white/10' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>{model.name && model.name !== model.id ? model.name : getModelDisplayName(model.id)}</button>)); })()}
                       </div>
                     </div>
                   )}
@@ -1173,8 +1182,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     )}
                   </div>
                   <div className="flex gap-2">
-                    <button type="button" onClick={() => void handleTestNewConnection()} disabled={isTestingNew || !apiBaseUrl || !apiKey} className={`flex-1 h-9 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 border disabled:opacity-40 cursor-pointer ${isDark ? 'border-white/20 text-[#d4af37] hover:bg-white/5' : 'border-gray-300 text-[#d4af37] hover:bg-gray-50'}`}><RefreshCw className={`w-3.5 h-3.5 ${isTestingNew ? 'animate-spin' : ''}`} />{isTestingNew ? '测试中...' : '测试连接'}</button>
-                    <button onClick={() => editingProviderId ? void handleUpdateApi() : void handleAddApi()} className={`flex-1 h-9 rounded-lg text-sm font-semibold cursor-pointer ${editingProviderId ? 'bg-blue-600 text-white' : 'bg-[#d4af37] text-black'}`}>{editingProviderId ? '更新 API' : '添加 API'}</button>
+                    <button type="button" onClick={() => void handleTestNewConnection()} disabled={isTestingNew || !apiBaseUrl || !apiKey} className={`flex-1 h-9 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 border disabled:opacity-40 cursor-pointer ${isDark ? `border-white/20 ${accentClass} hover:bg-white/5` : `border-gray-300 ${accentClass} hover:bg-gray-50`}`}><RefreshCw className={`w-3.5 h-3.5 ${isTestingNew ? 'animate-spin' : ''}`} />{isTestingNew ? '测试中...' : '测试连接'}</button>
+                    <button onClick={() => editingProviderId ? void handleUpdateApi() : void handleAddApi()} className={`flex-1 h-9 rounded-lg text-sm font-semibold cursor-pointer ${editingProviderId ? 'bg-blue-600 text-white' : `${accentBgClass} ${accentTextOnBgClass}`}`}>{editingProviderId ? '更新 API' : '添加 API'}</button>
                   </div>
                   {testNewResult && (<div className={`text-xs px-3 py-2 rounded-lg ${testNewResult.success ? (isDark ? 'bg-green-500/10 text-green-400' : 'bg-green-50 text-green-700') : (isDark ? 'bg-red-500/10 text-red-400' : 'bg-red-50 text-red-700')}`}>{testNewResult.success ? `连接成功 · ${testNewResult.modelCount ?? 0} 个模型可用` : `连接失败：${testNewResult.error || testNewResult.message}`}</div>)}
                   {editingProviderId && (<button onClick={() => { setEditingProviderId(null); setApiName(''); setApiBaseUrl(''); setApiKey(''); setApiModel(''); setDiscoveredModels([]); setSelectedModels([]); setModelSearchQuery(''); }} className={`w-full h-9 rounded-lg text-sm border cursor-pointer ${isDark ? 'border-white/20 text-[#888] hover:bg-white/5' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>取消编辑</button>)}
@@ -1189,7 +1198,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 {providers.map((provider, providerIndex) => (
                   <div key={provider.id} className={`rounded-xl border p-4 ${softClass}`}>
                     <div className="flex items-start gap-3">
-                      <Plug className={`w-5 h-5 mt-0.5 shrink-0 ${provider.isEnabled ? 'text-[#d4af37]' : 'text-gray-500'}`} />
+                      <Plug className={`w-5 h-5 mt-0.5 shrink-0 ${provider.isEnabled ? accentClass : 'text-gray-500'}`} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="text-sm font-semibold">{provider.displayName || provider.name}</p>
@@ -1199,10 +1208,10 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                         <p className={`text-xs mt-1 truncate ${isDark ? 'text-[#666]' : 'text-gray-500'}`}>{provider.baseUrl}</p>
                         <p className={`text-xs mt-1 font-mono ${isDark ? 'text-[#555]' : 'text-gray-400'}`}>{provider.apiKeyPreview || `${provider.apiKey.slice(0, 8)}****************`}</p>
                         {provider.selectedModels && provider.selectedModels.length > 0 && (
-                          <div className="mt-2"><p className={`text-xs mb-1 ${isDark ? 'text-[#888]' : 'text-gray-500'}`}>当前模型：</p><div className="flex flex-wrap gap-1">{provider.selectedModels.map(modelId => { const discovered = (provider.discoveredModels || []).find((dm: { id: string }) => dm.id === modelId); const displayName = discovered?.name && discovered.name !== modelId ? discovered.name : getModelDisplayName(modelId); return <span key={modelId} className={`text-xs px-2 py-0.5 rounded ${isDark ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'bg-amber-50 text-amber-700'}`}>{displayName}</span>; })}</div></div>
+                          <div className="mt-2"><p className={`text-xs mb-1 ${isDark ? 'text-[#888]' : 'text-gray-500'}`}>当前模型：</p><div className="flex flex-wrap gap-1">{provider.selectedModels.map(modelId => { const discovered = (provider.discoveredModels || []).find((dm: { id: string }) => dm.id === modelId); const displayName = discovered?.name && discovered.name !== modelId ? discovered.name : getModelDisplayName(modelId); return <span key={modelId} className={`text-xs px-2 py-0.5 rounded ${isDark ? `bg-[${accentHex}]/15 ${accentClass}` : isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>{displayName}</span>; })}</div></div>
                         )}
-                        {provider.modelType === 'vectorize' && provider.isEnabled && <div className={`mt-2 text-xs px-2 py-1 rounded ${isDark ? 'bg-[#d4af37]/10 text-[#d4af37]' : 'bg-amber-50 text-amber-700'}`}>已对接：矢量化工具 / 导出SVG</div>}
-                        {provider.modelType === 'layer' && provider.isEnabled && <div className={`mt-2 text-xs px-2 py-1 rounded ${isDark ? 'bg-[#d4af37]/10 text-[#d4af37]' : 'bg-amber-50 text-amber-700'}`}>已对接：编辑元素 / 下载PSD</div>}
+                        {provider.modelType === 'vectorize' && provider.isEnabled && <div className={`mt-2 text-xs px-2 py-1 rounded ${isDark ? `bg-[${accentHex}]/10 ${accentClass}` : isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>已对接：矢量化工具 / 导出SVG</div>}
+                        {provider.modelType === 'layer' && provider.isEnabled && <div className={`mt-2 text-xs px-2 py-1 rounded ${isDark ? `bg-[${accentHex}]/10 ${accentClass}` : isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>已对接：编辑元素 / 下载PSD</div>}
                         {(() => { const bal = apiBalances.find(b => b.providerId === provider.id || b.providerName === provider.name || provider.baseUrl.includes(b.providerId)); if (!bal) return null; return (<div className={`flex items-center gap-3 mt-2 text-xs ${isDark ? 'text-[#888]' : 'text-gray-500'}`}>{bal.balance !== null && <span className="flex items-center gap-1"><Wallet className="w-3 h-3" />余额: <span className={bal.balance > 10 ? 'text-green-500' : bal.balance > 1 ? 'text-yellow-500' : 'text-red-500'}>{bal.balance.toFixed(2)} {bal.currency}</span></span>}{bal.totalUsage > 0 && <span>总用量: {bal.totalUsage}</span>}{bal.dailyUsage > 0 && <span>今日: {bal.dailyUsage}</span>}{bal.error && <span className="text-red-400 text-xs">{bal.error}</span>}</div>); })()}
                       </div>
                     </div>
@@ -1237,13 +1246,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 <div className="w-1/3 border-r pr-3">
                   <div className={`text-xs font-medium mb-2 ${isDark ? 'text-[#999]' : 'text-gray-500'}`}>选择用户</div>
                   <div className="space-y-1 max-h-[500px] overflow-y-auto">
-                    {adminUsers.map(u => (<button key={u.id} onClick={() => void loadUserData(u.id)} className={`w-full text-left rounded-lg px-3 py-2 text-sm transition-colors cursor-pointer ${selectedDataUser === u.id ? (isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-primary/10 text-primary') : isDark ? 'bg-white/5 hover:bg-white/10 text-gray-200' : 'bg-white hover:bg-gray-50 text-gray-700'}`}><div className="font-medium">{u.name}</div><div className={`text-xs mt-0.5 ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>{u.id}</div></button>))}
+                    {adminUsers.map(u => (<button key={u.id} onClick={() => void loadUserData(u.id)} className={`w-full text-left rounded-lg px-3 py-2 text-sm transition-colors cursor-pointer ${selectedDataUser === u.id ? (isMonochrome ? 'bg-[#3b82f6]/20 text-[#3b82f6]' : isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-primary/10 text-primary') : isDark ? 'bg-white/5 hover:bg-white/10 text-gray-200' : 'bg-white hover:bg-gray-50 text-gray-700'}`}><div className="font-medium">{u.name}</div><div className={`text-xs mt-0.5 ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>{u.id}</div></button>))}
                   </div>
                 </div>
                 <div className="flex-1 flex gap-4 min-w-0">
                   <div className="w-1/2 border-r pr-3">
                     <div className={`text-xs font-medium mb-2 ${isDark ? 'text-[#999]' : 'text-gray-500'}`}>{selectedDataUser ? '数据条目' : '请先选择用户'}</div>
-                    {selectedDataUser ? (userDataKeys.length > 0 ? (<div className="space-y-1 max-h-[500px] overflow-y-auto">{userDataKeys.map(dk => (<div key={dk.dataKey} className={`group rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors flex items-center justify-between gap-2 ${viewingDataKey === dk.dataKey ? (isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-primary/10 text-primary') : isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-white hover:bg-gray-50'}`} onClick={() => void loadDataDetail(selectedDataUser, dk.dataKey)}><div className="min-w-0 flex-1"><div className="truncate font-medium">{dk.dataKey}</div><div className={`text-xs mt-0.5 ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>{dk.updatedAt ? new Date(dk.updatedAt).toLocaleString('zh-CN') : ''}</div></div><button onClick={(e) => { e.stopPropagation(); void deleteUserData(selectedDataUser, dk.dataKey); }} className={`opacity-0 group-hover:opacity-100 shrink-0 p-1 rounded transition-opacity cursor-pointer ${isDark ? 'hover:bg-red-500/20 text-red-400' : 'hover:bg-red-50 text-red-500'}`} title="删除此数据"><Trash2 size={14} /></button></div>))}</div>) : (<div className={`text-xs ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>该用户暂无数据</div>)) : (<div className={`text-xs ${isDark ? 'text-[#555]' : 'text-gray-300'}`}>← 点击左侧用户查看数据</div>)}
+                    {selectedDataUser ? (userDataKeys.length > 0 ? (<div className="space-y-1 max-h-[500px] overflow-y-auto">{userDataKeys.map(dk => (<div key={dk.dataKey} className={`group rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors flex items-center justify-between gap-2 ${viewingDataKey === dk.dataKey ? (isMonochrome ? 'bg-[#3b82f6]/20 text-[#3b82f6]' : isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-primary/10 text-primary') : isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-white hover:bg-gray-50'}`} onClick={() => void loadDataDetail(selectedDataUser, dk.dataKey)}><div className="min-w-0 flex-1"><div className="truncate font-medium">{dk.dataKey}</div><div className={`text-xs mt-0.5 ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>{dk.updatedAt ? new Date(dk.updatedAt).toLocaleString('zh-CN') : ''}</div></div><button onClick={(e) => { e.stopPropagation(); void deleteUserData(selectedDataUser, dk.dataKey); }} className={`opacity-0 group-hover:opacity-100 shrink-0 p-1 rounded transition-opacity cursor-pointer ${isDark ? 'hover:bg-red-500/20 text-red-400' : 'hover:bg-red-50 text-red-500'}`} title="删除此数据"><Trash2 size={14} /></button></div>))}</div>) : (<div className={`text-xs ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>该用户暂无数据</div>)) : (<div className={`text-xs ${isDark ? 'text-[#555]' : 'text-gray-300'}`}>← 点击左侧用户查看数据</div>)}
                   </div>
                   <div className="w-1/2 min-w-0">
                     <div className={`text-xs font-medium mb-2 ${isDark ? 'text-[#999]' : 'text-gray-500'}`}>{viewingDataKey ? `数据详情: ${viewingDataKey}` : '数据内容'}</div>
@@ -1260,7 +1269,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           <div className="h-full overflow-y-auto p-6">
             <div className="flex items-center justify-between mb-6">
               <div><h1 className={`text-xl font-bold ${textPrimary}`}>电商模板管理</h1><p className={`text-sm ${textSecondary}`}>管理品牌电商生成模板</p></div>
-              <button onClick={() => { setEditingEcomTpl({ id: `tpl_${Date.now()}`, name: '', icon: '📄', description: '', prompt_template: '', negative_prompt: 'low quality, blurry, distorted, deformed, watermark', aspect_ratio: '1:1', category: 'product', fidelity_anchor: '', sort_order: ecomTemplates.length + 1, is_enabled: true }); setShowNewEcomTpl(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#d4af37] text-black hover:bg-[#e0b840] transition-colors cursor-pointer"><Plus size={12} /> 新增模板</button>
+              <button onClick={() => { setEditingEcomTpl({ id: `tpl_${Date.now()}`, name: '', icon: '📄', description: '', prompt_template: '', negative_prompt: 'low quality, blurry, distorted, deformed, watermark', aspect_ratio: '1:1', category: 'product', fidelity_anchor: '', sort_order: ecomTemplates.length + 1, is_enabled: true }); setShowNewEcomTpl(true); }} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${accentBgClass} ${accentTextOnBgClass} ${accentHoverBgClass} transition-colors cursor-pointer`}><Plus size={12} /> 新增模板</button>
             </div>
             <div className="space-y-2 max-h-[500px] overflow-y-auto">
               {ecomTemplates.length === 0 ? (<div className={`text-center py-8 text-sm ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>暂无自定义模板，点击"新增模板"添加</div>) : ecomTemplates.map((tpl, idx) => (
@@ -1270,7 +1279,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium truncate">{tpl.name as string || '未命名'}</span>
                       <span className={`text-[10px] px-1.5 py-0.5 rounded ${tpl.is_enabled ? (isDark ? 'bg-green-500/20 text-green-400' : 'bg-green-50 text-green-600') : (isDark ? 'bg-[#333] text-[#666]' : 'bg-gray-100 text-gray-400')}`}>{tpl.is_enabled ? '启用' : '禁用'}</span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-blue-50 text-blue-600'}`}>{(tpl.category as string) || 'product'}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${isMonochrome ? 'bg-[#3b82f6]/20 text-[#3b82f6]' : isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-blue-50 text-blue-600'}`}>{(tpl.category as string) || 'product'}</span>
                       <span className={`text-[10px] ${isDark ? 'text-[#555]' : 'text-gray-400'}`}>{tpl.aspect_ratio as string}</span>
                     </div>
                     <div className={`text-xs mt-0.5 truncate ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>{tpl.description as string || '无描述'}</div>
@@ -1298,7 +1307,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   <div className="col-span-2"><label className={labelClass}>反向提示词</label><textarea className={`w-full h-16 px-3 py-2 rounded-lg border text-sm ${inputClass} resize-y`} placeholder="排除的低质量描述" value={(editingEcomTpl?.negative_prompt as string) || ''} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, negative_prompt: e.target.value } : null)} /></div>
                 </div>
                 <div className="flex items-center gap-2 mt-3">
-                  <button onClick={() => editingEcomTpl && void saveEcomTemplate(editingEcomTpl)} disabled={isEcomTplSaving || !(editingEcomTpl?.name) || !(editingEcomTpl?.prompt_template)} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-[#d4af37] text-black hover:bg-[#e0b840] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">{isEcomTplSaving ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}{isEcomTplSaving ? '保存中...' : '保存模板'}</button>
+                  <button onClick={() => editingEcomTpl && void saveEcomTemplate(editingEcomTpl)} disabled={isEcomTplSaving || !(editingEcomTpl?.name) || !(editingEcomTpl?.prompt_template)} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium ${accentBgClass} ${accentTextOnBgClass} ${accentHoverBgClass} transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed`}>{isEcomTplSaving ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}{isEcomTplSaving ? '保存中...' : '保存模板'}</button>
                   <button onClick={() => { setEditingEcomTpl(null); setShowNewEcomTpl(false); }} className={`px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${isDark ? 'text-[#888] hover:bg-white/5' : 'text-gray-500 hover:bg-gray-100'}`}>取消</button>
                 </div>
               </div>
