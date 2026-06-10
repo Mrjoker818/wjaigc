@@ -670,6 +670,8 @@ UPSCALE_TIMEOUT_MS=300000
 - onProjectsChanged 字段保留逻辑：从 latestImagesRef 保留本地非空字段，避免30秒同步覆盖
 - completedCanvasImages modelName 回退链：img.modelName || pollingModelName || img.model，确保模型名称始终有值
 - 自动保存类型修复：PersistableCanvasImage 类型别名 + as 类型断言，解决 user-types 与 infinite-canvas CanvasImage 类型兼容问题
+- apiProvider 渲染时回退：infinite-canvas 新增 modelProviderMap (useMemo)，当 image.apiProvider 为空时从模型配置查找提供商名称显示
+- modelProviderMap 支持纯模型ID和复合键(providerId::modelId)两种格式的映射
 
 **P0: 扩展命令 gemini-image 协议修复**
 - submitImageTask 新增 gemini-image 协议检测与 chat 格式转换（buildGeminiChatImageRequest）

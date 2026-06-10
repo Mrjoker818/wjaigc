@@ -880,6 +880,18 @@ export function InfiniteCanvas({
   const [canvasGenCount, setCanvasGenCount] = useState(1);
   const [canvasGenRefImages, setCanvasGenRefImages] = useState<string[]>([]);
   const [canvasGenModels, setCanvasGenModels] = useState<{id: string, providerId: string, providerName: string, apiDisplayName?: string}[]>([]);
+  // 模型ID → 提供商名称 映射（用于历史图片 apiProvider 回填）
+  const modelProviderMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of canvasGenModels) {
+      if (m.providerName) {
+        map.set(m.id, m.providerName);
+        // 也映射 compositeKey（providerId::modelId 格式）
+        if (m.providerId) map.set(`${m.providerId}::${m.id}`, m.providerName);
+      }
+    }
+    return map;
+  }, [canvasGenModels]);
   const [canvasGenGenerating, setCanvasGenGenerating] = useState(false);
   const [canvasGenFramePos, setCanvasGenFramePos] = useState<{x: number, y: number}>({ x: 0, y: 0 });
   const canvasGenFrameWidth = 512;
@@ -7833,25 +7845,29 @@ export function InfiniteCanvas({
                   </div>
                 )}
                 {/* Model & API info badge (bottom-left) */}
-                {(image.modelName || image.apiProvider) && !image.isProcessingPlaceholder && (
+                {(() => {
+                  const displayModelName = image.modelName || '';
+                  const displayApiProvider = image.apiProvider || modelProviderMap.get(image.model || '') || modelProviderMap.get(image.modelName || '') || '';
+                  return (displayModelName || displayApiProvider) && !image.isProcessingPlaceholder ? (
                   <div className="absolute bottom-1 left-1 z-20 pointer-events-none flex flex-col gap-0.5"
                     style={{ fontSize: `${Math.max(8, 9 / zoom)}px` }}>
-                    {image.modelName && (
+                    {displayModelName && (
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap leading-tight ${
                         isMonochrome ? 'bg-black/60 text-white/90' : 'bg-black/70 text-white/90'
                       }`}>
-                        {image.modelName}
+                        {displayModelName}
                       </span>
                     )}
-                    {image.apiProvider && (
+                    {displayApiProvider && (
                       <span className={`px-1.5 py-0.5 rounded text-[9px] font-normal whitespace-nowrap leading-tight ${
                         isMonochrome ? 'bg-black/50 text-blue-300/80' : 'bg-black/60 text-gold/70'
                       }`}>
-                        {image.apiProvider}
+                        {displayApiProvider}
                       </span>
                     )}
                   </div>
-                )}
+                ) : null;
+                })()}
                 {/* Image dimensions indicator (bottom-right, show on hover) */}
                 <div className="absolute bottom-1 right-1 z-20 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none"
                   style={{ fontSize: `${Math.max(9, 10 / zoom)}px` }}>
