@@ -4715,6 +4715,8 @@ export function InfiniteCanvas({
               width: 300,
               height: 300,
               prompt: canvasGenPrompt,
+              modelName: data.modelName || (canvasGenModel?.includes('::') ? canvasGenModel.split('::')[1] : canvasGenModel),
+              apiProvider: data.providerName,
             });
           }
         }

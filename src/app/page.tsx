@@ -668,10 +668,38 @@ function CanvasApp() {
               );
               // 清理无效图片框：没有 url 且不是处理中占位框的图片（可能是之前生成失败残留）
               const validImages = latest.canvasImages.filter(
-                (img: { url?: string; isProcessingPlaceholder?: boolean }) => img.url || img.isProcessingPlaceholder
+                (img: CanvasImage) => img.url || img.isProcessingPlaceholder
               );
+              // 从本地React状态构建已有图片字段索引（modelName/apiProvider/originalWidth/originalHeight 等）
+              // 服务器数据可能缺少这些字段，需要从本地补充
+              const localImgMap = new Map<string, CanvasImage>();
+              for (const li of latestImagesRef.current) {
+                if (li.id) localImgMap.set(li.id, li);
+              }
+              const enrichedImages = validImages.map((img: CanvasImage) => {
+                const localImg = localImgMap.get(img.id);
+                if (!localImg) return img;
+                const enriched = { ...img };
+                // 逐字段检查，从本地补充服务器缺失的字段
+                if ((!enriched.modelName || enriched.modelName === '') && localImg.modelName) {
+                  enriched.modelName = localImg.modelName;
+                }
+                if ((!enriched.apiProvider || enriched.apiProvider === '') && localImg.apiProvider) {
+                  enriched.apiProvider = localImg.apiProvider;
+                }
+                if ((!enriched.originalWidth) && localImg.originalWidth) {
+                  enriched.originalWidth = localImg.originalWidth;
+                }
+                if ((!enriched.originalHeight) && localImg.originalHeight) {
+                  enriched.originalHeight = localImg.originalHeight;
+                }
+                if ((!enriched.model || enriched.model === '') && localImg.model) {
+                  enriched.model = localImg.model;
+                }
+                return enriched;
+              });
               setImages([
-                ...validImages.map(img => ({ ...img })),
+                ...enrichedImages,
                 ...uniquePlaceholders,
               ]);
             }
