@@ -2396,7 +2396,7 @@ function CanvasApp() {
   }, []);
 
   // AI聊天中的图像生成回调 - 当AI建议生成图片时直接触发
-  const handleChatGenerateImage = useCallback((prompt: string) => {
+  const handleChatGenerateImage = useCallback((prompt: string, outputCount?: number) => {
     // 从 wujie_selected_model 读取当前选择的图像生成模型（与 generation-panel 同步）
     let model = '';
     let providerId: string | undefined;
@@ -2438,7 +2438,7 @@ function CanvasApp() {
     // 调用 handleGenerate 执行实际的图像生成
     handleGenerate({
       prompt: prompt,
-      outputCount: 1,
+      outputCount: outputCount || 1,
       aspectRatio: '1:1',
       size: '',
       referenceImages: [],

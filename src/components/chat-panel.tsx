@@ -297,7 +297,7 @@ interface ChatPanelProps {
   onChatModelChange?: (info: { model: string; providerId: string; apiKey: string; baseUrl: string; providerPreset?: string } | null) => void;
   onSuggestionAction?: (action: string, data?: Record<string, string>) => void;
   /** Called when user clicks "generate image" suggestion - triggers image generation directly */
-  onGenerateImage?: (prompt: string) => void;
+  onGenerateImage?: (prompt: string, outputCount?: number) => void;
   brandDna?: Record<string, unknown> | null;
   onInjectBrandDna?: (dna: Record<string, unknown>) => void;
   /** Image sent from canvas right-click menu "发送到聊天修改" */
@@ -731,6 +731,51 @@ function isImageGenerationIntent(message: string): boolean {
     /产品.*图/, /电商.*图/, /商品.*图/,
   ];
   return strongNouns.some(p => p.test(lower));
+}
+
+// Detect how many images user wants from text (e.g., "生成3张图", "多张方案", "5张")
+function detectImageCountFromText(text: string): number {
+  const lower = text.toLowerCase();
+  // Explicit number patterns: "3张", "5张图", "4个方案", "3幅画", "3套", "3组"
+  const numberPatterns = [
+    /(\d+)\s*[张幅份套组个]/,
+    /(\d+)\s*(张|幅|份|套|组|个)\s*(图|图片|画|海报|封面|插画|方案|设计|稿)/,
+    /(生成|画|做|创建|设计|出)\s*(\d+)\s*(张|幅|份|套|组|个)/,
+    /(生成|画|做|创建|设计|出)\s*(\d+)\s*(图|图片|画|海报|封面|插画|方案|设计|稿)/,
+    /(\d+)\s*(种|款|版)\s*(方案|设计|样式|风格|效果)/,
+    /(\d+)\s*(个|种|款)\s*(不同|不同风格|不同方案)/,
+  ];
+  for (const pattern of numberPatterns) {
+    const match = lower.match(pattern);
+    if (match) {
+      const num = parseInt(match[1] || match[2] || match[0], 10);
+      if (num >= 2 && num <= 10) return num;
+    }
+  }
+  // "多张", "多幅", "多个方案", "一组", "一套", "系列" without specific number → default 4
+  if (/多[张幅份个]/.test(lower) || /一[组套]图/.test(lower) || /系列图/.test(lower) || /批量/.test(lower)) {
+    return 4;
+  }
+  // "几张", "若干张" → default 3
+  if (/几[张幅份个]/.test(lower) || /若干[张幅份个]/.test(lower)) {
+    return 3;
+  }
+  // English patterns: "3 images", "generate 5 photos", "multiple images"
+  const enPatterns = [
+    /(\d+)\s*(images?|pictures?|photos?|illustrations?|posters?|designs?|versions?|variants?)/,
+    /(generate|create|make|draw|design)\s+(\d+)\s*(images?|pictures?|photos?|illustrations?|posters?)/,
+  ];
+  for (const pattern of enPatterns) {
+    const match = lower.match(pattern);
+    if (match) {
+      const num = parseInt(match[1] || match[2] || '0', 10);
+      if (num >= 2 && num <= 10) return num;
+    }
+  }
+  if (/multiple\s*(images?|pictures?|photos?|versions?|variants?)/.test(lower) || /a\s+set\s+of/.test(lower) || /a\s+series\s+of/.test(lower)) {
+    return 4;
+  }
+  return 1;
 }
 
 // Helper: clean assistant content for display - extract useful text from AI response
@@ -3167,9 +3212,10 @@ ${imageDescriptions}
             try {
               console.log('[ChatImage] LLM-triggered generation with prompt:', rawPrompt.substring(0, 100) + '...');
 
-              // 检测比例和质量
+              // 检测比例、质量和数量
               const aspectRatio = detectAspectRatioFromText(rawPrompt + ' ' + trimmedInput) || '1:1';
               const quality = /高清|高质量|hd|high.?quality|2k|4k/i.test(trimmedInput) ? '2K' : '1K';
+              const outputCount = detectImageCountFromText(trimmedInput);
 
               // 如果用户有图片，作为参考图传入
               const referenceImages = capturedPendingImages.map(img => img.url);
@@ -3185,6 +3231,7 @@ ${imageDescriptions}
                   providerId: imageModelInfo.providerId,
                   aspectRatio,
                   quality,
+                  outputCount,
                   ...(referenceImages.length > 0 ? { referenceImages } : {}),
                 }),
               });
@@ -3330,6 +3377,7 @@ ${imageDescriptions}
                 const imageSourceId = capturedPendingImages.length > 0 ? capturedPendingImages[0].id : undefined;
                 const aspectRatio = detectAspectRatioFromText(trimmedInput) || '1:1';
                 const quality = /高清|高质量|hd|high.?quality|2k|4k/i.test(trimmedInput) ? '2K' : '1K';
+                const outputCount = detectImageCountFromText(trimmedInput);
 
                 // 用 optimize-prompt 优化用户的提示词
                 let optimizedPrompt = trimmedInput;
@@ -3356,6 +3404,7 @@ ${imageDescriptions}
                     providerId: imageModelInfo.providerId,
                     aspectRatio,
                     quality,
+                    outputCount,
                     ...(referenceImages.length > 0 ? { referenceImages } : {}),
                   }),
                 });
@@ -4269,7 +4318,10 @@ ${imageDescriptions}
                             key={sug.id}
                             onClick={() => {
                               if (sug.action === 'generate-image' && onGenerateImage && sug.prompt) {
-                                onGenerateImage(sug.prompt);
+                                // 从最近的用户消息中检测生成数量
+                                const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+                                const count = lastUserMsg ? detectImageCountFromText(lastUserMsg.content) : 1;
+                                onGenerateImage(sug.prompt, count);
                               } else if (sug.action === 'send-to-prompt' && sug.prompt) {
                                 // 作为聊天消息发送，而非发到图像生成面板
                                 handleSend(sug.prompt);
