@@ -11276,7 +11276,7 @@ export function InfiniteCanvas({
           const providers = getThreeDProviders();
           return (
             <div
-              className="fixed inset-0 z-[998] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+              className="fixed inset-0 z-[998] flex items-center justify-center bg-[#1a1a1a]"
               data-modal="3d-conversion"
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}

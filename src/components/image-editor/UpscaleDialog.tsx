@@ -149,7 +149,7 @@ export default function UpscaleDialog({ imageUrl, onClose, onSuccess, isMonochro
 
   return (
     <div
-      className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-[300] flex items-center justify-center bg-[#1a1a1a]"
       onClick={handleOverlayClick}
     >
       <div
