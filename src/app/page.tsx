@@ -2395,6 +2395,36 @@ function CanvasApp() {
     setExternalPrompt(undefined);
   }, []);
 
+  // AI聊天中的图像生成回调 - 当AI建议生成图片时直接触发
+  const handleChatGenerateImage = useCallback((prompt: string) => {
+    // 从 localStorage 获取当前选择的图像生成模型
+    const storedModel = localStorage.getItem('currentImageModel');
+    const model = storedModel || '';
+    
+    if (!model) {
+      toast.error('未选择图像生成模型', {
+        description: '请先在图像生成面板中选择模型',
+        className: 'bg-[#141414] border border-yellow-900 text-white',
+      });
+      return;
+    }
+
+    // 调用 handleGenerate 执行实际的图像生成
+    handleGenerate({
+      prompt: prompt,
+      outputCount: 1,
+      aspectRatio: '1:1',
+      size: '',
+      referenceImages: [],
+      referenceMode: 'style',
+      imageCategory: '',
+      productCategory: '',
+      stylePreset: '',
+      quality: 'standard',
+      model: model,
+    });
+  }, [handleGenerate]);
+
   // 适配 InfiniteCanvas 的简单回调函数
   const handleCanvasGenerateVariation = useCallback((image: CanvasImage) => {
     setExternalReferenceImage(image.url);
@@ -2971,7 +3001,7 @@ function CanvasApp() {
                   />
               </div>
               <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
-                <ChatPanel themeStyle={themeStyle} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} canvasImages={images} selectedCanvasImage={selectedImage} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} />
+                <ChatPanel themeStyle={themeStyle} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} canvasImages={images} selectedCanvasImage={selectedImage} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} />
               </div>
               <div className={activePanel === 'video' ? 'flex-1 overflow-y-auto scroll-smooth' : 'hidden'} style={{
                 scrollbarWidth: 'thin',

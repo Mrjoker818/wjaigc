@@ -51,7 +51,7 @@ interface Message {
 interface NextSuggestion {
   id: string;
   label: string;
-  action: 'img2img' | 'retouch' | 'upscale' | 'remove-bg' | 'extend' | 'svg-trace' | 'agent-edit' | 'generate-variant' | 'send-to-prompt';
+  action: 'img2img' | 'retouch' | 'upscale' | 'remove-bg' | 'extend' | 'svg-trace' | 'agent-edit' | 'generate-variant' | 'send-to-prompt' | 'generate-image';
   prompt?: string;
 }
 
@@ -296,6 +296,8 @@ interface ChatPanelProps {
   selectedCanvasImage?: CanvasImage | null;
   onChatModelChange?: (info: { model: string; providerId: string; apiKey: string; baseUrl: string; providerPreset?: string } | null) => void;
   onSuggestionAction?: (action: string, data?: Record<string, string>) => void;
+  /** Called when user clicks "generate image" suggestion - triggers image generation directly */
+  onGenerateImage?: (prompt: string) => void;
   brandDna?: Record<string, unknown> | null;
   onInjectBrandDna?: (dna: Record<string, unknown>) => void;
   /** Image sent from canvas right-click menu "发送到聊天修改" */
@@ -401,6 +403,7 @@ function parseSuggestions(content: string): { cleanedContent: string; suggestion
           else if (/扩展|延伸|extend|outpaint/i.test(actionHint)) action = 'extend';
           else if (/矢量|描摹|svg|vectoriz/i.test(actionHint)) action = 'svg-trace';
           else if (/agent|编排|智能/i.test(actionHint)) action = 'agent-edit';
+          else if (/生成图片|生成|create|generate|画图|画|制作|设计/i.test(actionHint || label)) action = 'generate-image';
           else if (/提示词|prompt|生图/i.test(actionHint)) action = 'send-to-prompt';
           prompt = label;
           suggestions.push({ id: `sug-${Date.now()}-${suggestions.length}`, label, action, prompt });
@@ -1073,7 +1076,7 @@ ${outputSpec || '1. 设计理念（200字内）\n2. 详细方案描述\n3. 材�
   );
 }
 
-export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages = [], selectedCanvasImage, onChatModelChange, onSuggestionAction, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage }: ChatPanelProps) {
+export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages = [], selectedCanvasImage, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [model, setModel] = useState('gemini-3.1-pro-preview');
@@ -4261,7 +4264,9 @@ ${imageDescriptions}
                           <button
                             key={sug.id}
                             onClick={() => {
-                              if (sug.action === 'send-to-prompt' && onAddToPrompt && sug.prompt) {
+                              if (sug.action === 'generate-image' && onGenerateImage && sug.prompt) {
+                                onGenerateImage(sug.prompt);
+                              } else if (sug.action === 'send-to-prompt' && onAddToPrompt && sug.prompt) {
                                 onAddToPrompt(sug.prompt);
                               } else if (onSuggestionAction) {
                                 onSuggestionAction(sug.action, { prompt: sug.prompt || '', label: sug.label });
