@@ -2194,7 +2194,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                   })}
                 </div>
                 {/* 进度信息栏：已用时间 + 取消按钮 */}
-                <div className={`flex items-center justify-between px-1 py-1.5 rounded-lg ${isMonochrome ? "bg-gray-50" : "bg-white/[0.03]"}`}>
+                <div className={`flex items-center justify-between px-1 py-1.5 rounded-lg ${isMonochrome ? "bg-gray-50" : "bg-[#222]"}`}>
                   <div className="flex items-center gap-3 text-xs">
                     <span className={thTextMuted}>
                       进度 {loadingProgress}%
@@ -2210,7 +2210,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                     className={`px-2 py-0.5 text-xs rounded font-medium transition-all ${
                       isMonochrome
                         ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-                        : "bg-white/[0.08] hover:bg-white/[0.15] text-gray-300"
+                        : "bg-[#2a2a2a] hover:bg-[#333] text-gray-300"
                     }`}
                   >
                     取消
