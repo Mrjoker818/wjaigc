@@ -789,8 +789,9 @@ function CanvasApp() {
       const apiEndpoint = isThirdParty ? '/api/universal-generate' : '/api/generate';
       
       // 提交生成请求（带超时保护，避免网络异常导致无限等待）
+      // 超时需匹配后端 maxDuration (600s=10分钟)，部分第三方API出图可达90秒+
       const submitController = new AbortController();
-      const submitTimeout = setTimeout(() => submitController.abort(), 30000); // 30秒超时
+      const submitTimeout = setTimeout(() => submitController.abort(), 600000); // 10分钟超时，匹配后端maxDuration
 
       let response: Response;
       try {

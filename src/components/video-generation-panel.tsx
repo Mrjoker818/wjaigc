@@ -21,6 +21,7 @@ export interface VideoModelInfo {
     videoExtend: boolean;
     audio: boolean;
     maxDuration: number;
+    durations: number[];
     aspectRatios: string[];
     resolutions: string[];
   };
@@ -32,98 +33,123 @@ const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
   'kling-v3-video-generation': {
     id: 'kling-v3-video-generation', name: '可灵 V3', provider: 'Kuaishou', region: 'cn',
     profile: 'dashscope',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, maxDuration: 10, aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'] }
   },
   'kling-v3-omni-video-generation': {
     id: 'kling-v3-omni-video-generation', name: '可灵 V3 Omni', provider: 'Kuaishou', region: 'cn',
     profile: 'dashscope',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, maxDuration: 10, aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'] }
   },
   'doubao-seedance-2-0': {
     id: 'doubao-seedance-2-0', name: 'Seedance 2.0', provider: 'ByteDance', region: 'cn',
     profile: 'volcengine-ark',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, maxDuration: 10, aspectRatios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['480p','720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['480p','720p','1080p'] }
   },
   'doubao-seedance-2-0-fast': {
     id: 'doubao-seedance-2-0-fast', name: 'Seedance 2.0 Fast', provider: 'ByteDance', region: 'cn',
     profile: 'volcengine-ark',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, maxDuration: 10, aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p','1080p'] }
   },
   'doubao-seedance-2-3': {
     id: 'doubao-seedance-2-3', name: 'Seedance 2.3', provider: 'ByteDance', region: 'cn',
     profile: 'volcengine-ark',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, maxDuration: 10, aspectRatios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['768p','1080p'] }
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['768p','1080p'] }
   },
   'doubao-seedance-2-3-fast': {
     id: 'doubao-seedance-2-3-fast', name: 'Seedance 2.3 Fast', provider: 'ByteDance', region: 'cn',
     profile: 'volcengine-ark',
-    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 10, aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['768p','1080p'] }
+    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['768p','1080p'] }
   },
   'doubao-seedance-1-0-lite': {
     id: 'doubao-seedance-1-0-lite', name: 'Seedance 1.0 Lite', provider: 'ByteDance', region: 'cn',
     profile: 'volcengine-ark',
-    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 10, aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'] }
+    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'] }
   },
   'video-01': {
     id: 'video-01', name: '海螺 Video-01', provider: 'MiniMax', region: 'cn',
     profile: 'minimax',
-    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 5, aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['720p'] }
+    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 6, durations: [6], aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['720p'] }
   },
   'hailuo-02': {
     id: 'hailuo-02', name: '海螺 Hailuo 02', provider: 'MiniMax', region: 'cn',
     profile: 'minimax',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 10, aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['512p','768p','1080p'] }
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 10, durations: [5, 6, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['512p','768p','1080p'] }
+  },
+  'hailuo-2.3': {
+    id: 'hailuo-2.3', name: '海螺 Hailuo 2.3', provider: 'MiniMax', region: 'cn',
+    profile: 'minimax',
+    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 10, durations: [5, 6, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['768p','1080p'] }
   },
   'vidu-q1': {
     id: 'vidu-q1', name: 'Vidu Q1', provider: 'ShengShu', region: 'cn',
     profile: 'vidu',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, maxDuration: 8, aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, maxDuration: 8, durations: [4, 8], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'] }
   },
   'vidu-q2': {
     id: 'vidu-q2', name: 'Vidu Q2', provider: 'ShengShu', region: 'cn',
     profile: 'vidu',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, maxDuration: 8, aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, maxDuration: 8, durations: [4, 8], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'] }
   },
   // === 海外模型 ===
   'gen-3-alpha-turbo': {
     id: 'gen-3-alpha-turbo', name: 'Runway Gen-3 Turbo', provider: 'Runway', region: 'global',
     profile: 'rest-generic',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: true, videoExtend: true, audio: false, maxDuration: 10, aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: false, videoEdit: true, videoExtend: true, audio: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
+  },
+  'gen-3-alpha': {
+    id: 'gen-3-alpha', name: 'Runway Gen-3', provider: 'Runway', region: 'global',
+    profile: 'rest-generic',
+    features: { firstLastFrame: true, multiReference: false, videoEdit: true, videoExtend: true, audio: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
   },
   'gen-4': {
     id: 'gen-4', name: 'Runway Gen-4', provider: 'Runway', region: 'global',
     profile: 'rest-generic',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: true, videoExtend: true, audio: false, maxDuration: 10, aspectRatios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p','4K'] }
+    features: { firstLastFrame: true, multiReference: false, videoEdit: true, videoExtend: true, audio: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p','4K'] }
   },
   'pika-2.2': {
     id: 'pika-2.2', name: 'Pika 2.2', provider: 'Pika', region: 'global',
     profile: 'fal-video',
-    features: { firstLastFrame: false, multiReference: true, videoEdit: true, videoExtend: false, audio: false, maxDuration: 10, aspectRatios: ['16:9','9:16','1:1','4:5','5:4','3:2','2:3'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: false, multiReference: true, videoEdit: true, videoExtend: false, audio: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['16:9','9:16','1:1','4:5','5:4','3:2','2:3'], resolutions: ['720p','1080p'] }
+  },
+  'pika-2.0': {
+    id: 'pika-2.0', name: 'Pika 2.0', provider: 'Pika', region: 'global',
+    profile: 'fal-video',
+    features: { firstLastFrame: false, multiReference: true, videoEdit: true, videoExtend: false, audio: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
+  },
+  'pika-1.5': {
+    id: 'pika-1.5', name: 'Pika 1.5', provider: 'Pika', region: 'global',
+    profile: 'fal-video',
+    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 5, durations: [5], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p'] }
   },
   'ray3': {
     id: 'ray3', name: 'Luma Ray3', provider: 'Luma', region: 'global',
     profile: 'rest-generic',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: true, audio: false, maxDuration: 10, aspectRatios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: true, audio: false, maxDuration: 10, durations: [5, 9, 10], aspectRatios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p'] }
   },
   'ray3.14': {
     id: 'ray3.14', name: 'Luma Ray3.14', provider: 'Luma', region: 'global',
     profile: 'rest-generic',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: true, audio: false, maxDuration: 10, aspectRatios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: true, audio: false, maxDuration: 10, durations: [5, 9, 10], aspectRatios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p'] }
+  },
+  'ray2': {
+    id: 'ray2', name: 'Luma Ray2', provider: 'Luma', region: 'global',
+    profile: 'rest-generic',
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: true, audio: false, maxDuration: 5, durations: [5], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
   },
   'sora': {
     id: 'sora', name: 'OpenAI Sora', provider: 'OpenAI', region: 'global',
     profile: 'openai-video',
-    features: { firstLastFrame: false, multiReference: false, videoEdit: true, videoExtend: true, audio: true, maxDuration: 20, aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: false, multiReference: false, videoEdit: true, videoExtend: true, audio: true, maxDuration: 20, durations: [5, 10, 15, 20], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
   },
   'veo-2': {
     id: 'veo-2', name: 'Google Veo 2', provider: 'Google', region: 'global',
     profile: 'rest-generic',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 8, aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 8, durations: [4, 8], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
   },
   'veo-3': {
     id: 'veo-3', name: 'Google Veo 3', provider: 'Google', region: 'global',
     profile: 'rest-generic',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: true, maxDuration: 8, aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: true, maxDuration: 8, durations: [4, 8], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
   },
 };
 
@@ -215,7 +241,7 @@ export default function VideoGenerationPanel({
           region: registry?.region || 'cn' as const,
           features: registry?.features || {
             firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false,
-            audio: false, maxDuration: 10, aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p']
+            audio: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p']
           },
         };
       });
@@ -280,7 +306,7 @@ export default function VideoGenerationPanel({
 
   // 动态可选比例
   const availableRatios = currentFeatures?.aspectRatios || ['1:1', '4:3', '16:9', '9:16'];
-  const availableDurations = [5, 10].filter(d => d <= (currentFeatures?.maxDuration || 10));
+  const availableDurations = currentFeatures?.durations || [5, 10];
   const availableResolutions = currentFeatures?.resolutions || ['720p', '1080p'];
 
   // 画布选中图片自动设为首帧

@@ -3410,8 +3410,9 @@ export function InfiniteCanvas({
       }
 
       // 提交生成请求（带超时保护）
+      // 超时需匹配后端 maxDuration (600s=10分钟)，部分第三方API出图可达90秒+
       const genController = new AbortController();
-      const genTimeout = setTimeout(() => genController.abort(), 120000); // 2分钟超时（图像生成API可能较慢）
+      const genTimeout = setTimeout(() => genController.abort(), 600000); // 10分钟超时，匹配后端maxDuration
 
       let res: Response;
       try {
@@ -4697,8 +4698,9 @@ export function InfiniteCanvas({
       const canvasGenPureModel = canvasGenModel?.includes('::') ? canvasGenModel.split('::')[1] : canvasGenModel || undefined;
       const canvasGenProviderId = canvasGenModel?.includes('::') ? canvasGenModel.split('::')[0] : undefined;
       // 提交生成请求（带超时保护）
+      // 超时需匹配后端 maxDuration (600s=10分钟)，部分第三方API出图可达90秒+
       const canvasGenController = new AbortController();
-      const canvasGenTimeout = setTimeout(() => canvasGenController.abort(), 120000); // 2分钟超时（图像生成API可能较慢）
+      const canvasGenTimeout = setTimeout(() => canvasGenController.abort(), 600000); // 10分钟超时，匹配后端maxDuration
 
       let res: Response;
       try {
@@ -5415,7 +5417,7 @@ export function InfiniteCanvas({
       updateProcessingFrame(placeholderId, { progress: 8, status: '正在提交到 AI 模型...' });
       // ★ 放大操作可能耗时较长（如108s），设置5分钟超时与后端直接模式600s对齐
       const upscaleController = new AbortController();
-      const upscaleTimeout = setTimeout(() => upscaleController.abort(), 300000);
+      const upscaleTimeout = setTimeout(() => upscaleController.abort(), 600000); // 10分钟超时，匹配后端maxDuration
       let res: Response;
       try {
         res = await fetch('/api/image-edit', {
@@ -6401,7 +6403,7 @@ export function InfiniteCanvas({
         console.log('[inpaint] bodySize:', Math.round(bodyStr.length / 1024) + 'KB', 'urlType:', currentEditImg.url?.substring(0, 20));
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 180000); // 3分钟超时
+        const timeoutId = setTimeout(() => controller.abort(), 600000); // 10分钟超时，匹配后端maxDuration
 
         let res: Response;
         try {
