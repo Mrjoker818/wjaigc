@@ -54,6 +54,7 @@ export interface VideoGenerateParams {
   providerId?: string;          // 提供商ID
   apiKey?: string;              // API密钥
   baseUrl?: string;             // API基础URL
+  advancedParams?: Record<string, any>; // 提供商高级参数
 }
 
 export interface VideoTaskSubmitResult {
@@ -619,21 +620,41 @@ function buildFalVideoSubmit(baseUrl: string, apiKey: string, params: VideoGener
 }
 
 function buildRestGenericSubmit(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
+  // Support both video-specific and image-style endpoints for max third-party compatibility
+  // Many third-party APIs expose video generation via /v1/images/generations
+  const cleanBase = baseUrl.replace(/\/+$/, '');
+  const useImageEndpoint = params.advancedParams?.videoEndpoint === 'images'
+    || cleanBase.includes('/v1/images');
+
+  const endpoint = useImageEndpoint
+    ? `${cleanBase}/v1/images/generations`
+    : `${cleanBase}/v1/video/generations`;
+
+  // Build request body compatible with both OpenAI image and video API formats
   const body: Record<string, any> = {
     model: params.model,
     prompt: params.prompt,
-    ...(params.imageUrl ? { image_url: params.imageUrl } : {}),
+    // Image-style: image as array of objects; Video-style: flat fields
+    ...(params.imageUrl ? useImageEndpoint
+      ? { image: params.imageUrl }  // OpenAI images/generations style
+      : { image_url: params.imageUrl }  // Video style
+    : {}),
     ...(params.lastFrameImageUrl ? { last_frame_image_url: params.lastFrameImageUrl } : {}),
-    ...(params.aspectRatio ? { aspect_ratio: params.aspectRatio } : {}),
+    ...(params.aspectRatio ? useImageEndpoint
+      ? { size: ratioToSize(params.aspectRatio) }
+      : { aspect_ratio: params.aspectRatio }
+    : {}),
     ...(params.duration ? { duration: params.duration } : {}),
     ...(params.mode ? { mode: params.mode } : {}),
     ...(params.generateAudio ? { audio: true } : {}),
     ...(params.negativePrompt ? { negative_prompt: params.negativePrompt } : {}),
     ...(params.seed !== undefined ? { seed: params.seed } : {}),
+    // Image-style: n=1 for single video generation
+    ...(useImageEndpoint ? { n: 1, response_format: 'url' } : {}),
   };
 
   return {
-    url: `${baseUrl}/v1/video/generations`,
+    url: endpoint,
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
@@ -641,6 +662,19 @@ function buildRestGenericSubmit(baseUrl: string, apiKey: string, params: VideoGe
     body: JSON.stringify(body),
     method: 'POST',
   };
+}
+
+/** Convert aspect ratio like "16:9" to approximate pixel size string "1920x1080" */
+function ratioToSize(ratio: string): string {
+  const ratioMap: Record<string, string> = {
+    '1:1': '1024x1024',
+    '4:3': '1024x768',
+    '3:4': '768x1024',
+    '16:9': '1920x1080',
+    '9:16': '1080x1920',
+    '21:9': '1792x768',
+  };
+  return ratioMap[ratio] || '1024x1024';
 }
 
 // ==================== Protocol-Specific Parsers ====================

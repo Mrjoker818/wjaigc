@@ -80,16 +80,37 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 3.5 解析视频 URL（转换为第三方 API 可访问的格式）
+    const rawDomain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
+    const domainBase = rawDomain.replace(/\/+$/, '');
+
+    let resolvedVideoUrl = videoUrl;
+    if (videoUrl.startsWith('/')) {
+      if (domainBase) {
+        const base = domainBase.startsWith('http') ? domainBase : `https://${domainBase}`;
+        resolvedVideoUrl = `${base}${videoUrl}`;
+      } else {
+        try {
+          const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+          const port = process.env.DEPLOY_RUN_PORT || 5000;
+          const resp = await fetch(`${proto}://localhost:${port}${videoUrl}`, { signal: AbortSignal.timeout(10000) });
+          const buf = Buffer.from(await resp.arrayBuffer());
+          resolvedVideoUrl = `data:video/mp4;base64,${buf.toString('base64')}`;
+        } catch { /* fallback to original */ }
+      }
+    }
+
     // 4. 构建请求参数
     const videoParams: VideoGenerateParams = {
       prompt: prompt || '请延长视频',
       model,
-      videoUrl,
+      videoUrl: resolvedVideoUrl,
       action: 'extend',
       extendDuration,
       generateAudio,
       apiKey,
       baseUrl,
+      advancedParams,
     };
 
     // 5. 注册任务
@@ -106,12 +127,23 @@ export async function POST(request: NextRequest) {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 30000);
 
-        const response = await fetch(req.url, {
+        let response = await fetch(req.url, {
           method: req.method,
           headers: req.headers,
           body: req.body,
           signal: controller.signal,
         });
+
+        // Auto-fallback: if /v1/video/generations returns 404, try /v1/images/generations
+        if (response.status === 404 && profile === 'rest-generic' && !req.url.includes('/v1/images/')) {
+          const fallbackUrl = req.url.replace('/v1/video/generations', '/v1/images/generations');
+          response = await fetch(fallbackUrl, {
+            method: req.method,
+            headers: req.headers,
+            body: req.body,
+            signal: controller.signal,
+          });
+        }
 
         clearTimeout(timeout);
 
