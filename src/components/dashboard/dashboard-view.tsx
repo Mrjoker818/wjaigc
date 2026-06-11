@@ -21,8 +21,8 @@ import { getModelDisplayName } from '@/lib/model-name-map';
 type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates';
 type ProjectFilter = 'all' | 'recent' | 'starred';
 type AssetSubTab = 'images' | 'prompts' | 'brands';
-type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer';
-type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'imageEdit' | 'vectorize' | 'layer';
+type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video';
+type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'imageEdit' | 'vectorize' | 'layer' | 'video';
 type AdminProvider = ApiProvider & { apiKeyPreview?: string };
 
 const apiKindLabels: Record<ApiKind, string> = {
@@ -32,6 +32,7 @@ const apiKindLabels: Record<ApiKind, string> = {
   '3d': '3D 模型',
   vectorize: '矢量模型',
   layer: '图片分层模型',
+  video: '视频模型',
 };
 
 const apiKindDescriptions: Record<ApiKind, string> = {
@@ -41,6 +42,7 @@ const apiKindDescriptions: Record<ApiKind, string> = {
   '3d': '支持自动识别模型，管理员选择后对接到一键转3D功能',
   vectorize: '添加API后系统自动识别 vectorize 模型，对接到矢量化工具和导出SVG',
   layer: '添加API后系统自动识别 qwen-image-layered 模型，对接到编辑元素和下载PSD',
+  video: '添加API后系统自动识别视频模型（可灵/Seedance/海螺/Vidu/Runway/Pika/Sora等），对接到文生视频和图生视频功能',
 };
 
 const userPermissionLabels: Record<UserPermissionKey, string> = {
@@ -50,6 +52,7 @@ const userPermissionLabels: Record<UserPermissionKey, string> = {
   imageEdit: '编辑',
   vectorize: '矢量',
   layer: '分层',
+  video: '视频',
 };
 
 interface DashboardViewProps {
@@ -428,6 +431,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       image: u.apiPermissions?.image ?? true, chat: u.apiPermissions?.chat ?? true,
       threeD: u.apiPermissions?.threeD ?? true, imageEdit: u.apiPermissions?.imageEdit ?? true,
       vectorize: u.apiPermissions?.vectorize ?? true, layer: u.apiPermissions?.layer ?? true,
+      video: u.apiPermissions?.video ?? true,
     };
     await fetch('/api/admin/users', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
@@ -469,7 +473,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: apiName.trim(), baseUrl: apiBaseUrl.trim(), apiKey: apiKey.trim(), modelType: apiKind, selectedModels: models,
-        requestStyle: apiKind === 'general' ? 'auto' : apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' ? 'chat-completions' : 'images-generations',
+        requestStyle: apiKind === 'general' ? 'auto' : apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' ? 'chat-completions' : apiKind === 'video' ? 'images-generations' : 'images-generations',
         advancedParams: [...advancedParams.filter(p => p.key.trim()), ...(compatProfile !== 'auto' ? [{ key: 'compatProfile', value: compatProfile }] : [])],
       }),
     });
@@ -532,7 +536,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       advancedParams.forEach(p => { if (p.key.trim()) advParams[p.key.trim()] = p.value; });
       const response = await fetch('/api/test-provider-connection', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({ baseUrl: apiBaseUrl, apiKey, requestStyle: apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' ? 'chat-completions' : 'images-generations', advancedParams: advParams }),
+        body: JSON.stringify({ baseUrl: apiBaseUrl, apiKey, requestStyle: apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' ? 'chat-completions' : apiKind === 'video' ? 'images-generations' : 'images-generations', advancedParams: advParams }),
       });
       if (!response.ok) throw new Error(`测试连接失败: HTTP ${response.status}`);
       const data = await response.json();
@@ -1233,6 +1237,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                         )}
                         {provider.modelType === 'vectorize' && provider.isEnabled && <div className={`mt-2 text-xs px-2 py-1 rounded ${isDark ? `bg-[${accentHex}]/10 ${accentClass}` : isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>已对接：矢量化工具 / 导出SVG</div>}
                         {provider.modelType === 'layer' && provider.isEnabled && <div className={`mt-2 text-xs px-2 py-1 rounded ${isDark ? `bg-[${accentHex}]/10 ${accentClass}` : isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>已对接：编辑元素 / 下载PSD</div>}
+                        {provider.modelType === 'video' && provider.isEnabled && <div className={`mt-2 text-xs px-2 py-1 rounded ${isDark ? `bg-[${accentHex}]/10 ${accentClass}` : isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>已对接：文生视频 / 图生视频 / 视频延长</div>}
                         {(() => { const bal = apiBalances.find(b => b.providerId === provider.id || b.providerName === provider.name || provider.baseUrl.includes(b.providerId)); if (!bal) return null; return (<div className={`flex items-center gap-3 mt-2 text-xs ${isDark ? 'text-[#888]' : 'text-gray-500'}`}>{bal.balance !== null && <span className="flex items-center gap-1"><Wallet className="w-3 h-3" />余额: <span className={bal.balance > 10 ? 'text-green-500' : bal.balance > 1 ? 'text-yellow-500' : 'text-red-500'}>{bal.balance.toFixed(2)} {bal.currency}</span></span>}{bal.totalUsage > 0 && <span>总用量: {bal.totalUsage}</span>}{bal.dailyUsage > 0 && <span>今日: {bal.dailyUsage}</span>}{bal.error && <span className="text-red-400 text-xs">{bal.error}</span>}</div>); })()}
                       </div>
                     </div>
