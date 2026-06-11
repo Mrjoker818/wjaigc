@@ -3096,12 +3096,26 @@ ${imageDescriptions}
 
 当你判断需要生成图片时，输出格式要求（严格遵守）：
 1. 先用自然语言描述你的设计思路和建议（中文）
-2. 在回复的最后，单独一行输出，必须严格遵循此格式：
+2. 在回复的最后，每张图片单独一行输出 [GENERATE: ...] 标签，格式严格如下：
+
+【单张图】
 [GENERATE: 详细的英文图像生成提示词]
 
+【多张图 - 关键规则】
+当用户要求生成多张图（如"生成3张"、"多个方案"、"不同风格"）时：
+- 每个方案必须输出一个独立的 [GENERATE: ...] 标签
+- 每个标签内的提示词只描述一个画面，不要把多个方案合并到一个标签里
+- 每个提示词应有明显差异（不同构图/风格/角度/色调）
+格式示例：
+[GENERATE: a cute orange cat sleeping on a sunny windowsill, oil painting style, warm tones]
+[GENERATE: a playful orange cat chasing a butterfly in a flower garden, watercolor style, bright colors]
+[GENERATE: a majestic orange cat sitting on a rooftop at sunset, digital art, cinematic lighting]
+
 提示词要求：英文、200-500词、详细描述画面内容/风格/构图/色彩/光照/细节。
-示例：用户说"做一套表情包" → 你先给设计建议，最后单独一行输出：
-[GENERATE: a set of 4 cute cartoon stickers of a cat character, kawaii style, white background, various expressions happy sad angry surprised, bold outlines, vibrant colors, meme sticker design]`;
+示例：用户说"做一套表情包" → 你先给设计建议，最后为每个表情分别输出：
+[GENERATE: a cute cartoon cat sticker with happy expression, kawaii style, white background, bold outlines]
+[GENERATE: a cute cartoon cat sticker with angry expression, kawaii style, white background, bold outlines]
+[GENERATE: a cute cartoon cat sticker with surprised expression, kawaii style, white background, bold outlines]`;
       }
 
       // P2-1: Tune Mode — Inject fine-tuning parameters
@@ -3120,8 +3134,20 @@ ${imageDescriptions}
 
 当你判断需要生成图片时，输出格式要求（严格遵守）：
 1. 先用自然语言描述你的设计思路和建议（中文）
-2. 在回复的最后，单独一行输出，必须严格遵循此格式：
+2. 在回复的最后，每张图片单独一行输出 [GENERATE: ...] 标签，格式严格如下：
+
+【单张图】
 [GENERATE: 详细的英文图像生成提示词]
+
+【多张图 - 关键规则】
+当用户要求生成多张图（如"生成3张"、"多个方案"、"不同风格"）时：
+- 每个方案必须输出一个独立的 [GENERATE: ...] 标签
+- 每个标签内的提示词只描述一个画面，不要把多个方案合并到一个标签里
+- 每个提示词应有明显差异（不同构图/风格/角度/色调）
+格式示例：
+[GENERATE: a cute orange cat sleeping on a sunny windowsill, oil painting style, warm tones]
+[GENERATE: a playful orange cat chasing a butterfly in a flower garden, watercolor style, bright colors]
+[GENERATE: a majestic orange cat sitting on a rooftop at sunset, digital art, cinematic lighting]
 
 提示词要求：英文、200-500词、详细描述画面内容/风格/构图/色彩/光照/细节。
 示例：用户说"画一只猫" → 你先给出创意建议，最后单独一行输出：
@@ -3262,8 +3288,11 @@ ${imageDescriptions}
                 const delta = parsed.choices?.[0]?.delta?.content || '';
                 if (delta) {
                   assistantContent += delta;
-                  // 流式输出时实时隐藏 [GENERATE: ...] 标签
-                  const streamDisplayContent = assistantContent.replace(/\[GENERATE:\s*[\s\S]*$/g, '').trimEnd();
+                  // 流式输出时实时隐藏所有 [GENERATE: ...] 标签（包括未闭合的）
+                  const streamDisplayContent = assistantContent
+                    .replace(/\[GENERATE:\s*[\s\S]+?\]/g, '') // 移除已闭合的标签
+                    .replace(/\[GENERATE:\s*[\s\S]*$/, '') // 移除未闭合的标签（正在流式输出）
+                    .trimEnd();
                   setMessages(prev => prev.map(msg => 
                     msg.id === assistantMessageId 
                       ? { ...msg, content: streamDisplayContent || assistantContent }
@@ -3297,16 +3326,18 @@ ${imageDescriptions}
         ));
       }
 
-      // ====== LLM驱动的图像生成：解析 [GENERATE: ...] 标签 ======
-      const generateMatch = assistantContent.match(/\[GENERATE:\s*([\s\S]+?)\]/);
-      if (generateMatch) {
-        const rawPrompt = generateMatch[1].trim();
-        // 从显示内容中移除 [GENERATE: ...] 标签
+      // ====== LLM驱动的图像生成：解析 [GENERATE: ...] 标签（支持多个独立标签） ======
+      const generateMatches = [...assistantContent.matchAll(/\[GENERATE:\s*([\s\S]+?)\]/g)];
+      const hasGenerateTags = generateMatches.length > 0;
+      if (hasGenerateTags) {
+        // ★ 提取所有独立的 prompt
+        const prompts: string[] = generateMatches.map(m => m[1].trim());
+        // 从显示内容中移除所有 [GENERATE: ...] 标签
         const displayContent = assistantContent.replace(/\[GENERATE:\s*[\s\S]+?\]/g, '').trim();
-        // ★ 先获取模型信息，再使用
+        // ★ 先获取模型信息
         const imageModelInfo = getCurrentImageModelInfo(imageModel, imageModelProviderId);
-        // 检测生成数量
-        const imageCount = detectImageCountFromText(trimmedInput);
+        // 图片数量 = LLM输出的标签数（优先），否则从用户文本检测
+        const imageCount = prompts.length > 0 ? prompts.length : detectImageCountFromText(trimmedInput);
         setMessages(prev => prev.map(msg => 
           msg.id === assistantMessageId 
             ? { ...msg, content: displayContent, isGeneratingImage: true, generateModelName: imageModelInfo.model || '图像生成', generateProgress: 0, generateImageCount: imageCount }
@@ -3318,136 +3349,147 @@ ${imageDescriptions}
           console.warn('[ChatImage] No image model selected');
           setMessages(prev => prev.map(msg => 
             msg.id === assistantMessageId 
-              ? { ...msg, isGeneratingImage: false, generateError: '请先在左侧图像生成面板中选择一个图像模型，然后再试一次' }
+              ? { ...msg, isGeneratingImage: false, generateError: '请先在聊天输入框选择一个图像模型，然后再试一次' }
               : msg
           ));
         } else {
-          // 异步执行图像生成
+          // 异步执行图像生成 — 每个 prompt 独立提交
           (async () => {
             try {
-              console.log('[ChatImage] LLM-triggered generation with prompt:', rawPrompt.substring(0, 100) + '...');
-
-              // 检测比例、质量和数量
-              const aspectRatio = detectAspectRatioFromText(rawPrompt + ' ' + trimmedInput) || '1:1';
-              const quality = detectQualityFromText(rawPrompt + ' ' + trimmedInput) || '1K';
-              const outputCount = detectImageCountFromText(trimmedInput);
-
-              // 如果用户有图片，作为参考图传入
+              const aspectRatio = detectAspectRatioFromText(prompts.join(' ') + ' ' + trimmedInput) || '1:1';
+              const quality = detectQualityFromText(prompts.join(' ') + ' ' + trimmedInput) || '1K';
               const referenceImages = capturedPendingImages.map(img => img.url);
               const imageSourceId = capturedPendingImages.length > 0 ? capturedPendingImages[0].id : undefined;
 
-              // 提交图像生成
-              const generateRes = await fetch('/api/generate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  prompt: rawPrompt,
-                  model: imageModelInfo.model,
-                  providerId: imageModelInfo.providerId,
-                  aspectRatio,
-                  quality,
-                  outputCount,
-                  ...(referenceImages.length > 0 ? { referenceImages } : {}),
-                }),
-              });
-              const generateData = await generateRes.json();
-              console.log('[ChatImage] Generate API response:', JSON.stringify(generateData).substring(0, 200));
+              console.log(`[ChatImage] LLM-triggered generation: ${prompts.length} independent prompt(s)`);
+              prompts.forEach((p, i) => console.log(`[ChatImage] Prompt #${i+1}:`, p.substring(0, 100) + '...'));
 
-              if (!generateData.success) {
-                console.error('[ChatImage] Generate API failed:', generateData.error);
-                setMessages(prev => prev.map(msg => 
-                  msg.id === assistantMessageId 
-                    ? { ...msg, isGeneratingImage: false, generateError: `图像生成失败: ${generateData.error || '未知错误'}` }
-                    : msg
-                ));
-                return;
-              }
+              const allResultUrls: string[] = [];
 
-              const resultUrls: string[] = [];
-              const genModel = generateData.model || imageModelInfo.model;
+              // ★ 逐个提交每个 prompt（串行，避免API限流）
+              for (let promptIdx = 0; promptIdx < prompts.length; promptIdx++) {
+                const rawPrompt = prompts[promptIdx];
+                const isMultiPrompt = prompts.length > 1;
 
-              // ★ 处理直接返回图片的情况 (mode: 'direct', imageUrls)
-              if (generateData.imageUrls && generateData.imageUrls.length > 0) {
-                resultUrls.push(...generateData.imageUrls);
-              } else if (generateData.imageUrl) {
-                resultUrls.push(generateData.imageUrl);
-              }
+                // 更新进度（多prompt时按prompt进度）
+                if (isMultiPrompt) {
+                  const baseProgress = Math.round((promptIdx / prompts.length) * 100);
+                  setMessages(prev => prev.map(msg => 
+                    msg.id === assistantMessageId 
+                      ? { ...msg, generateProgress: baseProgress }
+                      : msg
+                  ));
+                }
 
-              // ★ 轮询模式 (mode: 'polling', taskIds)
-              const taskIds: string[] = generateData.taskIds || [];
-              if (taskIds.length > 0 && resultUrls.length === 0) {
-                for (const taskId of taskIds) {
-                  for (let i = 0; i < 120; i++) {
-                    const interval = i <= 2 ? 800 : i <= 5 ? 1000 : i <= 15 ? 1500 : 2000;
-                    await new Promise(r => setTimeout(r, interval));
+                // 提交图像生成 — 每个 prompt 只生成1张（outputCount: 1）
+                const generateRes = await fetch('/api/generate', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    prompt: rawPrompt,
+                    model: imageModelInfo.model,
+                    providerId: imageModelInfo.providerId,
+                    aspectRatio,
+                    quality,
+                    outputCount: 1,
+                    ...(referenceImages.length > 0 ? { referenceImages } : {}),
+                  }),
+                });
+                const generateData = await generateRes.json();
+                console.log(`[ChatImage] Prompt #${promptIdx+1} API response:`, JSON.stringify(generateData).substring(0, 200));
 
-                    // ★ 更新进度
-                    const progress = Math.min(90, 10 + Math.round((i / 120) * 80));
-                    setMessages(prev => prev.map(msg => 
-                      msg.id === assistantMessageId 
-                        ? { ...msg, generateProgress: progress }
-                        : msg
-                    ));
+                if (!generateData.success) {
+                  console.error(`[ChatImage] Prompt #${promptIdx+1} API failed:`, generateData.error);
+                  // 单个prompt失败不中断其他prompt，记录错误继续
+                  continue;
+                }
 
-                    try {
-                      const pollRes = await fetch('/api/poll-task', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ taskId, model: genModel, providerId: imageModelInfo.providerId }),
-                      });
-                      const pollData = await pollRes.json();
+                const genModel = generateData.model || imageModelInfo.model;
+                const promptResultUrls: string[] = [];
 
-                      if (pollData.status === 'completed') {
-                        // ★ 多种格式提取图片URL
-                        const extractedUrl = pollData.imageUrl
-                          || pollData.result?.imageUrl
-                          || (pollData.result?.image?.url)
-                          || (pollData.result?.images?.[0]?.url)
-                          || (pollData.result?.images?.[0]);
-                        if (extractedUrl && typeof extractedUrl === 'string') {
-                          resultUrls.push(extractedUrl);
+                // ★ 处理直接返回图片的情况 (mode: 'direct', imageUrls)
+                if (generateData.imageUrls && generateData.imageUrls.length > 0) {
+                  promptResultUrls.push(...generateData.imageUrls);
+                } else if (generateData.imageUrl) {
+                  promptResultUrls.push(generateData.imageUrl);
+                }
+
+                // ★ 轮询模式 (mode: 'polling', taskIds)
+                const taskIds: string[] = generateData.taskIds || [];
+                if (taskIds.length > 0 && promptResultUrls.length === 0) {
+                  for (const taskId of taskIds) {
+                    for (let i = 0; i < 120; i++) {
+                      const interval = i <= 2 ? 800 : i <= 5 ? 1000 : i <= 15 ? 1500 : 2000;
+                      await new Promise(r => setTimeout(r, interval));
+
+                      // ★ 更新进度
+                      const pollProgress = isMultiPrompt
+                        ? Math.round(((promptIdx + (i / 120)) / prompts.length) * 100)
+                        : Math.min(90, 10 + Math.round((i / 120) * 80));
+                      setMessages(prev => prev.map(msg => 
+                        msg.id === assistantMessageId 
+                          ? { ...msg, generateProgress: pollProgress }
+                          : msg
+                      ));
+
+                      try {
+                        const pollRes = await fetch('/api/poll-task', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ taskId, model: genModel, providerId: imageModelInfo.providerId }),
+                        });
+                        const pollData = await pollRes.json();
+
+                        if (pollData.status === 'completed') {
+                          const extractedUrl = pollData.imageUrl
+                            || pollData.result?.imageUrl
+                            || (pollData.result?.image?.url)
+                            || (pollData.result?.images?.[0]?.url)
+                            || (pollData.result?.images?.[0]);
+                          if (extractedUrl && typeof extractedUrl === 'string') {
+                            promptResultUrls.push(extractedUrl);
+                          }
+                          break;
+                        } else if (pollData.status === 'failed') {
+                          console.error(`[ChatImage] Prompt #${promptIdx+1} generation failed:`, pollData.error);
+                          break; // 单个prompt失败，不中断其他
+                        } else if (pollData.retryable === false) {
+                          console.error(`[ChatImage] Prompt #${promptIdx+1} task not retryable:`, pollData.error);
+                          break;
                         }
-                        break;
-                      } else if (pollData.status === 'failed') {
-                        console.error('[ChatImage] Image generation failed:', pollData.error);
-                        // ★ 记录失败原因，避免仅显示通用错误
-                        const failReason = pollData.error || '生成失败';
-                        setMessages(prev => prev.map(msg => 
-                          msg.id === assistantMessageId 
-                            ? { ...msg, isGeneratingImage: false, generateError: failReason }
-                            : msg
-                        ));
-                        return; // 退出异步函数
-                      } else if (pollData.retryable === false) {
-                        console.error('[ChatImage] Task not retryable:', pollData.error);
-                        const failReason = pollData.error || '任务不可重试';
-                        setMessages(prev => prev.map(msg => 
-                          msg.id === assistantMessageId 
-                            ? { ...msg, isGeneratingImage: false, generateError: failReason }
-                            : msg
-                        ));
-                        return;
+                      } catch (pollErr) {
+                        console.warn(`[ChatImage] Prompt #${promptIdx+1} poll error, retrying:`, pollErr);
                       }
-                    } catch (pollErr) {
-                      console.warn('[ChatImage] Poll error, retrying:', pollErr);
                     }
                   }
                 }
+
+                // 收集此 prompt 的结果
+                allResultUrls.push(...promptResultUrls);
+
+                // 每完成一个prompt，实时更新已生成的图片
+                if (allResultUrls.length > 0) {
+                  setMessages(prev => prev.map(msg => 
+                    msg.id === assistantMessageId 
+                      ? { ...msg, generatedImages: [...allResultUrls] }
+                      : msg
+                  ));
+                }
               }
 
-              if (resultUrls.length > 0) {
+              if (allResultUrls.length > 0) {
                 // 更新消息：添加生成图片，移除loading
                 setMessages(prev => prev.map(msg => 
                   msg.id === assistantMessageId 
-                    ? { ...msg, generatedImages: resultUrls, isGeneratingImage: false, generateProgress: 100 }
+                    ? { ...msg, generatedImages: allResultUrls, isGeneratingImage: false, generateProgress: 100 }
                     : msg
                 ));
 
-                // 将图片添加到画布，附带源图片ID用于SVG连线
+                // 将图片添加到画布
                 if (onAddImages) {
-                  onAddImages(resultUrls, imageSourceId);
+                  onAddImages(allResultUrls, imageSourceId);
                 }
-                console.log('[ChatImage] Successfully added', resultUrls.length, 'images to canvas');
+                console.log('[ChatImage] Successfully generated', allResultUrls.length, 'images from', prompts.length, 'prompt(s)');
               } else {
                 setMessages(prev => prev.map(msg => 
                   msg.id === assistantMessageId 
@@ -3468,7 +3510,7 @@ ${imageDescriptions}
       }
 
       // ====== 兜底：如果LLM未输出 [GENERATE: ...] 但用户意图明确是生图 ======
-      if (!generateMatch && (pendingImages.length > 0 || (activeSkill && ['image', 'design'].includes(activeSkill.category)))) {
+      if (!hasGenerateTags && (pendingImages.length > 0 || (activeSkill && ['image', 'design'].includes(activeSkill.category)))) {
         const userWantsImage = isImageGenerationIntent(trimmedInput);
         if (userWantsImage) {
           console.log('[ChatImage] Fallback: LLM did not output [GENERATE] tag but user intent is clear');
@@ -3484,7 +3526,7 @@ ${imageDescriptions}
           if (!imageModelInfo.model) {
             setMessages(prev => prev.map(msg => 
               msg.id === assistantMessageId 
-                ? { ...msg, isGeneratingImage: false, generateError: '请先在左侧图像生成面板中选择一个图像模型' }
+                ? { ...msg, isGeneratingImage: false, generateError: '请先在聊天输入框选择一个图像模型' }
                 : msg
             ));
           } else {
