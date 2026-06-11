@@ -255,9 +255,9 @@ export function resolveVideoCompatProfile(
   if (compatProfileOverride && compatProfileOverride !== 'auto') {
     return compatProfileOverride as VideoCompatProfile;
   }
-  const info = getVideoModelInfo(modelId);
-  if (info) return info.profile;
-  // Fallback: infer from baseUrl
+  // Priority 1: infer from baseUrl — if URL matches an official API, use its native protocol
+  // This is checked FIRST because the API URL determines the actual request format.
+  // A third-party proxy (e.g. APImart) serving seedance models uses OpenAI format, NOT volcengine format.
   if (baseUrl) {
     const urlLower = baseUrl.toLowerCase();
     if (urlLower.includes('dashscope') || urlLower.includes('aliyun')) return 'dashscope';
@@ -266,7 +266,16 @@ export function resolveVideoCompatProfile(
     if (urlLower.includes('vidu')) return 'vidu';
     if (urlLower.includes('fal.run')) return 'fal-video';
     if (urlLower.includes('openai')) return 'openai-video';
+    // If baseUrl does NOT match any official API domain, it's a third-party proxy
+    // → use rest-generic (OpenAI-compatible format) regardless of model name
+    if (!urlLower.includes('volcengine') && !urlLower.includes('ark') &&
+        !urlLower.includes('dashscope') && !urlLower.includes('aliyun')) {
+      return 'rest-generic';
+    }
   }
+  // Priority 2: match from model registry (only when no baseUrl or baseUrl matches official domain)
+  const info = getVideoModelInfo(modelId);
+  if (info) return info.profile;
   return 'rest-generic';
 }
 

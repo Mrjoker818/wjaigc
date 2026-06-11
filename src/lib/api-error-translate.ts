@@ -51,8 +51,12 @@ export function translateApiError(rawMsg: string): string {
   if (msg.includes('image_urls') || msg.includes('mask_image') || msg.includes('image editing')) {
     return '当前模型不支持图像编辑功能，请尝试切换模型';
   }
-  // 不支持 Base64
-  if (msg.includes('must be an url') || msg.includes('invalid url') || msg.includes('data:')) {
+  // 不支持 Base64 或图片URL无效
+  if (msg.includes('must be an url') || msg.includes('must be a url') || msg.includes('invalid url format')) {
+    return '图片URL格式无效，请检查API提供商是否支持当前图片格式，或尝试切换模型';
+  }
+  // data: 前缀（Base64输入不被支持）
+  if (msg.includes('data:')) {
     return '当前模型不支持 Base64 图片输入，请尝试切换模型';
   }
   // 内容安全
