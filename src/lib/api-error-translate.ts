@@ -11,6 +11,13 @@ export function translateApiError(rawMsg: string): string {
   const strMsg = typeof rawMsg === 'string' ? rawMsg : JSON.stringify(rawMsg);
   const msg = strMsg.toLowerCase();
 
+  // 内容审核/版权限制
+  if (msg.includes('copyright') || msg.includes('content policy') || msg.includes('content restriction')) {
+    return '生成内容触发了版权/内容安全限制，请修改提示词后重试';
+  }
+  if (msg.includes('task_failed') && msg.includes('output')) {
+    return '生成任务被平台拒绝，可能涉及敏感内容或版权限制，请修改提示词后重试';
+  }
   // 余额不足
   if (msg.includes('insufficient balance') || msg.includes('insufficient')) {
     return 'API 余额不足，请联系管理员充值';
