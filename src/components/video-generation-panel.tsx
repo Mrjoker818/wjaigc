@@ -363,7 +363,8 @@ export default function VideoGenerationPanel({
           region: registry?.region || 'cn' as const,
           features: registry?.features || {
             firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false,
-            audio: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p']
+            audio: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'],
+            cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false,
           },
         };
       });
@@ -406,7 +407,8 @@ export default function VideoGenerationPanel({
               region: registry?.region || 'cn' as const,
               features: registry?.features || {
                 firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false,
-                audio: false, maxDuration: 10, aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p']
+                audio: false, maxDuration: 10, aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'],
+                cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false,
               },
             };
           });
@@ -913,8 +915,8 @@ export default function VideoGenerationPanel({
         </div>
       </div>
 
-      {/* === 音效开关（仅支持音频的模型显示） === */}
-      {currentFeatures?.audio && (
+      {/* === 音效开关 === */}
+      {(
         <div className="px-3 pt-3">
           <button
             onClick={() => setGenerateAudio(!generateAudio)}
@@ -927,8 +929,8 @@ export default function VideoGenerationPanel({
         </div>
       )}
 
-      {/* === 摄像机控制（仅支持的模型显示） === */}
-      {currentFeatures?.cameraControl && mode !== 'video-extend' && (
+      {/* === 摄像机控制 === */}
+      {mode !== 'video-extend' && (
         <div className="px-3 pt-3">
           <button
             onClick={() => setShowCameraPanel(!showCameraPanel)}
@@ -998,8 +1000,8 @@ export default function VideoGenerationPanel({
         </div>
       )}
 
-      {/* === 角色一致性（仅支持的模型显示） === */}
-      {currentFeatures?.characterConsistency && mode !== 'video-extend' && (
+      {/* === 角色一致性 === */}
+      {mode !== 'video-extend' && (
         <div className="px-3 pt-3">
           <button
             onClick={() => setShowCharacterPanel(!showCharacterPanel)}
@@ -1258,10 +1260,10 @@ export default function VideoGenerationPanel({
               {currentFeatures?.videoEdit && ' 视频编辑'}
               {currentFeatures?.videoExtend && ' 延长'}
               {currentFeatures?.audio && ' 音效'}
-              {currentFeatures?.cameraControl && ' 摄像机控制'}
-              {currentFeatures?.motionBrush && ' 运动笔刷'}
-              {currentFeatures?.characterConsistency && ' 角色一致性'}
-              {currentFeatures?.multiShot && ' 多镜头叙事'}
+              {' 摄像机控制'}
+              {' 运动笔刷'}
+              {' 角色一致性'}
+              {' 多镜头叙事'}
               {' · '}最长 {currentFeatures?.maxDuration || 10}秒
             </div>
           </div>
