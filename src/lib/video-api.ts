@@ -59,8 +59,9 @@ export interface VideoGenerateParams {
 
 export interface VideoTaskSubmitResult {
   taskId: string;
-  status: 'queued' | 'submitted';
+  status: 'queued' | 'submitted' | 'succeeded';
   estimatedTime?: number;  // 预估完成时间(秒)
+  videoUrl?: string;       // 同步返回时的视频URL
 }
 
 export interface VideoTaskPollResult {
@@ -279,6 +280,16 @@ export function resolveVideoCompatProfile(
   return 'rest-generic';
 }
 
+/** Ensure baseUrl doesn't produce double /v1 paths. Strips trailing /v1 if present. */
+function ensureBaseUrl(url: string): string {
+  let clean = url.replace(/\/+$/, '');
+  // Strip trailing /v1 to avoid double /v1 when builder appends /v1/xxx
+  if (clean.endsWith('/v1')) {
+    clean = clean.slice(0, -3);
+  }
+  return clean;
+}
+
 // ==================== Protocol Adapters ====================
 
 /**
@@ -289,7 +300,7 @@ export function buildVideoSubmitRequest(
   profile: VideoCompatProfile,
   params: VideoGenerateParams,
 ): { url: string; headers: Record<string, string>; body: string; method: string } {
-  const baseUrl = (params.baseUrl || '').replace(/\/+$/, '');
+  const baseUrl = ensureBaseUrl(params.baseUrl || '');
   const apiKey = params.apiKey || '';
 
   switch (profile) {
@@ -356,12 +367,32 @@ export function parseVideoSubmitResponse(
         estimatedTime: 90,
       };
     case 'rest-generic':
-    default:
+    default: {
+      // 检查是否同步返回结果（第三方API可能直接返回视频URL）
+      const syncData = data?.data?.[0] || data?.results?.[0] || (Array.isArray(data?.data) && data.data[0]);
+      if (syncData && (syncData.url || syncData.video_url)) {
+        return {
+          taskId: '__sync_complete__',
+          status: 'succeeded',
+          videoUrl: syncData.url || syncData.video_url,
+          estimatedTime: 0,
+        };
+      }
+      // 检查顶层直接返回视频URL
+      if (data?.url || data?.video_url || data?.output?.video_url) {
+        return {
+          taskId: '__sync_complete__',
+          status: 'succeeded',
+          videoUrl: data.url || data.video_url || data.output.video_url,
+          estimatedTime: 0,
+        };
+      }
       return {
         taskId: data?.task_id || data?.id || data?.request_id || '',
         status: 'submitted',
         estimatedTime: 120,
       };
+    }
   }
 }
 
@@ -373,8 +404,9 @@ export function buildVideoPollRequest(
   baseUrl: string,
   apiKey: string,
   taskId: string,
+  advancedParams?: Record<string, any>,
 ): { url: string; headers: Record<string, string>; method: string } {
-  const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
+  const cleanBaseUrl = ensureBaseUrl(baseUrl);
 
   switch (profile) {
     case 'dashscope':
@@ -414,12 +446,23 @@ export function buildVideoPollRequest(
         method: 'GET',
       };
     case 'rest-generic':
-    default:
+    default: {
+      // 支持自定义轮询端点（通过advancedParams.pollEndpoint指定）
+      // 默认支持多种常见格式，按优先级尝试
+      const customPollEndpoint = advancedParams?.pollEndpoint;
+      if (customPollEndpoint) {
+        return {
+          url: customPollEndpoint.replace('{taskId}', taskId),
+          headers: { 'Authorization': `Bearer ${apiKey}` },
+          method: 'GET',
+        };
+      }
       return {
         url: `${cleanBaseUrl}/tasks/${taskId}`,
         headers: { 'Authorization': `Bearer ${apiKey}` },
         method: 'GET',
       };
+    }
   }
 }
 
@@ -631,13 +674,19 @@ function buildFalVideoSubmit(baseUrl: string, apiKey: string, params: VideoGener
 function buildRestGenericSubmit(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
   // Support both video-specific and image-style endpoints for max third-party compatibility
   // Many third-party APIs expose video generation via /v1/images/generations
-  const cleanBase = baseUrl.replace(/\/+$/, '');
-  const useImageEndpoint = params.advancedParams?.videoEndpoint === 'images'
-    || cleanBase.includes('/v1/images');
+  const cleanBase = ensureBaseUrl(baseUrl);
 
-  const endpoint = useImageEndpoint
-    ? `${cleanBase}/v1/images/generations`
-    : `${cleanBase}/v1/video/generations`;
+  const advancedEndpoint = params.advancedParams?.submitEndpoint;
+  const useImageEndpoint = advancedEndpoint
+    ? advancedEndpoint.includes('images')
+    : (params.advancedParams?.videoEndpoint === 'images'
+      || baseUrl.includes('/v1/images'));
+
+  const endpoint = advancedEndpoint
+    ? `${cleanBase}${advancedEndpoint.startsWith('/') ? advancedEndpoint : '/' + advancedEndpoint}`
+    : useImageEndpoint
+      ? `${cleanBase}/v1/images/generations`
+      : `${cleanBase}/v1/video/generations`;
 
   // Build request body compatible with both OpenAI image and video API formats
   const body: Record<string, any> = {
@@ -874,7 +923,7 @@ export function buildVideoExtendRequest(
   profile: VideoCompatProfile,
   params: VideoGenerateParams,
 ): { url: string; headers: Record<string, string>; body: string; method: string } {
-  const baseUrl = (params.baseUrl || '').replace(/\/+$/, '');
+  const baseUrl = ensureBaseUrl(params.baseUrl || '');
   const apiKey = params.apiKey || '';
 
   switch (profile) {

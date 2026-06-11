@@ -181,6 +181,7 @@ export async function POST(request: NextRequest) {
             apiKey,
             model,
             providerId: provider.id,
+            advancedParams: provider.advancedParams || undefined,
           },
         });
       } catch (err: any) {

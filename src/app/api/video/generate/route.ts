@@ -229,6 +229,23 @@ export async function POST(request: NextRequest) {
           return;
         }
 
+        // 同步返回：API直接返回了视频URL，无需轮询
+        if (submitResult.status === 'succeeded' && submitResult.videoUrl) {
+          updateTaskProgress(taskId, {
+            status: 'completed',
+            progress: 100,
+            label: `${modeLabel} · ${modelName} · 已完成`,
+            result: {
+              videoUrl: submitResult.videoUrl,
+              model,
+              modelName,
+              providerId: provider.id,
+              type: 'video',
+            },
+          });
+          return;
+        }
+
         // 存储轮询所需信息到任务结果中
         updateTaskProgress(taskId, {
           progress: 10,
@@ -238,6 +255,7 @@ export async function POST(request: NextRequest) {
             profile,
             baseUrl,
             apiKey,
+            advancedParams,
             model,
             providerId: provider.id,
           },

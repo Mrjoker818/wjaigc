@@ -467,6 +467,19 @@ export async function POST(request: NextRequest) {
         const videoProviderId = regResult.providerId as string | undefined;
 
         if (!thirdPartyTaskId) {
+          // 可能是同步完成的任务（API直接返回视频URL，status可能仍为processing）
+          const syncVideoUrl = regResult.videoUrl as string | undefined;
+          if (syncVideoUrl) {
+            const releaseQueueSlot = (await import('@/lib/task-registry')).releaseQueueSlot;
+            releaseQueueSlot(taskId);
+            return NextResponse.json({
+              success: true,
+              status: 'completed',
+              progress: 100,
+              label: registryTask.label,
+              result: registryTask.result,
+            }, { status: 200 });
+          }
           // 尚未获得第三方任务ID（可能提交还在进行中）
           return NextResponse.json({
             success: true,
@@ -495,6 +508,8 @@ export async function POST(request: NextRequest) {
           }, { status: 200 });
         }
 
+        const videoAdvancedParams = (regResult.advancedParams || regResult.providerAdvancedParams) as Record<string, unknown> | undefined;
+
         try {
           const {
             buildVideoPollRequest,
@@ -506,6 +521,7 @@ export async function POST(request: NextRequest) {
             vBaseUrl,
             vApiKey || '',
             thirdPartyTaskId,
+            videoAdvancedParams,
           );
 
           const pollResp = await fetch(pollReq.url, {
@@ -515,6 +531,25 @@ export async function POST(request: NextRequest) {
           });
 
           if (!pollResp.ok) {
+            // 轮询请求失败：区分4xx（客户端错误/任务不存在）和5xx（服务器临时故障）
+            const errorBody = await pollResp.text().catch(() => '');
+            if (pollResp.status >= 400 && pollResp.status < 500) {
+              // 4xx 客户端错误：可能是 URL 格式不对或任务已过期
+              console.warn(`[poll-task] Video poll 4xx (${pollResp.status}): ${errorBody.slice(0, 200)}`);
+              const errorMsg = errorBody.includes('not found') || errorBody.includes('Not Found')
+                ? '视频任务不存在或已过期'
+                : `API 返回错误: ${errorBody.slice(0, 200)}`;
+              updateTaskProgress(taskId, { status: 'failed', error: errorMsg, progress: 0 });
+              releaseQueueSlot(taskId);
+              failedTaskCache.set(taskId, { error: errorMsg, timestamp: Date.now() });
+              return NextResponse.json({
+                success: false, status: 'failed',
+                error: translateApiError(errorMsg),
+                retryable: true,
+              }, { status: 200 });
+            }
+            // 5xx 服务器错误：可能是临时故障，返回 processing 让前端继续轮询
+            console.warn(`[poll-task] Video poll ${pollResp.status}, retrying: ${errorBody.slice(0, 200)}`);
             return NextResponse.json({
               success: true, status: 'processing',
               progress: registryTask.progress,
@@ -528,7 +563,7 @@ export async function POST(request: NextRequest) {
             pollData,
           );
 
-          if ((videoResult.status === 'succeeded' || (videoResult as any).status === 'completed') && videoResult.videoUrl) {
+          if (['succeeded', 'completed', 'success', 'done'].includes(videoResult.status) && videoResult.videoUrl) {
             // 持久化视频文件
             let persistedVideoUrl = videoResult.videoUrl;
             try {
