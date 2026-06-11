@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed } from 'lucide-react';
+import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -623,12 +623,32 @@ function detectQualityFromText(text: string): string | undefined {
 function getCurrentGenerationModel(): string {
   try {
     if (typeof window === 'undefined') return 'gemini-2.5-flash-image-preview';
+    // 优先从 wujie_selected_model 读取（generation panel 最新选择的模型）
+    const rawModel = localStorage.getItem('wujie_selected_model');
+    if (rawModel) {
+      const modelInfo = JSON.parse(rawModel);
+      if (modelInfo.model) {
+        console.log('[ChatPanel] getCurrentGenerationModel read from wujie_selected_model:', modelInfo.model);
+        return modelInfo.model;
+      }
+    }
+    console.log('[ChatPanel] getCurrentGenerationModel wujie_selected_model is empty, falling back to userData');
+    // 备用：从 userData 读取
     const currentUserId = localStorage.getItem('unbounded_ai_current_user');
     const raw = localStorage.getItem('unbounded_ai_user_data');
     if (!raw || !currentUserId) return 'gemini-2.5-flash-image-preview';
     const data = JSON.parse(raw);
     const selectedModel = data?.userData?.[currentUserId]?.selectedModel;
-    if (selectedModel) return selectedModel;
+    if (selectedModel) {
+      // selectedModel format: "providerId::modelId" or just "modelId"
+      if (selectedModel.includes('::')) {
+        const [, modelId] = selectedModel.split('::');
+        console.log('[ChatPanel] getCurrentGenerationModel read from userData:', modelId);
+        return modelId;
+      }
+      console.log('[ChatPanel] getCurrentGenerationModel read from userData:', selectedModel);
+      return selectedModel;
+    }
   } catch { /* fallback */ }
   return 'gemini-2.5-flash-image-preview';
 }
@@ -642,9 +662,11 @@ function getCurrentImageModelInfo(): { model: string; providerId?: string } {
     if (rawModel) {
       const modelInfo = JSON.parse(rawModel);
       if (modelInfo.model) {
+        console.log('[ChatImage] Read model from wujie_selected_model:', modelInfo.model, 'providerId:', modelInfo.providerId);
         return { model: modelInfo.model, providerId: modelInfo.providerId || undefined };
       }
     }
+    console.log('[ChatImage] wujie_selected_model is empty or invalid, falling back to userData');
     // 备用：从 userData 读取
     const currentUserId = localStorage.getItem('unbounded_ai_current_user');
     const raw = localStorage.getItem('unbounded_ai_user_data');
@@ -655,10 +677,14 @@ function getCurrentImageModelInfo(): { model: string; providerId?: string } {
     // selectedModel format: "providerId::modelId" or just "modelId"
     if (selectedModel.includes('::')) {
       const [providerId, modelId] = selectedModel.split('::');
+      console.log('[ChatImage] Read model from userData:', modelId, 'providerId:', providerId);
       return { model: modelId, providerId };
     }
+    console.log('[ChatImage] Read model from userData (no provider):', selectedModel);
     return { model: selectedModel };
-  } catch { /* fallback */ }
+  } catch (e) {
+    console.error('[ChatImage] Error reading model:', e);
+  }
   return { model: '' };
 }
 
@@ -4369,6 +4395,30 @@ ${imageDescriptions}
                       {copiedId === message.id ? <Check size={12} /> : <Copy size={12} />}
                       {copiedId === message.id ? '已复制' : '复制'}
                     </button>
+                    {/* 重试/重新生成按钮 */}
+                    {!isLoading && (
+                      <button
+                        onClick={() => {
+                          if (message.role === 'user') {
+                            // 用户消息：重新发送该消息
+                            handleSend(message.content);
+                          } else {
+                            // AI消息：找到上一条用户消息并重新发送
+                            const msgIndex = messages.findIndex(m => m.id === message.id);
+                            const prevUserMsg = [...messages].slice(0, msgIndex).reverse().find(m => m.role === 'user');
+                            if (prevUserMsg) {
+                              handleSend(prevUserMsg.content);
+                            }
+                          }
+                        }}
+                        className={`text-xs flex items-center gap-1 transition-colors ${
+                          isGold ? 'text-gold/70 hover:text-gold' : 'text-blue-400 hover:text-blue-600'
+                        }`}
+                      >
+                        <RotateCcw size={12} />
+                        {message.role === 'user' ? '重试' : '重新生成'}
+                      </button>
+                    )}
                     {message.role === 'assistant' && onAddToPrompt && (
                       <button
                         onClick={() => handleAddMessageToGeneration(message.content)}
