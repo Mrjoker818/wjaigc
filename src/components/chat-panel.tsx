@@ -42,6 +42,7 @@ interface Message {
   isGeneratingImage?: boolean; // 是否正在生成图片
   generateModelName?: string; // 生成使用的模型名称
   generateProgress?: number; // 生成进度 0-100
+  generateImageCount?: number; // 生成图片数量
   generateError?: string; // 生成失败时的错误信息
   imageAnchors?: Array<{ imageId: string; imageUrl: string; imageName: string }>; // 画布图片锚点（Lovart风格）
   suggestions?: NextSuggestion[]; // 建议下一步操作
@@ -3192,9 +3193,11 @@ ${imageDescriptions}
         const displayContent = assistantContent.replace(/\[GENERATE:\s*[\s\S]+?\]/g, '').trim();
         // ★ 先获取模型信息，再使用
         const imageModelInfo = getCurrentImageModelInfo();
+        // 检测生成数量
+        const imageCount = detectImageCountFromText(trimmedInput);
         setMessages(prev => prev.map(msg => 
           msg.id === assistantMessageId 
-            ? { ...msg, content: displayContent, isGeneratingImage: true, generateModelName: imageModelInfo.model || '图像生成', generateProgress: 0 }
+            ? { ...msg, content: displayContent, isGeneratingImage: true, generateModelName: imageModelInfo.model || '图像生成', generateProgress: 0, generateImageCount: imageCount }
             : msg
         ));
 
@@ -3358,9 +3361,11 @@ ${imageDescriptions}
         if (userWantsImage) {
           console.log('[ChatImage] Fallback: LLM did not output [GENERATE] tag but user intent is clear');
           const imageModelInfo = getCurrentImageModelInfo();
+          // 检测生成数量
+          const imageCount = detectImageCountFromText(trimmedInput);
           setMessages(prev => prev.map(msg => 
             msg.id === assistantMessageId 
-              ? { ...msg, isGeneratingImage: true, generateModelName: imageModelInfo.model || '图像生成', generateProgress: 0 }
+              ? { ...msg, isGeneratingImage: true, generateModelName: imageModelInfo.model || '图像生成', generateProgress: 0, generateImageCount: imageCount }
               : msg
           ));
 
@@ -4209,74 +4214,126 @@ ${imageDescriptions}
                         : message.content}
                     </div>
                   </div>
-                  {/* AI生成的图片 - 显示在文字下方 */}
+                  {/* AI生成的图片 - ChatGPT风格：每张图独立卡片，垂直排列 */}
                   {message.generatedImages && message.generatedImages.length > 0 && (
-                    <div className="flex flex-col gap-2 mt-2">
+                    <div className="flex flex-col gap-3 mt-3">
                       {message.generatedImages.map((imgUrl, imgIdx) => (
-                        <div key={imgIdx} className="relative group/chat-img inline-block">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={imgUrl}
-                            alt={`AI生成图片${imgIdx + 1}`}
-                            className="w-full rounded-lg border cursor-pointer hover:opacity-90 transition-opacity"
-                            style={{ maxHeight: '320px', objectFit: 'contain' }}
-                            onClick={() => onAddImages?.([imgUrl])}
-                            title="点击添加到画布"
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                          />
-                          <div className="absolute bottom-2 right-2 flex gap-1.5 opacity-0 group-hover/chat-img:opacity-100 transition-opacity">
-                            {onAddImages && (
-                              <button
-                                onClick={() => onAddImages([imgUrl])}
-                                className="bg-black/60 text-white text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1 hover:bg-black/80"
-                              >
-                                <Plus size={12} /> 画布
-                              </button>
+                        <div key={imgIdx} className={`rounded-xl overflow-hidden ${isGold ? 'bg-black/30 border border-gold/15' : 'bg-gray-50 border border-gray-200'}`}>
+                          {/* 模型名称标签 */}
+                          <div className={`px-3 py-1.5 flex items-center gap-2 ${isGold ? 'bg-gold/5 border-b border-gold/10' : 'bg-gray-100 border-b border-gray-200'}`}>
+                            <div className={`w-4 h-4 rounded flex items-center justify-center ${isGold ? 'bg-gold/20' : 'bg-blue-100'}`}>
+                              <Sparkles size={10} className={isGold ? 'text-gold' : 'text-blue-500'} />
+                            </div>
+                            <span className={`text-xs font-medium ${isGold ? 'text-gold/90' : 'text-gray-700'}`}>
+                              {message.generateModelName || 'AI 生成'}
+                            </span>
+                            {message.generatedImages!.length > 1 && (
+                              <span className={`text-[10px] ${isGold ? 'text-gold/60' : 'text-gray-500'}`}>
+                                {imgIdx + 1} / {message.generatedImages!.length}
+                              </span>
                             )}
-                            <a
-                              href={imgUrl}
-                              download
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="bg-black/60 text-white text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1 hover:bg-black/80"
-                            >
-                              <Download size={12} /> 下载
-                            </a>
+                          </div>
+                          {/* 图片区域 */}
+                          <div className="relative group/chat-img">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={imgUrl}
+                              alt={`AI生成图片${imgIdx + 1}`}
+                              className="w-full cursor-pointer hover:opacity-95 transition-opacity"
+                              style={{ maxHeight: '400px', objectFit: 'contain' }}
+                              onClick={() => onAddImages?.([imgUrl])}
+                              title="点击添加到画布"
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                            />
+                            {/* 悬浮操作按钮 */}
+                            <div className="absolute bottom-2 right-2 flex gap-1.5 opacity-0 group-hover/chat-img:opacity-100 transition-opacity">
+                              {onAddImages && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); onAddImages([imgUrl]); }}
+                                  className="bg-black/70 backdrop-blur-sm text-white text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1 hover:bg-black/90 shadow-lg"
+                                >
+                                  <Plus size={12} /> 画布
+                                </button>
+                              )}
+                              <a
+                                href={imgUrl}
+                                download
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="bg-black/70 backdrop-blur-sm text-white text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1 hover:bg-black/90 shadow-lg"
+                              >
+                                <Download size={12} /> 下载
+                              </a>
+                            </div>
                           </div>
                         </div>
                       ))}
-                      <div className="text-[10px] text-muted-foreground mt-0.5">
-                        已自动添加到画布 | 点击图片可再次添加
+                      <div className={`text-[10px] text-center ${isGold ? 'text-gold/50' : 'text-gray-400'}`}>
+                        点击图片可添加到画布
                       </div>
                     </div>
                   )}
-                  {/* 正在生成图片 - 内嵌进度框（文字下方） */}
+                  {/* 正在生成图片 - ChatGPT风格：每张图独立进度卡片 */}
                   {message.isGeneratingImage && (
-                    <div className={`mt-2 rounded-lg p-3 ${isGold ? 'bg-black/40 border border-gold/20' : 'bg-muted/50 border border-border/50'}`}>
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <Loader2 size={14} className={`animate-spin ${isGold ? 'text-gold' : 'text-primary'}`} />
-                          <span className={`text-xs font-medium ${isGold ? 'text-gold/90' : 'text-foreground/80'}`}>
-                            {message.generateModelName || '图像生成中'}
-                          </span>
+                    <div className="flex flex-col gap-3 mt-3">
+                      {Array.from({ length: message.generateImageCount || 1 }).map((_, imgIdx) => (
+                        <div key={imgIdx} className={`rounded-xl overflow-hidden ${isGold ? 'bg-black/30 border border-gold/15' : 'bg-gray-50 border border-gray-200'}`}>
+                          {/* 模型名称标签 */}
+                          <div className={`px-3 py-1.5 flex items-center gap-2 ${isGold ? 'bg-gold/5 border-b border-gold/10' : 'bg-gray-100 border-b border-gray-200'}`}>
+                            <div className={`w-4 h-4 rounded flex items-center justify-center ${isGold ? 'bg-gold/20' : 'bg-blue-100'}`}>
+                              <Sparkles size={10} className={isGold ? 'text-gold' : 'text-blue-500'} />
+                            </div>
+                            <span className={`text-xs font-medium ${isGold ? 'text-gold/90' : 'text-gray-700'}`}>
+                              {message.generateModelName || 'AI 生成'}
+                            </span>
+                            {(message.generateImageCount || 1) > 1 && (
+                              <span className={`text-[10px] ${isGold ? 'text-gold/60' : 'text-gray-500'}`}>
+                                {imgIdx + 1} / {message.generateImageCount}
+                              </span>
+                            )}
+                          </div>
+                          {/* 进度区域 */}
+                          <div className="p-4">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <Loader2 size={14} className={`animate-spin ${isGold ? 'text-gold' : 'text-blue-500'}`} />
+                                <span className={`text-xs ${isGold ? 'text-gold/80' : 'text-gray-600'}`}>
+                                  生成中...
+                                </span>
+                              </div>
+                              <span className={`text-xs tabular-nums ${isGold ? 'text-gold/60' : 'text-gray-500'}`}>
+                                {message.generateProgress ? Math.round(message.generateProgress) + '%' : '准备中...'}
+                              </span>
+                            </div>
+                            {/* 进度条 */}
+                            <div className={`h-1 rounded-full overflow-hidden ${isGold ? 'bg-gold/10' : 'bg-gray-200'}`}>
+                              <div
+                                className={`h-full rounded-full transition-all duration-500 ease-out ${isGold ? 'bg-gold' : 'bg-blue-500'}`}
+                                style={{ width: (message.generateProgress || 5) + '%' }}
+                              />
+                            </div>
+                            {/* 占位区域 */}
+                            <div className={`mt-3 rounded-lg flex items-center justify-center ${isGold ? 'bg-black/20' : 'bg-gray-100'}`} style={{ height: '200px' }}>
+                              <div className="text-center">
+                                <ImageIcon size={24} className={`mx-auto mb-1 ${isGold ? 'text-gold/30' : 'text-gray-300'}`} />
+                                <span className={`text-[10px] ${isGold ? 'text-gold/40' : 'text-gray-400'}`}>
+                                  图片 {imgIdx + 1}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                        <span className={`text-xs tabular-nums ${isGold ? 'text-gold/60' : 'text-muted-foreground'}`}>
-                          {message.generateProgress ? Math.round(message.generateProgress) + '%' : '准备中...'}
-                        </span>
-                      </div>
-                      <div className={`h-1.5 rounded-full overflow-hidden ${isGold ? 'bg-gold/10' : 'bg-muted'}`}>
-                        <div
-                          className={`h-full rounded-full transition-all duration-500 ease-out ${isGold ? 'bg-gold' : 'bg-primary'}`}
-                          style={{ width: (message.generateProgress || 5) + '%' }}
-                        />
-                      </div>
+                      ))}
                     </div>
                   )}
                   {/* 生成失败提示 */}
                   {message.generateError && (
-                    <div className="flex items-center gap-2 mt-2 text-xs text-destructive">
-                      <AlertCircle size={12} />
-                      <span>图片生成失败: {message.generateError}</span>
+                    <div className={`mt-3 rounded-lg p-3 flex items-center gap-2 ${isGold ? 'bg-red-900/20 border border-red-500/30' : 'bg-red-50 border border-red-200'}`}>
+                      <AlertCircle size={14} className={isGold ? 'text-red-400' : 'text-red-500'} />
+                      <span className={`text-xs ${isGold ? 'text-red-300' : 'text-red-600'}`}>
+                        图片生成失败: {message.generateError}
+                      </span>
                     </div>
                   )}
                   <div className={`flex items-center gap-2 mt-0.5 px-1 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
