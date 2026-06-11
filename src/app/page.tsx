@@ -2397,9 +2397,35 @@ function CanvasApp() {
 
   // AI聊天中的图像生成回调 - 当AI建议生成图片时直接触发
   const handleChatGenerateImage = useCallback((prompt: string) => {
-    // 从 localStorage 获取当前选择的图像生成模型
-    const storedModel = localStorage.getItem('currentImageModel');
-    const model = storedModel || '';
+    // 从 wujie_selected_model 读取当前选择的图像生成模型（与 generation-panel 同步）
+    let model = '';
+    let providerId: string | undefined;
+    try {
+      const rawModel = localStorage.getItem('wujie_selected_model');
+      if (rawModel) {
+        const modelInfo = JSON.parse(rawModel);
+        model = modelInfo.model || '';
+        providerId = modelInfo.providerId || undefined;
+      }
+      // 备用：从 userData 读取
+      if (!model) {
+        const currentUserId = localStorage.getItem('unbounded_ai_current_user');
+        const raw = localStorage.getItem('unbounded_ai_user_data');
+        if (raw && currentUserId) {
+          const data = JSON.parse(raw);
+          const selectedModel = data?.userData?.[currentUserId]?.selectedModel;
+          if (selectedModel) {
+            if (selectedModel.includes('::')) {
+              const parts = selectedModel.split('::');
+              providerId = parts[0];
+              model = parts.slice(1).join('::');
+            } else {
+              model = selectedModel;
+            }
+          }
+        }
+      }
+    } catch { /* fallback */ }
     
     if (!model) {
       toast.error('未选择图像生成模型', {
@@ -2422,6 +2448,7 @@ function CanvasApp() {
       stylePreset: '',
       quality: 'standard',
       model: model,
+      providerId: providerId,
     });
   }, [handleGenerate]);
 
