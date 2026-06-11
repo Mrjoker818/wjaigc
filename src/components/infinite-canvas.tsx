@@ -3411,7 +3411,7 @@ export function InfiniteCanvas({
 
       // 提交生成请求（带超时保护）
       const genController = new AbortController();
-      const genTimeout = setTimeout(() => genController.abort(), 30000);
+      const genTimeout = setTimeout(() => genController.abort(), 120000); // 2分钟超时（图像生成API可能较慢）
 
       let res: Response;
       try {
@@ -4698,7 +4698,7 @@ export function InfiniteCanvas({
       const canvasGenProviderId = canvasGenModel?.includes('::') ? canvasGenModel.split('::')[0] : undefined;
       // 提交生成请求（带超时保护）
       const canvasGenController = new AbortController();
-      const canvasGenTimeout = setTimeout(() => canvasGenController.abort(), 30000);
+      const canvasGenTimeout = setTimeout(() => canvasGenController.abort(), 120000); // 2分钟超时（图像生成API可能较慢）
 
       let res: Response;
       try {
@@ -8287,13 +8287,11 @@ export function InfiniteCanvas({
             const baseSize = Math.max(displayBase, srcMaxDim, 300);
             const resultW = arW >= arH ? baseSize : Math.round(baseSize * (arW / arH));
             const resultH = arH >= arW ? baseSize : Math.round(baseSize * (arH / arW));
+            // 使用存储的组位置，而非动态计算（避免源图片移动时整个组跟着移动）
             const srcBounds = srcImages.map(img => ({ x: img.x + dragDx, y: img.y + dragDy, w: img.width, h: img.height }));
-            const srcRightEdge = srcBounds.length > 0 ? Math.max(...srcBounds.map(b => b.x + b.w)) : 0;
-            const srcTopEdge = srcBounds.length > 0 ? Math.min(...srcBounds.map(b => b.y)) : 0;
-            const srcCenterY = srcBounds.length > 0 ? srcBounds.reduce((s, b) => s + b.y + b.h / 2, 0) / srcBounds.length : 0;
-            const gapBetweenSrcAndResult = 80; // 80px gap between source images and result frame
-            const resultX = srcRightEdge + gapBetweenSrcAndResult;
-            const resultY = srcCenterY - resultH / 2; // vertically centered relative to source images
+            // 结果框位置：优先使用存储的位置，避免跟随源图片移动
+            const resultX = (group.position.resultX || 0) + dragDx;
+            const resultY = (group.position.resultY || 0) + dragDy;
             const resultCenterX = resultX + resultW / 2;
             const resultCenterY = resultY + resultH / 2;
 
