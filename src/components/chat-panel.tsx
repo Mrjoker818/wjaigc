@@ -603,18 +603,19 @@ function detectAspectRatioFromText(text: string): string | undefined {
 }
 
 // Detect image quality/resolution from text
+// Returns only values accepted by /api/generate qualityMap: '1K', '2K', '4K', 'standard', 'high', 'auto'
 function detectQualityFromText(text: string): string | undefined {
   const lower = text.toLowerCase();
   // 4K patterns
   if (/4k|超高清|ultra.?hd|uhd|超清|4096|2160p/i.test(lower)) return '4K';
-  // 3K patterns
-  if (/3k|3072|准4k/i.test(lower)) return '3K';
-  // 2K patterns
-  if (/2k|2048|高清|high.?quality|hd(?!r)?|高质量|高分辨率|high.?res/i.test(lower)) return '2K';
+  // 2K patterns (3K maps to 2K since API doesn't support 3K)
+  if (/3k|3072|准4k|2k|2048|高清|high.?quality|hd(?!r)?|高质量|高分辨率|high.?res/i.test(lower)) return '2K';
   // 1K / standard patterns
-  if (/1k|1024|标准|普通|正常|standard|normal|默认|default/i.test(lower)) return '1K';
-  // Low quality
-  if (/低清|低质量|low.?quality|low|草稿|draft|快速|fast|预览|preview|缩略图|thumbnail/i.test(lower)) return 'low';
+  if (/1k|1024|标准|普通|正常|standard|normal|默认|default|清晰/i.test(lower)) return '1K';
+  // low quality / draft / preview (maps to 'standard' for API compatibility)
+  if (/低清|低质量|low.?quality|low|草稿|draft|快速|fast|预览|preview|缩略图|thumbnail/i.test(lower)) return 'standard';
+  // high quality (maps to 'high' for quality-type models)
+  if (/极致|最高|best|ultra|maximum/i.test(lower)) return 'high';
   return undefined;
 }
 
