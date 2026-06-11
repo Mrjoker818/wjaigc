@@ -581,16 +581,40 @@ function findMatchingBrace(text: string, start: number): number {
 // Extract aspect ratio hints from text content
 function detectAspectRatioFromText(text: string): string | undefined {
   const lower = text.toLowerCase();
-  if (/竖版|纵向|portrait|vertical|9:?16/.test(lower)) return '9:16';
-  if (/横版|横向|landscape|horizontal|16:?9/.test(lower)) return '16:9';
-  if (/方形|正方|square|1:?1/.test(lower)) return '1:1';
-  if (/4:?3/.test(lower)) return '4:3';
-  if (/3:?4/.test(lower)) return '3:4';
+  // Explicit ratio patterns: "16:9", "16比9", "16x9", "16×9"
+  if (/9\s*[:比x×]\s*16|9\s*:\s*16/.test(lower)) return '9:16';
+  if (/16\s*[:比x×]\s*9|16\s*:\s*9/.test(lower)) return '16:9';
+  if (/3\s*[:比x×]\s*2(?!1)|3\s*:\s*2(?!1)/.test(lower)) return '3:2';
+  if (/2\s*[:比x×]\s*3|2\s*:\s*3/.test(lower)) return '2:3';
+  if (/21\s*[:比x×]\s*9|21\s*:\s*9/.test(lower)) return '21:9';
+  if (/4\s*[:比x×]\s*3|4\s*:\s*3/.test(lower)) return '4:3';
+  if (/3\s*[:比x×]\s*4|3\s*:\s*4/.test(lower)) return '3:4';
+  if (/1\s*[:比x×]\s*1|1\s*:\s*1/.test(lower)) return '1:1';
+  // Descriptive patterns
+  if (/竖版|纵向|竖屏|竖图|portrait|vertical/i.test(lower)) return '9:16';
+  if (/横版|横向|横屏|横图|宽屏|landscape|horizontal/i.test(lower)) return '16:9';
+  if (/方形|正方|square/i.test(lower)) return '1:1';
   // Skill-specific defaults
   if (/海报|poster|封面|cover|壁纸|wallpaper|名片|card|ppt|演示/i.test(lower)) return '3:4';
   if (/头像|avatar|icon|图标|logo/i.test(lower)) return '1:1';
-  if (/横幅|banner|电脑壁纸|desktop/i.test(lower)) return '16:9';
+  if (/横幅|banner|电脑壁纸|desktop|宽幅/i.test(lower)) return '16:9';
   if (/手机壁纸|phone.*wallpaper|锁屏/i.test(lower)) return '9:16';
+  return undefined;
+}
+
+// Detect image quality/resolution from text
+function detectQualityFromText(text: string): string | undefined {
+  const lower = text.toLowerCase();
+  // 4K patterns
+  if (/4k|超高清|ultra.?hd|uhd|超清|4096|2160p/i.test(lower)) return '4K';
+  // 3K patterns
+  if (/3k|3072|准4k/i.test(lower)) return '3K';
+  // 2K patterns
+  if (/2k|2048|高清|high.?quality|hd(?!r)?|高质量|高分辨率|high.?res/i.test(lower)) return '2K';
+  // 1K / standard patterns
+  if (/1k|1024|标准|普通|正常|standard|normal|默认|default/i.test(lower)) return '1K';
+  // Low quality
+  if (/低清|低质量|low.?quality|low|草稿|draft|快速|fast|预览|preview|缩略图|thumbnail/i.test(lower)) return 'low';
   return undefined;
 }
 
@@ -3217,7 +3241,7 @@ ${imageDescriptions}
 
               // 检测比例、质量和数量
               const aspectRatio = detectAspectRatioFromText(rawPrompt + ' ' + trimmedInput) || '1:1';
-              const quality = /高清|高质量|hd|high.?quality|2k|4k/i.test(trimmedInput) ? '2K' : '1K';
+              const quality = detectQualityFromText(rawPrompt + ' ' + trimmedInput) || '1K';
               const outputCount = detectImageCountFromText(trimmedInput);
 
               // 如果用户有图片，作为参考图传入
@@ -3381,7 +3405,7 @@ ${imageDescriptions}
                 const referenceImages = capturedPendingImages.map(img => img.url);
                 const imageSourceId = capturedPendingImages.length > 0 ? capturedPendingImages[0].id : undefined;
                 const aspectRatio = detectAspectRatioFromText(trimmedInput) || '1:1';
-                const quality = /高清|高质量|hd|high.?quality|2k|4k/i.test(trimmedInput) ? '2K' : '1K';
+                const quality = detectQualityFromText(trimmedInput) || '1K';
                 const outputCount = detectImageCountFromText(trimmedInput);
 
                 // 用 optimize-prompt 优化用户的提示词

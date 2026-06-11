@@ -2396,7 +2396,7 @@ function CanvasApp() {
   }, []);
 
   // AI聊天中的图像生成回调 - 当AI建议生成图片时直接触发
-  const handleChatGenerateImage = useCallback((prompt: string, outputCount?: number) => {
+  const handleChatGenerateImage = useCallback((prompt: string, outputCount?: number, aspectRatio?: string, quality?: string) => {
     // 从 wujie_selected_model 读取当前选择的图像生成模型（与 generation-panel 同步）
     let model = '';
     let providerId: string | undefined;
@@ -2902,7 +2902,7 @@ function CanvasApp() {
       )}
 
       {/* Right Panel - with vertical collapse strip */}
-      <div className={`absolute top-0 right-0 bottom-0 z-30 flex transition-all duration-300 ease-in-out ${panelCollapsed ? '' : ''}`} style={{ width: panelCollapsed ? '20px' : (activePanel === 'chat' ? '480px' : '360px') }}>
+      <div className={`fixed top-0 right-0 bottom-0 z-30 flex transition-all duration-300 ease-in-out ${panelCollapsed ? '' : ''}`} style={{ width: panelCollapsed ? '20px' : (activePanel === 'chat' ? '480px' : '360px') }}>
         {/* Vertical collapse strip */}
         <button
           onClick={() => setPanelCollapsed(prev => !prev)}
@@ -2920,25 +2920,18 @@ function CanvasApp() {
         {/* Panel Content */}
         {!panelCollapsed && (
         <div className={`flex-1 flex flex-col ${themeStyle === 'monochrome' ? 'bg-white border-l border-gray-200' : 'bg-[#141418] border-l border-white/[0.06]'} overflow-hidden`}>
-          {/* 软件标题 - 版本号在下方，项目名在右侧 */}
-          <div className="px-4 py-2.5 flex-shrink-0 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex flex-col">
-                <div className="flex items-center gap-2">
-                  <h1 className={`text-lg font-bold leading-tight tracking-tight ${themeStyle === 'monochrome' ? 'text-gray-900' : 'text-foreground'}`}>
-                    {APP_NAME}
-                  </h1>
-                  <div className={`w-1.5 h-1.5 rounded-full ${themeStyle === 'monochrome' ? 'bg-blue-500' : 'bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]'}`} />
-                </div>
-                <span className={`text-[10px] leading-tight font-mono ${themeStyle === 'monochrome' ? 'text-gray-400' : 'text-gold-muted'}`}>
-                  {APP_FULL_VERSION_LABEL}
-                </span>
+          {/* 软件标题 */}
+          <div className="px-4 py-2.5 flex-shrink-0 flex items-center">
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2">
+                <h1 className={`text-lg font-bold leading-tight tracking-tight ${themeStyle === 'monochrome' ? 'text-gray-900' : 'text-foreground'}`}>
+                  {APP_NAME}
+                </h1>
+                <div className={`w-1.5 h-1.5 rounded-full ${themeStyle === 'monochrome' ? 'bg-blue-500' : 'bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]'}`} />
               </div>
-              {currentProject && (
-                <span className={`text-xs px-2.5 py-0.5 rounded-lg font-medium transition-colors ${themeStyle === 'monochrome' ? 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100' : 'bg-gold/10 text-gold border border-gold/20 hover:bg-gold/15'}`}>
-                  {currentProject.name}
-                </span>
-              )}
+              <span className={`text-[10px] leading-tight font-mono ${themeStyle === 'monochrome' ? 'text-gray-400' : 'text-gold-muted'}`}>
+                {APP_FULL_VERSION_LABEL}
+              </span>
             </div>
           </div>
           <div className={`h-px ${themeStyle === 'monochrome' ? 'bg-gray-200' : 'bg-gradient-to-r from-transparent via-gold/15 to-transparent'}`} />
