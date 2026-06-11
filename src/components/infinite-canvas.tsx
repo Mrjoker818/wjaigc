@@ -12135,9 +12135,9 @@ export function InfiniteCanvas({
                           const fullPrompt = `${faceDescriptions} ${hcg.toolbar.prompt}`;
                           setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'generating', progress: 10 } : g));
                           try {
-                            // 提交生成请求（带超时保护）
+                            // 提交生成请求（带超时保护，匹配后端maxDuration）
                             const hexCubeController = new AbortController();
-                            const hexCubeTimeout = setTimeout(() => hexCubeController.abort(), 30000);
+                            const hexCubeTimeout = setTimeout(() => hexCubeController.abort(), 600000); // 10分钟超时
                             let res: Response;
                             try {
                               res = await fetch('/api/generate', {
