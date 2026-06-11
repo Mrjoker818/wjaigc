@@ -221,8 +221,10 @@ export class UserManager {
     }, UserManager.SYNC_DEBOUNCE_MS);
   }
 
-  /** 将当前用户的项目数据同步到服务器数据库 */
-  private async syncToServer(): Promise<void> {
+  /** 将当前用户的项目数据同步到服务器数据库
+   * @param immediate 是否立即同步（跳过防抖），用于删除等关键操作
+   */
+  private async syncToServer(immediate: boolean = false): Promise<void> {
     if (!this.currentUserId || !this.multiUserData) return;
     const userData = this.multiUserData.userData[this.currentUserId];
     if (!userData) return;
@@ -726,7 +728,7 @@ export class UserManager {
     return userData.projects[index];
   }
 
-  deleteProject(projectId: string): boolean {
+  async deleteProject(projectId: string): Promise<boolean> {
     const userData = this.getCurrentUserData();
     if (!userData) return false;
 
@@ -735,6 +737,8 @@ export class UserManager {
 
     if (userData.projects.length !== initialLength) {
       this.saveData();
+      // 删除项目后等待服务器同步完成，防止刷新后从服务器恢复
+      await this.syncToServer(true);
       return true;
     }
 

@@ -243,9 +243,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     });
   }, []);
 
-  const handleDelete = useCallback((id: string) => {
+  const handleDelete = useCallback(async (id: string) => {
     if (!confirm('确定删除此项目？此操作不可恢复。')) return;
-    mgr.deleteProject(id);
+    await mgr.deleteProject(id);
     setMenuOpenId(null);
     window.location.reload();
   }, [mgr]);

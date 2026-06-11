@@ -61,7 +61,7 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
 
   // Custom dialog state
   const [promptDialog, setPromptDialog] = useState<{open: boolean, title: string, defaultValue: string, placeholder: string, onConfirm: ((value: string) => void) | null}>({open: false, title: '', defaultValue: '', placeholder: '', onConfirm: null});
-  const [confirmDialog, setConfirmDialog] = useState<{open: boolean, title: string, message: string, onConfirm: (() => void) | null}>({open: false, title: '', message: '', onConfirm: null});
+  const [confirmDialog, setConfirmDialog] = useState<{open: boolean, title: string, message: string, onConfirm: (() => void | Promise<void>) | null}>({open: false, title: '', message: '', onConfirm: null});
   const [textareaDialog, setTextareaDialog] = useState<{open: boolean, title: string, defaultValue: string, placeholder: string, onConfirm: ((value: string) => void) | null}>({open: false, title: '', defaultValue: '', placeholder: '', onConfirm: null});
 
   const syncServerSession = useCallback(async (profile: User, password: string): Promise<boolean> => {
@@ -204,8 +204,8 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
       open: true,
       title: '删除项目',
       message: '确定删除这个项目吗？此操作无法撤销。',
-      onConfirm: () => {
-        userManager.deleteProject(projectId);
+      onConfirm: async () => {
+        await userManager.deleteProject(projectId);
         loadData();
         setConfirmDialog({ open: false, title: '', message: '', onConfirm: null });
       }
