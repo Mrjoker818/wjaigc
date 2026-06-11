@@ -653,16 +653,23 @@ function getCurrentGenerationModel(): string {
   return 'gemini-2.5-flash-image-preview';
 }
 
-/** 获取当前图像生成模型（从generation-panel同步的模型信息） */
-function getCurrentImageModelInfo(): { model: string; providerId?: string } {
+/** 获取当前图像生成模型（优先使用聊天面板选择的模型） */
+function getCurrentImageModelInfo(imageModelState: string, imageModelProviderIdState: string): { model: string; providerId?: string } {
   try {
     if (typeof window === 'undefined') return { model: '' };
-    // 优先从 wujie_selected_model 读取（generation panel 最新选择的模型）
+    // ★ 优先使用聊天面板选择的模型（用户在聊天面板的模型选择器）
+    if (imageModelState) {
+      const modelId = imageModelState.includes('::') ? imageModelState.split('::').pop()! : imageModelState;
+      const providerId = imageModelProviderIdState || undefined;
+      console.log('[ChatImage] Using chat panel model:', modelId, 'providerId:', providerId);
+      return { model: modelId, providerId };
+    }
+    // 备用：从 wujie_selected_model 读取（generation panel 选择的模型）
     const rawModel = localStorage.getItem('wujie_selected_model');
     if (rawModel) {
       const modelInfo = JSON.parse(rawModel);
       if (modelInfo.model) {
-        console.log('[ChatImage] Read model from wujie_selected_model:', modelInfo.model, 'providerId:', modelInfo.providerId);
+        console.log('[ChatImage] Fallback to wujie_selected_model:', modelInfo.model, 'providerId:', modelInfo.providerId);
         return { model: modelInfo.model, providerId: modelInfo.providerId || undefined };
       }
     }
@@ -1235,6 +1242,11 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   const [thirdPartyChatModels, setThirdPartyChatModels] = useState<{id: string; name: string; provider: string; providerId: string}[]>([]);
   // 服务器端发现的模型
   const [discoveredChatModels, setDiscoveredChatModels] = useState<{id: string; name: string; provider: string; providerId: string; description?: string; isDefault?: boolean}[]>([]);
+  // 图像模型选择（用于聊天中生图）
+  const [imageModel, setImageModel] = useState('');
+  const [imageModelProviderId, setImageModelProviderId] = useState('');
+  const [discoveredImageModels, setDiscoveredImageModels] = useState<{id: string; name: string; provider: string; providerId: string}[]>([]);
+  const [showImageModelSelector, setShowImageModelSelector] = useState(false);
   // 对话管理相关状态
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
@@ -2631,6 +2643,7 @@ UI设计规范：
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         loadServerModels();
+        loadImageModels();
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
@@ -2638,6 +2651,54 @@ UI设计规范：
       document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [loadServerModels]);
+
+  // 从服务器加载可用图像模型（用于聊天中生图）
+  const loadImageModels = useCallback(async () => {
+    try {
+      const res = await fetch('/api/models?type=image');
+      if (res.ok) {
+        const data = await res.json();
+        const models: {id: string; name: string; provider: string; providerId: string}[] = [];
+        const providerMap = new Map<string, string>();
+        if (data.providers && Array.isArray(data.providers)) {
+          for (const p of data.providers) {
+            providerMap.set(p.id, p.name || p.displayName || '');
+          }
+        }
+        if (data.models && Array.isArray(data.models)) {
+          for (const m of data.models) {
+            models.push({
+              id: m.providerId ? `${m.providerId}::${m.id || m.name}` : (m.id || m.name),
+              name: (m.name && m.name !== m.id) ? m.name : getModelDisplayName(m.name || m.id),
+              provider: providerMap.get(m.providerId) || m.providerId || '',
+              providerId: m.providerId || '',
+            });
+          }
+        }
+        setDiscoveredImageModels(models);
+      }
+    } catch {
+      // 静默失败
+    }
+  }, []);
+
+  // 初始化图像模型选择（从localStorage读取，与图像生成面板同步）
+  useEffect(() => {
+    loadImageModels();
+    const saved = localStorage.getItem('wujie_selected_model');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed?.model) {
+          const modelId = parsed.providerId ? `${parsed.providerId}::${parsed.model}` : parsed.model;
+          setImageModel(modelId);
+          setImageModelProviderId(parsed.providerId || '');
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, [loadImageModels]);
 
   // 初始化对话列表
   useEffect(() => {
@@ -3243,7 +3304,7 @@ ${imageDescriptions}
         // 从显示内容中移除 [GENERATE: ...] 标签
         const displayContent = assistantContent.replace(/\[GENERATE:\s*[\s\S]+?\]/g, '').trim();
         // ★ 先获取模型信息，再使用
-        const imageModelInfo = getCurrentImageModelInfo();
+        const imageModelInfo = getCurrentImageModelInfo(imageModel, imageModelProviderId);
         // 检测生成数量
         const imageCount = detectImageCountFromText(trimmedInput);
         setMessages(prev => prev.map(msg => 
@@ -3411,7 +3472,7 @@ ${imageDescriptions}
         const userWantsImage = isImageGenerationIntent(trimmedInput);
         if (userWantsImage) {
           console.log('[ChatImage] Fallback: LLM did not output [GENERATE] tag but user intent is clear');
-          const imageModelInfo = getCurrentImageModelInfo();
+          const imageModelInfo = getCurrentImageModelInfo(imageModel, imageModelProviderId);
           // 检测生成数量
           const imageCount = detectImageCountFromText(trimmedInput);
           setMessages(prev => prev.map(msg => 
@@ -4775,6 +4836,67 @@ ${imageDescriptions}
                       <span>{cmd.label}</span>
                     </button>
                   ))}
+                </div>
+              )}
+            </div>
+            {/* 图像模型选择器 */}
+            <div className="relative">
+              <button
+                onClick={() => setShowImageModelSelector(prev => !prev)}
+                className={`shrink-0 h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] transition-colors ${
+                  showImageModelSelector
+                    ? isGold
+                      ? 'bg-gold/15 text-gold'
+                      : 'bg-blue-100 text-blue-600'
+                    : isGold
+                      ? 'bg-white/[0.04] text-gold-muted/70 hover:text-gold hover:bg-white/[0.08]'
+                      : 'bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                }`}
+                title="选择图像模型"
+              >
+                <ImageIcon size={12} />
+                <span className="max-w-[80px] truncate">{discoveredImageModels.find(m => m.id === imageModel)?.name || getModelDisplayName(imageModel.split('::').pop() || imageModel)}</span>
+              </button>
+              {showImageModelSelector && (
+                <div className={`absolute bottom-full right-0 mb-1 w-64 max-h-80 overflow-y-auto rounded-lg border shadow-lg z-50 ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
+                  <div className={`px-3 py-2 text-[10px] font-medium border-b ${isGold ? 'text-gold-muted/60 border-white/5' : 'text-gray-400 border-gray-100'}`}>
+                    选择图像模型
+                  </div>
+                  {discoveredImageModels.length === 0 ? (
+                    <div className={`px-3 py-4 text-xs text-center ${isGold ? 'text-white/40' : 'text-gray-400'}`}>
+                      暂无可用模型
+                    </div>
+                  ) : (
+                    discoveredImageModels.map((m) => (
+                      <button
+                        key={m.id}
+                        onClick={() => {
+                          setImageModel(m.id);
+                          setImageModelProviderId(m.providerId);
+                          // 同步到localStorage，与图像生成面板共享
+                          const modelId = m.id.split('::').pop() || m.id;
+                          localStorage.setItem('wujie_selected_model', JSON.stringify({ model: modelId, providerId: m.providerId }));
+                          setShowImageModelSelector(false);
+                        }}
+                        className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
+                          imageModel === m.id
+                            ? isGold
+                              ? 'bg-gold/10 text-gold'
+                              : 'bg-blue-50 text-blue-600'
+                            : isGold
+                              ? 'text-white/80 hover:bg-white/5'
+                              : 'text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <ImageIcon size={12} className="shrink-0 opacity-50" />
+                        <div className="flex-1 min-w-0 text-left">
+                          <div className="truncate">{m.name}</div>
+                          {m.provider && <div className={`text-[10px] truncate ${isGold ? 'text-white/40' : 'text-gray-400'}`}>{m.provider}</div>}
+                        </div>
+                        {imageModel === m.id && <span className="text-gold">✓</span>}
+                      </button>
+                    ))
+                  )}
                 </div>
               )}
             </div>
