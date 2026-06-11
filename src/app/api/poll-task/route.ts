@@ -466,6 +466,8 @@ export async function POST(request: NextRequest) {
         const videoModel = regResult.model as string | undefined;
         const videoProviderId = regResult.providerId as string | undefined;
 
+        console.log(`[poll-task/video] taskId=${taskId}, thirdPartyTaskId=${thirdPartyTaskId}, profile=${videoProfile}, baseUrl=${videoBaseUrl?.slice(0, 50)}, model=${videoModel}`);
+
         if (!thirdPartyTaskId) {
           // 可能是同步完成的任务（API直接返回视频URL，status可能仍为processing）
           const syncVideoUrl = regResult.videoUrl as string | undefined;
@@ -508,7 +510,14 @@ export async function POST(request: NextRequest) {
           }, { status: 200 });
         }
 
-        const videoAdvancedParams = (regResult.advancedParams || regResult.providerAdvancedParams) as Record<string, unknown> | undefined;
+        let videoAdvancedParams = (regResult.advancedParams || regResult.providerAdvancedParams) as Record<string, any> | undefined;
+        
+        // 检查提交时是否使用了 images 端点，以便轮询也用对应端点
+        const usedImagesEndpoint = regResult.usedImagesEndpoint as boolean | undefined;
+        if (usedImagesEndpoint) {
+          if (!videoAdvancedParams) videoAdvancedParams = {};
+          videoAdvancedParams.videoEndpoint = 'images';
+        }
 
         try {
           const {
@@ -516,7 +525,7 @@ export async function POST(request: NextRequest) {
             parseVideoPollResponse,
           } = await import('@/lib/video-api');
 
-          const pollReq = buildVideoPollRequest(
+          let pollReq = buildVideoPollRequest(
             (videoProfile || 'rest-generic') as any,
             vBaseUrl,
             vApiKey || '',
@@ -524,11 +533,31 @@ export async function POST(request: NextRequest) {
             videoAdvancedParams,
           );
 
-          const pollResp = await fetch(pollReq.url, {
+          console.log(`[poll-task/video] Polling: url=${pollReq.url}, method=${pollReq.method}`);
+
+          let pollResp = await fetch(pollReq.url, {
             method: pollReq.method,
             headers: pollReq.headers,
             signal: AbortSignal.timeout(30000),
           });
+
+          // Poll endpoint fallback: if current endpoint returns 404/422, try alternative paths
+          // Common pattern: /v1/tasks/{id} 404 → try /v1/images/generations/{id}
+          if (pollResp.status === 404 && videoProfile === 'rest-generic') {
+            const altUrl = pollReq.url.includes('/v1/tasks/')
+              ? pollReq.url.replace('/v1/tasks/', '/v1/images/generations/')
+              : pollReq.url.includes('/v1/images/generations/')
+                ? pollReq.url.replace('/v1/images/generations/', '/v1/tasks/')
+                : null;
+            if (altUrl) {
+              console.log(`[poll-task/video] Poll 404, trying alt: ${altUrl}`);
+              pollResp = await fetch(altUrl, {
+                method: pollReq.method,
+                headers: pollReq.headers,
+                signal: AbortSignal.timeout(30000),
+              });
+            }
+          }
 
           if (!pollResp.ok) {
             // 轮询请求失败：区分4xx（客户端错误/任务不存在）和5xx（服务器临时故障）
@@ -563,32 +592,72 @@ export async function POST(request: NextRequest) {
             pollData,
           );
 
-          if (['succeeded', 'completed', 'success', 'done'].includes(videoResult.status) && videoResult.videoUrl) {
-            // 持久化视频文件
-            let persistedVideoUrl = videoResult.videoUrl;
-            try {
-              const { persistRemoteImage } = await import('@/lib/s3-storage');
-              const persisted = await persistRemoteImage(videoResult.videoUrl, `video/${taskId}`);
-              if (persisted) persistedVideoUrl = persisted;
-            } catch (persistErr) {
-              console.warn('[poll-task] Video persist failed, using source URL:', persistErr);
+          console.log(`[poll-task/video] Poll result: status=${videoResult.status}, videoUrl=${videoResult.videoUrl ? '(has url)' : '(none)'}, progress=${videoResult.progress}, raw keys=${Object.keys(pollData).join(',')}`);
+          console.log(`[poll-task/video] Raw poll response (first 500 chars): ${JSON.stringify(pollData).slice(0, 500)}`);
+
+          if (['succeeded', 'completed', 'success', 'done'].includes(videoResult.status)) {
+            // 如果 parseVideoPollResponse 未能提取 videoUrl，尝试从原始数据中提取
+            if (!videoResult.videoUrl && pollData) {
+              const rawResult = pollData?.data?.result || pollData?.data?.results || pollData?.result || pollData?.results;
+              const rawVideos = rawResult?.videos || rawResult?.video_results;
+              if (Array.isArray(rawVideos) && rawVideos.length > 0) {
+                videoResult.videoUrl = Array.isArray(rawVideos[0].url) ? rawVideos[0].url[0] : rawVideos[0].url;
+              } else if (rawResult?.video_url) {
+                videoResult.videoUrl = rawResult.video_url;
+              } else if (rawResult?.url) {
+                videoResult.videoUrl = rawResult.url;
+              }
+              if (videoResult.videoUrl) {
+                console.log(`[poll-task/video] Extracted videoUrl from raw data: ${videoResult.videoUrl.slice(0, 100)}`);
+              }
             }
+            
+            if (videoResult.videoUrl) {
+              // 持久化视频文件（直接下载保存，不经过sharp压缩）
+              let persistedVideoUrl = videoResult.videoUrl;
+              try {
+                const path = await import('path');
+                const fs = await import('fs/promises');
+                const { getServerDataRoot } = await import('@/lib/server-data-root');
+                const dataRoot = getServerDataRoot();
+                
+                const videoResp = await fetch(videoResult.videoUrl, { signal: AbortSignal.timeout(120000) });
+                if (videoResp.ok) {
+                  const videoBuffer = Buffer.from(await videoResp.arrayBuffer());
+                  // 从原始URL或Content-Type推断视频扩展名
+                  const origPath = new URL(videoResult.videoUrl).pathname;
+                  const ext = path.extname(origPath).toLowerCase() || '.mp4';
+                  const filename = `video_${taskId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+                  const dirPath = path.join(dataRoot, 'public', 'video', taskId);
+                  await fs.mkdir(dirPath, { recursive: true });
+                  await fs.writeFile(path.join(dirPath, filename), videoBuffer);
+                  persistedVideoUrl = `/api/serve-upload/video/${taskId}/${filename}`;
+                  console.log(`[poll-task/video] Persisted video: ${persistedVideoUrl} (${(videoBuffer.length / 1024 / 1024).toFixed(1)}MB)`);
+                } else {
+                  console.warn(`[poll-task/video] Failed to download video: ${videoResp.status}`);
+                }
+              } catch (persistErr) {
+                console.warn('[poll-task] Video persist failed, using source URL:', persistErr);
+              }
 
-            updateTaskProgress(taskId, { status: 'completed', progress: 100 });
-            releaseQueueSlot(taskId);
-            completedTaskCache.set(taskId, { imageUrl: persistedVideoUrl, modelName: '', providerName: '', timestamp: Date.now() });
+              updateTaskProgress(taskId, { status: 'completed', progress: 100 });
+              releaseQueueSlot(taskId);
+              completedTaskCache.set(taskId, { imageUrl: persistedVideoUrl, modelName: '', providerName: '', timestamp: Date.now() });
 
-            return NextResponse.json({
-              success: true,
-              status: 'completed',
-              progress: 100,
-              imageUrl: persistedVideoUrl,
-              mediaType: 'video',
-              videoUrl: persistedVideoUrl,
-              videoDuration: videoResult.duration,
-              watermarkVideoUrl: videoResult.watermarkVideoUrl,
-              modelName: videoModel || '',
-            }, { status: 200 });
+              return NextResponse.json({
+                success: true,
+                status: 'completed',
+                progress: 100,
+                imageUrl: persistedVideoUrl,
+                mediaType: 'video',
+                videoUrl: persistedVideoUrl,
+                videoDuration: videoResult.duration,
+                watermarkVideoUrl: videoResult.watermarkVideoUrl,
+                modelName: videoModel || '',
+              }, { status: 200 });
+            }
+            // 视频完成但无URL — 视为失败
+            console.warn(`[poll-task/video] Task ${taskId} completed but no videoUrl found in response`);
           }
 
           if (videoResult.status === 'failed') {

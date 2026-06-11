@@ -378,6 +378,14 @@ export function parseVideoSubmitResponse(
           estimatedTime: 0,
         };
       }
+      // 检查嵌套的task_id（如 apimart 格式: {code:200, data:[{task_id:"xxx"}]}）
+      if (syncData?.task_id || syncData?.id || syncData?.request_id) {
+        return {
+          taskId: syncData.task_id || syncData.id || syncData.request_id || '',
+          status: syncData.status || 'submitted',
+          estimatedTime: 120,
+        };
+      }
       // 检查顶层直接返回视频URL
       if (data?.url || data?.video_url || data?.output?.video_url) {
         return {
@@ -389,7 +397,7 @@ export function parseVideoSubmitResponse(
       }
       return {
         taskId: data?.task_id || data?.id || data?.request_id || '',
-        status: 'submitted',
+        status: data?.status || 'submitted',
         estimatedTime: 120,
       };
     }
@@ -448,7 +456,6 @@ export function buildVideoPollRequest(
     case 'rest-generic':
     default: {
       // 支持自定义轮询端点（通过advancedParams.pollEndpoint指定）
-      // 默认支持多种常见格式，按优先级尝试
       const customPollEndpoint = advancedParams?.pollEndpoint;
       if (customPollEndpoint) {
         return {
@@ -457,8 +464,23 @@ export function buildVideoPollRequest(
           method: 'GET',
         };
       }
+      // 默认轮询端点：尝试多种常见格式
+      // 大多数第三方 API 代理使用以下路径之一:
+      // /v1/images/generations/{taskId} (OpenAI 风格)
+      // /v1/tasks/{taskId} (通用任务)
+      // /tasks/{taskId} (简化路径)
+      // 优先使用 /v1/images/generations/{taskId} 因为大部分代理通过 images 端点暴露视频模型
+      const submitEndpoint = advancedParams?.submitEndpoint || '';
+      if (submitEndpoint.includes('images') || advancedParams?.videoEndpoint === 'images') {
+        // 提交使用的是 images 端点，轮询也用 images 端点
+        return {
+          url: `${cleanBaseUrl}/v1/images/generations/${taskId}`,
+          headers: { 'Authorization': `Bearer ${apiKey}` },
+          method: 'GET',
+        };
+      }
       return {
-        url: `${cleanBaseUrl}/tasks/${taskId}`,
+        url: `${cleanBaseUrl}/v1/tasks/${taskId}`,
         headers: { 'Authorization': `Bearer ${apiKey}` },
         method: 'GET',
       };
@@ -689,6 +711,7 @@ function buildRestGenericSubmit(baseUrl: string, apiKey: string, params: VideoGe
       : `${cleanBase}/v1/video/generations`;
 
   // Build request body compatible with both OpenAI image and video API formats
+  // 策略：视频模型始终使用 aspect_ratio（如 "16:9"），不发送像素 size（代理可能误映射为 ratio）
   const body: Record<string, any> = {
     model: params.model,
     prompt: params.prompt,
@@ -698,10 +721,7 @@ function buildRestGenericSubmit(baseUrl: string, apiKey: string, params: VideoGe
       : { image_url: params.imageUrl }  // Video style
     : {}),
     ...(params.lastFrameImageUrl ? { last_frame_image_url: params.lastFrameImageUrl } : {}),
-    ...(params.aspectRatio ? useImageEndpoint
-      ? { size: ratioToSize(params.aspectRatio) }
-      : { aspect_ratio: params.aspectRatio }
-    : {}),
+    ...(params.aspectRatio ? { aspect_ratio: params.aspectRatio } : {}),
     ...(params.duration ? { duration: params.duration } : {}),
     ...(params.mode ? { mode: params.mode } : {}),
     ...(params.generateAudio ? { audio: true } : {}),
@@ -723,7 +743,7 @@ function buildRestGenericSubmit(baseUrl: string, apiKey: string, params: VideoGe
 }
 
 /** Convert aspect ratio like "16:9" to approximate pixel size string "1920x1080" */
-function ratioToSize(ratio: string): string {
+export function ratioToSize(ratio: string): string {
   const ratioMap: Record<string, string> = {
     '1:1': '1024x1024',
     '4:3': '1024x768',
@@ -887,27 +907,46 @@ function parseFalVideoPoll(data: any): VideoTaskPollResult {
 }
 
 function parseRestGenericPoll(data: any): VideoTaskPollResult {
-  const status = (data?.status || data?.task_status || '').toLowerCase();
+  // apimart 格式: {code:200, data:{task_status:"SUCCEEDED", results:{video_url:"..."}}}
+  // 或: {code:200, data:[{status:"SUCCEEDED", video_url:"..."}]}
+  const innerData = data?.data;
+  const pollItem = Array.isArray(innerData) ? innerData[0] : innerData;
+  
+  // 优先从嵌套data中提取状态和结果
+  const status = (pollItem?.status || pollItem?.task_status || data?.status || data?.task_status || '').toLowerCase();
 
   if (status === 'succeeded' || status === 'completed' || status === 'success' || status === 'done') {
-    const result = data?.result || data?.output || data?.data?.[0] || data;
+    const result = pollItem?.results || pollItem?.result || pollItem?.output || data?.result || data?.output || data?.data?.[0] || data;
+    // apimart 格式: result.videos[0].url[0] 或 result.videos[0].url
+    // 通用格式: result.video_url / result.url / result.content.video_url
+    const videosArray = result?.videos || result?.video_results;
+    const videoUrl = result?.video_url || result?.url || result?.content?.video_url
+      || pollItem?.video_url || pollItem?.url
+      || (Array.isArray(videosArray) && videosArray.length > 0
+        ? (Array.isArray(videosArray[0].url) ? videosArray[0].url[0] : videosArray[0].url)
+        : undefined);
     return {
       status: 'succeeded',
       progress: 100,
-      videoUrl: result?.video_url || result?.url || result?.content?.video_url,
+      videoUrl,
       duration: result?.duration,
     };
   } else if (status === 'failed' || status === 'error') {
     return {
       status: 'failed',
-      error: data?.error?.message || data?.message || 'Video generation failed',
+      error: pollItem?.error || data?.error?.message || data?.message || data?.error || 'Video generation failed',
     };
-  } else if (status === 'running' || status === 'processing') {
+  } else if (status === 'running' || status === 'processing' || status === 'in_progress') {
+    // 进度值可能是 0-1（比例）或 0-100（百分比），智能判断
+    const rawProgress = data?.progress ?? pollItem?.progress;
+    const progress = rawProgress != null
+      ? (rawProgress > 1 ? rawProgress : Math.round(rawProgress * 100))
+      : 50;
     return {
       status: 'running',
-      progress: data?.progress ? Math.round(data.progress * 100) : 50,
+      progress,
     };
-  } else if (status === 'pending' || status === 'queued') {
+  } else if (status === 'pending' || status === 'queued' || status === 'submitted') {
     return { status: 'pending', progress: 10 };
   }
   return { status: 'pending', progress: 0 };

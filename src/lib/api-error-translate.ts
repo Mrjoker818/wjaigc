@@ -7,7 +7,9 @@
 
 export function translateApiError(rawMsg: string): string {
   if (!rawMsg) return '处理失败，请重试';
-  const msg = rawMsg.toLowerCase();
+  // 防御性处理：确保 rawMsg 是字符串
+  const strMsg = typeof rawMsg === 'string' ? rawMsg : JSON.stringify(rawMsg);
+  const msg = strMsg.toLowerCase();
 
   // 余额不足
   if (msg.includes('insufficient balance') || msg.includes('insufficient')) {
@@ -80,7 +82,7 @@ export function translateApiError(rawMsg: string): string {
     return '模型当前过载，请稍后重试或切换其他模型';
   }
   // 请求ID后缀清理（如 "(request id: 20260529...)" 无需暴露给用户）
-  const cleanedMsg = rawMsg.replace(/\s*\(request id:.*?\)\s*/i, '').trim();
+  const cleanedMsg = strMsg.replace(/\s*\(request id:.*?\)\s*/i, '').trim();
 
   // 兜底：如果是纯英文消息，加上中文前缀
   if (/^[a-zA-Z]/.test(cleanedMsg) && !/[\u4e00-\u9fff]/.test(cleanedMsg)) {

@@ -14,6 +14,7 @@ import {
   parseVideoSubmitResponse,
   resolveVideoCompatProfile,
   getVideoModelInfo,
+  ratioToSize,
   type VideoGenerateParams,
   type VideoCompatProfile,
 } from '@/lib/video-api';
@@ -70,9 +71,15 @@ export async function POST(request: NextRequest) {
 
     const apiKey = provider.apiKey;
     const baseUrl = provider.baseUrl;
-    const advancedParams = provider.advancedParams ? 
-      (typeof provider.advancedParams === 'string' ? JSON.parse(provider.advancedParams) : provider.advancedParams) 
+    let advancedParams = provider.advancedParams 
+      ? (typeof provider.advancedParams === 'string' ? JSON.parse(provider.advancedParams) : provider.advancedParams) 
       : {};
+    
+    // 关键：将 requestStyle 转化为 advancedParams 中的端点指示
+    // 管理员后台标记了 requestStyle=images-generations 表示该提供商应使用 images 端点
+    if (provider.requestStyle === 'images-generations') {
+      advancedParams = { ...advancedParams, videoEndpoint: 'images' };
+    }
 
     // 2. 推断视频协议
     const profile = resolveVideoCompatProfile(
@@ -80,6 +87,7 @@ export async function POST(request: NextRequest) {
       advancedParams?.compatProfile,
       baseUrl,
     );
+    console.log(`[video/generate] model=${model}, providerId=${provider.id}, baseUrl=${baseUrl}, profile=${profile}, compatProfile=${advancedParams?.compatProfile || '(none)'}`);
 
     // 3. 获取模型特征信息
     const modelInfo = getVideoModelInfo(model);
@@ -181,6 +189,7 @@ export async function POST(request: NextRequest) {
         updateTaskProgress(taskId, { progress: 5, label: `${modeLabel} · ${modelName} · 提交中...` });
 
         const req = buildVideoSubmitRequest(profile, videoParams);
+        console.log(`[video/generate] Submit request: url=${req.url}, method=${req.method}`);
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 30000); // 30s 提交超时
 
@@ -191,23 +200,45 @@ export async function POST(request: NextRequest) {
           signal: controller.signal,
         });
 
-        // Auto-fallback: if /v1/video/generations returns 404, try /v1/images/generations
-        // Many third-party APIs expose video models via the images endpoint
-        if (response.status === 404 && profile === 'rest-generic' && !req.url.includes('/v1/images/')) {
-          const fallbackUrl = req.url.replace('/v1/video/generations', '/v1/images/generations');
-          updateTaskProgress(taskId, { progress: 8, label: `${modeLabel} · ${modelName} · 重试备用端点...` });
-          response = await fetch(fallbackUrl, {
-            method: req.method,
-            headers: req.headers,
-            body: req.body,
-            signal: controller.signal,
-          });
+        let usedImagesEndpoint = req.url.includes('/v1/images/');
+        
+        // Auto-fallback: try /v1/images/generations when /v1/video/generations fails
+        // Many third-party API proxies only expose video models via the images endpoint
+        if (!response.ok && profile === 'rest-generic' && !req.url.includes('/v1/images/')) {
+          const errorBody = await response.text().catch(() => '');
+          const isModelNotFound = errorBody.includes('model_not_found') || errorBody.includes('Model not found');
+          const isEndpointNotFound = response.status === 404;
+          
+          if (isEndpointNotFound || isModelNotFound || response.status === 503) {
+            // Rebuild request body in OpenAI images/generations format
+            const fallbackUrl = req.url.replace('/v1/video/generations', '/v1/images/generations');
+            const fallbackBody: Record<string, any> = {
+              model,
+              prompt,
+              n: 1,
+              response_format: 'url',
+              ...(resolvedImageUrl ? { image: resolvedImageUrl } : {}),
+              ...(aspectRatio ? { size: ratioToSize(aspectRatio) } : {}),
+            };
+            console.log(`[video/generate] Fallback from video to images endpoint: ${fallbackUrl}, reason: status=${response.status}, modelNotFound=${isModelNotFound}`);
+            updateTaskProgress(taskId, { progress: 8, label: `${modeLabel} · ${modelName} · 重试备用端点...` });
+            response = await fetch(fallbackUrl, {
+              method: req.method,
+              headers: req.headers,
+              body: JSON.stringify(fallbackBody),
+              signal: controller.signal,
+            });
+            usedImagesEndpoint = true;
+          }
         }
 
         clearTimeout(timeout);
 
+        console.log(`[video/generate] Submit response: status=${response.status}, ok=${response.ok}`);
+
         if (!response.ok) {
           const errorText = await response.text().catch(() => '');
+          console.error(`[video/generate] Submit failed (${response.status}): ${errorText.slice(0, 500)}`);
           let errorMessage = `API 请求失败 (${response.status})`;
           try {
             const errorJson = JSON.parse(errorText);
@@ -219,6 +250,8 @@ export async function POST(request: NextRequest) {
 
         const data = await response.json();
         const submitResult = parseVideoSubmitResponse(profile, data);
+        console.log(`[video/generate] Parse submit result: taskId=${submitResult.taskId}, status=${submitResult.status}, videoUrl=${submitResult.videoUrl ? '(has url)' : '(none)'}, raw keys=${Object.keys(data).join(',')}`);
+        console.log(`[video/generate] Raw submit response (first 500 chars): ${JSON.stringify(data).slice(0, 500)}`);
 
         if (!submitResult.taskId) {
           updateTaskProgress(taskId, {
@@ -247,6 +280,7 @@ export async function POST(request: NextRequest) {
         }
 
         // 存储轮询所需信息到任务结果中
+        // 注意：记录提交端点类型，以便轮询时选择正确的端点
         updateTaskProgress(taskId, {
           progress: 10,
           label: `${modeLabel} · ${modelName} · 排队中...`,
@@ -258,6 +292,7 @@ export async function POST(request: NextRequest) {
             advancedParams,
             model,
             providerId: provider.id,
+            usedImagesEndpoint,
           },
         });
       } catch (err: any) {

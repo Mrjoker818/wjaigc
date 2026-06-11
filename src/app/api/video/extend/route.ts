@@ -58,9 +58,14 @@ export async function POST(request: NextRequest) {
 
     const apiKey = provider.apiKey;
     const baseUrl = provider.baseUrl;
-    const advancedParams = provider.advancedParams
+    let advancedParams = provider.advancedParams
       ? (typeof provider.advancedParams === 'string' ? JSON.parse(provider.advancedParams) : provider.advancedParams)
       : {};
+    
+    // 关键：将 requestStyle 转化为 advancedParams 中的端点指示
+    if (provider.requestStyle === 'images-generations') {
+      advancedParams = { ...advancedParams, videoEndpoint: 'images' };
+    }
 
     // 2. 推断视频协议
     const profile = resolveVideoCompatProfile(
@@ -134,15 +139,25 @@ export async function POST(request: NextRequest) {
           signal: controller.signal,
         });
 
-        // Auto-fallback: if /v1/video/generations returns 404, try /v1/images/generations
-        if (response.status === 404 && profile === 'rest-generic' && !req.url.includes('/v1/images/')) {
-          const fallbackUrl = req.url.replace('/v1/video/generations', '/v1/images/generations');
-          response = await fetch(fallbackUrl, {
-            method: req.method,
-            headers: req.headers,
-            body: req.body,
-            signal: controller.signal,
-          });
+        let usedImagesEndpoint = req.url.includes('/v1/images/');
+
+        // Auto-fallback: try /v1/images/generations when /v1/video/generations fails
+        if (!response.ok && profile === 'rest-generic' && !req.url.includes('/v1/images/')) {
+          const errorBody = await response.text().catch(() => '');
+          const isModelNotFound = errorBody.includes('model_not_found') || errorBody.includes('Model not found');
+          const isEndpointNotFound = response.status === 404;
+          
+          if (isEndpointNotFound || isModelNotFound || response.status === 503) {
+            const fallbackUrl = req.url.replace('/v1/video/generations', '/v1/images/generations');
+            console.log(`[video/extend] Fallback to images endpoint: ${fallbackUrl}`);
+            response = await fetch(fallbackUrl, {
+              method: req.method,
+              headers: req.headers,
+              body: req.body,
+              signal: controller.signal,
+            });
+            usedImagesEndpoint = true;
+          }
         }
 
         clearTimeout(timeout);
@@ -182,6 +197,7 @@ export async function POST(request: NextRequest) {
             model,
             providerId: provider.id,
             advancedParams: provider.advancedParams || undefined,
+            usedImagesEndpoint,
           },
         });
       } catch (err: any) {
