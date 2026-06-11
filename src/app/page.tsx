@@ -2439,14 +2439,14 @@ function CanvasApp() {
     handleGenerate({
       prompt: prompt,
       outputCount: outputCount || 1,
-      aspectRatio: '1:1',
+      aspectRatio: aspectRatio || '1:1',
       size: '',
       referenceImages: [],
       referenceMode: 'style',
       imageCategory: '',
       productCategory: '',
       stylePreset: '',
-      quality: 'standard',
+      quality: quality || 'standard',
       model: model,
       providerId: providerId,
     });

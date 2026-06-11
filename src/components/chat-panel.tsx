@@ -298,7 +298,7 @@ interface ChatPanelProps {
   onChatModelChange?: (info: { model: string; providerId: string; apiKey: string; baseUrl: string; providerPreset?: string } | null) => void;
   onSuggestionAction?: (action: string, data?: Record<string, string>) => void;
   /** Called when user clicks "generate image" suggestion - triggers image generation directly */
-  onGenerateImage?: (prompt: string, outputCount?: number) => void;
+  onGenerateImage?: (prompt: string, outputCount?: number, aspectRatio?: string, quality?: string) => void;
   brandDna?: Record<string, unknown> | null;
   onInjectBrandDna?: (dna: Record<string, unknown>) => void;
   /** Image sent from canvas right-click menu "发送到聊天修改" */
@@ -4399,10 +4399,13 @@ ${imageDescriptions}
                             key={sug.id}
                             onClick={() => {
                               if (sug.action === 'generate-image' && onGenerateImage && sug.prompt) {
-                                // 从最近的用户消息中检测生成数量
+                                // 从最近的用户消息中检测生成数量、比例和质量
                                 const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
-                                const count = lastUserMsg ? detectImageCountFromText(lastUserMsg.content) : 1;
-                                onGenerateImage(sug.prompt, count);
+                                const userText = lastUserMsg?.content || '';
+                                const count = detectImageCountFromText(userText);
+                                const ratio = detectAspectRatioFromText(userText) || '1:1';
+                                const quality = detectQualityFromText(userText) || '1K';
+                                onGenerateImage(sug.prompt, count, ratio, quality);
                               } else if (sug.action === 'send-to-prompt' && sug.prompt) {
                                 // 作为聊天消息发送，而非发到图像生成面板
                                 handleSend(sug.prompt);
