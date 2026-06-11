@@ -67,9 +67,24 @@ export async function POST(request: NextRequest) {
     // but send thinking-related parameters if the provider supports it
     const requestModel = baseModel;
 
+    // Convert relative image URLs to absolute URLs so upstream API can fetch them
+    const origin = request.headers.get('origin') || process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
+    const fixedMessages = messages.map((msg: { role: string; content: unknown }) => {
+      if (Array.isArray(msg.content)) {
+        const fixedContent = msg.content.map((part: { type?: string; image_url?: { url?: string } }) => {
+          if (part.type === 'image_url' && part.image_url?.url && part.image_url.url.startsWith('/')) {
+            return { ...part, image_url: { ...part.image_url, url: `${origin}${part.image_url.url}` } };
+          }
+          return part;
+        });
+        return { ...msg, content: fixedContent };
+      }
+      return msg;
+    });
+
     const requestBody: Record<string, unknown> = {
       model: requestModel,
-      messages,
+      messages: fixedMessages,
       stream,
       temperature: 0.7,
     };
@@ -100,7 +115,7 @@ export async function POST(request: NextRequest) {
       const errorText = await response.text().catch(() => '');
       console.warn(`[chat] Base model ${requestModel} with thinking params failed (${response.status}), trying ${model}...`);
       
-      const retryBody = { model, messages, stream, temperature: 0.7 };
+      const retryBody = { model, messages: fixedMessages, stream, temperature: 0.7 };
       const retryResponse = await fetchWithV1Retry(
         chatBaseUrl,
         '/chat/completions',
@@ -160,7 +175,7 @@ export async function POST(request: NextRequest) {
         try {
           const responsesBody: Record<string, unknown> = {
             model: requestModel,
-            input: messages,
+            input: fixedMessages,
             stream,
           };
 
