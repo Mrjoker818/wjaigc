@@ -1,11 +1,42 @@
 'use client';
 
-import { useState, useEffect, useCallback, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import {
   Play, Video, ImagePlus, Clock, Settings2,
   ChevronDown, Loader2, Sparkles, Volume2, VolumeX,
-  Upload, X, AlertCircle, Info, FastForward
+  Upload, X, AlertCircle, Info, FastForward, Users, Plus, Paintbrush, Film
 } from 'lucide-react';
+import MotionBrushCanvas, { type MotionBrushResult, type MotionBrushCanvasHandle } from './motion-brush-canvas';
+
+// === 视频模板库 ===
+interface VideoTemplate {
+  id: string;
+  name: string;
+  category: 'product' | 'character' | 'landscape' | 'effect' | 'story';
+  prompt: string;
+  recommendedModel?: string;
+  aspectRatio?: string;
+  duration?: number;
+  cameraControl?: CameraControlParams;
+}
+
+const VIDEO_TEMPLATES: VideoTemplate[] = [
+  // 产品展示
+  { id: 'product-rotate', name: '产品旋转展示', category: 'product', prompt: '一个产品在纯白背景上缓慢旋转，柔和的灯光，专业产品摄影风格', aspectRatio: '1:1', duration: 5, cameraControl: { type: 'orbit_right', intensity: 50 } },
+  { id: 'product-zoom', name: '产品特写推进', category: 'product', prompt: '产品特写镜头缓慢推进，展示细节质感，电影级光影', aspectRatio: '16:9', duration: 5, cameraControl: { type: 'push_in', intensity: 30 } },
+  // 人物
+  { id: 'character-portrait', name: '人物肖像', category: 'character', prompt: '一位优雅的人物肖像，柔和的背景光，电影级色彩', aspectRatio: '3:4', duration: 5 },
+  { id: 'character-action', name: '人物动作', category: 'character', prompt: '人物做出流畅的动作，头发和衣服自然飘动，慢动作效果', aspectRatio: '16:9', duration: 5 },
+  // 风景
+  { id: 'landscape-pan', name: '风景横摇', category: 'landscape', prompt: '壮丽的自然风景，山川河流，日出时分，金色阳光', aspectRatio: '21:9', duration: 8, cameraControl: { type: 'pan_right', intensity: 40 } },
+  { id: 'landscape-aerial', name: '航拍视角', category: 'landscape', prompt: '航拍视角俯瞰大地，云层缭绕，壮观的自然景观', aspectRatio: '16:9', duration: 8, cameraControl: { type: 'push_in', intensity: 30 } },
+  // 特效
+  { id: 'effect-transition', name: '转场特效', category: 'effect', prompt: '粒子消散转场效果，从清晰到模糊，梦幻氛围', aspectRatio: '16:9', duration: 3 },
+  { id: 'effect-slowmo', name: '慢动作', category: 'effect', prompt: '慢动作捕捉瞬间，水滴飞溅，时间凝固的感觉', aspectRatio: '16:9', duration: 5 },
+  // 故事
+  { id: 'story-opening', name: '故事开场', category: 'story', prompt: '电影开场镜头，从远景缓慢推进到主体，营造悬念氛围', aspectRatio: '2.35:1', duration: 8, cameraControl: { type: 'push_in', intensity: 20 } },
+  { id: 'story-climax', name: '故事高潮', category: 'story', prompt: '紧张刺激的高潮场景，快速剪辑感，动态镜头', aspectRatio: '2.35:1', duration: 5, cameraControl: { type: 'tracking', intensity: 70 } },
+];
 
 // === 视频模型信息 ===
 export interface VideoModelInfo {
@@ -20,6 +51,10 @@ export interface VideoModelInfo {
     videoEdit: boolean;
     videoExtend: boolean;
     audio: boolean;
+    cameraControl: boolean;
+    motionBrush: boolean;
+    characterConsistency: boolean;
+    multiShot: boolean;
     maxDuration: number;
     durations: number[];
     aspectRatios: string[];
@@ -33,129 +68,190 @@ const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
   'kling-v3-video-generation': {
     id: 'kling-v3-video-generation', name: '可灵 V3', provider: 'Kuaishou', region: 'cn',
     profile: 'dashscope',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: false, multiShot: false, maxDuration: 15, durations: [5, 10, 15], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'] }
   },
   'kling-v3-omni-video-generation': {
     id: 'kling-v3-omni-video-generation', name: '可灵 V3 Omni', provider: 'Kuaishou', region: 'cn',
     profile: 'dashscope',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 30, durations: [5, 10, 15, 30], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'] }
   },
-  'doubao-seedance-2-0': {
-    id: 'doubao-seedance-2-0', name: 'Seedance 2.0', provider: 'ByteDance', region: 'cn',
-    profile: 'volcengine-ark',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['480p','720p','1080p'] }
+  'kling-v3-5-video-generation': {
+    id: 'kling-v3-5-video-generation', name: '可灵 V3.5', provider: 'Kuaishou', region: 'cn',
+    profile: 'dashscope',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 30, durations: [5, 10, 15, 30], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p','4K'] }
   },
-  'doubao-seedance-2-0-fast': {
-    id: 'doubao-seedance-2-0-fast', name: 'Seedance 2.0 Fast', provider: 'ByteDance', region: 'cn',
+  'doubao-seedance-3-0': {
+    id: 'doubao-seedance-3-0', name: 'Seedance 3.0', provider: 'ByteDance', region: 'cn',
     profile: 'volcengine-ark',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: true, maxDuration: 15, durations: [5, 10, 15], aspectRatios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['720p','1080p','4K'] }
+  },
+  'doubao-seedance-3-0-fast': {
+    id: 'doubao-seedance-3-0-fast', name: 'Seedance 3.0 Fast', provider: 'ByteDance', region: 'cn',
+    profile: 'volcengine-ark',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, cameraControl: true, motionBrush: false, characterConsistency: true, multiShot: true, maxDuration: 15, durations: [5, 10, 15], aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['720p','1080p'] }
   },
   'doubao-seedance-2-3': {
     id: 'doubao-seedance-2-3', name: 'Seedance 2.3', provider: 'ByteDance', region: 'cn',
     profile: 'volcengine-ark',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['768p','1080p'] }
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['768p','1080p'] }
   },
   'doubao-seedance-2-3-fast': {
     id: 'doubao-seedance-2-3-fast', name: 'Seedance 2.3 Fast', provider: 'ByteDance', region: 'cn',
     profile: 'volcengine-ark',
-    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['768p','1080p'] }
+    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['768p','1080p'] }
+  },
+  'doubao-seedance-2-0': {
+    id: 'doubao-seedance-2-0', name: 'Seedance 2.0', provider: 'ByteDance', region: 'cn',
+    profile: 'volcengine-ark',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['480p','720p','1080p'] }
+  },
+  'doubao-seedance-2-0-fast': {
+    id: 'doubao-seedance-2-0-fast', name: 'Seedance 2.0 Fast', provider: 'ByteDance', region: 'cn',
+    profile: 'volcengine-ark',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p','1080p'] }
   },
   'doubao-seedance-1-0-lite': {
     id: 'doubao-seedance-1-0-lite', name: 'Seedance 1.0 Lite', provider: 'ByteDance', region: 'cn',
     profile: 'volcengine-ark',
-    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'] }
+    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'] }
   },
   'video-01': {
     id: 'video-01', name: '海螺 Video-01', provider: 'MiniMax', region: 'cn',
     profile: 'minimax',
-    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 6, durations: [6], aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['720p'] }
+    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 6, durations: [6], aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['720p'] }
   },
   'hailuo-02': {
     id: 'hailuo-02', name: '海螺 Hailuo 02', provider: 'MiniMax', region: 'cn',
     profile: 'minimax',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 10, durations: [5, 6, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['512p','768p','1080p'] }
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 6, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['512p','768p','1080p'] }
   },
   'hailuo-2.3': {
     id: 'hailuo-2.3', name: '海螺 Hailuo 2.3', provider: 'MiniMax', region: 'cn',
     profile: 'minimax',
-    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 10, durations: [5, 6, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['768p','1080p'] }
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 6, 10], aspectRatios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['768p','1080p'] }
   },
-  'vidu-q1': {
-    id: 'vidu-q1', name: 'Vidu Q1', provider: 'ShengShu', region: 'cn',
+  'vidu-q3': {
+    id: 'vidu-q3', name: 'Vidu Q3', provider: 'ShengShu', region: 'cn',
     profile: 'vidu',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, maxDuration: 8, durations: [4, 8], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 16, durations: [4, 8, 16], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p','4K'] }
+  },
+  'vidu-q3-pro': {
+    id: 'vidu-q3-pro', name: 'Vidu Q3 Pro', provider: 'ShengShu', region: 'cn',
+    profile: 'vidu',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 16, durations: [4, 8, 16], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['1080p','4K'] }
   },
   'vidu-q2': {
     id: 'vidu-q2', name: 'Vidu Q2', provider: 'ShengShu', region: 'cn',
     profile: 'vidu',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, maxDuration: 8, durations: [4, 8], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [4, 8], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'] }
+  },
+  'vidu-q1': {
+    id: 'vidu-q1', name: 'Vidu Q1', provider: 'ShengShu', region: 'cn',
+    profile: 'vidu',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [4, 8], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'] }
   },
   // === 海外模型 ===
   'gen-3-alpha-turbo': {
     id: 'gen-3-alpha-turbo', name: 'Runway Gen-3 Turbo', provider: 'Runway', region: 'global',
     profile: 'rest-generic',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: true, videoExtend: true, audio: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: false, videoEdit: true, videoExtend: true, audio: false, cameraControl: true, motionBrush: true, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
   },
   'gen-3-alpha': {
     id: 'gen-3-alpha', name: 'Runway Gen-3', provider: 'Runway', region: 'global',
     profile: 'rest-generic',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: true, videoExtend: true, audio: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: false, videoEdit: true, videoExtend: true, audio: false, cameraControl: true, motionBrush: true, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
   },
   'gen-4': {
     id: 'gen-4', name: 'Runway Gen-4', provider: 'Runway', region: 'global',
     profile: 'rest-generic',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: true, videoExtend: true, audio: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p','4K'] }
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: false, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p','4K'] }
+  },
+  'gen-4-turbo': {
+    id: 'gen-4-turbo', name: 'Runway Gen-4 Turbo', provider: 'Runway', region: 'global',
+    profile: 'rest-generic',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: false, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p'] }
+  },
+  'pika-2.5': {
+    id: 'pika-2.5', name: 'Pika 2.5', provider: 'Pika', region: 'global',
+    profile: 'fal-video',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: false, audio: false, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['16:9','9:16','1:1','4:5','5:4','3:2','2:3'], resolutions: ['720p','1080p'] }
   },
   'pika-2.2': {
     id: 'pika-2.2', name: 'Pika 2.2', provider: 'Pika', region: 'global',
     profile: 'fal-video',
-    features: { firstLastFrame: false, multiReference: true, videoEdit: true, videoExtend: false, audio: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['16:9','9:16','1:1','4:5','5:4','3:2','2:3'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: false, multiReference: true, videoEdit: true, videoExtend: false, audio: false, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['16:9','9:16','1:1','4:5','5:4','3:2','2:3'], resolutions: ['720p','1080p'] }
   },
   'pika-2.0': {
     id: 'pika-2.0', name: 'Pika 2.0', provider: 'Pika', region: 'global',
     profile: 'fal-video',
-    features: { firstLastFrame: false, multiReference: true, videoEdit: true, videoExtend: false, audio: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: false, multiReference: true, videoEdit: true, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
   },
   'pika-1.5': {
     id: 'pika-1.5', name: 'Pika 1.5', provider: 'Pika', region: 'global',
     profile: 'fal-video',
-    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 5, durations: [5], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p'] }
+    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 5, durations: [5], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p'] }
   },
   'ray3': {
     id: 'ray3', name: 'Luma Ray3', provider: 'Luma', region: 'global',
     profile: 'rest-generic',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: true, audio: false, maxDuration: 10, durations: [5, 9, 10], aspectRatios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: true, audio: false, cameraControl: true, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 9, 10], aspectRatios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p'] }
   },
   'ray3.14': {
     id: 'ray3.14', name: 'Luma Ray3.14', provider: 'Luma', region: 'global',
     profile: 'rest-generic',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: true, audio: false, maxDuration: 10, durations: [5, 9, 10], aspectRatios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: true, audio: false, cameraControl: true, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 9, 10], aspectRatios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p'] }
   },
   'ray2': {
     id: 'ray2', name: 'Luma Ray2', provider: 'Luma', region: 'global',
     profile: 'rest-generic',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: true, audio: false, maxDuration: 5, durations: [5], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: true, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 5, durations: [5], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
   },
   'sora': {
     id: 'sora', name: 'OpenAI Sora', provider: 'OpenAI', region: 'global',
     profile: 'openai-video',
-    features: { firstLastFrame: false, multiReference: false, videoEdit: true, videoExtend: true, audio: true, maxDuration: 20, durations: [5, 10, 15, 20], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: false, multiReference: false, videoEdit: true, videoExtend: true, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 20, durations: [5, 10, 15, 20], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
   },
   'veo-2': {
     id: 'veo-2', name: 'Google Veo 2', provider: 'Google', region: 'global',
     profile: 'rest-generic',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 8, durations: [4, 8], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [4, 8], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
   },
   'veo-3': {
     id: 'veo-3', name: 'Google Veo 3', provider: 'Google', region: 'global',
     profile: 'rest-generic',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: true, maxDuration: 8, durations: [4, 8], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [4, 8], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'] }
+  },
+  'veo-3.1': {
+    id: 'veo-3.1', name: 'Google Veo 3.1', provider: 'Google', region: 'global',
+    profile: 'rest-generic',
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: true, multiShot: false, maxDuration: 8, durations: [4, 8], aspectRatios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p','4K'] }
   },
 };
 
+// 摄像机控制参数
+export interface CameraControlParams {
+  type: 'push_in' | 'push_out' | 'pan_left' | 'pan_right' | 'tilt_up' | 'tilt_down' | 'orbit_left' | 'orbit_right' | 'zoom_in' | 'zoom_out' | 'tracking' | 'static';
+  intensity?: number; // 运动强度 0-100
+  speed?: number; // 速度 0-100
+}
+
+// 运动笔刷参数
+export interface MotionBrushParams {
+  maskDataUrl: string; // 笔刷涂抹区域的蒙版 (base64 PNG)
+  trajectories: MotionTrajectory[]; // 运动轨迹列表
+}
+
+export interface MotionTrajectory {
+  startX: number; // 起点X (0-1 归一化)
+  startY: number; // 起点Y (0-1 归一化)
+  endX: number; // 终点X (0-1 归一化)
+  endY: number; // 终点Y (0-1 归一化)
+  speed?: number; // 运动速度 0-100
+}
+
 export interface VideoGenerateParams {
   prompt: string;
-  mode: 'text2video' | 'image2video-first' | 'image2video-firstlast' | 'image2video-ref' | 'video-extend';
+  mode: 'text2video' | 'image2video-first' | 'image2video-firstlast' | 'image2video-ref' | 'video-extend' | 'multi-shot';
   model: string;
   providerId?: string;
   aspectRatio: string;
@@ -168,6 +264,15 @@ export interface VideoGenerateParams {
   resolution?: string;
   videoUrl?: string;
   extendDuration?: number;
+  // 新增高级参数
+  cameraControl?: CameraControlParams;
+  motionBrush?: MotionBrushParams;
+  characterReferences?: string[]; // 角色参考图URL列表
+  motionStrength?: number; // 运动强度 0-100
+  seed?: number; // 随机种子
+  negativePrompt?: string; // 反向提示词
+  // 多镜头叙事
+  multiShotScenes?: Array<{ id: string; prompt: string; duration: number; cameraControl?: CameraControlParams }>;
 }
 
 interface VideoGenerationPanelProps {
@@ -209,7 +314,7 @@ export default function VideoGenerationPanel({
   serverVideoModels,
 }: VideoGenerationPanelProps) {
   // === 状态 ===
-  const [mode, setMode] = useState<'text2video' | 'image2video-first' | 'image2video-firstlast' | 'image2video-ref' | 'video-extend'>('text2video');
+  const [mode, setMode] = useState<'text2video' | 'image2video-first' | 'image2video-firstlast' | 'image2video-ref' | 'video-extend' | 'multi-shot'>('text2video');
   const [prompt, setPrompt] = useState('');
   const [model, setModel] = useState('');
   const [aspectRatio, setAspectRatio] = useState('16:9');
@@ -224,6 +329,23 @@ export default function VideoGenerationPanel({
   const [isGenerating, setIsGenerating] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string>('');
   const [extendDuration, setExtendDuration] = useState(5);
+
+  // === 多镜头叙事状态 ===
+  const [multiShotScenes, setMultiShotScenes] = useState<Array<{ id: string; prompt: string; duration: number; cameraControl?: CameraControlParams }>>([
+    { id: '1', prompt: '', duration: 5 },
+  ]);
+  const [showMultiShotPanel, setShowMultiShotPanel] = useState(false);
+
+  // === 高级功能状态 ===
+  const [cameraControl, setCameraControl] = useState<CameraControlParams | null>(null);
+  const [motionBrush, setMotionBrush] = useState<MotionBrushParams | null>(null);
+  const [characterReferences, setCharacterReferences] = useState<string[]>([]);
+  const [showCameraPanel, setShowCameraPanel] = useState(false);
+  const [showCharacterPanel, setShowCharacterPanel] = useState(false);
+  const [showMotionBrush, setShowMotionBrush] = useState(false);
+  const [negativePrompt, setNegativePrompt] = useState('');
+  const [seed, setSeed] = useState<number | undefined>(undefined);
+  const [motionStrength, setMotionStrength] = useState(50);
 
   // 合并服务器模型与内置注册表
   const [videoModels, setVideoModels] = useState<{ id: string; name: string; providerId: string; providerName: string; region: 'cn' | 'global'; features: VideoModelInfo['features'] }[]>([]);
@@ -350,6 +472,30 @@ export default function VideoGenerationPanel({
   if (currentFeatures?.videoExtend) {
     modeOptions.push({ value: 'video-extend' as const, label: '视频延长', icon: <FastForward className="w-4 h-4" /> });
   }
+  // 多镜头叙事模式（所有模型都支持，通过串行生成实现）
+  modeOptions.push({ value: 'multi-shot' as const, label: '多镜头叙事', icon: <Film className="w-4 h-4" /> });
+
+  // === 运动笔刷处理 ===
+  const motionBrushRef = useRef<MotionBrushCanvasHandle>(null);
+
+  const handleMotionBrushExport = useCallback((result: MotionBrushResult) => {
+    if (!result || result.trajectories.length === 0) {
+      setMotionBrush(null);
+      return;
+    }
+    // Convert MotionBrushResult to MotionBrushParams format
+    const motionBrushParams: MotionBrushParams = {
+      maskDataUrl: result.maskDataUrl,
+      trajectories: result.trajectories.map(traj => ({
+        startX: traj.startX,
+        startY: traj.startY,
+        endX: traj.endX,
+        endY: traj.endY,
+        speed: traj.speed,
+      })),
+    };
+    setMotionBrush(motionBrushParams);
+  }, []);
 
   const handleGenerate = useCallback(() => {
     if (!prompt.trim() && mode === 'text2video') {
@@ -368,6 +514,10 @@ export default function VideoGenerationPanel({
       onError?.('请提供源视频URL');
       return;
     }
+    if (mode === 'multi-shot' && multiShotScenes.every(s => !s.prompt.trim())) {
+      onError?.('请至少输入一个镜头的描述');
+      return;
+    }
     if (!model) {
       onError?.('请选择视频模型');
       return;
@@ -380,8 +530,13 @@ export default function VideoGenerationPanel({
     const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
     const providerId = model.includes('::') ? model.split('::')[0] : undefined;
 
+    // 多镜头叙事模式：合并所有镜头的提示词
+    const finalPrompt = mode === 'multi-shot' 
+      ? multiShotScenes.filter(s => s.prompt.trim()).map((s, i) => `[镜头${i + 1}] ${s.prompt}`).join('\n')
+      : prompt.trim();
+
     onVideoGenerate({
-      prompt: prompt.trim(),
+      prompt: finalPrompt,
       mode,
       model: pureModelId,
       providerId,
@@ -389,14 +544,23 @@ export default function VideoGenerationPanel({
       duration,
       quality,
       generateAudio,
-      firstFrameUrl: (mode !== 'text2video' && mode !== 'video-extend') ? firstFrameUrl : undefined,
+      firstFrameUrl: (mode !== 'text2video' && mode !== 'video-extend' && mode !== 'multi-shot') ? firstFrameUrl : undefined,
       lastFrameUrl: (mode === 'image2video-firstlast') ? lastFrameUrl : undefined,
       referenceImages: (mode === 'image2video-ref') ? referenceImages : undefined,
       resolution,
       videoUrl: (mode === 'video-extend') ? videoUrl : undefined,
       extendDuration: (mode === 'video-extend') ? extendDuration : undefined,
+      // 高级参数
+      cameraControl: cameraControl || undefined,
+      motionBrush: motionBrush || undefined,
+      characterReferences: characterReferences.length > 0 ? characterReferences : undefined,
+      motionStrength: cameraControl ? motionStrength : undefined,
+      seed: seed || undefined,
+      negativePrompt: negativePrompt.trim() || undefined,
+      // 多镜头参数
+      multiShotScenes: mode === 'multi-shot' ? multiShotScenes.filter(s => s.prompt.trim()) : undefined,
     });
-  }, [prompt, mode, model, aspectRatio, duration, quality, generateAudio, firstFrameUrl, lastFrameUrl, referenceImages, resolution, videoUrl, extendDuration, onVideoGenerate, onError]);
+  }, [prompt, mode, model, aspectRatio, duration, quality, generateAudio, firstFrameUrl, lastFrameUrl, referenceImages, resolution, videoUrl, extendDuration, cameraControl, motionBrush, characterReferences, motionStrength, seed, negativePrompt, multiShotScenes, onVideoGenerate, onError]);
 
   // 处理图片上传
   const handleImageUpload = useCallback((target: 'first' | 'last' | 'ref') => {
@@ -449,6 +613,33 @@ export default function VideoGenerationPanel({
             {opt.label}
           </button>
         ))}
+      </div>
+
+      {/* === 视频模板库 === */}
+      <div className="px-3 pt-2">
+        <label className="text-xs text-gray-500 mb-1 block">快速模板</label>
+        <div className="flex gap-1.5 overflow-x-auto pb-1">
+          {VIDEO_TEMPLATES.map(template => (
+            <button
+              key={template.id}
+              onClick={() => {
+                setPrompt(template.prompt);
+                if (template.aspectRatio) setAspectRatio(template.aspectRatio);
+                if (template.duration) setDuration(template.duration);
+                if (template.cameraControl) setCameraControl(template.cameraControl);
+              }}
+              className="flex-shrink-0 px-2.5 py-1.5 rounded-md text-[10px] border transition-all cursor-pointer hover:border-amber-500/50"
+              style={{
+                background: inputBg,
+                borderColor: '#374151',
+                color: '#9ca3af',
+              }}
+              title={template.prompt}
+            >
+              {template.name}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* === 视频模型选择 === */}
@@ -736,6 +927,288 @@ export default function VideoGenerationPanel({
         </div>
       )}
 
+      {/* === 摄像机控制（仅支持的模型显示） === */}
+      {currentFeatures?.cameraControl && mode !== 'video-extend' && (
+        <div className="px-3 pt-3">
+          <button
+            onClick={() => setShowCameraPanel(!showCameraPanel)}
+            className="flex items-center gap-2 text-xs cursor-pointer"
+            style={{ color: cameraControl ? accentColor : '#888' }}
+          >
+            <Video className="w-4 h-4" />
+            摄像机控制
+            {cameraControl && <span className="text-[10px] opacity-60">({cameraControl.type.replace('_', ' ')})</span>}
+          </button>
+          {showCameraPanel && (
+            <div className="mt-2 p-2 rounded-md space-y-2" style={{ background: inputBg }}>
+              <div className="grid grid-cols-4 gap-1.5">
+                {[
+                  { type: 'push_in', label: '推进', icon: '→' },
+                  { type: 'push_out', label: '拉出', icon: '←' },
+                  { type: 'pan_left', label: '左摇', icon: '◀' },
+                  { type: 'pan_right', label: '右摇', icon: '▶' },
+                  { type: 'tilt_up', label: '上仰', icon: '▲' },
+                  { type: 'tilt_down', label: '下俯', icon: '▼' },
+                  { type: 'orbit_left', label: '左环绕', icon: '↺' },
+                  { type: 'orbit_right', label: '右环绕', icon: '↻' },
+                  { type: 'zoom_in', label: '放大', icon: '⊕' },
+                  { type: 'zoom_out', label: '缩小', icon: '⊖' },
+                  { type: 'tracking', label: '跟踪', icon: '◎' },
+                  { type: 'static', label: '静止', icon: '□' },
+                ].map(cam => (
+                  <button
+                    key={cam.type}
+                    onClick={() => setCameraControl(cameraControl?.type === cam.type ? null : { type: cam.type as CameraControlParams['type'], intensity: 50 })}
+                    className="flex flex-col items-center gap-0.5 px-1.5 py-1.5 rounded text-[10px] transition-all cursor-pointer"
+                    style={{
+                      background: cameraControl?.type === cam.type ? (isGold ? 'rgba(212,175,55,0.2)' : 'rgba(139,139,139,0.2)') : '#2a2a2a',
+                      color: cameraControl?.type === cam.type ? accentColor : '#888',
+                      border: `1px solid ${cameraControl?.type === cam.type ? borderColor : 'transparent'}`,
+                    }}
+                  >
+                    <span className="text-sm">{cam.icon}</span>
+                    <span>{cam.label}</span>
+                  </button>
+                ))}
+              </div>
+              {cameraControl && cameraControl.type !== 'static' && (
+                <div className="space-y-1">
+                  <label className="text-[10px] text-gray-500">运动强度: {motionStrength}%</label>
+                  <input
+                    type="range"
+                    min="10"
+                    max="100"
+                    value={motionStrength}
+                    onChange={(e) => setMotionStrength(Number(e.target.value))}
+                    className="w-full h-1 rounded-lg appearance-none cursor-pointer"
+                    style={{ background: `linear-gradient(to right, ${accentColor} ${motionStrength}%, #333 ${motionStrength}%)` }}
+                  />
+                </div>
+              )}
+              {cameraControl && (
+                <button
+                  onClick={() => { setCameraControl(null); setShowCameraPanel(false); }}
+                  className="text-[10px] text-gray-500 hover:text-gray-300 cursor-pointer"
+                >
+                  清除摄像机控制
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* === 角色一致性（仅支持的模型显示） === */}
+      {currentFeatures?.characterConsistency && mode !== 'video-extend' && (
+        <div className="px-3 pt-3">
+          <button
+            onClick={() => setShowCharacterPanel(!showCharacterPanel)}
+            className="flex items-center gap-2 text-xs cursor-pointer"
+            style={{ color: characterReferences.length > 0 ? accentColor : '#888' }}
+          >
+            <Users className="w-4 h-4" />
+            角色一致性
+            {characterReferences.length > 0 && <span className="text-[10px] opacity-60">({characterReferences.length}张参考图)</span>}
+          </button>
+          {showCharacterPanel && (
+            <div className="mt-2 p-2 rounded-md space-y-2" style={{ background: inputBg }}>
+              <p className="text-[10px] text-gray-500">上传角色参考图，AI将保持角色外观一致性</p>
+              <div className="flex flex-wrap gap-2">
+                {characterReferences.map((url, idx) => (
+                  <div key={idx} className="relative w-16 h-16 rounded overflow-hidden group">
+                    <img src={url} alt={`角色${idx + 1}`} className="w-full h-full object-cover" />
+                    <button
+                      onClick={() => setCharacterReferences(characterReferences.filter((_, i) => i !== idx))}
+                      className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                {characterReferences.length < 5 && (
+                  <button
+                    onClick={() => {
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.accept = 'image/*';
+                      input.onchange = async (e) => {
+                        const file = (e.target as HTMLInputElement).files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                          const dataUrl = ev.target?.result as string;
+                          setCharacterReferences([...characterReferences, dataUrl]);
+                        };
+                        reader.readAsDataURL(file);
+                      };
+                      input.click();
+                    }}
+                    className="w-16 h-16 rounded border border-dashed flex flex-col items-center justify-center gap-0.5 cursor-pointer hover:border-gray-500 transition-colors"
+                    style={{ borderColor: borderColor }}
+                  >
+                    <Plus className="w-4 h-4" style={{ color: accentColor }} />
+                    <span className="text-[9px] text-gray-500">添加</span>
+                  </button>
+                )}
+              </div>
+              {characterReferences.length > 0 && (
+                <button
+                  onClick={() => { setCharacterReferences([]); setShowCharacterPanel(false); }}
+                  className="text-[10px] text-gray-500 hover:text-gray-300 cursor-pointer"
+                >
+                  清除角色参考
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* === 运动笔刷 === */}
+      {mode === 'image2video-first' && firstFrameUrl && (
+        <div className="px-3 pt-2">
+          <button
+            onClick={() => setShowMotionBrush(!showMotionBrush)}
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-md border transition-colors ${
+              showMotionBrush ? 'border-amber-500/50' : 'border-gray-700 hover:border-amber-500/30'
+            }`}
+            style={{ background: inputBg }}
+          >
+            <span className="flex items-center gap-2 text-xs">
+              <Paintbrush className="w-3.5 h-3.5 text-amber-500" />
+              <span className="text-gray-300">运动笔刷</span>
+              {motionBrush && (
+                <span className="text-[10px] text-amber-500">
+                  ({motionBrush.trajectories.length} 轨迹)
+                </span>
+              )}
+            </span>
+            <ChevronDown className={`w-3.5 h-3.5 text-gray-500 transition-transform ${showMotionBrush ? 'rotate-180' : ''}`} />
+          </button>
+          
+          {showMotionBrush && (
+            <div className="mt-2 p-3 rounded-md border border-gray-700" style={{ background: inputBg }}>
+              <div className="flex items-center gap-2 mb-2">
+                <Paintbrush className="w-4 h-4 text-amber-500" />
+                <span className="text-xs text-gray-300">在图片上涂抹区域并绘制运动轨迹</span>
+              </div>
+              
+              <MotionBrushCanvas
+                ref={motionBrushRef}
+                imageUrl={firstFrameUrl}
+                onExport={handleMotionBrushExport}
+              />
+              
+              {motionBrush && motionBrush.trajectories.length > 0 && (
+                <div className="mt-2 space-y-2">
+                  <div className="text-[10px] text-gray-500">
+                    已绘制 {motionBrush.trajectories.length} 条运动轨迹
+                  </div>
+                  <button
+                    onClick={() => {
+                      setMotionBrush(null);
+                      setShowMotionBrush(false);
+                    }}
+                    className="w-full py-1.5 rounded-md border border-gray-600 text-[11px] text-gray-400 hover:border-red-500/50 hover:text-red-400 transition-colors"
+                  >
+                    清除运动笔刷
+                  </button>
+                </div>
+              )}
+              
+              <div className="mt-2 text-[10px] text-gray-500 space-y-0.5">
+                <div>• 左键涂抹：标记运动区域</div>
+                <div>• 右键绘制：定义运动方向</div>
+                <div>• 滚轮调整：画笔大小</div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* === 多镜头叙事 === */}
+      {mode === 'multi-shot' && (
+        <div className="px-3 pt-2">
+          <div className="p-3 rounded-md border border-gray-700" style={{ background: inputBg }}>
+            <div className="flex items-center gap-2 mb-3">
+              <Film className="w-4 h-4 text-purple-400" />
+              <span className="text-xs text-gray-300">多镜头叙事</span>
+              <span className="text-[10px] text-gray-500">({multiShotScenes.length} 个镜头)</span>
+            </div>
+            
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {multiShotScenes.map((scene, index) => (
+                <div key={scene.id} className="p-2 rounded-md border border-gray-600" style={{ background: panelBg }}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] text-purple-400">镜头 {index + 1}</span>
+                    {multiShotScenes.length > 1 && (
+                      <button
+                        onClick={() => setMultiShotScenes(multiShotScenes.filter(s => s.id !== scene.id))}
+                        className="text-gray-500 hover:text-red-400 transition-colors"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                  <textarea
+                    value={scene.prompt}
+                    onChange={(e) => {
+                      const newScenes = [...multiShotScenes];
+                      const idx = newScenes.findIndex(s => s.id === scene.id);
+                      if (idx >= 0) newScenes[idx] = { ...newScenes[idx], prompt: e.target.value };
+                      setMultiShotScenes(newScenes);
+                    }}
+                    placeholder={`描述镜头 ${index + 1} 的画面内容...`}
+                    className="w-full px-2 py-1.5 rounded text-xs border resize-none h-16"
+                    style={{
+                      background: panelBg,
+                      borderColor: '#374151',
+                      color: '#e5e7eb',
+                    }}
+                  />
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[10px] text-gray-500">时长:</span>
+                    <select
+                      value={scene.duration}
+                      onChange={(e) => {
+                        const newScenes = [...multiShotScenes];
+                        const idx = newScenes.findIndex(s => s.id === scene.id);
+                        if (idx >= 0) newScenes[idx] = { ...newScenes[idx], duration: Number(e.target.value) };
+                        setMultiShotScenes(newScenes);
+                      }}
+                      className="px-1.5 py-0.5 rounded text-[10px] border"
+                      style={{ background: panelBg, borderColor: '#374151', color: '#e5e7eb' }}
+                    >
+                      <option value={3}>3s</option>
+                      <option value={5}>5s</option>
+                      <option value={8}>8s</option>
+                      <option value={10}>10s</option>
+                    </select>
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            <button
+              onClick={() => {
+                setMultiShotScenes([
+                  ...multiShotScenes,
+                  { id: Date.now().toString(), prompt: '', duration: 5 },
+                ]);
+              }}
+              className="w-full mt-2 py-1.5 rounded-md border border-dashed border-gray-600 text-[11px] text-gray-400 hover:border-purple-500/50 hover:text-purple-400 transition-colors flex items-center justify-center gap-1"
+            >
+              <Plus className="w-3 h-3" />
+              添加镜头
+            </button>
+            
+            <div className="mt-2 text-[10px] text-gray-500">
+              总时长: {multiShotScenes.reduce((sum, s) => sum + s.duration, 0)}s
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* === 高级设置 === */}
       <div className="px-3 pt-3">
         <button
@@ -785,6 +1258,10 @@ export default function VideoGenerationPanel({
               {currentFeatures?.videoEdit && ' 视频编辑'}
               {currentFeatures?.videoExtend && ' 延长'}
               {currentFeatures?.audio && ' 音效'}
+              {currentFeatures?.cameraControl && ' 摄像机控制'}
+              {currentFeatures?.motionBrush && ' 运动笔刷'}
+              {currentFeatures?.characterConsistency && ' 角色一致性'}
+              {currentFeatures?.multiShot && ' 多镜头叙事'}
               {' · '}最长 {currentFeatures?.maxDuration || 10}秒
             </div>
           </div>

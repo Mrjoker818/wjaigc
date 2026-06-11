@@ -1134,6 +1134,39 @@ export function InfiniteCanvas({
   const [videoEditTarget, setVideoEditTarget] = useState<CanvasImage | null>(null);
   const [videoEditTab, setVideoEditTab] = useState<'edit' | 'extend'>('edit');
 
+  // Video tools handler
+  const handleVideoTool = async (action: 'to-gif' | 'extract-cover' | 'compress', image: CanvasImage) => {
+    if (!image.videoUrl) return;
+    
+    try {
+      const response = await fetch('/api/video/tools', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          videoUrl: image.videoUrl,
+          // GIF 参数
+          fps: 10,
+          width: 480,
+          // 封面提取参数
+          timestamp: 0,
+          // 压缩参数
+          quality: 0.7,
+        }),
+      });
+      
+      const result = await response.json();
+      if (result.success) {
+        console.log(`[video-tool] ${action} success:`, result.data);
+        // 实际实现中应该将结果添加到画布
+      } else {
+        console.error(`[video-tool] ${action} failed:`, result.error);
+      }
+    } catch (error) {
+      console.error(`[video-tool] ${action} error:`, error);
+    }
+  };
+
   const [threeDQuality, setThreeDQuality] = useState('high');
   const [threeDTexture, setThreeDTexture] = useState('4k');
   const [threeDFormat, setThreeDFormat] = useState('glb');
@@ -7040,6 +7073,13 @@ export function InfiniteCanvas({
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '播放视频', action: () => { setVideoPlayerUrl(selectedImageData.videoUrl!); setVideoPlayerVisible(true); } }] : []),
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '视频编辑', action: () => { setVideoEditTarget(selectedImageData); setShowVideoEditPanel(true); } }] : []),
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '视频延长', action: () => { setVideoEditTarget(selectedImageData); setShowVideoEditPanel(true); setVideoEditTab('extend'); } }] : []),
+    // 视频工具集
+    ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [
+      { label: '─'.repeat(15), action: () => {} }, // 分隔线
+      { label: '转 GIF', action: () => { handleVideoTool('to-gif', selectedImageData); } },
+      { label: '提取封面', action: () => { handleVideoTool('extract-cover', selectedImageData); } },
+      { label: '视频压缩', action: () => { handleVideoTool('compress', selectedImageData); } },
+    ] : []),
     { label: '删除', shortcut: 'Delete', action: () => { onImagesChange(images.filter(i => !selectedIds.has(i.id))); setSelectedIds(new Set()); selectImage(null); } },
     { label: '发送参考图', action: () => { const img = selectedImageData; if (img) onGenerateVariation(img); } },
     { label: '提取关键词', action: () => { const img = selectedImageData; if (img) onExtractKeywords(img); } },

@@ -22,6 +22,10 @@ export interface VideoModelFeatures {
   videoEdit: boolean;         // 是否支持视频编辑
   videoExtend: boolean;       // 是否支持视频延长
   audio: boolean;             // 是否支持音效生成
+  cameraControl: boolean;     // 是否支持摄像机控制 (推/拉/摇/移/环绕/跟踪)
+  motionBrush: boolean;       // 是否支持运动笔刷 (涂抹区域+轨迹)
+  characterConsistency: boolean; // 是否支持角色一致性 (参考图锁定角色)
+  multiShot: boolean;         // 是否支持多镜头叙事
   maxDuration: number;        // 最大时长(秒)
   durations: number[];        // 可选时长列表(秒)
   ratios: string[];           // 支持的画面比例
@@ -50,12 +54,43 @@ export interface VideoGenerateParams {
   action?: 'generate' | 'extend' | 'edit'; // 操作类型: 生成/延长/编辑
   videoUrl?: string;            // 延长/编辑源视频 URL
   extendDuration?: number;      // 延长时长(秒)
-  negativePrompt?: string;      // 反向提示词
-  seed?: number;                // 随机种子
+  // 摄像机控制
+  cameraControl?: CameraControlParams;
+  // 运动笔刷
+  motionBrush?: MotionBrushParams;
+  // 角色一致性
+  characterReferences?: string[]; // 角色参考图URL列表
+  // 多镜头叙事
+  multiShotScenes?: Array<{ id: string; prompt: string; duration: number; cameraControl?: CameraControlParams }>;
+  // 其他高级参数
+  motionStrength?: number; // 运动强度 0-100
+  seed?: number; // 随机种子
+  negativePrompt?: string; // 反向提示词
   providerId?: string;          // 提供商ID
   apiKey?: string;              // API密钥
   baseUrl?: string;             // API基础URL
   advancedParams?: Record<string, any>; // 提供商高级参数
+}
+
+/** 摄像机控制参数 */
+export interface CameraControlParams {
+  type: 'push_in' | 'push_out' | 'pan_left' | 'pan_right' | 'tilt_up' | 'tilt_down' | 'orbit_left' | 'orbit_right' | 'zoom_in' | 'zoom_out' | 'tracking' | 'static';
+  intensity?: number;           // 运动强度 0-100
+  speed?: number;               // 速度 0-100
+}
+
+/** 运动笔刷参数 */
+export interface MotionBrushParams {
+  maskDataUrl: string;          // 笔刷涂抹区域的蒙版 (base64 PNG)
+  trajectories: MotionTrajectory[]; // 运动轨迹列表
+}
+
+export interface MotionTrajectory {
+  startX: number;               // 起点X (0-1 归一化)
+  startY: number;               // 起点Y (0-1 归一化)
+  endX: number;                 // 终点X (0-1 归一化)
+  endY: number;                 // 终点Y (0-1 归一化)
+  speed?: number;               // 运动速度 0-100
 }
 
 export interface VideoTaskSubmitResult {
@@ -82,100 +117,132 @@ const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
   // === 国内模型 ===
   'kling-v3-video-generation': {
     profile: 'dashscope', name: '可灵 V3 视频', short: 'Kling V3', provider: 'Kuaishou',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, maxDuration: 10, durations: [5, 10], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'], region: 'cn' },
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: false, multiShot: false, maxDuration: 15, durations: [5, 10, 15], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'], region: 'cn' },
   },
   'kling-v3-omni-video-generation': {
     profile: 'dashscope', name: '可灵 V3 Omni 视频', short: 'Kling V3 Omni', provider: 'Kuaishou',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, maxDuration: 10, durations: [5, 10], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'], region: 'cn' },
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 30, durations: [5, 10, 15, 30], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'], region: 'cn' },
   },
-  'doubao-seedance-2-0': {
-    profile: 'volcengine-ark', name: 'Seedance 2.0', short: 'SD 2.0', provider: 'ByteDance',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, maxDuration: 10, durations: [5, 10], ratios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['480p','720p','1080p'], region: 'cn' },
+  'kling-v3-5-video-generation': {
+    profile: 'dashscope', name: '可灵 V3.5 视频', short: 'Kling V3.5', provider: 'Kuaishou',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 30, durations: [5, 10, 15, 30], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p','4K'], region: 'cn' },
   },
-  'doubao-seedance-2-0-fast': {
-    profile: 'volcengine-ark', name: 'Seedance 2.0 Fast', short: 'SD 2.0F', provider: 'ByteDance',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, maxDuration: 10, durations: [5, 10], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p','1080p'], region: 'cn' },
+  'doubao-seedance-3-0': {
+    profile: 'volcengine-ark', name: 'Seedance 3.0', short: 'SD 3.0', provider: 'ByteDance',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: true, maxDuration: 15, durations: [5, 10, 15], ratios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['720p','1080p','4K'], region: 'cn' },
+  },
+  'doubao-seedance-3-0-fast': {
+    profile: 'volcengine-ark', name: 'Seedance 3.0 Fast', short: 'SD 3.0F', provider: 'ByteDance',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, cameraControl: true, motionBrush: false, characterConsistency: true, multiShot: true, maxDuration: 15, durations: [5, 10, 15], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['720p','1080p'], region: 'cn' },
   },
   'doubao-seedance-2-3': {
     profile: 'volcengine-ark', name: 'Seedance 2.3', short: 'SD 2.3', provider: 'ByteDance',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, maxDuration: 10, durations: [5, 10], ratios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['768p','1080p'], region: 'cn' },
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], ratios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['768p','1080p'], region: 'cn' },
   },
   'doubao-seedance-2-3-fast': {
     profile: 'volcengine-ark', name: 'Seedance 2.3 Fast', short: 'SD 2.3F', provider: 'ByteDance',
-    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 10, durations: [5, 10], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['768p','1080p'], region: 'cn' },
+    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['768p','1080p'], region: 'cn' },
+  },
+  'doubao-seedance-2-0': {
+    profile: 'volcengine-ark', name: 'Seedance 2.0', short: 'SD 2.0', provider: 'ByteDance',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], ratios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['480p','720p','1080p'], region: 'cn' },
+  },
+  'doubao-seedance-2-0-fast': {
+    profile: 'volcengine-ark', name: 'Seedance 2.0 Fast', short: 'SD 2.0F', provider: 'ByteDance',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p','1080p'], region: 'cn' },
   },
   'doubao-seedance-1-0-lite': {
     profile: 'volcengine-ark', name: 'Seedance 1.0 Lite', short: 'SD 1.0L', provider: 'ByteDance',
-    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 10, durations: [5, 10], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'], region: 'cn' },
+    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'], region: 'cn' },
   },
   'hailuo-02': {
     profile: 'minimax', name: '海螺 Hailuo 02', short: 'Hailuo 02', provider: 'MiniMax',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 10, durations: [5, 6, 10], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['512p','768p','1080p'], region: 'cn' },
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 6, 10], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['512p','768p','1080p'], region: 'cn' },
   },
   'hailuo-2.3': {
     profile: 'minimax', name: '海螺 Hailuo 2.3', short: 'Hailuo 2.3', provider: 'MiniMax',
-    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 10, durations: [5, 6, 10], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['768p','1080p'], region: 'cn' },
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 6, 10], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['768p','1080p'], region: 'cn' },
   },
   'video-01': {
     profile: 'minimax', name: '海螺 Video-01', short: 'Video-01', provider: 'MiniMax',
-    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 6, durations: [6], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['720p'], region: 'cn' },
+    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 6, durations: [6], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['720p'], region: 'cn' },
   },
-  'vidu-q1': {
-    profile: 'vidu', name: 'Vidu Q1', short: 'Vidu Q1', provider: 'ShengShu',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, maxDuration: 8, durations: [4, 8], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'], region: 'cn' },
+  'vidu-q3': {
+    profile: 'vidu', name: 'Vidu Q3', short: 'Vidu Q3', provider: 'ShengShu',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 16, durations: [4, 8, 16], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p','4K'], region: 'cn' },
+  },
+  'vidu-q3-pro': {
+    profile: 'vidu', name: 'Vidu Q3 Pro', short: 'Vidu Q3 Pro', provider: 'ShengShu',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 16, durations: [4, 8, 16], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['1080p','4K'], region: 'cn' },
   },
   'vidu-q2': {
     profile: 'vidu', name: 'Vidu Q2', short: 'Vidu Q2', provider: 'ShengShu',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, maxDuration: 8, durations: [4, 8], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'], region: 'cn' },
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [4, 8], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'], region: 'cn' },
+  },
+  'vidu-q1': {
+    profile: 'vidu', name: 'Vidu Q1', short: 'Vidu Q1', provider: 'ShengShu',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [4, 8], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'], region: 'cn' },
   },
   // === 海外模型 ===
   'gen-4': {
     profile: 'rest-generic', name: 'Runway Gen-4', short: 'Gen-4', provider: 'Runway',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: true, videoExtend: true, audio: false, maxDuration: 10, durations: [5, 10], ratios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p','4K'], region: 'global' },
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: false, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 10, durations: [5, 10], ratios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p','4K'], region: 'global' },
+  },
+  'gen-4-turbo': {
+    profile: 'rest-generic', name: 'Runway Gen-4 Turbo', short: 'Gen-4T', provider: 'Runway',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: false, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 10, durations: [5, 10], ratios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p'], region: 'global' },
   },
   'gen-3-alpha-turbo': {
     profile: 'rest-generic', name: 'Runway Gen-3 Turbo', short: 'Gen-3T', provider: 'Runway',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: true, videoExtend: true, audio: false, maxDuration: 10, durations: [5, 10], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+    features: { firstLastFrame: true, multiReference: false, videoEdit: true, videoExtend: true, audio: false, cameraControl: true, motionBrush: true, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
   },
   'gen-3-alpha': {
     profile: 'rest-generic', name: 'Runway Gen-3', short: 'Gen-3', provider: 'Runway',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: true, videoExtend: true, audio: false, maxDuration: 10, durations: [5, 10], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+    features: { firstLastFrame: true, multiReference: false, videoEdit: true, videoExtend: true, audio: false, cameraControl: true, motionBrush: true, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+  },
+  'pika-2.5': {
+    profile: 'fal-video', name: 'Pika 2.5', short: 'Pika 2.5', provider: 'Pika',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: false, audio: false, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 10, durations: [5, 10], ratios: ['16:9','9:16','1:1','4:5','5:4','3:2','2:3'], resolutions: ['720p','1080p'], region: 'global' },
   },
   'pika-2.2': {
     profile: 'fal-video', name: 'Pika 2.2', short: 'Pika 2.2', provider: 'Pika',
-    features: { firstLastFrame: false, multiReference: true, videoEdit: true, videoExtend: false, audio: false, maxDuration: 10, durations: [5, 10], ratios: ['16:9','9:16','1:1','4:5','5:4','3:2','2:3'], resolutions: ['720p','1080p'], region: 'global' },
+    features: { firstLastFrame: false, multiReference: true, videoEdit: true, videoExtend: false, audio: false, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 10, durations: [5, 10], ratios: ['16:9','9:16','1:1','4:5','5:4','3:2','2:3'], resolutions: ['720p','1080p'], region: 'global' },
   },
   'pika-2.0': {
     profile: 'fal-video', name: 'Pika 2.0', short: 'Pika 2.0', provider: 'Pika',
-    features: { firstLastFrame: false, multiReference: true, videoEdit: true, videoExtend: false, audio: false, maxDuration: 10, durations: [5, 10], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+    features: { firstLastFrame: false, multiReference: true, videoEdit: true, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
   },
   'pika-1.5': {
     profile: 'fal-video', name: 'Pika 1.5', short: 'Pika 1.5', provider: 'Pika',
-    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 5, durations: [5], ratios: ['16:9','9:16','1:1'], resolutions: ['720p'], region: 'global' },
+    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 5, durations: [5], ratios: ['16:9','9:16','1:1'], resolutions: ['720p'], region: 'global' },
   },
   'ray3.14': {
     profile: 'rest-generic', name: 'Luma Ray3.14', short: 'Ray3.14', provider: 'Luma',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: true, audio: false, maxDuration: 10, durations: [5, 9, 10], ratios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p'], region: 'global' },
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: true, audio: false, cameraControl: true, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 9, 10], ratios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p'], region: 'global' },
   },
   'ray3': {
     profile: 'rest-generic', name: 'Luma Ray3', short: 'Ray3', provider: 'Luma',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: true, audio: false, maxDuration: 10, durations: [5, 9, 10], ratios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p'], region: 'global' },
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: true, audio: false, cameraControl: true, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 9, 10], ratios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['720p','1080p'], region: 'global' },
   },
   'ray2': {
     profile: 'rest-generic', name: 'Luma Ray2', short: 'Ray2', provider: 'Luma',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: true, audio: false, maxDuration: 5, durations: [5], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: true, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 5, durations: [5], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
   },
   'sora': {
     profile: 'openai-video', name: 'OpenAI Sora', short: 'Sora', provider: 'OpenAI',
-    features: { firstLastFrame: false, multiReference: false, videoEdit: true, videoExtend: true, audio: true, maxDuration: 20, durations: [5, 10, 15, 20], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+    features: { firstLastFrame: false, multiReference: false, videoEdit: true, videoExtend: true, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 20, durations: [5, 10, 15, 20], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+  },
+  'veo-3.1': {
+    profile: 'rest-generic', name: 'Google Veo 3.1', short: 'Veo 3.1', provider: 'Google',
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: true, multiShot: false, maxDuration: 8, durations: [4, 8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p','4K'], region: 'global' },
   },
   'veo-3': {
     profile: 'rest-generic', name: 'Google Veo 3', short: 'Veo 3', provider: 'Google',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: true, maxDuration: 8, durations: [4, 8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [4, 8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
   },
   'veo-2': {
     profile: 'rest-generic', name: 'Google Veo 2', short: 'Veo 2', provider: 'Google',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, maxDuration: 8, durations: [4, 8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [4, 8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
   },
 };
 
@@ -242,6 +309,10 @@ function inferVideoModelFromKeywords(modelId: string): VideoModelInfo | null {
       ratios: ['1:1', '4:3', '16:9', '9:16'],
       resolutions: ['720p', '1080p'],
       region,
+      cameraControl: false,
+      motionBrush: false,
+      characterConsistency: false,
+      multiShot: false,
     },
   };
 }
@@ -544,6 +615,32 @@ function buildDashscopeSubmit(baseUrl: string, apiKey: string, params: VideoGene
       ...(params.aspectRatio ? { aspect_ratio: params.aspectRatio } : {}),
       ...(params.duration ? { duration: params.duration } : {}),
       ...(params.generateAudio ? { audio: true } : {}),
+      ...(params.seed ? { seed: params.seed } : {}),
+      // 摄像机控制
+      ...(params.cameraControl?.type ? {
+        camera_control: {
+          type: params.cameraControl.type,
+          intensity: params.cameraControl.intensity ?? 50,
+          speed: params.cameraControl.speed ?? 50,
+        },
+      } : {}),
+      // 运动笔刷 (可灵 DynamicMask)
+      ...(params.motionBrush?.maskDataUrl ? {
+        dynamic_mask: {
+          mask: params.motionBrush.maskDataUrl,
+          trajectories: params.motionBrush.trajectories.map(t => ({
+            start_x: t.startX, start_y: t.startY,
+            end_x: t.endX, end_y: t.endY,
+            speed: t.speed ?? 50,
+          })),
+        },
+      } : {}),
+      // 角色一致性参考图
+      ...(params.characterReferences?.length ? {
+        character_references: params.characterReferences.map((url, i) => ({
+          url, role: `character_${i + 1}`,
+        })),
+      } : {}),
     },
   };
 
@@ -574,6 +671,12 @@ function buildVolcengineSubmit(baseUrl: string, apiKey: string, params: VideoGen
       content.push({ type: 'image_url', image_url: { url } });
     });
   }
+  // 角色一致性参考图 (Seedance 3.0 Reference to Get)
+  if (params.characterReferences?.length) {
+    params.characterReferences.forEach((url, i) => {
+      content.push({ type: 'image_url', image_url: { url, role: `character_${i + 1}` } });
+    });
+  }
 
   const body: Record<string, any> = {
     model: params.model,
@@ -581,6 +684,30 @@ function buildVolcengineSubmit(baseUrl: string, apiKey: string, params: VideoGen
     ...(params.aspectRatio ? { ratio: params.aspectRatio } : {}),
     ...(params.duration ? { duration: params.duration } : {}),
     ...(params.generateAudio ? { generate_audio: true } : {}),
+    ...(params.seed ? { seed: params.seed } : {}),
+    // 摄像机控制 (Seedance camera_control)
+    ...(params.cameraControl?.type ? {
+      camera_control: {
+        type: params.cameraControl.type,
+        intensity: params.cameraControl.intensity ?? 50,
+        speed: params.cameraControl.speed ?? 50,
+      },
+    } : {}),
+    // 运动笔刷 (Seedance motion_brush)
+    ...(params.motionBrush?.maskDataUrl ? {
+      motion_brush: {
+        mask: params.motionBrush.maskDataUrl,
+        trajectories: params.motionBrush.trajectories.map(t => ({
+          start_x: t.startX, start_y: t.startY,
+          end_x: t.endX, end_y: t.endY,
+          speed: t.speed ?? 50,
+        })),
+      },
+    } : {}),
+    // 多镜头叙事 (Seedance 3.0 multi_shot)
+    ...(params.advancedParams?.multiShotScenes ? {
+      multi_shot: { scenes: params.advancedParams.multiShotScenes },
+    } : {}),
   };
 
   return {
@@ -636,6 +763,30 @@ function buildViduSubmit(baseUrl: string, apiKey: string, params: VideoGenerateP
     ...(params.aspectRatio ? { aspect_ratio: params.aspectRatio } : {}),
     ...(params.duration ? { duration: params.duration } : {}),
     ...(params.generateAudio ? { audio: true } : {}),
+    ...(params.seed ? { seed: params.seed } : {}),
+    // 摄像机控制
+    ...(params.cameraControl?.type ? {
+      camera_control: {
+        type: params.cameraControl.type,
+        intensity: params.cameraControl.intensity ?? 50,
+      },
+    } : {}),
+    // 运动笔刷
+    ...(params.motionBrush?.maskDataUrl ? {
+      motion_brush: {
+        mask: params.motionBrush.maskDataUrl,
+        trajectories: params.motionBrush.trajectories.map(t => ({
+          start_x: t.startX, start_y: t.startY,
+          end_x: t.endX, end_y: t.endY,
+        })),
+      },
+    } : {}),
+    // 角色一致性
+    ...(params.characterReferences?.length ? {
+      character_references: params.characterReferences.map((url, i) => ({
+        url, role: `character_${i + 1}`,
+      })),
+    } : {}),
   };
 
   return {
@@ -729,6 +880,25 @@ function buildRestGenericSubmit(baseUrl: string, apiKey: string, params: VideoGe
     ...(params.generateAudio ? { audio: true } : {}),
     ...(params.negativePrompt ? { negative_prompt: params.negativePrompt } : {}),
     ...(params.seed !== undefined ? { seed: params.seed } : {}),
+    // 摄像机控制
+    ...(params.cameraControl?.type ? {
+      camera_control: {
+        type: params.cameraControl.type,
+        intensity: params.cameraControl.intensity ?? 50,
+        speed: params.cameraControl.speed ?? 50,
+      },
+    } : {}),
+    // 运动笔刷
+    ...(params.motionBrush?.maskDataUrl ? {
+      motion_brush: {
+        mask: params.motionBrush.maskDataUrl,
+        trajectories: params.motionBrush.trajectories,
+      },
+    } : {}),
+    // 角色一致性
+    ...(params.characterReferences?.length ? {
+      character_references: params.characterReferences,
+    } : {}),
     // Image-style: n=1 for single video generation
     ...(useImageEndpoint ? { n: 1, response_format: 'url' } : {}),
   };

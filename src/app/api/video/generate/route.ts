@@ -38,6 +38,11 @@ export async function POST(request: NextRequest) {
       negativePrompt,
       seed,
       providerId,
+      // === 新增高级参数 ===
+      cameraControl,
+      motionBrush,
+      characterReferences,
+      motionStrength,
     } = body;
 
     if (!prompt || !model) {
@@ -174,6 +179,11 @@ export async function POST(request: NextRequest) {
       apiKey,
       baseUrl,
       advancedParams,
+      // === 新增高级参数 ===
+      cameraControl,
+      motionBrush,
+      characterReferences,
+      motionStrength,
     };
 
     // 5. 注册任务

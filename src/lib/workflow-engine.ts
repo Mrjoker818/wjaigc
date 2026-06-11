@@ -34,17 +34,19 @@ export type NodeType =
   | 'ai-generate' | 'ai-edit' | 'ai-retouch' | 'ai-upscale' | 'ai-removebg' | 'ai-vectorize' | 'ai-style-transfer' | 'ai-color-adjust' | 'ai-analyze'
   | 'ai-font-design' | 'ai-refine-engine' | 'ai-brand-ecommerce' | 'ai-segment' | 'ai-multi-angle' | 'ai-3d-model'
   | 'ai-video-generate' | 'ai-video-i2v'
+  | 'video-speed-change' | 'video-filter' | 'video-concat' | 'video-trim'
   | 'condition-if' | 'condition-switch' | 'loop-for' | 'loop-while' | 'loop-each' | 'parallel'
   | 'agent-auto' | 'agent-chat'
   | 'subgraph' | 'group' | 'storyboard-sequence'
   | 'output-image' | 'output-save' | 'output-export' | 'output-image-group' | 'output-video';
 
-export type NodeCategory = 'input' | 'ai' | 'logic' | 'agent' | 'subgraph' | 'output';
+export type NodeCategory = 'input' | 'ai' | 'ai-video' | 'logic' | 'agent' | 'subgraph' | 'output';
 
 /** 节点分类 → 颜色映射 */
 export const NODE_TYPE_COLORS: Record<NodeCategory, string> = {
   input: '#3b82f6',
   ai: '#d4af37',
+  'ai-video': '#8b5cf6',
   logic: '#f59e0b',
   agent: '#f472b6',
   subgraph: '#06b6d4',
@@ -55,6 +57,7 @@ export const NODE_TYPE_COLORS: Record<NodeCategory, string> = {
 export const NODE_CATEGORY_LABELS: Record<NodeCategory, string> = {
   input: '输入节点',
   ai: 'AI 节点',
+  'ai-video': '视频节点',
   logic: '逻辑控制',
   agent: 'Agent',
   subgraph: '子图/组合',
@@ -135,6 +138,10 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   'output-image-group': '图片组',
   'ai-video-generate': '文生视频',
   'ai-video-i2v': '图生视频',
+  'video-speed-change': '视频变速',
+  'video-filter': '视频滤镜',
+  'video-concat': '视频拼接',
+  'video-trim': '视频裁切',
   'output-video': '视频输出',
 };
 
@@ -175,6 +182,10 @@ export const NODE_TYPE_ICONS: Record<NodeType, string> = {
   'output-image-group': 'Layers',
   'ai-video-generate': 'Video',
   'ai-video-i2v': 'Video',
+  'video-speed-change': 'Clock',
+  'video-filter': 'Filter',
+  'video-concat': 'Link',
+  'video-trim': 'Scissors',
   'output-video': 'FileVideo',
 };
 
@@ -311,6 +322,11 @@ export const NODE_TEMPLATES: { type: NodeType; category: NodeCategory; label: st
   { type: 'ai-video-generate', category: 'ai', label: '视频生成', desc: 'AI文生视频/图生视频' },
   { type: 'ai-video-i2v', category: 'ai', label: '图生视频', desc: '图片转视频（首帧/首尾帧/参考图）' },
   { type: 'output-video', category: 'output', label: '视频输出', desc: '输出视频结果' },
+  // 视频后处理节点
+  { type: 'video-speed-change', category: 'ai-video', label: '视频变速', desc: '调整视频播放速度 (0.25x-4x)' },
+  { type: 'video-filter', category: 'ai-video', label: '视频滤镜', desc: '应用视频滤镜效果 (电影/复古/赛博朋克等)' },
+  { type: 'video-concat', category: 'ai-video', label: '视频拼接', desc: '拼接多段视频，支持转场效果' },
+  { type: 'video-trim', category: 'ai-video', label: '视频裁切', desc: '裁切视频指定时间段' },
 ];
 
 /** 创建默认端口 */
@@ -323,6 +339,14 @@ function createDefaultPorts(type: NodeType): NodePort[] {
       // AI节点都有图片输入和提示词输入
       ports.push({ id: 'in-image', label: '图片', type: 'image', direction: 'in' });
       ports.push({ id: 'in-prompt', label: '提示词', type: 'prompt', direction: 'in' });
+    } else if (type === 'video-speed-change' || type === 'video-filter' || type === 'video-trim') {
+      // 视频后处理节点：视频输入
+      ports.push({ id: 'in-video', label: '视频', type: 'video', direction: 'in' });
+    } else if (type === 'video-concat') {
+      // 视频拼接节点：多个视频输入
+      ports.push({ id: 'in-video-1', label: '视频1', type: 'video', direction: 'in' });
+      ports.push({ id: 'in-video-2', label: '视频2', type: 'video', direction: 'in' });
+      ports.push({ id: 'in-video-3', label: '视频3', type: 'video', direction: 'in' });
     } else if (cat === 'logic') {
       ports.push({ id: 'in-data', label: '输入', type: 'any', direction: 'in' });
     } else if (cat === 'agent') {
@@ -368,6 +392,9 @@ function createDefaultPorts(type: NodeType): NodePort[] {
       if (type === 'ai-removebg') {
         ports.push({ id: 'out-mask', label: '蒙版', type: 'mask', direction: 'out' });
       }
+    } else if (type === 'video-speed-change' || type === 'video-filter' || type === 'video-trim' || type === 'video-concat') {
+      // 视频后处理节点输出视频
+      ports.push({ id: 'out-video', label: '视频', type: 'video', direction: 'out' });
     } else if (type === 'condition-if') {
       ports.push({ id: 'out-true', label: 'True', type: 'condition', direction: 'out' });
       ports.push({ id: 'out-false', label: 'False', type: 'condition', direction: 'out' });
@@ -768,12 +795,27 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
       { label: '16:9', value: '16:9' }, { label: '9:16', value: '9:16' }, { label: '21:9', value: '21:9' }
     ], defaultValue: '16:9' });
     fields.push({ key: 'duration', label: '时长(秒)', type: 'select', options: [
-      { label: '5秒', value: '5' }, { label: '10秒', value: '10' }
+      { label: '5秒', value: '5' }, { label: '10秒', value: '10' }, { label: '15秒', value: '15' }, { label: '30秒', value: '30' }
     ], defaultValue: '5' });
     fields.push({ key: 'quality', label: '生成质量', type: 'select', options: [
       { label: '标准', value: 'std' }, { label: '高品质', value: 'pro' }
     ], defaultValue: 'std' });
+    fields.push({ key: 'resolution', label: '分辨率', type: 'select', options: [
+      { label: '720p', value: '720p' }, { label: '1080p', value: '1080p' }, { label: '4K', value: '4K' }
+    ], defaultValue: '1080p' });
     fields.push({ key: 'generateAudio', label: '生成音效', type: 'toggle', defaultValue: false });
+    // 高级参数
+    fields.push({ key: 'negativePrompt', label: '反向提示词', type: 'textarea', placeholder: '不希望出现的内容...' });
+    fields.push({ key: 'seed', label: '随机种子', type: 'number', placeholder: '留空为随机', defaultValue: 0 });
+    fields.push({ key: 'cameraControl', label: '摄像机控制', type: 'select', options: [
+      { label: '无', value: '' }, { label: '推进', value: 'push_in' }, { label: '拉出', value: 'push_out' },
+      { label: '左摇', value: 'pan_left' }, { label: '右摇', value: 'pan_right' },
+      { label: '上仰', value: 'tilt_up' }, { label: '下俯', value: 'tilt_down' },
+      { label: '左环绕', value: 'orbit_left' }, { label: '右环绕', value: 'orbit_right' },
+      { label: '放大', value: 'zoom_in' }, { label: '缩小', value: 'zoom_out' },
+      { label: '跟踪', value: 'tracking' }, { label: '静止', value: 'static' }
+    ] });
+    fields.push({ key: 'motionStrength', label: '运动强度', type: 'slider', min: 0, max: 100, step: 5, defaultValue: 50 });
   }
 
   if (type === 'ai-video-i2v') {
@@ -789,12 +831,27 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
       { label: '16:9', value: '16:9' }, { label: '9:16', value: '9:16' }, { label: '21:9', value: '21:9' }
     ], defaultValue: '16:9' });
     fields.push({ key: 'duration', label: '时长(秒)', type: 'select', options: [
-      { label: '5秒', value: '5' }, { label: '10秒', value: '10' }
+      { label: '5秒', value: '5' }, { label: '10秒', value: '10' }, { label: '15秒', value: '15' }, { label: '30秒', value: '30' }
     ], defaultValue: '5' });
     fields.push({ key: 'quality', label: '生成质量', type: 'select', options: [
       { label: '标准', value: 'std' }, { label: '高品质', value: 'pro' }
     ], defaultValue: 'std' });
+    fields.push({ key: 'resolution', label: '分辨率', type: 'select', options: [
+      { label: '720p', value: '720p' }, { label: '1080p', value: '1080p' }, { label: '4K', value: '4K' }
+    ], defaultValue: '1080p' });
     fields.push({ key: 'generateAudio', label: '生成音效', type: 'toggle', defaultValue: false });
+    // 高级参数
+    fields.push({ key: 'negativePrompt', label: '反向提示词', type: 'textarea', placeholder: '不希望出现的内容...' });
+    fields.push({ key: 'seed', label: '随机种子', type: 'number', placeholder: '留空为随机', defaultValue: 0 });
+    fields.push({ key: 'cameraControl', label: '摄像机控制', type: 'select', options: [
+      { label: '无', value: '' }, { label: '推进', value: 'push_in' }, { label: '拉出', value: 'push_out' },
+      { label: '左摇', value: 'pan_left' }, { label: '右摇', value: 'pan_right' },
+      { label: '上仰', value: 'tilt_up' }, { label: '下俯', value: 'tilt_down' },
+      { label: '左环绕', value: 'orbit_left' }, { label: '右环绕', value: 'orbit_right' },
+      { label: '放大', value: 'zoom_in' }, { label: '缩小', value: 'zoom_out' },
+      { label: '跟踪', value: 'tracking' }, { label: '静止', value: 'static' }
+    ] });
+    fields.push({ key: 'motionStrength', label: '运动强度', type: 'slider', min: 0, max: 100, step: 5, defaultValue: 50 });
   }
 
   if (type === 'output-video') {
@@ -804,6 +861,39 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
     fields.push({ key: 'quality', label: '质量', type: 'select', options: [
       { label: '原始', value: 'original' }, { label: '压缩', value: 'compressed' }
     ], defaultValue: 'original' });
+  }
+
+  // ─── 视频后处理节点 ───
+  if (type === 'video-speed-change') {
+    fields.push({ key: 'speed', label: '变速倍率', type: 'slider', min: 0.25, max: 4, step: 0.25, defaultValue: 1 });
+    fields.push({ key: 'preservePitch', label: '保持音调', type: 'toggle', defaultValue: true });
+  }
+  if (type === 'video-filter') {
+    fields.push({ key: 'filter', label: '滤镜', type: 'select', options: [
+      { label: '无', value: 'none' },
+      { label: '电影色调', value: 'cinematic' },
+      { label: '复古', value: 'vintage' },
+      { label: '赛博朋克', value: 'cyberpunk' },
+      { label: '黑白', value: 'bw' },
+      { label: '暖色', value: 'warm' },
+      { label: '冷色', value: 'cool' },
+      { label: '高对比', value: 'high-contrast' },
+    ], defaultValue: 'none' });
+    fields.push({ key: 'intensity', label: '滤镜强度', type: 'slider', min: 0, max: 100, step: 10, defaultValue: 100 });
+  }
+  if (type === 'video-concat') {
+    fields.push({ key: 'transition', label: '转场效果', type: 'select', options: [
+      { label: '无', value: 'none' },
+      { label: '淡入淡出', value: 'fade' },
+      { label: '滑动', value: 'slide' },
+      { label: '溶解', value: 'dissolve' },
+    ], defaultValue: 'none' });
+    fields.push({ key: 'transitionDuration', label: '转场时长(秒)', type: 'number', min: 0, max: 3, step: 0.5, defaultValue: 0.5 });
+  }
+  if (type === 'video-trim') {
+    fields.push({ key: 'startTime', label: '开始时间(秒)', type: 'number', min: 0, step: 0.1, defaultValue: 0 });
+    fields.push({ key: 'endTime', label: '结束时间(秒)', type: 'number', min: 0, step: 0.1, defaultValue: 0 });
+    fields.push({ key: 'duration', label: '裁切时长(秒)', type: 'number', min: 0, step: 0.1, defaultValue: 5 });
   }
 
   // ─── 输出节点 ───
@@ -1247,10 +1337,15 @@ export function buildNodeExecutionRequest(
         body: {
           prompt: config.prompt || config.textContent || config.text || '',
           model: config.model || '',
-          mode: 'text2video',
+          mode: config.mode || 'text2video',
           aspectRatio: config.aspectRatio || '16:9',
-          duration: config.duration || 5,
+          duration: Number(config.duration) || 5,
           quality: config.quality || 'std',
+          resolution: config.resolution || '1080p',
+          generateAudio: config.generateAudio === true || config.generateAudio === 'true',
+          negativePrompt: config.negativePrompt || '',
+          seed: config.seed ? Number(config.seed) : undefined,
+          cameraControl: config.cameraControl ? { type: config.cameraControl, intensity: Number(config.motionStrength) || 50 } : undefined,
         }
       };
 
@@ -1261,12 +1356,17 @@ export function buildNodeExecutionRequest(
         body: {
           prompt: config.prompt || config.textContent || config.text || '',
           model: config.model || '',
-          mode: config.videoMode || 'image2video-first',
+          mode: config.mode || config.videoMode || 'image2video-first',
           imageUrl: config.imageUrl || inputs.imageUrl || '',
           lastFrameImageUrl: config.lastFrameImageUrl || '',
           aspectRatio: config.aspectRatio || '16:9',
-          duration: config.duration || 5,
+          duration: Number(config.duration) || 5,
           quality: config.quality || 'std',
+          resolution: config.resolution || '1080p',
+          generateAudio: config.generateAudio === true || config.generateAudio === 'true',
+          negativePrompt: config.negativePrompt || '',
+          seed: config.seed ? Number(config.seed) : undefined,
+          cameraControl: config.cameraControl ? { type: config.cameraControl, intensity: Number(config.motionStrength) || 50 } : undefined,
         }
       };
 

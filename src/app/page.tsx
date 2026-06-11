@@ -1847,7 +1847,7 @@ function CanvasApp() {
     prompt: string;
     model: string;
     imageUrl?: string;
-    mode: 'text2video' | 'image2video-first' | 'image2video-firstlast' | 'image2video-ref' | 'video-extend';
+    mode: 'text2video' | 'image2video-first' | 'image2video-firstlast' | 'image2video-ref' | 'video-extend' | 'multi-shot';
     aspectRatio: string;
     duration: number;
     quality: string;
@@ -1859,6 +1859,14 @@ function CanvasApp() {
     lastFrameUrl?: string;
     referenceImages?: string[];
     resolution?: string;
+    // 新增高级参数
+    cameraControl?: { type: string; angle?: number; speed?: number };
+    motionBrush?: { maskDataUrl: string; trajectories: Array<{ startX: number; startY: number; endX: number; endY: number; speed?: number }> };
+    characterReferences?: string[];
+    motionStrength?: number;
+    seed?: number;
+    negativePrompt?: string;
+    multiShotScenes?: Array<{ id: string; prompt: string; duration: number; cameraControl?: { type: string; angle?: number; speed?: number } }>;
   }) => {
     setActiveGenerationCount(prev => prev + 1);
 
