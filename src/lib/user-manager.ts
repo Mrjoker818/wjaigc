@@ -344,6 +344,13 @@ export class UserManager {
                 enriched.modelName = enriched.model;
               }
               if (!lImg) return enriched;
+              // ★ 关键修复：保留本地的位置信息（x, y, width, height）
+              // 用户可能在本地拖动了图片，但服务器还没同步到最新位置
+              // 优先使用本地的位置数据，避免图片"回位"
+              if (lImg.x !== undefined) enriched.x = lImg.x;
+              if (lImg.y !== undefined) enriched.y = lImg.y;
+              if (lImg.width !== undefined) enriched.width = lImg.width;
+              if (lImg.height !== undefined) enriched.height = lImg.height;
               // 逐字段检查，从本地补充服务器缺失的字段
               if ((!enriched.modelName || enriched.modelName === '') && lImg.modelName) {
                 enriched.modelName = lImg.modelName;

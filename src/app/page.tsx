@@ -682,6 +682,15 @@ function CanvasApp() {
                 if ((!enriched.modelName || enriched.modelName === '') && enriched.model) {
                   enriched.modelName = enriched.model;
                 }
+                // ★ 关键修复：保留本地的位置信息（x, y, width, height）
+                // 用户可能在本地拖动了图片，但服务器还没同步到最新位置
+                // 优先使用本地的位置数据，避免图片"回位"
+                if (localImg) {
+                  if (localImg.x !== undefined) enriched.x = localImg.x;
+                  if (localImg.y !== undefined) enriched.y = localImg.y;
+                  if (localImg.width !== undefined) enriched.width = localImg.width;
+                  if (localImg.height !== undefined) enriched.height = localImg.height;
+                }
                 // 逐字段检查，从本地补充服务器缺失的字段
                 if ((!enriched.modelName || enriched.modelName === '') && localImg?.modelName) {
                   enriched.modelName = localImg.modelName;
