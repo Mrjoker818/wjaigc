@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw } from 'lucide-react';
+import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -14,6 +14,7 @@ import { UniversalApiManager } from '@/lib/universal-api-manager';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import type { CanvasImage } from '@/components/infinite-canvas';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
@@ -1279,6 +1280,12 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   const [mentionPickerIndex, setMentionPickerIndex] = useState(0);
   const mentionTriggerRef = useRef<{ start: number; end: number } | null>(null);
 
+  // ===== / Prompt Template Trigger =====
+  const [templatePopupOpen, setTemplatePopupOpen] = useState(false);
+  const [templatePopupSearch, setTemplatePopupSearch] = useState('');
+  const [templatePopupIndex, setTemplatePopupIndex] = useState(0);
+  const [templatePopupItems, setTemplatePopupItems] = useState<PromptTemplate[]>([]);
+
   // ===== Tab Mode (selected image → chat targeting) =====
   // All images are stored in pendingImages array - canvas images, pasted images, @mentioned images
   // When a canvas image is selected, it's ADDED to pendingImages (not replacing)
@@ -1371,6 +1378,26 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
       setMentionPickerOpen(false);
       mentionTriggerRef.current = null;
     }
+
+    // Detect / trigger for prompt templates
+    const lastSlashIndex = textBeforeCursor.lastIndexOf('/');
+    if (lastSlashIndex >= 0) {
+      const charBeforeSlash = lastSlashIndex > 0 ? textBeforeCursor[lastSlashIndex - 1] : ' ';
+      // Only trigger if / is at start or after whitespace, and not part of URL (://)
+      const isUrlSlash = lastSlashIndex > 0 && textBeforeCursor[lastSlashIndex - 1] === ':';
+      if (!isUrlSlash && (lastSlashIndex === 0 || /\s/.test(charBeforeSlash))) {
+        const query = textBeforeCursor.slice(lastSlashIndex + 1);
+        if (!query.includes('\n') && query.length <= 30) {
+          setTemplatePopupSearch(query);
+          const results = query ? searchTemplates(query) : getPromptTemplates();
+          setTemplatePopupItems(results.slice(0, 8));
+          setTemplatePopupIndex(0);
+          setTemplatePopupOpen(results.length > 0);
+          return;
+        }
+      }
+    }
+    setTemplatePopupOpen(false);
   }, []);
 
   // Select a mention item
@@ -2597,6 +2624,23 @@ UI设计规范：
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  // Select a prompt template from / trigger
+  const selectPromptTemplate = useCallback((template: PromptTemplate) => {
+    const textarea = textareaRef.current;
+    const cursorPos = textarea?.selectionStart || input.length;
+    const textBeforeCursor = input.slice(0, cursorPos);
+    const lastSlashIndex = textBeforeCursor.lastIndexOf('/');
+    const textAfterCursor = input.slice(cursorPos);
+    
+    if (lastSlashIndex >= 0) {
+      const newInput = input.slice(0, lastSlashIndex) + template.content + textAfterCursor;
+      setInput(newInput);
+    }
+    
+    setTemplatePopupOpen(false);
+    setTimeout(() => textarea?.focus(), 0);
+  }, [input]);
 
   // 从服务器加载可用聊天模型
   const loadServerModels = useCallback(async () => {
@@ -4968,9 +5012,32 @@ ${imageDescriptions}
               ref={textareaRef}
               value={input}
               onChange={handleInputChange}
-              placeholder={pendingImages.length > 0 ? `描述你想对这${pendingImages.length}张图片做什么...` : "输入消息，@ 引用图片/品牌/提示词..."}
+              placeholder={pendingImages.length > 0 ? `描述你想对这${pendingImages.length}张图片做什么...` : "输入消息，@ 引用图片/品牌，/ 使用模板..."}
               className={`w-full resize-none min-h-[60px] max-h-[200px] border-0 bg-transparent px-4 py-3 text-[14px] leading-relaxed focus:outline-none focus:ring-0 ${themeClasses.text} placeholder:${isGold ? 'text-gold-muted/40' : 'text-gray-400'}`}
               onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+                // Handle template popup navigation (priority over mention picker)
+                if (templatePopupOpen && templatePopupItems.length > 0) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setTemplatePopupIndex(prev => Math.min(prev + 1, templatePopupItems.length - 1));
+                    return;
+                  }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setTemplatePopupIndex(prev => Math.max(prev - 1, 0));
+                    return;
+                  }
+                  if (e.key === 'Enter' || e.key === 'Tab') {
+                    e.preventDefault();
+                    selectPromptTemplate(templatePopupItems[templatePopupIndex]);
+                    return;
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setTemplatePopupOpen(false);
+                    return;
+                  }
+                }
                 // Handle mention picker navigation
                 if (mentionPickerOpen && mentionPickerItems.length > 0) {
                   if (e.key === 'ArrowDown') {
@@ -5026,6 +5093,43 @@ ${imageDescriptions}
                     </span>
                   </button>
                 ))}
+              </div>
+            )}
+            {/* / Prompt Template Popup */}
+            {templatePopupOpen && templatePopupItems.length > 0 && (
+              <div className={`absolute bottom-full left-0 right-0 mb-1 rounded-lg border shadow-lg z-50 overflow-hidden ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
+                <div className={`px-3 py-1.5 text-[10px] font-medium ${isGold ? 'text-gold-muted/60' : 'text-gray-400'}`}>
+                  提示词模板 {templatePopupSearch && `· 搜索: "${templatePopupSearch}"`}
+                </div>
+                <div className="max-h-48 overflow-y-auto">
+                  {templatePopupItems.map((template, idx) => (
+                    <button
+                      key={template.id}
+                      onClick={() => selectPromptTemplate(template)}
+                      className={`w-full flex items-start gap-2 px-3 py-2 text-xs transition-colors text-left ${
+                        idx === templatePopupIndex
+                          ? isGold ? 'bg-gold/10 text-gold' : 'bg-blue-50 text-blue-700'
+                          : isGold ? 'text-white/80 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      <FileText size={12} className="shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-medium truncate">{template.name}</span>
+                          <span className={`text-[10px] px-1 rounded ${isGold ? 'bg-white/5 text-white/40' : 'bg-gray-100 text-gray-400'}`}>
+                            {template.category}
+                          </span>
+                        </div>
+                        <p className={`text-[10px] mt-0.5 truncate ${isGold ? 'text-white/40' : 'text-gray-400'}`}>
+                          {template.content}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                <div className={`px-3 py-1.5 border-t text-[10px] ${isGold ? 'border-white/5 text-white/30' : 'border-gray-100 text-gray-400'}`}>
+                  ↑↓ 选择 · Enter 确认 · Esc 关闭
+                </div>
               </div>
             )}
           </div>

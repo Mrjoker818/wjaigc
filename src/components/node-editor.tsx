@@ -11,6 +11,7 @@ import {
 } from '@/lib/workflow-engine';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { MODEL_QUALITIES, MODEL_ASPECT_RATIOS } from '@/lib/canvas-generation-group';
+import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
 import {
   Image as ImageIcon, Type, SlidersHorizontal, Wand2, Pencil, Maximize, Scissors,
   PenTool, Palette, Sun, GitBranch, GitMerge, Repeat, RefreshCw, Layers,
@@ -2734,6 +2735,12 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
   const llmSystemPrompt = node.config?.llmSystemPrompt as string ?? '';
   const textContent = node.config?.textContent as string ?? '';
 
+  // 提示词模板触发状态
+  const [showTemplatePopup, setShowTemplatePopup] = useState(false);
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [templatePopupIndex, setTemplatePopupIndex] = useState(0);
+  const filteredTemplates = templateSearch ? searchTemplates(templateSearch) : getPromptTemplates();
+
   // P0: 解析文本中的 [img:id] 引用，渲染为缩略图
   const renderTextWithMentions = (text: string) => {
     if (!canvasImages?.length) return text;
@@ -2870,15 +2877,86 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
         <div className="node-body">
           {/* input-text 节点: 文本编辑 + LLM优化 + 预设 */}
           {isInputText && (
-            <div className="flex flex-col gap-1.5" style={{ color: T.nodeTitle, fontSize: 12 }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+            <div className="flex flex-col gap-1.5 relative" style={{ color: T.nodeTitle, fontSize: 12 }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
               <textarea
                 className="prompt-textarea"
-                placeholder="输入提示词..."
+                placeholder="输入提示词... (输入 / 使用模板)"
                 value={textContent}
-                onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'textContent', e.target.value); }}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  const val = e.target.value;
+                  onNodeFieldChange?.(node.id, 'textContent', val);
+                  if (val.endsWith('/')) {
+                    setShowTemplatePopup(true);
+                    setTemplateSearch('');
+                    setTemplatePopupIndex(0);
+                  } else if (showTemplatePopup) {
+                    const slashIdx = val.lastIndexOf('/');
+                    if (slashIdx >= 0) {
+                      const afterSlash = val.slice(slashIdx + 1);
+                      if (!afterSlash.includes(' ') && !afterSlash.includes('\n')) {
+                        setTemplateSearch(afterSlash);
+                        setTemplatePopupIndex(0);
+                      } else {
+                        setShowTemplatePopup(false);
+                      }
+                    } else {
+                      setShowTemplatePopup(false);
+                    }
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (showTemplatePopup && filteredTemplates.length > 0) {
+                    if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setTemplatePopupIndex((i) => (i - 1 + filteredTemplates.length) % filteredTemplates.length);
+                    } else if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setTemplatePopupIndex((i) => (i + 1) % filteredTemplates.length);
+                    } else if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const tpl = filteredTemplates[templatePopupIndex];
+                      if (tpl) {
+                        const val = textContent;
+                        const slashIdx = val.lastIndexOf('/');
+                        const before = val.slice(0, slashIdx);
+                        onNodeFieldChange?.(node.id, 'textContent', before + tpl.content);
+                        setShowTemplatePopup(false);
+                      }
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setShowTemplatePopup(false);
+                    }
+                  }
+                }}
                 onMouseDown={(e) => e.stopPropagation()}
                 rows={3}
               />
+              {showTemplatePopup && filteredTemplates.length > 0 && (
+                <div className="absolute bottom-full left-0 right-0 mb-1 max-h-48 overflow-y-auto rounded-lg border border-white/10 bg-[#1a1a1a] shadow-xl z-50">
+                  {filteredTemplates.slice(0, 5).map((tpl, i) => (
+                    <button
+                      key={tpl.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const val = textContent;
+                        const slashIdx = val.lastIndexOf('/');
+                        const before = val.slice(0, slashIdx);
+                        onNodeFieldChange?.(node.id, 'textContent', before + tpl.content);
+                        setShowTemplatePopup(false);
+                      }}
+                      className={`w-full text-left px-3 py-2 text-sm border-b border-white/5 last:border-0 transition-colors ${i === templatePopupIndex ? 'bg-[#d4af37]/20 text-white' : 'text-gray-300 hover:bg-white/5'}`}
+                    >
+                      <div className="font-medium">{tpl.name}</div>
+                      <div className="text-xs text-gray-500 truncate">{tpl.content}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
               {canvasImages?.length && textContent.includes('[img:') && (
                 <div className="flex gap-0.5 flex-wrap">
                   {textContent.split(/(\[img:[^\]]+\])/g).filter(p => p.match(/^\[img:/)).map((ref, i) => {

@@ -1018,6 +1018,7 @@ export function GenerationPanel(
                 {/* 创意描述 - 可拖动调整高度，支持参考图标记 */}
                 <div className="space-y-1">
                     <label className={stl}>{dot}创意描述{altRefMarkers.length > 0 && <span className="ml-1.5 text-xs text-[#6366f1] font-normal">({altRefMarkers.length}张参考图)</span>}</label>
+                    <div className="relative">
                     <div className={`relative rounded-md border ${mc ? 'border-gray-200' : 'border-white/[0.06]'} overflow-hidden`}>
                         {/* Alt reference marker chips displayed above the textarea */}
                         {altRefMarkers.length > 0 && (
@@ -1137,8 +1138,34 @@ export function GenerationPanel(
                             style={{ height: prompt ? promptHeight : undefined, minHeight: 80 }}
                             className={`w-full px-3 py-2.5 text-sm resize-none ${mc ? 'bg-gray-50 text-gray-900 placeholder:text-gray-400' : 'bg-white/5 text-text-bright placeholder:text-gold-muted/50'} leading-relaxed focus:outline-none focus:ring-1 ${mc ? 'focus:ring-gray-300' : 'focus:ring-gold/30'} rounded-lg transition-shadow`}
                         />
-                        {/* Template Popup */}
-                        {showTemplatePopup && filteredTemplates.length > 0 && (
+                        {/* 拖动手柄 - 仅在有内容时显示 */}
+                        {prompt && (
+                            <div
+                                className={`absolute bottom-0 right-0 w-8 h-4 cursor-ns-resize flex items-center justify-center ${mc ? 'hover:bg-gray-200' : 'hover:bg-[#2a2a2a]'} transition-colors rounded-tl`}
+                                onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    promptDragRef.current = { startY: e.clientY, startH: promptHeight };
+                                    const onMove = (ev: MouseEvent) => {
+                                        if (!promptDragRef.current) return;
+                                        const delta = ev.clientY - promptDragRef.current.startY;
+                                        const newH = Math.max(80, Math.min(500, promptDragRef.current.startH + delta));
+                                        setPromptHeight(newH);
+                                    };
+                                    const onUp = () => {
+                                        promptDragRef.current = null;
+                                        window.removeEventListener('mousemove', onMove);
+                                        window.removeEventListener('mouseup', onUp);
+                                    };
+                                    window.addEventListener('mousemove', onMove);
+                                    window.addEventListener('mouseup', onUp);
+                                }}
+                            >
+                                <GripHorizontal className={`w-4 h-4 ${mc ? 'text-gray-400' : 'text-gold-muted/50'}`} />
+                            </div>
+                        )}
+                    </div>
+                    {/* Template Popup - outside overflow-hidden container */}
+                    {showTemplatePopup && filteredTemplates.length > 0 && (
                             <div className={`absolute left-0 right-0 top-full mt-1 z-50 rounded-xl shadow-2xl overflow-hidden ${
                                 mc ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-white/[0.12]'
                             }`}>
@@ -1189,31 +1216,6 @@ export function GenerationPanel(
                                         ↑↓ 选择 · Enter 确认 · Esc 关闭
                                     </span>
                                 </div>
-                            </div>
-                        )}
-                        {/* 拖动手柄 - 仅在有内容时显示 */}
-                        {prompt && (
-                            <div
-                                className={`absolute bottom-0 right-0 w-8 h-4 cursor-ns-resize flex items-center justify-center ${mc ? 'hover:bg-gray-200' : 'hover:bg-[#2a2a2a]'} transition-colors rounded-tl`}
-                                onMouseDown={(e) => {
-                                    e.preventDefault();
-                                    promptDragRef.current = { startY: e.clientY, startH: promptHeight };
-                                    const onMove = (ev: MouseEvent) => {
-                                        if (!promptDragRef.current) return;
-                                        const delta = ev.clientY - promptDragRef.current.startY;
-                                        const newH = Math.max(80, Math.min(500, promptDragRef.current.startH + delta));
-                                        setPromptHeight(newH);
-                                    };
-                                    const onUp = () => {
-                                        promptDragRef.current = null;
-                                        window.removeEventListener('mousemove', onMove);
-                                        window.removeEventListener('mouseup', onUp);
-                                    };
-                                    window.addEventListener('mousemove', onMove);
-                                    window.addEventListener('mouseup', onUp);
-                                }}
-                            >
-                                <GripHorizontal className={`w-4 h-4 ${mc ? 'text-gray-400' : 'text-gold-muted/50'}`} />
                             </div>
                         )}
                     </div>

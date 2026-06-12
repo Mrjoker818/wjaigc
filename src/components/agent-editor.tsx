@@ -3,6 +3,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { X, GripVertical, RefreshCw, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle, ImagePlus, Minus, Zap, Timer, Clock } from 'lucide-react';
 import { useProgressTimer } from '@/hooks/useProgressTimer';
+import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
 
 interface AgentEditorProps {
   imageUrl?: string;
@@ -97,6 +98,12 @@ export function AgentEditor({
   const [stepsExpanded, setStepsExpanded] = useState(false);
   const [error, setError] = useState('');
   const [resultImageUrl, setResultImageUrl] = useState('');
+
+  // 提示词模板触发状态
+  const [showTemplatePopup, setShowTemplatePopup] = useState(false);
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [templatePopupIndex, setTemplatePopupIndex] = useState(0);
+  const filteredTemplates = templateSearch ? searchTemplates(templateSearch) : getPromptTemplates();
   const [resultPrompt, setResultPrompt] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
   const { elapsed, totalTime, formatTime, startTimer, stopTimer, resetTimer } = useProgressTimer();
@@ -600,11 +607,56 @@ export function AgentEditor({
         </div>
 
         {/* 输入框 */}
-        <div className="px-3 pb-1">
+        <div className="px-3 pb-1 relative">
           <textarea
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="描述你想要的编辑效果..."
+            onChange={(e) => {
+              setPrompt(e.target.value);
+              const val = e.target.value;
+              if (val.endsWith('/')) {
+                setShowTemplatePopup(true);
+                setTemplateSearch('');
+                setTemplatePopupIndex(0);
+              } else if (showTemplatePopup) {
+                const slashIdx = val.lastIndexOf('/');
+                if (slashIdx >= 0) {
+                  const afterSlash = val.slice(slashIdx + 1);
+                  if (!afterSlash.includes(' ') && !afterSlash.includes('\n')) {
+                    setTemplateSearch(afterSlash);
+                    setTemplatePopupIndex(0);
+                  } else {
+                    setShowTemplatePopup(false);
+                  }
+                } else {
+                  setShowTemplatePopup(false);
+                }
+              }
+            }}
+            onKeyDown={(e) => {
+              if (showTemplatePopup && filteredTemplates.length > 0) {
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setTemplatePopupIndex((i) => (i - 1 + filteredTemplates.length) % filteredTemplates.length);
+                } else if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setTemplatePopupIndex((i) => (i + 1) % filteredTemplates.length);
+                } else if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  const tpl = filteredTemplates[templatePopupIndex];
+                  if (tpl) {
+                    const val = prompt;
+                    const slashIdx = val.lastIndexOf('/');
+                    const before = val.slice(0, slashIdx);
+                    setPrompt(before + tpl.content);
+                    setShowTemplatePopup(false);
+                  }
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setShowTemplatePopup(false);
+                }
+              }
+            }}
+            placeholder="描述你想要的编辑效果... (输入 / 使用模板)"
             className="w-full rounded px-2 py-1.5 text-sm resize-none focus:outline-none"
             style={{
               height: textareaHeight,
@@ -617,6 +669,26 @@ export function AgentEditor({
             onClick={stopPropagation}
             onPointerDown={stopPropagation}
           />
+          {showTemplatePopup && filteredTemplates.length > 0 && (
+            <div className="absolute bottom-full left-3 right-3 mb-1 max-h-48 overflow-y-auto rounded-lg border border-white/10 bg-[#1a1a1a] shadow-xl z-50">
+              {filteredTemplates.slice(0, 5).map((tpl, i) => (
+                <button
+                  key={tpl.id}
+                  onClick={() => {
+                    const val = prompt;
+                    const slashIdx = val.lastIndexOf('/');
+                    const before = val.slice(0, slashIdx);
+                    setPrompt(before + tpl.content);
+                    setShowTemplatePopup(false);
+                  }}
+                  className={`w-full text-left px-3 py-2 text-sm border-b border-white/5 last:border-0 transition-colors ${i === templatePopupIndex ? 'bg-[#d4af37]/20 text-white' : 'text-gray-300 hover:bg-white/5'}`}
+                >
+                  <div className="font-medium">{tpl.name}</div>
+                  <div className="text-xs text-gray-500 truncate">{tpl.content}</div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* 执行按钮 */}

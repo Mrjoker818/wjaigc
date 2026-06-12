@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { X, Pencil, Eraser, Trash2, Loader2, Check, Sparkles, History, Image as ImageIcon, ChevronDown, ChevronUp, Plus, Minus, Maximize2, GripVertical, Upload, RefreshCw } from 'lucide-react';
+import { X, Pencil, Eraser, Trash2, Loader2, Check, Sparkles, History, Image as ImageIcon, ChevronDown, ChevronUp, Plus, Minus, Maximize2, GripVertical, Upload, RefreshCw, FileText } from 'lucide-react';
 import type { CanvasImage } from './infinite-canvas';
 
 interface EditHistoryItem {
@@ -71,6 +71,7 @@ const MODEL_HINTS: Record<string, string> = {
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { MODEL_ASPECT_RATIOS, MODEL_QUALITIES, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, QUALITY_DISPLAY_NAMES, findModelConfig } from '@/lib/canvas-generation-group';
 import { taskEventsClient } from '@/lib/task-events-client';
+import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
 
 function getModelHint(modelId: string): string {
   for (const [key, hint] of Object.entries(MODEL_HINTS)) {
@@ -211,6 +212,12 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   const [aspectRatio, setAspectRatio] = useState(initialAspectRatio || '1:1');
   const [quality, setQuality] = useState(initialQuality || 'high');
   const [outputCount, setOutputCount] = useState(initialCount || 1);
+
+  // 提示词模板触发状态
+  const [showTemplatePopup, setShowTemplatePopup] = useState(false);
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [templatePopupIndex, setTemplatePopupIndex] = useState(0);
+  const filteredTemplates = templateSearch ? searchTemplates(templateSearch) : getPromptTemplates();
 
   // 模型选择：使用 "server::<providerId>::<modelId>" 作为 key
   const [selectedModelKey, setSelectedModelKey] = useState('');
@@ -1910,11 +1917,77 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           <div className="relative">
             <textarea
               value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="描述修改内容，如：把背景换成日落..."
+              onChange={(e) => {
+                setPrompt(e.target.value);
+                const val = e.target.value;
+                if (val.endsWith('/')) {
+                  setShowTemplatePopup(true);
+                  setTemplateSearch('');
+                  setTemplatePopupIndex(0);
+                } else if (showTemplatePopup) {
+                  const slashIdx = val.lastIndexOf('/');
+                  if (slashIdx >= 0) {
+                    const afterSlash = val.slice(slashIdx + 1);
+                    if (!afterSlash.includes(' ') && !afterSlash.includes('\n')) {
+                      setTemplateSearch(afterSlash);
+                      setTemplatePopupIndex(0);
+                    } else {
+                      setShowTemplatePopup(false);
+                    }
+                  } else {
+                    setShowTemplatePopup(false);
+                  }
+                }
+              }}
+              onKeyDown={(e) => {
+                if (showTemplatePopup && filteredTemplates.length > 0) {
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setTemplatePopupIndex((i) => (i - 1 + filteredTemplates.length) % filteredTemplates.length);
+                  } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setTemplatePopupIndex((i) => (i + 1) % filteredTemplates.length);
+                  } else if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const tpl = filteredTemplates[templatePopupIndex];
+                    if (tpl) {
+                      const val = prompt;
+                      const slashIdx = val.lastIndexOf('/');
+                      const before = val.slice(0, slashIdx);
+                      setPrompt(before + tpl.content);
+                      setShowTemplatePopup(false);
+                    }
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setShowTemplatePopup(false);
+                  }
+                } else {
+                  handleKeyDown(e);
+                }
+              }}
+              placeholder="描述修改内容，如：把背景换成日落... (输入 / 使用模板)"
               className={`w-full ${promptExpanded ? 'h-32' : 'h-14'} ${thInput} rounded-lg px-3 py-2 text-sm ${thTextPlaceholder} resize-none transition-all duration-200`}
             />
+            {showTemplatePopup && filteredTemplates.length > 0 && (
+              <div className="absolute bottom-full left-0 right-0 mb-1 max-h-48 overflow-y-auto rounded-lg border border-white/10 bg-[#1a1a1a] shadow-xl z-50">
+                {filteredTemplates.slice(0, 5).map((tpl, i) => (
+                  <button
+                    key={tpl.id}
+                    onClick={() => {
+                      const val = prompt;
+                      const slashIdx = val.lastIndexOf('/');
+                      const before = val.slice(0, slashIdx);
+                      setPrompt(before + tpl.content);
+                      setShowTemplatePopup(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 text-sm border-b border-white/5 last:border-0 transition-colors ${i === templatePopupIndex ? 'bg-[#d4af37]/20 text-white' : 'text-gray-300 hover:bg-white/5'}`}
+                  >
+                    <div className="font-medium">{tpl.name}</div>
+                    <div className="text-xs text-gray-500 truncate">{tpl.content}</div>
+                  </button>
+                ))}
+              </div>
+            )}
             <button
               type="button"
               onClick={() => setPromptExpanded(!promptExpanded)}
