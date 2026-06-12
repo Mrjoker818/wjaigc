@@ -53,20 +53,38 @@ export function PromptTemplatePopup({
                 : mc ? 'hover:bg-gray-50' : 'hover:bg-white/[0.03]'
             }`}
           >
-            <div className="flex items-center gap-2">
-              <FileText className={`w-3.5 h-3.5 flex-shrink-0 ${mc ? 'text-gray-400' : 'text-gold-muted/50'}`} />
-              <span className={`text-sm font-medium truncate ${mc ? 'text-gray-900' : 'text-foreground'}`}>
-                {template.name}
-              </span>
-              <span className={`text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 ${
-                mc ? 'bg-gray-100 text-gray-500' : 'bg-white/[0.06] text-gold-muted/70'
+            <div className="flex items-start gap-2">
+              {/* Thumbnail */}
+              <div className={`w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 ${
+                mc ? 'bg-gray-100 border border-gray-200' : 'bg-[#2a2a2a] border border-white/[0.08]'
               }`}>
-                {template.category}
-              </span>
+                {template.thumbnail ? (
+                  <img src={template.thumbnail} alt={template.name} className="w-full h-full object-cover" />
+                ) : (
+                  <div className={`w-full h-full flex items-center justify-center ${
+                    mc ? 'text-gray-300' : 'text-white/20'
+                  }`}>
+                    <FileText className="w-4 h-4" />
+                  </div>
+                )}
+              </div>
+              {/* Content */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium truncate ${mc ? 'text-gray-900' : 'text-foreground'}`}>
+                    {template.name}
+                  </span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 ${
+                    mc ? 'bg-gray-100 text-gray-500' : 'bg-white/[0.06] text-gold-muted/70'
+                  }`}>
+                    {template.category}
+                  </span>
+                </div>
+                <p className={`text-xs mt-1 line-clamp-1 ${mc ? 'text-gray-500' : 'text-gold-muted/50'}`}>
+                  {template.content}
+                </p>
+              </div>
             </div>
-            <p className={`text-xs mt-1 line-clamp-1 pl-5.5 ${mc ? 'text-gray-500' : 'text-gold-muted/50'}`}>
-              {template.content}
-            </p>
           </button>
         ))}
       </div>

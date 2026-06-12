@@ -478,7 +478,23 @@ export default function PromptTemplatePanel({
                       : 'bg-white/[0.03] border border-white/[0.08] hover:border-white/[0.15] hover:bg-white/[0.05]'
                   }`}
                 >
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    {/* Thumbnail */}
+                    <div className={`w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 ${
+                      mc ? 'bg-gray-100 border border-gray-200' : 'bg-[#1a1a1a] border border-white/[0.12]'
+                    }`}>
+                      {template.thumbnail ? (
+                        <img src={template.thumbnail} alt={template.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className={`w-full h-full flex items-center justify-center ${
+                          mc ? 'text-gray-300' : 'text-white/20'
+                        }`}>
+                          <ImageIcon className="w-6 h-6" />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <h4 className={`text-sm font-medium truncate ${mc ? 'text-gray-900' : 'text-foreground'}`}>
@@ -516,35 +532,36 @@ export default function PromptTemplatePanel({
                         </div>
                       )}
                     </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={() => handleUseTemplate(template)}
-                        className={`p-1.5 rounded-lg transition-colors ${
-                          mc ? 'hover:bg-gray-100 text-gray-500' : 'hover:bg-white/[0.06] text-gold-muted'
-                        }`}
-                        title="使用模板"
-                      >
-                        <FileText className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => startEdit(template)}
-                        className={`p-1.5 rounded-lg transition-colors ${
-                          mc ? 'hover:bg-gray-100 text-gray-500' : 'hover:bg-white/[0.06] text-gold-muted'
-                        }`}
-                        title="编辑"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(template.id)}
-                        className={`p-1.5 rounded-lg transition-colors ${
-                          mc ? 'hover:bg-red-50 text-gray-500 hover:text-red-600' : 'hover:bg-red-500/10 text-gold-muted hover:text-red-400'
-                        }`}
-                        title="删除"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                  </div>
+                  {/* Actions */}
+                  <div className="flex items-center justify-end gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => handleUseTemplate(template)}
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        mc ? 'hover:bg-gray-100 text-gray-500' : 'hover:bg-white/[0.06] text-gold-muted'
+                      }`}
+                      title="使用模板"
+                    >
+                      <FileText className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => startEdit(template)}
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        mc ? 'hover:bg-gray-100 text-gray-500' : 'hover:bg-white/[0.06] text-gold-muted'
+                      }`}
+                      title="编辑"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(template.id)}
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        mc ? 'hover:bg-red-50 text-gray-500 hover:text-red-600' : 'hover:bg-red-500/10 text-gold-muted hover:text-red-400'
+                      }`}
+                      title="删除"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
               ))
