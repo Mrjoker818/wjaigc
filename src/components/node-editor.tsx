@@ -699,9 +699,24 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   // 右键菜单状态
   const [contextMenu, setContextMenu] = useState<{ type: 'canvas' | 'node'; x: number; y: number; nodeId?: string } | null>(null);
 
-  // P2: 提示词库
+  // P2: 提示词库 - 使用统一的提示词模板系统
   const [promptSnippets, setPromptSnippets] = useState<PromptSnippet[]>(() => {
-    try { return JSON.parse(localStorage.getItem('wujie-prompt-snippets') || '[]'); } catch { return []; }
+    try {
+      // 从统一的提示词模板系统加载
+      const templates = getPromptTemplates();
+      // 同时兼容旧的提示词库数据
+      const oldSnippets: PromptSnippet[] = JSON.parse(localStorage.getItem('wujie-prompt-snippets') || '[]');
+      // 合并：模板优先，旧数据补充
+      const fromTemplates: PromptSnippet[] = templates.map(t => ({
+        id: t.id,
+        text: t.content,
+        tags: t.tags,
+        category: t.category,
+        createdAt: t.createdAt,
+      }));
+      const fromOld = oldSnippets.filter(s => !fromTemplates.some(t => t.id === s.id));
+      return [...fromTemplates, ...fromOld];
+    } catch { return []; }
   });
   const [promptSearch, setPromptSearch] = useState('');
   const [newSnippetText, setNewSnippetText] = useState('');
@@ -778,9 +793,20 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
     });
   }, []);
 
-  // P2: 保存提示词到库
+  // P2: 保存提示词到库 - 同时保存到统一的提示词模板系统
   const savePromptSnippet = useCallback((text: string, tags: string[], category: string) => {
     const snippet: PromptSnippet = { id: `ps-${Date.now()}`, text, tags, category, createdAt: Date.now() };
+    // 保存到统一的提示词模板系统
+    const { addPromptTemplate } = require('@/lib/prompt-templates');
+    addPromptTemplate({
+      id: snippet.id,
+      name: text.slice(0, 30) + (text.length > 30 ? '...' : ''),
+      content: text,
+      category,
+      tags,
+      createdAt: snippet.createdAt,
+    });
+    // 同时保存到旧的存储（向后兼容）
     setPromptSnippets(prev => {
       const next = [...prev, snippet];
       localStorage.setItem('wujie-prompt-snippets', JSON.stringify(next));
