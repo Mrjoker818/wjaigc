@@ -591,17 +591,24 @@ export default function VideoGenerationPanel({
 
   // === 主题颜色 ===
   const isGold = themeStyle === 'gold';
-  const accentColor = isGold ? '#d4af37' : '#3b82f6';
-  const panelBg = '#1a1a1a';
-  const inputBg = isGold ? '#242424' : '#222222';
-  const textColor = '#e0e0e0';
-  const subTextColor = '#888';
-  const borderColor = isGold ? 'rgba(212,175,55,0.3)' : 'rgba(255,255,255,0.1)';
-  const hoverBorderColor = isGold ? 'border-amber-500/50' : 'border-blue-500/50';
-  const hoverBorderColorLight = isGold ? 'hover:border-amber-500/30' : 'hover:border-blue-500/30';
-  const accentTextClass = isGold ? 'text-amber-500' : 'text-blue-400';
-  const borderActiveClass = isGold ? 'border-amber-500/50' : 'border-blue-500/50';
-  const borderInactiveClass = 'border-gray-700';
+  const isMonochrome = themeStyle === 'monochrome';
+  const accentColor = isGold ? '#d4af37' : isMonochrome ? '#6b7280' : '#3b82f6';
+  const panelBg = isMonochrome ? '#ffffff' : '#1a1a1a';
+  const inputBg = isMonochrome ? '#f3f4f6' : isGold ? '#242424' : '#222222';
+  const textColor = isMonochrome ? '#1a1a1a' : '#e0e0e0';
+  const subTextColor = isMonochrome ? '#6b7280' : '#888';
+  const borderColor = isMonochrome ? 'rgba(0,0,0,0.1)' : isGold ? 'rgba(212,175,55,0.3)' : 'rgba(255,255,255,0.1)';
+  const hoverBorderColor = isMonochrome ? 'border-gray-300' : isGold ? 'border-amber-500/50' : 'border-blue-500/50';
+  const hoverBorderColorLight = isMonochrome ? 'hover:border-gray-300' : isGold ? 'hover:border-amber-500/30' : 'hover:border-blue-500/30';
+  const accentTextClass = isMonochrome ? 'text-gray-500' : isGold ? 'text-amber-500' : 'text-blue-400';
+  const borderActiveClass = isMonochrome ? 'border-gray-400' : isGold ? 'border-amber-500/50' : 'border-blue-500/50';
+  const borderInactiveClass = isMonochrome ? 'border-gray-200' : 'border-gray-700';
+  // Additional theme-aware classes for labels, text, borders
+  const labelClass = isMonochrome ? 'text-xs text-gray-500' : 'text-xs text-gray-500';
+  const sectionTitleClass = isMonochrome ? 'text-gray-700' : 'text-gray-300';
+  const subtleTextClass = isMonochrome ? 'text-gray-400' : 'text-gray-500';
+  const subtleBorderClass = isMonochrome ? 'border-gray-200' : 'border-gray-600';
+  const deepBorderClass = isMonochrome ? 'border-gray-300' : 'border-gray-700';
 
   return (
     <div className="flex flex-col h-full overflow-y-auto" style={{ background: panelBg, color: textColor }}>
@@ -614,7 +621,7 @@ export default function VideoGenerationPanel({
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer"
             style={{
               background: mode === opt.value ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(139,139,139,0.15)') : 'transparent',
-              color: mode === opt.value ? accentColor : '#888',
+              color: mode === opt.value ? accentColor : subTextColor,
               border: `1px solid ${mode === opt.value ? borderColor : 'transparent'}`,
             }}
           >
@@ -640,8 +647,8 @@ export default function VideoGenerationPanel({
               className={`flex-shrink-0 px-2.5 py-1.5 rounded-md text-[10px] border transition-all cursor-pointer ${hoverBorderColor}`}
               style={{
                 background: inputBg,
-                borderColor: '#374151',
-                color: '#9ca3af',
+                borderColor: isMonochrome ? '#d1d5db' : '#374151',
+                color: isMonochrome ? '#4b5563' : '#9ca3af',
               }}
               title={template.prompt}
             >
@@ -659,7 +666,7 @@ export default function VideoGenerationPanel({
             value={model}
             onChange={e => setModel(e.target.value)}
             className="w-full px-3 py-2 rounded-md text-sm appearance-none cursor-pointer"
-            style={{ background: inputBg, color: '#e0e0e0', border: `1px solid ${borderColor}` }}
+            style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
           >
             {videoModels.length === 0 && (
               <option value="">请在管理员后台添加视频模型</option>
@@ -683,7 +690,7 @@ export default function VideoGenerationPanel({
           placeholder="描述你想生成的视频画面..."
           rows={3}
           className="w-full px-3 py-2 rounded-md text-sm resize-y min-h-[60px]"
-          style={{ background: inputBg, color: '#e0e0e0', border: `1px solid ${borderColor}`, outline: 'none' }}
+          style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}`, outline: 'none' }}
           onFocus={e => e.target.style.borderColor = accentColor}
           onBlur={e => e.target.style.borderColor = borderColor}
         />
@@ -818,7 +825,7 @@ export default function VideoGenerationPanel({
                     type="text"
                     placeholder="输入视频URL..."
                     className="flex-1 px-3 py-2 rounded-md text-xs"
-                    style={{ background: inputBg, color: '#e0e0e0', border: `1px solid ${borderColor}`, outline: 'none' }}
+                    style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}`, outline: 'none' }}
                     onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value; if (v) setVideoUrl(v); } }}
                     onBlur={(e: React.FocusEvent<HTMLInputElement>) => { if (e.target.value) setVideoUrl(e.target.value); }}
                   />
@@ -838,7 +845,7 @@ export default function VideoGenerationPanel({
                   className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs transition-all cursor-pointer"
                   style={{
                     background: extendDuration === d ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(139,139,139,0.15)') : inputBg,
-                    color: extendDuration === d ? accentColor : '#888',
+                    color: extendDuration === d ? accentColor : subTextColor,
                     border: `1px solid ${extendDuration === d ? borderColor : 'transparent'}`,
                   }}
                 >
@@ -850,7 +857,7 @@ export default function VideoGenerationPanel({
           </div>
 
           {/* 延长提示 */}
-          <div className="flex items-start gap-1.5 p-2 rounded-md" style={{ background: 'rgba(212,175,55,0.05)', border: `1px solid rgba(212,175,55,0.1)` }}>
+          <div className="flex items-start gap-1.5 p-2 rounded-md" style={{ background: isGold ? 'rgba(212,175,55,0.05)' : isMonochrome ? 'rgba(107,114,128,0.05)' : 'rgba(59,130,246,0.05)', border: `1px solid ${isGold ? 'rgba(212,175,55,0.1)' : isMonochrome ? 'rgba(107,114,128,0.15)' : 'rgba(59,130,246,0.1)'}` }}>
             <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: accentColor }} />
             <span className="text-xs text-gray-500">视频延长将在源视频末尾追加新内容，保持画面连贯性。可在描述中指定延长内容的方向。</span>
           </div>
@@ -868,7 +875,7 @@ export default function VideoGenerationPanel({
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs transition-all cursor-pointer"
               style={{
                 background: aspectRatio === r ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(139,139,139,0.15)') : inputBg,
-                color: aspectRatio === r ? accentColor : '#888',
+                color: aspectRatio === r ? accentColor : subTextColor,
                 border: `1px solid ${aspectRatio === r ? borderColor : 'transparent'}`,
               }}
             >
@@ -890,7 +897,7 @@ export default function VideoGenerationPanel({
               className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs transition-all cursor-pointer"
               style={{
                 background: duration === d ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(139,139,139,0.15)') : inputBg,
-                color: duration === d ? accentColor : '#888',
+                color: duration === d ? accentColor : subTextColor,
                 border: `1px solid ${duration === d ? borderColor : 'transparent'}`,
               }}
             >
@@ -912,7 +919,7 @@ export default function VideoGenerationPanel({
               className="px-3 py-1.5 rounded-md text-xs transition-all cursor-pointer"
               style={{
                 background: quality === q ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(139,139,139,0.15)') : inputBg,
-                color: quality === q ? accentColor : '#888',
+                color: quality === q ? accentColor : subTextColor,
                 border: `1px solid ${quality === q ? borderColor : 'transparent'}`,
               }}
             >
@@ -928,7 +935,7 @@ export default function VideoGenerationPanel({
           <button
             onClick={() => setGenerateAudio(!generateAudio)}
             className="flex items-center gap-2 text-xs cursor-pointer"
-            style={{ color: generateAudio ? accentColor : '#888' }}
+            style={{ color: generateAudio ? accentColor : subTextColor }}
           >
             {generateAudio ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
             {generateAudio ? '生成音效（已开启）' : '生成音效（已关闭）'}
@@ -947,8 +954,8 @@ export default function VideoGenerationPanel({
             style={{ background: inputBg }}
           >
             <span className="flex items-center gap-2 text-xs">
-              <Video className="w-4 h-4" style={{ color: cameraControl ? accentColor : '#888' }} />
-              <span className="text-gray-300">摄像机控制</span>
+              <Video className="w-4 h-4" style={{ color: cameraControl ? accentColor : subTextColor }} />
+              <span className={sectionTitleClass}>摄像机控制</span>
               {cameraControl && <span className="text-[10px] opacity-60">({cameraControl.type.replace('_', ' ')})</span>}
             </span>
             <ChevronDown className={`w-3.5 h-3.5 text-gray-500 transition-transform ${showCameraPanel ? 'rotate-180' : ''}`} />
@@ -975,8 +982,8 @@ export default function VideoGenerationPanel({
                     onClick={() => setCameraControl(cameraControl?.type === cam.type ? null : { type: cam.type as CameraControlParams['type'], intensity: 50 })}
                     className="flex flex-col items-center gap-0.5 px-1.5 py-1.5 rounded text-[10px] transition-all cursor-pointer"
                     style={{
-                      background: cameraControl?.type === cam.type ? (isGold ? 'rgba(212,175,55,0.2)' : 'rgba(139,139,139,0.2)') : '#2a2a2a',
-                      color: cameraControl?.type === cam.type ? accentColor : '#888',
+                      background: cameraControl?.type === cam.type ? (isGold ? 'rgba(212,175,55,0.2)' : 'rgba(139,139,139,0.2)') : (isMonochrome ? '#f3f4f6' : '#2a2a2a'),
+                      color: cameraControl?.type === cam.type ? accentColor : subTextColor,
                       border: `1px solid ${cameraControl?.type === cam.type ? borderColor : 'transparent'}`,
                     }}
                   >
@@ -995,14 +1002,14 @@ export default function VideoGenerationPanel({
                     value={motionStrength}
                     onChange={(e) => setMotionStrength(Number(e.target.value))}
                     className="w-full h-1 rounded-lg appearance-none cursor-pointer"
-                    style={{ background: `linear-gradient(to right, ${accentColor} ${motionStrength}%, #333 ${motionStrength}%)` }}
+                    style={{ background: `linear-gradient(to right, ${accentColor} ${motionStrength}%, ${isMonochrome ? '#ddd' : '#333'} ${motionStrength}%)` }}
                   />
                 </div>
               )}
               {cameraControl && (
                 <button
                   onClick={() => { setCameraControl(null); setShowCameraPanel(false); }}
-                  className="text-[10px] text-gray-500 hover:text-gray-300 cursor-pointer"
+                  className={`text-[10px] ${subtleTextClass} ${isMonochrome ? 'hover:text-gray-600' : 'hover:text-gray-300'} cursor-pointer`}
                 >
                   清除摄像机控制
                 </button>
@@ -1023,8 +1030,8 @@ export default function VideoGenerationPanel({
             style={{ background: inputBg }}
           >
             <span className="flex items-center gap-2 text-xs">
-              <Users className="w-4 h-4" style={{ color: characterReferences.length > 0 ? accentColor : '#888' }} />
-              <span className="text-gray-300">角色一致性</span>
+              <Users className="w-4 h-4" style={{ color: characterReferences.length > 0 ? accentColor : subTextColor }} />
+              <span className={sectionTitleClass}>角色一致性</span>
               {characterReferences.length > 0 && <span className="text-[10px] opacity-60">({characterReferences.length}张参考图)</span>}
             </span>
             <ChevronDown className={`w-3.5 h-3.5 text-gray-500 transition-transform ${showCharacterPanel ? 'rotate-180' : ''}`} />
@@ -1073,7 +1080,7 @@ export default function VideoGenerationPanel({
               {characterReferences.length > 0 && (
                 <button
                   onClick={() => { setCharacterReferences([]); setShowCharacterPanel(false); }}
-                  className="text-[10px] text-gray-500 hover:text-gray-300 cursor-pointer"
+                  className={`text-[10px] ${subtleTextClass} ${isMonochrome ? 'hover:text-gray-600' : 'hover:text-gray-300'} cursor-pointer`}
                 >
                   清除角色参考
                 </button>
@@ -1094,8 +1101,8 @@ export default function VideoGenerationPanel({
             style={{ background: inputBg }}
           >
             <span className="flex items-center gap-2 text-xs">
-              <Paintbrush className="w-4 h-4" style={{ color: motionBrush ? accentColor : '#888' }} />
-              <span className="text-gray-300">运动笔刷</span>
+              <Paintbrush className="w-4 h-4" style={{ color: motionBrush ? accentColor : subTextColor }} />
+              <span className={sectionTitleClass}>运动笔刷</span>
               {motionBrush && (
                 <span className="text-[10px] opacity-60">
                   ({motionBrush.trajectories.length} 轨迹)
@@ -1109,7 +1116,7 @@ export default function VideoGenerationPanel({
             <div className="mt-2 p-3 rounded-md border" style={{ background: inputBg, borderColor }}>
               <div className="flex items-center gap-2 mb-2">
                 <Paintbrush className={`w-4 h-4 ${accentTextClass}`} />
-                <span className="text-xs text-gray-300">在图片上涂抹区域并绘制运动轨迹</span>
+                <span className={`text-xs ${sectionTitleClass}`}>在图片上涂抹区域并绘制运动轨迹</span>
               </div>
               
               <MotionBrushCanvas
@@ -1128,7 +1135,7 @@ export default function VideoGenerationPanel({
                       setMotionBrush(null);
                       setShowMotionBrush(false);
                     }}
-                    className="w-full py-1.5 rounded-md border border-gray-600 text-[11px] text-gray-400 hover:border-red-500/50 hover:text-red-400 transition-colors"
+                    className={`w-full py-1.5 rounded-md border ${subtleBorderClass} text-[11px] text-gray-400 hover:border-red-500/50 hover:text-red-400 transition-colors`}
                   >
                     清除运动笔刷
                   </button>
@@ -1148,16 +1155,16 @@ export default function VideoGenerationPanel({
       {/* === 多镜头叙事 === */}
       {mode === 'multi-shot' && (
         <div className="px-3 pt-2">
-          <div className="p-3 rounded-md border border-gray-700" style={{ background: inputBg }}>
+          <div className={`p-3 rounded-md border ${deepBorderClass}`} style={{ background: inputBg }}>
             <div className="flex items-center gap-2 mb-3">
               <Film className="w-4 h-4 text-purple-400" />
-              <span className="text-xs text-gray-300">多镜头叙事</span>
+              <span className={`text-xs ${sectionTitleClass}`}>多镜头叙事</span>
               <span className="text-[10px] text-gray-500">({multiShotScenes.length} 个镜头)</span>
             </div>
             
             <div className="space-y-2 max-h-60 overflow-y-auto">
               {multiShotScenes.map((scene, index) => (
-                <div key={scene.id} className="p-2 rounded-md border border-gray-600" style={{ background: panelBg }}>
+                <div key={scene.id} className={`p-2 rounded-md border ${subtleBorderClass}`} style={{ background: panelBg }}>
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-[10px] text-purple-400">镜头 {index + 1}</span>
                     {multiShotScenes.length > 1 && (
@@ -1215,7 +1222,7 @@ export default function VideoGenerationPanel({
                   { id: Date.now().toString(), prompt: '', duration: 5 },
                 ]);
               }}
-              className="w-full mt-2 py-1.5 rounded-md border border-dashed border-gray-600 text-[11px] text-gray-400 hover:border-purple-500/50 hover:text-purple-400 transition-colors flex items-center justify-center gap-1"
+              className={`w-full mt-2 py-1.5 rounded-md border border-dashed ${subtleBorderClass} text-[11px] text-gray-400 hover:border-purple-500/50 hover:text-purple-400 transition-colors flex items-center justify-center gap-1`}
             >
               <Plus className="w-3 h-3" />
               添加镜头
@@ -1232,7 +1239,7 @@ export default function VideoGenerationPanel({
       <div className="px-3 pt-3">
         <button
           onClick={() => setShowAdvanced(!showAdvanced)}
-          className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer hover:text-gray-300 transition-colors"
+          className={`flex items-center gap-1.5 text-xs ${subtleTextClass} ${isMonochrome ? 'hover:text-gray-600' : 'hover:text-gray-300'} transition-colors cursor-pointer`}
         >
           <Settings2 className="w-3.5 h-3.5" />
           高级设置
@@ -1250,8 +1257,8 @@ export default function VideoGenerationPanel({
                     onClick={() => setResolution(r)}
                     className="px-2.5 py-1 rounded-md text-xs transition-all cursor-pointer"
                     style={{
-                      background: resolution === r ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(139,139,139,0.15)') : '#2a2a2a',
-                      color: resolution === r ? accentColor : '#888',
+                      background: resolution === r ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(139,139,139,0.15)') : (isMonochrome ? '#f3f4f6' : '#2a2a2a'),
+                      color: resolution === r ? accentColor : subTextColor,
                       border: `1px solid ${resolution === r ? borderColor : 'transparent'}`,
                     }}
                   >
@@ -1267,7 +1274,7 @@ export default function VideoGenerationPanel({
       {/* === 模型能力提示 === */}
       {currentModel && (
         <div className="px-3 pt-3">
-          <div className="flex items-start gap-1.5 p-2 rounded-md" style={{ background: 'rgba(212,175,55,0.05)', border: `1px solid rgba(212,175,55,0.1)` }}>
+          <div className="flex items-start gap-1.5 p-2 rounded-md" style={{ background: isGold ? 'rgba(212,175,55,0.05)' : isMonochrome ? 'rgba(107,114,128,0.05)' : 'rgba(59,130,246,0.05)', border: `1px solid ${isGold ? 'rgba(212,175,55,0.1)' : isMonochrome ? 'rgba(107,114,128,0.15)' : 'rgba(59,130,246,0.1)'}` }}>
             <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: accentColor }} />
             <div className="text-xs text-gray-500 leading-relaxed">
               <span style={{ color: accentColor }}>{currentModel.name}</span>
@@ -1296,9 +1303,11 @@ export default function VideoGenerationPanel({
           style={{
             background: isGold
               ? (isGenerating ? 'rgba(212,175,55,0.3)' : 'linear-gradient(135deg, #d4af37, #b8962e)')
-              : (isGenerating ? 'rgba(59,130,246,0.3)' : 'linear-gradient(135deg, #3b82f6, #2563eb)'),
+              : isMonochrome
+                ? (isGenerating ? 'rgba(107,114,128,0.3)' : 'linear-gradient(135deg, #4b5563, #374151)')
+                : (isGenerating ? 'rgba(59,130,246,0.3)' : 'linear-gradient(135deg, #3b82f6, #2563eb)'),
             color: '#fff',
-            boxShadow: isGenerating ? 'none' : `0 2px 8px ${isGold ? 'rgba(212,175,55,0.3)' : 'rgba(59,130,246,0.3)'}`,
+            boxShadow: isGenerating ? 'none' : `0 2px 8px ${isGold ? 'rgba(212,175,55,0.3)' : isMonochrome ? 'rgba(75,85,99,0.3)' : 'rgba(59,130,246,0.3)'}`,
           }}
         >
           {isGenerating ? (
