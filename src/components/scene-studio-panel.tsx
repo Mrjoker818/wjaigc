@@ -1956,7 +1956,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
           background: isMonochrome ? '#1a1a1a' : '#111',
           borderColor: isMonochrome ? '#333' : '#d4af3740',
           ...(isMinimized ? {} : { left: windowPos.x, top: windowPos.y }),
-          ...(isDragging ? { outline: '2px solid #d4af37', outlineOffset: '-2px' } : {}),
+          ...(isDragging ? { outline: `2px solid ${accent}`, outlineOffset: '-2px' } : {}),
         }}
         onMouseDown={e => e.stopPropagation()}
         onPointerDown={e => e.stopPropagation()}

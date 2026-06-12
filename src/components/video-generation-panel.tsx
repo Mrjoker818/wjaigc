@@ -591,13 +591,20 @@ export default function VideoGenerationPanel({
 
   // === 主题颜色 ===
   const isGold = themeStyle === 'gold';
-  const accentColor = isGold ? '#d4af37' : '#8b8b8b';
+  const accentColor = isGold ? '#d4af37' : '#3b82f6';
   const panelBg = '#1a1a1a';
-  const inputBg = '#242424';
-  const borderColor = isGold ? 'rgba(212,175,55,0.3)' : 'rgba(139,139,139,0.3)';
+  const inputBg = isGold ? '#242424' : '#222222';
+  const textColor = '#e0e0e0';
+  const subTextColor = '#888';
+  const borderColor = isGold ? 'rgba(212,175,55,0.3)' : 'rgba(255,255,255,0.1)';
+  const hoverBorderColor = isGold ? 'border-amber-500/50' : 'border-blue-500/50';
+  const hoverBorderColorLight = isGold ? 'hover:border-amber-500/30' : 'hover:border-blue-500/30';
+  const accentTextClass = isGold ? 'text-amber-500' : 'text-blue-400';
+  const borderActiveClass = isGold ? 'border-amber-500/50' : 'border-blue-500/50';
+  const borderInactiveClass = 'border-gray-700';
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto" style={{ background: panelBg, color: '#e0e0e0' }}>
+    <div className="flex flex-col h-full overflow-y-auto" style={{ background: panelBg, color: textColor }}>
       {/* === 模式切换 === */}
       <div className="flex gap-1 p-3 pb-1">
         {modeOptions.map(opt => (
@@ -630,7 +637,7 @@ export default function VideoGenerationPanel({
                 if (template.duration) setDuration(template.duration);
                 if (template.cameraControl) setCameraControl(template.cameraControl);
               }}
-              className="flex-shrink-0 px-2.5 py-1.5 rounded-md text-[10px] border transition-all cursor-pointer hover:border-amber-500/50"
+              className={`flex-shrink-0 px-2.5 py-1.5 rounded-md text-[10px] border transition-all cursor-pointer ${hoverBorderColor}`}
               style={{
                 background: inputBg,
                 borderColor: '#374151',
@@ -935,7 +942,7 @@ export default function VideoGenerationPanel({
           <button
             onClick={() => setShowCameraPanel(!showCameraPanel)}
             className={`w-full flex items-center justify-between px-3 py-2.5 rounded-md border transition-colors ${
-              showCameraPanel ? 'border-amber-500/50' : 'border-gray-700 hover:border-amber-500/30'
+              showCameraPanel ? borderActiveClass : `${borderInactiveClass} ${hoverBorderColorLight}`
             }`}
             style={{ background: inputBg }}
           >
@@ -1011,7 +1018,7 @@ export default function VideoGenerationPanel({
           <button
             onClick={() => setShowCharacterPanel(!showCharacterPanel)}
             className={`w-full flex items-center justify-between px-3 py-2.5 rounded-md border transition-colors ${
-              showCharacterPanel ? 'border-amber-500/50' : 'border-gray-700 hover:border-amber-500/30'
+              showCharacterPanel ? borderActiveClass : `${borderInactiveClass} ${hoverBorderColorLight}`
             }`}
             style={{ background: inputBg }}
           >
@@ -1082,7 +1089,7 @@ export default function VideoGenerationPanel({
           <button
             onClick={() => setShowMotionBrush(!showMotionBrush)}
             className={`w-full flex items-center justify-between px-3 py-2.5 rounded-md border transition-colors ${
-              showMotionBrush ? 'border-amber-500/50' : 'border-gray-700 hover:border-amber-500/30'
+              showMotionBrush ? borderActiveClass : `${borderInactiveClass} ${hoverBorderColorLight}`
             }`}
             style={{ background: inputBg }}
           >
@@ -1099,9 +1106,9 @@ export default function VideoGenerationPanel({
           </button>
           
           {showMotionBrush && (
-            <div className="mt-2 p-3 rounded-md border border-gray-700" style={{ background: inputBg }}>
+            <div className="mt-2 p-3 rounded-md border" style={{ background: inputBg, borderColor }}>
               <div className="flex items-center gap-2 mb-2">
-                <Paintbrush className="w-4 h-4 text-amber-500" />
+                <Paintbrush className={`w-4 h-4 ${accentTextClass}`} />
                 <span className="text-xs text-gray-300">在图片上涂抹区域并绘制运动轨迹</span>
               </div>
               
@@ -1289,9 +1296,9 @@ export default function VideoGenerationPanel({
           style={{
             background: isGold
               ? (isGenerating ? 'rgba(212,175,55,0.3)' : 'linear-gradient(135deg, #d4af37, #b8962e)')
-              : (isGenerating ? 'rgba(139,139,139,0.3)' : 'linear-gradient(135deg, #8b8b8b, #6b6b6b)'),
+              : (isGenerating ? 'rgba(59,130,246,0.3)' : 'linear-gradient(135deg, #3b82f6, #2563eb)'),
             color: '#fff',
-            boxShadow: isGenerating ? 'none' : `0 2px 8px ${isGold ? 'rgba(212,175,55,0.3)' : 'rgba(139,139,139,0.3)'}`,
+            boxShadow: isGenerating ? 'none' : `0 2px 8px ${isGold ? 'rgba(212,175,55,0.3)' : 'rgba(59,130,246,0.3)'}`,
           }}
         >
           {isGenerating ? (
