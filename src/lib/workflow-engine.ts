@@ -1445,6 +1445,51 @@ export function buildNodeExecutionRequest(
     case 'condition-if':
     case 'condition-switch':
     case 'loop-for':
+    // ─── 视频后处理节点 ───
+    case 'video-speed-change':
+      return {
+        endpoint: '/api/video/tools',
+        method: 'POST',
+        body: {
+          action: 'speed',
+          videoUrl: config.videoUrl || inputs.videoUrl || '',
+          speed: Number(config.speed) || 1.0,
+        }
+      };
+
+    case 'video-filter':
+      return {
+        endpoint: '/api/video/tools',
+        method: 'POST',
+        body: {
+          action: 'filter',
+          videoUrl: config.videoUrl || inputs.videoUrl || '',
+          filter: config.filter || 'none',
+        }
+      };
+
+    case 'video-concat':
+      return {
+        endpoint: '/api/video/tools',
+        method: 'POST',
+        body: {
+          action: 'concat',
+          videoUrls: config.videoUrls || inputs.videoUrls || [],
+        }
+      };
+
+    case 'video-trim':
+      return {
+        endpoint: '/api/video/tools',
+        method: 'POST',
+        body: {
+          action: 'trim',
+          videoUrl: config.videoUrl || inputs.videoUrl || '',
+          startTime: Number(config.startTime) || 0,
+          endTime: Number(config.endTime) || 0,
+        }
+      };
+
     case 'loop-while':
     case 'loop-each':
     case 'parallel':

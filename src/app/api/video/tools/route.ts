@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 export const maxDuration = 300; // 5 min timeout
 
 interface VideoToolsRequest {
-  action: 'to-gif' | 'extract-frames' | 'compress' | 'convert' | 'extract-cover';
+  action: 'to-gif' | 'extract-frames' | 'compress' | 'convert' | 'extract-cover' | 'speed' | 'filter' | 'concat' | 'trim';
   videoUrl: string;
   // GIF 参数
   fps?: number;
@@ -27,6 +27,15 @@ interface VideoToolsRequest {
   outputFormat?: 'mp4' | 'webm' | 'mov' | 'avi';
   // 封面提取参数
   timestamp?: number; // 秒
+  // 变速参数
+  speed?: number; // 0.25 - 4.0
+  // 滤镜参数
+  filter?: string; // cinematic | vintage | cyberpunk | warm | cool | bw | bright
+  // 拼接参数
+  videos?: string[]; // 视频 URL 数组
+  // 裁切参数
+  trimStart?: number; // 秒
+  trimEnd?: number; // 秒
 }
 
 export async function POST(request: NextRequest) {
@@ -53,6 +62,14 @@ export async function POST(request: NextRequest) {
         return await handleConvert(body);
       case 'extract-cover':
         return await handleExtractCover(body);
+      case 'speed':
+        return await handleSpeed(body);
+      case 'filter':
+        return await handleFilter(body);
+      case 'concat':
+        return await handleConcat(body);
+      case 'trim':
+        return await handleTrim(body);
       default:
         return NextResponse.json(
           { error: `不支持的操作: ${action}` },
@@ -152,6 +169,102 @@ async function handleExtractCover(params: VideoToolsRequest) {
       timestamp,
       coverUrl: null,
       note: '封面提取功能需要安装 ffmpeg，当前为模拟响应'
+    }
+  });
+}
+
+// 视频变速
+async function handleSpeed(params: VideoToolsRequest) {
+  const { videoUrl, speed = 1.0 } = params;
+  
+  if (speed < 0.25 || speed > 4.0) {
+    return NextResponse.json(
+      { error: '变速倍率需在 0.25 - 4.0 之间' },
+      { status: 400 }
+    );
+  }
+  
+  return NextResponse.json({
+    success: true,
+    message: '变速任务已提交',
+    data: {
+      videoUrl,
+      speed,
+      outputUrl: null,
+      note: '变速功能需要安装 ffmpeg，当前为模拟响应'
+    }
+  });
+}
+
+// 视频滤镜
+async function handleFilter(params: VideoToolsRequest) {
+  const { videoUrl, filter = 'cinematic' } = params;
+  
+  const supportedFilters = ['cinematic', 'vintage', 'cyberpunk', 'warm', 'cool', 'bw', 'bright'];
+  if (!supportedFilters.includes(filter || '')) {
+    return NextResponse.json(
+      { error: `不支持的滤镜: ${filter}，支持: ${supportedFilters.join(', ')}` },
+      { status: 400 }
+    );
+  }
+  
+  return NextResponse.json({
+    success: true,
+    message: '滤镜任务已提交',
+    data: {
+      videoUrl,
+      filter,
+      outputUrl: null,
+      note: '滤镜功能需要安装 ffmpeg，当前为模拟响应'
+    }
+  });
+}
+
+// 视频拼接
+async function handleConcat(params: VideoToolsRequest) {
+  const { videos = [], videoUrl } = params;
+  
+  // videoUrl 作为第一个视频，videos 数组作为后续视频
+  const allVideos = videoUrl ? [videoUrl, ...videos] : videos;
+  
+  if (allVideos.length < 2) {
+    return NextResponse.json(
+      { error: '拼接至少需要 2 个视频' },
+      { status: 400 }
+    );
+  }
+  
+  return NextResponse.json({
+    success: true,
+    message: '拼接任务已提交',
+    data: {
+      videos: allVideos,
+      outputUrl: null,
+      note: '拼接功能需要安装 ffmpeg，当前为模拟响应'
+    }
+  });
+}
+
+// 视频裁切
+async function handleTrim(params: VideoToolsRequest) {
+  const { videoUrl, trimStart = 0, trimEnd } = params;
+  
+  if (trimEnd !== undefined && trimEnd <= trimStart) {
+    return NextResponse.json(
+      { error: '结束时间必须大于开始时间' },
+      { status: 400 }
+    );
+  }
+  
+  return NextResponse.json({
+    success: true,
+    message: '裁切任务已提交',
+    data: {
+      videoUrl,
+      trimStart,
+      trimEnd,
+      outputUrl: null,
+      note: '裁切功能需要安装 ffmpeg，当前为模拟响应'
     }
   });
 }

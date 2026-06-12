@@ -428,8 +428,8 @@ async function executeWorkflow(
         fetchOptions.body = JSON.stringify(req.body);
       }
 
-      // 对于异步API (generate, image-edit, edit, agent-edit)，使用提交+轮询模式
-      const isAsyncApi = ['/api/generate', '/api/image-edit', '/api/edit', '/api/agent-edit'].includes(req.endpoint);
+      // 对于异步API (generate, image-edit, edit, agent-edit, video/generate)，使用提交+轮询模式
+      const isAsyncApi = ['/api/generate', '/api/image-edit', '/api/edit', '/api/agent-edit', '/api/video/generate'].includes(req.endpoint);
 
       // P1: 分镜串行 — 多场景按序生成
       if (node.type === 'storyboard-sequence' && req.body._storyboard) {
