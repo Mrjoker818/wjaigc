@@ -608,7 +608,7 @@ export default function VideoGenerationPanel({
   const borderInactiveClass = isMonochrome ? 'border-gray-200' : 'border-gray-700';
   // Additional theme-aware classes for labels, text, borders
   const labelClass = isMonochrome ? 'text-xs text-gray-500' : 'text-xs text-gray-500';
-  const sectionTitleClass = isMonochrome ? 'text-xs font-semibold text-blue-500 whitespace-nowrap' : 'text-xs font-semibold text-gray-300 whitespace-nowrap';
+  const sectionTitleClass = isMonochrome ? 'text-xs font-semibold text-blue-500 whitespace-nowrap truncate' : 'text-xs font-semibold text-gray-300 whitespace-nowrap truncate';
   const subtleTextClass = isMonochrome ? 'text-gray-400' : 'text-gray-500';
   const subtleBorderClass = isMonochrome ? 'border-gray-200' : 'border-gray-600';
   const deepBorderClass = isMonochrome ? 'border-gray-200' : 'border-gray-700';
@@ -987,8 +987,8 @@ export default function VideoGenerationPanel({
             }`}
             style={{ background: inputBg }}
           >
-            <span className="flex items-center gap-2 text-xs">
-              <Video className="w-4 h-4" style={{ color: cameraControl ? accentColor : subTextColor }} />
+            <span className="flex items-center gap-2 text-xs min-w-0 overflow-hidden shrink">
+              <Video className="w-4 h-4 shrink-0" style={{ color: cameraControl ? accentColor : subTextColor }} />
               <span className={sectionTitleClass}>摄像机控制</span>
               {cameraControl && <span className="text-[10px] opacity-60">({cameraControl.type.replace('_', ' ')})</span>}
             </span>
@@ -1069,8 +1069,8 @@ export default function VideoGenerationPanel({
             }`}
             style={{ background: inputBg }}
           >
-            <span className="flex items-center gap-2 text-xs">
-              <Users className="w-4 h-4" style={{ color: characterReferences.length > 0 ? accentColor : subTextColor }} />
+            <span className="flex items-center gap-2 text-xs min-w-0 overflow-hidden shrink">
+              <Users className="w-4 h-4 shrink-0" style={{ color: characterReferences.length > 0 ? accentColor : subTextColor }} />
               <span className={sectionTitleClass}>角色一致性</span>
               {characterReferences.length > 0 && <span className="text-[10px] opacity-60">({characterReferences.length}张参考图)</span>}
             </span>
@@ -1140,8 +1140,8 @@ export default function VideoGenerationPanel({
             }`}
             style={{ background: inputBg }}
           >
-            <span className="flex items-center gap-2 text-xs">
-              <Paintbrush className="w-4 h-4" style={{ color: motionBrush ? accentColor : subTextColor }} />
+            <span className="flex items-center gap-2 text-xs min-w-0 overflow-hidden shrink">
+              <Paintbrush className="w-4 h-4 shrink-0" style={{ color: motionBrush ? accentColor : subTextColor }} />
               <span className={sectionTitleClass}>运动笔刷</span>
               {motionBrush && (
                 <span className="text-[10px] opacity-60">

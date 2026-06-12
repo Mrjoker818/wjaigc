@@ -108,16 +108,53 @@ interface SceneStudioProps {
 
 /* ========== CONSTANTS ========== */
 
-const ACCENT = '#d4af37';
-const ACCENT_DIM = '#b8941f';
-const BG_PRIMARY = '#0a0a0a';
-const BG_SECONDARY = '#111111';
-const BG_TERTIARY = '#1a1a1a';
-const BG_HOVER = '#222222';
-const BORDER_COLOR = '#2a2a2a';
-const TEXT_PRIMARY = '#f0f0f0';
-const TEXT_SECONDARY = '#999999';
-const TEXT_DIM = '#666666';
+/* ========== DYNAMIC THEME ========== */
+// Module-level theme state — updated by SceneStudioPanel on each render
+// so child components (GeometryPanel, etc.) always read the correct values.
+const _themeRef = { mono: false };
+
+function getTheme(isMonochrome?: boolean) {
+  if (isMonochrome) {
+    return {
+      accent: '#3b82f6',
+      accentDim: '#2563eb',
+      bgPrimary: '#ffffff',
+      bgSecondary: '#fafafa',
+      bgTertiary: '#f3f4f6',
+      bgHover: '#e5e7eb',
+      borderColor: '#e5e7eb',
+      textPrimary: '#1a1a1a',
+      textSecondary: '#6b7280',
+      textDim: '#9ca3af',
+    };
+  }
+  return {
+    accent: '#d4af37',
+    accentDim: '#b8941f',
+    bgPrimary: '#0a0a0a',
+    bgSecondary: '#111111',
+    bgTertiary: '#1a1a1a',
+    bgHover: '#222222',
+    borderColor: '#2a2a2a',
+    textPrimary: '#f0f0f0',
+    textSecondary: '#999999',
+    textDim: '#666666',
+  };
+}
+
+// Dynamic theme proxy — reads from _themeRef.mono so child components
+// that don't receive isMonochrome as a prop still get the correct colors.
+const _t = () => getTheme(_themeRef.mono);
+const ACCENT       = () => _t().accent;
+const ACCENT_DIM   = () => _t().accentDim;
+const BG_PRIMARY   = () => _t().bgPrimary;
+const BG_SECONDARY = () => _t().bgSecondary;
+const BG_TERTIARY  = () => _t().bgTertiary;
+const BG_HOVER     = () => _t().bgHover;
+const BORDER_COLOR = () => _t().borderColor;
+const TEXT_PRIMARY  = () => _t().textPrimary;
+const TEXT_SECONDARY = () => _t().textSecondary;
+const TEXT_DIM      = () => _t().textDim;
 
 const GEOMETRY_PRESETS: { type: SceneObject['type']; name: string; icon: React.ReactNode; emoji: string; defaultScale: [number, number, number]; defaultColor: string }[] = [
   { type: 'box', name: '立方体', icon: <BoxIcon size={16} />, emoji: '📦', defaultScale: [1, 1, 1], defaultColor: '#808080' },
@@ -412,9 +449,9 @@ function GeometryGrid({ onAddObject }: { onAddObject: (type: SceneObject['type']
           key={preset.type}
           onClick={() => onAddObject(preset.type)}
           className="flex flex-col items-center gap-1 p-2 rounded-lg transition-all cursor-pointer hover:scale-[1.02]"
-          style={{ background: BG_TERTIARY, border: `1px solid ${BORDER_COLOR}`, color: TEXT_SECONDARY }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = ACCENT; e.currentTarget.style.color = ACCENT; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = BORDER_COLOR; e.currentTarget.style.color = TEXT_SECONDARY; }}
+          style={{ background: BG_TERTIARY(), border: `1px solid ${BORDER_COLOR()}`, color: TEXT_SECONDARY() }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = ACCENT(); e.currentTarget.style.color = ACCENT(); }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = BORDER_COLOR(); e.currentTarget.style.color = TEXT_SECONDARY(); }}
         >
           {preset.icon}
           <span className="text-[13px]">{preset.name}</span>
@@ -436,7 +473,7 @@ function ObjectList({ objects, selectedId, onSelectObject, onDeleteObject, onTog
   return (
     <div className="space-y-0.5 p-2">
       {objects.length === 0 && (
-        <p className="text-center py-4 text-xs" style={{ color: TEXT_DIM }}>场景为空，添加几何体开始</p>
+        <p className="text-center py-4 text-xs" style={{ color: TEXT_DIM() }}>场景为空，添加几何体开始</p>
       )}
       {objects.map(obj => (
         <div
@@ -444,24 +481,24 @@ function ObjectList({ objects, selectedId, onSelectObject, onDeleteObject, onTog
           onClick={() => onSelectObject(obj.id)}
           className="flex items-center gap-1.5 px-2 py-1.5 rounded cursor-pointer transition-colors group"
           style={{
-            background: selectedId === obj.id ? `${ACCENT}15` : 'transparent',
-            borderLeft: selectedId === obj.id ? `2px solid ${ACCENT}` : '2px solid transparent',
+            background: selectedId === obj.id ? `${ACCENT()}15` : 'transparent',
+            borderLeft: selectedId === obj.id ? `2px solid ${ACCENT()}` : '2px solid transparent',
           }}
         >
-          <span className="text-xs flex-1 truncate" style={{ color: selectedId === obj.id ? ACCENT : TEXT_PRIMARY, opacity: obj.visible ? 1 : 0.4 }}>
+          <span className="text-xs flex-1 truncate" style={{ color: selectedId === obj.id ? ACCENT() : TEXT_PRIMARY(), opacity: obj.visible ? 1 : 0.4 }}>
             {obj.name}
           </span>
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button onClick={(e) => { e.stopPropagation(); onToggleVisibility(obj.id); }} className="p-0.5 cursor-pointer" style={{ color: TEXT_DIM }}>
+            <button onClick={(e) => { e.stopPropagation(); onToggleVisibility(obj.id); }} className="p-0.5 cursor-pointer" style={{ color: TEXT_DIM() }}>
               {obj.visible ? <Eye size={11} /> : <EyeOff size={11} />}
             </button>
-            <button onClick={(e) => { e.stopPropagation(); onToggleLock(obj.id); }} className="p-0.5 cursor-pointer" style={{ color: TEXT_DIM }}>
+            <button onClick={(e) => { e.stopPropagation(); onToggleLock(obj.id); }} className="p-0.5 cursor-pointer" style={{ color: TEXT_DIM() }}>
               {obj.locked ? <Lock size={11} /> : <Unlock size={11} />}
             </button>
-            <button onClick={(e) => { e.stopPropagation(); onDuplicateObject(obj.id); }} className="p-0.5 cursor-pointer" style={{ color: TEXT_DIM }}>
+            <button onClick={(e) => { e.stopPropagation(); onDuplicateObject(obj.id); }} className="p-0.5 cursor-pointer" style={{ color: TEXT_DIM() }}>
               <Copy size={11} />
             </button>
-            <button onClick={(e) => { e.stopPropagation(); onDeleteObject(obj.id); }} className="p-0.5 cursor-pointer hover:text-red-400" style={{ color: TEXT_DIM }}>
+            <button onClick={(e) => { e.stopPropagation(); onDeleteObject(obj.id); }} className="p-0.5 cursor-pointer hover:text-red-400" style={{ color: TEXT_DIM() }}>
               <Trash2 size={11} />
             </button>
           </div>
@@ -506,14 +543,14 @@ function ModelImportPanel({ onModelUpload }: { onModelUpload: (file: File) => vo
       <button
         onClick={() => fileInputRef.current?.click()}
         className="w-full flex items-center justify-center gap-2 py-3 rounded-lg border-2 border-dashed transition-colors cursor-pointer"
-        style={{ borderColor: BORDER_COLOR, color: TEXT_SECONDARY, background: BG_TERTIARY }}
-        onMouseEnter={e => { e.currentTarget.style.borderColor = ACCENT; e.currentTarget.style.color = ACCENT; }}
-        onMouseLeave={e => { e.currentTarget.style.borderColor = BORDER_COLOR; e.currentTarget.style.color = TEXT_SECONDARY; }}
+        style={{ borderColor: BORDER_COLOR(), color: TEXT_SECONDARY(), background: BG_TERTIARY() }}
+        onMouseEnter={e => { e.currentTarget.style.borderColor = ACCENT(); e.currentTarget.style.color = ACCENT(); }}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = BORDER_COLOR(); e.currentTarget.style.color = TEXT_SECONDARY(); }}
       >
         <Upload size={16} />
         <span className="text-xs">导入 GLB / GLTF</span>
       </button>
-      <p className="text-[13px] text-center" style={{ color: TEXT_DIM }}>支持 .glb .gltf 格式，最大 {MAX_MODEL_SIZE_MB}MB</p>
+      <p className="text-[13px] text-center" style={{ color: TEXT_DIM() }}>支持 .glb .gltf 格式，最大 {MAX_MODEL_SIZE_MB}MB</p>
       {uploadError && (
         <p className="text-[13px] text-center text-red-400">{uploadError}</p>
       )}
@@ -524,19 +561,19 @@ function ModelImportPanel({ onModelUpload }: { onModelUpload: (file: File) => vo
 function LightPresetsPanel({ onApplyPreset }: { onApplyPreset: (preset: Omit<SceneLight, 'id'>[]) => void }) {
   return (
     <div className="space-y-1.5 p-2">
-      <p className="text-[13px] uppercase tracking-wider font-semibold mb-1" style={{ color: TEXT_DIM }}>灯光预设</p>
+      <p className="text-[13px] uppercase tracking-wider font-semibold mb-1" style={{ color: TEXT_DIM() }}>灯光预设</p>
       {LIGHT_PRESETS_DATA.map((preset, i) => (
         <button
           key={i}
           onClick={() => onApplyPreset(preset.lights)}
           className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-colors cursor-pointer"
-          style={{ background: BG_TERTIARY, color: TEXT_SECONDARY, border: `1px solid ${BORDER_COLOR}` }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = ACCENT; e.currentTarget.style.color = ACCENT; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = BORDER_COLOR; e.currentTarget.style.color = TEXT_SECONDARY; }}
+          style={{ background: BG_TERTIARY(), color: TEXT_SECONDARY(), border: `1px solid ${BORDER_COLOR()}` }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = ACCENT(); e.currentTarget.style.color = ACCENT(); }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = BORDER_COLOR(); e.currentTarget.style.color = TEXT_SECONDARY(); }}
         >
           <Sun size={12} />
           {preset.name}
-          <span className="ml-auto text-[9px]" style={{ color: TEXT_DIM }}>{preset.lights.length}灯</span>
+          <span className="ml-auto text-[9px]" style={{ color: TEXT_DIM() }}>{preset.lights.length}灯</span>
         </button>
       ))}
     </div>
@@ -553,7 +590,7 @@ function CameraPresetsPanel({ currentPreset, onApplyPreset, savedViews, onSaveVi
 }) {
   return (
     <div className="space-y-2 p-2">
-      <p className="text-[13px] uppercase tracking-wider font-semibold" style={{ color: TEXT_DIM }}>相机预设</p>
+      <p className="text-[13px] uppercase tracking-wider font-semibold" style={{ color: TEXT_DIM() }}>相机预设</p>
       <div className="flex flex-wrap gap-1">
         {CAMERA_PRESETS.map(preset => (
           <button
@@ -561,9 +598,9 @@ function CameraPresetsPanel({ currentPreset, onApplyPreset, savedViews, onSaveVi
             onClick={() => onApplyPreset(preset.key)}
             className="px-2.5 py-1.5 rounded text-[13px] transition-colors cursor-pointer"
             style={{
-              background: currentPreset === preset.key ? `${ACCENT}20` : BG_TERTIARY,
-              color: currentPreset === preset.key ? ACCENT : TEXT_SECONDARY,
-              border: `1px solid ${currentPreset === preset.key ? ACCENT : BORDER_COLOR}`,
+              background: currentPreset === preset.key ? `${ACCENT()}20` : BG_TERTIARY(),
+              color: currentPreset === preset.key ? ACCENT() : TEXT_SECONDARY(),
+              border: `1px solid ${currentPreset === preset.key ? ACCENT() : BORDER_COLOR()}`,
             }}
           >
             {preset.name}
@@ -571,20 +608,20 @@ function CameraPresetsPanel({ currentPreset, onApplyPreset, savedViews, onSaveVi
         ))}
       </div>
       <div className="flex items-center justify-between mt-2">
-        <p className="text-[13px] uppercase tracking-wider font-semibold" style={{ color: TEXT_DIM }}>保存的视角</p>
-        <button onClick={onSaveView} className="flex items-center gap-1 px-2 py-0.5 rounded text-[13px] cursor-pointer" style={{ color: ACCENT }}>
+        <p className="text-[13px] uppercase tracking-wider font-semibold" style={{ color: TEXT_DIM() }}>保存的视角</p>
+        <button onClick={onSaveView} className="flex items-center gap-1 px-2 py-0.5 rounded text-[13px] cursor-pointer" style={{ color: ACCENT() }}>
           <Bookmark size={10} /> 保存当前视角
         </button>
       </div>
       {savedViews.length === 0 ? (
-        <p className="text-[13px] text-center py-2" style={{ color: TEXT_DIM }}>暂无保存的视角</p>
+        <p className="text-[13px] text-center py-2" style={{ color: TEXT_DIM() }}>暂无保存的视角</p>
       ) : (
         <div className="space-y-0.5">
           {savedViews.map(view => (
-            <div key={view.id} className="flex items-center gap-1.5 px-2 py-1.5 rounded group" style={{ background: BG_TERTIARY }}>
-              <Camera size={10} style={{ color: TEXT_DIM }} />
-              <button onClick={() => onGoToView(view)} className="text-xs flex-1 text-left cursor-pointer" style={{ color: TEXT_PRIMARY }}>{view.name}</button>
-              <button onClick={() => onDeleteView(view.id)} className="p-0.5 opacity-0 group-hover:opacity-100 cursor-pointer" style={{ color: TEXT_DIM }}>
+            <div key={view.id} className="flex items-center gap-1.5 px-2 py-1.5 rounded group" style={{ background: BG_TERTIARY() }}>
+              <Camera size={10} style={{ color: TEXT_DIM() }} />
+              <button onClick={() => onGoToView(view)} className="text-xs flex-1 text-left cursor-pointer" style={{ color: TEXT_PRIMARY() }}>{view.name}</button>
+              <button onClick={() => onDeleteView(view.id)} className="p-0.5 opacity-0 group-hover:opacity-100 cursor-pointer" style={{ color: TEXT_DIM() }}>
                 <Trash2 size={9} />
               </button>
             </div>
@@ -604,33 +641,33 @@ function PropertiesPanel({ selectedObject, onUpdateObject, isMonochrome }: {
 }) {
   if (!selectedObject) {
     return (
-      <div className="flex-shrink-0 flex flex-col items-center justify-center py-6" style={{ color: TEXT_DIM }}>
+      <div className="flex-shrink-0 flex flex-col items-center justify-center py-6" style={{ color: TEXT_DIM() }}>
         <MousePointer2 size={20} />
         <p className="text-[13px] mt-2">选中对象查看属性</p>
       </div>
     );
   }
 
-  const accent = isMonochrome ? '#3b82f6' : ACCENT;
+  const accent = isMonochrome ? '#3b82f6' : ACCENT();
 
   return (
     <div className="flex-shrink-0 flex flex-col overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
       {/* Object name */}
-      <div className="p-2 border-b" style={{ borderColor: BORDER_COLOR }}>
+      <div className="p-2 border-b" style={{ borderColor: BORDER_COLOR() }}>
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded" style={{ background: selectedObject.color }} />
           <input
             value={selectedObject.name}
             onChange={e => onUpdateObject(selectedObject.id, { name: e.target.value })}
             className="flex-1 bg-transparent text-xs font-medium outline-none"
-            style={{ color: TEXT_PRIMARY }}
+            style={{ color: TEXT_PRIMARY() }}
           />
         </div>
       </div>
 
       {/* Transform */}
-      <div className="p-2 border-b" style={{ borderColor: BORDER_COLOR }}>
-        <h4 className="text-[9px] uppercase tracking-wider mb-1.5 font-semibold" style={{ color: TEXT_DIM }}>位置</h4>
+      <div className="p-2 border-b" style={{ borderColor: BORDER_COLOR() }}>
+        <h4 className="text-[9px] uppercase tracking-wider mb-1.5 font-semibold" style={{ color: TEXT_DIM() }}>位置</h4>
         <div className="grid grid-cols-3 gap-1">
           {(['x', 'y', 'z'] as const).map(axis => (
             <div key={axis} className="flex flex-col">
@@ -646,13 +683,13 @@ function PropertiesPanel({ selectedObject, onUpdateObject, isMonochrome }: {
                   onUpdateObject(selectedObject.id, { position: p });
                 }}
                 className="w-full px-1 py-0.5 rounded text-[13px] outline-none"
-                style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}` }}
+                style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
               />
             </div>
           ))}
         </div>
 
-        <h4 className="text-[9px] uppercase tracking-wider mb-1.5 mt-2 font-semibold" style={{ color: TEXT_DIM }}>旋转</h4>
+        <h4 className="text-[9px] uppercase tracking-wider mb-1.5 mt-2 font-semibold" style={{ color: TEXT_DIM() }}>旋转</h4>
         <div className="grid grid-cols-3 gap-1">
           {(['x', 'y', 'z'] as const).map(axis => (
             <div key={axis} className="flex flex-col">
@@ -668,13 +705,13 @@ function PropertiesPanel({ selectedObject, onUpdateObject, isMonochrome }: {
                   onUpdateObject(selectedObject.id, { rotation: r });
                 }}
                 className="w-full px-1 py-0.5 rounded text-[13px] outline-none"
-                style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}` }}
+                style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
               />
             </div>
           ))}
         </div>
 
-        <h4 className="text-[9px] uppercase tracking-wider mb-1.5 mt-2 font-semibold" style={{ color: TEXT_DIM }}>缩放</h4>
+        <h4 className="text-[9px] uppercase tracking-wider mb-1.5 mt-2 font-semibold" style={{ color: TEXT_DIM() }}>缩放</h4>
         <div className="grid grid-cols-3 gap-1">
           {(['x', 'y', 'z'] as const).map(axis => (
             <div key={axis} className="flex flex-col">
@@ -690,7 +727,7 @@ function PropertiesPanel({ selectedObject, onUpdateObject, isMonochrome }: {
                   onUpdateObject(selectedObject.id, { scale: s });
                 }}
                 className="w-full px-1 py-0.5 rounded text-[13px] outline-none"
-                style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}` }}
+                style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
               />
             </div>
           ))}
@@ -698,40 +735,40 @@ function PropertiesPanel({ selectedObject, onUpdateObject, isMonochrome }: {
       </div>
 
       {/* Material */}
-      <div className="p-2 border-b" style={{ borderColor: BORDER_COLOR }}>
-        <h4 className="text-[9px] uppercase tracking-wider mb-1.5 font-semibold" style={{ color: TEXT_DIM }}>材质颜色</h4>
+      <div className="p-2 border-b" style={{ borderColor: BORDER_COLOR() }}>
+        <h4 className="text-[9px] uppercase tracking-wider mb-1.5 font-semibold" style={{ color: TEXT_DIM() }}>材质颜色</h4>
         <div className="flex items-center gap-2">
           <input
             type="color"
             value={selectedObject.color}
             onChange={e => onUpdateObject(selectedObject.id, { color: e.target.value })}
             className="w-6 h-6 rounded cursor-pointer border-0"
-            style={{ background: BG_TERTIARY }}
+            style={{ background: BG_TERTIARY() }}
           />
           <input
             value={selectedObject.color}
             onChange={e => onUpdateObject(selectedObject.id, { color: e.target.value })}
             className="flex-1 px-2 py-0.5 rounded text-[13px] outline-none"
-            style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}` }}
+            style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
           />
         </div>
       </div>
 
       {/* Quick actions */}
       <div className="p-2">
-        <h4 className="text-[9px] uppercase tracking-wider mb-1.5 font-semibold" style={{ color: TEXT_DIM }}>快捷操作</h4>
+        <h4 className="text-[9px] uppercase tracking-wider mb-1.5 font-semibold" style={{ color: TEXT_DIM() }}>快捷操作</h4>
         <div className="space-y-0.5">
           <button
             onClick={() => onUpdateObject(selectedObject.id, { position: [0, 0, 0] })}
             className="w-full flex items-center gap-1.5 px-2 py-1 rounded text-[13px] transition-colors cursor-pointer"
-            style={{ background: BG_TERTIARY, color: TEXT_SECONDARY, border: `1px solid ${BORDER_COLOR}` }}
+            style={{ background: BG_TERTIARY(), color: TEXT_SECONDARY(), border: `1px solid ${BORDER_COLOR()}` }}
           >
             <RotateCw size={10} /> 归零位置
           </button>
           <button
             onClick={() => onUpdateObject(selectedObject.id, { scale: [1, 1, 1] })}
             className="w-full flex items-center gap-1.5 px-2 py-1 rounded text-[13px] transition-colors cursor-pointer"
-            style={{ background: BG_TERTIARY, color: TEXT_SECONDARY, border: `1px solid ${BORDER_COLOR}` }}
+            style={{ background: BG_TERTIARY(), color: TEXT_SECONDARY(), border: `1px solid ${BORDER_COLOR()}` }}
           >
             <Maximize2 size={10} /> 重置缩放
           </button>
@@ -767,7 +804,7 @@ function AIGenerationPanel({
   imageCount: number;
   setImageCount: (n: number) => void;
 }) {
-  const accent = isMonochrome ? '#3b82f6' : ACCENT;
+  const accent = isMonochrome ? '#3b82f6' : ACCENT();
   const [showNegPrompt, setShowNegPrompt] = useState(false);
   const [aiLayoutPrompt, setAiLayoutPrompt] = useState('');
   const [showResults, setShowResults] = useState(false);
@@ -786,7 +823,7 @@ function AIGenerationPanel({
             className="flex items-center gap-1 px-2 py-1 rounded-full text-[13px] transition-all cursor-pointer"
             style={{
               background: generationMode === tab.mode ? `${accent}20` : 'transparent',
-              color: generationMode === tab.mode ? accent : TEXT_DIM,
+              color: generationMode === tab.mode ? accent : TEXT_DIM(),
               border: generationMode === tab.mode ? `1px solid ${accent}40` : '1px solid transparent',
             }}
           >
@@ -797,7 +834,7 @@ function AIGenerationPanel({
         <button
           onClick={onCaptureScreenshot}
           className="flex items-center gap-1 px-2 py-1 rounded text-[13px] cursor-pointer ml-auto"
-          style={{ background: BG_TERTIARY, color: TEXT_SECONDARY, border: `1px solid ${BORDER_COLOR}` }}
+          style={{ background: BG_TERTIARY(), color: TEXT_SECONDARY(), border: `1px solid ${BORDER_COLOR()}` }}
         >
           <Camera size={10} /> 截图
         </button>
@@ -811,9 +848,9 @@ function AIGenerationPanel({
             onClick={() => { setStrengthMode(mode.key); if (!prompt.trim()) setPrompt(mode.promptHint); }}
             className="px-1.5 py-0.5 rounded text-[9px] transition-colors cursor-pointer"
             style={{
-              background: strengthMode === mode.key ? `${accent}20` : BG_TERTIARY,
-              color: strengthMode === mode.key ? accent : TEXT_DIM,
-              border: `1px solid ${strengthMode === mode.key ? accent : BORDER_COLOR}`,
+              background: strengthMode === mode.key ? `${accent}20` : BG_TERTIARY(),
+              color: strengthMode === mode.key ? accent : TEXT_DIM(),
+              border: `1px solid ${strengthMode === mode.key ? accent : BORDER_COLOR()}`,
             }}
             title={mode.desc}
           >
@@ -825,18 +862,18 @@ function AIGenerationPanel({
       {/* Aspect ratio and count */}
       <div className="flex items-center gap-2">
         <div className="flex items-center gap-1">
-          <span className="text-[9px]" style={{ color: TEXT_DIM }}>比例</span>
+          <span className="text-[9px]" style={{ color: TEXT_DIM() }}>比例</span>
           <select
             value={aspectRatio}
             onChange={e => setAspectRatio(e.target.value)}
             className="px-1.5 py-0.5 rounded text-[13px] outline-none cursor-pointer"
-            style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}` }}
+            style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
           >
             {ASPECT_RATIOS.map(r => <option key={r} value={r}>{r}</option>)}
           </select>
         </div>
         <div className="flex items-center gap-1">
-          <span className="text-[9px]" style={{ color: TEXT_DIM }}>数量</span>
+          <span className="text-[9px]" style={{ color: TEXT_DIM() }}>数量</span>
           <div className="flex gap-0.5">
             {[1, 4].map(n => (
               <button
@@ -844,9 +881,9 @@ function AIGenerationPanel({
                 onClick={() => setImageCount(n)}
                 className="px-2 py-0.5 rounded text-[13px] cursor-pointer"
                 style={{
-                  background: imageCount === n ? `${accent}20` : BG_TERTIARY,
-                  color: imageCount === n ? accent : TEXT_DIM,
-                  border: `1px solid ${imageCount === n ? accent : BORDER_COLOR}`,
+                  background: imageCount === n ? `${accent}20` : BG_TERTIARY(),
+                  color: imageCount === n ? accent : TEXT_DIM(),
+                  border: `1px solid ${imageCount === n ? accent : BORDER_COLOR()}`,
                 }}
               >
                 {n}张
@@ -864,13 +901,13 @@ function AIGenerationPanel({
           placeholder="描述你想要的画面效果..."
           rows={3}
           className="w-full px-2 py-1.5 rounded-lg text-[13px] outline-none resize-none"
-          style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}`, scrollbarWidth: 'thin' }}
+          style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}`, scrollbarWidth: 'thin' }}
           onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !isGenerating) onGenerate(); }}
         />
         <button
           onClick={() => setShowNegPrompt(!showNegPrompt)}
           className="text-[9px] text-left cursor-pointer"
-          style={{ color: TEXT_DIM }}
+          style={{ color: TEXT_DIM() }}
         >
           {showNegPrompt ? '▼' : '▶'} 反向提示词
         </button>
@@ -881,7 +918,7 @@ function AIGenerationPanel({
             placeholder="不想要的元素..."
             rows={2}
             className="w-full px-2 py-1.5 rounded-lg text-[13px] outline-none resize-none"
-            style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}` }}
+            style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
           />
         )}
       </div>
@@ -892,8 +929,8 @@ function AIGenerationPanel({
         disabled={isGenerating || !prompt.trim()}
         className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
         style={{
-          background: isGenerating ? BG_TERTIARY : accent,
-          color: isGenerating ? TEXT_DIM : '#000000',
+          background: isGenerating ? BG_TERTIARY() : accent,
+          color: isGenerating ? TEXT_DIM() : '#000000',
         }}
       >
         {isGenerating ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
@@ -916,7 +953,7 @@ function AIGenerationPanel({
                 <div
                   key={result.id}
                   className="rounded-lg overflow-hidden relative group cursor-pointer"
-                  style={{ border: `1px solid ${BORDER_COLOR}` }}
+                  style={{ border: `1px solid ${BORDER_COLOR()}` }}
                 >
                   <img src={result.url} alt="" className="w-full h-20 object-cover" />
                   <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
@@ -949,13 +986,13 @@ function AIAutoLayoutPanel({ onApplyLayout, isGenerating, isMonochrome, chatMode
   onSelectChatModel: (id: string) => void;
 }) {
   const [description, setDescription] = useState('');
-  const accent = isMonochrome ? '#3b82f6' : ACCENT;
+  const accent = isMonochrome ? '#3b82f6' : ACCENT();
 
   return (
     <div className="space-y-2 p-2">
       <div className="flex items-center gap-1.5">
         <Wand2 size={12} style={{ color: accent }} />
-        <span className="text-[13px] font-medium" style={{ color: TEXT_PRIMARY }}>AI 自动布景</span>
+        <span className="text-[13px] font-medium" style={{ color: TEXT_PRIMARY() }}>AI 自动布景</span>
       </div>
       <textarea
         value={description}
@@ -963,14 +1000,14 @@ function AIAutoLayoutPanel({ onApplyLayout, isGenerating, isMonochrome, chatMode
         placeholder="描述你想要的场景，例如：做一个红色年轻化品牌快闪店，中央有产品展示台，左侧是便利店货架..."
         rows={4}
         className="w-full px-2 py-1.5 rounded-lg text-[13px] outline-none resize-none"
-        style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}`, scrollbarWidth: 'thin' }}
+        style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}`, scrollbarWidth: 'thin' }}
       />
       {chatModels.length > 0 ? (
         <select
           value={selectedChatModel}
           onChange={e => onSelectChatModel(e.target.value)}
           className="w-full px-2 py-1 rounded-lg text-[11px] outline-none cursor-pointer"
-          style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}` }}
+          style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
         >
           {chatModels.map(m => (
             <option key={m.id} value={m.id}>
@@ -979,17 +1016,17 @@ function AIAutoLayoutPanel({ onApplyLayout, isGenerating, isMonochrome, chatMode
           ))}
         </select>
       ) : (
-        <p className="text-[10px] py-1" style={{ color: TEXT_DIM }}>请先在管理员后台配置 LLM 模型</p>
+        <p className="text-[10px] py-1" style={{ color: TEXT_DIM() }}>请先在管理员后台配置 LLM 模型</p>
       )}
       <div className="space-y-1">
-        <p className="text-[9px]" style={{ color: TEXT_DIM }}>快速模板：</p>
+        <p className="text-[9px]" style={{ color: TEXT_DIM() }}>快速模板：</p>
         <div className="flex flex-wrap gap-1">
           {['品牌快闪店', '产品展台', '便利店场景', '美妆柜台', '科技展位', '食品货架'].map(tpl => (
             <button
               key={tpl}
               onClick={() => setDescription(prev => prev + (prev ? '，' : '') + tpl)}
               className="px-1.5 py-0.5 rounded-full text-[9px] cursor-pointer transition-colors"
-              style={{ background: BG_TERTIARY, color: TEXT_SECONDARY, border: `1px solid ${BORDER_COLOR}` }}
+              style={{ background: BG_TERTIARY(), color: TEXT_SECONDARY(), border: `1px solid ${BORDER_COLOR()}` }}
             >
               {tpl}
             </button>
@@ -1021,20 +1058,20 @@ function AssetManagementPanel({ onSaveScene, onLoadScene, onExportScene, onDelet
   onLoadById: (id: string) => void;
   isMonochrome?: boolean;
 }) {
-  const accent = isMonochrome ? '#3b82f6' : ACCENT;
+  const accent = isMonochrome ? '#3b82f6' : ACCENT();
   const [showSceneList, setShowSceneList] = useState(false);
 
   return (
     <div className="space-y-1.5 p-2">
       <div className="flex items-center gap-1.5">
         <Archive size={12} style={{ color: accent }} />
-        <span className="text-[13px] font-medium" style={{ color: TEXT_PRIMARY }}>资产管理</span>
+        <span className="text-[13px] font-medium" style={{ color: TEXT_PRIMARY() }}>资产管理</span>
       </div>
 
       <button
         onClick={onSaveScene}
         className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-[13px] transition-colors cursor-pointer"
-        style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}` }}
+        style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
       >
         <Save size={10} style={{ color: accent }} /> 保存当前场景
       </button>
@@ -1042,7 +1079,7 @@ function AssetManagementPanel({ onSaveScene, onLoadScene, onExportScene, onDelet
       <button
         onClick={() => setShowSceneList(!showSceneList)}
         className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-[13px] transition-colors cursor-pointer"
-        style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}` }}
+        style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
       >
         <FolderOpen size={10} style={{ color: accent }} /> 已保存场景 ({scenes.length})
       </button>
@@ -1050,18 +1087,18 @@ function AssetManagementPanel({ onSaveScene, onLoadScene, onExportScene, onDelet
       {showSceneList && (
         <div className="space-y-0.5 max-h-40 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
           {scenes.length === 0 ? (
-            <p className="text-[13px] text-center py-2" style={{ color: TEXT_DIM }}>暂无保存的场景</p>
+            <p className="text-[13px] text-center py-2" style={{ color: TEXT_DIM() }}>暂无保存的场景</p>
           ) : (
             scenes.map(scene => (
-              <div key={scene.id} className="flex items-center gap-1.5 px-2 py-1 rounded group" style={{ background: BG_TERTIARY }}>
-                <LayoutGrid size={9} style={{ color: TEXT_DIM }} />
-                <button onClick={() => onLoadById(scene.id)} className="text-[13px] flex-1 text-left cursor-pointer" style={{ color: TEXT_PRIMARY }}>
+              <div key={scene.id} className="flex items-center gap-1.5 px-2 py-1 rounded group" style={{ background: BG_TERTIARY() }}>
+                <LayoutGrid size={9} style={{ color: TEXT_DIM() }} />
+                <button onClick={() => onLoadById(scene.id)} className="text-[13px] flex-1 text-left cursor-pointer" style={{ color: TEXT_PRIMARY() }}>
                   {scene.name}
                 </button>
-                <button onClick={() => onDuplicateScene(scene.id)} className="p-0.5 opacity-0 group-hover:opacity-100 cursor-pointer" style={{ color: TEXT_DIM }} title="复制场景">
+                <button onClick={() => onDuplicateScene(scene.id)} className="p-0.5 opacity-0 group-hover:opacity-100 cursor-pointer" style={{ color: TEXT_DIM() }} title="复制场景">
                   <Copy size={9} />
                 </button>
-                <button onClick={() => onDeleteScene(scene.id)} className="p-0.5 opacity-0 group-hover:opacity-100 cursor-pointer" style={{ color: TEXT_DIM }}>
+                <button onClick={() => onDeleteScene(scene.id)} className="p-0.5 opacity-0 group-hover:opacity-100 cursor-pointer" style={{ color: TEXT_DIM() }}>
                   <Trash2 size={9} />
                 </button>
               </div>
@@ -1073,7 +1110,7 @@ function AssetManagementPanel({ onSaveScene, onLoadScene, onExportScene, onDelet
       <button
         onClick={onExportScene}
         className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-[13px] transition-colors cursor-pointer"
-        style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}` }}
+        style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
       >
         <Download size={10} style={{ color: accent }} /> 导出场景文件
       </button>
@@ -1088,14 +1125,14 @@ function LightEditorPanel({ lights, onLightsChange, isMonochrome }: {
   onLightsChange: (lights: SceneLight[]) => void;
   isMonochrome?: boolean;
 }) {
-  const accent = isMonochrome ? '#3b82f6' : ACCENT;
+  const accent = isMonochrome ? '#3b82f6' : ACCENT();
   const [expandedLight, setExpandedLight] = useState<string | null>(null);
   const LIGHT_TYPE_LABELS: Record<SceneLight['type'], string> = { ambient: '环境光', directional: '方向光', point: '点光', spot: '聚光灯' };
 
   return (
     <div className="space-y-1.5 p-2">
       <div className="flex items-center justify-between">
-        <span className="text-[9px] uppercase tracking-wider font-semibold" style={{ color: TEXT_DIM }}>灯光设置</span>
+        <span className="text-[9px] uppercase tracking-wider font-semibold" style={{ color: TEXT_DIM() }}>灯光设置</span>
         <button
           onClick={() => onLightsChange([...lights, {
             id: `light_${Date.now()}`,
@@ -1113,10 +1150,10 @@ function LightEditorPanel({ lights, onLightsChange, isMonochrome }: {
       </div>
       {lights.map(light => (
         <div key={light.id}>
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer" style={{ background: BG_TERTIARY }} onClick={() => setExpandedLight(expandedLight === light.id ? null : light.id)}>
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer" style={{ background: BG_TERTIARY() }} onClick={() => setExpandedLight(expandedLight === light.id ? null : light.id)}>
             <Lightbulb size={10} style={{ color: light.color }} />
-            <span className="text-[13px] flex-1 truncate" style={{ color: TEXT_PRIMARY }}>{light.name}</span>
-            <span className="text-[9px] px-1 py-0.5 rounded" style={{ background: BG_HOVER, color: TEXT_DIM }}>{LIGHT_TYPE_LABELS[light.type]}</span>
+            <span className="text-[13px] flex-1 truncate" style={{ color: TEXT_PRIMARY() }}>{light.name}</span>
+            <span className="text-[9px] px-1 py-0.5 rounded" style={{ background: BG_HOVER(), color: TEXT_DIM() }}>{LIGHT_TYPE_LABELS[light.type]}</span>
             <input
               type="range" min={0} max={3} step={0.1}
               value={light.intensity}
@@ -1131,31 +1168,31 @@ function LightEditorPanel({ lights, onLightsChange, isMonochrome }: {
               className="w-4 h-4 rounded cursor-pointer border-0"
               onClick={e => e.stopPropagation()}
             />
-            <button onClick={e => { e.stopPropagation(); onLightsChange(lights.filter(l => l.id !== light.id)); }} className="cursor-pointer" style={{ color: TEXT_DIM }}>
+            <button onClick={e => { e.stopPropagation(); onLightsChange(lights.filter(l => l.id !== light.id)); }} className="cursor-pointer" style={{ color: TEXT_DIM() }}>
               <Trash2 size={9} />
             </button>
-            {expandedLight === light.id ? <ChevronDown size={9} style={{ color: TEXT_DIM }} /> : <ChevronRight size={9} style={{ color: TEXT_DIM }} />}
+            {expandedLight === light.id ? <ChevronDown size={9} style={{ color: TEXT_DIM() }} /> : <ChevronRight size={9} style={{ color: TEXT_DIM() }} />}
           </div>
           {expandedLight === light.id && (
-            <div className="px-2 py-1.5 space-y-1.5 mt-0.5 rounded-b" style={{ background: BG_HOVER }}>
+            <div className="px-2 py-1.5 space-y-1.5 mt-0.5 rounded-b" style={{ background: BG_HOVER() }}>
               {/* Light name */}
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] w-8" style={{ color: TEXT_DIM }}>名称</span>
+                <span className="text-[9px] w-8" style={{ color: TEXT_DIM() }}>名称</span>
                 <input
                   value={light.name}
                   onChange={e => onLightsChange(lights.map(l => l.id === light.id ? { ...l, name: e.target.value } : l))}
                   className="flex-1 px-1.5 py-0.5 rounded text-[13px] outline-none"
-                  style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}` }}
+                  style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
                 />
               </div>
               {/* Light type */}
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] w-8" style={{ color: TEXT_DIM }}>类型</span>
+                <span className="text-[9px] w-8" style={{ color: TEXT_DIM() }}>类型</span>
                 <select
                   value={light.type}
                   onChange={e => onLightsChange(lights.map(l => l.id === light.id ? { ...l, type: e.target.value as SceneLight['type'] } : l))}
                   className="flex-1 px-1.5 py-0.5 rounded text-[13px] outline-none cursor-pointer"
-                  style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}` }}
+                  style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
                 >
                   <option value="ambient">环境光</option>
                   <option value="directional">方向光</option>
@@ -1166,7 +1203,7 @@ function LightEditorPanel({ lights, onLightsChange, isMonochrome }: {
               {/* Light position */}
               {light.type !== 'ambient' && (
                 <div className="space-y-1">
-                  <span className="text-[9px]" style={{ color: TEXT_DIM }}>位置</span>
+                  <span className="text-[9px]" style={{ color: TEXT_DIM() }}>位置</span>
                   <div className="grid grid-cols-3 gap-1">
                     {(['x', 'y', 'z'] as const).map(axis => {
                       const idx = { x: 0, y: 1, z: 2 }[axis];
@@ -1182,7 +1219,7 @@ function LightEditorPanel({ lights, onLightsChange, isMonochrome }: {
                               onLightsChange(lights.map(l => l.id === light.id ? { ...l, position: p } : l));
                             }}
                             className="w-full px-1 py-0.5 rounded text-[13px] outline-none"
-                            style={{ background: BG_TERTIARY, color: TEXT_PRIMARY, border: `1px solid ${BORDER_COLOR}` }}
+                            style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
                           />
                         </div>
                       );
@@ -1193,13 +1230,13 @@ function LightEditorPanel({ lights, onLightsChange, isMonochrome }: {
               {/* Spot angle */}
               {light.type === 'spot' && (
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[9px] w-8" style={{ color: TEXT_DIM }}>角度</span>
+                  <span className="text-[9px] w-8" style={{ color: TEXT_DIM() }}>角度</span>
                   <input
                     type="range" min={10} max={90} step={5} value={light.angle ?? 45}
                     onChange={e => onLightsChange(lights.map(l => l.id === light.id ? { ...l, angle: parseInt(e.target.value) } : l))}
                     className="flex-1 h-1 accent-amber-500"
                   />
-                  <span className="text-[9px]" style={{ color: TEXT_DIM }}>{light.angle ?? 45}°</span>
+                  <span className="text-[9px]" style={{ color: TEXT_DIM() }}>{light.angle ?? 45}°</span>
                 </div>
               )}
             </div>
@@ -1213,6 +1250,9 @@ function LightEditorPanel({ lights, onLightsChange, isMonochrome }: {
 /* ========== MAIN COMPONENT ========== */
 
 export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }: SceneStudioProps) {
+  // Sync theme ref so child components get correct colors
+  _themeRef.mono = !!isMonochrome;
+
   // Scene state
   const [objects, setObjects] = useState<SceneObject[]>([]);
   const [lights, setLights] = useState<SceneLight[]>([
@@ -1360,7 +1400,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
     return { x: 40, y: 40 };
   });
 
-  const accent = isMonochrome ? '#3b82f6' : ACCENT;
+  const accent = isMonochrome ? '#3b82f6' : ACCENT();
 
   // Keyboard shortcut: Ctrl+Z / Ctrl+Shift+Z
   useEffect(() => {
@@ -1927,7 +1967,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
 
   // Tab button style helper
   const tabStyle = (isActive: boolean) => ({
-    color: isActive ? accent : TEXT_DIM,
+    color: isActive ? accent : TEXT_DIM(),
     borderBottom: isActive ? `2px solid ${accent}` : '2px solid transparent',
     background: 'transparent' as const,
   });
@@ -1970,7 +2010,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
         >
           <div className="flex items-center gap-2">
             <Boxes size={14} style={{ color: accent }} />
-            <span className="text-sm font-medium" style={{ color: isMonochrome ? '#1a1a1a' : '#d4af37' }}>3D构图</span>
+            <span className="text-sm font-medium" style={{ color: isMonochrome ? '#3b82f6' : '#d4af37' }}>3D构图</span>
             <span className="text-xs" style={{ color: isMonochrome ? '#6b7280' : '#666' }}>{sceneName}</span>
           </div>
           <div className="flex items-center gap-1">
@@ -2081,7 +2121,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer"
                 style={{
                   background: rightTab === 'generate' ? (isMonochrome ? '#e5e7eb' : '#d4af3730') : 'transparent',
-                  color: rightTab === 'generate' ? (isMonochrome ? '#1a1a1a' : '#d4af37') : (isMonochrome ? '#666' : '#aaa'),
+                  color: rightTab === 'generate' ? (isMonochrome ? '#3b82f6' : '#d4af37') : (isMonochrome ? '#666' : '#aaa'),
                   border: rightTab === 'generate' ? (isMonochrome ? '1px solid #d1d5db' : '1px solid #d4af3750') : '1px solid transparent',
                 }}
                 onClick={() => setRightTab('generate')}
@@ -2094,7 +2134,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer"
                 style={{
                   background: rightTab === 'assets' && screenshotUrl ? (isMonochrome ? '#e5e7eb' : '#d4af3730') : 'transparent',
-                  color: rightTab === 'assets' && screenshotUrl ? (isMonochrome ? '#1a1a1a' : '#d4af37') : (isMonochrome ? '#666' : '#aaa'),
+                  color: rightTab === 'assets' && screenshotUrl ? (isMonochrome ? '#3b82f6' : '#d4af37') : (isMonochrome ? '#666' : '#aaa'),
                   border: rightTab === 'assets' && screenshotUrl ? (isMonochrome ? '1px solid #d1d5db' : '1px solid #d4af3750') : '1px solid transparent',
                 }}
                 onClick={() => { captureScreenshot(); setRightTab('assets'); }}
@@ -2107,7 +2147,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer"
                 style={{
                   background: rightTab === 'layout' ? (isMonochrome ? '#e5e7eb' : '#d4af3730') : 'transparent',
-                  color: rightTab === 'layout' ? (isMonochrome ? '#1a1a1a' : '#d4af37') : (isMonochrome ? '#666' : '#aaa'),
+                  color: rightTab === 'layout' ? (isMonochrome ? '#3b82f6' : '#d4af37') : (isMonochrome ? '#666' : '#aaa'),
                   border: rightTab === 'layout' ? (isMonochrome ? '1px solid #d1d5db' : '1px solid #d4af3750') : '1px solid transparent',
                 }}
                 onClick={() => setRightTab('layout')}
@@ -2129,7 +2169,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
               {generationResults.length > 0 && (
                 <button
                   className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer"
-                  style={{ background: isMonochrome ? '#e5e7eb' : '#d4af3720', color: isMonochrome ? '#1a1a1a' : '#d4af37' }}
+                  style={{ background: isMonochrome ? '#dbeafe' : '#d4af3720', color: isMonochrome ? '#3b82f6' : '#d4af37' }}
                   onClick={() => addImageToCanvas(generationResults[0].url)}
                 >
                   <Plus size={14} />
@@ -2163,8 +2203,8 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                   key={tab.key}
                   className="flex-1 flex items-center justify-center gap-1 py-2.5 text-sm font-medium transition-colors cursor-pointer"
                   style={{
-                    color: rightTab === tab.key ? (isMonochrome ? '#1a1a1a' : '#d4af37') : (isMonochrome ? '#999' : '#777'),
-                    borderBottom: rightTab === tab.key ? (isMonochrome ? '2px solid #1a1a1a' : `2px solid ${accent}`) : '2px solid transparent',
+                    color: rightTab === tab.key ? (isMonochrome ? '#3b82f6' : '#d4af37') : (isMonochrome ? '#999' : '#777'),
+                    borderBottom: rightTab === tab.key ? (isMonochrome ? '2px solid #3b82f6' : `2px solid ${accent}`) : '2px solid transparent',
                     background: rightTab === tab.key ? (isMonochrome ? '#f3f4f6' : '#d4af3710') : 'transparent',
                   }}
                   onClick={() => setRightTab(tab.key)}
@@ -2391,7 +2431,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                         ))}
                       </select>
                     ) : (
-                      <p className="text-[11px] py-1" style={{ color: TEXT_DIM }}>请先在管理员后台配置图像模型</p>
+                      <p className="text-[11px] py-1" style={{ color: TEXT_DIM() }}>请先在管理员后台配置图像模型</p>
                     )}
                   </div>
                   {/* Generation mode */}
@@ -2512,7 +2552,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                   {/* Generate button */}
                   <button
                     className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer disabled:opacity-50"
-                    style={{ background: isMonochrome ? '#1a1a1a' : '#d4af37', color: isMonochrome ? '#fff' : '#111' }}
+                    style={{ background: isMonochrome ? '#3b82f6' : '#d4af37', color: '#fff' }}
                     onClick={handleGenerate}
                     disabled={isGenerating || !prompt.trim()}
                   >
