@@ -889,7 +889,7 @@ async function parseSSEToJSON(resp: Response): Promise<Record<string, unknown>> 
 function parseSSETextToJSON(text: string): Record<string, unknown> {
   const lines = text.split('\n');
   let fullContent = '';
-  let toolCalls: Array<{ id?: string; type?: string; function: { name: string; arguments: string } }> = [];
+  const toolCalls: Array<{ id?: string; type?: string; function: { name: string; arguments: string } }> = [];
   let lastFinishReason = '';
   let model = '';
 

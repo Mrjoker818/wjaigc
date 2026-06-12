@@ -450,7 +450,7 @@ async function compositeAIResultToOriginal(
       // 蒙版边界羽化：20像素过渡区
       // 计算到蒙版边界的距离
       const featherRadius = 20;
-      let minDistToEdge = featherRadius;
+      const minDistToEdge = featherRadius;
       // 简化：直接用蒙版亮度作为混合权重
       // maskBrightness: 0=黑(保留原图) 255=白(AI结果)
       let blend: number;

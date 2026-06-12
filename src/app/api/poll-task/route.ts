@@ -525,7 +525,7 @@ export async function POST(request: NextRequest) {
             parseVideoPollResponse,
           } = await import('@/lib/video-api');
 
-          let pollReq = buildVideoPollRequest(
+          const pollReq = buildVideoPollRequest(
             (videoProfile || 'rest-generic') as any,
             vBaseUrl,
             vApiKey || '',

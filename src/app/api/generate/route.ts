@@ -417,7 +417,7 @@ export async function POST(request: NextRequest) {
       );
       const isGeminiImageRoute = profile.id === 'gemini-image';
 
-      let effectiveSize = currentModelConfig.supportedSizes.includes(requestedSize) 
+      const effectiveSize = currentModelConfig.supportedSizes.includes(requestedSize) 
         ? requestedSize 
         : currentModelConfig.supportedSizes[0] || '1:1';
 

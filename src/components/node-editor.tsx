@@ -943,7 +943,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
         })()
       : null;
     setWf(prev => {
-      let autoConns: WorkflowConnection[] = [];
+      const autoConns: WorkflowConnection[] = [];
       // 生图节点 → 自动输出节点连线
       if (outputNode) {
         const genOutPort = node.ports.find(p => p.direction === 'out' && p.type === 'image');

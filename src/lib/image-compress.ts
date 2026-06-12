@@ -43,7 +43,7 @@ export async function compressImage(
   const img = await loadImage(source);
 
   // 2. 计算目标尺寸
-  let { width, height } = fitSize(img.naturalWidth || img.width, img.naturalHeight || img.height, maxWidth, maxHeight);
+  const { width, height } = fitSize(img.naturalWidth || img.width, img.naturalHeight || img.height, maxWidth, maxHeight);
 
   // 3. Canvas 绘制
   const canvas = document.createElement('canvas');

@@ -1115,7 +1115,7 @@ function groupPathsByFill(svg: string): string {
   const elements: Array<{ fill: string; xml: string }> = [];
   const pathRegex = /<path\s+([^>]*)\/>/g;
   let match: RegExpExecArray | null;
-  let lastIndex = 0;
+  const lastIndex = 0;
 
   // Simple approach: find all paths with their fill, group consecutive same-fill paths
   const paths: Array<{ fill: string; xml: string; index: number }> = [];
@@ -1160,8 +1160,8 @@ function groupPathsByFill(svg: string): string {
   }
 
   // Insert grouped paths
-  let groupIdx = 0;
-  let insertOffset = 0;
+  const groupIdx = 0;
+  const insertOffset = 0;
   const insertPoint = paths[0].index;
 
   const groupXml = groups.map((g, idx) => {
@@ -1488,7 +1488,7 @@ async function compressImage(
   const quality = params.quality ?? 80;
   const format = params.format || 'webp';
 
-  let pipeline = sharp(inputBuffer);
+  const pipeline = sharp(inputBuffer);
   const metadata = await sharp(inputBuffer).metadata();
   const width = metadata.width || 0;
   const height = metadata.height || 0;

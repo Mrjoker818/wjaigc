@@ -3053,7 +3053,7 @@ UI设计规范：
     setIsLoading(true);
 
     try {
-      let selectedModel = isThinkingMode 
+      const selectedModel = isThinkingMode 
         ? (model.includes('thinking') ? model : `${model}-thinking`)
         : model;
 
@@ -3304,7 +3304,7 @@ ${imageDescriptions}
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-      let assistantMessageId = `assistant-${Date.now()}`;
+      const assistantMessageId = `assistant-${Date.now()}`;
       let assistantContent = '';
 
       setMessages(prev => [...prev, {
@@ -3833,7 +3833,7 @@ ${imageDescriptions}
       const result = data.optimized || '';
       
       // 清理思考过程标签
-      let cleaned = result
+      const cleaned = result
         .replace(/<think[\s\S]*?<\/think>/gi, '')
         .replace(/<thinking[\s\S]*?<\/thinking>/gi, '')
         .replace(/\*\*[^*]*\*\*/g, '')

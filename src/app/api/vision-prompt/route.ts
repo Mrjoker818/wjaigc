@@ -265,7 +265,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Admin provider config not found' }, { status: 400 });
       }
       visionApiKey = provider.apiKey;
-      let baseUrl = normalizeApiBaseUrl(provider.baseUrl);
+      const baseUrl = normalizeApiBaseUrl(provider.baseUrl);
       visionBaseUrl = baseUrl;
       resolvedProviderPreset = providerPreset || provider.providerPreset;
       if (!visionModel && provider.selectedModels?.length) {

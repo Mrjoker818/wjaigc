@@ -224,7 +224,7 @@ export async function executeAgentLoop(
     }
 
     // 执行每个工具调用
-    let allResults: string[] = [];
+    const allResults: string[] = [];
     for (const toolCall of llmResponse.toolCalls) {
       const tool = getTool(toolCall.name);
       if (!tool) {

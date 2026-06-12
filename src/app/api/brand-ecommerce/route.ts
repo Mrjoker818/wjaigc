@@ -791,7 +791,7 @@ export async function POST(request: NextRequest) {
                 }
 
                 const { body: apiBody, endpoint: apiEndpoint } = adjustRequestForProfile(reqBody, compatProfile, { hasImage: allImageUrls.length > 0 });
-                let path = apiEndpoint || '/images/generations';
+                const path = apiEndpoint || '/images/generations';
 
                 const headers: Record<string, string> = {
                   'Content-Type': 'application/json',

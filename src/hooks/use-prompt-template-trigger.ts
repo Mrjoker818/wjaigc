@@ -3,7 +3,7 @@
  * 用于在 textarea/input 中实现输入 / 触发模板列表的功能
  */
 
-import { useState, useCallback, useRef, type KeyboardEvent, type ChangeEvent, type RefObject } from 'react';
+import { useState, useCallback, useRef, useEffect, type KeyboardEvent, type ChangeEvent, type RefObject } from 'react';
 import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
 
 export interface UsePromptTemplateTriggerOptions {
@@ -46,7 +46,9 @@ export function usePromptTemplateTrigger({
   
   // 保存原始 onChange 的 ref
   const originalValueRef = useRef(value);
-  originalValueRef.current = value;
+  useEffect(() => {
+    originalValueRef.current = value;
+  }, [value]);
 
   const closePopup = useCallback(() => {
     setShowPopup(false);

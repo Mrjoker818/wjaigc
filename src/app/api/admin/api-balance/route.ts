@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
       processedUrls.add(baseUrl);
 
       const firstProvider = groupProviders[0];
-      let balanceInfo: BalanceInfo = {
+      const balanceInfo: BalanceInfo = {
         providerId: firstProvider.id,
         providerName: firstProvider.name,
         providerType: groupProviders.map(p => p.type).join(' + '),

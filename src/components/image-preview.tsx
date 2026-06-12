@@ -190,7 +190,7 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
         if (r2 > 1) continue;
         const nz = Math.sqrt(Math.max(0, 1 - r2));
 
-        let rx = nx * cosY + nz * sinY;
+        const rx = nx * cosY + nz * sinY;
         let rz = -nx * sinY + nz * cosY;
         let ry = ny;
         const ry2 = ry * cosX - rz * sinX;

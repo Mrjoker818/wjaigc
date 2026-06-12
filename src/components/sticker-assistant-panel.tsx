@@ -463,7 +463,7 @@ async function removeBackgroundLocal(imageUrl: string): Promise<string | null> {
         const blurRadius = 2; // 半径2 = 5px宽
         const blurPasses = 4; // 4次迭代，近似σ≈2.4的高斯
         let bSrc = new Float32Array(mask);
-        let bDst = new Float32Array(width * height);
+        const bDst = new Float32Array(width * height);
 
         for (let pass = 0; pass < blurPasses; pass++) {
           // 水平方向

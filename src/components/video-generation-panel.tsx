@@ -931,15 +931,20 @@ export default function VideoGenerationPanel({
 
       {/* === 摄像机控制 === */}
       {mode !== 'video-extend' && (
-        <div className="px-3 pt-3">
+        <div className="px-3 pt-4 pb-2">
           <button
             onClick={() => setShowCameraPanel(!showCameraPanel)}
-            className="flex items-center gap-2 text-xs cursor-pointer"
-            style={{ color: cameraControl ? accentColor : '#888' }}
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-md border transition-colors ${
+              showCameraPanel ? 'border-amber-500/50' : 'border-gray-700 hover:border-amber-500/30'
+            }`}
+            style={{ background: inputBg }}
           >
-            <Video className="w-4 h-4" />
-            摄像机控制
-            {cameraControl && <span className="text-[10px] opacity-60">({cameraControl.type.replace('_', ' ')})</span>}
+            <span className="flex items-center gap-2 text-xs">
+              <Video className="w-4 h-4" style={{ color: cameraControl ? accentColor : '#888' }} />
+              <span className="text-gray-300">摄像机控制</span>
+              {cameraControl && <span className="text-[10px] opacity-60">({cameraControl.type.replace('_', ' ')})</span>}
+            </span>
+            <ChevronDown className={`w-3.5 h-3.5 text-gray-500 transition-transform ${showCameraPanel ? 'rotate-180' : ''}`} />
           </button>
           {showCameraPanel && (
             <div className="mt-2 p-2 rounded-md space-y-2" style={{ background: inputBg }}>
@@ -1002,15 +1007,20 @@ export default function VideoGenerationPanel({
 
       {/* === 角色一致性 === */}
       {mode !== 'video-extend' && (
-        <div className="px-3 pt-3">
+        <div className="px-3 pt-3 pb-2">
           <button
             onClick={() => setShowCharacterPanel(!showCharacterPanel)}
-            className="flex items-center gap-2 text-xs cursor-pointer"
-            style={{ color: characterReferences.length > 0 ? accentColor : '#888' }}
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-md border transition-colors ${
+              showCharacterPanel ? 'border-amber-500/50' : 'border-gray-700 hover:border-amber-500/30'
+            }`}
+            style={{ background: inputBg }}
           >
-            <Users className="w-4 h-4" />
-            角色一致性
-            {characterReferences.length > 0 && <span className="text-[10px] opacity-60">({characterReferences.length}张参考图)</span>}
+            <span className="flex items-center gap-2 text-xs">
+              <Users className="w-4 h-4" style={{ color: characterReferences.length > 0 ? accentColor : '#888' }} />
+              <span className="text-gray-300">角色一致性</span>
+              {characterReferences.length > 0 && <span className="text-[10px] opacity-60">({characterReferences.length}张参考图)</span>}
+            </span>
+            <ChevronDown className={`w-3.5 h-3.5 text-gray-500 transition-transform ${showCharacterPanel ? 'rotate-180' : ''}`} />
           </button>
           {showCharacterPanel && (
             <div className="mt-2 p-2 rounded-md space-y-2" style={{ background: inputBg }}>
@@ -1068,19 +1078,19 @@ export default function VideoGenerationPanel({
 
       {/* === 运动笔刷 === */}
       {mode === 'image2video-first' && firstFrameUrl && (
-        <div className="px-3 pt-2">
+        <div className="px-3 pt-3 pb-2">
           <button
             onClick={() => setShowMotionBrush(!showMotionBrush)}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-md border transition-colors ${
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-md border transition-colors ${
               showMotionBrush ? 'border-amber-500/50' : 'border-gray-700 hover:border-amber-500/30'
             }`}
             style={{ background: inputBg }}
           >
             <span className="flex items-center gap-2 text-xs">
-              <Paintbrush className="w-3.5 h-3.5 text-amber-500" />
+              <Paintbrush className="w-4 h-4" style={{ color: motionBrush ? accentColor : '#888' }} />
               <span className="text-gray-300">运动笔刷</span>
               {motionBrush && (
-                <span className="text-[10px] text-amber-500">
+                <span className="text-[10px] opacity-60">
                   ({motionBrush.trajectories.length} 轨迹)
                 </span>
               )}

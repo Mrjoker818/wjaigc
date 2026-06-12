@@ -189,7 +189,7 @@ function MultiAngleSpherePreview({
         const rz = ny * sinP + rz2 * cosP;
 
         // Spherical to UV (equirectangular)
-        let u = Math.atan2(rx, rz) / (2 * Math.PI) + 0.5;
+        const u = Math.atan2(rx, rz) / (2 * Math.PI) + 0.5;
         const v = Math.asin(Math.max(-1, Math.min(1, ry))) / Math.PI + 0.5;
 
         // Sample texture
@@ -6201,7 +6201,7 @@ export function InfiniteCanvas({
       const scaleX = origW / (displayW * zoom);
       const scaleY = origH / (displayH * zoom);
 
-      let newPadding = { ...startPadding };
+      const newPadding = { ...startPadding };
       const step = 8; // 对齐到8的倍数
 
       // 根据拖拽方向更新 padding
@@ -6476,7 +6476,7 @@ export function InfiniteCanvas({
         if (!data.success) {
           console.error('Image edit failed:', data.error);
           // 后端已根据 editMode 返回不同错误消息
-          let errorMessage = translateErrorFrontend(data.error || '编辑失败');
+          const errorMessage = translateErrorFrontend(data.error || '编辑失败');
           updateProcessingFrame(placeholderId, {
             progress: -1,
             status: `❌ ${errorMessage}`,

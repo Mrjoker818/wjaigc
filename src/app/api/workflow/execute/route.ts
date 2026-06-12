@@ -622,7 +622,7 @@ async function executeAsyncTask(
     // 合并所有图片URL到imageUrls数组
     const allImageUrls: string[] = [];
     let firstImageUrl = '';
-    let mergedOutput: Record<string, unknown> = {};
+    const mergedOutput: Record<string, unknown> = {};
 
     for (const result of completedResults) {
       const parsed = parseApiOutput(nodeType, result);
