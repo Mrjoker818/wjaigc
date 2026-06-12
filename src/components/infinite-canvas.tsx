@@ -388,6 +388,8 @@ interface InfiniteCanvasProps {
   onToggleFavorites?: () => void;
   /** Callback to open prompt template panel */
   onTogglePromptTemplate?: () => void;
+  /** Callback to open Logo Generator Skill panel */
+  onToggleLogoSkill?: () => void;
   /** Switch to node editor mode */
   onSwitchToNodeMode?: () => void;
   /** Switch to workflow hub */
@@ -495,6 +497,7 @@ export function InfiniteCanvas({
   onAddToFavorites,
   onToggleFavorites,
   onTogglePromptTemplate,
+  onToggleLogoSkill,
   onSwitchToNodeMode,
   onSwitchToWorkflowHub,
   onSwitchToDashboard,
@@ -13040,6 +13043,16 @@ export function InfiniteCanvas({
         >
           <Building2 className={`h-4 w-4 ${mIcon.building}`} />
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">品牌工厂</span>
+        </button>
+
+        {/* Logo Generator Pro - Logo生成器 */}
+        <button
+          onClick={() => onToggleLogoSkill?.()}
+          className={`tool-btn p-2 rounded-full transition-all relative group ${isMonochrome ? 'text-violet-600 hover:text-violet-500 hover:bg-violet-50' : 'text-gold hover:text-gold-light hover:bg-gold/10'}`}
+          title="Logo生成器 Pro"
+        >
+          <PenTool className="h-4 w-4" />
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">Logo Pro</span>
         </button>
 
         {/* 3D构图画布 Pro */}

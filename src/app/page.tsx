@@ -23,6 +23,7 @@ import { ProjectDataPanel } from '@/components/project-data-panel';
 import { HelpGuide } from '@/components/help-guide';
 import { FavoritesPanel } from '@/components/favorites-panel';
 import PromptTemplatePanel from '@/components/prompt-template-panel';
+import LogoSkillPanel from '@/components/logo-skill-panel';
 import { taskEventsClient } from '@/lib/task-events-client';
 
 interface FavoriteItem {
@@ -206,6 +207,7 @@ function CanvasApp() {
   const [showHelpGuide, setShowHelpGuide] = useState(false);
   const [showFavorites, setShowFavorites] = useState(false);
   const [showPromptTemplate, setShowPromptTemplate] = useState(false);
+  const [showLogoSkill, setShowLogoSkill] = useState(false);
   const [favoriteParams, setFavoriteParams] = useState<{
     prompt: string;
     negativePrompt?: string;
@@ -2829,6 +2831,7 @@ function CanvasApp() {
           onAddToFavorites={handleAddToFavorites}
           onToggleFavorites={() => setShowFavorites(true)}
           onTogglePromptTemplate={() => setShowPromptTemplate(true)}
+          onToggleLogoSkill={() => setShowLogoSkill(true)}
           onSwitchToNodeMode={() => safeSwitchMode('node')}
           onSwitchToWorkflowHub={() => safeSwitchMode('workflow-hub')}
           onSwitchToDashboard={() => safeSwitchMode('dashboard')}
@@ -3424,6 +3427,26 @@ function CanvasApp() {
           setShowPromptTemplate(false);
         }}
       />
+
+      {/* Logo Generator Skill Pro Panel */}
+      {showLogoSkill && (
+        <LogoSkillPanel
+          isMonochrome={themeStyle === 'monochrome'}
+          onClose={() => setShowLogoSkill(false)}
+          onAddImages={(urls: string[]) => {
+            handleAddImages(urls);
+            setShowLogoSkill(false);
+          }}
+          brandProject={currentProject ? {
+            brandName: currentProject.name || '',
+            industry: '',
+            description: currentProject.description || '',
+            targetAudience: '',
+            tone: '',
+            brandDna: null,
+          } : null}
+        />
+      )}
 
       {/* Project Data Panel */}
       <ProjectDataPanel

@@ -619,12 +619,12 @@ export default function VideoGenerationPanel({
   return (
     <div className="flex flex-col h-full overflow-y-auto" style={{ background: panelBg, color: textColor }}>
       {/* === 模式切换 === */}
-      <div className={`flex gap-1 p-3 pb-1 overflow-x-auto ${isMonochrome ? 'bg-gray-100 rounded-lg mx-3 mt-3 p-1.5' : ''}`}>
+      <div className={`flex gap-1 p-3 pb-1 flex-nowrap ${isMonochrome ? 'bg-gray-100 rounded-lg mx-3 mt-3 p-1.5' : ''}`}>
         {modeOptions.map(opt => (
           <button
             key={opt.value}
             onClick={() => setMode(opt.value)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
+            className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
               isMonochrome
                 ? mode === opt.value
                   ? 'bg-white text-gray-900 shadow-sm'
