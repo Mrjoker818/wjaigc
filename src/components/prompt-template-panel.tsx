@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { X, Plus, Edit2, Trash2, Search, Tag, FileText, Save, ChevronDown } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { X, Plus, Edit2, Trash2, Search, Tag, FileText, Save, ChevronDown, Image as ImageIcon, Upload } from 'lucide-react';
 import { 
   PromptTemplate, 
   getPromptTemplates, 
@@ -40,6 +40,8 @@ export default function PromptTemplatePanel({
   const [formCategory, setFormCategory] = useState('');
   const [formTags, setFormTags] = useState('');
   const [formIsGlobal, setFormIsGlobal] = useState(false);
+  const [formThumbnail, setFormThumbnail] = useState<string>('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const mc = isMonochrome;
 
@@ -73,6 +75,7 @@ export default function PromptTemplatePanel({
     setFormCategory('');
     setFormTags('');
     setFormIsGlobal(false);
+    setFormThumbnail('');
     setEditingTemplate(null);
     setIsEditing(false);
     setShowAddForm(false);
@@ -86,8 +89,54 @@ export default function PromptTemplatePanel({
     setFormCategory(template.category);
     setFormTags(template.tags.join(', '));
     setFormIsGlobal(template.isGlobal);
+    setFormThumbnail(template.thumbnail || '');
     setIsEditing(true);
     setShowAddForm(true);
+  };
+
+  // 处理图片上传
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    // 限制文件大小 (最大 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      alert('图片大小不能超过 2MB');
+      return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target?.result as string;
+      // 压缩图片到合适大小
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxSize = 200;
+        let width = img.width;
+        let height = img.height;
+        
+        if (width > height) {
+          if (width > maxSize) {
+            height = (height * maxSize) / width;
+            width = maxSize;
+          }
+        } else {
+          if (height > maxSize) {
+            width = (width * maxSize) / height;
+            height = maxSize;
+          }
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        setFormThumbnail(canvas.toDataURL('image/jpeg', 0.8));
+      };
+      img.src = result;
+    };
+    reader.readAsDataURL(file);
   };
 
   // 保存模板
@@ -102,6 +151,7 @@ export default function PromptTemplatePanel({
         content: formContent,
         category: formCategory || '自定义',
         tags,
+        thumbnail: formThumbnail || undefined,
         isGlobal: isAdmin ? formIsGlobal : false
       });
     } else {
@@ -110,6 +160,7 @@ export default function PromptTemplatePanel({
         content: formContent,
         category: formCategory || '自定义',
         tags,
+        thumbnail: formThumbnail || undefined,
         createdBy: isAdmin && formIsGlobal ? 'admin' : 'user',
         isGlobal: isAdmin ? formIsGlobal : false
       });
@@ -310,6 +361,60 @@ export default function PromptTemplatePanel({
                           : 'bg-[#1a1a1a] border border-white/[0.12] text-text-bright'
                       }`}
                     />
+                  </div>
+                </div>
+
+                {/* Thumbnail Image Upload */}
+                <div>
+                  <label className={`text-xs mb-1 block ${mc ? 'text-gray-500' : 'text-gold-muted'}`}>
+                    效果图 <span className="opacity-60">（可选，最大 2MB）</span>
+                  </label>
+                  <div className="flex items-center gap-3">
+                    {/* Preview */}
+                    <div className={`w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 ${
+                      mc ? 'bg-gray-100 border border-gray-200' : 'bg-[#1a1a1a] border border-white/[0.12]'
+                    }`}>
+                      {formThumbnail ? (
+                        <img src={formThumbnail} alt="预览" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className={`w-full h-full flex items-center justify-center ${
+                          mc ? 'text-gray-400' : 'text-white/30'
+                        }`}>
+                          <ImageIcon className="w-6 h-6" />
+                        </div>
+                      )}
+                    </div>
+                    {/* Upload Button */}
+                    <div className="flex-1 flex flex-col gap-2">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleImageUpload}
+                        className="hidden"
+                      />
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className={`px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 ${
+                          mc 
+                            ? 'bg-gray-100 hover:bg-gray-200 text-gray-700' 
+                            : 'bg-white/[0.06] hover:bg-white/[0.1] text-gold-muted'
+                        }`}
+                      >
+                        <Upload className="w-3 h-3" />
+                        上传图片
+                      </button>
+                      {formThumbnail && (
+                        <button
+                          onClick={() => setFormThumbnail('')}
+                          className={`px-3 py-1 rounded-lg text-xs ${
+                            mc ? 'text-red-500 hover:text-red-600' : 'text-red-400 hover:text-red-300'
+                          }`}
+                        >
+                          移除图片
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
 

@@ -1953,8 +1953,8 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
         style={{
           width: isMinimized ? 320 : 'calc(100vw - 80px)',
           height: isMinimized ? 'auto' : 'calc(100vh - 80px)',
-          background: isMonochrome ? '#1a1a1a' : '#111',
-          borderColor: isMonochrome ? '#333' : '#d4af3740',
+          background: isMonochrome ? '#ffffff' : '#111',
+          borderColor: isMonochrome ? '#e5e5e5' : '#d4af3740',
           ...(isMinimized ? {} : { left: windowPos.x, top: windowPos.y }),
           ...(isDragging ? { outline: `2px solid ${accent}`, outlineOffset: '-2px' } : {}),
         }}
@@ -1965,12 +1965,12 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
         <div
           data-panel-header
           className="flex items-center justify-between px-3 shrink-0 cursor-move select-none"
-          style={{ height: 36, background: isMonochrome ? '#222' : '#161616', borderBottom: isMinimized ? 'none' : (isMonochrome ? '1px solid #333' : '1px solid #d4af3730') }}
+          style={{ height: 36, background: isMonochrome ? '#f9fafb' : '#161616', borderBottom: isMinimized ? 'none' : (isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3730') }}
           onMouseDown={handleDragStart}
         >
           <div className="flex items-center gap-2">
             <Boxes size={14} style={{ color: accent }} />
-            <span className="text-sm font-medium" style={{ color: isMonochrome ? '#ccc' : '#d4af37' }}>3D构图</span>
+            <span className="text-sm font-medium" style={{ color: isMonochrome ? '#1a1a1a' : '#d4af37' }}>3D构图</span>
             <span className="text-xs" style={{ color: '#666' }}>{sceneName}</span>
           </div>
           <div className="flex items-center gap-1">
@@ -2017,8 +2017,8 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
             <div
               className="relative z-20 flex items-center gap-1 px-3 py-1.5 border-b"
               style={{
-                background: isMonochrome ? '#1e1e1e' : '#131313',
-                borderColor: isMonochrome ? '#333' : '#d4af3720',
+                background: isMonochrome ? '#f3f4f6' : '#131313',
+                borderColor: isMonochrome ? '#e5e5e5' : '#d4af3720',
                 pointerEvents: 'auto'
               }}
             >
@@ -2027,8 +2027,8 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                   key={mode}
                   className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${transformMode === mode ? 'text-white' : ''}`}
                   style={{
-                    background: transformMode === mode ? (isMonochrome ? '#444' : '#d4af3730') : 'transparent',
-                    color: transformMode === mode ? (isMonochrome ? '#fff' : '#d4af37') : '#888',
+                    background: transformMode === mode ? (isMonochrome ? '#1a1a1a' : '#d4af3730') : 'transparent',
+                    color: transformMode === mode ? (isMonochrome ? '#fff' : '#d4af37') : (isMonochrome ? '#666' : '#888'),
                   }}
                   onClick={() => setTransformMode(mode)}
                 >
@@ -2036,7 +2036,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                 </button>
               ))}
               <div className="flex-1" />
-              <span className="text-[13px]" style={{ color: '#555' }}>Del 删除 · Esc 取消</span>
+              <span className="text-[13px]" style={{ color: isMonochrome ? '#999' : '#555' }}>Del 删除 · Esc 取消</span>
             </div>
 
             {/* 3D Canvas */}
@@ -2071,8 +2071,8 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
             <div
               className="relative z-20 flex items-center gap-2 px-3 py-2 border-t flex-shrink-0"
               style={{
-                background: isMonochrome ? '#1a1a1a' : '#0d0d0d',
-                borderColor: isMonochrome ? '#333' : '#d4af3720',
+                background: isMonochrome ? '#f9fafb' : '#0d0d0d',
+                borderColor: isMonochrome ? '#e5e5e5' : '#d4af3720',
                 pointerEvents: 'auto'
               }}
             >
@@ -2080,9 +2080,9 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
               <button
                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer"
                 style={{
-                  background: rightTab === 'generate' ? (isMonochrome ? '#444' : '#d4af3730') : (isMonochrome ? '#252525' : '#1a1a1a'),
-                  color: rightTab === 'generate' ? (isMonochrome ? '#fff' : '#d4af37') : '#aaa',
-                  border: rightTab === 'generate' ? (isMonochrome ? '1px solid #555' : '1px solid #d4af3750') : '1px solid transparent',
+                  background: rightTab === 'generate' ? (isMonochrome ? '#1a1a1a' : '#d4af3730') : (isMonochrome ? '#f3f4f6' : '#1a1a1a'),
+                  color: rightTab === 'generate' ? (isMonochrome ? '#fff' : '#d4af37') : (isMonochrome ? '#666' : '#aaa'),
+                  border: rightTab === 'generate' ? (isMonochrome ? '1px solid #1a1a1a' : '1px solid #d4af3750') : (isMonochrome ? '1px solid #e5e5e5' : '1px solid transparent'),
                 }}
                 onClick={() => setRightTab('generate')}
               >
@@ -2093,9 +2093,9 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
               <button
                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer"
                 style={{
-                  background: rightTab === 'assets' && screenshotUrl ? (isMonochrome ? '#444' : '#d4af3730') : (isMonochrome ? '#252525' : '#1a1a1a'),
-                  color: rightTab === 'assets' && screenshotUrl ? (isMonochrome ? '#fff' : '#d4af37') : '#aaa',
-                  border: rightTab === 'assets' && screenshotUrl ? (isMonochrome ? '1px solid #555' : '1px solid #d4af3750') : '1px solid transparent',
+                  background: rightTab === 'assets' && screenshotUrl ? (isMonochrome ? '#1a1a1a' : '#d4af3730') : (isMonochrome ? '#f3f4f6' : '#1a1a1a'),
+                  color: rightTab === 'assets' && screenshotUrl ? (isMonochrome ? '#fff' : '#d4af37') : (isMonochrome ? '#666' : '#aaa'),
+                  border: rightTab === 'assets' && screenshotUrl ? (isMonochrome ? '1px solid #1a1a1a' : '1px solid #d4af3750') : (isMonochrome ? '1px solid #e5e5e5' : '1px solid transparent'),
                 }}
                 onClick={() => { captureScreenshot(); setRightTab('assets'); }}
               >
@@ -2106,9 +2106,9 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
               <button
                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer"
                 style={{
-                  background: rightTab === 'layout' ? (isMonochrome ? '#444' : '#d4af3730') : (isMonochrome ? '#252525' : '#1a1a1a'),
-                  color: rightTab === 'layout' ? (isMonochrome ? '#fff' : '#d4af37') : '#aaa',
-                  border: rightTab === 'layout' ? (isMonochrome ? '1px solid #555' : '1px solid #d4af3750') : '1px solid transparent',
+                  background: rightTab === 'layout' ? (isMonochrome ? '#1a1a1a' : '#d4af3730') : (isMonochrome ? '#f3f4f6' : '#1a1a1a'),
+                  color: rightTab === 'layout' ? (isMonochrome ? '#fff' : '#d4af37') : (isMonochrome ? '#666' : '#aaa'),
+                  border: rightTab === 'layout' ? (isMonochrome ? '1px solid #1a1a1a' : '1px solid #d4af3750') : (isMonochrome ? '1px solid #e5e5e5' : '1px solid transparent'),
                 }}
                 onClick={() => setRightTab('layout')}
               >
@@ -2119,7 +2119,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
               {/* Save button */}
               <button
                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-all cursor-pointer"
-                style={{ background: isMonochrome ? '#252525' : '#1a1a1a', color: '#aaa', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}
+                style={{ background: isMonochrome ? '#f3f4f6' : '#1a1a1a', color: isMonochrome ? '#666' : '#aaa', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720' }}
                 onClick={() => saveScene()}
               >
                 <Save size={14} />
@@ -2129,7 +2129,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
               {generationResults.length > 0 && (
                 <button
                   className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer"
-                  style={{ background: isMonochrome ? '#333' : '#d4af3720', color: isMonochrome ? '#fff' : '#d4af37' }}
+                  style={{ background: isMonochrome ? '#1a1a1a' : '#d4af3720', color: isMonochrome ? '#fff' : '#d4af37' }}
                   onClick={() => addImageToCanvas(generationResults[0].url)}
                 >
                   <Plus size={14} />
@@ -2144,14 +2144,14 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
             className="flex flex-col overflow-hidden"
             style={{
               width: 280,
-              background: isMonochrome ? '#1a1a1a' : '#111',
-              borderLeft: isMonochrome ? '1px solid #333' : '1px solid #d4af3720',
+              background: isMonochrome ? '#ffffff' : '#111',
+              borderLeft: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720',
             }}
           >
             {/* Tab buttons */}
             <div
               className="flex border-b flex-shrink-0"
-              style={{ borderColor: isMonochrome ? '#333' : '#d4af3720' }}
+              style={{ borderColor: isMonochrome ? '#e5e5e5' : '#d4af3720' }}
             >
               {([
                 { key: 'build' as const, label: '搭建', Icon: Hammer },
@@ -2163,9 +2163,9 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                   key={tab.key}
                   className="flex-1 flex items-center justify-center gap-1 py-2.5 text-sm font-medium transition-colors cursor-pointer"
                   style={{
-                    color: rightTab === tab.key ? (isMonochrome ? '#fff' : '#d4af37') : '#777',
-                    borderBottom: rightTab === tab.key ? (isMonochrome ? '2px solid #fff' : `2px solid ${accent}`) : '2px solid transparent',
-                    background: rightTab === tab.key ? (isMonochrome ? '#222' : '#d4af3710') : 'transparent',
+                    color: rightTab === tab.key ? (isMonochrome ? '#1a1a1a' : '#d4af37') : (isMonochrome ? '#999' : '#777'),
+                    borderBottom: rightTab === tab.key ? (isMonochrome ? '2px solid #1a1a1a' : `2px solid ${accent}`) : '2px solid transparent',
+                    background: rightTab === tab.key ? (isMonochrome ? '#f3f4f6' : '#d4af3710') : 'transparent',
                   }}
                   onClick={() => setRightTab(tab.key)}
                 >
@@ -2184,11 +2184,11 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                   {selectedId && objects.find(o => o.id === selectedId) && (() => {
                     const obj = objects.find(o => o.id === selectedId)!;
                     return (
-                      <div className="rounded-lg p-3 space-y-2.5" style={{ background: isMonochrome ? '#222' : '#1a1a1a', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}>
+                      <div className="rounded-lg p-3 space-y-2.5" style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720' }}>
                         <div className="text-sm font-medium" style={{ color: accent }}>属性 - {obj.name}</div>
                         {/* Position */}
                         <div>
-                          <div className="text-xs mb-1" style={{ color: '#888' }}>位置</div>
+                          <div className="text-xs mb-1" style={{ color: isMonochrome ? '#666' : '#888' }}>位置</div>
                           <div className="flex gap-1">
                             {['x', 'y', 'z'].map((axis, i) => (
                               <div key={axis} className="flex-1">
@@ -2202,7 +2202,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                                     updateObject(obj.id, { position: newPos });
                                   }}
                                   className="w-full px-1.5 py-1 rounded text-center text-sm"
-                                  style={{ background: isMonochrome ? '#333' : '#0d0d0d', color: '#ccc', border: isMonochrome ? '1px solid #444' : '1px solid #333' }}
+                                  style={{ background: isMonochrome ? '#f3f4f6' : '#0d0d0d', color: isMonochrome ? '#333' : '#ccc', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #333' }}
                                 />
                               </div>
                             ))}
@@ -2224,7 +2224,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                                     updateObject(obj.id, { rotation: newRot });
                                   }}
                                   className="w-full px-1.5 py-1 rounded text-center text-sm"
-                                  style={{ background: isMonochrome ? '#333' : '#0d0d0d', color: '#ccc', border: isMonochrome ? '1px solid #444' : '1px solid #333' }}
+                                  style={{ background: isMonochrome ? '#f3f4f6' : '#0d0d0d', color: isMonochrome ? '#333' : '#ccc', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #333' }}
                                 />
                               </div>
                             ))}
@@ -2247,7 +2247,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                                     updateObject(obj.id, { scale: newScale });
                                   }}
                                   className="w-full px-1.5 py-1 rounded text-center text-sm"
-                                  style={{ background: isMonochrome ? '#333' : '#0d0d0d', color: '#ccc', border: isMonochrome ? '1px solid #444' : '1px solid #333' }}
+                                  style={{ background: isMonochrome ? '#f3f4f6' : '#0d0d0d', color: isMonochrome ? '#333' : '#ccc', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #333' }}
                                 />
                               </div>
                             ))}
@@ -2265,14 +2265,14 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                   })()}
 
                   {/* Geometry presets */}
-                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#222' : '#1a1a1a', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}>
+                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720' }}>
                     <div className="text-sm font-medium mb-2" style={{ color: accent }}>几何体</div>
                     <div className="grid grid-cols-5 gap-1.5">
                       {GEOMETRY_PRESETS.map(preset => (
                         <button
                           key={preset.type}
                           className="flex flex-col items-center gap-0.5 p-1.5 rounded cursor-pointer transition-colors"
-                          style={{ background: isMonochrome ? '#2a2a2a' : '#0d0d0d' }}
+                          style={{ background: isMonochrome ? '#f3f4f6' : '#0d0d0d' }}
                           onClick={() => addObject(preset.type)}
                           title={preset.name}
                         >
@@ -2289,14 +2289,14 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                   />
 
                   {/* Light presets */}
-                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#222' : '#1a1a1a', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}>
+                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720' }}>
                     <div className="text-sm font-medium mb-2" style={{ color: accent }}>灯光预设</div>
                     <div className="space-y-1">
                       {LIGHT_PRESETS_DATA.map(preset => (
                         <button
                           key={preset.name}
                           className="w-full text-left px-2.5 py-2 rounded text-sm transition-colors cursor-pointer"
-                          style={{ background: isMonochrome ? '#2a2a2a' : '#0d0d0d', color: '#bbb' }}
+                          style={{ background: isMonochrome ? '#f3f4f6' : '#0d0d0d', color: '#bbb' }}
                           onClick={() => applyLightPreset(preset.lights)}
                         >
                           {preset.name}
@@ -2306,12 +2306,12 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                   </div>
 
                   {/* Light editor */}
-                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#222' : '#1a1a1a', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}>
+                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720' }}>
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-sm font-medium" style={{ color: accent }}>灯光</div>
                       <button
                         className="px-2 py-0.5 rounded text-xs cursor-pointer"
-                        style={{ background: isMonochrome ? '#333' : '#d4af3720', color: accent }}
+                        style={{ background: isMonochrome ? '#f3f4f6' : '#d4af3720', color: accent }}
                         onClick={() => setLights(prev => [...prev, { id: `light-${Date.now()}`, name: `灯光${prev.length + 1}`, type: 'point' as const, position: [2, 3, 2] as [number, number, number], intensity: 1, color: '#ffffff' }])}
                       >
                         + 添加
@@ -2319,7 +2319,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                     </div>
                     <div className="space-y-1.5">
                       {lights.map(light => (
-                        <div key={light.id} className="flex items-center gap-1.5 p-1.5 rounded" style={{ background: isMonochrome ? '#2a2a2a' : '#0d0d0d' }}>
+                        <div key={light.id} className="flex items-center gap-1.5 p-1.5 rounded" style={{ background: isMonochrome ? '#f3f4f6' : '#0d0d0d' }}>
                           <input
                             type="color"
                             value={light.color}
@@ -2349,7 +2349,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                   </div>
 
                   {/* Camera presets */}
-                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#222' : '#1a1a1a', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}>
+                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720' }}>
                     <div className="text-sm font-medium mb-2" style={{ color: accent }}>相机预设</div>
                     <div className="grid grid-cols-3 gap-1">
                       {CAMERA_PRESETS.map(preset => (
@@ -2357,7 +2357,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                           key={preset.key}
                           className="px-1.5 py-1.5 rounded text-xs text-center transition-colors cursor-pointer"
                           style={{
-                            background: cameraPreset === preset.key ? (isMonochrome ? '#444' : '#d4af3730') : (isMonochrome ? '#2a2a2a' : '#0d0d0d'),
+                            background: cameraPreset === preset.key ? (isMonochrome ? '#e5e5e5' : '#d4af3730') : (isMonochrome ? '#f3f4f6' : '#0d0d0d'),
                             color: cameraPreset === preset.key ? accent : '#999',
                             border: cameraPreset === preset.key ? (isMonochrome ? '1px solid #666' : '1px solid #d4af3750') : '1px solid transparent',
                           }}
@@ -2395,7 +2395,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                     )}
                   </div>
                   {/* Generation mode */}
-                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#222' : '#1a1a1a', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}>
+                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720' }}>
                     <div className="text-sm font-medium mb-2" style={{ color: accent }}>生成模式</div>
                     <div className="space-y-1">
                       {GENERATION_MODES.map(m => (
@@ -2403,7 +2403,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                           key={m.key}
                           className="w-full text-left px-2.5 py-2 rounded text-sm transition-colors cursor-pointer"
                           style={{
-                            background: generationMode === m.key ? (isMonochrome ? '#444' : '#d4af3730') : (isMonochrome ? '#2a2a2a' : '#0d0d0d'),
+                            background: generationMode === m.key ? (isMonochrome ? '#e5e5e5' : '#d4af3730') : (isMonochrome ? '#f3f4f6' : '#0d0d0d'),
                             color: generationMode === m.key ? accent : '#bbb',
                           }}
                           onClick={() => setGenerationMode(m.key)}
@@ -2415,7 +2415,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                   </div>
 
                   {/* Strength mode */}
-                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#222' : '#1a1a1a', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}>
+                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720' }}>
                     <div className="text-sm font-medium mb-2" style={{ color: accent }}>风格强度</div>
                     <div className="space-y-1">
                       {STRENGTH_MODES.map(m => (
@@ -2423,7 +2423,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                           key={m.key}
                           className="w-full text-left px-2.5 py-2 rounded text-sm transition-colors cursor-pointer"
                           style={{
-                            background: strengthMode === m.key ? (isMonochrome ? '#444' : '#d4af3730') : (isMonochrome ? '#2a2a2a' : '#0d0d0d'),
+                            background: strengthMode === m.key ? (isMonochrome ? '#e5e5e5' : '#d4af3730') : (isMonochrome ? '#f3f4f6' : '#0d0d0d'),
                             color: strengthMode === m.key ? accent : '#bbb',
                           }}
                           onClick={() => setStrengthMode(m.key)}
@@ -2436,7 +2436,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                   </div>
 
                   {/* Prompt */}
-                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#222' : '#1a1a1a', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}>
+                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720' }}>
                     <div className="text-sm font-medium mb-2" style={{ color: accent }}>提示词</div>
                     <textarea
                       value={prompt}
@@ -2444,7 +2444,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                       placeholder="描述你想要生成的图像..."
                       rows={3}
                       className="w-full px-2.5 py-2 rounded text-sm resize-y"
-                      style={{ background: isMonochrome ? '#333' : '#0d0d0d', color: '#ccc', border: isMonochrome ? '1px solid #444' : '1px solid #333' }}
+                      style={{ background: isMonochrome ? '#f3f4f6' : '#0d0d0d', color: isMonochrome ? '#333' : '#ccc', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #333' }}
                     />
                     {/* Negative prompt toggle */}
                     <button
@@ -2461,13 +2461,13 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                         placeholder="排除的元素..."
                         rows={2}
                         className="w-full mt-1 px-2.5 py-2 rounded text-sm resize-y"
-                        style={{ background: isMonochrome ? '#333' : '#0d0d0d', color: '#ccc', border: isMonochrome ? '1px solid #444' : '1px solid #333' }}
+                        style={{ background: isMonochrome ? '#f3f4f6' : '#0d0d0d', color: isMonochrome ? '#333' : '#ccc', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #333' }}
                       />
                     )}
                   </div>
 
                   {/* Aspect ratio & count */}
-                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#222' : '#1a1a1a', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}>
+                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720' }}>
                     <div className="text-sm font-medium mb-2" style={{ color: accent }}>参数</div>
                     <div className="space-y-2">
                       <div>
@@ -2478,7 +2478,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                               key={r}
                               className="px-2 py-1 rounded text-xs cursor-pointer transition-colors"
                               style={{
-                                background: aspectRatio === r ? (isMonochrome ? '#444' : '#d4af3730') : (isMonochrome ? '#2a2a2a' : '#0d0d0d'),
+                                background: aspectRatio === r ? (isMonochrome ? '#e5e5e5' : '#d4af3730') : (isMonochrome ? '#f3f4f6' : '#0d0d0d'),
                                 color: aspectRatio === r ? accent : '#999',
                               }}
                               onClick={() => setAspectRatio(r)}
@@ -2496,7 +2496,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                               key={n}
                               className="px-2.5 py-1 rounded text-xs cursor-pointer transition-colors"
                               style={{
-                                background: imageCount === n ? (isMonochrome ? '#444' : '#d4af3730') : (isMonochrome ? '#2a2a2a' : '#0d0d0d'),
+                                background: imageCount === n ? (isMonochrome ? '#e5e5e5' : '#d4af3730') : (isMonochrome ? '#f3f4f6' : '#0d0d0d'),
                                 color: imageCount === n ? accent : '#999',
                               }}
                               onClick={() => setImageCount(n)}
@@ -2512,7 +2512,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                   {/* Generate button */}
                   <button
                     className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer disabled:opacity-50"
-                    style={{ background: isMonochrome ? '#444' : '#d4af37', color: isMonochrome ? '#fff' : '#111' }}
+                    style={{ background: isMonochrome ? '#1a1a1a' : '#d4af37', color: isMonochrome ? '#fff' : '#111' }}
                     onClick={handleGenerate}
                     disabled={isGenerating || !prompt.trim()}
                   >
@@ -2521,7 +2521,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
 
                   {/* Generation results */}
                   {generationResults.length > 0 && (
-                    <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#222' : '#1a1a1a', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}>
+                    <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720' }}>
                       <div className="text-sm font-medium mb-2" style={{ color: accent }}>生成结果</div>
                       <div className="grid grid-cols-2 gap-1.5">
                         {generationResults.map((result, i) => (
@@ -2531,7 +2531,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                               href={result.url}
                               download={`scene-result-${i + 1}.png`}
                               className="absolute top-1 right-1 px-1.5 py-0.5 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                              style={{ background: isMonochrome ? '#333' : '#d4af37cc', color: isMonochrome ? '#fff' : '#000' }}
+                              style={{ background: isMonochrome ? '#f3f4f6' : '#d4af37cc', color: isMonochrome ? '#1a1a1a' : '#000' }}
                               onClick={e => e.stopPropagation()}
                             >
                               ↓
@@ -2557,14 +2557,14 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                   />
 
                   {/* Quick templates */}
-                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#222' : '#1a1a1a', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}>
+                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720' }}>
                     <div className="text-sm font-medium mb-2" style={{ color: accent }}>快速模板</div>
                     <div className="space-y-1">
                       {AI_LAYOUT_TEMPLATES.map(t => (
                         <button
                           key={t.key}
                           className="w-full text-left px-2.5 py-2 rounded text-sm transition-colors cursor-pointer"
-                          style={{ background: isMonochrome ? '#2a2a2a' : '#0d0d0d', color: '#bbb' }}
+                          style={{ background: isMonochrome ? '#f3f4f6' : '#0d0d0d', color: '#bbb' }}
                           onClick={() => handleAILayout(t.prompt)}
                         >
                           {t.emoji} {t.name}
@@ -2579,7 +2579,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
               {rightTab === 'assets' && (
                 <>
                   {/* Scene management */}
-                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#222' : '#1a1a1a', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}>
+                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720' }}>
                     <div className="text-sm font-medium mb-2" style={{ color: accent }}>场景管理</div>
                     <div className="space-y-1.5">
                       <input
@@ -2588,11 +2588,11 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                         onChange={e => setSceneName(e.target.value)}
                         placeholder="场景名称"
                         className="w-full px-2.5 py-1.5 rounded text-sm"
-                        style={{ background: isMonochrome ? '#333' : '#0d0d0d', color: '#ccc', border: isMonochrome ? '1px solid #444' : '1px solid #333' }}
+                        style={{ background: isMonochrome ? '#f3f4f6' : '#0d0d0d', color: isMonochrome ? '#333' : '#ccc', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #333' }}
                       />
                       <button
                         className="w-full py-2 rounded text-sm font-medium cursor-pointer transition-colors"
-                        style={{ background: isMonochrome ? '#333' : '#d4af3720', color: accent }}
+                        style={{ background: isMonochrome ? '#f3f4f6' : '#d4af3720', color: accent }}
                         onClick={() => saveScene()}
                       >
                         保存场景
@@ -2602,11 +2602,11 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
 
                   {/* Saved scenes list */}
                   {savedSceneList.length > 0 && (
-                    <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#222' : '#1a1a1a', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}>
+                    <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720' }}>
                       <div className="text-sm font-medium mb-2" style={{ color: accent }}>已保存场景</div>
                       <div className="space-y-1">
                         {savedSceneList.map(scene => (
-                          <div key={scene.id} className="flex items-center gap-1.5 px-2 py-1.5 rounded" style={{ background: isMonochrome ? '#2a2a2a' : '#0d0d0d' }}>
+                          <div key={scene.id} className="flex items-center gap-1.5 px-2 py-1.5 rounded" style={{ background: isMonochrome ? '#f3f4f6' : '#0d0d0d' }}>
                             <button
                               className="flex-1 text-left text-sm cursor-pointer"
                               style={{ color: '#bbb' }}
@@ -2645,7 +2645,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
 
                   {/* Generated images library */}
                   {generationResults.length > 0 && (
-                    <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#222' : '#1a1a1a', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}>
+                    <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720' }}>
                       <div className="text-sm font-medium mb-2" style={{ color: accent }}>生成素材库 ({generationResults.length})</div>
                       <div className="grid grid-cols-3 gap-1.5">
                         {generationResults.map((result, i) => (
@@ -2663,7 +2663,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                                 href={result.url}
                                 download={`scene-asset-${i + 1}.png`}
                                 className="text-[9px] px-1 py-0.5 rounded cursor-pointer"
-                                style={{ background: isMonochrome ? '#444' : '#d4af37cc', color: isMonochrome ? '#fff' : '#000' }}
+                                style={{ background: isMonochrome ? '#1a1a1a' : '#d4af37cc', color: isMonochrome ? '#fff' : '#000' }}
                                 onClick={e => e.stopPropagation()}
                               >
                                 下载
@@ -2676,12 +2676,12 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                   )}
 
                   {/* Export options */}
-                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#222' : '#1a1a1a', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}>
+                  <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720' }}>
                     <div className="text-sm font-medium mb-2" style={{ color: accent }}>导出</div>
                     <div className="space-y-1.5">
                       <button
                         className="w-full py-2 rounded text-sm cursor-pointer transition-colors"
-                        style={{ background: isMonochrome ? '#2a2a2a' : '#0d0d0d', color: '#bbb', border: isMonochrome ? '1px solid #333' : '1px solid #333' }}
+                        style={{ background: isMonochrome ? '#f3f4f6' : '#0d0d0d', color: '#bbb', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #333' }}
                         onClick={captureScreenshot}
                       >
                         📸 截取画面
@@ -2690,7 +2690,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                         <>
                           <button
                             className="w-full py-2 rounded text-sm font-medium cursor-pointer transition-colors"
-                            style={{ background: isMonochrome ? '#333' : '#d4af3720', color: accent }}
+                            style={{ background: isMonochrome ? '#f3f4f6' : '#d4af3720', color: accent }}
                             onClick={() => addImageToCanvas(generationResults[0].url)}
                           >
                             加入无限画布
@@ -2698,7 +2698,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                           {generationResults.length > 1 && (
                             <button
                               className="w-full py-2 rounded text-sm cursor-pointer transition-colors"
-                              style={{ background: isMonochrome ? '#2a2a2a' : '#0d0d0d', color: '#bbb', border: isMonochrome ? '1px solid #333' : '1px solid #333' }}
+                              style={{ background: isMonochrome ? '#f3f4f6' : '#0d0d0d', color: '#bbb', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #333' }}
                               onClick={() => generationResults.forEach(r => addImageToCanvas(r.url))}
                             >
                               全部加入画布
@@ -2711,7 +2711,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
 
                   {/* Screenshot preview */}
                   {screenshotUrl && (
-                    <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#222' : '#1a1a1a', border: isMonochrome ? '1px solid #333' : '1px solid #d4af3720' }}>
+                    <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720' }}>
                       <div className="text-sm font-medium mb-2" style={{ color: accent }}>截图预览</div>
                       <img src={screenshotUrl} alt="截图" className="w-full rounded" />
                       <div className="flex gap-1.5 mt-2">
@@ -2719,13 +2719,13 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
                           href={screenshotUrl}
                           download="scene-screenshot.png"
                           className="flex-1 py-1.5 rounded text-sm text-center cursor-pointer"
-                          style={{ background: isMonochrome ? '#333' : '#d4af3720', color: accent }}
+                          style={{ background: isMonochrome ? '#f3f4f6' : '#d4af3720', color: accent }}
                         >
                           下载
                         </a>
                         <button
                           className="flex-1 py-1.5 rounded text-sm cursor-pointer"
-                          style={{ background: isMonochrome ? '#333' : '#d4af3720', color: accent }}
+                          style={{ background: isMonochrome ? '#f3f4f6' : '#d4af3720', color: accent }}
                           onClick={() => addImageToCanvas(screenshotUrl)}
                         >
                           加入画布

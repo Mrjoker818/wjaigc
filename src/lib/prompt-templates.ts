@@ -10,6 +10,7 @@ export interface PromptTemplate {
   content: string;
   category: string;
   tags: string[];
+  thumbnail?: string; // 效果图缩略图 (base64 data URL 或图片 URL)
   createdBy: string; // 'admin' | userId
   createdAt: number;
   updatedAt: number;

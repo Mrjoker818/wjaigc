@@ -592,35 +592,47 @@ export default function VideoGenerationPanel({
   // === 主题颜色 ===
   const isGold = themeStyle === 'gold';
   const isMonochrome = themeStyle === 'monochrome';
-  const accentColor = isGold ? '#d4af37' : isMonochrome ? '#6b7280' : '#3b82f6';
+  // Monochrome: white bg + blue accent (matches generation-panel & chat-panel)
+  // Gold: dark bg + gold accent
+  // Default: dark bg + blue accent
+  const accentColor = isGold ? '#d4af37' : '#3b82f6';
   const panelBg = isMonochrome ? '#ffffff' : '#1a1a1a';
-  const inputBg = isMonochrome ? '#f3f4f6' : isGold ? '#242424' : '#222222';
-  const textColor = isMonochrome ? '#1a1a1a' : '#e0e0e0';
+  const inputBg = isMonochrome ? '#ffffff' : isGold ? '#242424' : '#222222';
+  const textColor = isMonochrome ? '#111827' : '#e0e0e0';
   const subTextColor = isMonochrome ? '#6b7280' : '#888';
-  const borderColor = isMonochrome ? 'rgba(0,0,0,0.1)' : isGold ? 'rgba(212,175,55,0.3)' : 'rgba(255,255,255,0.1)';
-  const hoverBorderColor = isMonochrome ? 'border-gray-300' : isGold ? 'border-amber-500/50' : 'border-blue-500/50';
-  const hoverBorderColorLight = isMonochrome ? 'hover:border-gray-300' : isGold ? 'hover:border-amber-500/30' : 'hover:border-blue-500/30';
-  const accentTextClass = isMonochrome ? 'text-gray-500' : isGold ? 'text-amber-500' : 'text-blue-400';
-  const borderActiveClass = isMonochrome ? 'border-gray-400' : isGold ? 'border-amber-500/50' : 'border-blue-500/50';
+  const borderColor = isMonochrome ? '#e5e7eb' : isGold ? 'rgba(212,175,55,0.3)' : 'rgba(255,255,255,0.1)';
+  const hoverBorderColor = isMonochrome ? 'border-blue-300' : isGold ? 'border-amber-500/50' : 'border-blue-500/50';
+  const hoverBorderColorLight = isMonochrome ? 'hover:border-blue-300' : isGold ? 'hover:border-amber-500/30' : 'hover:border-blue-500/30';
+  const accentTextClass = isMonochrome ? 'text-blue-500' : isGold ? 'text-amber-500' : 'text-blue-400';
+  const borderActiveClass = isMonochrome ? 'border-blue-500' : isGold ? 'border-amber-500/50' : 'border-blue-500/50';
   const borderInactiveClass = isMonochrome ? 'border-gray-200' : 'border-gray-700';
   // Additional theme-aware classes for labels, text, borders
   const labelClass = isMonochrome ? 'text-xs text-gray-500' : 'text-xs text-gray-500';
-  const sectionTitleClass = isMonochrome ? 'text-gray-700' : 'text-gray-300';
+  const sectionTitleClass = isMonochrome ? 'text-xs font-semibold text-blue-500' : 'text-xs font-semibold text-gray-300';
   const subtleTextClass = isMonochrome ? 'text-gray-400' : 'text-gray-500';
   const subtleBorderClass = isMonochrome ? 'border-gray-200' : 'border-gray-600';
-  const deepBorderClass = isMonochrome ? 'border-gray-300' : 'border-gray-700';
+  const deepBorderClass = isMonochrome ? 'border-gray-200' : 'border-gray-700';
+  // Monochrome-specific bg classes (matching chat-panel)
+  const cardBgClass = isMonochrome ? 'bg-gray-50/50' : '';
+  const sectionBgClass = isMonochrome ? 'bg-gray-50' : '';
 
   return (
     <div className="flex flex-col h-full overflow-y-auto" style={{ background: panelBg, color: textColor }}>
       {/* === 模式切换 === */}
-      <div className="flex gap-1 p-3 pb-1">
+      <div className={`flex gap-1 p-3 pb-1 ${isMonochrome ? 'bg-gray-100 rounded-lg mx-3 mt-3 p-1.5' : ''}`}>
         {modeOptions.map(opt => (
           <button
             key={opt.value}
             onClick={() => setMode(opt.value)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer"
-            style={{
-              background: mode === opt.value ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(139,139,139,0.15)') : 'transparent',
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
+              isMonochrome
+                ? mode === opt.value
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-400 hover:text-gray-600'
+                : ''
+            }`}
+            style={isMonochrome ? {} : {
+              background: mode === opt.value ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(59,130,246,0.15)') : 'transparent',
               color: mode === opt.value ? accentColor : subTextColor,
               border: `1px solid ${mode === opt.value ? borderColor : 'transparent'}`,
             }}
@@ -633,7 +645,7 @@ export default function VideoGenerationPanel({
 
       {/* === 视频模板库 === */}
       <div className="px-3 pt-2">
-        <label className="text-xs text-gray-500 mb-1 block">快速模板</label>
+        <label className={labelClass}>快速模板</label>
         <div className="flex gap-1.5 overflow-x-auto pb-1">
           {VIDEO_TEMPLATES.map(template => (
             <button
@@ -644,11 +656,15 @@ export default function VideoGenerationPanel({
                 if (template.duration) setDuration(template.duration);
                 if (template.cameraControl) setCameraControl(template.cameraControl);
               }}
-              className={`flex-shrink-0 px-2.5 py-1.5 rounded-md text-[10px] border transition-all cursor-pointer ${hoverBorderColor}`}
-              style={{
+              className={`flex-shrink-0 px-2.5 py-1.5 rounded-md text-[10px] border transition-all cursor-pointer ${
+                isMonochrome
+                  ? 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600'
+                  : hoverBorderColor
+              }`}
+              style={isMonochrome ? {} : {
                 background: inputBg,
-                borderColor: isMonochrome ? '#d1d5db' : '#374151',
-                color: isMonochrome ? '#4b5563' : '#9ca3af',
+                borderColor: borderColor,
+                color: '#9ca3af',
               }}
               title={template.prompt}
             >
@@ -814,7 +830,7 @@ export default function VideoGenerationPanel({
                   <button
                     onClick={() => setVideoUrl(selectedVideoUrl)}
                     className="w-full py-2 rounded-md flex items-center justify-center gap-2 cursor-pointer transition-colors text-xs"
-                    style={{ background: isGold ? 'rgba(212,175,55,0.1)' : 'rgba(139,139,139,0.1)', border: `1px solid ${borderColor}`, color: accentColor }}
+                    style={{ background: isGold ? 'rgba(212,175,55,0.1)' : isMonochrome ? 'rgba(59,130,246,0.08)' : 'rgba(59,130,246,0.1)', border: `1px solid ${borderColor}`, color: accentColor }}
                   >
                     <FastForward className="w-3.5 h-3.5" />
                     使用画布选中的视频
@@ -844,7 +860,7 @@ export default function VideoGenerationPanel({
                   onClick={() => setExtendDuration(d)}
                   className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs transition-all cursor-pointer"
                   style={{
-                    background: extendDuration === d ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(139,139,139,0.15)') : inputBg,
+                    background: extendDuration === d ? (isGold ? 'rgba(212,175,55,0.15)' : isMonochrome ? 'rgba(59,130,246,0.1)' : 'rgba(59,130,246,0.15)') : inputBg,
                     color: extendDuration === d ? accentColor : subTextColor,
                     border: `1px solid ${extendDuration === d ? borderColor : 'transparent'}`,
                   }}
@@ -857,7 +873,7 @@ export default function VideoGenerationPanel({
           </div>
 
           {/* 延长提示 */}
-          <div className="flex items-start gap-1.5 p-2 rounded-md" style={{ background: isGold ? 'rgba(212,175,55,0.05)' : isMonochrome ? 'rgba(107,114,128,0.05)' : 'rgba(59,130,246,0.05)', border: `1px solid ${isGold ? 'rgba(212,175,55,0.1)' : isMonochrome ? 'rgba(107,114,128,0.15)' : 'rgba(59,130,246,0.1)'}` }}>
+          <div className="flex items-start gap-1.5 p-2 rounded-md" style={{ background: isGold ? 'rgba(212,175,55,0.05)' : 'rgba(59,130,246,0.05)', border: `1px solid ${isGold ? 'rgba(212,175,55,0.1)' : 'rgba(59,130,246,0.1)'}` }}>
             <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: accentColor }} />
             <span className="text-xs text-gray-500">视频延长将在源视频末尾追加新内容，保持画面连贯性。可在描述中指定延长内容的方向。</span>
           </div>
@@ -866,15 +882,21 @@ export default function VideoGenerationPanel({
 
       {/* === 画面比例 === */}
       <div className="px-3 pt-3">
-        <label className="text-xs text-gray-500 mb-1 block">画面比例</label>
+        <label className={labelClass}>画面比例</label>
         <div className="flex flex-wrap gap-1.5">
           {availableRatios.map(r => (
             <button
               key={r}
               onClick={() => setAspectRatio(r)}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs transition-all cursor-pointer"
-              style={{
-                background: aspectRatio === r ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(139,139,139,0.15)') : inputBg,
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs transition-all cursor-pointer border ${
+                isMonochrome
+                  ? aspectRatio === r
+                    ? 'bg-blue-500 text-white border-blue-500 shadow-sm shadow-blue-200'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600'
+                  : ''
+              }`}
+              style={isMonochrome ? {} : {
+                background: aspectRatio === r ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(59,130,246,0.15)') : inputBg,
                 color: aspectRatio === r ? accentColor : subTextColor,
                 border: `1px solid ${aspectRatio === r ? borderColor : 'transparent'}`,
               }}
@@ -888,15 +910,21 @@ export default function VideoGenerationPanel({
 
       {/* === 视频时长 === */}
       <div className="px-3 pt-3">
-        <label className="text-xs text-gray-500 mb-1 block">视频时长</label>
+        <label className={labelClass}>视频时长</label>
         <div className="flex gap-1.5">
           {availableDurations.map(d => (
             <button
               key={d}
               onClick={() => setDuration(d)}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs transition-all cursor-pointer"
-              style={{
-                background: duration === d ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(139,139,139,0.15)') : inputBg,
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs transition-all cursor-pointer border ${
+                isMonochrome
+                  ? duration === d
+                    ? 'bg-blue-500 text-white border-blue-500 shadow-sm shadow-blue-200'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600'
+                  : ''
+              }`}
+              style={isMonochrome ? {} : {
+                background: duration === d ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(59,130,246,0.15)') : inputBg,
                 color: duration === d ? accentColor : subTextColor,
                 border: `1px solid ${duration === d ? borderColor : 'transparent'}`,
               }}
@@ -910,15 +938,21 @@ export default function VideoGenerationPanel({
 
       {/* === 生成质量 === */}
       <div className="px-3 pt-3">
-        <label className="text-xs text-gray-500 mb-1 block">生成质量</label>
+        <label className={labelClass}>生成质量</label>
         <div className="flex gap-1.5">
           {(['std', 'pro'] as const).map(q => (
             <button
               key={q}
               onClick={() => setQuality(q)}
-              className="px-3 py-1.5 rounded-md text-xs transition-all cursor-pointer"
-              style={{
-                background: quality === q ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(139,139,139,0.15)') : inputBg,
+              className={`px-3 py-1.5 rounded-md text-xs transition-all cursor-pointer border ${
+                isMonochrome
+                  ? quality === q
+                    ? 'bg-blue-500 text-white border-blue-500 shadow-sm shadow-blue-200'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600'
+                  : ''
+              }`}
+              style={isMonochrome ? {} : {
+                background: quality === q ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(59,130,246,0.15)') : inputBg,
                 color: quality === q ? accentColor : subTextColor,
                 border: `1px solid ${quality === q ? borderColor : 'transparent'}`,
               }}
@@ -945,7 +979,7 @@ export default function VideoGenerationPanel({
 
       {/* === 摄像机控制 === */}
       {mode !== 'video-extend' && (
-        <div className="px-3 pt-4 pb-2">
+        <div className="px-3 pt-3 pb-2">
           <button
             onClick={() => setShowCameraPanel(!showCameraPanel)}
             className={`w-full flex items-center justify-between px-3 py-2.5 rounded-md border transition-colors ${
@@ -980,9 +1014,15 @@ export default function VideoGenerationPanel({
                   <button
                     key={cam.type}
                     onClick={() => setCameraControl(cameraControl?.type === cam.type ? null : { type: cam.type as CameraControlParams['type'], intensity: 50 })}
-                    className="flex flex-col items-center gap-0.5 px-1.5 py-1.5 rounded text-[10px] transition-all cursor-pointer"
-                    style={{
-                      background: cameraControl?.type === cam.type ? (isGold ? 'rgba(212,175,55,0.2)' : 'rgba(139,139,139,0.2)') : (isMonochrome ? '#f3f4f6' : '#2a2a2a'),
+                    className={`flex flex-col items-center gap-0.5 px-1.5 py-1.5 rounded text-[10px] transition-all cursor-pointer border ${
+                      isMonochrome
+                        ? cameraControl?.type === cam.type
+                          ? 'bg-blue-500 text-white border-blue-500 shadow-sm shadow-blue-200'
+                          : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600'
+                        : ''
+                    }`}
+                    style={isMonochrome ? {} : {
+                      background: cameraControl?.type === cam.type ? (isGold ? 'rgba(212,175,55,0.2)' : 'rgba(59,130,246,0.2)') : '#2a2a2a',
                       color: cameraControl?.type === cam.type ? accentColor : subTextColor,
                       border: `1px solid ${cameraControl?.type === cam.type ? borderColor : 'transparent'}`,
                     }}
@@ -1185,8 +1225,12 @@ export default function VideoGenerationPanel({
                       setMultiShotScenes(newScenes);
                     }}
                     placeholder={`描述镜头 ${index + 1} 的画面内容...`}
-                    className="w-full px-2 py-1.5 rounded text-xs border resize-none h-16"
-                    style={{
+                    className={`w-full px-2 py-1.5 rounded text-xs border resize-none h-16 ${
+                      isMonochrome
+                        ? 'bg-white border-gray-200 text-gray-900 placeholder-gray-400'
+                        : ''
+                    }`}
+                    style={isMonochrome ? {} : {
                       background: panelBg,
                       borderColor: '#374151',
                       color: '#e5e7eb',
@@ -1202,8 +1246,12 @@ export default function VideoGenerationPanel({
                         if (idx >= 0) newScenes[idx] = { ...newScenes[idx], duration: Number(e.target.value) };
                         setMultiShotScenes(newScenes);
                       }}
-                      className="px-1.5 py-0.5 rounded text-[10px] border"
-                      style={{ background: panelBg, borderColor: '#374151', color: '#e5e7eb' }}
+                      className={`px-1.5 py-0.5 rounded text-[10px] border ${
+                        isMonochrome
+                          ? 'bg-white border-gray-200 text-gray-700'
+                          : ''
+                      }`}
+                      style={isMonochrome ? {} : { background: panelBg, borderColor: '#374151', color: '#e5e7eb' }}
                     >
                       <option value={3}>3s</option>
                       <option value={5}>5s</option>
@@ -1255,9 +1303,15 @@ export default function VideoGenerationPanel({
                   <button
                     key={r}
                     onClick={() => setResolution(r)}
-                    className="px-2.5 py-1 rounded-md text-xs transition-all cursor-pointer"
-                    style={{
-                      background: resolution === r ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(139,139,139,0.15)') : (isMonochrome ? '#f3f4f6' : '#2a2a2a'),
+                    className={`px-2.5 py-1 rounded-md text-xs transition-all cursor-pointer border ${
+                      isMonochrome
+                        ? resolution === r
+                          ? 'bg-blue-500 text-white border-blue-500 shadow-sm shadow-blue-200'
+                          : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600'
+                        : ''
+                    }`}
+                    style={isMonochrome ? {} : {
+                      background: resolution === r ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(59,130,246,0.15)') : '#2a2a2a',
                       color: resolution === r ? accentColor : subTextColor,
                       border: `1px solid ${resolution === r ? borderColor : 'transparent'}`,
                     }}
@@ -1303,11 +1357,9 @@ export default function VideoGenerationPanel({
           style={{
             background: isGold
               ? (isGenerating ? 'rgba(212,175,55,0.3)' : 'linear-gradient(135deg, #d4af37, #b8962e)')
-              : isMonochrome
-                ? (isGenerating ? 'rgba(107,114,128,0.3)' : 'linear-gradient(135deg, #4b5563, #374151)')
-                : (isGenerating ? 'rgba(59,130,246,0.3)' : 'linear-gradient(135deg, #3b82f6, #2563eb)'),
+              : (isGenerating ? 'rgba(59,130,246,0.3)' : 'linear-gradient(135deg, #3b82f6, #2563eb)'),
             color: '#fff',
-            boxShadow: isGenerating ? 'none' : `0 2px 8px ${isGold ? 'rgba(212,175,55,0.3)' : isMonochrome ? 'rgba(75,85,99,0.3)' : 'rgba(59,130,246,0.3)'}`,
+            boxShadow: isGenerating ? 'none' : `0 2px 8px ${isGold ? 'rgba(212,175,55,0.3)' : 'rgba(59,130,246,0.3)'}`,
           }}
         >
           {isGenerating ? (

@@ -973,8 +973,8 @@ export function InfiniteCanvas({
     generator: 'text-blue-600', pencil: 'text-violet-500', bot: 'text-fuchsia-500',
     shoppingBag: 'text-orange-500', scan: 'text-teal-500', fontDesign: 'text-amber-600',
     building: 'text-cyan-500', fileImage: 'text-indigo-500', hexCube: 'text-rose-500',
-    maximize: 'text-gray-500', mousePointer: 'text-gray-500', hand: 'text-gray-500',
-    upload: 'text-gray-500', fileText: 'text-emerald-500',
+    maximize: 'text-emerald-500', mousePointer: 'text-blue-500', hand: 'text-green-500',
+    upload: 'text-purple-500', fileText: 'text-emerald-500',
   } : {};
   const leftToolbarRef = useRef<HTMLDivElement>(null);
 
@@ -13018,14 +13018,14 @@ export function InfiniteCanvas({
           className={`${toolBtnCls}`}
           title="精修引擎"
         >
-          <Scan className="h-4 w-4" />
+          <Scan className={`h-4 w-4 ${mIcon.scan}`} />
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">精修引擎</span>
         </button>
 
         {/* Font Design - 字境大师 */}
         <button
           onClick={() => setShowFontDesign(true)}
-          className="tool-btn p-2 rounded-full transition-all relative group text-gold hover:text-gold-light hover:bg-gold/10"
+          className={`tool-btn p-2 rounded-full transition-all relative group ${isMonochrome ? 'text-amber-600 hover:text-amber-500 hover:bg-amber-50' : 'text-gold hover:text-gold-light hover:bg-gold/10'}`}
           title="字境大师"
         >
           <span className="text-sm font-bold leading-none">字</span>
@@ -13038,7 +13038,7 @@ export function InfiniteCanvas({
           className={`${toolBtnCls}`}
           title="品牌工厂"
         >
-          <Building2 className="h-4 w-4" />
+          <Building2 className={`h-4 w-4 ${mIcon.building}`} />
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">品牌工厂</span>
         </button>
 
@@ -13048,7 +13048,7 @@ export function InfiniteCanvas({
           className={`${toolBtnCls}`}
           title="3D构图画布 Pro"
         >
-          <Boxes className="h-4 w-4" />
+          <Boxes className={`h-4 w-4 ${mIcon.hexCube}`} />
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">3D构图</span>
         </button>
 
@@ -13058,7 +13058,7 @@ export function InfiniteCanvas({
           className={`${toolBtnCls}`}
           title="AI PSD生成器"
         >
-          <FileImage className="h-4 w-4" />
+          <FileImage className={`h-4 w-4 ${mIcon.fileImage}`} />
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">AI PSD</span>
         </button>
 
@@ -13068,7 +13068,7 @@ export function InfiniteCanvas({
           className={`${toolBtnCls}`}
           title="表情助手"
         >
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <svg className={`h-4 w-4 ${mIcon.heart}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="10" />
             <path d="M8 14s1.5 2 4 2 4-2 4-2" />
             <line x1="9" y1="9" x2="9.01" y2="9" strokeWidth="2.5" />
@@ -13085,7 +13085,7 @@ export function InfiniteCanvas({
           className={`${toolBtnCls}`}
           title="六面体"
         >
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <svg className={`h-4 w-4 ${mIcon.hexCube}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 16V8l-9-5-9 5v8l9 5 9-5z" />
             <path d="M12 3v18" />
             <path d="M3 8l9 5 9-5" />
