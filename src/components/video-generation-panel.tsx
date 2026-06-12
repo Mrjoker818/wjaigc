@@ -608,7 +608,7 @@ export default function VideoGenerationPanel({
   const borderInactiveClass = isMonochrome ? 'border-gray-200' : 'border-gray-700';
   // Additional theme-aware classes for labels, text, borders
   const labelClass = isMonochrome ? 'text-xs text-gray-500' : 'text-xs text-gray-500';
-  const sectionTitleClass = isMonochrome ? 'text-xs font-semibold text-blue-500' : 'text-xs font-semibold text-gray-300';
+  const sectionTitleClass = isMonochrome ? 'text-xs font-semibold text-blue-500 whitespace-nowrap' : 'text-xs font-semibold text-gray-300 whitespace-nowrap';
   const subtleTextClass = isMonochrome ? 'text-gray-400' : 'text-gray-500';
   const subtleBorderClass = isMonochrome ? 'border-gray-200' : 'border-gray-600';
   const deepBorderClass = isMonochrome ? 'border-gray-200' : 'border-gray-700';
