@@ -22,6 +22,7 @@ import { ProjectDataPanel } from '@/components/project-data-panel';
 
 import { HelpGuide } from '@/components/help-guide';
 import { FavoritesPanel } from '@/components/favorites-panel';
+import PromptTemplatePanel from '@/components/prompt-template-panel';
 import { taskEventsClient } from '@/lib/task-events-client';
 
 interface FavoriteItem {
@@ -204,6 +205,7 @@ function CanvasApp() {
   const [navigateToImageId, setNavigateToImageId] = useState<string | null>(null);
   const [showHelpGuide, setShowHelpGuide] = useState(false);
   const [showFavorites, setShowFavorites] = useState(false);
+  const [showPromptTemplate, setShowPromptTemplate] = useState(false);
   const [favoriteParams, setFavoriteParams] = useState<{
     prompt: string;
     negativePrompt?: string;
@@ -2826,6 +2828,7 @@ function CanvasApp() {
           onToggleHelp={() => setShowHelpGuide(true)}
           onAddToFavorites={handleAddToFavorites}
           onToggleFavorites={() => setShowFavorites(true)}
+          onTogglePromptTemplate={() => setShowPromptTemplate(true)}
           onSwitchToNodeMode={() => safeSwitchMode('node')}
           onSwitchToWorkflowHub={() => safeSwitchMode('workflow-hub')}
           onSwitchToDashboard={() => safeSwitchMode('dashboard')}
@@ -3409,6 +3412,18 @@ function CanvasApp() {
           }}
         />
       )}
+
+      {/* Prompt Template Panel */}
+      <PromptTemplatePanel
+        isOpen={showPromptTemplate}
+        onClose={() => setShowPromptTemplate(false)}
+        isMonochrome={themeStyle === 'monochrome'}
+        isAdmin={currentUser?.role === 'admin'}
+        onUseTemplate={(content: string) => {
+          setExternalPrompt(content);
+          setShowPromptTemplate(false);
+        }}
+      />
 
       {/* Project Data Panel */}
       <ProjectDataPanel

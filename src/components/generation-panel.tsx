@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Upload, X, Plus, Cpu, GitMerge, GripHorizontal, Zap } from 'lucide-react';
+import { Upload, X, Plus, Cpu, GitMerge, GripHorizontal, Zap, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { UniversalApiManager } from '@/lib/universal-api-manager';
 import { ApiProvider } from '@/lib/universal-api-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { ThirdPartyModelDialog } from '@/components/third-party-model-dialog';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import { getPromptTemplates, PromptTemplate, searchTemplates } from '@/lib/prompt-templates';
 import { MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS, MODEL_QUALITIES as SHARED_MODEL_QUALITIES, QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE as SHARED_QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES, findModelConfig as sharedFindModelConfig, calculateActualPixels as sharedCalculateActualPixels } from '@/lib/canvas-generation-group';
 
 export interface GenerationParams {
@@ -274,6 +275,13 @@ export function GenerationPanel(
     const [externalPromptApplied, setExternalPromptApplied] = useState(false);
     const [externalRefImgApplied, setExternalRefImgApplied] = useState(false);
     const [fusionPrompt, setFusionPrompt] = useState("");
+
+    // Prompt template popup state
+    const [showTemplatePopup, setShowTemplatePopup] = useState(false);
+    const [templateSearchQuery, setTemplateSearchQuery] = useState('');
+    const [filteredTemplates, setFilteredTemplates] = useState<PromptTemplate[]>([]);
+    const [selectedTemplateIndex, setSelectedTemplateIndex] = useState(0);
+    const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
 
     // Sync external prompt from chat-panel prompt optimizer
     useEffect(() => {
@@ -1052,9 +1060,69 @@ export function GenerationPanel(
                             </div>
                         )}
                         <textarea
+                            ref={promptTextareaRef}
                             value={prompt}
-                            onChange={(e) => setPrompt(e.target.value)}
+                            onChange={(e) => {
+                                const newValue = e.target.value;
+                                setPrompt(newValue);
+                                
+                                // Check for / trigger
+                                const cursorPos = e.target.selectionStart;
+                                const textBeforeCursor = newValue.slice(0, cursorPos);
+                                const lastSlashIndex = textBeforeCursor.lastIndexOf('/');
+                                
+                                if (lastSlashIndex >= 0) {
+                                    const charBeforeSlash = lastSlashIndex > 0 ? textBeforeCursor[lastSlashIndex - 1] : ' ';
+                                    // Show popup if / is at start or after whitespace
+                                    if (lastSlashIndex === 0 || /\s/.test(charBeforeSlash)) {
+                                        const query = textBeforeCursor.slice(lastSlashIndex + 1);
+                                        setTemplateSearchQuery(query);
+                                        const results = query ? searchTemplates(query) : getPromptTemplates();
+                                        setFilteredTemplates(results.slice(0, 8));
+                                        setSelectedTemplateIndex(0);
+                                        setShowTemplatePopup(true);
+                                    } else {
+                                        setShowTemplatePopup(false);
+                                    }
+                                } else {
+                                    setShowTemplatePopup(false);
+                                }
+                            }}
                             onKeyDown={(e) => {
+                                // Handle template popup navigation
+                                if (showTemplatePopup && filteredTemplates.length > 0) {
+                                    if (e.key === 'ArrowDown') {
+                                        e.preventDefault();
+                                        setSelectedTemplateIndex(prev => (prev + 1) % filteredTemplates.length);
+                                        return;
+                                    }
+                                    if (e.key === 'ArrowUp') {
+                                        e.preventDefault();
+                                        setSelectedTemplateIndex(prev => (prev - 1 + filteredTemplates.length) % filteredTemplates.length);
+                                        return;
+                                    }
+                                    if (e.key === 'Enter' || e.key === 'Tab') {
+                                        e.preventDefault();
+                                        const selected = filteredTemplates[selectedTemplateIndex];
+                                        if (selected) {
+                                            // Replace the /query with template content
+                                            const cursorPos = e.currentTarget.selectionStart;
+                                            const textBeforeCursor = prompt.slice(0, cursorPos);
+                                            const lastSlashIndex = textBeforeCursor.lastIndexOf('/');
+                                            const textAfterCursor = prompt.slice(cursorPos);
+                                            const newPrompt = prompt.slice(0, lastSlashIndex) + selected.content + textAfterCursor;
+                                            setPrompt(newPrompt);
+                                            setShowTemplatePopup(false);
+                                        }
+                                        return;
+                                    }
+                                    if (e.key === 'Escape') {
+                                        e.preventDefault();
+                                        setShowTemplatePopup(false);
+                                        return;
+                                    }
+                                }
+                                
                                 // Backspace at the start of textarea: remove last alt ref marker
                                 if (e.key === 'Backspace' && altRefMarkers.length > 0) {
                                     const textarea = e.currentTarget;
@@ -1065,10 +1133,64 @@ export function GenerationPanel(
                                     }
                                 }
                             }}
-                            placeholder={altRefMarkers.length > 0 ? "用 R1、R2... 引用参考图来控制生成效果..." : "描述你想要创建的图像..."}
+                            placeholder={altRefMarkers.length > 0 ? "用 R1、R2... 引用参考图来控制生成效果..." : "描述你想要创建的图像... (输入 / 使用模板)"}
                             style={{ height: prompt ? promptHeight : undefined, minHeight: 80 }}
                             className={`w-full px-3 py-2.5 text-sm resize-none ${mc ? 'bg-gray-50 text-gray-900 placeholder:text-gray-400' : 'bg-white/5 text-text-bright placeholder:text-gold-muted/50'} leading-relaxed focus:outline-none focus:ring-1 ${mc ? 'focus:ring-gray-300' : 'focus:ring-gold/30'} rounded-lg transition-shadow`}
                         />
+                        {/* Template Popup */}
+                        {showTemplatePopup && filteredTemplates.length > 0 && (
+                            <div className={`absolute left-0 right-0 top-full mt-1 z-50 rounded-xl shadow-2xl overflow-hidden ${
+                                mc ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-white/[0.12]'
+                            }`}>
+                                <div className={`px-3 py-2 border-b ${mc ? 'border-gray-100' : 'border-white/[0.06]'}`}>
+                                    <span className={`text-xs ${mc ? 'text-gray-500' : 'text-gold-muted/70'}`}>
+                                        提示词模板 {templateSearchQuery && `· 搜索: "${templateSearchQuery}"`}
+                                    </span>
+                                </div>
+                                <div className="max-h-60 overflow-y-auto">
+                                    {filteredTemplates.map((template, index) => (
+                                        <button
+                                            key={template.id}
+                                            onClick={() => {
+                                                const cursorPos = promptTextareaRef.current?.selectionStart || prompt.length;
+                                                const textBeforeCursor = prompt.slice(0, cursorPos);
+                                                const lastSlashIndex = textBeforeCursor.lastIndexOf('/');
+                                                const textAfterCursor = prompt.slice(cursorPos);
+                                                const newPrompt = prompt.slice(0, lastSlashIndex) + template.content + textAfterCursor;
+                                                setPrompt(newPrompt);
+                                                setShowTemplatePopup(false);
+                                                promptTextareaRef.current?.focus();
+                                            }}
+                                            className={`w-full text-left px-3 py-2.5 transition-colors ${
+                                                index === selectedTemplateIndex
+                                                    ? mc ? 'bg-gray-100' : 'bg-white/[0.06]'
+                                                    : mc ? 'hover:bg-gray-50' : 'hover:bg-white/[0.03]'
+                                            }`}
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                <FileText className={`w-3.5 h-3.5 flex-shrink-0 ${mc ? 'text-gray-400' : 'text-gold-muted/50'}`} />
+                                                <span className={`text-sm font-medium truncate ${mc ? 'text-gray-900' : 'text-foreground'}`}>
+                                                    {template.name}
+                                                </span>
+                                                <span className={`text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 ${
+                                                    mc ? 'bg-gray-100 text-gray-500' : 'bg-white/[0.06] text-gold-muted/70'
+                                                }`}>
+                                                    {template.category}
+                                                </span>
+                                            </div>
+                                            <p className={`text-xs mt-1 line-clamp-1 pl-5.5 ${mc ? 'text-gray-500' : 'text-gold-muted/50'}`}>
+                                                {template.content}
+                                            </p>
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className={`px-3 py-2 border-t ${mc ? 'border-gray-100' : 'border-white/[0.06]'}`}>
+                                    <span className={`text-[10px] ${mc ? 'text-gray-400' : 'text-gold-muted/40'}`}>
+                                        ↑↓ 选择 · Enter 确认 · Esc 关闭
+                                    </span>
+                                </div>
+                            </div>
+                        )}
                         {/* 拖动手柄 - 仅在有内容时显示 */}
                         {prompt && (
                             <div

@@ -386,6 +386,8 @@ interface InfiniteCanvasProps {
   onAddToFavorites?: (image: CanvasImage) => void;
   /** Callback to open favorites panel */
   onToggleFavorites?: () => void;
+  /** Callback to open prompt template panel */
+  onTogglePromptTemplate?: () => void;
   /** Switch to node editor mode */
   onSwitchToNodeMode?: () => void;
   /** Switch to workflow hub */
@@ -492,6 +494,7 @@ export function InfiniteCanvas({
   initialViewState,
   onAddToFavorites,
   onToggleFavorites,
+  onTogglePromptTemplate,
   onSwitchToNodeMode,
   onSwitchToWorkflowHub,
   onSwitchToDashboard,
@@ -971,7 +974,7 @@ export function InfiniteCanvas({
     shoppingBag: 'text-orange-500', scan: 'text-teal-500', fontDesign: 'text-amber-600',
     building: 'text-cyan-500', fileImage: 'text-indigo-500', hexCube: 'text-rose-500',
     maximize: 'text-gray-500', mousePointer: 'text-gray-500', hand: 'text-gray-500',
-    upload: 'text-gray-500',
+    upload: 'text-gray-500', fileText: 'text-emerald-500',
   } : {};
   const leftToolbarRef = useRef<HTMLDivElement>(null);
 
@@ -7299,6 +7302,15 @@ export function InfiniteCanvas({
               <Heart className={`h-3.5 w-3.5 ${mIcon.heart}`} />
               <span>收藏夹</span>
             </button>
+            {/* Prompt Templates */}
+            <button
+              onClick={onTogglePromptTemplate}
+              className={ltExpandedBtnCls}
+              title="提示词模板"
+            >
+              <FileText className={`h-3.5 w-3.5 ${mIcon.fileText}`} />
+              <span>提示词模板</span>
+            </button>
             {/* Help */}
             <button
               onClick={onToggleHelp}
@@ -7371,6 +7383,13 @@ export function InfiniteCanvas({
               title="项目数据"
             >
               <FolderOpen className="w-4 h-4" />
+            </button>
+            <button
+              onClick={onTogglePromptTemplate}
+              className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.fileText} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
+              title="提示词模板"
+            >
+              <FileText className="w-4 h-4" />
             </button>
             <button
               onClick={onToggleTheme}
