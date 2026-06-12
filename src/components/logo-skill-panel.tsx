@@ -75,7 +75,14 @@ interface LogoSkillPanelProps {
       logoRules?: string[];
       forbiddenRules?: string[];
     } | null;
+    id?: string;
   } | null;
+  /** 保存 Logo 到品牌资产回调 */
+  onSaveToBrandAssets?: (logoUrl: string, direction?: LogoDirection) => void;
+  /** 打开品牌 DNA 面板回调 */
+  onOpenBrandDna?: () => void;
+  /** 打开主 KV 面板回调 */
+  onOpenMainKv?: () => void;
 }
 
 type Step = 'input' | 'direction' | 'generate' | 'result';
@@ -115,6 +122,9 @@ export default function LogoSkillPanel({
   onClose,
   onAddImages,
   brandProject,
+  onSaveToBrandAssets,
+  onOpenBrandDna,
+  onOpenMainKv,
 }: LogoSkillPanelProps) {
   // ─── State ─────────────────────────────────────────────────
   const [step, setStep] = useState<Step>('input');
@@ -420,6 +430,38 @@ export default function LogoSkillPanel({
     }
   }
 
+  // ─── 保存到品牌资产 ──────────────────────────────────────────
+  const [isSavingToBrand, setIsSavingToBrand] = useState(false);
+  const [savedToBrand, setSavedToBrand] = useState(false);
+
+  function handleSaveToBrandAssets() {
+    if (!selectedImageUrl) return;
+    setIsSavingToBrand(true);
+    onSaveToBrandAssets?.(selectedImageUrl, direction || undefined);
+    // 同时调用 API 持久化
+    fetch('/api/logo-skill', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'save-asset',
+        brandName,
+        logoType,
+        logoUrl: selectedImageUrl,
+        direction: direction || undefined,
+        symbol: symbol || undefined,
+        visualNotes: visualNotes || undefined,
+        platformPrompts: platformPrompts.length > 0 ? platformPrompts : undefined,
+        projectId: brandProject?.id,
+      }),
+    }).then(res => res.json()).then(data => {
+      if (data.success) {
+        setSavedToBrand(true);
+      }
+    }).catch(() => {}).finally(() => {
+      setIsSavingToBrand(false);
+    });
+  }
+
   // ─── 重新开始 ────────────────────────────────────────────────
   function handleReset() {
     setStep('input');
@@ -716,195 +758,285 @@ export default function LogoSkillPanel({
   // ─── Step 2: 方向展示 ────────────────────────────────────────
   function renderDirectionStep() {
     return (
-      <div className="max-w-3xl mx-auto space-y-6">
-        {/* Logo Direction */}
-        {direction && (
-          <div className={`rounded-xl border ${border} p-5`}>
-            <div className="flex items-center gap-2 mb-4">
-              <CompassIcon className={`h-5 w-5 ${accent}`} />
-              <h3 className={`font-bold text-lg ${textPrimary}`}>Logo 方向</h3>
-            </div>
-            <div className="space-y-3">
-              <div>
-                <span className={`text-xs font-medium ${textSecondary}`}>定位</span>
-                <p className={`text-sm ${textPrimary} mt-0.5`}>{direction.positioning}</p>
-              </div>
-              <div>
-                <span className={`text-xs font-medium ${textSecondary}`}>视觉氛围</span>
-                <p className={`text-sm ${textPrimary} mt-0.5`}>{direction.visualMood}</p>
-              </div>
-              <div>
-                <span className={`text-xs font-medium ${textSecondary}`}>配色方案</span>
-                <div className="flex items-center gap-2 mt-1">
-                  {direction.colorPalette.map((c, i) => (
-                    <div key={i} className="flex items-center gap-1">
-                      <div className="w-6 h-6 rounded-md border border-white/20" style={{ backgroundColor: c.startsWith('#') ? c : undefined }} />
-                      <span className={`text-xs ${textSecondary}`}>{c}</span>
-                    </div>
-                  ))}
+      <div className="flex gap-6 h-full">
+        {/* 左栏：方向展示 + 修订 + 生成 */}
+        <div className="flex-1 min-w-0 space-y-5 overflow-y-auto max-h-[calc(100vh-200px)] pr-2">
+          {/* Logo Direction */}
+          {direction && (
+            <div className={`rounded-xl border ${border} p-5`}>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <CompassIcon className={`h-5 w-5 ${accent}`} />
+                  <h3 className={`font-bold text-lg ${textPrimary}`}>Logo 方向</h3>
                 </div>
+                {/* 方向命名标签 */}
+                <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+                  isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-[#d4af37]/15 text-[#d4af37]'
+                }`}>
+                  {direction.visualMood || '方案 A'}
+                </span>
               </div>
-              <div>
-                <span className={`text-xs font-medium ${textSecondary}`}>字体</span>
-                <p className={`text-sm ${textPrimary} mt-0.5`}>{direction.typography}</p>
-              </div>
-              <div>
-                <span className={`text-xs font-medium ${textSecondary}`}>构图</span>
-                <p className={`text-sm ${textPrimary} mt-0.5`}>{direction.composition}</p>
-              </div>
-              {direction.fitReason && (
-                <div className={`text-xs ${textSecondary} italic`}>适配原因: {direction.fitReason}</div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Symbol Concept */}
-        {symbol && (
-          <div className={`rounded-xl border ${border} p-5`}>
-            <div className="flex items-center gap-2 mb-4">
-              <Star className={`h-5 w-5 ${accent}`} />
-              <h3 className={`font-bold text-lg ${textPrimary}`}>符号概念</h3>
-            </div>
-            <div className="space-y-3">
-              <div>
-                <span className={`text-xs font-medium ${textSecondary}`}>核心隐喻</span>
-                <p className={`text-sm ${textPrimary} mt-0.5`}>{symbol.coreMetaphor}</p>
-              </div>
-              <div>
-                <span className={`text-xs font-medium ${textSecondary}`}>图标形式</span>
-                <p className={`text-sm ${textPrimary} mt-0.5`}>{symbol.iconForm}</p>
-              </div>
-              {symbol.negativeSpaceIdea && (
+              <div className="space-y-3">
                 <div>
-                  <span className={`text-xs font-medium ${textSecondary}`}>负空间</span>
-                  <p className={`text-sm ${textPrimary} mt-0.5`}>{symbol.negativeSpaceIdea}</p>
+                  <span className={`text-xs font-medium ${textSecondary}`}>定位</span>
+                  <p className={`text-sm ${textPrimary} mt-0.5`}>{direction.positioning || '待确定'}</p>
                 </div>
-              )}
-              {symbol.alternativeRoutes.length > 0 && (
                 <div>
-                  <span className={`text-xs font-medium ${textSecondary}`}>替代路线</span>
-                  <ul className="mt-1 space-y-1">
-                    {symbol.alternativeRoutes.map((r, i) => (
-                      <li key={i} className={`text-sm ${textPrimary} flex items-start gap-2`}>
-                        <ArrowRight className={`h-3 w-3 mt-1 ${accent} shrink-0`} />
-                        {r}
-                      </li>
+                  <span className={`text-xs font-medium ${textSecondary}`}>视觉氛围</span>
+                  <p className={`text-sm ${textPrimary} mt-0.5`}>{direction.visualMood || '待确定'}</p>
+                </div>
+                <div>
+                  <span className={`text-xs font-medium ${textSecondary}`}>配色方案</span>
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    {direction.colorPalette.map((c, i) => (
+                      <div key={i} className="flex items-center gap-1">
+                        <div className="w-6 h-6 rounded-md border border-white/20" style={{ backgroundColor: c.startsWith('#') ? c : undefined }} />
+                        <span className={`text-xs ${textSecondary}`}>{c}</span>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
+                </div>
+                <div>
+                  <span className={`text-xs font-medium ${textSecondary}`}>字体</span>
+                  <p className={`text-sm ${textPrimary} mt-0.5`}>{direction.typography}</p>
+                </div>
+                <div>
+                  <span className={`text-xs font-medium ${textSecondary}`}>构图</span>
+                  <p className={`text-sm ${textPrimary} mt-0.5`}>{direction.composition}</p>
+                </div>
+                {direction.fitReason && (
+                  <div className={`text-xs ${textSecondary} italic`}>适配原因: {direction.fitReason}</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Symbol Concept */}
+          {symbol && (
+            <div className={`rounded-xl border ${border} p-5`}>
+              <div className="flex items-center gap-2 mb-4">
+                <Star className={`h-5 w-5 ${accent}`} />
+                <h3 className={`font-bold text-lg ${textPrimary}`}>符号概念</h3>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <span className={`text-xs font-medium ${textSecondary}`}>核心隐喻</span>
+                  <p className={`text-sm ${textPrimary} mt-0.5`}>{symbol.coreMetaphor || '待确定'}</p>
+                </div>
+                <div>
+                  <span className={`text-xs font-medium ${textSecondary}`}>图标形式</span>
+                  <p className={`text-sm ${textPrimary} mt-0.5`}>{symbol.iconForm}</p>
+                </div>
+                {symbol.negativeSpaceIdea && (
+                  <div>
+                    <span className={`text-xs font-medium ${textSecondary}`}>负空间</span>
+                    <p className={`text-sm ${textPrimary} mt-0.5`}>{symbol.negativeSpaceIdea}</p>
+                  </div>
+                )}
+                {symbol.alternativeRoutes.length > 0 && (
+                  <div>
+                    <span className={`text-xs font-medium ${textSecondary}`}>替代路线</span>
+                    <ul className="mt-1 space-y-1">
+                      {symbol.alternativeRoutes.map((r, i) => (
+                        <li key={i} className={`text-sm ${textPrimary} flex items-start gap-2`}>
+                          <ArrowRight className={`h-3 w-3 mt-1 ${accent} shrink-0`} />
+                          {r}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Visual System Notes */}
+          {visualNotes && (
+            <div className={`rounded-xl border ${border} p-5`}>
+              <div className="flex items-center gap-2 mb-4">
+                <Eye className={`h-5 w-5 ${accent}`} />
+                <h3 className={`font-bold text-lg ${textPrimary}`}>视觉系统说明</h3>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <span className={`text-xs font-medium ${textSecondary}`}>单色行为</span>
+                  <p className={`text-sm ${textPrimary} mt-0.5`}>{visualNotes.oneColorBehavior}</p>
+                </div>
+                <div>
+                  <span className={`text-xs font-medium ${textSecondary}`}>小尺寸行为</span>
+                  <p className={`text-sm ${textPrimary} mt-0.5`}>{visualNotes.smallSizeBehavior}</p>
+                </div>
+              </div>
+              {visualNotes.recommendedLockups.length > 0 && (
+                <div className="mt-3">
+                  <span className={`text-xs font-medium ${textSecondary}`}>推荐组合</span>
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {visualNotes.recommendedLockups.map((l, i) => (
+                      <span key={i} className={`px-2 py-1 rounded text-xs ${cardBg} ${textSecondary}`}>{l}</span>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Visual System Notes */}
-        {visualNotes && (
-          <div className={`rounded-xl border ${border} p-5`}>
-            <div className="flex items-center gap-2 mb-4">
-              <Eye className={`h-5 w-5 ${accent}`} />
-              <h3 className={`font-bold text-lg ${textPrimary}`}>视觉系统说明</h3>
+          {/* 修订输入 */}
+          <div className={`rounded-xl border ${border} p-4`}>
+            <div className="flex items-center gap-2 mb-3">
+              <RefreshCw className={`h-4 w-4 ${accent}`} />
+              <h3 className={`font-semibold text-sm ${textPrimary}`}>修订方向</h3>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <span className={`text-xs font-medium ${textSecondary}`}>单色行为</span>
-                <p className={`text-sm ${textPrimary} mt-0.5`}>{visualNotes.oneColorBehavior}</p>
-              </div>
-              <div>
-                <span className={`text-xs font-medium ${textSecondary}`}>小尺寸行为</span>
-                <p className={`text-sm ${textPrimary} mt-0.5`}>{visualNotes.smallSizeBehavior}</p>
-              </div>
+            <div className="flex gap-2">
+              <input
+                value={revisionNotes}
+                onChange={e => setRevisionNotes(e.target.value)}
+                placeholder="描述你想调整的方面..."
+                className={`flex-1 px-3 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} placeholder:text-gray-400 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'}`}
+                onKeyDown={e => { if (e.key === 'Enter' && revisionNotes.trim()) handleRefineDirection(); }}
+              />
+              <button
+                onClick={handleRefineDirection}
+                disabled={!revisionNotes.trim() || isGeneratingDirection}
+                className={`px-3 py-2 rounded-lg ${accentBg} text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-opacity flex items-center gap-1`}
+              >
+                {isGeneratingDirection ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                修订
+              </button>
             </div>
-            {visualNotes.recommendedLockups.length > 0 && (
-              <div className="mt-3">
-                <span className={`text-xs font-medium ${textSecondary}`}>推荐组合</span>
-                <div className="flex flex-wrap gap-2 mt-1">
-                  {visualNotes.recommendedLockups.map((l, i) => (
-                    <span key={i} className={`px-2 py-1 rounded text-xs ${cardBg} ${textSecondary}`}>{l}</span>
+          </div>
+
+          {/* 生成图像按钮 */}
+          <div className={`rounded-xl border ${border} p-4`}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Sparkles className={`h-4 w-4 ${accent}`} />
+                <h3 className={`font-semibold text-sm ${textPrimary}`}>生成 Logo 图像</h3>
+              </div>
+              {imageModels.length > 0 && (
+                <select
+                  value={selectedImageModel}
+                  onChange={e => setSelectedImageModel(e.target.value)}
+                  className={`px-2 py-1 rounded-lg border text-xs ${inputBg} ${textPrimary} focus:outline-none`}
+                >
+                  {imageModels.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <p className={`text-xs ${textSecondary} mb-3`}>
+              布局: {outputLayout === 'brand-system-board' ? '品牌系统展示板' : OUTPUT_LAYOUTS.find(l => l.value === outputLayout)?.label}
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={handleGenerateImage}
+                disabled={isGeneratingImage}
+                className={`flex-1 py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${accentBg} ${accentBgHover} text-white transition-all disabled:opacity-50`}
+              >
+                {isGeneratingImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
+                生成 Logo
+              </button>
+              <button
+                onClick={handleReset}
+                className={`px-3 py-2.5 rounded-xl text-sm ${isMonochrome ? 'bg-gray-100 hover:bg-gray-200 text-gray-700' : 'bg-white/10 hover:bg-white/20 text-white'} transition-colors font-medium`}
+              >
+                重新开始
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* 右栏：平台 Prompt */}
+        <div className="w-[380px] shrink-0 space-y-4 overflow-y-auto max-h-[calc(100vh-200px)]">
+          <h3 className={`font-semibold text-sm ${textPrimary} flex items-center gap-2`}>
+            <Wand2 className={`h-4 w-4 ${accent}`} />
+            多平台 Prompt
+          </h3>
+          {platformPrompts.length === 0 ? (
+            <div className={`rounded-xl border ${border} p-6 text-center`}>
+              <p className={`text-sm ${textSecondary}`}>生成方向后将展示各平台 Prompt</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {platformPrompts.map((pp, i) => (
+                <div key={i} className={`rounded-xl border ${border} overflow-hidden`}>
+                  <button
+                    onClick={() => setExpandedPrompt(expandedPrompt === pp.platform ? null : pp.platform)}
+                    className={`w-full px-4 py-2.5 flex items-center justify-between ${cardBg} hover:opacity-80 transition-opacity`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-bold ${accent}`}>
+                        {pp.platform === 'gpt-image' ? 'GPT' :
+                         pp.platform === 'midjourney' ? 'MJ' :
+                         pp.platform === 'flux' ? 'Flux' :
+                         pp.platform === 'ideogram' ? 'Ideo' :
+                         'Uni'}
+                      </span>
+                      <span className={`text-xs font-medium ${textPrimary}`}>{pp.platform}</span>
+                      {pp.notes && <span className={`text-[10px] ${textSecondary}`}>({pp.notes})</span>}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleCopyPrompt(pp.prompt, pp.platform); }}
+                        className={`p-1 rounded ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'} transition-colors`}
+                        title="复制 Prompt"
+                      >
+                        {copiedPrompt === pp.platform ? <Check className="h-3 w-3 text-green-400" /> : <Copy className={`h-3 w-3 ${textSecondary}`} />}
+                      </button>
+                      {expandedPrompt === pp.platform ? <ChevronDown className={`h-3 w-3 ${textSecondary}`} /> : <ChevronRight className={`h-3 w-3 ${textSecondary}`} />}
+                    </div>
+                  </button>
+                  {expandedPrompt === pp.platform && (
+                    <div className={`px-4 py-3 ${isMonochrome ? 'bg-gray-50' : 'bg-black/30'}`}>
+                      <pre className={`text-xs ${textSecondary} whitespace-pre-wrap break-all`}>{pp.prompt}</pre>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Board Layout */}
+          {boardLayout && (
+            <div className={`rounded-xl border ${border} p-4`}>
+              <div className="flex items-center gap-2 mb-3">
+                <Layout className={`h-4 w-4 ${accent}`} />
+                <h4 className={`font-semibold text-sm ${textPrimary}`}>展示板布局</h4>
+              </div>
+              <div className="space-y-2">
+                <p className={`text-xs ${textSecondary}`}>{boardLayout.canvasSpec}</p>
+                <div className="space-y-1">
+                  {boardLayout.modules.map((m, i) => (
+                    <p key={i} className={`text-xs ${textPrimary} flex items-start gap-1`}>
+                      <span className={`${accent} shrink-0`}>•</span>
+                      {m}
+                    </p>
                   ))}
                 </div>
+                {boardLayout.footerValues.length > 0 && (
+                  <div className={`text-[10px] ${textSecondary} mt-2`}>
+                    页脚: {boardLayout.footerValues.join(' | ')}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        )}
-
-        {/* 修订输入 */}
-        <div className={`rounded-xl border ${border} p-5`}>
-          <div className="flex items-center gap-2 mb-3">
-            <RefreshCw className={`h-5 w-5 ${accent}`} />
-            <h3 className={`font-semibold ${textPrimary}`}>修订方向</h3>
-          </div>
-          <div className="flex gap-2">
-            <input
-              value={revisionNotes}
-              onChange={e => setRevisionNotes(e.target.value)}
-              placeholder="描述你想调整的方面，例如：配色更温暖一些、符号更具科技感..."
-              className={`flex-1 px-4 py-3 rounded-lg border ${inputBg} ${textPrimary} placeholder:text-gray-400 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'}`}
-              onKeyDown={e => { if (e.key === 'Enter' && revisionNotes.trim()) handleRefineDirection(); }}
-            />
-            <button
-              onClick={handleRefineDirection}
-              disabled={!revisionNotes.trim() || isGeneratingDirection}
-              className={`px-4 py-3 rounded-lg ${accentBg} text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-opacity flex items-center gap-1`}
-            >
-              {isGeneratingDirection ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
-              修订
-            </button>
-          </div>
-        </div>
-
-        {/* 生成图像 */}
-        <div className={`rounded-xl border ${border} p-5`}>
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Sparkles className={`h-5 w-5 ${accent}`} />
-              <h3 className={`font-semibold ${textPrimary}`}>生成 Logo 图像</h3>
             </div>
-            {imageModels.length > 0 && (
-              <select
-                value={selectedImageModel}
-                onChange={e => setSelectedImageModel(e.target.value)}
-                className={`px-3 py-1.5 rounded-lg border text-xs ${inputBg} ${textPrimary} focus:outline-none`}
-              >
-                {imageModels.map(m => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-              </select>
+          )}
+
+          {/* 查看原始响应 */}
+          <div>
+            <button
+              onClick={() => setShowRawResponse(!showRawResponse)}
+              className={`text-xs ${textSecondary} hover:underline flex items-center gap-1`}
+            >
+              {showRawResponse ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              {showRawResponse ? '隐藏' : '查看'}原始 LLM 响应
+            </button>
+            {showRawResponse && (
+              <pre className={`mt-2 p-4 rounded-lg text-xs ${textSecondary} whitespace-pre-wrap break-all overflow-auto max-h-64 ${cardBg}`}>
+                {rawResponse}
+              </pre>
             )}
           </div>
-          <p className={`text-sm ${textSecondary} mb-4`}>将使用 {outputLayout === 'brand-system-board' ? '品牌系统展示板' : OUTPUT_LAYOUTS.find(l => l.value === outputLayout)?.label} 布局生成图像</p>
-          <div className="flex gap-3">
-            <button
-              onClick={handleGenerateImage}
-              disabled={isGeneratingImage}
-              className={`flex-1 py-3 rounded-xl font-bold text-base flex items-center justify-center gap-2 ${accentBg} ${accentBgHover} text-white transition-all disabled:opacity-50`}
-            >
-              {isGeneratingImage ? <Loader2 className="h-5 w-5 animate-spin" /> : <ImageIcon className="h-5 w-5" />}
-              生成 Logo 图像
-            </button>
-            <button
-              onClick={handleReset}
-              className={`px-4 py-3 rounded-xl ${isMonochrome ? 'bg-gray-100 hover:bg-gray-200 text-gray-700' : 'bg-white/10 hover:bg-white/20 text-white'} transition-colors font-medium`}
-            >
-              重新开始
-            </button>
-          </div>
-        </div>
-
-        {/* 查看原始响应 */}
-        <div>
-          <button
-            onClick={() => setShowRawResponse(!showRawResponse)}
-            className={`text-xs ${textSecondary} hover:underline flex items-center gap-1`}
-          >
-            {showRawResponse ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-            {showRawResponse ? '隐藏' : '查看'}原始 LLM 响应
-          </button>
-          {showRawResponse && (
-            <pre className={`mt-2 p-4 rounded-lg text-xs ${textSecondary} whitespace-pre-wrap break-all overflow-auto max-h-64 ${cardBg}`}>
-              {rawResponse}
-            </pre>
-          )}
         </div>
       </div>
     );
@@ -936,14 +1068,24 @@ export default function LogoSkillPanel({
       <div className="max-w-4xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
           <h2 className={`text-xl font-bold ${textPrimary}`}>生成结果</h2>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <button
               onClick={handleAddToCanvas}
-              className={`px-4 py-2 rounded-lg ${accentBg} text-white font-medium flex items-center gap-1`}
+              className={`px-4 py-2 rounded-lg ${isMonochrome ? 'bg-gray-100 text-gray-700' : 'bg-white/10 text-white'} font-medium flex items-center gap-1`}
             >
               <Download className="h-4 w-4" />
               添加到画布
             </button>
+            {brandProject && (
+              <button
+                onClick={handleSaveToBrandAssets}
+                disabled={isSavingToBrand || !selectedImageUrl}
+                className={`px-4 py-2 rounded-lg ${accentBg} text-white font-medium flex items-center gap-1 disabled:opacity-50`}
+              >
+                {isSavingToBrand ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                {savedToBrand ? '已保存' : '保存到品牌资产'}
+              </button>
+            )}
             <button
               onClick={() => setStep('direction')}
               className={`px-4 py-2 rounded-lg ${isMonochrome ? 'bg-gray-100 text-gray-700' : 'bg-white/10 text-white'} font-medium flex items-center gap-1`}
@@ -963,17 +1105,36 @@ export default function LogoSkillPanel({
         {/* 图像网格 */}
         <div className="grid grid-cols-2 gap-4">
           {imageUrls.map((url, i) => (
-            <button
-              key={i}
-              onClick={() => setSelectedImageUrl(url)}
-              className={`rounded-xl overflow-hidden border-2 transition-all ${
-                selectedImageUrl === url
-                  ? isMonochrome ? 'border-blue-500' : 'border-[#d4af37]'
-                  : `${border} hover:opacity-80`
-              }`}
-            >
-              <img src={url} alt={`Logo ${i + 1}`} className="w-full aspect-square object-contain bg-white" />
-            </button>
+            <div key={i} className="relative">
+              <button
+                onClick={() => { setSelectedImageUrl(url); setSavedToBrand(false); }}
+                className={`w-full rounded-xl overflow-hidden border-2 transition-all ${
+                  selectedImageUrl === url
+                    ? isMonochrome ? 'border-blue-500' : 'border-[#d4af37]'
+                    : `${border} hover:opacity-80`
+                }`}
+              >
+                <img src={url} alt={`Logo ${i + 1}`} className="w-full aspect-square object-contain bg-white" />
+              </button>
+              {selectedImageUrl === url && brandProject && (
+                <div className="absolute top-2 right-2 flex gap-1">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleSaveToBrandAssets(); }}
+                    className={`p-1.5 rounded-lg ${accentBg} text-white shadow-lg`}
+                    title="保存到品牌资产"
+                  >
+                    <Save className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onAddImages?.([url]); }}
+                    className={`p-1.5 rounded-lg ${isMonochrome ? 'bg-gray-200 text-gray-700' : 'bg-white/20 text-white'} shadow-lg`}
+                    title="添加到画布"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
           ))}
         </div>
 
@@ -981,6 +1142,48 @@ export default function LogoSkillPanel({
         {selectedImageUrl && (
           <div className={`rounded-xl border ${border} overflow-hidden`}>
             <img src={selectedImageUrl} alt="Selected Logo" className="w-full max-h-[500px] object-contain bg-white" />
+          </div>
+        )}
+
+        {/* 快捷入口：品牌 DNA / 主 KV / 物料中心 */}
+        {brandProject && savedToBrand && (
+          <div className={`rounded-xl ${isMonochrome ? 'bg-gray-50 border border-gray-200' : 'bg-[#1a1a1a]/80 border border-[#d4af37]/20'} p-5`}>
+            <h3 className={`text-sm font-semibold mb-3 ${textPrimary}`}>Logo 已保存到品牌资产，接下来可以：</h3>
+            <div className="grid grid-cols-3 gap-3">
+              <button
+                onClick={onOpenBrandDna}
+                className={`p-3 rounded-lg text-center transition-all ${
+                  isMonochrome
+                    ? 'bg-white border border-gray-200 hover:border-blue-300 text-gray-700'
+                    : 'bg-[#222] border border-[#d4af37]/20 hover:border-[#d4af37]/50 text-white'
+                }`}
+              >
+                <Palette className="h-5 w-5 mx-auto mb-1" />
+                <span className="text-xs font-medium">品牌 DNA</span>
+              </button>
+              <button
+                onClick={onOpenMainKv}
+                className={`p-3 rounded-lg text-center transition-all ${
+                  isMonochrome
+                    ? 'bg-white border border-gray-200 hover:border-blue-300 text-gray-700'
+                    : 'bg-[#222] border border-[#d4af37]/20 hover:border-[#d4af37]/50 text-white'
+                }`}
+              >
+                <ImageIcon className="h-5 w-5 mx-auto mb-1" />
+                <span className="text-xs font-medium">主 KV</span>
+              </button>
+              <button
+                onClick={onClose}
+                className={`p-3 rounded-lg text-center transition-all ${
+                  isMonochrome
+                    ? 'bg-white border border-gray-200 hover:border-blue-300 text-gray-700'
+                    : 'bg-[#222] border border-[#d4af37]/20 hover:border-[#d4af37]/50 text-white'
+                }`}
+              >
+                <Wand2 className="h-5 w-5 mx-auto mb-1" />
+                <span className="text-xs font-medium">物料中心</span>
+              </button>
+            </div>
           </div>
         )}
       </div>

@@ -3445,6 +3445,23 @@ function CanvasApp() {
             tone: '',
             brandDna: null,
           } : null}
+          onSaveToBrandAssets={(logoUrl, dir) => {
+            // 保存 Logo 到当前项目并设置为 logoUrl
+            if (currentProject) {
+              setCurrentProject(prev => prev ? { ...prev, logoUrl } : prev);
+              fetch('/api/brand-factory', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'update-project', id: currentProject.id, logoUrl }),
+              }).catch(() => {});
+            }
+          }}
+          onOpenBrandDna={() => {
+            setShowLogoSkill(false);
+          }}
+          onOpenMainKv={() => {
+            setShowLogoSkill(false);
+          }}
         />
       )}
 

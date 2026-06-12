@@ -11657,6 +11657,10 @@ export function InfiniteCanvas({
                 onAddImages?.(urls);
               }}
               isMonochrome={isMonochrome}
+              onOpenLogoSkill={() => {
+                setShowBrandFactory(false);
+                onToggleLogoSkill?.();
+              }}
             />
           </Suspense>
         )}

@@ -399,6 +399,7 @@ const CLIENT_ACTIONS = [
 const TABS = [
   { key: 'projects', label: '项目中心', icon: FolderOpen },
   { key: 'assets', label: '品牌资产', icon: ImageIcon },
+  { key: 'logo-generator', label: 'Logo 生成', icon: PenTool },
   { key: 'dna', label: '品牌DNA', icon: Palette },
   { key: 'directions', label: '创意方向', icon: Sparkles },
   { key: 'kv', label: '主KV', icon: Layout },
@@ -421,9 +422,11 @@ interface BrandFactoryPanelProps {
   onClose: () => void;
   onAddImages?: (urls: string[]) => void;
   isMonochrome?: boolean;
+  /** 打开 Logo Generator Skill Pro 面板 */
+  onOpenLogoSkill?: () => void;
 }
 
-export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome = false }: BrandFactoryPanelProps) {
+export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome = false, onOpenLogoSkill }: BrandFactoryPanelProps) {
   // === Panel drag state ===
   const [panelPos, setPanelPos] = useState({ x: 0, y: 20 });
   const [isDragging, setIsDragging] = useState(false);
@@ -459,7 +462,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
   // === Project create state ===
   const [newProject, setNewProject] = useState({
     brandName: '', industry: '', projectType: '', tone: '',
-    keywords: '', targetAudience: '', description: ''
+    keywords: '', targetAudience: '', description: '', logoSource: 'generate' as 'generate' | 'upload' | 'skip'
   });
 
   // === DNA state ===
@@ -672,7 +675,12 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
       const proj = parseProject(data.project);
       setProjects(prev => [...prev, proj]);
       setCurrentProject(proj);
-      setNewProject({ brandName: '', industry: '', projectType: '', tone: '', keywords: '', targetAudience: '', description: '' });
+      const logoSrc = newProject.logoSource;
+      setNewProject({ brandName: '', industry: '', projectType: '', tone: '', keywords: '', targetAudience: '', description: '', logoSource: 'generate' });
+      // 如果选择了 AI 生成 Logo，创建项目后自动打开 Logo Generator
+      if (logoSrc === 'generate') {
+        onOpenLogoSkill?.();
+      }
     }
   };
 
@@ -910,6 +918,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
     switch (activeTab) {
       case 'projects': return renderProjects();
       case 'assets': return renderAssets();
+      case 'logo-generator': return renderLogoGenerator();
       case 'dna': return renderDNA();
       case 'directions': return renderDirections();
       case 'kv': return renderKV();
@@ -956,6 +965,29 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
         </div>
         <textarea className={`${th.input} w-full resize-none`} rows={2} placeholder="项目描述" value={newProject.description}
           onChange={e => setNewProject(p => ({ ...p, description: e.target.value }))} />
+        {/* Logo 来源选择器 */}
+        <div className="space-y-2">
+          <h4 className={`${th.textSec} text-xs font-medium`}>Logo 来源</h4>
+          <div className="grid grid-cols-3 gap-2">
+            {([
+              { value: 'generate' as const, label: 'AI 生成 Logo', icon: '✨', desc: '使用 Logo Pro 生成' },
+              { value: 'upload' as const, label: '上传已有', icon: '📤', desc: '上传现有 Logo' },
+              { value: 'skip' as const, label: '暂不设置', icon: '⏭️', desc: '稍后再添加' },
+            ]).map(opt => (
+              <button key={opt.value}
+                className={`p-2 rounded-lg text-center transition-all text-xs ${
+                  newProject.logoSource === opt.value
+                    ? 'bg-[var(--color-primary,#d4af37)]/15 border border-[var(--color-primary,#d4af37)]/40'
+                    : `${th.card} border border-transparent hover:border-[var(--color-primary,#d4af37)]/20`
+                }`}
+                onClick={() => setNewProject(p => ({ ...p, logoSource: opt.value }))}>
+                <span className="block text-base mb-0.5">{opt.icon}</span>
+                <span className="block font-medium">{opt.label}</span>
+                <span className={`block mt-0.5 ${th.textSec} text-[10px]`}>{opt.desc}</span>
+              </button>
+            ))}
+          </div>
+        </div>
         <button className={`${th.btn} w-full`} onClick={handleCreateProject} disabled={loading || !newProject.brandName}>
           <Plus className="w-4 h-4 inline mr-1" />创建项目
         </button>
@@ -978,6 +1010,56 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
         ))}
         {projects.length === 0 && <div className={`${th.textMuted} text-xs text-center py-4`}>暂无项目，请创建</div>}
       </div>
+    </div>
+  );
+
+  // ========== LOGO GENERATOR ==========
+  const renderLogoGenerator = () => (
+    <div className="space-y-4">
+      {noProject && <div className={`${th.textMuted} text-sm text-center py-8`}>请先选择或创建项目</div>}
+      {currentProject && (
+        <div className={`${th.card} p-4 space-y-3`}>
+          <div className="flex items-center gap-2 mb-2">
+            <PenTool className={`w-4 h-4 ${ac.textAccent}`} />
+            <span className={`${th.title} text-sm`}>Logo 生成器 Pro</span>
+          </div>
+          <p className={`${th.textSec} text-xs`}>基于 SanbaoAI 专业设计师经验生成品牌 Logo 与品牌系统方向</p>
+          {currentProject.logoUrl ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <img src={currentProject.logoUrl} alt="当前Logo" className="w-16 h-16 object-contain rounded bg-black/30" />
+                <div>
+                  <div className={`${th.text} text-sm font-medium`}>当前已有 Logo</div>
+                  <div className={`${th.textMuted} text-xs`}>可重新生成替换</div>
+                </div>
+              </div>
+              <button className={`${th.btn} w-full flex items-center justify-center gap-2`}
+                onClick={() => onOpenLogoSkill?.()}>
+                <PenTool className="w-4 h-4" /> 重新生成 Logo
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className={`${th.textMuted} text-xs text-center py-3`}>当前项目尚无 Logo，使用 AI 专业生成</div>
+              <button className={`${th.btn} w-full flex items-center justify-center gap-2`}
+                onClick={() => onOpenLogoSkill?.()}>
+                <PenTool className="w-4 h-4" /> 生成专业 Logo
+              </button>
+            </div>
+          )}
+          <div className={`border-t ${th.borderLight} pt-3 mt-3`}>
+            <div className={`${th.textSec} text-xs font-medium mb-2`}>快捷入口</div>
+            <div className="grid grid-cols-3 gap-2">
+              <button className={`${th.btnGhost} text-xs py-2 flex items-center justify-center gap-1`}
+                onClick={() => setActiveTab('dna')}><Palette className="w-3 h-3" />品牌DNA</button>
+              <button className={`${th.btnGhost} text-xs py-2 flex items-center justify-center gap-1`}
+                onClick={() => setActiveTab('kv')}><Layout className="w-3 h-3" />主KV</button>
+              <button className={`${th.btnGhost} text-xs py-2 flex items-center justify-center gap-1`}
+                onClick={() => setActiveTab('materials')}><FileText className="w-3 h-3" />物料</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 
