@@ -33,7 +33,7 @@ interface BrandKit {
 
 interface BrandKitPanelProps {
   isGold: boolean;
-  onAddImages?: (imageUrls: string[]) => void;
+  onAddImages?: (imageUrls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
 }
 
 // ========== Default Colors ==========
@@ -643,7 +643,7 @@ function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageMo
   kit: BrandKit;
   isGold: boolean;
   onClose: () => void;
-  onAddImages?: (urls: string[]) => void;
+  onAddImages?: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
   currentImageModel?: string;
   currentImageProviderId?: string;
 }) {
@@ -747,7 +747,7 @@ function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageMo
 
   const handleAddToCanvas = () => {
     const urls = results.filter(r => r.url).map(r => r.url!);
-    if (urls.length > 0 && onAddImages) onAddImages(urls);
+    if (urls.length > 0 && onAddImages) onAddImages(urls, { modelName: currentImageModel, apiProvider: currentImageProviderId });
     onClose();
   };
 

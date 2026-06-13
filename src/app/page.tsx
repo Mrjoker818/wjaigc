@@ -2008,6 +2008,7 @@ function CanvasApp() {
                   processing: undefined,
                   prompt: params.prompt,
                   modelName: params.model,
+                  apiProvider: params.providerId || undefined,
                 } as CanvasImage : img
               ));
             } else {
@@ -2659,7 +2660,7 @@ function CanvasApp() {
         onOpenWorkflowHub={() => setAppMode('workflow-hub')}
         canvasImages={images.map(img => ({ id: img.id, url: img.url, name: img.prompt?.slice(0, 30) || '图片', description: img.prompt || '', width: img.width, height: img.height }))}
         themeStyle={themeStyle}
-        onAddImages={handleAddImages}
+        onAddImages={(urls, meta) => handleAddImages(urls, undefined, meta)}
       />
     );
   }

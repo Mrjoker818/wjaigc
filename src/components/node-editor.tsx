@@ -1579,9 +1579,9 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
             if (generatedUrls.length > 0) {
               // ★ 如果输出没有模型信息，从工作流节点中查找
               if (!workflowModelName && wf.nodes) {
-                const genNode = wf.nodes.find(n => n.type === 'ai-generate' && n.fields?.model);
-                if (genNode?.fields?.model) {
-                  const model = genNode.fields.model as string;
+                const genNode = wf.nodes.find(n => n.type === 'ai-generate' && n.config?.model);
+                if (genNode?.config?.model) {
+                  const model = genNode.config.model as string;
                   workflowModelName = model.includes('::') ? model.split('::').pop()! : model;
                   if (!workflowApiProvider && model.includes('::')) workflowApiProvider = model.split('::')[0];
                 }
