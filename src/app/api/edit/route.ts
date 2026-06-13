@@ -3,6 +3,8 @@ import sharp from 'sharp';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl, getApiProviders } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { optionalApiAuth } from '@/lib/api-auth';
+import { getSessionUser } from '@/lib/server-auth';
+import { consumeCredits } from '@/lib/credits';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { getEditTask, deleteEditTask, setEditTask, updateTaskStage, failEditTask } from '@/lib/edit-task-store';
@@ -298,6 +300,15 @@ export async function POST(request: NextRequest) {
     }
     if (safetyResult.level === 'warning') {
       logSafetyWarning(prompt, safetyResult);
+    }
+
+    // 积分检查与扣除
+    const sessionUser = await getSessionUser(request);
+    if (sessionUser) {
+      const creditResult = await consumeCredits(sessionUser.id, 'image_retouch', undefined, undefined, model, { quality });
+      if (!creditResult.success) {
+        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+      }
     }
 
     // ========== 1. 获取 API 凭证（与 /api/generate 一致） ==========

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getServerDataRoot } from '@/lib/server-data-root';
+import { getSessionUser } from '@/lib/server-auth';
+import { consumeCredits } from '@/lib/credits';
 import fsSync from 'fs';
 import path from 'path';
 
@@ -92,6 +94,15 @@ export async function POST(request: NextRequest) {
 
     if (!imageUrl) {
       return NextResponse.json({ success: false, error: '缺少 imageUrl' }, { status: 400 });
+    }
+
+    // 积分检查与扣除
+    const sessionUser = await getSessionUser(request);
+    if (sessionUser) {
+      const creditResult = await consumeCredits(sessionUser.id, 'segment');
+      if (!creditResult.success) {
+        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+      }
     }
 
     // 查找管理员配置的分层模型 API

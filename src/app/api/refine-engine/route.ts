@@ -5,6 +5,8 @@ import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile,
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { translateApiError } from '@/lib/api-error-translate';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
+import { getSessionUser } from '@/lib/server-auth';
+import { consumeCredits } from '@/lib/credits';
 
 // ─── Persist result image to local server ───
 async function persistResultImage(imageUrl: string): Promise<string> {
@@ -780,6 +782,15 @@ export async function POST(request: NextRequest) {
 
       if (!imageUrl) {
         return NextResponse.json({ error: '请提供产品图片' }, { status: 400 });
+      }
+
+      // 积分检查与扣除
+      const sessionUser = await getSessionUser(request).catch(() => null);
+      if (sessionUser) {
+        const creditResult = await consumeCredits(sessionUser.id, 'image_retouch', undefined, undefined, model);
+        if (!creditResult.success) {
+          return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+        }
       }
 
       if (!model) {

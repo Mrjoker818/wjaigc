@@ -18,6 +18,7 @@ import { eraseWithLama, removeBgWithIOPaint, generateRemoveBgMask, DEFAULT_REMOV
 import { LOCAL_AI_ENABLED } from '@/lib/image-tools/config';
 import { postProcessAIRemoveBG, postProcessLocalRemoveBG } from '@/lib/remove-bg-postprocess';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
+import { consumeCredits } from '@/lib/credits';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -1479,6 +1480,18 @@ export async function POST(request: NextRequest) {
       }
       if (safetyResult.level === 'warning') {
         logSafetyWarning(prompt, safetyResult);
+      }
+    }
+
+    // 积分检查与扣除
+    if (sessionUser) {
+      const creditOp = action === 'upscale' ? 'image_upscale'
+        : action === 'remove_background' ? 'image_remove_bg'
+        : action === 'outpaint' ? 'image_edit'
+        : 'image_edit';
+      const creditResult = await consumeCredits(sessionUser.id, creditOp, undefined, undefined, modelStr);
+      if (!creditResult.success) {
+        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }
     }
 

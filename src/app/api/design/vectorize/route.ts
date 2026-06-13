@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getServerDataRoot } from '@/lib/server-data-root';
+import { getSessionUser } from '@/lib/server-auth';
+import { consumeCredits } from '@/lib/credits';
 import fsSync from 'fs';
 import path from 'path';
 import sharp from 'sharp';
@@ -718,6 +720,15 @@ export async function POST(req: NextRequest) {
 
     if (!imageUrl) {
       return NextResponse.json({ success: false, error: '缺少 imageUrl' }, { status: 400 });
+    }
+
+    // 积分检查与扣除
+    const sessionUser = await getSessionUser(req).catch(() => null);
+    if (sessionUser) {
+      const creditResult = await consumeCredits(sessionUser.id, 'vectorize');
+      if (!creditResult.success) {
+        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+      }
     }
 
     console.log('[vectorize] Request:', { imageUrl: imageUrl.substring(0, 100), layerId, mode });

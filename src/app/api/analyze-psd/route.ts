@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { LLMClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { getSessionUser } from '@/lib/server-auth';
+import { consumeCredits } from '@/lib/credits';
 
 export const runtime = 'nodejs';
 
@@ -28,6 +30,15 @@ export async function POST(request: NextRequest) {
         { success: false, error: '缺少图片数据' },
         { status: 400 }
       );
+    }
+
+    // 积分检查与扣除
+    const sessionUser = await getSessionUser(request).catch(() => null);
+    if (sessionUser) {
+      const creditResult = await consumeCredits(sessionUser.id, 'segment');
+      if (!creditResult.success) {
+        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+      }
     }
 
     const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);

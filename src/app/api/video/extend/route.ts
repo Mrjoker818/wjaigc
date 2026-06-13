@@ -9,6 +9,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature, findProviderForModel, findProviderById } from '@/lib/server-api-config';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
+import { getSessionUser } from '@/lib/server-auth';
+import { consumeCredits } from '@/lib/credits';
 import {
   buildVideoExtendRequest,
   parseVideoSubmitResponse,
@@ -117,6 +119,15 @@ export async function POST(request: NextRequest) {
       baseUrl,
       advancedParams,
     };
+
+    // 4.5 积分检查与扣除
+    const sessionUser = await getSessionUser(request);
+    if (sessionUser) {
+      const creditResult = await consumeCredits(sessionUser.id, 'video_extend', undefined, undefined, model, { durationSeconds: Number(extendDuration) });
+      if (!creditResult.success) {
+        return NextResponse.json({ error: creditResult.message || '积分不足' }, { status: 402 });
+      }
+    }
 
     // 5. 注册任务
     const taskId = `video_extend_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;

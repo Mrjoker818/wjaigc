@@ -8,6 +8,8 @@ import path from 'path';
 import { getServerDataRoot, saveImageFile } from '@/lib/server-data-root';
 import { uploadImageToS3, isS3Available } from '@/lib/s3-storage';
 import { PYTHON_BIN } from '@/lib/image-tools/config';
+import { getSessionUser } from '@/lib/server-auth';
+import { consumeCredits } from '@/lib/credits';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -1642,6 +1644,15 @@ export async function POST(req: NextRequest) {
     }
 
     console.log(`[svg-trace] mode=${mode}, preset=${body.qualityPreset || 'balanced'}, imageUrl=${imageUrl.substring(0, 100)}`);
+
+    // 积分检查与扣除
+    const sessionUser = await getSessionUser(req);
+    if (sessionUser) {
+      const creditResult = await consumeCredits(sessionUser.id, 'svg_trace');
+      if (!creditResult.success) {
+        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+      }
+    }
 
     // Pre-check tool availability for trace modes
     if (mode === 'color') {

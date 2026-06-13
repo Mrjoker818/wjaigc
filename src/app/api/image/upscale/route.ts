@@ -6,6 +6,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { performUpscale } from '@/lib/image-tools/upscayl';
 import { IMAGE_MAX_SIZE_MB } from '@/lib/image-tools/config';
 import type { UpscaleParams } from '@/lib/image-tools/upscayl';
+import { getSessionUser } from '@/lib/server-auth';
+import { consumeCredits } from '@/lib/credits';
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,6 +21,15 @@ export async function POST(request: NextRequest) {
         { success: false, error: '缺少 imageUrl 参数' },
         { status: 400 },
       );
+    }
+
+    // 积分检查与扣除
+    const sessionUser = await getSessionUser(request).catch(() => null);
+    if (sessionUser) {
+      const creditResult = await consumeCredits(sessionUser.id, 'image_upscale');
+      if (!creditResult.success) {
+        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+      }
     }
 
     // 校验 scale

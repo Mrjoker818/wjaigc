@@ -4,6 +4,7 @@ import { appendUserJsonl } from '@/lib/server-user-storage';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
+import { consumeCredits } from '@/lib/credits';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -54,6 +55,14 @@ export async function POST(request: NextRequest) {
 
     if (!prompt) {
       return NextResponse.json({ error: '缺少必要参数：prompt' }, { status: 400 });
+    }
+
+    // 积分检查与扣除
+    if (sessionUser) {
+      const creditResult = await consumeCredits(sessionUser.id, 'chat', undefined, undefined, model);
+      if (!creditResult.success) {
+        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+      }
     }
 
     // Content safety check

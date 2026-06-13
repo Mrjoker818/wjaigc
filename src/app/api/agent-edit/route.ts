@@ -8,6 +8,8 @@ import { executeAgentLoop, getToolsForLLM, type AgentContext, type AgentResult }
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { translateApiError } from '@/lib/api-error-translate';
 import { isTaskCancelled as isRegistryCancelled } from '@/lib/task-registry';
+import { getSessionUser } from '@/lib/server-auth';
+import { consumeCredits } from '@/lib/credits';
 export const runtime = 'nodejs';
 export const maxDuration = 600;
 
@@ -57,6 +59,15 @@ export async function POST(request: NextRequest) {
 
     if (!image || !prompt) {
       return NextResponse.json({ success: false, error: '缺少图片或描述' }, { status: 400 });
+    }
+
+    // 积分检查与扣除
+    const sessionUser = await getSessionUser(request).catch(() => null);
+    if (sessionUser) {
+      const creditResult = await consumeCredits(sessionUser.id, 'image_retouch', undefined, undefined, model);
+      if (!creditResult.success) {
+        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+      }
     }
 
     // Content safety check

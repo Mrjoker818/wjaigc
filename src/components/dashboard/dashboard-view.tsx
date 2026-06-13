@@ -10,7 +10,7 @@ import {
   UserPlus, Ban, CheckCircle2, Plug, RefreshCw, Activity, Wallet,
   Loader2, Settings, ChevronDown, ShieldCheck, AlertTriangle,
   ArrowUp, ArrowDown, ShoppingBag, Users, Server, Database,
-  XCircle, BarChart3, Upload, RotateCcw,
+  XCircle, BarChart3, Upload, RotateCcw, Film,
 } from 'lucide-react';
 import { UserManager } from '@/lib/user-manager';
 import type { Project, CanvasImage, User, UsageStats } from '@/lib/user-types';
@@ -850,6 +850,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     { key: 'image', label: '图像', icon: '🎨' }, { key: 'chat', label: '对话', icon: '💬' },
                     { key: 'threeD', label: '3D', icon: '🧊' }, { key: 'imageEdit', label: '编辑', icon: '✏️' },
                     { key: 'vectorize', label: '矢量', icon: '📐' }, { key: 'layer', label: '分层', icon: '🗂️' },
+                    { key: 'video', label: '视频', icon: '🎬' },
                   ].map(perm => {
                     const enabled = user.apiPermissions?.[perm.key as keyof typeof user.apiPermissions] ?? false;
                     return (<span key={perm.key} className={`text-[10px] px-1.5 py-0.5 rounded-md flex items-center gap-1 ${enabled ? `${accentBgLight} ${accentClass}` : isDark ? 'bg-white/5 text-gray-600' : 'bg-gray-100 text-gray-300'}`}><span>{perm.icon}</span><span>{perm.label}</span></span>);
@@ -1496,6 +1497,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 {[
                   { key: 'image', label: '图像生成', icon: Image },
                   { key: 'chat', label: 'AI 聊天', icon: Sparkles },
+                  { key: 'video', label: '视频生成', icon: Film },
                   { key: 'threeD', label: '3D 模型', icon: Box },
                   { key: 'imageEdit', label: '图像编辑', icon: Pencil },
                   { key: 'vectorize', label: '矢量化', icon: Palette },

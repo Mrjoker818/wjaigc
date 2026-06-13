@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
+import { consumeCredits } from '@/lib/credits';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import fsSync from 'fs';
 import path from 'path';
@@ -660,7 +661,16 @@ export async function POST(request: NextRequest) {
   try {
     const body = await resolveServerProvider(await request.json() as ImageTo3DRequest);
     // Verify session (getSessionUser throws on unauthenticated)
-    await getSessionUser(request);
+    const sessionUser = await getSessionUser(request);
+
+    // 积分检查与扣除
+    if (sessionUser) {
+      const creditResult = await consumeCredits(sessionUser.id, '3d_model');
+      if (!creditResult.success) {
+        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+      }
+    }
+
     if (!body.imageUrl) {
       return NextResponse.json({ success: false, error: 'Missing imageUrl' }, { status: 400 });
     }

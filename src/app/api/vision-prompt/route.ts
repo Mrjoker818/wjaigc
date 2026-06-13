@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { consumeCredits } from '@/lib/credits';
 
 export const maxDuration = 60;
 
@@ -252,6 +253,14 @@ export async function POST(request: NextRequest) {
 
     const resolvedModel = model?.includes('::') ? model.split('::').slice(1).join('::') : (model || '');
     const resolvedProviderId = providerId || (model?.includes('::') ? model.split('::')[0] : undefined);
+
+    // 积分检查与扣除
+    if (sessionUser) {
+      const creditResult = await consumeCredits(sessionUser.id, 'chat', undefined, undefined, resolvedModel);
+      if (!creditResult.success) {
+        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+      }
+    }
 
     // Resolve API key and base URL from server-side provider config only
     let visionApiKey = '';

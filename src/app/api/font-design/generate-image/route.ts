@@ -4,6 +4,8 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 import { buildJimengPrompt, buildBlackOnWhitePrompt, buildTransparentLogoPrompt, FONT_STYLE_CATEGORIES, SCENE_MAP, STROKE_MAP, GRAPHIC_MAP, MATERIAL_MAP } from '../plan/route';
+import { getSessionUser } from '@/lib/server-auth';
+import { consumeCredits } from '@/lib/credits';
 
 export const maxDuration = 600;
 export const dynamic = 'force-dynamic';
@@ -107,6 +109,15 @@ export async function POST(request: NextRequest) {
       style: styleStr, scene: sceneStr, color: colorStr, background: bgStr,
       material: matStr, strokeOptions: strokes, graphicElements: graphics,
     });
+
+    // 积分检查与扣除
+    const sessionUser = await getSessionUser(request).catch(() => null);
+    if (sessionUser) {
+      const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, modelStr);
+      if (!creditResult.success) {
+        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+      }
+    }
 
     let finalPrompt = '';
     if (prompt) {

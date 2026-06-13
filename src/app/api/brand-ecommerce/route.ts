@@ -4,6 +4,8 @@ import type { ApiProvider } from '@/lib/universal-api-types';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl } from '@/lib/api-compatibility';
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
+import { getSessionUser } from '@/lib/server-auth';
+import { consumeCredits } from '@/lib/credits';
 import sharp from 'sharp';
 
 export const dynamic = 'force-dynamic';
@@ -521,6 +523,15 @@ export async function POST(request: NextRequest) {
       }
       if (!productDesc?.trim()) {
         return NextResponse.json({ error: '请输入商品描述' }, { status: 400 });
+      }
+
+      // 积分检查与扣除
+      const sessionUser = await getSessionUser(request).catch(() => null);
+      if (sessionUser) {
+        const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, model);
+        if (!creditResult.success) {
+          return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+        }
       }
 
       const provider = await getImageProvider(model, providerId);
