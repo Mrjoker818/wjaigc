@@ -10608,6 +10608,8 @@ export function InfiniteCanvas({
               className={`absolute z-[60] pointer-events-auto ${isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-gold/30'} rounded-xl shadow-2xl`}
               style={{ left: panelLeft, top: panelTop, width: 280 }}
               onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
             >
               <div className="p-3">
@@ -10911,6 +10913,10 @@ export function InfiniteCanvas({
               ref={annotationPanelRef}
               style={{ transform: `translate(${panelPos.current.x}px, ${panelPos.current.y}px)` }}
               className={`absolute bottom-20 right-4 z-[60] max-w-md w-max max-h-60 rounded-xl shadow-lg ${isMonochrome ? 'bg-white border border-blue-200' : 'bg-[#1a1a1a] border border-gold/20'}`}
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              onWheel={(e) => e.stopPropagation()}
             >
               <div
                 onPointerDown={onPointerDown}
@@ -10978,11 +10984,18 @@ export function InfiniteCanvas({
                     </span>
                     {ann.status === 'pending' && (
                       <button
-                        onClick={(e) => { e.stopPropagation(); setAnnotations(prev => prev.filter(a => a.id !== ann.id)); }}
-                        className={`shrink-0 p-1 rounded ${isMonochrome ? 'text-gray-300 hover:text-red-400 hover:bg-red-50' : 'text-white/20 hover:text-red-400 hover:bg-red-500/10'}`}
-                        title="删除"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setAnnotations(prev => prev.filter(a => a.id !== ann.id));
+                        }}
+                        className={`shrink-0 p-1.5 rounded z-10 relative ${isMonochrome ? 'text-gray-400 hover:text-red-500 hover:bg-red-50' : 'text-white/40 hover:text-red-400 hover:bg-red-500/20'}`}
+                        title="删除此批注"
+                        style={{ pointerEvents: 'auto' }}
                       >
-                        <X size={12} />
+                        <X size={14} />
                       </button>
                     )}
                     {ann.status === 'failed' && (
