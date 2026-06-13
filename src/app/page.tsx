@@ -23,7 +23,6 @@ import { ProjectDataPanel } from '@/components/project-data-panel';
 import { HelpGuide } from '@/components/help-guide';
 import { FavoritesPanel } from '@/components/favorites-panel';
 import PromptTemplatePanel from '@/components/prompt-template-panel';
-import LogoSkillPanel from '@/components/logo-skill-panel';
 import { taskEventsClient } from '@/lib/task-events-client';
 
 interface FavoriteItem {
@@ -206,7 +205,6 @@ function CanvasApp() {
   const [showHelpGuide, setShowHelpGuide] = useState(false);
   const [showFavorites, setShowFavorites] = useState(false);
   const [showPromptTemplate, setShowPromptTemplate] = useState(false);
-  const [showLogoSkill, setShowLogoSkill] = useState(false);
   const [favoriteParams, setFavoriteParams] = useState<{
     prompt: string;
     negativePrompt?: string;
@@ -2837,7 +2835,13 @@ function CanvasApp() {
           onAddToFavorites={handleAddToFavorites}
           onToggleFavorites={() => setShowFavorites(true)}
           onTogglePromptTemplate={() => setShowPromptTemplate(true)}
-          onToggleLogoSkill={() => setShowLogoSkill(true)}
+          brandProject={currentProject ? {
+            brandName: currentProject.name || '',
+            description: currentProject.description || '',
+            targetAudience: '',
+            tone: '',
+            brandDna: null,
+          } : null}
           onSwitchToNodeMode={() => safeSwitchMode('node')}
           onSwitchToWorkflowHub={() => safeSwitchMode('workflow-hub')}
           onSwitchToDashboard={() => safeSwitchMode('dashboard')}
@@ -3189,43 +3193,6 @@ function CanvasApp() {
           setShowPromptTemplate(false);
         }}
       />
-
-      {/* Logo Generator Skill Pro Panel */}
-      {showLogoSkill && (
-        <LogoSkillPanel
-          isMonochrome={themeStyle === 'monochrome'}
-          onClose={() => setShowLogoSkill(false)}
-          onAddImages={(urls: string[]) => {
-            handleAddImages(urls);
-            setShowLogoSkill(false);
-          }}
-          brandProject={currentProject ? {
-            brandName: currentProject.name || '',
-            industry: '',
-            description: currentProject.description || '',
-            targetAudience: '',
-            tone: '',
-            brandDna: null,
-          } : null}
-          onSaveToBrandAssets={(logoUrl, dir) => {
-            // 保存 Logo 到当前项目并设置为 logoUrl
-            if (currentProject) {
-              setCurrentProject(prev => prev ? { ...prev, logoUrl } : prev);
-              fetch('/api/brand-factory', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'update-project', id: currentProject.id, logoUrl }),
-              }).catch(() => {});
-            }
-          }}
-          onOpenBrandDna={() => {
-            setShowLogoSkill(false);
-          }}
-          onOpenMainKv={() => {
-            setShowLogoSkill(false);
-          }}
-        />
-      )}
 
       {/* Project Data Panel */}
       <ProjectDataPanel

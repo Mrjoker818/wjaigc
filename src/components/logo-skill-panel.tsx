@@ -1,14 +1,16 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  X, Sparkles, Palette, PenTool, Image as ImageIcon,
-  ChevronRight, ChevronDown, Loader2, RefreshCw, Copy,
-  Check, Download, ArrowRight, Wand2, Star, Eye,
-  Type, Layout, Zap, RotateCcw, Save, BookOpen
+  PenTool, X, Loader2, Wand2, Star, Eye, ArrowRight,
+  Copy, Check, ChevronDown, ChevronRight, RotateCcw,
+  RefreshCw, Sparkles, Download, Save, Palette, ImageIcon,
+  Layout, GripVertical,
 } from 'lucide-react';
 
 /* ========== TYPES ========== */
+
+type Step = 'input' | 'direction' | 'generate' | 'result';
 
 interface LogoDirection {
   positioning: string;
@@ -16,28 +18,26 @@ interface LogoDirection {
   colorPalette: string[];
   typography: string;
   composition: string;
-  fitReason: string;
+  fitReason?: string;
 }
 
 interface SymbolConcept {
   coreMetaphor: string;
   iconForm: string;
-  negativeSpaceIdea: string;
+  negativeSpaceIdea?: string;
   alternativeRoutes: string[];
 }
 
 interface VisualSystemNotes {
-  recommendedLockups: string[];
   oneColorBehavior: string;
   smallSizeBehavior: string;
-  usageNotes: string;
+  recommendedLockups: string[];
 }
 
 interface BrandSystemBoardLayout {
   canvasSpec: string;
   modules: string[];
   footerValues: string[];
-  styleNotes: string;
 }
 
 interface PlatformPrompt {
@@ -49,70 +49,58 @@ interface PlatformPrompt {
 interface ImageModel {
   id: string;
   name: string;
-  providerId: string;
-  providerName: string;
+  providerId?: string;
+  providerName?: string;
 }
 
 interface LogoSkillPanelProps {
   isMonochrome?: boolean;
   onClose: () => void;
   onAddImages?: (urls: string[]) => void;
-  /** 当前品牌工厂项目数据 */
   brandProject?: {
-    brandName: string;
-    industry?: string;
-    projectType?: string;
+    id?: string;
+    brandName?: string;
     description?: string;
     targetAudience?: string;
     tone?: string;
-    keywords?: string[];
     brandDna?: {
-      brandKeywords?: string[];
       mainColors?: string[];
       secondaryColors?: string[];
       fontStyle?: string;
-      visualTone?: string;
-      logoRules?: string[];
-      forbiddenRules?: string[];
     } | null;
-    id?: string;
   } | null;
-  /** 保存 Logo 到品牌资产回调 */
   onSaveToBrandAssets?: (logoUrl: string, direction?: LogoDirection) => void;
-  /** 打开品牌 DNA 面板回调 */
   onOpenBrandDna?: () => void;
-  /** 打开主 KV 面板回调 */
   onOpenMainKv?: () => void;
 }
 
-type Step = 'input' | 'direction' | 'generate' | 'result';
+/* ========== CONSTANTS ========== */
+
+const PANEL_W = 420;
+const PANEL_H = 620;
 
 const LOGO_TYPES = [
-  { value: 'brand', label: '品牌Logo' },
-  { value: 'company', label: '公司Logo' },
-  { value: 'product', label: '产品Logo' },
-  { value: 'cultural-creative', label: '文创IP' },
-  { value: 'campaign', label: '活动/广告' },
-  { value: 'event', label: '事件' },
-  { value: 'app', label: 'App' },
-  { value: 'sub-brand', label: '子品牌' },
-  { value: 'personal-brand', label: '个人品牌' },
+  { value: 'brand', label: '品牌 Logo' },
+  { value: 'app-icon', label: 'App 图标' },
+  { value: 'emblem', label: '徽章/纹章' },
+  { value: 'wordmark', label: '文字标' },
+  { value: 'pictogram', label: '图形符号' },
 ];
 
 const OUTPUT_LAYOUTS = [
-  { value: 'brand-system-board', label: '品牌系统板', desc: '完整品牌规范展示（推荐）', icon: Layout },
-  { value: 'standalone-logo', label: '独立Logo', desc: '白底独立Logo图', icon: Star },
-  { value: 'square-avatar', label: '方形图标', desc: 'App图标/头像', icon: Zap },
-  { value: 'identity-board', label: '简版身份板', desc: 'Logo + 配色 + 字体', icon: BookOpen },
-  { value: 'transparent-asset', label: '透明资产', desc: '透明背景素材', icon: Download },
+  { value: 'brand-system-board', label: '品牌板', icon: Layout },
+  { value: 'square-avatar', label: '头像', icon: ImageIcon },
+  { value: 'horizontal-lockup', label: '横排', icon: Layout },
+  { value: 'vertical-lockup', label: '竖排', icon: Layout },
+  { value: 'icon-only', label: '图标', icon: Star },
 ];
 
 const TARGET_PLATFORMS = [
+  { value: 'all', label: '全平台通用' },
   { value: 'gpt-image', label: 'GPT Image' },
   { value: 'midjourney', label: 'Midjourney' },
   { value: 'flux', label: 'Flux' },
   { value: 'ideogram', label: 'Ideogram' },
-  { value: 'all', label: '全部平台' },
 ];
 
 /* ========== COMPONENT ========== */
@@ -126,6 +114,42 @@ export default function LogoSkillPanel({
   onOpenBrandDna,
   onOpenMainKv,
 }: LogoSkillPanelProps) {
+  // ─── Panel position (draggable) ──────────────────────────────
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useRef({ mx: 0, my: 0, px: 0, py: 0 });
+
+  // Center panel on first render
+  useEffect(() => {
+    setPos({
+      x: window.innerWidth - PANEL_W - 24,
+      y: Math.max(72, (window.innerHeight - PANEL_H) / 2),
+    });
+  }, []);
+
+  const onDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setDragging(true);
+    dragStart.current = { mx: e.clientX, my: e.clientY, px: pos.x, py: pos.y };
+  }, [pos]);
+
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e: MouseEvent) => {
+      const dx = e.clientX - dragStart.current.mx;
+      const dy = e.clientY - dragStart.current.my;
+      setPos({
+        x: Math.max(0, Math.min(window.innerWidth - PANEL_W, dragStart.current.px + dx)),
+        y: Math.max(0, Math.min(window.innerHeight - 100, dragStart.current.py + dy)),
+      });
+    };
+    const onUp = () => setDragging(false);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, [dragging]);
+
   // ─── State ─────────────────────────────────────────────────
   const [step, setStep] = useState<Step>('input');
   const [brandName, setBrandName] = useState(brandProject?.brandName || '');
@@ -175,7 +199,6 @@ export default function LogoSkillPanel({
       if (brandProject.description) setBrief(brandProject.description);
       if (brandProject.targetAudience) setAudience(brandProject.targetAudience);
       if (brandProject.tone) setPreferredStyle(brandProject.tone);
-      // 构建参考风格
       const refParts: string[] = [];
       if (brandProject.brandDna?.mainColors?.length) {
         refParts.push(`主色: ${brandProject.brandDna.mainColors.join(', ')}`);
@@ -191,9 +214,7 @@ export default function LogoSkillPanel({
   }, [brandProject]);
 
   // ─── 加载模型列表 ────────────────────────────────────────────
-  useEffect(() => {
-    loadModels();
-  }, []);
+  useEffect(() => { loadModels(); }, []);
 
   async function loadModels() {
     try {
@@ -232,10 +253,8 @@ export default function LogoSkillPanel({
       setError('请填写品牌名称和品牌简报');
       return;
     }
-
     setIsGeneratingDirection(true);
     setError('');
-
     try {
       const res = await fetch('/api/logo-skill', {
         method: 'POST',
@@ -254,13 +273,8 @@ export default function LogoSkillPanel({
           llmModel: selectedLlmModel || undefined,
         }),
       });
-
       const data = await res.json();
-      if (!data.success) {
-        setError(data.error || '生成方向失败');
-        return;
-      }
-
+      if (!data.success) { setError(data.error || '生成方向失败'); return; }
       setDirection(data.direction);
       setSymbol(data.symbol);
       setVisualNotes(data.visualNotes);
@@ -278,10 +292,8 @@ export default function LogoSkillPanel({
   // ─── 修订方向 ───────────────────────────────────────────────
   async function handleRefineDirection() {
     if (!revisionNotes.trim()) return;
-
     setIsGeneratingDirection(true);
     setError('');
-
     try {
       const res = await fetch('/api/logo-skill', {
         method: 'POST',
@@ -301,13 +313,8 @@ export default function LogoSkillPanel({
           llmModel: selectedLlmModel || undefined,
         }),
       });
-
       const data = await res.json();
-      if (!data.success) {
-        setError(data.error || '修订方向失败');
-        return;
-      }
-
+      if (!data.success) { setError(data.error || '修订方向失败'); return; }
       setDirection(data.direction);
       setSymbol(data.symbol);
       setVisualNotes(data.visualNotes);
@@ -326,18 +333,12 @@ export default function LogoSkillPanel({
   async function handleGenerateImage() {
     const bestPrompt = platformPrompts.find(p => p.platform === 'GPT Image')?.prompt
       || platformPrompts.find(p => p.platform === 'Universal')?.prompt;
-
-    if (!bestPrompt) {
-      setError('没有可用的生成提示词');
-      return;
-    }
-
+    if (!bestPrompt) { setError('没有可用的生成提示词'); return; }
     setIsGeneratingImage(true);
     setError('');
     setImageUrls([]);
     setTaskId(null);
     setStep('generate');
-
     try {
       const res = await fetch('/api/logo-skill', {
         method: 'POST',
@@ -346,24 +347,21 @@ export default function LogoSkillPanel({
           action: 'generate-image',
           prompt: bestPrompt,
           imageModel: selectedImageModel || undefined,
-          size: outputLayout === 'square-avatar' ? '1024x1024' : '1024x1024',
+          size: '1024x1024',
           n: 1,
         }),
       });
-
       const data = await res.json();
       if (!data.success && data.status !== 'processing') {
         setError(data.error || '图像生成失败');
         setStep('direction');
         return;
       }
-
       if (data.imageUrls && data.imageUrls.length > 0) {
         setImageUrls(data.imageUrls);
         setSelectedImageUrl(data.imageUrls[0]);
         setStep('result');
       } else if (data.taskId) {
-        // 异步任务，轮询结果
         setTaskId(data.taskId);
         pollForResult(data.taskId, data.imageModel, data.apiBaseUrl, data.apiKey);
       } else {
@@ -383,11 +381,9 @@ export default function LogoSkillPanel({
     const maxAttempts = 60;
     const interval = 3000;
     let attempts = 0;
-
     while (attempts < maxAttempts) {
       await new Promise(r => setTimeout(r, interval));
       attempts++;
-
       try {
         const res = await fetch('/api/poll-task', {
           method: 'POST',
@@ -395,7 +391,6 @@ export default function LogoSkillPanel({
           body: JSON.stringify({ taskId: tid, model, apiBaseUrl, apiKey }),
         });
         const data = await res.json();
-
         if (data.status === 'completed' && data.imageUrls?.length > 0) {
           setImageUrls(data.imageUrls);
           setSelectedImageUrl(data.imageUrls[0]);
@@ -409,7 +404,6 @@ export default function LogoSkillPanel({
         }
       } catch { /* continue polling */ }
     }
-
     setError('图像生成超时，请稍后重试');
     setStep('direction');
   }
@@ -425,9 +419,7 @@ export default function LogoSkillPanel({
 
   // ─── 保存到画布 ──────────────────────────────────────────────
   function handleAddToCanvas() {
-    if (selectedImageUrl && onAddImages) {
-      onAddImages([selectedImageUrl]);
-    }
+    if (selectedImageUrl && onAddImages) onAddImages([selectedImageUrl]);
   }
 
   // ─── 保存到品牌资产 ──────────────────────────────────────────
@@ -438,7 +430,6 @@ export default function LogoSkillPanel({
     if (!selectedImageUrl) return;
     setIsSavingToBrand(true);
     onSaveToBrandAssets?.(selectedImageUrl, direction || undefined);
-    // 同时调用 API 持久化
     fetch('/api/logo-skill', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -454,12 +445,8 @@ export default function LogoSkillPanel({
         projectId: brandProject?.id,
       }),
     }).then(res => res.json()).then(data => {
-      if (data.success) {
-        setSavedToBrand(true);
-      }
-    }).catch(() => {}).finally(() => {
-      setIsSavingToBrand(false);
-    });
+      if (data.success) setSavedToBrand(true);
+    }).catch(() => {}).finally(() => setIsSavingToBrand(false));
   }
 
   // ─── 重新开始 ────────────────────────────────────────────────
@@ -478,7 +465,7 @@ export default function LogoSkillPanel({
     setRevisionNotes('');
   }
 
-  // ─── 样式 ────────────────────────────────────────────────────
+  // ─── 样式 (黑金/单色双主题) ──────────────────────────────────
   const bg = isMonochrome ? 'bg-white' : 'bg-[#0d0d0d]';
   const textPrimary = isMonochrome ? 'text-gray-900' : 'text-white';
   const textSecondary = isMonochrome ? 'text-gray-500' : 'text-gray-400';
@@ -489,134 +476,111 @@ export default function LogoSkillPanel({
   const accentBg = isMonochrome ? 'bg-blue-600' : 'bg-[#d4af37]';
   const accentBgHover = isMonochrome ? 'hover:bg-blue-700' : 'hover:bg-[#c4a030]';
 
+  // ─── 步骤指示器 ──────────────────────────────────────────────
+  const steps: Step[] = ['input', 'direction', 'generate', 'result'];
+  const stepLabels: Record<Step, string> = { input: '输入', direction: '方向', generate: '生成', result: '结果' };
+
   return (
-    <div className={`fixed inset-0 z-[200] flex ${bg} ${textPrimary}`}>
-      {/* 左侧：步骤内容 */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* 顶部导航栏 */}
-        <div className={`flex items-center justify-between px-6 py-4 border-b ${border}`}>
-          <div className="flex items-center gap-3">
-            <div className={`w-8 h-8 rounded-lg ${accentBg} flex items-center justify-center`}>
-              <PenTool className="h-4 w-4 text-white" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold">Logo Generator Pro</h1>
-              <p className={`text-xs ${textSecondary}`}>SanbaoAI Prompt Core 驱动</p>
-            </div>
+    <div
+      ref={panelRef}
+      className={`fixed z-[90] flex flex-col rounded-2xl shadow-2xl border overflow-hidden ${bg} ${border}`}
+      style={{
+        left: pos.x,
+        top: pos.y,
+        width: PANEL_W,
+        maxHeight: `calc(100vh - 96px)`,
+        ...(isMonochrome ? { boxShadow: '0 8px 32px rgba(0,0,0,0.12)' } : { boxShadow: '0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(212,175,55,0.15)' }),
+      }}
+      data-popup
+    >
+      {/* ─── 可拖动标题栏 ─────────────────────────────────────── */}
+      <div
+        className={`flex items-center justify-between px-4 py-3 border-b ${border} select-none cursor-move shrink-0 ${
+          isMonochrome ? 'bg-gray-50' : 'bg-[#1a1a1a]'
+        }`}
+        onMouseDown={onDragStart}
+      >
+        <div className="flex items-center gap-2">
+          <GripVertical className={`h-4 w-4 ${textSecondary}`} />
+          <div className={`w-6 h-6 rounded-md ${accentBg} flex items-center justify-center`}>
+            <PenTool className="h-3.5 w-3.5 text-white" />
           </div>
-          <div className="flex items-center gap-2">
-            {/* 步骤指示器 */}
-            {(['input', 'direction', 'generate', 'result'] as Step[]).map((s, i) => (
+          <div>
+            <h1 className={`text-sm font-bold ${textPrimary}`}>Logo Generator Pro</h1>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          {/* 步骤指示器 */}
+          <div className="flex items-center gap-1">
+            {steps.map((s, i) => (
               <div key={s} className="flex items-center gap-1">
-                {i > 0 && <div className={`w-4 h-px ${step === s || ([...(['input', 'direction', 'generate', 'result'] as Step[])].indexOf(step) > i ? accent : isMonochrome ? 'bg-gray-300' : 'bg-gray-600')}`} />}
-                <div className={`w-6 h-6 rounded-full text-xs flex items-center justify-center font-medium ${
+                {i > 0 && <div className={`w-3 h-px ${steps.indexOf(step) >= i ? accent : isMonochrome ? 'bg-gray-300' : 'bg-gray-600'}`} />}
+                <div className={`w-5 h-5 rounded-full text-[10px] flex items-center justify-center font-medium ${
                   step === s ? `${accentBg} text-white` :
-                  [...(['input', 'direction', 'generate', 'result'] as Step[])].indexOf(step) > i ? `${accentBg}/80 text-white` :
-                  isMonochrome ? 'bg-gray-200 text-gray-500' : 'bg-white/10 text-gray-500'
+                  steps.indexOf(step) > i ? `${accentBg}/80 text-white` :
+                  isMonochrome ? 'bg-gray-200 text-gray-400' : 'bg-white/10 text-gray-500'
                 }`}>
                   {i + 1}
                 </div>
               </div>
             ))}
-            <button onClick={onClose} className={`ml-4 p-2 rounded-lg ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-white/10'} transition-colors`}>
-              <X className="h-5 w-5" />
-            </button>
           </div>
-        </div>
-
-        {/* 内容区 */}
-        <div className="flex-1 overflow-y-auto p-6">
-          {error && (
-            <div className={`mb-4 p-3 rounded-lg border ${isMonochrome ? 'bg-red-50 border-red-200 text-red-700' : 'bg-red-500/10 border-red-500/20 text-red-400'}`}>
-              {error}
-            </div>
-          )}
-
-          {step === 'input' && renderInputStep()}
-          {step === 'direction' && renderDirectionStep()}
-          {step === 'generate' && renderGeneratingStep()}
-          {step === 'result' && renderResultStep()}
+          <button onClick={onClose} className={`p-1.5 rounded-lg ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'} transition-colors`}>
+            <X className="h-4 w-4" />
+          </button>
         </div>
       </div>
 
-      {/* 右侧：平台 Prompt 面板 */}
-      {step === 'direction' && platformPrompts.length > 0 && (
-        <div className={`w-[420px] border-l ${border} flex flex-col`}>
-          <div className={`px-4 py-3 border-b ${border} flex items-center justify-between`}>
-            <h3 className={`font-semibold text-sm ${textPrimary}`}>平台 Prompt</h3>
-            <span className={`text-xs ${textSecondary}`}>{platformPrompts.length} 个变体</span>
+      {/* ─── 内容区 (可滚动) ─────────────────────────────────── */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {error && (
+          <div className={`p-3 rounded-lg border text-xs ${isMonochrome ? 'bg-red-50 border-red-200 text-red-700' : 'bg-red-500/10 border-red-500/20 text-red-400'}`}>
+            {error}
           </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {platformPrompts.map((pp) => (
-              <div key={pp.platform} className={`rounded-lg border ${border} overflow-hidden`}>
-                <button
-                  onClick={() => setExpandedPrompt(expandedPrompt === pp.platform ? null : pp.platform)}
-                  className={`w-full px-4 py-3 flex items-center justify-between ${cardBg} hover:opacity-80 transition-opacity`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={`font-medium text-sm ${accent}`}>{pp.platform}</span>
-                    {pp.notes && <span className={`text-xs ${textSecondary}`}>— {pp.notes.slice(0, 40)}...</span>}
-                  </div>
-                  {expandedPrompt === pp.platform ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                </button>
-                {expandedPrompt === pp.platform && (
-                  <div className={`px-4 py-3 ${bg}`}>
-                    <pre className={`text-xs ${textSecondary} whitespace-pre-wrap break-all leading-relaxed`}>{pp.prompt}</pre>
-                    <button
-                      onClick={() => handleCopyPrompt(pp.prompt, pp.platform)}
-                      className={`mt-2 px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1 ${
-                        copiedPrompt === pp.platform
-                          ? `${accentBg} text-white`
-                          : isMonochrome ? 'bg-gray-100 hover:bg-gray-200 text-gray-700' : 'bg-white/10 hover:bg-white/20 text-white'
-                      } transition-colors`}
-                    >
-                      {copiedPrompt === pp.platform ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                      {copiedPrompt === pp.platform ? '已复制' : '复制 Prompt'}
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+        )}
+
+        {step === 'input' && renderInputStep()}
+        {step === 'direction' && renderDirectionStep()}
+        {step === 'generate' && renderGeneratingStep()}
+        {step === 'result' && renderResultStep()}
+      </div>
     </div>
   );
 
   // ─── Step 1: 输入 ───────────────────────────────────────────
   function renderInputStep() {
     return (
-      <div className="max-w-2xl mx-auto space-y-6">
+      <div className="space-y-4">
         {/* 品牌名称 */}
         <div>
-          <label className={`block text-sm font-medium mb-2 ${textPrimary}`}>
+          <label className={`block text-xs font-medium mb-1.5 ${textPrimary}`}>
             品牌名称 <span className="text-red-500">*</span>
           </label>
-          <div className="flex gap-3">
+          <div className="flex gap-2">
             <input
               value={brandName}
               onChange={e => setBrandName(e.target.value)}
               placeholder="英文品牌名称"
-              className={`flex-1 px-4 py-3 rounded-lg border ${inputBg} ${textPrimary} placeholder:text-gray-400 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'}`}
+              className={`flex-1 px-3 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} placeholder:text-gray-500 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'}`}
             />
             <input
               value={chineseName}
               onChange={e => setChineseName(e.target.value)}
-              placeholder="中文名称（可选）"
-              className={`w-48 px-4 py-3 rounded-lg border ${inputBg} ${textPrimary} placeholder:text-gray-400 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'}`}
+              placeholder="中文名"
+              className={`w-28 px-3 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} placeholder:text-gray-500 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'}`}
             />
           </div>
         </div>
 
         {/* Logo 类型 */}
         <div>
-          <label className={`block text-sm font-medium mb-2 ${textPrimary}`}>Logo 类型</label>
-          <div className="flex flex-wrap gap-2">
+          <label className={`block text-xs font-medium mb-1.5 ${textPrimary}`}>Logo 类型</label>
+          <div className="flex flex-wrap gap-1.5">
             {LOGO_TYPES.map(t => (
               <button
                 key={t.value}
                 onClick={() => setLogoType(t.value)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
                   logoType === t.value
                     ? `${accentBg} text-white`
                     : isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-white/10 text-gray-300 hover:bg-white/20'
@@ -630,70 +594,70 @@ export default function LogoSkillPanel({
 
         {/* 品牌简报 */}
         <div>
-          <label className={`block text-sm font-medium mb-2 ${textPrimary}`}>
+          <label className={`block text-xs font-medium mb-1.5 ${textPrimary}`}>
             品牌简报 <span className="text-red-500">*</span>
           </label>
           <textarea
             value={brief}
             onChange={e => setBrief(e.target.value)}
-            placeholder="描述你的品牌：做什么、服务谁、有什么独特价值、品牌性格..."
-            rows={4}
-            className={`w-full px-4 py-3 rounded-lg border ${inputBg} ${textPrimary} placeholder:text-gray-400 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'} resize-y`}
+            placeholder="描述你的品牌：做什么、服务谁、有什么独特价值..."
+            rows={3}
+            className={`w-full px-3 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} placeholder:text-gray-500 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'} resize-y`}
           />
         </div>
 
         {/* 目标受众 & 偏好风格 */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className={`block text-sm font-medium mb-2 ${textPrimary}`}>目标受众</label>
+            <label className={`block text-xs font-medium mb-1.5 ${textPrimary}`}>目标受众</label>
             <input
               value={audience}
               onChange={e => setAudience(e.target.value)}
-              placeholder="例如：25-35岁都市白领"
-              className={`w-full px-4 py-3 rounded-lg border ${inputBg} ${textPrimary} placeholder:text-gray-400 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'}`}
+              placeholder="如：25-35岁都市白领"
+              className={`w-full px-3 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} placeholder:text-gray-500 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'}`}
             />
           </div>
           <div>
-            <label className={`block text-sm font-medium mb-2 ${textPrimary}`}>偏好风格</label>
+            <label className={`block text-xs font-medium mb-1.5 ${textPrimary}`}>偏好风格</label>
             <input
               value={preferredStyle}
               onChange={e => setPreferredStyle(e.target.value)}
-              placeholder="例如：极简现代、东方国潮"
-              className={`w-full px-4 py-3 rounded-lg border ${inputBg} ${textPrimary} placeholder:text-gray-400 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'}`}
+              placeholder="如：极简现代"
+              className={`w-full px-3 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} placeholder:text-gray-500 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'}`}
             />
           </div>
         </div>
 
         {/* 参考风格 */}
         <div>
-          <label className={`block text-sm font-medium mb-2 ${textPrimary}`}>参考风格描述（可选）</label>
+          <label className={`block text-xs font-medium mb-1.5 ${textPrimary}`}>参考风格（可选）</label>
           <textarea
             value={referenceStyle}
             onChange={e => setReferenceStyle(e.target.value)}
-            placeholder="描述参考设计的布局、间距、色彩克制、字体情绪..."
+            placeholder="参考设计的布局、间距、色彩..."
             rows={2}
-            className={`w-full px-4 py-3 rounded-lg border ${inputBg} ${textPrimary} placeholder:text-gray-400 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'} resize-y`}
+            className={`w-full px-3 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} placeholder:text-gray-500 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'} resize-y`}
           />
         </div>
 
         {/* 输出布局 */}
         <div>
-          <label className={`block text-sm font-medium mb-2 ${textPrimary}`}>输出布局</label>
-          <div className="grid grid-cols-5 gap-2">
+          <label className={`block text-xs font-medium mb-1.5 ${textPrimary}`}>输出布局</label>
+          <div className="grid grid-cols-5 gap-1.5">
             {OUTPUT_LAYOUTS.map(l => {
               const Icon = l.icon;
               return (
                 <button
                   key={l.value}
                   onClick={() => setOutputLayout(l.value)}
-                  className={`p-3 rounded-lg border text-center transition-all ${
+                  className={`p-2 rounded-lg border text-center transition-all ${
                     outputLayout === l.value
                       ? isMonochrome ? 'border-blue-500 bg-blue-50' : 'border-[#d4af37] bg-[#d4af37]/10'
                       : `${border} ${cardBg} hover:opacity-80`
                   }`}
                 >
-                  <Icon className={`h-5 w-5 mx-auto mb-1 ${outputLayout === l.value ? accent : textSecondary}`} />
-                  <div className={`text-xs font-medium ${outputLayout === l.value ? accent : textSecondary}`}>{l.label}</div>
+                  <Icon className={`h-4 w-4 mx-auto mb-0.5 ${outputLayout === l.value ? accent : textSecondary}`} />
+                  <div className={`text-[10px] font-medium ${outputLayout === l.value ? accent : textSecondary}`}>{l.label}</div>
                 </button>
               );
             })}
@@ -701,13 +665,13 @@ export default function LogoSkillPanel({
         </div>
 
         {/* 目标平台 & LLM模型 */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className={`block text-sm font-medium mb-2 ${textPrimary}`}>目标平台</label>
+            <label className={`block text-xs font-medium mb-1.5 ${textPrimary}`}>目标平台</label>
             <select
               value={targetPlatform}
               onChange={e => setTargetPlatform(e.target.value)}
-              className={`w-full px-4 py-3 rounded-lg border ${inputBg} ${textPrimary} focus:outline-none`}
+              className={`w-full px-3 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} focus:outline-none`}
             >
               {TARGET_PLATFORMS.map(p => (
                 <option key={p.value} value={p.value}>{p.label}</option>
@@ -715,11 +679,11 @@ export default function LogoSkillPanel({
             </select>
           </div>
           <div>
-            <label className={`block text-sm font-medium mb-2 ${textPrimary}`}>LLM 模型</label>
+            <label className={`block text-xs font-medium mb-1.5 ${textPrimary}`}>LLM 模型</label>
             <select
               value={selectedLlmModel}
               onChange={e => setSelectedLlmModel(e.target.value)}
-              className={`w-full px-4 py-3 rounded-lg border ${inputBg} ${textPrimary} focus:outline-none`}
+              className={`w-full px-3 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} focus:outline-none`}
             >
               {llmModels.length === 0 && <option value="">未配置</option>}
               {llmModels.map(m => (
@@ -733,22 +697,16 @@ export default function LogoSkillPanel({
         <button
           onClick={handleGenerateDirection}
           disabled={isGeneratingDirection || !brandName.trim() || !brief.trim()}
-          className={`w-full py-4 rounded-xl font-bold text-base flex items-center justify-center gap-2 transition-all ${
+          className={`w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all ${
             isGeneratingDirection || !brandName.trim() || !brief.trim()
               ? isMonochrome ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-white/10 text-gray-500 cursor-not-allowed'
               : `${accentBg} ${accentBgHover} text-white shadow-lg`
           }`}
         >
           {isGeneratingDirection ? (
-            <>
-              <Loader2 className="h-5 w-5 animate-spin" />
-              正在生成创意方向...
-            </>
+            <><Loader2 className="h-4 w-4 animate-spin" />正在生成...</>
           ) : (
-            <>
-              <Wand2 className="h-5 w-5" />
-              生成 Logo 方向
-            </>
+            <><Wand2 className="h-4 w-4" />生成 Logo 方向</>
           )}
         </button>
       </div>
@@ -758,285 +716,250 @@ export default function LogoSkillPanel({
   // ─── Step 2: 方向展示 ────────────────────────────────────────
   function renderDirectionStep() {
     return (
-      <div className="flex gap-6 h-full">
-        {/* 左栏：方向展示 + 修订 + 生成 */}
-        <div className="flex-1 min-w-0 space-y-5 overflow-y-auto max-h-[calc(100vh-200px)] pr-2">
-          {/* Logo Direction */}
-          {direction && (
-            <div className={`rounded-xl border ${border} p-5`}>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <CompassIcon className={`h-5 w-5 ${accent}`} />
-                  <h3 className={`font-bold text-lg ${textPrimary}`}>Logo 方向</h3>
-                </div>
-                {/* 方向命名标签 */}
-                <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                  isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-[#d4af37]/15 text-[#d4af37]'
-                }`}>
-                  {direction.visualMood || '方案 A'}
-                </span>
+      <div className="space-y-3">
+        {/* Logo Direction */}
+        {direction && (
+          <div className={`rounded-xl border ${border} p-3`}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <CompassIcon className={`h-4 w-4 ${accent}`} />
+                <h3 className={`font-bold text-sm ${textPrimary}`}>Logo 方向</h3>
               </div>
-              <div className="space-y-3">
-                <div>
-                  <span className={`text-xs font-medium ${textSecondary}`}>定位</span>
-                  <p className={`text-sm ${textPrimary} mt-0.5`}>{direction.positioning || '待确定'}</p>
-                </div>
-                <div>
-                  <span className={`text-xs font-medium ${textSecondary}`}>视觉氛围</span>
-                  <p className={`text-sm ${textPrimary} mt-0.5`}>{direction.visualMood || '待确定'}</p>
-                </div>
-                <div>
-                  <span className={`text-xs font-medium ${textSecondary}`}>配色方案</span>
-                  <div className="flex items-center gap-2 mt-1 flex-wrap">
-                    {direction.colorPalette.map((c, i) => (
-                      <div key={i} className="flex items-center gap-1">
-                        <div className="w-6 h-6 rounded-md border border-white/20" style={{ backgroundColor: c.startsWith('#') ? c : undefined }} />
-                        <span className={`text-xs ${textSecondary}`}>{c}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <span className={`text-xs font-medium ${textSecondary}`}>字体</span>
-                  <p className={`text-sm ${textPrimary} mt-0.5`}>{direction.typography}</p>
-                </div>
-                <div>
-                  <span className={`text-xs font-medium ${textSecondary}`}>构图</span>
-                  <p className={`text-sm ${textPrimary} mt-0.5`}>{direction.composition}</p>
-                </div>
-                {direction.fitReason && (
-                  <div className={`text-xs ${textSecondary} italic`}>适配原因: {direction.fitReason}</div>
-                )}
-              </div>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-[#d4af37]/15 text-[#d4af37]'
+              }`}>
+                {direction.visualMood || '方案 A'}
+              </span>
             </div>
-          )}
-
-          {/* Symbol Concept */}
-          {symbol && (
-            <div className={`rounded-xl border ${border} p-5`}>
-              <div className="flex items-center gap-2 mb-4">
-                <Star className={`h-5 w-5 ${accent}`} />
-                <h3 className={`font-bold text-lg ${textPrimary}`}>符号概念</h3>
+            <div className="space-y-2">
+              <div>
+                <span className={`text-[10px] font-medium ${textSecondary}`}>定位</span>
+                <p className={`text-xs ${textPrimary} mt-0.5`}>{direction.positioning || '待确定'}</p>
               </div>
-              <div className="space-y-3">
-                <div>
-                  <span className={`text-xs font-medium ${textSecondary}`}>核心隐喻</span>
-                  <p className={`text-sm ${textPrimary} mt-0.5`}>{symbol.coreMetaphor || '待确定'}</p>
-                </div>
-                <div>
-                  <span className={`text-xs font-medium ${textSecondary}`}>图标形式</span>
-                  <p className={`text-sm ${textPrimary} mt-0.5`}>{symbol.iconForm}</p>
-                </div>
-                {symbol.negativeSpaceIdea && (
-                  <div>
-                    <span className={`text-xs font-medium ${textSecondary}`}>负空间</span>
-                    <p className={`text-sm ${textPrimary} mt-0.5`}>{symbol.negativeSpaceIdea}</p>
-                  </div>
-                )}
-                {symbol.alternativeRoutes.length > 0 && (
-                  <div>
-                    <span className={`text-xs font-medium ${textSecondary}`}>替代路线</span>
-                    <ul className="mt-1 space-y-1">
-                      {symbol.alternativeRoutes.map((r, i) => (
-                        <li key={i} className={`text-sm ${textPrimary} flex items-start gap-2`}>
-                          <ArrowRight className={`h-3 w-3 mt-1 ${accent} shrink-0`} />
-                          {r}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+              <div>
+                <span className={`text-[10px] font-medium ${textSecondary}`}>视觉氛围</span>
+                <p className={`text-xs ${textPrimary} mt-0.5`}>{direction.visualMood || '待确定'}</p>
               </div>
-            </div>
-          )}
-
-          {/* Visual System Notes */}
-          {visualNotes && (
-            <div className={`rounded-xl border ${border} p-5`}>
-              <div className="flex items-center gap-2 mb-4">
-                <Eye className={`h-5 w-5 ${accent}`} />
-                <h3 className={`font-bold text-lg ${textPrimary}`}>视觉系统说明</h3>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <span className={`text-xs font-medium ${textSecondary}`}>单色行为</span>
-                  <p className={`text-sm ${textPrimary} mt-0.5`}>{visualNotes.oneColorBehavior}</p>
-                </div>
-                <div>
-                  <span className={`text-xs font-medium ${textSecondary}`}>小尺寸行为</span>
-                  <p className={`text-sm ${textPrimary} mt-0.5`}>{visualNotes.smallSizeBehavior}</p>
+              <div>
+                <span className={`text-[10px] font-medium ${textSecondary}`}>配色方案</span>
+                <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                  {direction.colorPalette.map((c, i) => (
+                    <div key={i} className="flex items-center gap-1">
+                      <div className="w-4 h-4 rounded border border-white/20" style={{ backgroundColor: c.startsWith('#') ? c : undefined }} />
+                      <span className={`text-[10px] ${textSecondary}`}>{c}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
-              {visualNotes.recommendedLockups.length > 0 && (
-                <div className="mt-3">
-                  <span className={`text-xs font-medium ${textSecondary}`}>推荐组合</span>
-                  <div className="flex flex-wrap gap-2 mt-1">
-                    {visualNotes.recommendedLockups.map((l, i) => (
-                      <span key={i} className={`px-2 py-1 rounded text-xs ${cardBg} ${textSecondary}`}>{l}</span>
-                    ))}
-                  </div>
-                </div>
+              <div>
+                <span className={`text-[10px] font-medium ${textSecondary}`}>字体</span>
+                <p className={`text-xs ${textPrimary} mt-0.5`}>{direction.typography}</p>
+              </div>
+              <div>
+                <span className={`text-[10px] font-medium ${textSecondary}`}>构图</span>
+                <p className={`text-xs ${textPrimary} mt-0.5`}>{direction.composition}</p>
+              </div>
+              {direction.fitReason && (
+                <div className={`text-[10px] ${textSecondary} italic`}>适配: {direction.fitReason}</div>
               )}
-            </div>
-          )}
-
-          {/* 修订输入 */}
-          <div className={`rounded-xl border ${border} p-4`}>
-            <div className="flex items-center gap-2 mb-3">
-              <RefreshCw className={`h-4 w-4 ${accent}`} />
-              <h3 className={`font-semibold text-sm ${textPrimary}`}>修订方向</h3>
-            </div>
-            <div className="flex gap-2">
-              <input
-                value={revisionNotes}
-                onChange={e => setRevisionNotes(e.target.value)}
-                placeholder="描述你想调整的方面..."
-                className={`flex-1 px-3 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} placeholder:text-gray-400 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'}`}
-                onKeyDown={e => { if (e.key === 'Enter' && revisionNotes.trim()) handleRefineDirection(); }}
-              />
-              <button
-                onClick={handleRefineDirection}
-                disabled={!revisionNotes.trim() || isGeneratingDirection}
-                className={`px-3 py-2 rounded-lg ${accentBg} text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-opacity flex items-center gap-1`}
-              >
-                {isGeneratingDirection ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
-                修订
-              </button>
             </div>
           </div>
+        )}
 
-          {/* 生成图像按钮 */}
-          <div className={`rounded-xl border ${border} p-4`}>
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Sparkles className={`h-4 w-4 ${accent}`} />
-                <h3 className={`font-semibold text-sm ${textPrimary}`}>生成 Logo 图像</h3>
+        {/* Symbol Concept */}
+        {symbol && (
+          <div className={`rounded-xl border ${border} p-3`}>
+            <div className="flex items-center gap-1.5 mb-2">
+              <Star className={`h-4 w-4 ${accent}`} />
+              <h3 className={`font-bold text-sm ${textPrimary}`}>符号概念</h3>
+            </div>
+            <div className="space-y-2">
+              <div>
+                <span className={`text-[10px] font-medium ${textSecondary}`}>核心隐喻</span>
+                <p className={`text-xs ${textPrimary} mt-0.5`}>{symbol.coreMetaphor || '待确定'}</p>
               </div>
-              {imageModels.length > 0 && (
-                <select
-                  value={selectedImageModel}
-                  onChange={e => setSelectedImageModel(e.target.value)}
-                  className={`px-2 py-1 rounded-lg border text-xs ${inputBg} ${textPrimary} focus:outline-none`}
-                >
-                  {imageModels.map(m => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
-                  ))}
-                </select>
+              <div>
+                <span className={`text-[10px] font-medium ${textSecondary}`}>图标形式</span>
+                <p className={`text-xs ${textPrimary} mt-0.5`}>{symbol.iconForm}</p>
+              </div>
+              {symbol.negativeSpaceIdea && (
+                <div>
+                  <span className={`text-[10px] font-medium ${textSecondary}`}>负空间</span>
+                  <p className={`text-xs ${textPrimary} mt-0.5`}>{symbol.negativeSpaceIdea}</p>
+                </div>
+              )}
+              {symbol.alternativeRoutes.length > 0 && (
+                <div>
+                  <span className={`text-[10px] font-medium ${textSecondary}`}>替代路线</span>
+                  <ul className="mt-1 space-y-0.5">
+                    {symbol.alternativeRoutes.map((r, i) => (
+                      <li key={i} className={`text-xs ${textPrimary} flex items-start gap-1`}>
+                        <ArrowRight className={`h-2.5 w-2.5 mt-0.5 ${accent} shrink-0`} />
+                        {r}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </div>
-            <p className={`text-xs ${textSecondary} mb-3`}>
-              布局: {outputLayout === 'brand-system-board' ? '品牌系统展示板' : OUTPUT_LAYOUTS.find(l => l.value === outputLayout)?.label}
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={handleGenerateImage}
-                disabled={isGeneratingImage}
-                className={`flex-1 py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${accentBg} ${accentBgHover} text-white transition-all disabled:opacity-50`}
-              >
-                {isGeneratingImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
-                生成 Logo
-              </button>
-              <button
-                onClick={handleReset}
-                className={`px-3 py-2.5 rounded-xl text-sm ${isMonochrome ? 'bg-gray-100 hover:bg-gray-200 text-gray-700' : 'bg-white/10 hover:bg-white/20 text-white'} transition-colors font-medium`}
-              >
-                重新开始
-              </button>
+          </div>
+        )}
+
+        {/* Visual System Notes */}
+        {visualNotes && (
+          <div className={`rounded-xl border ${border} p-3`}>
+            <div className="flex items-center gap-1.5 mb-2">
+              <Eye className={`h-4 w-4 ${accent}`} />
+              <h3 className={`font-bold text-sm ${textPrimary}`}>视觉系统</h3>
             </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <span className={`text-[10px] font-medium ${textSecondary}`}>单色行为</span>
+                <p className={`text-xs ${textPrimary} mt-0.5`}>{visualNotes.oneColorBehavior}</p>
+              </div>
+              <div>
+                <span className={`text-[10px] font-medium ${textSecondary}`}>小尺寸行为</span>
+                <p className={`text-xs ${textPrimary} mt-0.5`}>{visualNotes.smallSizeBehavior}</p>
+              </div>
+            </div>
+            {visualNotes.recommendedLockups.length > 0 && (
+              <div className="mt-2">
+                <span className={`text-[10px] font-medium ${textSecondary}`}>推荐组合</span>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {visualNotes.recommendedLockups.map((l, i) => (
+                    <span key={i} className={`px-1.5 py-0.5 rounded text-[10px] ${cardBg} ${textSecondary}`}>{l}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 平台 Prompt (折叠区) */}
+        {platformPrompts.length > 0 && (
+          <div className={`rounded-xl border ${border} overflow-hidden`}>
+            <button
+              onClick={() => setExpandedPrompt(expandedPrompt === '__prompts__' ? null : '__prompts__')}
+              className={`w-full px-3 py-2 flex items-center justify-between ${cardBg} hover:opacity-80 transition-opacity`}
+            >
+              <div className="flex items-center gap-1.5">
+                <Wand2 className={`h-3.5 w-3.5 ${accent}`} />
+                <span className={`text-xs font-semibold ${textPrimary}`}>多平台 Prompt</span>
+                <span className={`text-[10px] ${textSecondary}`}>({platformPrompts.length})</span>
+              </div>
+              {expandedPrompt === '__prompts__' ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            </button>
+            {expandedPrompt === '__prompts__' && (
+              <div className={`p-3 space-y-2 ${isMonochrome ? 'bg-gray-50' : 'bg-black/20'}`}>
+                {platformPrompts.map((pp, i) => (
+                  <div key={i} className={`rounded-lg border ${border} overflow-hidden`}>
+                    <button
+                      onClick={() => setExpandedPrompt(expandedPrompt === pp.platform ? null : pp.platform)}
+                      className={`w-full px-3 py-2 flex items-center justify-between ${cardBg} hover:opacity-80 transition-opacity`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-[10px] font-bold ${accent}`}>{pp.platform}</span>
+                        {pp.notes && <span className={`text-[10px] ${textSecondary}`}>({pp.notes})</span>}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleCopyPrompt(pp.prompt, pp.platform); }}
+                          className={`p-0.5 rounded ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'} transition-colors`}
+                          title="复制"
+                        >
+                          {copiedPrompt === pp.platform ? <Check className="h-3 w-3 text-green-400" /> : <Copy className={`h-3 w-3 ${textSecondary}`} />}
+                        </button>
+                        {expandedPrompt === pp.platform ? <ChevronDown className={`h-3 w-3 ${textSecondary}`} /> : <ChevronRight className={`h-3 w-3 ${textSecondary}`} />}
+                      </div>
+                    </button>
+                    {expandedPrompt === pp.platform && (
+                      <div className={`px-3 py-2 ${isMonochrome ? 'bg-white' : 'bg-black/30'}`}>
+                        <pre className={`text-[10px] ${textSecondary} whitespace-pre-wrap break-all leading-relaxed`}>{pp.prompt}</pre>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 修订输入 */}
+        <div className={`rounded-xl border ${border} p-3`}>
+          <div className="flex items-center gap-1.5 mb-2">
+            <RefreshCw className={`h-3.5 w-3.5 ${accent}`} />
+            <h3 className={`font-semibold text-xs ${textPrimary}`}>修订方向</h3>
+          </div>
+          <div className="flex gap-2">
+            <input
+              value={revisionNotes}
+              onChange={e => setRevisionNotes(e.target.value)}
+              placeholder="描述你想调整的方面..."
+              className={`flex-1 px-3 py-2 rounded-lg border text-xs ${inputBg} ${textPrimary} placeholder:text-gray-500 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'}`}
+              onKeyDown={e => { if (e.key === 'Enter' && revisionNotes.trim()) handleRefineDirection(); }}
+            />
+            <button
+              onClick={handleRefineDirection}
+              disabled={!revisionNotes.trim() || isGeneratingDirection}
+              className={`px-3 py-2 rounded-lg ${accentBg} text-white text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-opacity flex items-center gap-1`}
+            >
+              {isGeneratingDirection ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+              修订
+            </button>
           </div>
         </div>
 
-        {/* 右栏：平台 Prompt */}
-        <div className="w-[380px] shrink-0 space-y-4 overflow-y-auto max-h-[calc(100vh-200px)]">
-          <h3 className={`font-semibold text-sm ${textPrimary} flex items-center gap-2`}>
-            <Wand2 className={`h-4 w-4 ${accent}`} />
-            多平台 Prompt
-          </h3>
-          {platformPrompts.length === 0 ? (
-            <div className={`rounded-xl border ${border} p-6 text-center`}>
-              <p className={`text-sm ${textSecondary}`}>生成方向后将展示各平台 Prompt</p>
+        {/* 生成图像按钮 */}
+        <div className={`rounded-xl border ${border} p-3`}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-1.5">
+              <Sparkles className={`h-3.5 w-3.5 ${accent}`} />
+              <h3 className={`font-semibold text-xs ${textPrimary}`}>生成 Logo 图像</h3>
             </div>
-          ) : (
-            <div className="space-y-3">
-              {platformPrompts.map((pp, i) => (
-                <div key={i} className={`rounded-xl border ${border} overflow-hidden`}>
-                  <button
-                    onClick={() => setExpandedPrompt(expandedPrompt === pp.platform ? null : pp.platform)}
-                    className={`w-full px-4 py-2.5 flex items-center justify-between ${cardBg} hover:opacity-80 transition-opacity`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs font-bold ${accent}`}>
-                        {pp.platform === 'gpt-image' ? 'GPT' :
-                         pp.platform === 'midjourney' ? 'MJ' :
-                         pp.platform === 'flux' ? 'Flux' :
-                         pp.platform === 'ideogram' ? 'Ideo' :
-                         'Uni'}
-                      </span>
-                      <span className={`text-xs font-medium ${textPrimary}`}>{pp.platform}</span>
-                      {pp.notes && <span className={`text-[10px] ${textSecondary}`}>({pp.notes})</span>}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleCopyPrompt(pp.prompt, pp.platform); }}
-                        className={`p-1 rounded ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'} transition-colors`}
-                        title="复制 Prompt"
-                      >
-                        {copiedPrompt === pp.platform ? <Check className="h-3 w-3 text-green-400" /> : <Copy className={`h-3 w-3 ${textSecondary}`} />}
-                      </button>
-                      {expandedPrompt === pp.platform ? <ChevronDown className={`h-3 w-3 ${textSecondary}`} /> : <ChevronRight className={`h-3 w-3 ${textSecondary}`} />}
-                    </div>
-                  </button>
-                  {expandedPrompt === pp.platform && (
-                    <div className={`px-4 py-3 ${isMonochrome ? 'bg-gray-50' : 'bg-black/30'}`}>
-                      <pre className={`text-xs ${textSecondary} whitespace-pre-wrap break-all`}>{pp.prompt}</pre>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Board Layout */}
-          {boardLayout && (
-            <div className={`rounded-xl border ${border} p-4`}>
-              <div className="flex items-center gap-2 mb-3">
-                <Layout className={`h-4 w-4 ${accent}`} />
-                <h4 className={`font-semibold text-sm ${textPrimary}`}>展示板布局</h4>
-              </div>
-              <div className="space-y-2">
-                <p className={`text-xs ${textSecondary}`}>{boardLayout.canvasSpec}</p>
-                <div className="space-y-1">
-                  {boardLayout.modules.map((m, i) => (
-                    <p key={i} className={`text-xs ${textPrimary} flex items-start gap-1`}>
-                      <span className={`${accent} shrink-0`}>•</span>
-                      {m}
-                    </p>
-                  ))}
-                </div>
-                {boardLayout.footerValues.length > 0 && (
-                  <div className={`text-[10px] ${textSecondary} mt-2`}>
-                    页脚: {boardLayout.footerValues.join(' | ')}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* 查看原始响应 */}
-          <div>
-            <button
-              onClick={() => setShowRawResponse(!showRawResponse)}
-              className={`text-xs ${textSecondary} hover:underline flex items-center gap-1`}
-            >
-              {showRawResponse ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-              {showRawResponse ? '隐藏' : '查看'}原始 LLM 响应
-            </button>
-            {showRawResponse && (
-              <pre className={`mt-2 p-4 rounded-lg text-xs ${textSecondary} whitespace-pre-wrap break-all overflow-auto max-h-64 ${cardBg}`}>
-                {rawResponse}
-              </pre>
+            {imageModels.length > 0 && (
+              <select
+                value={selectedImageModel}
+                onChange={e => setSelectedImageModel(e.target.value)}
+                className={`px-2 py-1 rounded-lg border text-[10px] ${inputBg} ${textPrimary} focus:outline-none`}
+              >
+                {imageModels.map(m => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
             )}
           </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleGenerateImage}
+              disabled={isGeneratingImage}
+              className={`flex-1 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 ${accentBg} ${accentBgHover} text-white transition-all disabled:opacity-50`}
+            >
+              {isGeneratingImage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImageIcon className="h-3.5 w-3.5" />}
+              生成 Logo
+            </button>
+            <button
+              onClick={handleReset}
+              className={`px-3 py-2.5 rounded-xl text-xs ${isMonochrome ? 'bg-gray-100 hover:bg-gray-200 text-gray-700' : 'bg-white/10 hover:bg-white/20 text-white'} transition-colors font-medium`}
+            >
+              重来
+            </button>
+          </div>
+        </div>
+
+        {/* 查看原始响应 */}
+        <div>
+          <button
+            onClick={() => setShowRawResponse(!showRawResponse)}
+            className={`text-[10px] ${textSecondary} hover:underline flex items-center gap-1`}
+          >
+            {showRawResponse ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            {showRawResponse ? '隐藏' : '查看'}原始 LLM 响应
+          </button>
+          {showRawResponse && (
+            <pre className={`mt-1 p-3 rounded-lg text-[10px] ${textSecondary} whitespace-pre-wrap break-all overflow-auto max-h-40 ${cardBg}`}>
+              {rawResponse}
+            </pre>
+          )}
         </div>
       </div>
     );
@@ -1045,18 +968,15 @@ export default function LogoSkillPanel({
   // ─── Step 3: 生成中 ──────────────────────────────────────────
   function renderGeneratingStep() {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="py-8 flex items-center justify-center">
         <div className="text-center">
-          <div className={`w-24 h-24 rounded-2xl ${cardBg} flex items-center justify-center mx-auto mb-6`}>
-            <Loader2 className={`h-12 w-12 animate-spin ${accent}`} />
+          <div className={`w-16 h-16 rounded-2xl ${cardBg} flex items-center justify-center mx-auto mb-4`}>
+            <Loader2 className={`h-8 w-8 animate-spin ${accent}`} />
           </div>
-          <h2 className={`text-xl font-bold ${textPrimary} mb-2`}>正在生成 Logo</h2>
-          <p className={`text-sm ${textSecondary}`}>
+          <h2 className={`text-sm font-bold ${textPrimary} mb-1`}>正在生成 Logo</h2>
+          <p className={`text-xs ${textSecondary}`}>
             {taskId ? '图像生成中，请稍候...' : '正在准备提示词...'}
           </p>
-          {taskId && (
-            <p className={`text-xs ${textSecondary} mt-2`}>任务ID: {taskId}</p>
-          )}
         </div>
       </div>
     );
@@ -1065,123 +985,93 @@ export default function LogoSkillPanel({
   // ─── Step 4: 结果 ────────────────────────────────────────────
   function renderResultStep() {
     return (
-      <div className="max-w-4xl mx-auto space-y-6">
+      <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className={`text-xl font-bold ${textPrimary}`}>生成结果</h2>
-          <div className="flex gap-2 flex-wrap">
+          <h2 className={`text-sm font-bold ${textPrimary}`}>生成结果</h2>
+          <div className="flex gap-1.5">
             <button
               onClick={handleAddToCanvas}
-              className={`px-4 py-2 rounded-lg ${isMonochrome ? 'bg-gray-100 text-gray-700' : 'bg-white/10 text-white'} font-medium flex items-center gap-1`}
+              className={`px-2.5 py-1.5 rounded-lg text-[10px] ${isMonochrome ? 'bg-gray-100 text-gray-700' : 'bg-white/10 text-white'} font-medium flex items-center gap-1`}
             >
-              <Download className="h-4 w-4" />
-              添加到画布
+              <Download className="h-3 w-3" />添加到画布
             </button>
             {brandProject && (
               <button
                 onClick={handleSaveToBrandAssets}
                 disabled={isSavingToBrand || !selectedImageUrl}
-                className={`px-4 py-2 rounded-lg ${accentBg} text-white font-medium flex items-center gap-1 disabled:opacity-50`}
+                className={`px-2.5 py-1.5 rounded-lg text-[10px] ${accentBg} text-white font-medium flex items-center gap-1 disabled:opacity-50`}
               >
-                {isSavingToBrand ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                {savedToBrand ? '已保存' : '保存到品牌资产'}
+                {isSavingToBrand ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                {savedToBrand ? '已保存' : '保存品牌'}
               </button>
             )}
-            <button
-              onClick={() => setStep('direction')}
-              className={`px-4 py-2 rounded-lg ${isMonochrome ? 'bg-gray-100 text-gray-700' : 'bg-white/10 text-white'} font-medium flex items-center gap-1`}
-            >
-              <RotateCcw className="h-4 w-4" />
-              返回方向
-            </button>
-            <button
-              onClick={handleReset}
-              className={`px-4 py-2 rounded-lg ${isMonochrome ? 'bg-gray-100 text-gray-700' : 'bg-white/10 text-white'} font-medium`}
-            >
-              重新开始
-            </button>
           </div>
         </div>
 
-        {/* 图像网格 */}
-        <div className="grid grid-cols-2 gap-4">
+        {/* 图像列表 */}
+        <div className="space-y-2">
           {imageUrls.map((url, i) => (
-            <div key={i} className="relative">
-              <button
-                onClick={() => { setSelectedImageUrl(url); setSavedToBrand(false); }}
-                className={`w-full rounded-xl overflow-hidden border-2 transition-all ${
-                  selectedImageUrl === url
-                    ? isMonochrome ? 'border-blue-500' : 'border-[#d4af37]'
-                    : `${border} hover:opacity-80`
-                }`}
-              >
-                <img src={url} alt={`Logo ${i + 1}`} className="w-full aspect-square object-contain bg-white" />
-              </button>
-              {selectedImageUrl === url && brandProject && (
-                <div className="absolute top-2 right-2 flex gap-1">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleSaveToBrandAssets(); }}
-                    className={`p-1.5 rounded-lg ${accentBg} text-white shadow-lg`}
-                    title="保存到品牌资产"
-                  >
-                    <Save className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onAddImages?.([url]); }}
-                    className={`p-1.5 rounded-lg ${isMonochrome ? 'bg-gray-200 text-gray-700' : 'bg-white/20 text-white'} shadow-lg`}
-                    title="添加到画布"
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              )}
-            </div>
+            <button
+              key={i}
+              onClick={() => { setSelectedImageUrl(url); setSavedToBrand(false); }}
+              className={`w-full rounded-xl overflow-hidden border-2 transition-all ${
+                selectedImageUrl === url
+                  ? isMonochrome ? 'border-blue-500' : 'border-[#d4af37]'
+                  : `${border} hover:opacity-80`
+              }`}
+            >
+              <img src={url} alt={`Logo ${i + 1}`} className="w-full aspect-square object-contain bg-white" />
+            </button>
           ))}
         </div>
 
-        {/* 选中图像大图预览 */}
-        {selectedImageUrl && (
-          <div className={`rounded-xl border ${border} overflow-hidden`}>
-            <img src={selectedImageUrl} alt="Selected Logo" className="w-full max-h-[500px] object-contain bg-white" />
-          </div>
-        )}
+        {/* 操作按钮 */}
+        <div className="flex gap-2">
+          <button
+            onClick={() => setStep('direction')}
+            className={`flex-1 py-2 rounded-lg text-xs ${isMonochrome ? 'bg-gray-100 text-gray-700' : 'bg-white/10 text-white'} font-medium flex items-center justify-center gap-1`}
+          >
+            <RotateCcw className="h-3 w-3" />返回方向
+          </button>
+          <button
+            onClick={handleReset}
+            className={`flex-1 py-2 rounded-lg text-xs ${isMonochrome ? 'bg-gray-100 text-gray-700' : 'bg-white/10 text-white'} font-medium`}
+          >
+            重新开始
+          </button>
+        </div>
 
-        {/* 快捷入口：品牌 DNA / 主 KV / 物料中心 */}
+        {/* 快捷入口 */}
         {brandProject && savedToBrand && (
-          <div className={`rounded-xl ${isMonochrome ? 'bg-gray-50 border border-gray-200' : 'bg-[#1a1a1a]/80 border border-[#d4af37]/20'} p-5`}>
-            <h3 className={`text-sm font-semibold mb-3 ${textPrimary}`}>Logo 已保存到品牌资产，接下来可以：</h3>
-            <div className="grid grid-cols-3 gap-3">
+          <div className={`rounded-xl p-3 ${isMonochrome ? 'bg-gray-50 border border-gray-200' : 'bg-[#1a1a1a]/80 border border-[#d4af37]/20'}`}>
+            <h3 className={`text-xs font-semibold mb-2 ${textPrimary}`}>接下来可以：</h3>
+            <div className="grid grid-cols-3 gap-2">
               <button
                 onClick={onOpenBrandDna}
-                className={`p-3 rounded-lg text-center transition-all ${
-                  isMonochrome
-                    ? 'bg-white border border-gray-200 hover:border-blue-300 text-gray-700'
-                    : 'bg-[#222] border border-[#d4af37]/20 hover:border-[#d4af37]/50 text-white'
+                className={`p-2 rounded-lg text-center transition-all text-xs ${
+                  isMonochrome ? 'bg-white border border-gray-200 hover:border-blue-300 text-gray-700' : 'bg-[#222] border border-[#d4af37]/20 hover:border-[#d4af37]/50 text-white'
                 }`}
               >
-                <Palette className="h-5 w-5 mx-auto mb-1" />
-                <span className="text-xs font-medium">品牌 DNA</span>
+                <Palette className="h-4 w-4 mx-auto mb-0.5" />
+                <span className="text-[10px]">品牌 DNA</span>
               </button>
               <button
                 onClick={onOpenMainKv}
-                className={`p-3 rounded-lg text-center transition-all ${
-                  isMonochrome
-                    ? 'bg-white border border-gray-200 hover:border-blue-300 text-gray-700'
-                    : 'bg-[#222] border border-[#d4af37]/20 hover:border-[#d4af37]/50 text-white'
+                className={`p-2 rounded-lg text-center transition-all text-xs ${
+                  isMonochrome ? 'bg-white border border-gray-200 hover:border-blue-300 text-gray-700' : 'bg-[#222] border border-[#d4af37]/20 hover:border-[#d4af37]/50 text-white'
                 }`}
               >
-                <ImageIcon className="h-5 w-5 mx-auto mb-1" />
-                <span className="text-xs font-medium">主 KV</span>
+                <ImageIcon className="h-4 w-4 mx-auto mb-0.5" />
+                <span className="text-[10px]">主 KV</span>
               </button>
               <button
                 onClick={onClose}
-                className={`p-3 rounded-lg text-center transition-all ${
-                  isMonochrome
-                    ? 'bg-white border border-gray-200 hover:border-blue-300 text-gray-700'
-                    : 'bg-[#222] border border-[#d4af37]/20 hover:border-[#d4af37]/50 text-white'
+                className={`p-2 rounded-lg text-center transition-all text-xs ${
+                  isMonochrome ? 'bg-white border border-gray-200 hover:border-blue-300 text-gray-700' : 'bg-[#222] border border-[#d4af37]/20 hover:border-[#d4af37]/50 text-white'
                 }`}
               >
-                <Wand2 className="h-5 w-5 mx-auto mb-1" />
-                <span className="text-xs font-medium">物料中心</span>
+                <Wand2 className="h-4 w-4 mx-auto mb-0.5" />
+                <span className="text-[10px]">物料中心</span>
               </button>
             </div>
           </div>

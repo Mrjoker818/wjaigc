@@ -51,6 +51,7 @@ const BrandEcommercePanel = lazy(() => import('@/components/brand-ecommerce-pane
 const RefineEnginePanel = lazy(() => import('@/components/refine-engine-panel'));
 const FontDesignPanel = lazy(() => import('@/components/font-design-panel'));
 const BrandFactoryPanel = lazy(() => import('@/components/brand-factory-panel'));
+const LogoSkillPanel = lazy(() => import('@/components/logo-skill-panel'));
 const AiPsdPanel = lazy(() => import('@/components/ai-psd/ai-psd-panel'));
 const ImageCompareDialog = lazy(() => import('@/components/image-compare-dialog').then(m => ({ default: m.ImageCompareDialog })));
 const SceneStudioPanel = lazy(() => import('@/components/scene-studio-panel'));
@@ -388,8 +389,9 @@ interface InfiniteCanvasProps {
   onToggleFavorites?: () => void;
   /** Callback to open prompt template panel */
   onTogglePromptTemplate?: () => void;
-  /** Callback to open Logo Generator Skill panel */
-  onToggleLogoSkill?: () => void;
+  /** Callback to open Logo Generator Skill panel (legacy, now uses internal state) */
+  /** Brand project info for Logo Generator panel */
+  brandProject?: { brandName?: string; description?: string; targetAudience?: string; tone?: string; brandDna?: { mainColors?: string[]; secondaryColors?: string[]; fontStyle?: string } | null } | null;
   /** Switch to node editor mode */
   onSwitchToNodeMode?: () => void;
   /** Switch to workflow hub */
@@ -497,7 +499,7 @@ export function InfiniteCanvas({
   onAddToFavorites,
   onToggleFavorites,
   onTogglePromptTemplate,
-  onToggleLogoSkill,
+  brandProject,
   onSwitchToNodeMode,
   onSwitchToWorkflowHub,
   onSwitchToDashboard,
@@ -544,6 +546,7 @@ export function InfiniteCanvas({
   // Font design state
   const [showFontDesign, setShowFontDesign] = useState(false);
   const [showBrandFactory, setShowBrandFactory] = useState(false);
+  const [showLogoSkill, setShowLogoSkill] = useState(false);
   const [showAiPsd, setShowAiPsd] = useState(false);
   const [showStickerAssistant, setShowStickerAssistant] = useState(false);
   const [showSceneStudio, setShowSceneStudio] = useState(false);
@@ -11659,7 +11662,28 @@ export function InfiniteCanvas({
               isMonochrome={isMonochrome}
               onOpenLogoSkill={() => {
                 setShowBrandFactory(false);
-                onToggleLogoSkill?.();
+                setShowLogoSkill(true);
+              }}
+            />
+          </Suspense>
+        )}
+
+        {/* ====== LOGO GENERATOR PRO PANEL ====== */}
+        {showLogoSkill && (
+          <Suspense fallback={null}>
+            <LogoSkillPanel
+              isMonochrome={isMonochrome}
+              onClose={() => setShowLogoSkill(false)}
+              onAddImages={(urls: string[]) => {
+                onAddImages?.(urls);
+              }}
+              brandProject={brandProject}
+              onOpenBrandDna={() => {
+                setShowLogoSkill(false);
+                setShowBrandFactory(true);
+              }}
+              onOpenMainKv={() => {
+                setShowLogoSkill(false);
               }}
             />
           </Suspense>
@@ -13051,7 +13075,7 @@ export function InfiniteCanvas({
 
         {/* Logo Generator Pro - Logo生成器 */}
         <button
-          onClick={() => onToggleLogoSkill?.()}
+          onClick={() => setShowLogoSkill(true)}
           className={`tool-btn p-2 rounded-full transition-all relative group ${isMonochrome ? 'text-violet-600 hover:text-violet-500 hover:bg-violet-50' : 'text-gold hover:text-gold-light hover:bg-gold/10'}`}
           title="Logo生成器 Pro"
         >
