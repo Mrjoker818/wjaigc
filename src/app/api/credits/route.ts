@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/server-auth';
-import { dbGetCredits, dbAdjustCredits, dbGetCreditTransactions, dbGetAllCredits, dbInitCredits } from '@/lib/db-storage';
+import { dbGetCredits, dbAdjustCredits, dbGetCreditTransactions, dbGetAllCredits, dbInitCredits, dbGetSystemSetting } from '@/lib/db-storage';
 import { execSql } from '@/lib/db-client';
 import { CREDITS_TO_CNY, CNY_TO_CREDITS, IMAGE_MODEL_CREDITS, VIDEO_MODEL_CREDITS, CHAT_MODEL_CREDITS, RECHARGE_PACKAGES, getModelPricingInfo } from '@/lib/credits';
+import crypto from 'crypto';
 
 /**
  * GET /api/credits
@@ -139,7 +140,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const { action, amount, description, userId: targetUserId, packageName, paymentMethod, orderId } = body as {
-      action: 'create-order' | 'query-order' | 'admin_adjust' | 'admin-recharge' | 'confirm-demo-order';
+      action: 'create-order' | 'query-order' | 'admin_adjust' | 'admin-recharge';
       amount?: number;
       description?: string;
       userId?: string;
@@ -159,6 +160,16 @@ export async function POST(request: NextRequest) {
       const method = paymentMethod || 'alipay';
       if (method !== 'alipay' && method !== 'wechat') {
         return NextResponse.json({ success: false, error: '不支持的支付方式' }, { status: 400 });
+      }
+
+      // Check payment is actually configured (no demo mode allowed)
+      const paymentConfig = method === 'alipay' ? await getAlipayConfigFromDB() : await getWechatConfigFromDB();
+      if (!paymentConfig.enabled) {
+        return NextResponse.json({ 
+          success: false, 
+          error: `${method === 'alipay' ? '支付宝' : '微信'}支付暂未配置，请联系管理员在后台配置支付参数后才能充值。`,
+          errorCode: 'PAYMENT_NOT_CONFIGURED',
+        }, { status: 400 });
       }
 
       // Validate amount matches a package
@@ -188,46 +199,20 @@ export async function POST(request: NextRequest) {
       let paymentData: Record<string, unknown> = {};
 
       if (method === 'alipay') {
-        // Alipay payment integration
-        const alipayConfig = getAlipayConfig();
-        if (alipayConfig.enabled) {
-          paymentData = await createAlipayOrder({
-            orderId,
-            amount: priceCny,
-            subject: `无界AI积分充值 - ${rechargeAmount}积分`,
-            notifyUrl,
-            returnUrl: `${domain.startsWith('http') ? domain : 'https://' + domain}`,
-          });
-        } else {
-          // Demo mode: no real Alipay configured, return simulated payment
-          paymentData = {
-            mode: 'demo',
-            message: '支付宝支付暂未配置，请联系管理员。当前为演示模式，订单已创建。',
-            orderId,
-            amount: priceCny,
-            qrCode: `https://qr.alipay.com/demo_${orderId}`,
-          };
-        }
+        paymentData = await createAlipayOrder({
+          orderId,
+          amount: priceCny,
+          subject: `无界AI积分充值 - ${rechargeAmount}积分`,
+          notifyUrl,
+          returnUrl: `${domain.startsWith('http') ? domain : 'https://' + domain}`,
+        });
       } else if (method === 'wechat') {
-        // WeChat Pay integration
-        const wechatConfig = getWechatConfig();
-        if (wechatConfig.enabled) {
-          paymentData = await createWechatOrder({
-            orderId,
-            amount: priceCny,
-            description: `无界AI积分充值 - ${rechargeAmount}积分`,
-            notifyUrl,
-          });
-        } else {
-          // Demo mode: no real WeChat Pay configured
-          paymentData = {
-            mode: 'demo',
-            message: '微信支付暂未配置，请联系管理员。当前为演示模式，订单已创建。',
-            orderId,
-            amount: priceCny,
-            qrCode: `weixin://wxpay/bizpayurl?pr=demo_${orderId}`,
-          };
-        }
+        paymentData = await createWechatOrder({
+          orderId,
+          amount: priceCny,
+          description: `无界AI积分充值 - ${rechargeAmount}积分`,
+          notifyUrl,
+        });
       }
 
       return NextResponse.json({
@@ -277,73 +262,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ===== User: Confirm demo order (simulate payment in demo mode) =====
-    if (action === 'confirm-demo-order') {
-      if (!orderId) {
-        return NextResponse.json({ success: false, error: '缺少订单号' }, { status: 400 });
-      }
-      try {
-        // Verify order belongs to current user and is pending
-        const orderResult = await execSql(
-          'SELECT * FROM wujie_recharge_orders WHERE id = $1 AND user_id = $2',
-          [orderId, user.id]
-        );
-        if (orderResult.rows.length === 0) {
-          return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 });
-        }
-        const order = orderResult.rows[0] as Record<string, unknown>;
-        if (order.payment_status === 'paid') {
-          return NextResponse.json({ success: false, error: '订单已支付' }, { status: 400 });
-        }
-        if (order.payment_status === 'expired' || order.payment_status === 'cancelled') {
-          return NextResponse.json({ success: false, error: '订单已过期或已取消' }, { status: 400 });
-        }
-
-        // Simulate payment: update order status
-        await execSql(
-          `UPDATE wujie_recharge_orders SET payment_status = 'paid', paid_at = NOW(), trade_no = $1 WHERE id = $2`,
-          [`demo_pay_${Date.now()}`, orderId]
-        );
-
-        // Credit the user
-        const orderAmount = order.amount as number;
-        const orderBonus = (order.bonus as number) || 0;
-        const totalCredits = orderAmount + orderBonus;
-
-        const creditResult = await execSql(
-          'SELECT credits FROM wujie_user_credits WHERE user_id = $1',
-          [user.id]
-        );
-        if (creditResult.rows.length === 0) {
-          await execSql(
-            'INSERT INTO wujie_user_credits (user_id, credits) VALUES ($1, $2)',
-            [user.id, totalCredits]
-          );
-        } else {
-          await execSql(
-            'UPDATE wujie_user_credits SET credits = credits + $1, updated_at = NOW() WHERE user_id = $2',
-            [totalCredits, user.id]
-          );
-        }
-
-        // Record transaction
-        await execSql(
-          `INSERT INTO wujie_credit_transactions (user_id, type, amount, description, ref_id)
-           VALUES ($1, 'recharge', $2, $3, $4)`,
-          [user.id, totalCredits, `演示充值 ${orderAmount}积分${orderBonus > 0 ? ` +赠送${orderBonus}积分` : ''}`, orderId]
-        );
-
-        return NextResponse.json({
-          success: true,
-          message: `充值成功！已到账 ${totalCredits} 积分${orderBonus > 0 ? `（含赠送 ${orderBonus} 积分）` : ''}`,
-          creditsAdded: totalCredits,
-        });
-      } catch (dbErr) {
-        console.error('[credits] confirm demo order error:', dbErr);
-        return NextResponse.json({ success: false, error: '确认订单失败' }, { status: 500 });
-      }
-    }
-
     // ===== Admin: Adjust credits =====
     if ((action === 'admin_adjust' || action === 'admin-recharge') && isAdmin) {
       const effectiveUserId = targetUserId || user.id;
@@ -375,15 +293,36 @@ interface AlipayConfig {
   privateKey: string;
   alipayPublicKey: string;
   gateway: string;
+  notifyUrl: string;
 }
 
-function getAlipayConfig(): AlipayConfig {
+async function getAlipayConfigFromDB(): Promise<AlipayConfig> {
+  // Priority: DB config (payment_config key) > env vars
+  try {
+    const dbConfigRaw = await dbGetSystemSetting('payment_config');
+    if (dbConfigRaw) {
+      const parsed = typeof dbConfigRaw === 'string' ? JSON.parse(dbConfigRaw) : dbConfigRaw;
+      const alipay = parsed.alipay;
+      if (alipay && alipay.enabled) {
+        return {
+          enabled: true,
+          appId: alipay.appId || '',
+          privateKey: alipay.privateKey || '',
+          alipayPublicKey: alipay.publicKey || '',
+          gateway: alipay.sandbox ? 'https://openapi-sandbox.dl.alipaydev.com/gateway.do' : 'https://openapi.alipay.com/gateway.do',
+          notifyUrl: alipay.notifyUrl || '',
+        };
+      }
+    }
+  } catch { /* ignore DB read error */ }
+  // Fallback to env vars
   return {
     enabled: !!(process.env.ALIPAY_APP_ID && process.env.ALIPAY_PRIVATE_KEY),
     appId: process.env.ALIPAY_APP_ID || '',
     privateKey: process.env.ALIPAY_PRIVATE_KEY || '',
     alipayPublicKey: process.env.ALIPAY_PUBLIC_KEY || '',
     gateway: process.env.ALIPAY_GATEWAY || 'https://openapi.alipay.com/gateway.do',
+    notifyUrl: process.env.ALIPAY_NOTIFY_URL || '',
   };
 }
 
@@ -394,7 +333,7 @@ async function createAlipayOrder(params: {
   notifyUrl: string;
   returnUrl: string;
 }): Promise<Record<string, unknown>> {
-  const config = getAlipayConfig();
+  const config = await getAlipayConfigFromDB();
   const bizContent = {
     out_trade_no: params.orderId,
     total_amount: params.amount.toFixed(2),
@@ -457,15 +396,36 @@ interface WechatConfig {
   mchId: string;
   apiKey: string;
   certPath: string;
+  notifyUrl: string;
 }
 
-function getWechatConfig(): WechatConfig {
+async function getWechatConfigFromDB(): Promise<WechatConfig> {
+  // Priority: DB config (payment_config key) > env vars
+  try {
+    const dbConfigRaw = await dbGetSystemSetting('payment_config');
+    if (dbConfigRaw) {
+      const parsed = typeof dbConfigRaw === 'string' ? JSON.parse(dbConfigRaw) : dbConfigRaw;
+      const wechat = parsed.wechat;
+      if (wechat && wechat.enabled) {
+        return {
+          enabled: true,
+          appId: wechat.appId || '',
+          mchId: wechat.mchId || '',
+          apiKey: wechat.apiKey || '',
+          certPath: wechat.serialNo || '',
+          notifyUrl: wechat.notifyUrl || '',
+        };
+      }
+    }
+  } catch { /* ignore DB read error */ }
+  // Fallback to env vars
   return {
     enabled: !!(process.env.WECHAT_APP_ID && process.env.WECHAT_MCH_ID && process.env.WECHAT_API_KEY),
     appId: process.env.WECHAT_APP_ID || '',
     mchId: process.env.WECHAT_MCH_ID || '',
     apiKey: process.env.WECHAT_API_KEY || '',
     certPath: process.env.WECHAT_CERT_PATH || '',
+    notifyUrl: process.env.WECHAT_NOTIFY_URL || '',
   };
 }
 
@@ -475,7 +435,7 @@ async function createWechatOrder(params: {
   description: string;
   notifyUrl: string;
 }): Promise<Record<string, unknown>> {
-  const config = getWechatConfig();
+  const config = await getWechatConfigFromDB();
 
   try {
     const crypto = await import('crypto');

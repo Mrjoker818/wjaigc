@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execSql } from '@/lib/db-client';
-import { dbAdjustCredits } from '@/lib/db-storage';
+import { dbAdjustCredits, dbGetSystemSetting } from '@/lib/db-storage';
 import crypto from 'crypto';
 
 /**
@@ -9,6 +9,7 @@ import crypto from 'crypto';
  * This is called by the payment platform when payment succeeds.
  * 
  * Security: Verifies signature to ensure the callback is authentic.
+ * Config: Reads payment keys from DB (admin panel) with env var fallback.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -32,21 +33,22 @@ export async function POST(request: NextRequest) {
     }
   } catch (e) {
     console.error('[payment-notify] error:', e);
-    return new NextResponse('fail', { status: 500 });
+    return NextResponse.json({ success: false }, { status: 500 });
   }
 }
 
 /**
  * GET /api/credits/payment-notify
- * Alipay uses GET for return_url (user browser redirect).
- * We just redirect the user back to the app.
+ * Alipay uses GET for return_url (user browser redirect after payment).
+ * We just redirect to the credits page.
  */
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const outTradeNo = url.searchParams.get('out_trade_no');
-  const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || 'http://localhost:5000';
-  const redirectUrl = domain.startsWith('http') ? domain : `https://${domain}`;
-  return NextResponse.redirect(`${redirectUrl}/?order_id=${outTradeNo || ''}&payment=alipay`);
+  
+  // Redirect to credits page with order info
+  const redirectUrl = `/dashboard?tab=credits${outTradeNo ? `&order=${outTradeNo}` : ''}`;
+  return NextResponse.redirect(new URL(redirectUrl, request.url));
 }
 
 // ========== Alipay Notification Handler ==========
@@ -58,51 +60,56 @@ async function handleAlipayNotify(request: NextRequest): Promise<NextResponse> {
     params[key] = value.toString();
   });
 
-  // Verify Alipay signature
-  const sign = params['sign'];
-  const signType = params['sign_type'] || 'RSA2';
+  const tradeStatus = params.trade_status;
+  const outTradeNo = params.out_trade_no;
+  const tradeNo = params.trade_no;
 
-  if (!verifyAlipaySignature(params, sign, signType)) {
-    console.error('[payment-notify] alipay signature verification failed');
-    return new NextResponse('sign check fail', { status: 400 });
-  }
-
-  // Check trade status
-  const tradeStatus = params['trade_status'];
+  // Only process successful payments
   if (tradeStatus !== 'TRADE_SUCCESS' && tradeStatus !== 'TRADE_FINISHED') {
-    // Not a successful payment, just acknowledge
-    return new NextResponse('success');
+    return new NextResponse('failure', { status: 200 });
   }
 
-  const outTradeNo = params['out_trade_no']; // Our order ID
-  const tradeNo = params['trade_no']; // Alipay transaction ID
-
-  // Process the payment
-  const result = await processSuccessfulPayment(outTradeNo, tradeNo, 'alipay');
-
-  if (result) {
-    return new NextResponse('success');
-  } else {
-    return new NextResponse('fail', { status: 500 });
+  // Verify Alipay signature using DB config
+  const alipayPublicKey = await getAlipayPublicKey();
+  if (!alipayPublicKey) {
+    console.error('[payment-notify] alipay: no public key configured');
+    return new NextResponse('failure', { status: 200 });
   }
+
+  if (!verifyAlipaySignature(params, alipayPublicKey)) {
+    console.error('[payment-notify] alipay signature verification failed');
+    return new NextResponse('failure', { status: 200 });
+  }
+
+  if (!outTradeNo) {
+    return new NextResponse('failure', { status: 200 });
+  }
+
+  const result = await processSuccessfulPayment(outTradeNo, tradeNo || '', 'alipay');
+
+  return new NextResponse(result ? 'success' : 'failure', { status: 200 });
 }
 
-function verifyAlipaySignature(
-  params: Record<string, string>,
-  sign: string | undefined,
-  signType: string
-): boolean {
-  const alipayPublicKey = process.env.ALIPAY_PUBLIC_KEY;
-  if (!alipayPublicKey || !sign) {
-    // If no public key configured, skip verification in dev mode
-    if (process.env.COZE_PROJECT_ENV !== 'PROD') {
-      console.warn('[payment-notify] alipay: skipping signature verification in dev mode');
-      return true;
+async function getAlipayPublicKey(): Promise<string | null> {
+  // Try DB first (from payment_config), then env var
+  try {
+    const dbConfigRaw = await dbGetSystemSetting('payment_config');
+    if (dbConfigRaw) {
+      const parsed = typeof dbConfigRaw === 'string' ? JSON.parse(dbConfigRaw) : dbConfigRaw;
+      const alipay = parsed.alipay;
+      if (alipay?.publicKey) return alipay.publicKey;
     }
-    return false;
-  }
+  } catch { /* ignore */ }
+  return process.env.ALIPAY_PUBLIC_KEY || null;
+}
 
-  // Build sign string: sort all params except sign/sign_type, join with &
+function verifyAlipaySignature(params: Record<string, string>, alipayPublicKey: string): boolean {
+  const sign = params.sign;
+  const signType = params.sign_type || 'RSA2';
+
+  if (!sign) return false;
+
+  // Build sign string (sorted, excluding sign/sign_type)
   const signString = Object.keys(params)
     .filter(k => k !== 'sign' && k !== 'sign_type' && params[k] !== '')
     .sort()
@@ -137,8 +144,8 @@ async function handleWechatNotify(request: NextRequest): Promise<NextResponse> {
     });
   }
 
-  // Verify WeChat signature
-  if (!verifyWechatSignature(body)) {
+  // Verify WeChat signature using DB config
+  if (!await verifyWechatSignatureFromDB(body)) {
     console.error('[payment-notify] wechat signature verification failed');
     const failXml = `<xml><return_code><![CDATA[FAIL]]></return_code><return_msg><![CDATA[Signature verification failed]]></return_msg></xml>`;
     return new NextResponse(failXml, {
@@ -167,8 +174,21 @@ async function handleWechatNotify(request: NextRequest): Promise<NextResponse> {
   });
 }
 
-function verifyWechatSignature(xmlBody: string): boolean {
-  const apiKey = process.env.WECHAT_API_KEY;
+async function verifyWechatSignatureFromDB(xmlBody: string): Promise<boolean> {
+  // Get API key from DB first (from payment_config), then env var
+  let apiKey: string | null = null;
+  try {
+    const dbConfigRaw = await dbGetSystemSetting('payment_config');
+    if (dbConfigRaw) {
+      const parsed = typeof dbConfigRaw === 'string' ? JSON.parse(dbConfigRaw) : dbConfigRaw;
+      const wechat = parsed.wechat;
+      if (wechat?.apiKey) apiKey = wechat.apiKey;
+    }
+  } catch { /* ignore */ }
+  if (!apiKey) {
+    apiKey = process.env.WECHAT_API_KEY || null;
+  }
+
   if (!apiKey) {
     if (process.env.COZE_PROJECT_ENV !== 'PROD') {
       console.warn('[payment-notify] wechat: skipping signature verification in dev mode');
