@@ -17,7 +17,7 @@ import WorkflowHub from '@/components/workflow-hub';
 import DashboardView from '@/components/dashboard/dashboard-view';
 import { createDemoWorkflow, type Workflow } from '@/lib/workflow-engine';
 import { ImageEditor } from '@/components/image-editor';
-import { UserManager } from '@/components/user-manager';
+import { LoginPanel } from '@/components/dashboard/login-panel';
 import { ProjectDataPanel } from '@/components/project-data-panel';
 
 import { HelpGuide } from '@/components/help-guide';
@@ -197,7 +197,6 @@ function CanvasApp() {
 
   const [appMode, setAppMode] = useState<'canvas' | 'node' | 'workflow-hub' | 'dashboard'>('canvas');
   const [pendingModeSwitch, setPendingModeSwitch] = useState<'node' | 'workflow-hub' | 'dashboard' | null>(null);
-  const [showUserManager, setShowUserManager] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -347,12 +346,10 @@ function CanvasApp() {
             } catch { /* non-blocking */ }
           } else {
             // 无 projectId → 显示工作台视图（在画布页面内部）
-            setShowUserManager(false);
             setAuthChecked(true);
             setAppMode('dashboard');
             return;
           }
-          setShowUserManager(false);
           setAuthChecked(true);
           return;
         }
@@ -363,7 +360,6 @@ function CanvasApp() {
         userMgr.logout();
         if (cancelled) return;
         setCurrentUser(null);
-        setShowUserManager(true);
       } catch {}
       if (!cancelled) setAuthChecked(true);
     };
@@ -2740,7 +2736,6 @@ function CanvasApp() {
           setImages([]);
           setInitialGroups([]);
           setAppMode('canvas');
-          setShowUserManager(true);
           toast.info('已退出登录', {
             description: '请重新登录以继续使用',
             className: themeStyle === 'monochrome'
@@ -3120,272 +3115,24 @@ function CanvasApp() {
         }}
       />
 
-      {/* User Manager Modal */}
-      {showUserManager && (
-        <UserManager
-          themeStyle={themeStyle}
-          onClose={() => setShowUserManager(false)}
-          currentImageCount={images.length}
-          currentProjectId={currentProject?.id}
+      {/* Login Panel - shown when not authenticated */}
+      {authChecked && !currentUser && (
+        <LoginPanel
           onLogin={async (user) => {
-            if (user) {
-              setCurrentUser(user);
-              setShowUserManager(false);
-              // 加载项目数据后跳转到工作台
-              try {
-                const userMgr = UserManagerCore.getInstance();
-                await userMgr.loadProjectsFromServer();
-              } catch { /* non-blocking */ }
-              toast.success('登录成功', {
-                description: `欢迎回来，${user.name}`,
-                className: themeStyle === 'monochrome' 
-                  ? 'bg-white border border-gray-200 text-gray-900' 
-                  : 'bg-[#141414] border border-[#2a2a2a] text-white',
-              });
-              // 登录成功后进入工作台
-              setAppMode('dashboard');
-            } else {
-              setCurrentUser(null);
-              setShowUserManager(false);
-            }
-          }}
-          onLogout={async () => {
-            // 退出前同步保存当前项目数据（含 data: URL 持久化）
+            setCurrentUser(user);
+            // 加载项目数据后跳转到工作台
             try {
-              if (currentProject && images.length > 0) {
-                const mgr = UserManagerCore.getInstance();
-                // 同步持久化 data:/blob: URL
-                const urlMapping: Record<string, string> = {};
-                const sourceUrlMapping: Record<string, string> = {};
-                const nonPersistent = images.filter(img => img.url.startsWith('data:') || img.url.startsWith('blob:'));
-                if (nonPersistent.length > 0) {
-                  const results = await Promise.allSettled(nonPersistent.map(async (img) => {
-                    let urlToSave = img.url;
-                    if (urlToSave.startsWith('blob:')) {
-                      try {
-                        const resp = await fetch(urlToSave);
-                        const blob = await resp.blob();
-                        urlToSave = await new Promise<string>((resolve) => {
-                          const reader = new FileReader();
-                          reader.onloadend = () => resolve(reader.result as string);
-                          reader.readAsDataURL(blob);
-                        });
-                      } catch { return null; }
-                    }
-                    const saveResp = await fetch('/api/save-image', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ imageUrl: urlToSave, userId: currentUser?.id, sourceUrl: img.url }),
-                    });
-                    const saveData = await saveResp.json();
-                    if (saveData.success && saveData.url) return { original: img.url, persisted: saveData.url };
-                    return null;
-                  }));
-                  for (const r of results) {
-                    if (r.status === 'fulfilled' && r.value) urlMapping[r.value.original] = r.value.persisted;
-                  }
-                }
-                const persistableCanvasImages = images
-                  .map(img => ({
-                    id: img.id,
-                    url: urlMapping[img.url] || img.url,
-                    x: img.x,
-                    y: img.y,
-                    width: img.width,
-                    height: img.height,
-                    originalWidth: img.originalWidth || img.width * 2,
-                    originalHeight: img.originalHeight || img.height * 2,
-                    rotation: 0,
-                    zIndex: 0,
-                    createdAt: img.createdAt || Date.now(),
-                    prompt: img.prompt || '',
-                    modifyPrompt: img.modifyPrompt || '',
-                    model: img.model || '',
-                    quality: img.quality || '',
-                    aspectRatio: img.aspectRatio || '',
-                    stylePreset: img.stylePreset || '',
-                    category: img.category || '',
-                    size: img.size || '',
-                    groupId: img.groupId || '',
-                    threeDModelUrl: img.threeDModelUrl || '',
-                    threeDModelUrls: img.threeDModelUrls || undefined,
-                    modelName: img.modelName || '',
-                    apiProvider: img.apiProvider || '',
-                    apiBaseUrl: img.apiBaseUrl || '',
-                  }))
-                  .filter(img => img.url) as PersistableCanvasImage[];
-                mgr.updateProject(currentProject.id, {
-                  canvasImages: persistableCanvasImages,
-                  metadata: {
-                    ...(currentProject.metadata || {}),
-                    groups: groupsRef.current,
-                  },
-                });
-              }
-            } catch { /* save failed - non-blocking */ }
-            setCurrentUser(null);
-            setCurrentProject(null);
-            setImages([]);
-            setInitialGroups([]);
-            // 显示登录界面
-            setShowUserManager(true);
-            toast.info('已退出登录', {
-              description: '请重新登录以继续使用',
-              className: themeStyle === 'monochrome'
-                ? 'bg-white border border-gray-200 text-gray-900'
+              const userMgr = UserManagerCore.getInstance();
+              await userMgr.loadProjectsFromServer();
+            } catch { /* non-blocking */ }
+            toast.success('登录成功', {
+              description: `欢迎回来，${user.name}`,
+              className: themeStyle === 'monochrome' 
+                ? 'bg-white border border-gray-200 text-gray-900' 
                 : 'bg-[#141414] border border-[#2a2a2a] text-white',
             });
-          }}
-          onSelectProject={async (project) => {
-            // 标记项目切换中，阻止自动保存用旧闭包数据覆盖
-            switchingProjectRef.current = true;
-            // 清除可能正在等待的自动保存定时器
-            if (autoSaveRef.current) {
-              clearTimeout(autoSaveRef.current);
-              autoSaveRef.current = null;
-            }
-
-            // 切换项目前先保存当前项目数据（含 data: URL 持久化 + metadata/groups）
-            try {
-              if (currentProject && images.length > 0) {
-                const mgr = UserManagerCore.getInstance();
-                // 同步持久化 data:/blob: URL
-                const urlMapping: Record<string, string> = {};
-                const nonPersistent = images.filter(img => img.url.startsWith('data:') || img.url.startsWith('blob:'));
-                if (nonPersistent.length > 0) {
-                  const results = await Promise.allSettled(nonPersistent.map(async (img) => {
-                    let urlToSave = img.url;
-                    if (urlToSave.startsWith('blob:')) {
-                      try {
-                        const resp = await fetch(urlToSave);
-                        const blob = await resp.blob();
-                        urlToSave = await new Promise<string>((resolve) => {
-                          const reader = new FileReader();
-                          reader.onloadend = () => resolve(reader.result as string);
-                          reader.readAsDataURL(blob);
-                        });
-                      } catch { return null; }
-                    }
-                    const saveResp = await fetch('/api/save-image', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ imageUrl: urlToSave, userId: currentUser?.id, sourceUrl: img.url }),
-                    });
-                    const saveData = await saveResp.json();
-                    if (saveData.success && saveData.url) return { original: img.url, persisted: saveData.url };
-                    return null;
-                  }));
-                  for (const r of results) {
-                    if (r.status === 'fulfilled' && r.value) urlMapping[r.value.original] = r.value.persisted;
-                  }
-                  if (Object.keys(urlMapping).length > 0) {
-                    setImages(prev => prev.map(img => urlMapping[img.url] ? { ...img, url: urlMapping[img.url] } : img));
-                  }
-                }
-                const persistableCanvasImages = images
-                  .map(img => ({
-                    id: img.id,
-                    url: urlMapping[img.url] || img.url,
-                    x: img.x, y: img.y, width: img.width, height: img.height,
-                    originalWidth: img.originalWidth || img.width * 2,
-                    originalHeight: img.originalHeight || img.height * 2,
-                    rotation: 0, zIndex: 0, createdAt: img.createdAt || Date.now(),
-                    prompt: img.prompt || '', modifyPrompt: img.modifyPrompt || '',
-                    model: img.model || '', quality: img.quality || '',
-                    aspectRatio: img.aspectRatio || '', stylePreset: img.stylePreset || '',
-                    category: img.category || '', size: img.size || '',
-                    groupId: img.groupId || '',
-                    threeDModelUrl: img.threeDModelUrl || '',
-                    threeDModelUrls: img.threeDModelUrls || undefined,
-                    modelName: img.modelName || '',
-                    apiProvider: img.apiProvider || '',
-                    apiBaseUrl: img.apiBaseUrl || '',
-                  }))
-                  .filter(img => img.url) as PersistableCanvasImage[];
-                // 保存 canvasImages + metadata(groups)，与自动保存逻辑保持一致
-                mgr.updateProject(currentProject.id, {
-                  canvasImages: persistableCanvasImages,
-                  metadata: {
-                    ...(currentProject.metadata || {}),
-                    groups: groupsRef.current,
-                  },
-                });
-              }
-            } catch { /* save failed - non-blocking */ }
-
-            // 从 UserManager 单例获取最新项目数据（而非组件中的过快照）
-            // 避免因组件 state 未刷新导致使用过时的 canvasImages（可能为空）
-            const mgr = UserManagerCore.getInstance();
-            const freshProject = mgr.getProject(project.id) || project;
-
-            setCurrentProject(freshProject);
-            // 加载项目画布数据
-            if (freshProject.canvasImages && freshProject.canvasImages.length > 0) {
-              setImages((freshProject.canvasImages as unknown as Record<string, unknown>[]).map(img => ({
-                id: img.id as string,
-                url: img.url as string,
-                prompt: (img.prompt as string) || '',
-                modifyPrompt: (img.modifyPrompt as string) || '',
-                model: (img.model as string) || '',
-                quality: (img.quality as string) || '',
-                aspectRatio: (img.aspectRatio as string) || '',
-                stylePreset: (img.stylePreset as string) || '',
-                category: (img.category as string) || '',
-                size: (img.size as string) || '',
-                groupId: (img.groupId as string) || '',
-                threeDModelUrl: (img.threeDModelUrl as string) || '',
-                threeDModelUrls: (img.threeDModelUrls as Record<string, string>) || undefined,
-                x: img.x as number,
-                y: img.y as number,
-                width: (img.width as number) || 256,
-                height: (img.height as number) || 256,
-                originalWidth: (img.originalWidth as number) || 512,
-                originalHeight: (img.originalHeight as number) || 512,
-                createdAt: (img.createdAt as number) || Date.now(),
-                modelName: (img.modelName as string) || '',
-                apiProvider: (img.apiProvider as string) || '',
-                apiBaseUrl: (img.apiBaseUrl as string) || '',
-              })));
-              // 恢复分组数据（优先 metadata，其次 localStorage 兜底）
-              const metaGroups = freshProject.metadata?.groups;
-              let restoredGroups: Array<{id: string; name: string; note: string; imageIds: string[]; x: number; y: number; collapsed: boolean}> = [];
-              if (metaGroups && metaGroups.length > 0) {
-                restoredGroups = metaGroups.map(g => ({
-                  id: g.id,
-                  name: g.name,
-                  note: g.note || '',
-                  imageIds: g.imageIds,
-                  x: g.x || 0,
-                  y: g.y || 0,
-                  collapsed: g.collapsed || false,
-                }));
-              } else {
-                try {
-                  const lsGroups = localStorage.getItem(`wujie-groups-${freshProject.id}`);
-                  if (lsGroups) restoredGroups = JSON.parse(lsGroups);
-                } catch {}
-              }
-              setInitialGroups(restoredGroups);
-              toast.success('项目已加载', {
-                description: `${freshProject.name} - ${freshProject.canvasImages.length} 张图片`,
-                className: themeStyle === 'monochrome'
-                  ? 'bg-white border border-gray-200 text-gray-900'
-                  : 'bg-[#141414] border border-[#d4af37]/50 text-white',
-              });
-            } else {
-              // 项目无图片，清空画布
-              setImages([]);
-              setInitialGroups([]);
-              toast.info('项目已加载', {
-                description: `${freshProject.name} - 暂无图片`,
-                className: themeStyle === 'monochrome'
-                  ? 'bg-white border border-gray-200 text-gray-900'
-                  : 'bg-[#141414] border border-[#2a2a2a] text-white',
-              });
-            }
-            setShowUserManager(false);
-            // 项目切换完成，解除自动保存拦截
-            switchingProjectRef.current = false;
+            // 登录成功后进入工作台
+            setAppMode('dashboard');
           }}
         />
       )}
@@ -3493,29 +3240,12 @@ function CanvasApp() {
         isMonochrome={themeStyle === 'monochrome'}
       />
 
-      {/* Auth gate overlay - covers everything when not authenticated */}
+      {/* Auth loading overlay */}
       {!authChecked && (
         <div className="fixed inset-0 flex items-center justify-center z-[90] bg-[#0a0a0a]">
           <div className="flex flex-col items-center gap-4">
             <div className="w-10 h-10 border-2 border-[#d4af37] border-t-transparent rounded-full animate-spin" />
             <p className="text-white/60 text-sm">正在验证身份...</p>
-          </div>
-        </div>
-      )}
-      {authChecked && !currentUser && !showUserManager && (
-        <div className="fixed inset-0 flex items-center justify-center z-[90] bg-gradient-to-br from-[#0a0a0a] via-[#111] to-[#0d0d0d]">
-          <div className="flex flex-col items-center gap-8">
-            <div className="relative">
-              <div className="absolute -inset-4 bg-[#d4af37]/10 rounded-3xl blur-2xl" />
-              <h1 className="relative text-3xl font-bold text-white tracking-wide">无界 AI</h1>
-            </div>
-            <p className="text-white/40 text-sm tracking-wider">请先登录以使用画布</p>
-            <button
-              onClick={() => setShowUserManager(true)}
-              className="btn-press px-8 py-3 bg-gradient-to-r from-[#d4af37] to-[#daa520] text-black font-semibold rounded-xl hover:from-[#daa520] hover:to-[#d4af37] shadow-lg shadow-[#d4af37]/20 hover:shadow-xl hover:shadow-[#d4af37]/30 transition-all"
-            >
-              登录 / 注册
-            </button>
           </div>
         </div>
       )}
