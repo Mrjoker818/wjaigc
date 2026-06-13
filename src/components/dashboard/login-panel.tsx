@@ -1,23 +1,32 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { User } from '@/lib/user-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
+import { APP_VERSION_LABEL } from '@/config/app-meta';
+import { Label } from '@/components/ui/label';
+import {
+  User as UserIcon,
+  Settings,
+  Zap,
+  Eye,
+  EyeOff,
+  FileText,
+  MessageSquareText,
+} from 'lucide-react';
 
 interface LoginPanelProps {
   onLogin: (user: User) => void;
 }
 
 export function LoginPanel({ onLogin }: LoginPanelProps) {
-  const [loginName, setLoginName] = useState('');
+  const userManager = useMemo(() => UserManagerCore.getInstance(), []);
+  const [loginName, setLoginName] = useState('Mr.joker');
   const [loginPassword, setLoginPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const userManager = UserManagerCore.getInstance();
 
   const submitLogin = async (name: string, password: string) => {
-    setIsLoading(true);
-    setLoginError('');
     try {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
@@ -38,82 +47,161 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
       }
 
       const loggedIn = await userManager.upsertUserFromServer(data.user);
+      setLoginError('');
       onLogin(loggedIn);
     } catch {
       setLoginError('登录失败，或该用户已被禁用');
-    } finally {
-      setIsLoading(false);
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (loginName.trim() && loginPassword.trim()) {
-      submitLogin(loginName.trim(), loginPassword.trim());
-    }
+  const handleLogin = async () => {
+    await submitLogin(loginName.trim(), loginPassword);
   };
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-gradient-to-br from-black via-gray-900 to-black">
-      {/* Background decorative elements */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/5 rounded-full blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-primary/3 rounded-full blur-3xl" />
-      </div>
+    <div className="fixed inset-0 z-[100] flex min-h-screen" style={{ background: '#0A0A0F' }}>
+      <div className="w-full min-h-screen flex flex-col lg:flex-row">
 
-      <div className="relative z-10 w-full max-w-md px-6">
-        {/* Logo / Title */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-white mb-2">无界 AI</h1>
-          <p className="text-gray-400 text-sm">AI 图像生成与协作平台</p>
+        {/* 左侧品牌展示区 */}
+        <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden flex-col justify-between p-12 xl:p-16"
+             style={{ background: 'linear-gradient(135deg, #0E0E16 0%, #151520 40%, #1A1A28 70%, #0E0E16 100%)' }}>
+
+          {/* 渐变光效背景装饰 */}
+          <div className="absolute top-0 left-0 w-full h-full pointer-events-none" aria-hidden="true">
+            <div className="absolute -top-24 -left-24 w-80 h-80 rounded-full opacity-20"
+                 style={{ background: 'radial-gradient(circle, rgba(212,175,55,0.3) 0%, transparent 70%)' }} />
+            <div className="absolute bottom-20 right-10 w-96 h-96 rounded-full opacity-10"
+                 style={{ background: 'radial-gradient(circle, rgba(212,175,55,0.25) 0%, transparent 70%)' }} />
+            <div className="absolute top-1/2 left-1/3 w-64 h-64 rounded-full opacity-10"
+                 style={{ background: 'radial-gradient(circle, rgba(212,175,55,0.2) 0%, transparent 60%)' }} />
+          </div>
+
+          {/* 品牌头部 */}
+          <div className="relative z-10">
+            <div className="flex items-center gap-3 mb-3">
+              <img src="/logo.png" alt="无界AI" className="w-10 h-10 object-contain rounded-lg" />
+              <h1 className="text-3xl xl:text-4xl font-bold text-foreground tracking-tight">无界AI</h1>
+            </div>
+            <p className="text-muted-foreground text-base xl:text-lg">AI图像生成与协作平台</p>
+          </div>
+
+          {/* 特性卡片 */}
+          <div className="relative z-10 space-y-4 my-12">
+            <div className="flex items-start gap-4 p-5 rounded-lg bg-muted/50 border border-border/20 hover:border-primary/30 transition-colors group">
+              <div className="w-10 h-10 rounded-md bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-shadow">
+                <Zap className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-foreground mb-1">无限画布</h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">自由缩放、无限延展的创作空间，支持多图层协同编辑</p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-4 p-5 rounded-lg bg-muted/50 border border-border/20 hover:border-primary/30 transition-colors group">
+              <div className="w-10 h-10 rounded-md bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-shadow">
+                <MessageSquareText className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-foreground mb-1">AI智能修图</h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">一键抠图、智能补全、风格迁移，让创作更高效</p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-4 p-5 rounded-lg bg-muted/50 border border-border/20 hover:border-primary/30 transition-colors group">
+              <div className="w-10 h-10 rounded-md bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-shadow">
+                <FileText className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-foreground mb-1">工作流编排</h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">可视化节点编排，自定义AI处理流水线，自动化批量生成</p>
+              </div>
+            </div>
+          </div>
+
+          {/* 版本号 */}
+          <div className="relative z-10">
+            <p className="text-xs text-muted-foreground/50 font-mono">{APP_VERSION_LABEL}</p>
+          </div>
         </div>
 
-        {/* Login Card */}
-        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-8 shadow-2xl">
-          <h2 className="text-xl font-semibold text-white mb-6">用户登录</h2>
+        {/* 右侧登录表单区 */}
+        <div className="flex-1 flex items-center justify-center p-6 sm:p-8 lg:p-12" style={{ backgroundColor: '#0F1117' }}>
+          <div className="w-full max-w-sm">
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">用户名</label>
-              <input
-                type="text"
-                value={loginName}
-                onChange={e => setLoginName(e.target.value)}
-                className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 transition-all"
-                placeholder="请输入用户名"
-                autoFocus
-              />
+            {/* 移动端品牌标识 */}
+            <div className="lg:hidden flex items-center gap-2 mb-10 justify-center">
+              <img src="/logo.png" alt="无界AI" className="w-8 h-8 object-contain rounded" />
+              <span className="text-2xl font-bold text-foreground tracking-tight">无界AI</span>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">密码</label>
-              <input
-                type="password"
-                value={loginPassword}
-                onChange={e => setLoginPassword(e.target.value)}
-                className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 transition-all"
-                placeholder="请输入密码"
-              />
-            </div>
+            {/* 登录标题 */}
+            <h2 className="text-2xl font-bold text-foreground mb-8">登录</h2>
 
+            {/* 登录表单 */}
+            <form onSubmit={(e) => { e.preventDefault(); void handleLogin(); }} autoComplete="off">
+              {/* 用户名输入框 */}
+              <div className="mb-5">
+                <Label className="block text-xs font-medium text-muted-foreground mb-1.5">用户名</Label>
+                <div className="relative">
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                    <UserIcon className="w-4 h-4 text-muted-foreground/60" />
+                  </div>
+                  <input
+                    type="text"
+                    value={loginName}
+                    onChange={(e) => setLoginName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') void handleLogin(); }}
+                    placeholder="请输入用户名"
+                    className="w-full bg-muted border-none rounded-md pl-10 pr-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors"
+                  />
+                </div>
+              </div>
+
+              {/* 密码输入框 */}
+              <div className="mb-6">
+                <Label className="block text-xs font-medium text-muted-foreground mb-1.5">密码</Label>
+                <div className="relative">
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                    <Settings className="w-4 h-4 text-muted-foreground/60" />
+                  </div>
+                  <input
+                    type={showLoginPassword ? 'text' : 'password'}
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') void handleLogin(); }}
+                    placeholder="请输入密码"
+                    className="w-full bg-muted border-none rounded-md pl-10 pr-10 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowLoginPassword((value) => !value)}
+                    aria-label={showLoginPassword ? '隐藏密码' : '显示密码'}
+                    title={showLoginPassword ? '隐藏密码' : '显示密码'}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                  >
+                    {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* 登录按钮 */}
+              <button
+                type="submit"
+                className="w-full bg-primary text-primary-foreground font-semibold py-2.5 rounded-md text-sm hover:brightness-110 active:scale-[0.98] transition-all inline-flex items-center justify-center gap-2"
+              >
+                登录
+              </button>
+            </form>
+
+            {/* 错误提示 */}
             {loginError && (
-              <div className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
-                {loginError}
+              <div className="mt-4 px-4 py-3 rounded-md text-sm font-medium" style={{ backgroundColor: '#3D1518' }}>
+                <span className="text-destructive">{loginError}</span>
               </div>
             )}
 
-            <button
-              type="submit"
-              disabled={isLoading || !loginName.trim() || !loginPassword.trim()}
-              className="w-full py-2.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isLoading ? '登录中...' : '登录'}
-            </button>
-          </form>
-
-          <p className="text-gray-500 text-xs text-center mt-6">
-            请联系管理员创建新账户
-          </p>
+            <p className="mt-6 text-xs text-muted-foreground/50">请联系管理员创建新账户。</p>
+          </div>
         </div>
       </div>
     </div>
