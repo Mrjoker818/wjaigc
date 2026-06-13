@@ -75,6 +75,10 @@ export async function POST(request: NextRequest) {
     if (body.confirmMode !== undefined) currentCfg.confirmMode = body.confirmMode;
     if (body.note !== undefined) currentCfg.note = body.note;
 
+    // 自动启用：有收款码URL就自动启用，清空URL就自动禁用
+    if (body.wechatQrUrl !== undefined) currentCfg.wechatEnabled = !!body.wechatQrUrl;
+    if (body.alipayQrUrl !== undefined) currentCfg.alipayEnabled = !!body.alipayQrUrl;
+
     await dbSetSystemSetting(CONFIG_KEY, JSON.stringify(currentCfg));
 
     const canAcceptPayments = (currentCfg.wechatEnabled && !!currentCfg.wechatQrUrl) || (currentCfg.alipayEnabled && !!currentCfg.alipayQrUrl);

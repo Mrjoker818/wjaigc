@@ -764,7 +764,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       const resp = await fetch('/api/credits/payment-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'save', wechatQrUrl: paymentConfig.wechatQrUrl, alipayQrUrl: paymentConfig.alipayQrUrl }),
+        body: JSON.stringify({
+          action: 'save',
+          wechatQrUrl: paymentConfig.wechatQrUrl,
+          alipayQrUrl: paymentConfig.alipayQrUrl,
+          // 上传收款码时自动启用对应支付方式
+          wechatEnabled: !!paymentConfig.wechatQrUrl,
+          alipayEnabled: !!paymentConfig.alipayQrUrl,
+        }),
       });
       const data = await resp.json();
       if (data.success) {
