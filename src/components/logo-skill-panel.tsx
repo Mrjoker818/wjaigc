@@ -56,7 +56,7 @@ interface ImageModel {
 interface LogoSkillPanelProps {
   isMonochrome?: boolean;
   onClose: () => void;
-  onAddImages?: (urls: string[]) => void;
+  onAddImages?: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
   brandProject?: {
     id?: string;
     brandName?: string;
@@ -419,7 +419,17 @@ export default function LogoSkillPanel({
 
   // ─── 保存到画布 ──────────────────────────────────────────────
   function handleAddToCanvas() {
-    if (selectedImageUrl && onAddImages) onAddImages([selectedImageUrl]);
+    if (selectedImageUrl && onAddImages) {
+      // ★ 传递模型信息
+      const meta: { modelName?: string; apiProvider?: string } = {};
+      if (selectedImageModel) {
+        const pureModelId = selectedImageModel.includes('::') ? selectedImageModel.split('::').pop()! : selectedImageModel;
+        meta.modelName = pureModelId;
+        const provider = imageModels.find(m => m.id === selectedImageModel);
+        if (provider?.providerId) meta.apiProvider = provider.providerId;
+      }
+      onAddImages([selectedImageUrl], meta);
+    }
   }
 
   // ─── 保存到品牌资产 ──────────────────────────────────────────

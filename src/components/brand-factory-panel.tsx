@@ -420,7 +420,7 @@ function genId(prefix: string) {
 /* ========== MAIN COMPONENT ========== */
 interface BrandFactoryPanelProps {
   onClose: () => void;
-  onAddImages?: (urls: string[]) => void;
+  onAddImages?: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
   isMonochrome?: boolean;
   /** 打开 Logo Generator Skill Pro 面板 */
   onOpenLogoSkill?: () => void;
@@ -1363,7 +1363,17 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
                 <img src={kvImageUrl} alt="KV主视觉" className="w-full h-auto" crossOrigin="anonymous" />
                 <div className="flex gap-1.5 p-1.5">
                   <button className={`${th.btnGhost} text-[10px] px-2 py-1 border ${th.borderLight}`}
-                    onClick={() => { if (onAddImages) onAddImages([kvImageUrl]); }}>添加到画布</button>
+                    onClick={() => {
+                      if (onAddImages) {
+                        const meta: { modelName?: string; apiProvider?: string } = {};
+                        if (selectedImageModel) {
+                          const pureModelId = selectedImageModel.includes('::') ? selectedImageModel.split('::').pop()! : selectedImageModel;
+                          meta.modelName = pureModelId;
+                          if (selectedImageProviderId) meta.apiProvider = selectedImageProviderId;
+                        }
+                        onAddImages([kvImageUrl], meta);
+                      }
+                    }}>添加到画布</button>
                   <button className={`${th.btnGhost} text-[10px] px-2 py-1 border ${th.borderLight}`}
                     onClick={() => setKvImageUrl('')}>清除</button>
                 </div>
@@ -1452,13 +1462,33 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
                     <div className="flex items-center justify-between p-1">
                       <span className="text-[10px] text-white/60">{r.item}</span>
                       <button className={`${th.btnGhost} text-[10px] px-1 py-0.5`}
-                        onClick={() => { if (onAddImages) onAddImages([r.imageUrl]); }}>+</button>
+                        onClick={() => {
+                          if (onAddImages) {
+                            const meta: { modelName?: string; apiProvider?: string } = {};
+                            if (selectedImageModel) {
+                              const pureModelId = selectedImageModel.includes('::') ? selectedImageModel.split('::').pop()! : selectedImageModel;
+                              meta.modelName = pureModelId;
+                              if (selectedImageProviderId) meta.apiProvider = selectedImageProviderId;
+                            }
+                            onAddImages([r.imageUrl], meta);
+                          }
+                        }}>+</button>
                     </div>
                   </div>
                 ))}
               </div>
               <button className={`${th.btnGhost} text-xs border ${th.borderLight} w-full py-1.5`}
-                onClick={() => { if (onAddImages) onAddImages(currentProject.batchResults.map((r: {item: string; imageUrl: string}) => r.imageUrl)); }}>全部添加到画布</button>
+                onClick={() => {
+                  if (onAddImages) {
+                    const meta: { modelName?: string; apiProvider?: string } = {};
+                    if (selectedImageModel) {
+                      const pureModelId = selectedImageModel.includes('::') ? selectedImageModel.split('::').pop()! : selectedImageModel;
+                      meta.modelName = pureModelId;
+                      if (selectedImageProviderId) meta.apiProvider = selectedImageProviderId;
+                    }
+                    onAddImages(currentProject.batchResults.map((r: {item: string; imageUrl: string}) => r.imageUrl), meta);
+                  }
+                }}>全部添加到画布</button>
             </div>
           )}
         </>

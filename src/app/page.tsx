@@ -621,6 +621,7 @@ function CanvasApp() {
               settings: p.settings,
               createdAt: p.createdAt,
               updatedAt: p.id === currentProject.id ? Date.now() : p.updatedAt,
+              userId: currentUser.id,
             })),
           };
           const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
@@ -1510,11 +1511,15 @@ function CanvasApp() {
 
   // 加载图片真实尺寸
   // 添加多张图片到画布（自动排列布局）
-  const handleAddImages = useCallback(async (imageUrls: string[], sourceImageId?: string) => {
+  const handleAddImages = useCallback(async (imageUrls: string[], sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string }) => {
     const newImages: CanvasImage[] = [];
     
     // Find source image for positioning if provided
     const sourceImg = sourceImageId ? images.find(img => img.id === sourceImageId) : null;
+    
+    // ★ 确定模型信息：优先使用 meta 参数，其次从源图继承
+    const effectiveModelName = meta?.modelName || sourceImg?.modelName || '';
+    const effectiveApiProvider = meta?.apiProvider || sourceImg?.apiProvider || '';
     
     for (let i = 0; i < imageUrls.length; i++) {
       let rawUrl = imageUrls[i];
@@ -1572,6 +1577,9 @@ function CanvasApp() {
         originalHeight: natH,
         createdAt: Date.now(),
         generatedFromImageId: sourceImageId,
+        // ★ 保留模型信息和API提供商信息
+        ...(effectiveModelName ? { modelName: effectiveModelName } : {}),
+        ...(effectiveApiProvider ? { apiProvider: effectiveApiProvider } : {}),
       });
     }
     

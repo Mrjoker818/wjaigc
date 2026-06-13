@@ -42,6 +42,7 @@ interface Message {
   generatedImages?: string[]; // AI生成的图片URL列表
   isGeneratingImage?: boolean; // 是否正在生成图片
   generateModelName?: string; // 生成使用的模型名称
+  generateProviderId?: string; // 生成使用的API提供商ID
   generateProgress?: number; // 生成进度 0-100
   generateImageCount?: number; // 生成图片数量
   generateError?: string; // 生成失败时的错误信息
@@ -293,7 +294,7 @@ interface ChatPanelProps {
   themeStyle: 'gold' | 'monochrome';
 
   onAddToPrompt?: (prompt: string) => void;
-  onAddImages?: (imageUrls: string[], sourceImageId?: string) => void;
+  onAddImages?: (imageUrls: string[], sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string }) => void;
   canvasImages?: CanvasImage[];
   selectedCanvasImage?: CanvasImage | null;
   onChatModelChange?: (info: { model: string; providerId: string; apiKey: string; baseUrl: string; providerPreset?: string } | null) => void;
@@ -3384,7 +3385,7 @@ ${imageDescriptions}
         const imageCount = prompts.length > 0 ? prompts.length : detectImageCountFromText(trimmedInput);
         setMessages(prev => prev.map(msg => 
           msg.id === assistantMessageId 
-            ? { ...msg, content: displayContent, isGeneratingImage: true, generateModelName: imageModelInfo.model || '图像生成', generateProgress: 0, generateImageCount: imageCount }
+            ? { ...msg, content: displayContent, isGeneratingImage: true, generateModelName: imageModelInfo.model || '图像生成', generateProviderId: imageModelInfo.providerId, generateProgress: 0, generateImageCount: imageCount }
             : msg
         ));
 
@@ -3531,7 +3532,7 @@ ${imageDescriptions}
 
                 // 将图片添加到画布
                 if (onAddImages) {
-                  onAddImages(allResultUrls, imageSourceId);
+                  onAddImages(allResultUrls, imageSourceId, { modelName: imageModelInfo.model, apiProvider: imageModelInfo.providerId });
                 }
                 console.log('[ChatImage] Successfully generated', allResultUrls.length, 'images from', prompts.length, 'prompt(s)');
               } else {
@@ -3563,7 +3564,7 @@ ${imageDescriptions}
           const imageCount = detectImageCountFromText(trimmedInput);
           setMessages(prev => prev.map(msg => 
             msg.id === assistantMessageId 
-              ? { ...msg, isGeneratingImage: true, generateModelName: imageModelInfo.model || '图像生成', generateProgress: 0, generateImageCount: imageCount }
+              ? { ...msg, isGeneratingImage: true, generateModelName: imageModelInfo.model || '图像生成', generateProviderId: imageModelInfo.providerId, generateProgress: 0, generateImageCount: imageCount }
               : msg
           ));
 
@@ -3694,7 +3695,7 @@ ${imageDescriptions}
                       : msg
                   ));
                   if (onAddImages) {
-                    onAddImages(resultUrls, imageSourceId);
+                    onAddImages(resultUrls, imageSourceId, { modelName: imageModelInfo.model, apiProvider: imageModelInfo.providerId });
                   }
                 } else {
                   setMessages(prev => prev.map(msg => 
@@ -4405,7 +4406,7 @@ ${imageDescriptions}
                       {message.role === 'assistant'
                         ? <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
-                            components={createMarkdownComponents(isGold, onAddImages ? (url: string) => onAddImages([url]) : undefined)}
+                            components={createMarkdownComponents(isGold, onAddImages ? (url: string) => onAddImages([url], undefined, { modelName: message.generateModelName, apiProvider: message.generateProviderId }) : undefined)}
                           >
                             {cleanAssistantContent(message.content)}
                           </ReactMarkdown>
@@ -4439,7 +4440,7 @@ ${imageDescriptions}
                               alt={`AI生成图片${imgIdx + 1}`}
                               className="w-full cursor-pointer hover:opacity-95 transition-opacity"
                               style={{ maxHeight: '400px', objectFit: 'contain' }}
-                              onClick={() => onAddImages?.([imgUrl])}
+                              onClick={() => onAddImages?.([imgUrl], undefined, { modelName: message.generateModelName, apiProvider: message.generateProviderId })}
                               title="点击添加到画布"
                               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                             />
@@ -4447,7 +4448,7 @@ ${imageDescriptions}
                             <div className="absolute bottom-2 right-2 flex gap-1.5 opacity-0 group-hover/chat-img:opacity-100 transition-opacity">
                               {onAddImages && (
                                 <button
-                                  onClick={(e) => { e.stopPropagation(); onAddImages([imgUrl]); }}
+                                  onClick={(e) => { e.stopPropagation(); onAddImages([imgUrl], undefined, { modelName: message.generateModelName, apiProvider: message.generateProviderId }); }}
                                   className="bg-black/70 backdrop-blur-sm text-white text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1 hover:bg-black/90 shadow-lg"
                                 >
                                   <Plus size={12} /> 画布

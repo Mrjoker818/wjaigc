@@ -91,7 +91,7 @@ interface HistoryItem {
 
 interface AiPsdPanelProps {
   onClose: () => void;
-  onAddImages: (urls: string[]) => void;
+  onAddImages: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
   isMonochrome?: boolean;
 }
 
@@ -1398,7 +1398,17 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false 
           </button>
           {taskData?.previewUrl && (
             <button className={th.btnSm}
-              onClick={() => onAddImages([taskData.previewUrl!])}>
+              onClick={() => {
+                // ★ 传递模型信息
+                const meta: { modelName?: string; apiProvider?: string } = {};
+                if (selectedImageModel) {
+                  const pureModelId = selectedImageModel.includes('::') ? selectedImageModel.split('::').pop()! : selectedImageModel;
+                  meta.modelName = pureModelId;
+                  const model = imageModels.find(m => m.id === selectedImageModel);
+                  if (model?.providerId) meta.apiProvider = model.providerId;
+                }
+                onAddImages([taskData.previewUrl!], meta);
+              }}>
               添加到画布
             </button>
           )}

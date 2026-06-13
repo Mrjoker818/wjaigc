@@ -102,7 +102,7 @@ interface SavedScene {
 
 interface SceneStudioProps {
   onClose: () => void;
-  onAddImages: (urls: string[]) => void;
+  onAddImages: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
   isMonochrome?: boolean;
 }
 
@@ -1897,8 +1897,16 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
   }, [sceneName, objects, lights, cameraPreset, savedCameraViews]);
 
   const addImageToCanvas = useCallback((url: string) => {
-    onAddImages([url]);
-  }, [onAddImages]);
+    // ★ 传递模型信息
+    const meta: { modelName?: string; apiProvider?: string } = {};
+    if (selectedImageModelId) {
+      const pureModelId = selectedImageModelId.includes('::') ? selectedImageModelId.split('::').pop()! : selectedImageModelId;
+      meta.modelName = pureModelId;
+      const model = imageModels.find(m => m.id === selectedImageModelId);
+      if (model?.providerId) meta.apiProvider = model.providerId;
+    }
+    onAddImages([url], meta);
+  }, [onAddImages, selectedImageModelId, imageModels]);
 
   // Save camera view
   const saveCameraView = useCallback(() => {

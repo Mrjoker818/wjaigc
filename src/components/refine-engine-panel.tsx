@@ -53,7 +53,7 @@ interface RefineResult {
 interface Props {
   isMonochrome?: boolean;
   onClose: () => void;
-  onAddImage?: (url: string) => void;
+  onAddImage?: (url: string, meta?: { modelName?: string; apiProvider?: string }) => void;
   initialImageUrl?: string;
 }
 
@@ -1288,7 +1288,16 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                       {/* Hover overlay with add-to-canvas button */}
                       <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center">
                         <button
-                          onClick={() => onAddImage?.(r.imageUrl)}
+                          onClick={() => {
+                            // ★ 传递模型信息
+                            const meta: { modelName?: string; apiProvider?: string } = {};
+                            if (selectedModel) {
+                              const pureModelId = selectedModel.includes('::') ? selectedModel.split('::').pop()! : selectedModel;
+                              meta.modelName = pureModelId;
+                              if (selectedModel.includes('::')) meta.apiProvider = selectedModel.split('::')[0];
+                            }
+                            onAddImage?.(r.imageUrl, meta);
+                          }}
                           className="px-3 py-1.5 text-xs rounded-md text-white transition-colors flex items-center gap-1"
                           style={{ background: accentColor }}
                         >
@@ -1307,7 +1316,14 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                 {/* Add all to canvas button */}
                 <button
                   onClick={() => {
-                    results.forEach(r => onAddImage?.(r.imageUrl));
+                    // ★ 传递模型信息
+                    const meta: { modelName?: string; apiProvider?: string } = {};
+                    if (selectedModel) {
+                      const pureModelId = selectedModel.includes('::') ? selectedModel.split('::').pop()! : selectedModel;
+                      meta.modelName = pureModelId;
+                      if (selectedModel.includes('::')) meta.apiProvider = selectedModel.split('::')[0];
+                    }
+                    results.forEach(r => onAddImage?.(r.imageUrl, meta));
                   }}
                   className="w-full py-2.5 rounded-md text-sm font-medium text-white transition-colors flex items-center justify-center gap-2"
                   style={{ background: accentColor }}

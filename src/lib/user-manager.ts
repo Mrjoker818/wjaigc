@@ -247,16 +247,10 @@ export class UserManager {
     }
 
     try {
-      // 只同步项目数据（最关键的画布数据）
+      // 只同步项目数据（最关键的画布数据），强制附带userId确保数据隔离
       const projectsPayload = userData.projects.map(p => ({
-        id: p.id,
-        name: p.name,
-        description: p.description,
-        canvasImages: p.canvasImages,
-        metadata: p.metadata,
-        settings: p.settings,
-        createdAt: p.createdAt,
-        updatedAt: p.updatedAt,
+        ...p,
+        userId: this.currentUserId || p.userId,
       }));
 
       const syncRes = await fetch('/api/user-data/sync', {
@@ -321,8 +315,19 @@ export class UserManager {
 
       // 【数据隔离】过滤掉不属于当前用户的项目（防御性检查，防止跨用户数据泄漏）
       const currentUserId = this.currentUserId;
-      serverProjects = serverProjects.filter(p => !p.userId || p.userId === currentUserId);
-      const localProjectsFiltered = userData.projects.filter(p => !p.userId || p.userId === currentUserId);
+      // 严格用户隔离：仅保留当前用户的项目
+      // - 有 userId 的项目必须匹配当前用户
+      // - 无 userId 的旧数据（历史遗留）补上当前用户ID后保留
+      serverProjects = serverProjects.filter(p => {
+        if (p.userId && p.userId !== currentUserId) return false;
+        if (!p.userId) p.userId = currentUserId; // 历史数据补上 userId
+        return true;
+      });
+      const localProjectsFiltered = userData.projects.filter(p => {
+        if (p.userId && p.userId !== currentUserId) return false;
+        if (!p.userId) p.userId = currentUserId;
+        return true;
+      });
 
       // 合并策略：按项目 ID 合并，保留更新时间更晚的版本
       const localHasData = localProjectsFiltered.length > 0;

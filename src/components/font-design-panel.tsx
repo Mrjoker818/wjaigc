@@ -44,7 +44,7 @@ type GalleryViewMode = 'list' | 'thumbnail' | 'large';
 interface FontDesignPanelProps {
   isMonochrome?: boolean;
   onClose: () => void;
-  onAddImages?: (urls: string[]) => void;
+  onAddImages?: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
 }
 
 const RANDOM_EXAMPLES = [
@@ -564,7 +564,16 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     } catch { showToast('黑底白字测试失败'); setIsGeneratingImage(false); stopImageTimer(); }
   }, [plans, text, scene, primaryStyleCategory, secondaryStyle, ratio, selectedModel, showToast, stopPolling, startPolling, buildStyleEnforcementPrefix]);
 
-  const handleAddToCanvas = useCallback((url: string) => { onAddImages?.([url]); }, [onAddImages]);
+  const handleAddToCanvas = useCallback((url: string) => {
+    // ★ 传递模型信息
+    const meta: { modelName?: string; apiProvider?: string } = {};
+    if (selectedModel) {
+      const pureModelId = selectedModel.includes('::') ? selectedModel.split('::').pop()! : selectedModel;
+      meta.modelName = pureModelId;
+      if (selectedModel.includes('::')) meta.apiProvider = selectedModel.split('::')[0];
+    }
+    onAddImages?.([url], meta);
+  }, [onAddImages, selectedModel]);
 
   // Gallery: load data from API
   const loadGalleryData = useCallback(async (category?: string, page?: number, search?: string) => {
@@ -1547,7 +1556,16 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                       <button onClick={() => handleGenerateImage('full')} disabled={isGeneratingImage} style={{ ...secondaryBtnStyle, opacity: isGeneratingImage ? 0.5 : 1 }}>
                         <RefreshCw size={12} className="inline mr-1" />重新生成
                       </button>
-                      <button onClick={() => onAddImages?.(generatedImages.map(g => g.url))} style={{ ...goldBtnStyle, width: 'auto' }}>
+                      <button onClick={() => {
+                        // ★ 传递模型信息
+                        const meta: { modelName?: string; apiProvider?: string } = {};
+                        if (selectedModel) {
+                          const pureModelId = selectedModel.includes('::') ? selectedModel.split('::').pop()! : selectedModel;
+                          meta.modelName = pureModelId;
+                          if (selectedModel.includes('::')) meta.apiProvider = selectedModel.split('::')[0];
+                        }
+                        onAddImages?.(generatedImages.map(g => g.url), meta);
+                      }} style={{ ...goldBtnStyle, width: 'auto' }}>
                         <Plus size={12} className="inline mr-1" />全部加入画布
                       </button>
                     </div>

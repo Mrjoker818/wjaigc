@@ -342,7 +342,7 @@ interface InfiniteCanvasProps {
   onGenerateVariation: (image: CanvasImage) => void;
   onExtractKeywords: (image: CanvasImage) => void;
   onFusion: (images: CanvasImage[]) => void;
-  onAddImages: (imageUrls: string[], sourceImageId?: string) => void;
+  onAddImages: (imageUrls: string[], sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string }) => void;
   onReferenceSelect?: (image: CanvasImage) => void;
   referenceIds?: string[];
   isGenerating?: boolean;
@@ -3749,6 +3749,9 @@ export function InfiniteCanvas({
         sourceUrl: sourceImage.url,
         startTime: Date.now(),
       },
+      // ★ 继承源图的模型信息，确保处理帧完成后不会丢失
+      modelName: sourceImage.modelName,
+      apiProvider: sourceImage.apiProvider,
     };
     const nextImages = [...imagesRef.current, placeholder];
     imagesRef.current = nextImages;
@@ -11587,13 +11590,14 @@ export function InfiniteCanvas({
               isMonochrome={isMonochrome}
               onApply={(resultUrl: string) => {
                 if (agentEditImage) {
+                  // ★ 保留模型信息：替换原图但保留 modelName/apiProvider
                   const updated = images.map(img =>
                     img.id === agentEditImage.id ? { ...img, url: resultUrl } : img
                   );
                   onImagesChange(updated);
                 } else {
                   // 没有原图时，将结果作为新图片添加到画布
-                  onAddImages?.([resultUrl]);
+                  onAddImages([resultUrl]);
                 }
                 setShowAgentEditor(false);
                 setAgentEditImage(null);
@@ -11629,8 +11633,8 @@ export function InfiniteCanvas({
           <Suspense fallback={null}>
             <BrandEcommercePanel
               isMonochrome={isMonochrome}
-              onAddImages={(urls: string[]) => {
-                onAddImages?.(urls);
+              onAddImages={(urls: string[], meta?: { modelName?: string; apiProvider?: string }) => {
+                onAddImages?.(urls, undefined, meta);
               }}
               onClose={() => setShowBrandEcommerce(false)}
             />
@@ -11643,8 +11647,8 @@ export function InfiniteCanvas({
             <RefineEnginePanel
               isMonochrome={isMonochrome}
               onClose={() => setShowRefineEngine(false)}
-              onAddImage={(url: string) => {
-                onAddImages?.([url]);
+              onAddImage={(url: string, meta?: { modelName?: string; apiProvider?: string }) => {
+                onAddImages?.([url], undefined, meta);
               }}
               initialImageUrl={refineEngineImageUrl}
             />
@@ -11657,8 +11661,8 @@ export function InfiniteCanvas({
             <FontDesignPanel
               isMonochrome={isMonochrome}
               onClose={() => setShowFontDesign(false)}
-              onAddImages={(urls: string[]) => {
-                onAddImages?.(urls);
+              onAddImages={(urls: string[], meta?: { modelName?: string; apiProvider?: string }) => {
+                onAddImages?.(urls, undefined, meta);
               }}
             />
           </Suspense>
@@ -11669,8 +11673,8 @@ export function InfiniteCanvas({
           <Suspense fallback={null}>
             <BrandFactoryPanel
               onClose={() => setShowBrandFactory(false)}
-              onAddImages={(urls: string[]) => {
-                onAddImages?.(urls);
+              onAddImages={(urls: string[], meta?: { modelName?: string; apiProvider?: string }) => {
+                onAddImages?.(urls, undefined, meta);
               }}
               isMonochrome={isMonochrome}
               onOpenLogoSkill={() => {
@@ -11687,8 +11691,8 @@ export function InfiniteCanvas({
             <LogoSkillPanel
               isMonochrome={isMonochrome}
               onClose={() => setShowLogoSkill(false)}
-              onAddImages={(urls: string[]) => {
-                onAddImages?.(urls);
+              onAddImages={(urls: string[], meta?: { modelName?: string; apiProvider?: string }) => {
+                onAddImages?.(urls, undefined, meta);
               }}
               brandProject={brandProject}
               onOpenBrandDna={() => {
@@ -11707,8 +11711,8 @@ export function InfiniteCanvas({
           <Suspense fallback={null}>
             <AiPsdPanel
               onClose={() => setShowAiPsd(false)}
-              onAddImages={(urls: string[]) => {
-                onAddImages?.(urls);
+              onAddImages={(urls: string[], meta?: { modelName?: string; apiProvider?: string }) => {
+                onAddImages?.(urls, undefined, meta);
               }}
               isMonochrome={isMonochrome}
             />
@@ -11721,8 +11725,8 @@ export function InfiniteCanvas({
             <StickerAssistantPanel
               isOpen={showStickerAssistant}
               onClose={() => setShowStickerAssistant(false)}
-              onAddImages={(urls: string[]) => {
-                onAddImages?.(urls);
+              onAddImages={(urls: string[], meta?: { modelName?: string; apiProvider?: string }) => {
+                onAddImages?.(urls, undefined, meta);
               }}
               isMonochrome={isMonochrome}
             />
@@ -11734,8 +11738,8 @@ export function InfiniteCanvas({
           <Suspense fallback={null}>
             <SceneStudioPanel
               onClose={() => setShowSceneStudio(false)}
-              onAddImages={(urls: string[]) => {
-                onAddImages?.(urls);
+              onAddImages={(urls: string[], meta?: { modelName?: string; apiProvider?: string }) => {
+                onAddImages?.(urls, undefined, meta);
               }}
               isMonochrome={isMonochrome}
             />
@@ -12278,7 +12282,7 @@ export function InfiniteCanvas({
                                     });
                                     const pollData = await pollRes.json();
                                     if (pollData.status === 'completed' && pollData.imageUrl) {
-                                      if (onAddImages) onAddImages([pollData.imageUrl]);
+                                      if (onAddImages) onAddImages([pollData.imageUrl], undefined, { modelName: hcg.toolbar.model, apiProvider: hcg.toolbar.providerId });
                                       setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'completed', resultImageUrl: pollData.imageUrl, progress: 100 } : g));
                                       return;
                                     } else if (pollData.status === 'failed') {
@@ -12292,7 +12296,7 @@ export function InfiniteCanvas({
                                 poll();
                               }
                             } else if (data.imageUrl) {
-                              if (onAddImages) onAddImages([data.imageUrl]);
+                              if (onAddImages) onAddImages([data.imageUrl], undefined, { modelName: hcg.toolbar.model, apiProvider: hcg.toolbar.providerId });
                               setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'completed', resultImageUrl: data.imageUrl, progress: 100 } : g));
                             } else {
                               setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'idle', progress: 0 } : g));

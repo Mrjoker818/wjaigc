@@ -46,7 +46,7 @@ interface LlmModel {
 interface Props {
   isMonochrome?: boolean;
   onClose: () => void;
-  onAddImages?: (urls: string[]) => void;
+  onAddImages?: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
   referenceImageUrl?: string;
 }
 
@@ -485,9 +485,16 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   const handleAddToCanvas = useCallback((urls?: string[]) => {
     const targetUrls = urls || results.filter(r => r.imageUrl).map(r => r.imageUrl!);
     if (targetUrls.length && onAddImages) {
-      onAddImages(targetUrls);
+      // ★ 传递模型信息
+      const meta: { modelName?: string; apiProvider?: string } = {};
+      if (selectedModel) {
+        const pureModelId = selectedModel.includes('::') ? selectedModel.split('::').pop()! : selectedModel;
+        meta.modelName = pureModelId;
+        if (selectedModel.includes('::')) meta.apiProvider = selectedModel.split('::')[0];
+      }
+      onAddImages(targetUrls, meta);
     }
-  }, [results, onAddImages]);
+  }, [results, onAddImages, selectedModel]);
 
   // ─── Cancel ──────────────────────────────────────────────────
 

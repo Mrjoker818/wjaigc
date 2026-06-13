@@ -37,11 +37,12 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const sessionUser = await getSessionUser(request);
-    if (!sessionUser) {
+    if (!sessionUser || !sessionUser.id) {
       return NextResponse.json({ success: false, error: 'Login required' }, { status: 401 });
     }
-    const requestedUserId = String(body.userId || 'anonymous');
-    const userId = sessionUser.id || requestedUserId;
+    // 安全红线：仅使用服务端会话的用户ID，绝不回退到客户端传值
+    const userId = sessionUser.id;
+    const requestedUserId = String(body.userId || '');
     const area = String(body.area || 'projects') as DataArea;
     if (!allowedAreas.has(area)) {
       return NextResponse.json({ success: false, error: 'Invalid data area' }, { status: 400 });
@@ -53,8 +54,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Payload too large (max 10MB)' }, { status: 413 });
     }
 
-    if (requestedUserId !== 'anonymous' && requestedUserId !== sessionUser.id && sessionUser.role !== 'admin') {
-      return NextResponse.json({ success: false, error: 'Permission denied' }, { status: 403 });
+    // 禁止跨用户写入（管理员也只能管理，不能将数据写入其他用户目录）
+    if (requestedUserId && requestedUserId !== userId) {
+      return NextResponse.json({ success: false, error: 'Cross-user write denied' }, { status: 403 });
     }
     await ensureUserDataDirs(userId);
 

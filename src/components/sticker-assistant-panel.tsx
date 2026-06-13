@@ -138,7 +138,7 @@ interface StickerAssistantPanelProps {
   isOpen: boolean;
   onClose: () => void;
   isMonochrome?: boolean;
-  onAddImages?: (urls: string[]) => void;
+  onAddImages?: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
 }
 
 /* ──────────────────── 表情包背景统一处理（参考 zinxtick production-qa：structured masking + white border + edge anti-aliasing） ──────────────────── */
@@ -1182,8 +1182,18 @@ ${themeDesc}
   /* ── 全部添加到画布 ── */
   const handleAddAllToCanvas = useCallback(() => {
     const urls = plan.filter(p => p.status === 'done' && p.imageUrl).map(p => p.imageUrl!);
-    if (urls.length > 0 && onAddImages) onAddImages(urls);
-  }, [plan, onAddImages]);
+    if (urls.length > 0 && onAddImages) {
+      // ★ 传递模型信息
+      const meta: { modelName?: string; apiProvider?: string } = {};
+      if (selectedModelId) {
+        const pureModelId = selectedModelId.includes('::') ? selectedModelId.split('::').pop()! : selectedModelId;
+        meta.modelName = pureModelId;
+        const model = models.find(m => m.id === selectedModelId);
+        if (model?.providerId) meta.apiProvider = model.providerId;
+      }
+      onAddImages(urls, meta);
+    }
+  }, [plan, onAddImages, selectedModelId, models]);
 
   /* ── 下载全部（ZIP 压缩包） ── */
   const [downloadZipping, setDownloadZipping] = useState(false);

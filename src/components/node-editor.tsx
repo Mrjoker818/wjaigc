@@ -325,7 +325,7 @@ interface NodeEditorProps {
   /** 主题风格: gold(黑金) / monochrome(单色) */
   themeStyle?: 'gold' | 'monochrome';
   /** 生成图片后回调，将图片添加到项目 */
-  onAddImages?: (imageUrls: string[]) => void;
+  onAddImages?: (imageUrls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
 }
 
 // ==================== 双主题配色 ====================
@@ -1559,6 +1559,9 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
           // 持久化: 将工作流生成的图片添加到项目
           if (data.status === 'completed' && onAddImages && data.results) {
             const generatedUrls: string[] = [];
+            // ★ 收集工作流中使用的模型信息
+            let workflowModelName: string | undefined;
+            let workflowApiProvider: string | undefined;
             for (const [, result] of Object.entries(data.results as Record<string, { status: string; output?: Record<string, unknown> }>)) {
               if (result.status === 'success' && result.output) {
                 const imgUrls = result.output.imageUrls as string[] | undefined;
@@ -1568,10 +1571,25 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 } else if (imgUrl) {
                   generatedUrls.push(imgUrl);
                 }
+                // 尝试从输出获取模型信息
+                if (!workflowModelName && result.output.modelName) workflowModelName = result.output.modelName as string;
+                if (!workflowApiProvider && result.output.apiProvider) workflowApiProvider = result.output.apiProvider as string;
               }
             }
             if (generatedUrls.length > 0) {
-              onAddImages(generatedUrls);
+              // ★ 如果输出没有模型信息，从工作流节点中查找
+              if (!workflowModelName && wf.nodes) {
+                const genNode = wf.nodes.find(n => n.type === 'ai-generate' && n.fields?.model);
+                if (genNode?.fields?.model) {
+                  const model = genNode.fields.model as string;
+                  workflowModelName = model.includes('::') ? model.split('::').pop()! : model;
+                  if (!workflowApiProvider && model.includes('::')) workflowApiProvider = model.split('::')[0];
+                }
+              }
+              const meta: { modelName?: string; apiProvider?: string } = {};
+              if (workflowModelName) meta.modelName = workflowModelName;
+              if (workflowApiProvider) meta.apiProvider = workflowApiProvider;
+              onAddImages(generatedUrls, Object.keys(meta).length > 0 ? meta : undefined);
             }
           }
           return; // done, don't schedule next poll
