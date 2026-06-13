@@ -182,26 +182,28 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [creditsLoading, setCreditsLoading] = useState(false);
 
   // ─── Load payment config & status (admin) ───
+  // Load payment config (admin) and payment status (all users)
   useEffect(() => {
-    if (!isAdmin) return;
     (async () => {
       try {
-        const [configRes, statusRes] = await Promise.all([
-          fetch('/api/credits/payment-config'),
-          fetch('/api/credits/payment-status'),
-        ]);
-        if (configRes.ok) {
-          const configData = await configRes.json();
-          if (configData.success && configData.config) {
-            setPaymentConfig({
-              wechatQrUrl: configData.config.wechatQrUrl || '',
-              alipayQrUrl: configData.config.alipayQrUrl || '',
-            });
-          }
-        }
+        // All users need payment status (for QR code display)
+        const statusRes = await fetch('/api/credits/payment-status');
         if (statusRes.ok) {
           const statusData = await statusRes.json();
           if (statusData.success) setPaymentStatus(statusData.status);
+        }
+        // Admin also needs full config
+        if (isAdmin) {
+          const configRes = await fetch('/api/credits/payment-config');
+          if (configRes.ok) {
+            const configData = await configRes.json();
+            if (configData.success && configData.config) {
+              setPaymentConfig({
+                wechatQrUrl: configData.config.wechatQrUrl || '',
+                alipayQrUrl: configData.config.alipayQrUrl || '',
+              });
+            }
+          }
         }
       } catch { /* ignore */ }
     })();
@@ -1477,19 +1479,19 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
                   {/* QR Code Image */}
                   <div className="inline-block p-4 bg-white rounded-xl mb-4">
-                    {selectedPaymentMethod === 'wechat' && paymentStatus.wechat ? (
+                    {selectedPaymentMethod === 'wechat' && paymentStatus.qrUrls?.wechat ? (
                       <img
-                        src={`/api/credits/payment-config?qrcode=wechat&_t=${Date.now()}`}
+                        src={paymentStatus.qrUrls.wechat}
                         alt="微信收款码"
                         className="w-52 h-52 object-contain"
-                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                        onError={(e) => { const el = e.target as HTMLImageElement; el.style.display = 'none'; }}
                       />
-                    ) : selectedPaymentMethod === 'alipay' && paymentStatus.alipay ? (
+                    ) : selectedPaymentMethod === 'alipay' && paymentStatus.qrUrls?.alipay ? (
                       <img
-                        src={`/api/credits/payment-config?qrcode=alipay&_t=${Date.now()}`}
+                        src={paymentStatus.qrUrls.alipay}
                         alt="支付宝收款码"
                         className="w-52 h-52 object-contain"
-                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                        onError={(e) => { const el = e.target as HTMLImageElement; el.style.display = 'none'; }}
                       />
                     ) : (
                       <div className={`w-52 h-52 flex items-center justify-center ${inputBg} rounded-lg`}>
