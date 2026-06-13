@@ -153,6 +153,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [pendingOrderId, setPendingOrderId] = useState<string | null>(null);
   const [pendingOrderAmount, setPendingOrderAmount] = useState(0);
   const [paymentPolling, setPaymentPolling] = useState(false);
+  const [qrCountdown, setQrCountdown] = useState(60);
+  const [qrRefreshKey, setQrRefreshKey] = useState(0);
   // Payment config state (admin) — personal QR code mode
   const [paymentConfig, setPaymentConfig] = useState<{
     wechatQrUrl: string;
@@ -208,6 +210,25 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       } catch { /* ignore */ }
     })();
   }, [isAdmin]);
+
+  // ─── QR Code countdown & auto-refresh (60s) ───
+  useEffect(() => {
+    if (paymentStep !== 'paying') {
+      setQrCountdown(60);
+      return;
+    }
+    setQrCountdown(60);
+    const timer = setInterval(() => {
+      setQrCountdown(prev => {
+        if (prev <= 1) {
+          setQrRefreshKey(k => k + 1); // refresh QR
+          return 60; // reset countdown
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [paymentStep, qrRefreshKey]);
 
   // ─── Admin: Ecom template state ───
   const [ecomTemplates, setEcomTemplates] = useState<Array<Record<string, unknown>>>([]);
@@ -1477,32 +1498,35 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   <div className="text-4xl font-bold text-green-500 mb-1">¥{(pendingOrderAmount * 0.01).toFixed(2)}</div>
                   <div className={`text-sm ${textSecondary} mb-6`}>{pendingOrderAmount} 积分</div>
 
-                  {/* QR Code Image */}
-                  <div className="inline-block p-4 bg-white rounded-xl mb-4">
-                    {selectedPaymentMethod === 'wechat' && paymentStatus.qrUrls?.wechat ? (
-                      <img
-                        src={paymentStatus.qrUrls.wechat}
-                        alt="微信收款码"
-                        className="w-52 h-52 object-contain"
-                        onError={(e) => { const el = e.target as HTMLImageElement; el.style.display = 'none'; }}
-                      />
-                    ) : selectedPaymentMethod === 'alipay' && paymentStatus.qrUrls?.alipay ? (
-                      <img
-                        src={paymentStatus.qrUrls.alipay}
-                        alt="支付宝收款码"
-                        className="w-52 h-52 object-contain"
-                        onError={(e) => { const el = e.target as HTMLImageElement; el.style.display = 'none'; }}
-                      />
-                    ) : (
-                      <div className={`w-52 h-52 flex items-center justify-center ${inputBg} rounded-lg`}>
-                        <span className={`text-sm ${textSecondary}`}>收款码未配置</span>
-                      </div>
-                    )}
+                  {/* Temporary QR Code with 60s countdown */}
+                  <div className="inline-block p-4 bg-white rounded-xl mb-4 relative">
+                    <img
+                      key={qrRefreshKey}
+                      src={`/api/credits/payment-qr?method=${selectedPaymentMethod}&t=${qrRefreshKey}`}
+                      alt={selectedPaymentMethod === 'wechat' ? '微信收款码' : '支付宝收款码'}
+                      className="w-52 h-52 object-contain"
+                      onError={(e) => {
+                        const el = e.target as HTMLImageElement;
+                        el.style.display = 'none';
+                        if (el.nextElementSibling) (el.nextElementSibling as HTMLElement).style.display = 'flex';
+                      }}
+                    />
+                    <div
+                      className="w-52 h-52 items-center justify-center bg-gray-100 rounded-lg hidden"
+                      style={{ display: 'none' }}
+                    >
+                      <span className="text-sm text-gray-400">收款码加载失败</span>
+                    </div>
+                    {/* Countdown overlay */}
+                    <div className="absolute top-5 right-5 bg-black/60 text-white text-xs px-2 py-1 rounded-full">
+                      {qrCountdown}s
+                    </div>
                   </div>
 
                   <div className={`text-sm ${textSecondary} mb-4`}>
                     请使用{selectedPaymentMethod === 'alipay' ? '支付宝' : '微信'}扫描上方收款码<br/>
-                    支付 <span className="text-green-500 font-semibold">¥{(pendingOrderAmount * 0.01).toFixed(2)}</span>（{pendingOrderAmount}积分）
+                    支付 <span className="text-green-500 font-semibold">¥{(pendingOrderAmount * 0.01).toFixed(2)}</span>（{pendingOrderAmount}积分）<br/>
+                    <span className="text-xs opacity-70">二维码每60秒自动刷新，扫码后将显示真实收款码</span>
                   </div>
 
                   {paymentStatus.note && (
