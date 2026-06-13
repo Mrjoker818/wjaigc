@@ -105,22 +105,45 @@ export class UserManager {
       this.ensureDefaultAdmin();
       // 构造函数加载数据后，严格验证所有用户的项目数据隔离
       // 核心原则：每个用户键下只能保留属于该用户的项目
-      // - 有 userId 且匹配 → 保留
-      // - 有 userId 但不匹配 → 删除（跨用户数据泄露）
-      // - 无 userId → 补上当前键的用户ID后保留（历史数据兼容）
       if (this.multiUserData?.userData) {
+        // ★ 第一轮：找出跨用户重复的项目ID（同一ID出现在多个用户下）
+        const projectIdToUsers = new Map<string, string[]>();
+        for (const uid of Object.keys(this.multiUserData.userData)) {
+          const ud = this.multiUserData.userData[uid];
+          if (ud?.projects) {
+            for (const p of ud.projects) {
+              if (!p.id) continue;
+              const users = projectIdToUsers.get(p.id) || [];
+              if (!users.includes(uid)) users.push(uid);
+              projectIdToUsers.set(p.id, users);
+            }
+          }
+        }
+        const duplicateProjectIds = new Set(
+          [...projectIdToUsers.entries()]
+            .filter(([, users]) => users.length > 1)
+            .map(([id]) => id)
+        );
+
+        // ★ 第二轮：严格过滤每个用户的项目
         for (const uid of Object.keys(this.multiUserData.userData)) {
           const ud = this.multiUserData.userData[uid];
           if (ud?.projects) {
             const before = ud.projects.length;
             ud.projects = ud.projects.filter(p => {
-              if (p.userId && p.userId !== uid) return false; // 跨用户数据，严格拒绝
+              // 跨用户重复的项目ID，全部移除，等服务器加载时恢复正确数据
+              if (duplicateProjectIds.has(p.id)) {
+                console.warn(`[DataIsolation] loadData: project ${p.id} exists in multiple users, removing from user ${uid}`);
+                return false;
+              }
+              if (p.userId && p.userId !== uid) return false; // userId不匹配，严格拒绝
               if (!p.userId) p.userId = uid; // 历史数据补上 userId
               return true;
             });
             const removed = before - ud.projects.length;
             if (removed > 0) {
               console.warn(`[DataIsolation] loadData: removed ${removed} cross-user projects from user ${uid}`);
+              this.saveData(); // 立即保存清理后的数据
             }
           }
         }
@@ -263,15 +286,17 @@ export class UserManager {
       const projectsPayload = userData.projects
         .filter(p => {
           // 严格隔离：只同步属于当前用户的项目
+          // 如果项目有 userId 且不属于当前用户，完全跳过（不覆盖、不同步）
           if (p.userId && p.userId !== currentUserId) {
             console.warn(`[DataIsolation] syncToServer: skipping cross-user project "${p.name}" (owner=${p.userId}, current=${currentUserId})`);
             return false;
           }
+          // 如果项目没有 userId，视为当前用户的项目（历史数据兼容）
           return true;
         })
         .map(p => ({
           ...p,
-          userId: currentUserId, // 强制设置当前用户ID
+          userId: p.userId || currentUserId, // 仅对无 userId 的历史数据补充当前用户ID
         }));
 
       const syncRes = await fetch('/api/user-data/sync', {

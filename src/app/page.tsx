@@ -2672,6 +2672,7 @@ function CanvasApp() {
     return (
       <>
       <DashboardView
+        key={currentUser?.id || 'no-user'}
         isMonochrome={themeStyle === 'monochrome'}
         user={currentUser!}
         onOpenProject={(project) => {
