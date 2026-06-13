@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const { action, amount, description, userId: targetUserId, packageName, paymentMethod, orderId } = body as {
-      action: 'create-order' | 'query-order' | 'admin_adjust' | 'admin-recharge';
+      action: 'create-order' | 'query-order' | 'admin_adjust' | 'admin-recharge' | 'confirm-demo-order';
       amount?: number;
       description?: string;
       userId?: string;
@@ -274,6 +274,73 @@ export async function POST(request: NextRequest) {
       } catch (dbErr) {
         console.error('[credits] query order error:', dbErr);
         return NextResponse.json({ success: false, error: '查询订单失败' }, { status: 500 });
+      }
+    }
+
+    // ===== User: Confirm demo order (simulate payment in demo mode) =====
+    if (action === 'confirm-demo-order') {
+      if (!orderId) {
+        return NextResponse.json({ success: false, error: '缺少订单号' }, { status: 400 });
+      }
+      try {
+        // Verify order belongs to current user and is pending
+        const orderResult = await execSql(
+          'SELECT * FROM wujie_recharge_orders WHERE id = $1 AND user_id = $2',
+          [orderId, user.id]
+        );
+        if (orderResult.rows.length === 0) {
+          return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 });
+        }
+        const order = orderResult.rows[0] as Record<string, unknown>;
+        if (order.payment_status === 'paid') {
+          return NextResponse.json({ success: false, error: '订单已支付' }, { status: 400 });
+        }
+        if (order.payment_status === 'expired' || order.payment_status === 'cancelled') {
+          return NextResponse.json({ success: false, error: '订单已过期或已取消' }, { status: 400 });
+        }
+
+        // Simulate payment: update order status
+        await execSql(
+          `UPDATE wujie_recharge_orders SET payment_status = 'paid', paid_at = NOW(), trade_no = $1 WHERE id = $2`,
+          [`demo_pay_${Date.now()}`, orderId]
+        );
+
+        // Credit the user
+        const orderAmount = order.amount as number;
+        const orderBonus = (order.bonus as number) || 0;
+        const totalCredits = orderAmount + orderBonus;
+
+        const creditResult = await execSql(
+          'SELECT credits FROM wujie_user_credits WHERE user_id = $1',
+          [user.id]
+        );
+        if (creditResult.rows.length === 0) {
+          await execSql(
+            'INSERT INTO wujie_user_credits (user_id, credits) VALUES ($1, $2)',
+            [user.id, totalCredits]
+          );
+        } else {
+          await execSql(
+            'UPDATE wujie_user_credits SET credits = credits + $1, updated_at = NOW() WHERE user_id = $2',
+            [totalCredits, user.id]
+          );
+        }
+
+        // Record transaction
+        await execSql(
+          `INSERT INTO wujie_credit_transactions (user_id, type, amount, description, ref_id)
+           VALUES ($1, 'recharge', $2, $3, $4)`,
+          [user.id, totalCredits, `演示充值 ${orderAmount}积分${orderBonus > 0 ? ` +赠送${orderBonus}积分` : ''}`, orderId]
+        );
+
+        return NextResponse.json({
+          success: true,
+          message: `充值成功！已到账 ${totalCredits} 积分${orderBonus > 0 ? `（含赠送 ${orderBonus} 积分）` : ''}`,
+          creditsAdded: totalCredits,
+        });
+      } catch (dbErr) {
+        console.error('[credits] confirm demo order error:', dbErr);
+        return NextResponse.json({ success: false, error: '确认订单失败' }, { status: 500 });
       }
     }
 

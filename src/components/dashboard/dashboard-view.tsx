@@ -13,6 +13,7 @@ import {
   XCircle, BarChart3, Upload, RotateCcw, Film,
 } from 'lucide-react';
 import { UserManager } from '@/lib/user-manager';
+import { RECHARGE_PACKAGES } from '@/lib/credits';
 import type { Project, CanvasImage, User, UsageStats } from '@/lib/user-types';
 import { ConfirmDialog } from '@/components/custom-dialogs';
 import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
@@ -143,6 +144,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [creditsTotalUsed, setCreditsTotalUsed] = useState(0);
   const [creditsTransactions, setCreditsTransactions] = useState<Array<{ id: string; type: string; amount: number; balanceAfter: number; description: string; createdAt: number }>>([]);
   const [rechargeAmount, setRechargeAmount] = useState<number | ''>('');
+  const [selectedPkgAmount, setSelectedPkgAmount] = useState<number | null>(null);
   const [isRecharging, setIsRecharging] = useState(false);
   const [rechargeError, setRechargeError] = useState('');
   // Payment flow state
@@ -159,7 +161,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     imageModels: Record<string, { credits: number; label: string; cny: string }>;
     videoModels: Record<string, { creditsPerSecond: number; label: string; cnyPerSecond: string }>;
     chatModels: Record<string, { creditsPerCall: number; label: string; cny: string }>;
-    rechargePackages: { credits: number; bonusCredits: number; label: string; price: number }[];
+    rechargePackages: { amount: number; bonus: number; label: string; price: number; popular?: boolean }[];
   } | null>(null);
   const [showPricingRef, setShowPricingRef] = useState(false);
   // Admin credits state
@@ -696,7 +698,10 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   }, []);
 
   const handleCreateOrder = useCallback(async (credits: number, method: 'alipay' | 'wechat') => {
-    if (credits <= 0) return;
+    if (credits <= 0) {
+      setRechargeError('充值数量必须大于0');
+      return;
+    }
     setIsRecharging(true);
     setRechargeError('');
     setPaymentStep('paying');
@@ -705,17 +710,17 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       const resp = await fetch('/api/credits', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create-order', credits, paymentMethod: method }),
+        body: JSON.stringify({ action: 'create-order', amount: credits, paymentMethod: method }),
       });
       const data = await resp.json();
-      if (data.success && data.order) {
-        setPendingOrderId(data.order.orderId);
-        setPendingOrderAmount(data.order.amount);
-        setPaymentQrUrl(data.order.qrCodeUrl || null);
-        setPaymentPageUrl(data.order.paymentUrl || null);
+      if (data.success && data.orderId) {
+        setPendingOrderId(data.orderId);
+        setPendingOrderAmount(data.amount);
+        setPaymentQrUrl(data.paymentData?.qrCode || null);
+        setPaymentPageUrl(data.paymentData?.payUrl || null);
         // Start polling for payment status
         setPaymentPolling(true);
-        pollOrderStatus(data.order.orderId);
+        pollOrderStatus(data.orderId);
       } else {
         setRechargeError(data.error || '创建订单失败');
         setPaymentStep('select');
@@ -735,14 +740,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           body: JSON.stringify({ action: 'query-order', orderId }),
         });
         const data = await resp.json();
-        if (data.success && data.order?.status === 'paid') {
+        if (data.success && data.order?.paymentStatus === 'paid') {
           setPaymentStep('success');
           setPaymentPolling(false);
           await loadCreditsData();
           return;
         }
-        if (data.order?.status === 'expired' || data.order?.status === 'failed') {
-          setRechargeError(data.order.status === 'expired' ? '订单已过期，请重新发起' : '支付失败，请重试');
+        if (data.order?.paymentStatus === 'expired' || data.order?.paymentStatus === 'failed') {
+          setRechargeError(data.order.paymentStatus === 'expired' ? '订单已过期，请重新发起' : '支付失败，请重试');
           setPaymentStep('select');
           setPaymentPolling(false);
           return;
@@ -757,6 +762,32 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     };
     poll();
   }, [loadCreditsData, paymentPolling]);
+
+  const confirmDemoOrder = useCallback(async (orderId: string) => {
+    try {
+      const resp = await fetch('/api/credits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'confirm-demo-order', orderId }),
+      });
+      const data = await resp.json();
+      if (data.success) {
+        setPaymentStep('success');
+        setPaymentPolling(false);
+        await loadCreditsData();
+      } else {
+        setRechargeError(data.error || '确认订单失败');
+        setPaymentStep('select');
+      }
+    } catch {
+      setRechargeError('网络错误');
+      setPaymentStep('select');
+    }
+  }, []);
+
+  const handleConfirmDemoOrder = useCallback(() => {
+    if (pendingOrderId) confirmDemoOrder(pendingOrderId);
+  }, [pendingOrderId, confirmDemoOrder]);
 
   const loadCreditsOverview = useCallback(async () => {
     setCreditsLoading(true);
@@ -1273,25 +1304,20 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 <div className="mb-6">
                   <h3 className={`text-base font-semibold ${textPrimary} mb-3`}>充值套餐</h3>
                   <div className="grid grid-cols-2 gap-3">
-                    {(creditsPricing?.rechargePackages || [
-                      { credits: 100, bonusCredits: 0, label: '体验', price: 1 },
-                      { credits: 500, bonusCredits: 10, label: '基础', price: 5 },
-                      { credits: 2000, bonusCredits: 100, label: '标准', price: 20 },
-                      { credits: 10000, bonusCredits: 1000, label: '专业', price: 100 },
-                    ]).map((pkg) => (
+                    {(creditsPricing?.rechargePackages || RECHARGE_PACKAGES).map((pkg) => (
                       <button
-                        key={pkg.credits}
+                        key={pkg.amount}
                         onClick={() => {
-                          setRechargeAmount(pkg.credits);
-                          setPaymentStep('select');
+                          setRechargeAmount(pkg.amount);
+                          setSelectedPkgAmount(pkg.amount);
                         }}
-                        className={`${cardBg} rounded-xl p-4 border ${borderColor} hover:border-blue-500/50 transition-all text-left group`}
+                        className={`${cardBg} rounded-xl p-4 border ${selectedPkgAmount === pkg.amount ? 'border-blue-500 ring-1 ring-blue-500/30' : borderColor} hover:border-blue-500/50 transition-all text-left group`}
                       >
                         <div className="flex justify-between items-start">
                           <div>
                             <div className={`text-xs ${textSecondary} mb-1`}>{pkg.label}</div>
-                            <div className="text-xl font-bold text-blue-500">{pkg.credits}</div>
-                            <div className={`text-xs ${textSecondary}`}>积分{pkg.bonusCredits > 0 ? <span className="text-green-500 ml-1">+{pkg.bonusCredits}赠送</span> : ''}</div>
+                            <div className="text-xl font-bold text-blue-500">{pkg.amount}</div>
+                            <div className={`text-xs ${textSecondary}`}>积分{pkg.bonus > 0 ? <span className="text-green-500 ml-1">+{pkg.bonus}赠送</span> : ''}</div>
                           </div>
                           <div className="text-right">
                             <div className="text-sm font-semibold text-green-500">¥{pkg.price}</div>
@@ -1311,7 +1337,10 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                       type="number"
                       min="1"
                       value={rechargeAmount}
-                      onChange={(e) => setRechargeAmount(Math.max(1, parseInt(e.target.value) || 0))}
+                      onChange={(e) => {
+                        setRechargeAmount(Math.max(1, parseInt(e.target.value) || 0));
+                        setSelectedPkgAmount(null);
+                      }}
                       className={`flex-1 px-4 py-2.5 rounded-lg border ${borderColor} ${inputBg} ${textPrimary} text-sm focus:outline-none focus:border-blue-500`}
                       placeholder="输入积分数量"
                     />
@@ -1408,6 +1437,22 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                         <div className={`text-sm ${textSecondary}`}>
                           {paymentPolling ? '正在等待支付...' : '请完成支付'}
                         </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Demo Mode: Simulate payment completion */}
+                  {pendingOrderId && (
+                    <div className="mt-4 pt-4 border-t border-dashed border-border/50">
+                      <button
+                        onClick={handleConfirmDemoOrder}
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-medium hover:from-amber-600 hover:to-orange-600 transition-all shadow-md"
+                      >
+                        <Zap className="w-4 h-4" />
+                        模拟充值完成
+                      </button>
+                      <div className={`text-xs ${textSecondary} mt-2`}>
+                        演示模式：点击模拟支付成功
                       </div>
                     </div>
                   )}
