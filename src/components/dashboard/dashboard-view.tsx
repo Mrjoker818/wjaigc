@@ -18,7 +18,7 @@ import { ConfirmDialog } from '@/components/custom-dialogs';
 import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
 import { getModelDisplayName } from '@/lib/model-name-map';
 
-type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates';
+type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates';
 type ProjectFilter = 'all' | 'recent' | 'starred';
 type AssetSubTab = 'images' | 'prompts' | 'brands';
 type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video';
@@ -137,6 +137,32 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [imageSourceFilter, setImageSourceFilter] = useState<'all' | 'generated' | 'uploaded'>('all');
   const [imageDetailId, setImageDetailId] = useState<string | null>(null);
 
+  // ─── Credits state ───
+  const [creditsBalance, setCreditsBalance] = useState(0);
+  const [creditsTotalRecharged, setCreditsTotalRecharged] = useState(0);
+  const [creditsTotalUsed, setCreditsTotalUsed] = useState(0);
+  const [creditsTransactions, setCreditsTransactions] = useState<Array<{ id: string; type: string; amount: number; balanceAfter: number; description: string; createdAt: number }>>([]);
+  const [rechargeAmount, setRechargeAmount] = useState<number | ''>('');
+  const [isRecharging, setIsRecharging] = useState(false);
+  const [rechargeError, setRechargeError] = useState('');
+  const [creditsPricing, setCreditsPricing] = useState<{
+    creditsToCNY: number;
+    cnyToCredits: number;
+    imageModels: Record<string, { credits: number; label: string; cny: string }>;
+    videoModels: Record<string, { creditsPerSecond: number; label: string; cnyPerSecond: string }>;
+    chatModels: Record<string, { creditsPerCall: number; label: string; cny: string }>;
+    rechargePackages: { credits: number; bonusCredits: number; label: string; price: number }[];
+  } | null>(null);
+  const [showPricingRef, setShowPricingRef] = useState(false);
+  // Admin credits state
+  const [creditsUsers, setCreditsUsers] = useState<Array<{ userId: string; userName: string; balance: number; totalRecharged: number; totalUsed: number }>>([]);
+  const [selectedCreditsUser, setSelectedCreditsUser] = useState<string | null>(null);
+  const [creditsUserTransactions, setCreditsUserTransactions] = useState<Array<{ id: string; type: string; amount: number; balanceAfter: number; description: string; createdAt: number }>>([]);
+  const [adminRechargeAmount, setAdminRechargeAmount] = useState<number | ''>('');
+  const [adminRechargeDesc, setAdminRechargeDesc] = useState('');
+  const [isAdminRecharging, setIsAdminRecharging] = useState(false);
+  const [creditsLoading, setCreditsLoading] = useState(false);
+
   // ─── Admin: Ecom template state ───
   const [ecomTemplates, setEcomTemplates] = useState<Array<Record<string, unknown>>>([]);
   const [editingEcomTpl, setEditingEcomTpl] = useState<Record<string, unknown> | null>(null);
@@ -162,6 +188,10 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const softClass = isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-gray-50 border-gray-200';
   const inputClass = isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-[#555]' : 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-400';
   const labelClass = `block text-xs font-medium mb-1.5 ${isDark ? 'text-[#b8b8b8]' : 'text-gray-600'}`;
+  // Credits-specific styling
+  const cardBg = isDark ? 'bg-[#1a1a2e]/80' : 'bg-white';
+  const borderColor = isDark ? 'border-primary/20' : 'border-gray-200';
+  const inputBg = isDark ? 'bg-white/5' : 'bg-gray-50';
 
   // ─── Project data ───
   const mgr = UserManager.getInstance();
@@ -365,6 +395,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       void refreshBalances();
     }
   }, [isAdmin, refreshAdmin, refreshBalances]);
+
+  // ─── Credits data loading ───
+
 
   // ─── Admin: User management handlers ───
   const handleCreateUser = async () => {
@@ -634,6 +667,94 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setUserImagesLoading(false);
   }, []);
 
+  // ─── Credits handlers ───
+  const loadCreditsData = useCallback(async () => {
+    try {
+      const resp = await fetch('/api/credits');
+      const data = await resp.json();
+      if (data.success) {
+        setCreditsBalance(data.credits?.balance ?? 0);
+        setCreditsTotalRecharged(data.credits?.totalRecharged ?? 0);
+        setCreditsTotalUsed(data.credits?.totalUsed ?? 0);
+        if (data.pricing) setCreditsPricing(data.pricing);
+      }
+      // Load transactions
+      try {
+        const txResp = await fetch('/api/credits?transactions=true&limit=30');
+        const txData = await txResp.json();
+        if (txData.success) setCreditsTransactions(txData.transactions || []);
+      } catch { /* ignore */ }
+    } catch { /* ignore */ }
+  }, []);
+
+  const handleRecharge = useCallback(async (amount: number) => {
+    if (amount <= 0) return;
+    setIsRecharging(true);
+    setRechargeError('');
+    try {
+      const resp = await fetch('/api/credits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'recharge', amount }),
+      });
+      const data = await resp.json();
+      if (data.success) {
+        await loadCreditsData();
+        setRechargeAmount('');
+      } else {
+        setRechargeError(data.error || '充值失败');
+      }
+    } catch { setRechargeError('网络错误'); }
+    setIsRecharging(false);
+  }, [loadCreditsData]);
+
+  const loadCreditsOverview = useCallback(async () => {
+    setCreditsLoading(true);
+    try {
+      const resp = await fetch('/api/credits?action=admin-overview');
+      const data = await resp.json();
+      if (data.success) setCreditsUsers(data.users || []);
+    } catch { /* ignore */ }
+    setCreditsLoading(false);
+  }, []);
+
+  const loadCreditsTransactions = useCallback(async (userId: string) => {
+    try {
+      const resp = await fetch(`/api/credits?action=transactions&userId=${encodeURIComponent(userId)}&limit=50`);
+      const data = await resp.json();
+      if (data.success) setCreditsUserTransactions(data.transactions || []);
+    } catch { /* ignore */ }
+  }, []);
+
+  const handleAdminRecharge = useCallback(async () => {
+    if (!selectedCreditsUser || !adminRechargeAmount || Number(adminRechargeAmount) <= 0) return;
+    setIsAdminRecharging(true);
+    try {
+      const resp = await fetch('/api/credits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'admin-recharge', userId: selectedCreditsUser, amount: Number(adminRechargeAmount), description: adminRechargeDesc || `管理员充值 ${adminRechargeAmount} 积分` }),
+      });
+      const data = await resp.json();
+      if (data.success) {
+        setAdminRechargeAmount('');
+        setAdminRechargeDesc('');
+        await loadCreditsOverview();
+        await loadCreditsTransactions(selectedCreditsUser);
+      } else {
+        alert(data.error || '充值失败');
+      }
+    } catch { alert('网络错误'); }
+    setIsAdminRecharging(false);
+  }, [selectedCreditsUser, adminRechargeAmount, adminRechargeDesc, loadCreditsOverview, loadCreditsTransactions]);
+
+  useEffect(() => {
+    if (activeTab === 'credits') {
+      void loadCreditsData();
+      if (isAdmin) void loadCreditsOverview();
+    }
+  }, [activeTab, isAdmin, loadCreditsData, loadCreditsOverview]);
+
   // ─── Admin: Ecom template handlers ───
   const loadEcomTemplates = useCallback(async () => {
     try { const resp = await fetch('/api/ecom-templates'); const data = await resp.json(); if (data.success) setEcomTemplates(data.templates || []); } catch { /* ignore */ }
@@ -751,6 +872,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             { key: 'assets' as TabType, label: '资产库', icon: Layers, count: allImages.length },
             { key: 'stats' as TabType, label: '统计', icon: BarChart3, count: null },
             { key: 'settings' as TabType, label: '设置', icon: Settings, count: null },
+            { key: 'credits' as TabType, label: '积分', icon: Wallet, count: creditsBalance > 0 ? creditsBalance : null },
           ].map(item => (
             <button key={item.key} onClick={() => setActiveTab(item.key)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${activeTab === item.key ? `${accentBgLight} ${accentClass}` : `${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'}`}`}>
               <item.icon className="w-4.5 h-4.5" />
@@ -769,6 +891,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 { key: 'users' as TabType, label: '用户管理', icon: Users, count: adminUsers.length },
                 { key: 'apis' as TabType, label: 'API 管理', icon: Server, count: providers.length },
                 { key: 'data' as TabType, label: '数据管理', icon: Database, count: null },
+                { key: 'credits' as TabType, label: '积分管理', icon: Wallet, count: null },
                 { key: 'ecom-templates' as TabType, label: '电商模板', icon: ShoppingBag, count: ecomTemplates.length },
               ].map(item => (
                 <button key={item.key} onClick={() => setActiveTab(item.key)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${activeTab === item.key ? `${accentBgLight} ${accentClass}` : `${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'}`}`}>
@@ -1009,6 +1132,332 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               <div className={`flex flex-col items-center justify-center h-48 ${textSecondary}`}>
                 <BarChart3 className="w-12 h-12 mb-3 opacity-30" />
                 <p className="text-sm">暂无统计数据</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Tab: Credits (User) ── */}
+        {activeTab === 'credits' && !isAdmin && (
+          <div className="h-full overflow-y-auto p-8">
+            <h1 className={`text-2xl font-bold mb-1 ${textPrimary}`}>积分中心</h1>
+            <p className={`text-sm mb-6 ${textSecondary}`}>管理您的积分余额与充值</p>
+
+            {/* Balance Card */}
+            <div className="grid grid-cols-3 gap-4 mb-6">
+              <div className={`${cardBg} rounded-xl p-5 border ${borderColor}`}>
+                <div className={`text-xs ${textSecondary} mb-1`}>当前余额</div>
+                <div className="text-3xl font-bold text-blue-500">{creditsBalance}</div>
+                <div className={`text-xs ${textSecondary} mt-1`}>≈ ¥{(creditsBalance * 0.01).toFixed(2)}</div>
+              </div>
+              <div className={`${cardBg} rounded-xl p-5 border ${borderColor}`}>
+                <div className={`text-xs ${textSecondary} mb-1`}>累计充值</div>
+                <div className="text-2xl font-bold text-green-500">{creditsTotalRecharged}</div>
+                <div className={`text-xs ${textSecondary} mt-1`}>≈ ¥{(creditsTotalRecharged * 0.01).toFixed(2)}</div>
+              </div>
+              <div className={`${cardBg} rounded-xl p-5 border ${borderColor}`}>
+                <div className={`text-xs ${textSecondary} mb-1`}>累计使用</div>
+                <div className="text-2xl font-bold text-orange-500">{creditsTotalUsed}</div>
+                <div className={`text-xs ${textSecondary} mt-1`}>≈ ¥{(creditsTotalUsed * 0.01).toFixed(2)}</div>
+              </div>
+            </div>
+
+            {/* Pricing Reference (collapsible) */}
+            {creditsPricing && (
+              <div className="mb-6">
+                <button
+                  onClick={() => setShowPricingRef(!showPricingRef)}
+                  className={`flex items-center gap-2 text-sm font-medium ${textSecondary} hover:text-blue-500 transition-colors`}
+                >
+                  <ChevronRight className={`w-4 h-4 transition-transform ${showPricingRef ? 'rotate-90' : ''}`} />
+                  模型定价参考（1积分 ≈ ¥0.01）
+                </button>
+                {showPricingRef && (
+                  <div className="mt-3 space-y-4">
+                    {/* Image Models */}
+                    <div className={`${cardBg} rounded-lg border ${borderColor} overflow-hidden`}>
+                      <div className={`px-4 py-2 text-xs font-semibold ${textSecondary} bg-gradient-to-r from-blue-500/10 to-transparent`}>图像生成</div>
+                      <div className="divide-y divide-border/30">
+                        {Object.entries(creditsPricing.imageModels).map(([name, info]) => (
+                          <div key={name} className="flex justify-between items-center px-4 py-2">
+                            <span className={`text-sm ${textPrimary}`}>{info?.label || name}</span>
+                            <span className="text-sm font-medium text-blue-500">{info?.credits ?? 0} 积分/次 <span className={textSecondary}>(¥{info?.cny ?? '0'})</span></span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    {/* Video Models */}
+                    <div className={`${cardBg} rounded-lg border ${borderColor} overflow-hidden`}>
+                      <div className={`px-4 py-2 text-xs font-semibold ${textSecondary} bg-gradient-to-r from-purple-500/10 to-transparent`}>视频生成 (5秒)</div>
+                      <div className="divide-y divide-border/30">
+                        {Object.entries(creditsPricing.videoModels).map(([name, info]) => (
+                          <div key={name} className="flex justify-between items-center px-4 py-2">
+                            <span className={`text-sm ${textPrimary}`}>{info?.label || name}</span>
+                            <span className="text-sm font-medium text-purple-500">{Math.round((info?.creditsPerSecond ?? 0) * 5)} 积分/5秒 <span className={textSecondary}>(¥{info?.cnyPerSecond ? (Number(info.cnyPerSecond) * 5).toFixed(2) : '0'})</span></span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    {/* LLM Models */}
+                    <div className={`${cardBg} rounded-lg border ${borderColor} overflow-hidden`}>
+                      <div className={`px-4 py-2 text-xs font-semibold ${textSecondary} bg-gradient-to-r from-green-500/10 to-transparent`}>AI 聊天</div>
+                      <div className="divide-y divide-border/30">
+                        {Object.entries(creditsPricing.chatModels).map(([name, info]) => (
+                          <div key={name} className="flex justify-between items-center px-4 py-2">
+                            <span className={`text-sm ${textPrimary}`}>{info?.label || name}</span>
+                            <span className="text-sm font-medium text-green-500">{info?.creditsPerCall ?? 0} 积分/次 <span className={textSecondary}>(¥{info?.cny ?? '0'})</span></span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Recharge Packages */}
+            <div className="mb-6">
+              <h3 className={`text-base font-semibold ${textPrimary} mb-3`}>充值套餐</h3>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { credits: 100, price: '¥1', label: '体验' },
+                  { credits: 500, price: '¥5', label: '基础' },
+                  { credits: 2000, price: '¥20', label: '标准' },
+                  { credits: 10000, price: '¥100', label: '专业' },
+                ].map((pkg) => (
+                  <button
+                    key={pkg.credits}
+                    onClick={() => handleRecharge(pkg.credits)}
+                    disabled={isRecharging}
+                    className={`${cardBg} rounded-xl p-4 border ${borderColor} hover:border-blue-500/50 transition-all text-left group disabled:opacity-50`}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <div className={`text-xs ${textSecondary} mb-1`}>{pkg.label}</div>
+                        <div className="text-xl font-bold text-blue-500">{pkg.credits}</div>
+                        <div className={`text-xs ${textSecondary}`}>积分</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-semibold text-green-500">{pkg.price}</div>
+                        <Zap className="w-4 h-4 text-blue-500 mt-1 ml-auto" />
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom Recharge */}
+            <div className="mb-6">
+              <h3 className={`text-base font-semibold ${textPrimary} mb-3`}>自定义充值</h3>
+              <div className="flex gap-3">
+                <input
+                  type="number"
+                  min="1"
+                  value={rechargeAmount}
+                  onChange={(e) => setRechargeAmount(Math.max(1, parseInt(e.target.value) || 0))}
+                  className={`flex-1 px-4 py-2.5 rounded-lg border ${borderColor} ${inputBg} ${textPrimary} text-sm focus:outline-none focus:border-blue-500`}
+                  placeholder="输入积分数量"
+                />
+                <button
+                  onClick={() => handleRecharge(Number(rechargeAmount) || 0)}
+                  disabled={isRecharging || !rechargeAmount || Number(rechargeAmount) <= 0}
+                  className="px-6 py-2.5 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 disabled:opacity-50 transition-colors"
+                >
+                  {isRecharging ? '充值中...' : `充值 ¥${(Number(rechargeAmount || 0) * 0.01).toFixed(2)}`}
+                </button>
+              </div>
+            </div>
+
+            {/* Transaction History */}
+            <div>
+              <h3 className={`text-base font-semibold ${textPrimary} mb-3`}>交易记录</h3>
+              {creditsTransactions.length === 0 ? (
+                <div className={`text-center py-8 ${textSecondary} text-sm`}>暂无交易记录</div>
+              ) : (
+                <div className="space-y-2">
+                  {creditsTransactions.map((tx: { id: string; type: string; amount: number; balanceAfter: number; description: string; createdAt: number }) => (
+                    <div key={tx.id} className={`flex items-center justify-between ${cardBg} rounded-lg px-4 py-3 border ${borderColor}`}>
+                      <div>
+                        <div className={`text-sm font-medium ${textPrimary}`}>
+                          {tx.type === 'recharge' ? '充值' : tx.type === 'consume' ? '使用' : tx.type === 'refund' ? '退款' : '调整'}
+                        </div>
+                        <div className={`text-xs ${textSecondary}`}>{tx.description || '-'}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className={`text-sm font-semibold ${tx.amount > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                          {tx.amount > 0 ? '+' : ''}{tx.amount}
+                        </div>
+                        <div className={`text-xs ${textSecondary}`}>余额: {tx.balanceAfter}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Tab: Credits (Admin) ── */}
+        {activeTab === 'credits' && isAdmin && (
+          <div className="h-full overflow-y-auto p-8">
+            <h1 className={`text-2xl font-bold mb-1 ${textPrimary}`}>积分管理</h1>
+            <p className={`text-sm mb-6 ${textSecondary}`}>查看用户积分情况，进行充值与调整（1积分 ≈ ¥0.01）</p>
+
+            {/* Overview Stats */}
+            <div className="grid grid-cols-3 gap-4 mb-6">
+              <div className={`${cardBg} rounded-xl p-5 border ${borderColor}`}>
+                <div className={`text-xs ${textSecondary} mb-1`}>总用户数</div>
+                <div className="text-2xl font-bold text-blue-500">{creditsUsers.length}</div>
+              </div>
+              <div className={`${cardBg} rounded-xl p-5 border ${borderColor}`}>
+                <div className={`text-xs ${textSecondary} mb-1`}>总充值积分</div>
+                <div className="text-2xl font-bold text-green-500">{creditsUsers.reduce((sum: number, u: { totalRecharged: number }) => sum + (u.totalRecharged || 0), 0)}</div>
+              </div>
+              <div className={`${cardBg} rounded-xl p-5 border ${borderColor}`}>
+                <div className={`text-xs ${textSecondary} mb-1`}>总消耗积分</div>
+                <div className="text-2xl font-bold text-orange-500">{creditsUsers.reduce((sum: number, u: { totalUsed: number }) => sum + (u.totalUsed || 0), 0)}</div>
+              </div>
+            </div>
+
+            {/* User Credits Table */}
+            <div className="mb-6">
+              <h3 className={`text-base font-semibold ${textPrimary} mb-3`}>用户积分概览</h3>
+              <div className={`${cardBg} rounded-xl border ${borderColor} overflow-hidden`}>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className={`${inputBg} border-b ${borderColor}`}>
+                      <th className={`text-left px-4 py-3 ${textSecondary} font-medium`}>用户</th>
+                      <th className={`text-right px-4 py-3 ${textSecondary} font-medium`}>余额</th>
+                      <th className={`text-right px-4 py-3 ${textSecondary} font-medium`}>累计充值</th>
+                      <th className={`text-right px-4 py-3 ${textSecondary} font-medium`}>累计使用</th>
+                      <th className={`text-center px-4 py-3 ${textSecondary} font-medium`}>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {creditsUsers.length === 0 ? (
+                      <tr><td colSpan={5} className={`text-center py-6 ${textSecondary}`}>暂无数据</td></tr>
+                    ) : creditsUsers.map((user) => (
+                      <tr key={user.userId} className={`border-b ${borderColor} hover:bg-muted/50 transition-colors`}>
+                        <td className={`px-4 py-3 ${textPrimary} font-medium`}>{user.userName || user.userId}</td>
+                        <td className="px-4 py-3 text-right font-semibold text-blue-500">{user.balance}</td>
+                        <td className="px-4 py-3 text-right text-green-500">{user.totalRecharged}</td>
+                        <td className="px-4 py-3 text-right text-orange-500">{user.totalUsed}</td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            onClick={() => { setSelectedCreditsUser(user.userId); loadCreditsTransactions(user.userId); }}
+                            className="text-xs text-blue-500 hover:text-blue-600 font-medium"
+                          >
+                            详情/充值
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Selected User Detail */}
+            {selectedCreditsUser && (
+              <div className={`${cardBg} rounded-xl border ${borderColor} p-6 mb-6`}>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className={`text-base font-semibold ${textPrimary}`}>
+                    {(creditsUsers.find(u => u.userId === selectedCreditsUser)?.userName || selectedCreditsUser)} 的积分详情
+                  </h3>
+                  <button onClick={() => setSelectedCreditsUser(null)} className={`text-xs ${textSecondary} hover:text-red-500`}>关闭</button>
+                </div>
+
+                {/* Admin Recharge */}
+                <div className="mb-4">
+                  <div className={`text-sm font-medium ${textPrimary} mb-2`}>管理员充值</div>
+                  <div className="flex gap-2 mb-2 flex-wrap">
+                    {[50, 100, 500, 1000, 5000].map(amount => (
+                      <button
+                        key={amount}
+                        onClick={() => setAdminRechargeAmount(amount)}
+                        className={`px-3 py-1.5 text-xs rounded-lg border ${adminRechargeAmount === amount ? 'border-blue-500 bg-blue-500/10 text-blue-500' : `${borderColor} ${textSecondary} hover:border-blue-500/50`} transition-colors`}
+                      >
+                        {amount}积分
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      min="1"
+                      value={adminRechargeAmount}
+                      onChange={(e) => setAdminRechargeAmount(Math.max(1, parseInt(e.target.value) || 0))}
+                      className={`flex-1 px-3 py-2 rounded-lg border ${borderColor} ${inputBg} ${textPrimary} text-sm focus:outline-none focus:border-blue-500`}
+                      placeholder="自定义积分"
+                    />
+                    <input
+                      type="text"
+                      value={adminRechargeDesc}
+                      onChange={(e) => setAdminRechargeDesc(e.target.value)}
+                      className={`flex-1 px-3 py-2 rounded-lg border ${borderColor} ${inputBg} ${textPrimary} text-sm focus:outline-none focus:border-blue-500`}
+                      placeholder="备注说明"
+                    />
+                    <button
+                      onClick={async () => {
+                        if (!selectedCreditsUser || Number(adminRechargeAmount || 0) <= 0) return;
+                        setIsAdminRecharging(true);
+                        try {
+                          const res = await fetch('/api/credits', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              action: 'admin-recharge',
+                              userId: selectedCreditsUser,
+                              amount: adminRechargeAmount,
+                              description: adminRechargeDesc || `管理员充值 ${adminRechargeAmount} 积分`,
+                            }),
+                          });
+                          const data = await res.json();
+                          if (data.success) {
+                            setAdminRechargeAmount(100);
+                            setAdminRechargeDesc('');
+                            loadCreditsOverview();
+                            loadCreditsTransactions(selectedCreditsUser);
+                          } else {
+                            alert(data.error || '充值失败');
+                          }
+                        } catch { alert('网络错误'); }
+                        setIsAdminRecharging(false);
+                      }}
+                      disabled={isAdminRecharging || Number(adminRechargeAmount || 0) <= 0}
+                      className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 disabled:opacity-50"
+                    >
+                      {isAdminRecharging ? '处理中...' : '充值'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* User Transactions */}
+                <div>
+                  <div className={`text-sm font-medium ${textPrimary} mb-2`}>交易记录</div>
+                  {creditsTransactions.length === 0 ? (
+                    <div className={`text-center py-4 ${textSecondary} text-sm`}>暂无记录</div>
+                  ) : (
+                    <div className="space-y-1.5 max-h-60 overflow-y-auto">
+                      {creditsTransactions.map((tx: { id: string; type: string; amount: number; balanceAfter: number; description: string; createdAt: number }) => (
+                        <div key={tx.id} className={`flex items-center justify-between px-3 py-2 rounded-lg ${inputBg}`}>
+                          <div>
+                            <span className={`text-xs font-medium ${tx.amount > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                              {tx.amount > 0 ? '+' : ''}{tx.amount}
+                            </span>
+                            <span className={`text-xs ${textSecondary} ml-2`}>
+                              {tx.type === 'recharge' ? '充值' : tx.type === 'consume' ? '使用' : tx.type === 'refund' ? '退款' : '调整'}
+                            </span>
+                          </div>
+                          <div className={`text-xs ${textSecondary}`}>
+                            余额 {tx.balanceAfter} · {new Date(tx.createdAt).toLocaleString('zh-CN')}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
