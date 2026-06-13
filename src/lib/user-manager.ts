@@ -554,6 +554,8 @@ export class UserManager {
       this.multiUserData.users[index] = nextUser;
     }
 
+    const isExistingUser = !!this.multiUserData.userData[nextUser.id];
+
     // ★ 数据隔离关键修复：清除该用户本地的项目缓存，强制从服务器重新加载
     // 防止 localStorage 中残留的跨用户项目数据泄露
     if (!isExistingUser) {
