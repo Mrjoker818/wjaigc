@@ -65,6 +65,7 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
   const [customRechargeAmount, setCustomRechargeAmount] = useState(100);
   const [isRecharging, setIsRecharging] = useState(false);
   const [rechargeError, setRechargeError] = useState('');
+  const [creditsPricing, setCreditsPricing] = useState<{ creditsPerYuan: number; models: Record<string, { cost: number; label: string; category: string }> } | null>(null);
 
   // Derived values
   const creditsBalance = credits?.balance ?? 0;
@@ -141,7 +142,10 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
       ]);
       if (creditsRes.ok) {
         const creditsData = await creditsRes.json();
-        if (creditsData.success) setCredits(creditsData.credits);
+        if (creditsData.success) {
+          setCredits(creditsData.credits);
+          if (creditsData.pricing) setCreditsPricing(creditsData.pricing);
+        }
       }
       if (txRes.ok) {
         const txData = await txRes.json();
@@ -646,20 +650,88 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
                 <div className={`text-3xl font-bold ${isGold ? 'text-[#d4af37]' : 'text-blue-600'}`}>
                   {creditsBalance.toLocaleString()}
                 </div>
+                <div className={`text-xs mt-1 ${isGold ? 'text-[#888]' : 'text-gray-400'}`}>
+                  ≈ ¥{(creditsBalance * 0.01).toFixed(2)} （1积分=0.01元）
+                </div>
                 <div className={`flex gap-4 mt-2 text-xs ${isGold ? 'text-[#888]' : 'text-gray-400'}`}>
                   <span>累计充值: {creditsTotalRecharged.toLocaleString()}</span>
                   <span>累计使用: {creditsTotalUsed.toLocaleString()}</span>
                 </div>
               </div>
 
+              {/* 模型积分消耗参考 */}
+              <details className={`mb-4 rounded-lg ${isGold ? 'bg-[#1a1a1a] border border-[#333]' : 'bg-gray-50 border border-gray-200'}`}>
+                <summary className={`px-3 py-2 text-xs font-medium cursor-pointer select-none ${isGold ? 'text-[#999]' : 'text-gray-500'}`}>
+                  模型积分消耗参考（点击展开）
+                </summary>
+                <div className="px-3 pb-3 space-y-2">
+                  {/* 图像模型 */}
+                  <div>
+                    <p className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${isGold ? 'text-[#d4af37]' : 'text-blue-500'}`}>图像生成</p>
+                    <div className="space-y-0.5">
+                      {[
+                        { name: 'DALL-E 3', credits: '28~56', note: '标准/HD' },
+                        { name: 'GPT-Image-2', credits: '40~100', note: '低/高质量' },
+                        { name: 'Midjourney', credits: '30~50', note: '快/慢模式' },
+                        { name: 'Seedream 3.0/4.5', credits: '4~8', note: '经济/品质' },
+                        { name: 'Flux Pro/Dev', credits: '6~30', note: 'Dev/Pro' },
+                        { name: 'Ideogram', credits: '6~15', note: '标准/高品质' },
+                        { name: 'Stable Diffusion', credits: '2~5', note: '基础/精绘' },
+                      ].map((m) => (
+                        <div key={m.name} className={`flex justify-between text-[10px] ${isGold ? 'text-[#888]' : 'text-gray-500'}`}>
+                          <span>{m.name}</span>
+                          <span>{m.credits} 积分 <span className="opacity-50">({m.note})</span></span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* 视频模型 */}
+                  <div>
+                    <p className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${isGold ? 'text-[#d4af37]' : 'text-blue-500'}`}>视频生成（5秒）</p>
+                    <div className="space-y-0.5">
+                      {[
+                        { name: '可灵 V3', credits: '150~250', note: '标清/高清' },
+                        { name: 'Seedance 2.0', credits: '200~500', note: '标清/高清' },
+                        { name: 'Sora 2', credits: '360~1500', note: '5s/25s' },
+                        { name: 'Runway Gen-4', credits: '200~600', note: '标清/高清' },
+                        { name: 'Veo 3.1', credits: '2700', note: '企业级' },
+                        { name: 'Vidu Q1/Q2', credits: '120~180', note: '标清/高清' },
+                      ].map((m) => (
+                        <div key={m.name} className={`flex justify-between text-[10px] ${isGold ? 'text-[#888]' : 'text-gray-500'}`}>
+                          <span>{m.name}</span>
+                          <span>{m.credits} 积分 <span className="opacity-50">({m.note})</span></span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* LLM模型 */}
+                  <div>
+                    <p className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${isGold ? 'text-[#d4af37]' : 'text-blue-500'}`}>AI聊天</p>
+                    <div className="space-y-0.5">
+                      {[
+                        { name: 'Gemini 2.5 Flash', credits: '1~3', note: '轻量/标准' },
+                        { name: 'GPT-4o', credits: '3~10', note: '短/长对话' },
+                        { name: 'GPT-4.1', credits: '5~15', note: '标准/深度' },
+                        { name: 'DeepSeek', credits: '1~5', note: '轻量/标准' },
+                      ].map((m) => (
+                        <div key={m.name} className={`flex justify-between text-[10px] ${isGold ? 'text-[#888]' : 'text-gray-500'}`}>
+                          <span>{m.name}</span>
+                          <span>{m.credits} 积分 <span className="opacity-50">({m.note})</span></span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </details>
+
               {/* 充值套餐 */}
               <p className={`text-xs font-medium uppercase tracking-wider mb-3 ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>充值套餐</p>
               <div className="grid grid-cols-2 gap-2 mb-4">
                 {[
-                  { amount: 100, price: '10', unit: '元' },
-                  { amount: 500, price: '45', unit: '元', badge: '9折' },
-                  { amount: 1000, price: '80', unit: '元', badge: '8折' },
-                  { amount: 5000, price: '350', unit: '元', badge: '7折' },
+                  { amount: 100, price: '1', unit: '元', label: '≈3次图像生成' },
+                  { amount: 500, price: '5', unit: '元', label: '≈17次图像生成', badge: '推荐' },
+                  { amount: 2000, price: '18', unit: '元', label: '≈10次视频生成', badge: '9折' },
+                  { amount: 10000, price: '80', unit: '元', label: '≈50次视频生成', badge: '8折' },
                 ].map((pkg) => (
                   <button
                     key={pkg.amount}
@@ -679,10 +751,13 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
                       </span>
                     )}
                     <div className={`text-lg font-bold ${isGold ? 'text-white' : 'text-gray-900'}`}>
-                      {pkg.amount.toLocaleString()}
+                      {pkg.amount.toLocaleString()}<span className="text-xs font-normal ml-0.5">积分</span>
                     </div>
-                    <div className={`text-xs ${isGold ? 'text-[#999]' : 'text-gray-500'}`}>
+                    <div className={`text-xs font-semibold ${isGold ? 'text-[#d4af37]' : 'text-blue-600'}`}>
                       ¥{pkg.price}
+                    </div>
+                    <div className={`text-[10px] mt-0.5 ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>
+                      {pkg.label}
                     </div>
                   </button>
                 ))}
@@ -690,7 +765,7 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
 
               {/* 自定义充值 */}
               <div className={`rounded-lg p-3 mb-4 ${isGold ? 'bg-[#1a1a1a] border border-[#333]' : 'bg-gray-50 border border-gray-200'}`}>
-                <p className={`text-xs mb-2 ${isGold ? 'text-[#999]' : 'text-gray-500'}`}>自定义充值数量</p>
+                <p className={`text-xs mb-2 ${isGold ? 'text-[#999]' : 'text-gray-500'}`}>自定义充值数量（1积分=0.01元）</p>
                 <div className="flex gap-2">
                   <input
                     type="number"
@@ -716,6 +791,11 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
                     充值
                   </button>
                 </div>
+                {customRechargeAmount > 0 && (
+                  <p className={`text-[10px] mt-1.5 ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>
+                    ≈ ¥{(customRechargeAmount * 0.01).toFixed(2)}
+                  </p>
+                )}
               </div>
 
               {/* 交易记录 */}

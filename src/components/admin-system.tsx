@@ -1389,7 +1389,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                       >
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-medium text-white">{u.userName}</span>
-                          <span className="text-xs font-bold text-[#d4af37]">{u.balance.toLocaleString()}</span>
+                          <span className="text-xs font-bold text-[#d4af37]">{u.balance.toLocaleString()} <span className="text-[#666] font-normal">≈¥{(u.balance * 0.01).toFixed(2)}</span></span>
                         </div>
                         <div className="flex items-center justify-between mt-1 text-[10px] text-[#666]">
                           <span>充值 {u.totalRecharged.toLocaleString()}</span>
@@ -1435,8 +1435,8 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                     </div>
 
                     {/* Quick amounts */}
-                    <div className="flex gap-1.5 mb-4">
-                      {[50, 100, 200, 500, 1000].map((amt) => (
+                    <div className="flex gap-1.5 mb-2">
+                      {[50, 100, 200, 500, 1000, 5000].map((amt) => (
                         <button
                           key={amt}
                           onClick={() => setAdminRechargeAmount(amt)}
@@ -1446,10 +1446,11 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                               : 'bg-[#1a1a1a] text-[#999] hover:text-white border border-[#333]'
                           }`}
                         >
-                          {amt}
+                          {amt}积分
                         </button>
                       ))}
                     </div>
+                    <p className="text-[10px] text-[#666] mb-4">1积分 ≈ ¥0.01 | {adminRechargeAmount}积分 ≈ ¥{(adminRechargeAmount * 0.01).toFixed(2)}</p>
 
                     {/* Transaction history */}
                     <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Activity className="w-4 h-4" />交易记录</h3>
@@ -1473,7 +1474,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                               {tx.type === 'recharge' ? '充值' : tx.type === 'consume' ? '消费' : tx.type === 'refund' ? '退款' : '管理员调整'}
                             </span>
                             <span className={`text-right font-bold ${tx.amount > 0 ? 'text-[#d4af37]' : 'text-[#ff6b6b]'}`}>
-                              {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}
+                              {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}<span className="text-[#555] text-[10px]"> ≈¥{(Math.abs(tx.amount) * 0.01).toFixed(2)}</span>
                             </span>
                             <span className="text-right text-[#999]">{tx.balanceAfter.toLocaleString()}</span>
                             <span className="text-[#666] truncate" title={tx.description}>{tx.description || '-'}</span>

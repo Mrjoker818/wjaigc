@@ -26,15 +26,7 @@ export const maxDuration = 300; // 5 min timeout
 
 export async function POST(request: NextRequest) {
   try {
-    // 积分扣除
-    const sessionUser = await getSessionUser(request);
-    if (sessionUser) {
-      const creditResult = await consumeCredits(sessionUser.id, 'video_generate');
-      if (!creditResult.success) {
-        return NextResponse.json({ error: creditResult.message || '积分不足' }, { status: 402 });
-      }
-    }
-
+    // 积分扣除（按模型差异化扣分）
     const body = await request.json();
     const {
       prompt,
@@ -61,6 +53,15 @@ export async function POST(request: NextRequest) {
         { error: '缺少必要参数: prompt 和 model 是必填的' },
         { status: 400 },
       );
+    }
+
+    // 积分扣除（登录用户才扣积分，按模型差异化扣分）
+    const sessionUser = await getSessionUser(request);
+    if (sessionUser) {
+      const creditResult = await consumeCredits(sessionUser.id, 'video_generate', undefined, undefined, model, { durationSeconds: Number(duration) });
+      if (!creditResult.success) {
+        return NextResponse.json({ error: creditResult.message || '积分不足' }, { status: 402 });
+      }
     }
 
     // 1. 查找视频 API 提供商

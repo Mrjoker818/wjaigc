@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/server-auth';
 import { dbGetCredits, dbAdjustCredits, dbGetCreditTransactions, dbGetAllCredits, dbInitCredits } from '@/lib/db-storage';
 import { execSql } from '@/lib/db-client';
+import { CREDITS_TO_CNY, CNY_TO_CREDITS, IMAGE_MODEL_CREDITS, VIDEO_MODEL_CREDITS, CHAT_MODEL_CREDITS, RECHARGE_PACKAGES, getModelPricingInfo } from '@/lib/credits';
 
 /**
  * GET /api/credits
@@ -97,6 +98,20 @@ export async function GET(request: NextRequest) {
         totalRecharged: credits.total_recharged,
         totalUsed: credits.total_used,
       } : { userId: effectiveUserId, balance: 0, totalRecharged: 0, totalUsed: 0 },
+      pricing: {
+        creditsToCNY: CREDITS_TO_CNY,
+        cnyToCredits: CNY_TO_CREDITS,
+        imageModels: Object.fromEntries(
+          Object.entries(IMAGE_MODEL_CREDITS).map(([k, v]) => [k, { credits: v.credits, label: v.label, cny: (v.credits * CREDITS_TO_CNY).toFixed(2) }])
+        ),
+        videoModels: Object.fromEntries(
+          Object.entries(VIDEO_MODEL_CREDITS).map(([k, v]) => [k, { creditsPerSecond: v.creditsPerSecond, label: v.label, cnyPerSecond: (v.creditsPerSecond * CREDITS_TO_CNY).toFixed(2) }])
+        ),
+        chatModels: Object.fromEntries(
+          Object.entries(CHAT_MODEL_CREDITS).map(([k, v]) => [k, { creditsPerCall: v.creditsPerCall, label: v.label, cny: (v.creditsPerCall * CREDITS_TO_CNY).toFixed(2) }])
+        ),
+        rechargePackages: RECHARGE_PACKAGES,
+      },
     });
   } catch (e) {
     console.error('[credits] GET error:', e);

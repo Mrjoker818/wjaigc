@@ -133,9 +133,10 @@ export async function POST(request: NextRequest) {
     const sessionUser = await getSessionUser(request);
     const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
 
-    // 积分扣除（登录用户才扣积分）
+    // 积分扣除（登录用户才扣积分，按模型差异化扣分）
     if (sessionUser) {
-      const creditResult = await consumeCredits(sessionUser.id, 'image_generate');
+      const modelId = model || '';
+      const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, modelId, { quality });
       if (!creditResult.success) {
         return NextResponse.json({ error: creditResult.message || '积分不足' }, { status: 402 });
       }
