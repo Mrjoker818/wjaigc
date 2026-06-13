@@ -158,11 +158,11 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     wechatQrUrl: string;
     alipayQrUrl: string;
   }>({ wechatQrUrl: '', alipayQrUrl: '' });
-  const [paymentStatus, setPaymentStatus] = useState<{ alipay: boolean; wechat: boolean }>({ alipay: false, wechat: false });
+  const [paymentStatus, setPaymentStatus] = useState<{ alipay: boolean; wechat: boolean; qrUrls?: { wechat: string; alipay: string }; note?: string }>({ alipay: false, wechat: false });
   const [configSaving, setConfigSaving] = useState(false);
   const [configSaveMsg, setConfigSaveMsg] = useState<string | null>(null);
   // Admin pending orders
-  const [pendingOrders, setPendingOrders] = useState<Array<{ orderId: string; userId: string; userName: string; amount: number; priceCny: number; paymentMethod: string; createdAt: string }>>([]);
+  const [auditOrders, setAuditOrders] = useState<Array<{ id: string; userId: string; userName: string; amount: number; priceCny: number; bonus: number; paymentMethod: string; status: string; createdAt: string; paidAt: string; updatedAt: string }>>([]);
   const [creditsPricing, setCreditsPricing] = useState<{
     creditsToCNY: number;
     cnyToCredits: number;
@@ -750,49 +750,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         setPendingOrderId(data.orderId);
         setPendingOrderAmount(data.amount);
         setPaymentStep('paying');
-        // Start polling for admin confirmation
-        setPaymentPolling(true);
-        pollOrderStatus(data.orderId);
       } else {
         setRechargeError(data.error || '创建订单失败');
       }
     } catch { setRechargeError('网络错误'); }
     setIsRecharging(false);
   }, []);
-
-  const pollOrderStatus = useCallback(async (orderId: string) => {
-    let attempts = 0;
-    const maxAttempts = 240; // 20 minutes max (5s interval)
-    const poll = async () => {
-      try {
-        const resp = await fetch('/api/credits', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'query-order', orderId }),
-        });
-        const data = await resp.json();
-        if (data.success && data.order?.paymentStatus === 'confirmed') {
-          setPaymentStep('success');
-          setPaymentPolling(false);
-          await loadCreditsData();
-          return;
-        }
-        if (data.order?.paymentStatus === 'expired' || data.order?.paymentStatus === 'failed') {
-          setRechargeError(data.order.paymentStatus === 'expired' ? '订单已过期，请重新发起' : '订单已取消');
-          setPaymentStep('select');
-          setPaymentPolling(false);
-          return;
-        }
-      } catch { /* ignore network errors during polling */ }
-      attempts++;
-      if (attempts < maxAttempts && paymentPolling) {
-        setTimeout(poll, 5000);
-      } else {
-        setPaymentPolling(false);
-      }
-    };
-    poll();
-  }, [loadCreditsData, paymentPolling]);
 
   const handleSavePaymentConfig = useCallback(async () => {
     setConfigSaving(true);
@@ -822,11 +785,11 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setConfigSaving(false);
   }, [paymentConfig]);
 
-  const loadPendingOrders = useCallback(async () => {
+  const loadAuditOrders = useCallback(async () => {
     try {
-      const resp = await fetch('/api/credits?action=pending-orders');
+      const resp = await fetch('/api/credits?action=audit-orders');
       const data = await resp.json();
-      if (data.success) setPendingOrders(data.orders || []);
+      if (data.success) setAuditOrders(data.orders || []);
     } catch { /* ignore */ }
   }, []);
 
@@ -840,22 +803,23 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setCreditsLoading(false);
   }, []);
 
-  const handleConfirmOrder = useCallback(async (orderId: string, action: 'confirm' | 'reject') => {
+  const handleReverseOrder = useCallback(async (orderId: string) => {
+    if (!confirm('确定要撤销此订单吗？积分将从用户账户中扣回。')) return;
     try {
       const resp = await fetch('/api/credits', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'confirm-order', orderId, confirmAction: action }),
+        body: JSON.stringify({ action: 'reverse-order', orderId }),
       });
       const data = await resp.json();
       if (data.success) {
-        await loadPendingOrders();
+        await loadAuditOrders();
         await loadCreditsOverview();
       } else {
-        alert(data.error || '操作失败');
+        alert(data.error || '撤销失败');
       }
     } catch { alert('网络错误'); }
-  }, [loadPendingOrders, loadCreditsOverview]);
+  }, [loadAuditOrders, loadCreditsOverview]);
 
   const loadCreditsTransactions = useCallback(async (userId: string) => {
     try {
@@ -892,7 +856,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       void loadCreditsData();
       if (isAdmin) {
         void loadCreditsOverview();
-        void loadPendingOrders();
+        void loadAuditOrders();
       } else {
         // Non-admin users need to check payment status
         (async () => {
@@ -907,7 +871,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       }
     }
     if (activeTab === 'payment-config' && isAdmin) {
-      void loadPendingOrders();
+      void loadAuditOrders();
     }
   }, [activeTab, isAdmin, loadCreditsData, loadCreditsOverview]);
 
@@ -1485,7 +1449,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             </>
             )}
 
-            {/* ── Payment Step: Paying (QR Code Display) ── */}
+            {/* ── Payment Step: Paying (QR Code Display + Self-confirm) ── */}
             {paymentStep === 'paying' && (
               <div className={`${cardBg} rounded-xl border ${borderColor} p-6 mb-6`}>
                 <div className="flex items-center justify-between mb-4">
@@ -1532,15 +1496,51 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     支付 <span className="text-green-500 font-semibold">¥{(pendingOrderAmount * 0.01).toFixed(2)}</span>（{pendingOrderAmount}积分）
                   </div>
 
-                  <div className={`text-xs ${textSecondary} mb-4 p-3 rounded-lg ${inputBg}`}>
-                    完成支付后，管理员将确认到账，积分会自动到账
-                  </div>
+                  {paymentStatus.note && (
+                    <div className={`text-xs ${textSecondary} mb-4 p-3 rounded-lg ${inputBg}`}>
+                      {paymentStatus.note}
+                    </div>
+                  )}
 
-                  {paymentPolling && (
+                  {/* Self-confirm button: user confirms they've paid → auto-credit */}
+                  {!paymentPolling ? (
+                    <button
+                      onClick={async () => {
+                        if (!pendingOrderId) return;
+                        setPaymentPolling(true);
+                        setRechargeError('');
+                        try {
+                          const res = await fetch('/api/credits', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'confirm-paid', orderId: pendingOrderId }),
+                          });
+                          const data = await res.json();
+                          if (data.success) {
+                            setPaymentStep('success');
+                            loadCreditsOverview();
+                          } else {
+                            setRechargeError(data.error || '确认失败');
+                          }
+                        } catch (err) {
+                          setRechargeError('网络错误，请重试');
+                        } finally {
+                          setPaymentPolling(false);
+                        }
+                      }}
+                      className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-colors bg-green-500 hover:bg-green-600"
+                    >
+                      我已完成付款
+                    </button>
+                  ) : (
                     <div className="flex items-center justify-center gap-2 text-green-500">
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      <span className="text-sm">等待管理员确认到账...</span>
+                      <span className="text-sm">正在确认到账...</span>
                     </div>
+                  )}
+
+                  {rechargeError && (
+                    <div className="mt-3 text-sm text-red-500 text-center">{rechargeError}</div>
                   )}
 
                   {pendingOrderId && (
@@ -2107,7 +2107,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h1 className={`text-xl font-bold ${textPrimary}`}>收款码配置</h1>
-                <p className={`text-sm ${textSecondary}`}>上传微信/支付宝个人收款码，用户扫码后由管理员确认到账</p>
+                <p className={`text-sm ${textSecondary}`}>上传微信/支付宝个人收款码，用户扫码付款后自助确认，积分自动到账</p>
               </div>
               <div className="flex items-center gap-2">
                 {paymentStatus.wechat && <span className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-green-500/15 text-green-400"><CheckCircle2 size={12}/> 微信已配置</span>}
@@ -2236,16 +2236,16 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 )}
               </div>
 
-              {/* 待确认订单 */}
-              {pendingOrders.length > 0 && (
+              {/* 订单审计 */}
+              {auditOrders.length > 0 && (
                 <div className={`rounded-xl border p-5 ${isDark ? 'bg-orange-500/5 border-orange-500/20' : 'bg-orange-50 border-orange-200'}`}>
                   <div className="flex items-center gap-2 mb-3">
                     <Clock className="w-4 h-4 text-orange-500" />
-                    <h3 className={`text-sm font-semibold ${textPrimary}`}>待确认订单 ({pendingOrders.length})</h3>
-                  </div>
+                    <h3 className={`text-sm font-semibold ${textPrimary}`}>最近订单 ({auditOrders.length})</h3>
+                </div>
                   <div className="space-y-2 max-h-60 overflow-y-auto">
-                    {pendingOrders.map((order) => (
-                      <div key={order.orderId} className={`flex items-center justify-between px-3 py-2.5 rounded-lg ${cardBg} border ${borderColor}`}>
+                    {auditOrders.map((order) => (
+                      <div key={order.id} className={`flex items-center justify-between px-3 py-2.5 rounded-lg ${cardBg} border ${borderColor}`}>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
                             <span className={`text-sm font-medium ${textPrimary}`}>¥{order.priceCny.toFixed(2)}</span>
@@ -2253,24 +2253,24 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                             <span className={`text-[10px] px-1.5 py-0.5 rounded ${order.paymentMethod === 'wechat' ? 'bg-green-500/15 text-green-400' : 'bg-blue-500/15 text-blue-400'}`}>
                               {order.paymentMethod === 'wechat' ? '微信' : '支付宝'}
                             </span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${order.status === 'paid' ? 'bg-green-500/15 text-green-400' : order.status === 'reversed' ? 'bg-red-500/15 text-red-400' : 'bg-yellow-500/15 text-yellow-400'}`}>
+                              {order.status === 'paid' ? '已到账' : order.status === 'reversed' ? '已撤销' : '待付款'}
+                            </span>
                           </div>
                           <div className={`text-xs ${textSecondary} mt-0.5`}>
                             用户: {order.userName || order.userId.slice(0, 8)} · {new Date(order.createdAt).toLocaleString('zh-CN')}
+                            {order.paidAt && ` · 付款: ${new Date(order.paidAt).toLocaleString('zh-CN')}`}
                           </div>
                         </div>
                         <div className="flex items-center gap-2 ml-3">
-                          <button
-                            onClick={() => handleConfirmOrder(order.orderId, 'confirm')}
-                            className="px-3 py-1.5 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
-                          >
-                            确认到账
-                          </button>
-                          <button
-                            onClick={() => handleConfirmOrder(order.orderId, 'reject')}
-                            className="px-3 py-1.5 text-xs font-medium bg-red-500/15 text-red-400 rounded-lg hover:bg-red-500/25 transition-colors"
-                          >
-                            拒绝
-                          </button>
+                          {order.status === 'paid' && (
+                            <button
+                              onClick={() => handleReverseOrder(order.id)}
+                              className="px-3 py-1.5 text-xs font-medium bg-red-500/15 text-red-400 rounded-lg hover:bg-red-500/25 transition-colors"
+                            >
+                              撤销
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -2285,8 +2285,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   <li>1. 打开微信/支付宝，找到"收付款"→"二维码收款"→保存收款码图片</li>
                   <li>2. 将收款码图片上传到上方对应区域</li>
                   <li>3. 用户充值时会看到您的收款码，扫码付款</li>
-                  <li>4. 付款完成后，用户等待管理员确认到账</li>
-                  <li>5. 管理员在"待确认订单"中点击"确认到账"，积分自动到账用户</li>
+                  <li>4. 付款完成后，用户点击"我已付款"，积分自动到账</li>
+                  <li>5. 管理员可在"最近订单"中查看并撤销欺诈订单（积分将扣回）</li>
                   <li>6. 无需开通商户号，使用个人收款码即可</li>
                 </ul>
               </div>

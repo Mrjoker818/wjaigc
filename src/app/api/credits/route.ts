@@ -30,7 +30,46 @@ export async function GET(request: NextRequest) {
     const txLimit = parseInt(searchParams.get('limit') || '50', 10);
     const txOffset = parseInt(searchParams.get('offset') || '0', 10);
 
-    // Admin: get pending orders for confirmation
+    // Admin: get self-confirmed orders for audit (auto-credited, admin can reverse fraudulent ones)
+    if (action === 'audit-orders' && isAdmin) {
+      try {
+        const status = searchParams.get('status') || 'all';
+        let statusFilter = '';
+        if (status === 'confirmed') statusFilter = "AND o.payment_status = 'paid'";
+        else if (status === 'reversed') statusFilter = "AND o.payment_status = 'reversed'";
+        else statusFilter = "AND o.payment_status IN ('paid', 'reversed')";
+
+        const result = await execSql(
+          `SELECT o.id, o.user_id, o.amount, o.price_cny, o.bonus, o.payment_method, o.payment_status, o.created_at, o.paid_at, o.updated_at, u.name as user_name
+           FROM wujie_recharge_orders o
+           LEFT JOIN wujie_users u ON o.user_id = u.id
+           WHERE 1=1 ${statusFilter}
+           ORDER BY o.created_at DESC
+           LIMIT 200`
+        );
+        return NextResponse.json({
+          success: true,
+          orders: result.rows.map((row: Record<string, unknown>) => ({
+            id: row.id,
+            userId: row.user_id,
+            userName: row.user_name || row.user_id,
+            amount: row.amount,
+            priceCny: row.price_cny,
+            bonus: row.bonus,
+            paymentMethod: row.payment_method,
+            status: row.payment_status,
+            createdAt: row.created_at,
+            paidAt: row.paid_at,
+            updatedAt: row.updated_at,
+          })),
+        });
+      } catch (dbErr) {
+        console.error('[credits] audit orders error:', dbErr);
+        return NextResponse.json({ success: false, error: '查询订单失败' }, { status: 500 });
+      }
+    }
+
+    // Admin: get pending orders for confirmation (legacy, kept for backwards compat)
     if (action === 'pending-orders' && isAdmin) {
       try {
         const result = await execSql(
@@ -154,9 +193,10 @@ export async function GET(request: NextRequest) {
  * POST /api/credits
  * - action=create-order: User creates a recharge order (show QR code, user pays manually)
  * - action=query-order: User queries order status
- * - action=confirm-paid: User confirms they've paid (changes status to pending_paid for admin review)
- * - action=admin-confirm: Admin confirms an order (adds credits)
+ * - action=confirm-paid: User confirms they've paid (auto-credits, admin can later audit)
+ * - action=admin-confirm: Admin confirms an order (legacy, for pending_paid orders)
  * - action=admin-reject: Admin rejects an order
+ * - action=reverse-order: Admin reverses a self-confirmed order (deducts credits back)
  * - action=admin_adjust / action=admin-recharge: Admin adjusts any user's credits
  */
 export async function POST(request: NextRequest) {
@@ -168,7 +208,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const { action, amount, description, userId: targetUserId, packageName, paymentMethod, orderId } = body as {
-      action: 'create-order' | 'query-order' | 'confirm-paid' | 'admin-confirm' | 'admin-reject' | 'admin_adjust' | 'admin-recharge';
+      action: 'create-order' | 'query-order' | 'confirm-paid' | 'admin-confirm' | 'admin-reject' | 'reverse-order' | 'admin_adjust' | 'admin-recharge';
       amount?: number;
       description?: string;
       userId?: string;
@@ -276,7 +316,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ===== User: Confirm they've paid =====
+    // ===== User: Confirm they've paid (auto-credit, admin can later audit) =====
     if (action === 'confirm-paid') {
       if (!orderId) {
         return NextResponse.json({ success: false, error: '缺少订单号' }, { status: 400 });
@@ -291,15 +331,28 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 });
         }
         const order = result.rows[0] as Record<string, unknown>;
+        if (order.payment_status === 'paid') {
+          return NextResponse.json({ success: true, message: '订单已到账', alreadyPaid: true });
+        }
         if (order.payment_status !== 'pending') {
           return NextResponse.json({ success: false, error: '订单状态不正确' }, { status: 400 });
         }
-        // Update status to pending_paid (waiting for admin confirmation)
+
+        // Auto-credit: immediately add credits to user's account
+        const orderAmount = Number(order.amount) || 0;
+        const adjustResult = await dbAdjustCredits(user.id, orderAmount, 'recharge', `扫码充值 ${orderAmount} 积分（订单${orderId}）`);
+
+        if (!adjustResult.success) {
+          return NextResponse.json({ success: false, error: '积分到账失败，请稍后重试' }, { status: 500 });
+        }
+
+        // Update order status to paid
         await execSql(
-          `UPDATE wujie_recharge_orders SET payment_status = 'pending_paid', updated_at = NOW() WHERE id = $1`,
+          `UPDATE wujie_recharge_orders SET payment_status = 'paid', paid_at = NOW(), updated_at = NOW() WHERE id = $1`,
           [orderId]
         );
-        return NextResponse.json({ success: true, message: '已确认付款，等待管理员审核到账' });
+
+        return NextResponse.json({ success: true, message: '积分已到账', balance: adjustResult.balance, amount: orderAmount });
       } catch (dbErr) {
         console.error('[credits] confirm paid error:', dbErr);
         return NextResponse.json({ success: false, error: '确认失败' }, { status: 500 });
@@ -360,6 +413,47 @@ export async function POST(request: NextRequest) {
       } catch (dbErr) {
         console.error('[credits] admin reject error:', dbErr);
         return NextResponse.json({ success: false, error: '操作失败' }, { status: 500 });
+      }
+    }
+
+    // ===== Admin: Reverse a self-confirmed order (deduct credits back) =====
+    if (action === 'reverse-order' && isAdmin) {
+      if (!orderId) {
+        return NextResponse.json({ success: false, error: '缺少订单号' }, { status: 400 });
+      }
+      const reason = (body as Record<string, unknown>).reason as string || '管理员撤销：未收到付款';
+      try {
+        const result = await execSql(
+          'SELECT * FROM wujie_recharge_orders WHERE id = $1',
+          [orderId]
+        );
+        if (result.rows.length === 0) {
+          return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 });
+        }
+        const order = result.rows[0] as Record<string, unknown>;
+        if (order.payment_status !== 'paid') {
+          return NextResponse.json({ success: false, error: '只能撤销已到账的订单' }, { status: 400 });
+        }
+
+        // Deduct credits from user
+        const orderAmount = Number(order.amount) || 0;
+        const targetUser = order.user_id as string;
+        const deductResult = await dbAdjustCredits(targetUser, -orderAmount, 'admin_adjust', `${reason}（撤销订单${orderId}）`);
+
+        if (!deductResult.success) {
+          return NextResponse.json({ success: false, error: '扣除积分失败: ' + (deductResult.message || '') }, { status: 500 });
+        }
+
+        // Update order status to reversed
+        await execSql(
+          `UPDATE wujie_recharge_orders SET payment_status = 'reversed', updated_at = NOW() WHERE id = $1`,
+          [orderId]
+        );
+
+        return NextResponse.json({ success: true, message: '订单已撤销，积分已扣回', balance: deductResult.balance });
+      } catch (dbErr) {
+        console.error('[credits] reverse order error:', dbErr);
+        return NextResponse.json({ success: false, error: '撤销失败' }, { status: 500 });
       }
     }
 
