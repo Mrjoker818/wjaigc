@@ -923,3 +923,151 @@ export async function dbDeleteBrandMaterial(id: string): Promise<boolean> {
     return false;
   }
 }
+
+// ─── Credits ────────────────────────────────────────────────────────────────
+
+interface DbCredits {
+  id: string;
+  user_id: string;
+  balance: number;
+  total_recharged: number;
+  total_used: number;
+  created_at: number;
+  updated_at: number;
+}
+
+interface DbCreditTransaction {
+  id: string;
+  user_id: string;
+  type: 'recharge' | 'consume' | 'refund' | 'admin_adjust';
+  amount: number;
+  balance_after: number;
+  description: string | null;
+  reference_id: string | null;
+  created_at: number;
+}
+
+export async function dbGetCredits(userId: string): Promise<DbCredits | null> {
+  try {
+    const result = await execSql('SELECT * FROM wujie_credits WHERE user_id = $1', [userId]);
+    return (result.rows as unknown as DbCredits[])[0] || null;
+  } catch (e) {
+    console.error('[db-storage] dbGetCredits error:', e);
+    return null;
+  }
+}
+
+export async function dbInitCredits(userId: string): Promise<DbCredits | null> {
+  try {
+    const id = `credits_${userId}_${Date.now()}`;
+    const now = Date.now();
+    const result = await execSql(
+      `INSERT INTO wujie_credits (id, user_id, balance, total_recharged, total_used, created_at, updated_at)
+       VALUES ($1, $2, 0, 0, 0, $3, $4)
+       ON CONFLICT (user_id) DO UPDATE SET updated_at = EXCLUDED.updated_at
+       RETURNING *`,
+      [id, userId, now, now]
+    );
+    return (result.rows as unknown as DbCredits[])[0] || null;
+  } catch (e) {
+    console.error('[db-storage] dbInitCredits error:', e);
+    return null;
+  }
+}
+
+export async function dbAdjustCredits(
+  userId: string,
+  amount: number,
+  type: 'recharge' | 'consume' | 'refund' | 'admin_adjust',
+  description?: string,
+  referenceId?: string
+): Promise<{ success: boolean; balance: number; message?: string }> {
+  try {
+    // Ensure credits row exists
+    let credits = await dbGetCredits(userId);
+    if (!credits) {
+      credits = await dbInitCredits(userId);
+      if (!credits) return { success: false, balance: 0, message: 'Failed to initialize credits' };
+    }
+
+    const newBalance = credits.balance + amount;
+    if (newBalance < 0) {
+      return { success: false, balance: credits.balance, message: 'Insufficient credits' };
+    }
+
+    const now = Date.now();
+    // Update credits
+    await execSql(
+      `UPDATE wujie_credits SET balance = $1, total_recharged = total_recharged + $2, total_used = total_used + $3, updated_at = $4 WHERE user_id = $5`,
+      [
+        newBalance,
+        amount > 0 && (type === 'recharge' || type === 'admin_adjust') ? amount : 0,
+        amount < 0 && (type === 'consume' || type === 'admin_adjust') ? Math.abs(amount) : 0,
+        now,
+        userId,
+      ]
+    );
+
+    // Insert transaction record
+    const txId = `tx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    await execSql(
+      `INSERT INTO wujie_credit_transactions (id, user_id, type, amount, balance_after, description, reference_id, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [txId, userId, type, amount, newBalance, description || null, referenceId || null, now]
+    );
+
+    return { success: true, balance: newBalance };
+  } catch (e) {
+    console.error('[db-storage] dbAdjustCredits error:', e);
+    return { success: false, balance: 0, message: 'Database error' };
+  }
+}
+
+export async function dbGetCreditTransactions(
+  userId: string,
+  options?: { type?: string; limit?: number; offset?: number }
+): Promise<DbCreditTransaction[]> {
+  try {
+    const limit = options?.limit || 50;
+    const offset = options?.offset || 0;
+    let query = 'SELECT * FROM wujie_credit_transactions WHERE user_id = $1';
+    const params: unknown[] = [userId];
+
+    if (options?.type) {
+      params.push(options.type);
+      query += ` AND type = $${params.length}`;
+    }
+
+    query += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
+    params.push(limit, offset);
+
+    const result = await execSql(query, params);
+    return result.rows as unknown as DbCreditTransaction[];
+  } catch (e) {
+    console.error('[db-storage] dbGetCreditTransactions error:', e);
+    return [];
+  }
+}
+
+export async function dbGetAllCredits(): Promise<DbCredits[]> {
+  try {
+    const result = await execSql('SELECT c.*, u.name as user_name FROM wujie_credits c LEFT JOIN wujie_users u ON c.user_id = u.id ORDER BY c.updated_at DESC');
+    return result.rows as unknown as DbCredits[];
+  } catch (e) {
+    console.error('[db-storage] dbGetAllCredits error:', e);
+    return [];
+  }
+}
+
+export async function dbGetRecentTransactions(limit: number = 100): Promise<DbCreditTransaction[]> {
+  try {
+    const result = await execSql(
+      `SELECT t.*, u.name as user_name FROM wujie_credit_transactions t LEFT JOIN wujie_users u ON t.user_id = u.id ORDER BY t.created_at DESC LIMIT $1`,
+      [limit]
+    );
+    return result.rows as unknown as DbCreditTransaction[];
+  } catch (e) {
+    console.error('[db-storage] dbGetRecentTransactions error:', e);
+    return [];
+  }
+}

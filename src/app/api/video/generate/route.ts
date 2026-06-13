@@ -19,11 +19,22 @@ import {
   type VideoCompatProfile,
 } from '@/lib/video-api';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { getSessionUser } from '@/lib/server-auth';
+import { consumeCredits } from '@/lib/credits';
 
 export const maxDuration = 300; // 5 min timeout
 
 export async function POST(request: NextRequest) {
   try {
+    // 积分扣除
+    const sessionUser = await getSessionUser(request);
+    if (sessionUser) {
+      const creditResult = await consumeCredits(sessionUser.id, 'video_generate');
+      if (!creditResult.success) {
+        return NextResponse.json({ error: creditResult.message || '积分不足' }, { status: 402 });
+      }
+    }
+
     const body = await request.json();
     const {
       prompt,

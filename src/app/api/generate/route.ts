@@ -6,6 +6,7 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { optionalApiAuth } from '@/lib/api-auth';
 import { translateApiError } from '@/lib/api-error-translate';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
+import { consumeCredits } from '@/lib/credits';
 
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
@@ -131,6 +132,14 @@ export async function POST(request: NextRequest) {
 
     const sessionUser = await getSessionUser(request);
     const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
+
+    // 积分扣除（登录用户才扣积分）
+    if (sessionUser) {
+      const creditResult = await consumeCredits(sessionUser.id, 'image_generate');
+      if (!creditResult.success) {
+        return NextResponse.json({ error: creditResult.message || '积分不足' }, { status: 402 });
+      }
+    }
 
     // 解析参考图片 URL（转换为 API 可访问的格式）
     // 优化：并行处理所有参考图，加速提交

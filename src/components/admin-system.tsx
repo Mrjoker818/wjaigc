@@ -49,7 +49,7 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
   const isGold = themeStyle === 'gold';
   const [users, setUsers] = useState<User[]>([]);
   const [providers, setProviders] = useState<ApiProvider[]>([]);
-  const [activeTab, setActiveTab] = useState<'users' | 'apis' | 'data' | 'ecom-templates'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'apis' | 'data' | 'ecom-templates' | 'credits'>('users');
   const [newUserName, setNewUserName] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('123456');
   const [newUserEmail, setNewUserEmail] = useState('');
@@ -90,6 +90,15 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
   const [editingEcomTpl, setEditingEcomTpl] = useState<Record<string, unknown> | null>(null);
   const [isEcomTplSaving, setIsEcomTplSaving] = useState(false);
   const [showNewEcomTpl, setShowNewEcomTpl] = useState(false);
+
+  // Credits tab state
+  const [creditsUsers, setCreditsUsers] = useState<Array<{ userId: string; userName: string; balance: number; totalRecharged: number; totalUsed: number }>>([]);
+  const [selectedCreditsUser, setSelectedCreditsUser] = useState<string | null>(null);
+  const [creditsTransactions, setCreditsTransactions] = useState<Array<{ id: string; type: string; amount: number; balanceAfter: number; description: string; createdAt: number }>>([]);
+  const [adminRechargeAmount, setAdminRechargeAmount] = useState(100);
+  const [adminRechargeDesc, setAdminRechargeDesc] = useState('');
+  const [isAdminRecharging, setIsAdminRecharging] = useState(false);
+  const [creditsLoading, setCreditsLoading] = useState(false);
   const [verifyResult, setVerifyResult] = useState<{ providerId: string; success: boolean; summary: string; tests: Array<{ name: string; status: string; detail: string }> } | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [apiBalances, setApiBalances] = useState<Array<{
@@ -186,6 +195,61 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
       }
     } catch { /* ignore */ }
   }, [loadUserData, viewingDataKey]);
+
+  // ─── Credits management ──────────────────────────────────────────
+
+  const loadCreditsOverview = useCallback(async () => {
+    setCreditsLoading(true);
+    try {
+      const resp = await fetch('/api/credits?action=admin-overview', { credentials: 'include' });
+      const data = await resp.json();
+      if (data.success) {
+        setCreditsUsers(data.users || []);
+      }
+    } catch { /* ignore */ }
+    setCreditsLoading(false);
+  }, []);
+
+  const loadCreditsTransactions = useCallback(async (userId: string) => {
+    setSelectedCreditsUser(userId);
+    setCreditsTransactions([]);
+    try {
+      const resp = await fetch(`/api/credits?action=transactions&userId=${userId}&limit=50`, { credentials: 'include' });
+      const data = await resp.json();
+      if (data.success) {
+        setCreditsTransactions(data.transactions || []);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const handleAdminRecharge = useCallback(async () => {
+    if (!selectedCreditsUser || adminRechargeAmount <= 0) return;
+    setIsAdminRecharging(true);
+    try {
+      const resp = await fetch('/api/credits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          action: 'admin-recharge',
+          userId: selectedCreditsUser,
+          amount: adminRechargeAmount,
+          description: adminRechargeDesc || `管理员充值 ${adminRechargeAmount} 积分`,
+        }),
+      });
+      const data = await resp.json();
+      if (data.success) {
+        await loadCreditsOverview();
+        await loadCreditsTransactions(selectedCreditsUser);
+        setAdminRechargeDesc('');
+      } else {
+        alert(data.error || '充值失败');
+      }
+    } catch {
+      alert('充值请求失败');
+    }
+    setIsAdminRecharging(false);
+  }, [selectedCreditsUser, adminRechargeAmount, adminRechargeDesc, loadCreditsOverview, loadCreditsTransactions]);
 
   // ─── Ecom template CRUD ──────────────────────────────────────────
 
@@ -288,7 +352,8 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
   useEffect(() => {
     void refresh();
     void refreshBalances();
-  }, [refresh, refreshBalances]);
+    void loadCreditsOverview();
+  }, [refresh, refreshBalances, loadCreditsOverview]);
 
   const panelClass = isGold ? 'bg-[#111] border-[#2a2a2a] text-white' : 'bg-white border-gray-200 text-gray-900';
   const softClass = isGold ? 'bg-[#171717] border-[#2a2a2a]' : 'bg-gray-50 border-gray-200';
@@ -754,11 +819,12 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
             ['users', '用户管理'],
             ['apis', 'API 管理'],
             ['data', '数据管理'],
+            ['credits', '积分管理'],
             ['ecom-templates', '电商模板'],
           ].map(([id, label]) => (
             <button
               key={id}
-              onClick={() => setActiveTab(id as 'users' | 'apis' | 'data' | 'ecom-templates')}
+              onClick={() => setActiveTab(id as 'users' | 'apis' | 'data' | 'ecom-templates' | 'credits')}
               aria-pressed={activeTab === id}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium ${activeTab === id ? 'bg-[#d4af37] text-black' : isGold ? 'text-[#888] hover:bg-[#1a1a1a]' : 'text-gray-500 hover:bg-gray-100'}`}
             >
@@ -1292,6 +1358,132 @@ export function AdminSystem({ themeStyle = 'gold', onClose }: AdminSystemProps) 
                     )}
                   </div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Tab: Credits Management ── */}
+          {activeTab === 'credits' && (
+            <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4">
+              {/* Left: User list with credits */}
+              <div className={`rounded-xl border p-4 h-fit ${softClass}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold flex items-center gap-2"><Zap className="w-4 h-4" />用户积分概览</h3>
+                  <button onClick={loadCreditsOverview} className="text-xs text-[#d4af37] hover:underline" disabled={creditsLoading}>
+                    {creditsLoading ? '加载中...' : '刷新'}
+                  </button>
+                </div>
+                {creditsUsers.length === 0 ? (
+                  <p className="text-xs text-[#666] text-center py-4">暂无数据</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-[500px] overflow-y-auto">
+                    {creditsUsers.map((u) => (
+                      <button
+                        key={u.userId}
+                        onClick={() => loadCreditsTransactions(u.userId)}
+                        className={`w-full text-left rounded-lg px-3 py-2.5 transition-colors ${
+                          selectedCreditsUser === u.userId
+                            ? 'bg-[#d4af37]/10 border border-[#d4af37]/30'
+                            : 'hover:bg-[#1a1a1a] border border-transparent'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-medium text-white">{u.userName}</span>
+                          <span className="text-xs font-bold text-[#d4af37]">{u.balance.toLocaleString()}</span>
+                        </div>
+                        <div className="flex items-center justify-between mt-1 text-[10px] text-[#666]">
+                          <span>充值 {u.totalRecharged.toLocaleString()}</span>
+                          <span>使用 {u.totalUsed.toLocaleString()}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Right: Selected user details */}
+              <div className={`rounded-xl border p-4 ${softClass}`}>
+                {!selectedCreditsUser ? (
+                  <p className="text-xs text-[#666] text-center py-8">选择左侧用户查看详情</p>
+                ) : (
+                  <div>
+                    {/* Admin recharge */}
+                    <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Wallet className="w-4 h-4" />管理员充值</h3>
+                    <div className="flex gap-2 mb-4">
+                      <input
+                        type="number"
+                        min="1"
+                        value={adminRechargeAmount}
+                        onChange={(e) => setAdminRechargeAmount(Math.max(1, parseInt(e.target.value) || 0))}
+                        className="flex-1 rounded-lg px-3 py-2 text-xs bg-[#1a1a1a] border border-[#333] text-white focus:border-[#d4af37] outline-none"
+                        placeholder="积分数量"
+                      />
+                      <input
+                        type="text"
+                        value={adminRechargeDesc}
+                        onChange={(e) => setAdminRechargeDesc(e.target.value)}
+                        className="flex-1 rounded-lg px-3 py-2 text-xs bg-[#1a1a1a] border border-[#333] text-white focus:border-[#d4af37] outline-none"
+                        placeholder="备注（可选）"
+                      />
+                      <button
+                        onClick={handleAdminRecharge}
+                        disabled={isAdminRecharging}
+                        className="px-4 py-2 rounded-lg text-xs font-medium bg-[#d4af37] text-black hover:bg-[#e5c44e] disabled:opacity-50 transition-colors"
+                      >
+                        {isAdminRecharging ? '充值中...' : '充值'}
+                      </button>
+                    </div>
+
+                    {/* Quick amounts */}
+                    <div className="flex gap-1.5 mb-4">
+                      {[50, 100, 200, 500, 1000].map((amt) => (
+                        <button
+                          key={amt}
+                          onClick={() => setAdminRechargeAmount(amt)}
+                          className={`px-2.5 py-1 rounded text-[10px] transition-colors ${
+                            adminRechargeAmount === amt
+                              ? 'bg-[#d4af37] text-black'
+                              : 'bg-[#1a1a1a] text-[#999] hover:text-white border border-[#333]'
+                          }`}
+                        >
+                          {amt}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Transaction history */}
+                    <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Activity className="w-4 h-4" />交易记录</h3>
+                    {creditsTransactions.length === 0 ? (
+                      <p className="text-xs text-[#666] text-center py-4">暂无记录</p>
+                    ) : (
+                      <div className="space-y-1.5 max-h-[400px] overflow-y-auto">
+                        <div className="grid grid-cols-[1fr_80px_80px_100px_80px] gap-2 px-3 py-1.5 text-[10px] text-[#666] font-medium uppercase">
+                          <span>类型</span>
+                          <span className="text-right">数量</span>
+                          <span className="text-right">余额</span>
+                          <span>备注</span>
+                          <span className="text-right">时间</span>
+                        </div>
+                        {creditsTransactions.map((tx) => (
+                          <div
+                            key={tx.id}
+                            className="grid grid-cols-[1fr_80px_80px_100px_80px] gap-2 px-3 py-2 rounded-lg bg-[#1a1a1a] text-xs items-center"
+                          >
+                            <span className="font-medium">
+                              {tx.type === 'recharge' ? '充值' : tx.type === 'consume' ? '消费' : tx.type === 'refund' ? '退款' : '管理员调整'}
+                            </span>
+                            <span className={`text-right font-bold ${tx.amount > 0 ? 'text-[#d4af37]' : 'text-[#ff6b6b]'}`}>
+                              {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}
+                            </span>
+                            <span className="text-right text-[#999]">{tx.balanceAfter.toLocaleString()}</span>
+                            <span className="text-[#666] truncate" title={tx.description}>{tx.description || '-'}</span>
+                            <span className="text-right text-[#666]">{new Date(tx.createdAt).toLocaleDateString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}

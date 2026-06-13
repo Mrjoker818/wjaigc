@@ -5,6 +5,7 @@ import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { optionalApiAuth } from '@/lib/api-auth';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
+import { consumeCredits } from '@/lib/credits';
 
 export const maxDuration = 60;
 
@@ -14,6 +15,14 @@ export async function POST(request: NextRequest) {
     const { model, messages, stream = true, providerId, userId: requestUserId } = await request.json();
     const sessionUser = await getSessionUser(request);
     const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
+
+    // 积分扣除（登录用户才扣积分）
+    if (sessionUser) {
+      const creditResult = await consumeCredits(sessionUser.id, 'chat');
+      if (!creditResult.success) {
+        return NextResponse.json({ error: creditResult.message || '积分不足' }, { status: 402 });
+      }
+    }
 
     if (!model || !messages) {
       return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });

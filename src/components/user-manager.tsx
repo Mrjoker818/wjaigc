@@ -48,7 +48,7 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
   const [projects, setProjects] = useState<Project[]>([]);
   const [usageStats, setUsageStats] = useState<UsageStats[]>([]);
   const [availableUsers, setAvailableUsers] = useState<User[]>([]);
-  const [activeTab, setActiveTab] = useState<'projects' | 'stats' | 'settings'>('projects');
+  const [activeTab, setActiveTab] = useState<'projects' | 'credits' | 'stats' | 'settings'>('projects');
   const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
   const [loginName, setLoginName] = useState('Mr.joker');
   const [loginPassword, setLoginPassword] = useState('');
@@ -58,6 +58,19 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
   const [newProjectDescription, setNewProjectDescription] = useState('');
   const importProjectInputRef = useRef<HTMLInputElement>(null);
   const isGold = themeStyle === 'gold';
+
+  // Credits state
+  const [credits, setCredits] = useState<{ balance: number; totalRecharged: number; totalUsed: number } | null>(null);
+  const [creditTransactions, setCreditTransactions] = useState<Array<{ id: string; type: string; amount: number; balanceAfter: number; description: string | null; createdAt: number; user_name?: string }>>([]);
+  const [customRechargeAmount, setCustomRechargeAmount] = useState(100);
+  const [isRecharging, setIsRecharging] = useState(false);
+  const [rechargeError, setRechargeError] = useState('');
+
+  // Derived values
+  const creditsBalance = credits?.balance ?? 0;
+  const creditsTotalRecharged = credits?.totalRecharged ?? 0;
+  const creditsTotalUsed = credits?.totalUsed ?? 0;
+  const creditsTransactions = creditTransactions;
 
   // Custom dialog state
   const [promptDialog, setPromptDialog] = useState<{open: boolean, title: string, defaultValue: string, placeholder: string, onConfirm: ((value: string) => void) | null}>({open: false, title: '', defaultValue: '', placeholder: '', onConfirm: null});
@@ -117,6 +130,54 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
     if (!user?.password) return;
     void syncServerSession(user, user.password);
   }, [user, syncServerSession]);
+
+  // Load credits when user is logged in
+  const loadCreditsData = useCallback(async () => {
+    if (!user) return;
+    try {
+      const [creditsRes, txRes] = await Promise.all([
+        fetch('/api/credits', { credentials: 'include' }),
+        fetch('/api/credits?transactions=true&limit=30', { credentials: 'include' }),
+      ]);
+      if (creditsRes.ok) {
+        const creditsData = await creditsRes.json();
+        if (creditsData.success) setCredits(creditsData.credits);
+      }
+      if (txRes.ok) {
+        const txData = await txRes.json();
+        if (txData.success) setCreditTransactions(txData.transactions || []);
+      }
+    } catch {
+      // Credits system may not be available
+    }
+  }, [user]);
+
+  const handleRecharge = useCallback(async (amount: number) => {
+    if (!user || amount <= 0) return;
+    setIsRecharging(true);
+    setRechargeError('');
+    try {
+      const resp = await fetch('/api/credits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ action: 'recharge', amount }),
+      });
+      const data = await resp.json();
+      if (data.success) {
+        await loadCreditsData();
+      } else {
+        setRechargeError(data.error || '充值失败');
+      }
+    } catch {
+      setRechargeError('充值请求失败');
+    }
+    setIsRecharging(false);
+  }, [user, loadCreditsData]);
+
+  useEffect(() => {
+    if (user) void loadCreditsData();
+  }, [user, loadCreditsData]);
 
   const submitLogin = async (name: string, password: string) => {
     try {
@@ -426,30 +487,7 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
                 </div>
               )}
 
-              {/* 已有用户快捷登录 */}
-              {allUsers.length > 0 && (
-                <div className="mt-6 space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground/50">已有用户</p>
-                  {allUsers.filter((existingUser) => existingUser.role !== 'admin').map((existingUser) => (
-                    <button
-                      key={existingUser.id}
-                      onClick={() => void handleSelectUser(existingUser)}
-                      className="w-full p-3 rounded-lg text-left transition-all group flex items-center gap-3 hover:bg-muted/80 bg-muted/30 border border-border/30 hover:border-primary/30"
-                    >
-                      <div className="w-10 h-10 rounded-md flex items-center justify-center text-primary-foreground font-bold text-sm bg-gradient-to-br from-primary to-[#b8860b]">
-                        {existingUser.name.charAt(0).toUpperCase()}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium truncate text-sm text-foreground">{existingUser.name}</p>
-                        <p className="text-xs truncate text-muted-foreground">{existingUser.email || '未设置邮箱'}</p>
-                      </div>
-                      <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity text-primary" />
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <p className="mt-6 text-xs text-muted-foreground/50">请联系管理员创建新账户。</p>
+                  <p className="mt-6 text-xs text-muted-foreground/50">请联系管理员创建新账户。</p>
             </div>
           </div>
         </div>
@@ -459,6 +497,7 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
 
   const tabs = [
     { id: 'projects' as const, label: '项目', icon: Folder },
+    { id: 'credits' as const, label: '积分', icon: Zap },
     { id: 'stats' as const, label: '统计', icon: BarChart3 },
     { id: 'settings' as const, label: '设置', icon: Settings },
   ];
@@ -582,6 +621,136 @@ export function UserManager({ themeStyle = 'gold', onLogin, onLogout, onSelectPr
                           <button onClick={() => handleDeleteProject(project.id)} className={`p-2 rounded-lg transition-colors ${isGold ? 'text-red-500/70 hover:bg-red-900/20 hover:text-red-400' : 'text-red-300 hover:bg-red-50 hover:text-red-500'}`} title="删除项目">
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'credits' && (
+            <div>
+              {/* 积分余额卡片 */}
+              <div className={`rounded-xl p-4 mb-4 ${isGold ? 'bg-[#1a1a1a] border border-[#333]' : 'bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100'}`}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className={`text-xs font-medium ${isGold ? 'text-[#999]' : 'text-gray-500'}`}>当前积分</span>
+                  <button
+                    onClick={loadCreditsData}
+                    className={`text-xs px-2 py-0.5 rounded ${isGold ? 'text-[#d4af37] hover:bg-[#252525]' : 'text-blue-500 hover:bg-blue-50'} transition-colors`}
+                  >
+                    刷新
+                  </button>
+                </div>
+                <div className={`text-3xl font-bold ${isGold ? 'text-[#d4af37]' : 'text-blue-600'}`}>
+                  {creditsBalance.toLocaleString()}
+                </div>
+                <div className={`flex gap-4 mt-2 text-xs ${isGold ? 'text-[#888]' : 'text-gray-400'}`}>
+                  <span>累计充值: {creditsTotalRecharged.toLocaleString()}</span>
+                  <span>累计使用: {creditsTotalUsed.toLocaleString()}</span>
+                </div>
+              </div>
+
+              {/* 充值套餐 */}
+              <p className={`text-xs font-medium uppercase tracking-wider mb-3 ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>充值套餐</p>
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                {[
+                  { amount: 100, price: '10', unit: '元' },
+                  { amount: 500, price: '45', unit: '元', badge: '9折' },
+                  { amount: 1000, price: '80', unit: '元', badge: '8折' },
+                  { amount: 5000, price: '350', unit: '元', badge: '7折' },
+                ].map((pkg) => (
+                  <button
+                    key={pkg.amount}
+                    onClick={() => handleRecharge(pkg.amount)}
+                    disabled={isRecharging}
+                    className={`relative rounded-lg p-3 text-left transition-all ${
+                      isGold
+                        ? 'bg-[#1a1a1a] border border-[#333] hover:border-[#d4af37]/50 disabled:opacity-50'
+                        : 'bg-white border border-gray-200 hover:border-blue-300 hover:shadow-sm disabled:opacity-50'
+                    }`}
+                  >
+                    {pkg.badge && (
+                      <span className={`absolute -top-1.5 -right-1.5 text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                        isGold ? 'bg-[#d4af37] text-black' : 'bg-blue-500 text-white'
+                      }`}>
+                        {pkg.badge}
+                      </span>
+                    )}
+                    <div className={`text-lg font-bold ${isGold ? 'text-white' : 'text-gray-900'}`}>
+                      {pkg.amount.toLocaleString()}
+                    </div>
+                    <div className={`text-xs ${isGold ? 'text-[#999]' : 'text-gray-500'}`}>
+                      ¥{pkg.price}
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {/* 自定义充值 */}
+              <div className={`rounded-lg p-3 mb-4 ${isGold ? 'bg-[#1a1a1a] border border-[#333]' : 'bg-gray-50 border border-gray-200'}`}>
+                <p className={`text-xs mb-2 ${isGold ? 'text-[#999]' : 'text-gray-500'}`}>自定义充值数量</p>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    value={customRechargeAmount}
+                    onChange={(e) => setCustomRechargeAmount(Math.max(1, parseInt(e.target.value) || 0))}
+                    className={`flex-1 rounded-lg px-3 py-2 text-sm outline-none ${
+                      isGold
+                        ? 'bg-[#252525] border border-[#444] text-white focus:border-[#d4af37]'
+                        : 'bg-white border border-gray-200 text-gray-900 focus:border-blue-400'
+                    }`}
+                    placeholder="输入积分数量"
+                  />
+                  <button
+                    onClick={() => handleRecharge(customRechargeAmount)}
+                    disabled={isRecharging || customRechargeAmount <= 0}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-50 ${
+                      isGold
+                        ? 'bg-[#d4af37] text-black hover:bg-[#e5c44e]'
+                        : 'bg-blue-500 text-white hover:bg-blue-600'
+                    }`}
+                  >
+                    充值
+                  </button>
+                </div>
+              </div>
+
+              {/* 交易记录 */}
+              <p className={`text-xs font-medium uppercase tracking-wider mb-3 ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>交易记录</p>
+              {creditsTransactions.length === 0 ? (
+                <p className={`text-xs text-center py-6 ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>暂无记录</p>
+              ) : (
+                <div className="space-y-1.5 max-h-[280px] overflow-y-auto">
+                  {creditsTransactions.map((tx) => (
+                    <div
+                      key={tx.id}
+                      className={`flex items-center justify-between rounded-lg px-3 py-2 ${
+                        isGold ? 'bg-[#1a1a1a]' : 'bg-white border border-gray-100'
+                      }`}
+                    >
+                      <div>
+                        <div className={`text-xs font-medium ${isGold ? 'text-white' : 'text-gray-900'}`}>
+                          {tx.type === 'recharge' ? '充值' : tx.type === 'consume' ? '消费' : tx.type === 'refund' ? '退款' : '管理员调整'}
+                        </div>
+                        {tx.description && (
+                          <div className={`text-[10px] mt-0.5 ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>
+                            {tx.description}
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <div className={`text-xs font-bold ${
+                          tx.amount > 0
+                            ? (isGold ? 'text-[#d4af37]' : 'text-green-500')
+                            : (isGold ? 'text-[#ff6b6b]' : 'text-red-500')
+                        }`}>
+                          {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}
+                        </div>
+                        <div className={`text-[10px] ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>
+                          {new Date(tx.createdAt).toLocaleDateString()}
                         </div>
                       </div>
                     </div>
