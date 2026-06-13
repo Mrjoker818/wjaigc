@@ -647,6 +647,9 @@ function CanvasApp() {
     const userMgr = UserManagerCore.getInstance();
     const unsubscribe = userMgr.onProjectsChanged(() => {
       try {
+        // ★ 数据隔离保护：验证当前用户身份，防止跨用户数据污染
+        const currentUserId = UserManagerCore.getInstance().getUser()?.id;
+        if (!currentUserId || currentUserId !== currentUser?.id) return;
         // 标记服务器同步合并中，防止自动保存用旧闭包数据覆盖
         serverSyncMergeRef.current = true;
         const projects = userMgr.getProjects();
@@ -3119,6 +3122,9 @@ function CanvasApp() {
       {authChecked && !currentUser && (
         <LoginPanel
           onLogin={async (user) => {
+            // 关键：先清除旧用户的所有状态，防止数据跨用户泄露
+            setCurrentProject(null);
+            setImages([]);
             setCurrentUser(user);
             // 加载项目数据后跳转到工作台
             try {
