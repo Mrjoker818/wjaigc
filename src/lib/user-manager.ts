@@ -103,6 +103,19 @@ export class UserManager {
         };
       }
       this.ensureDefaultAdmin();
+      // 构造函数加载数据后，验证所有用户的项目数据隔离
+      if (this.multiUserData?.userData) {
+        for (const uid of Object.keys(this.multiUserData.userData)) {
+          const ud = this.multiUserData.userData[uid];
+          if (ud?.projects) {
+            ud.projects = ud.projects.filter(p => !p.userId || p.userId === uid);
+            for (const project of ud.projects) {
+              if (!project.userId) project.userId = uid;
+            }
+          }
+        }
+      }
+
       // 规范化图片 URL：将旧格式 /uploads/xxx 转换为 /api/serve-upload/uploads/xxx
       this.normalizeImageUrls();
       // 持久化规范化后的 URL 到 localStorage，避免每次重复转换
@@ -306,8 +319,13 @@ export class UserManager {
         return true;
       }
 
+      // 【数据隔离】过滤掉不属于当前用户的项目（防御性检查，防止跨用户数据泄漏）
+      const currentUserId = this.currentUserId;
+      serverProjects = serverProjects.filter(p => !p.userId || p.userId === currentUserId);
+      const localProjectsFiltered = userData.projects.filter(p => !p.userId || p.userId === currentUserId);
+
       // 合并策略：按项目 ID 合并，保留更新时间更晚的版本
-      const localHasData = userData.projects.length > 0;
+      const localHasData = localProjectsFiltered.length > 0;
       const serverHasData = serverProjects.length > 0;
 
       if (!localHasData && serverHasData) {
@@ -324,7 +342,8 @@ export class UserManager {
         // 双方都有数据，按项目 ID 逐个合并
         // 关键修复：不再用 "updatedAt 更大者覆盖" 策略（会丢失另一方的图片），
         // 而是对 canvasImages 按图片 ID 做并集合并，确保双方图片都不丢失
-        const localProjectMap = new Map(userData.projects.map(p => [p.id, p]));
+        // 【数据隔离】使用过滤后的本地项目列表
+        const localProjectMap = new Map(localProjectsFiltered.map(p => [p.id, p]));
         const mergedProjects: Project[] = [];
         for (const sp of serverProjects) {
           const lp = localProjectMap.get(sp.id);
@@ -652,6 +671,10 @@ export class UserManager {
     this.currentUserId = userId;
     this.saveData();
     return true;
+  }
+
+  getCurrentUserId(): string | null {
+    return this.currentUserId || null;
   }
 
   getUser(): User | null {

@@ -440,8 +440,9 @@ function CanvasApp() {
     autoSaveRef.current = setTimeout(async () => {
       // 二次检查：定时器触发时如果正在切换项目，也跳过
       if (switchingProjectRef.current) return;
+      // 验证用户一致性：定时器闭包捕获的 userId 可能已过时
+      if (!currentUser?.id) return;
       try {
-        const mgr = UserManagerCore.getInstance();
         // 先将 data:/blob: URL 持久化到服务器
         const urlMapping: Record<string, string> = {};
         const sourceUrlMapping: Record<string, string> = {};
@@ -524,12 +525,14 @@ function CanvasApp() {
             apiProvider: img.apiProvider || '',
             apiBaseUrl: img.apiBaseUrl || '',
           }))
-          .filter(img => img.url) as PersistableCanvasImage[];        const updatedMeta = {
+          .filter(img => img.url) as PersistableCanvasImage[];
+        const updatedMeta = {
           ...(currentProject.metadata || {}),
           groups: groupsRef.current,
           viewState: viewStateRef.current,
         };
-        mgr.updateProject(currentProject.id, {
+        const autoSaveMgr = UserManagerCore.getInstance();
+        autoSaveMgr.updateProject(currentProject.id, {
           canvasImages: persistableCanvasImages,
           metadata: updatedMeta,
         });
@@ -566,6 +569,8 @@ function CanvasApp() {
       if (!currentProject) return;
       try {
         const mgr = UserManagerCore.getInstance();
+        // 验证用户一致性：确保只保存当前登录用户的数据
+        if (!currentUser?.id) return;
         // 保留所有图片URL，包括 data: URL（避免异步持久化未完成时丢失图片）
         const persistableCanvasImages = latestImagesRef.current
           .map(img => ({
@@ -672,11 +677,13 @@ function CanvasApp() {
               const validImages = latest.canvasImages.filter(
                 (img) => img.url || img.isProcessingPlaceholder
               );
-              // 从本地React状态构建已有图片字段索引（modelName/apiProvider/originalWidth/originalHeight 等）
-              // 服务器数据可能缺少这些字段，需要从本地补充
+              // ★ 数据隔离：仅从当前项目已有的服务器图片 ID 集合中查找本地补充数据
+              // 防止 latestImagesRef 中残留的前用户图片通过字段回填泄露到当前用户
+              const serverImgIdSet = new Set(latest.canvasImages.map(img => img.id));
               const localImgMap = new Map<string, CanvasImage>();
               for (const li of latestImagesRef.current) {
-                if (li.id) localImgMap.set(li.id, li);
+                // 仅纳入服务器也有的图片 ID，排除不属于当前项目的图片
+                if (li.id && serverImgIdSet.has(li.id)) localImgMap.set(li.id, li);
               }
               const enrichedImages = validImages.map((img) => {
                 const localImg = localImgMap.get(img.id);
@@ -2737,6 +2744,7 @@ function CanvasApp() {
           setCurrentUser(null);
           setCurrentProject(null);
           setImages([]);
+          latestImagesRef.current = []; // 立即清除 ref，防止残留图片数据
           setInitialGroups([]);
           setAppMode('canvas');
           toast.info('已退出登录', {
@@ -3125,6 +3133,7 @@ function CanvasApp() {
             // 关键：先清除旧用户的所有状态，防止数据跨用户泄露
             setCurrentProject(null);
             setImages([]);
+            latestImagesRef.current = []; // 立即清除 ref，防止 onProjectsChanged 用旧图片覆盖新用户数据
             setCurrentUser(user);
             // 加载项目数据后跳转到工作台
             try {
