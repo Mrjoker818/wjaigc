@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbGetSystemSetting } from '@/lib/db-storage';
 
-/** GET：公开的支付状态（无需管理员权限，仅返回是否可用） */
+/** GET：公开的支付状态（无需管理员权限，返回收款码可用状态和收款码图片） */
 export async function GET(_request: NextRequest) {
   try {
     let cfg: Record<string, unknown> | null = null;
@@ -10,26 +10,18 @@ export async function GET(_request: NextRequest) {
       if (dbVal) cfg = typeof dbVal === 'string' ? JSON.parse(dbVal) : dbVal;
     } catch { /* ignore */ }
 
-    // 合并环境变量
-    const alipayEnabled = (cfg?.alipay as Record<string, unknown>)?.enabled as boolean
-      || !!process.env.ALIPAY_APP_ID;
-    const alipayHasKeys = !!(
-      ((cfg?.alipay as Record<string, unknown>)?.privateKey as string) || process.env.ALIPAY_PRIVATE_KEY
-    ) && !!(
-      ((cfg?.alipay as Record<string, unknown>)?.publicKey as string) || process.env.ALIPAY_PUBLIC_KEY
-    );
-    const alipayReady = alipayEnabled && alipayHasKeys;
+    const wechatEnabled = (cfg?.wechatEnabled as boolean) || false;
+    const wechatQrUrl = (cfg?.wechatQrUrl as string) || '';
+    const alipayEnabled = (cfg?.alipayEnabled as boolean) || false;
+    const alipayQrUrl = (cfg?.alipayQrUrl as string) || '';
+    const note = (cfg?.note as string) || '付款时请备注您的用户名，方便管理员确认';
 
-    const wechatEnabled = (cfg?.wechat as Record<string, unknown>)?.enabled as boolean
-      || !!process.env.WECHAT_MCH_ID;
-    const wechatHasKeys = !!(
-      ((cfg?.wechat as Record<string, unknown>)?.apiKey as string) || process.env.WECHAT_API_KEY
-    );
-    const wechatReady = wechatEnabled && wechatHasKeys;
+    const wechatReady = wechatEnabled && !!wechatQrUrl;
+    const alipayReady = alipayEnabled && !!alipayQrUrl;
 
     const methods: string[] = [];
-    if (alipayReady) methods.push('alipay');
     if (wechatReady) methods.push('wechat');
+    if (alipayReady) methods.push('alipay');
 
     return NextResponse.json({
       success: true,
@@ -37,10 +29,16 @@ export async function GET(_request: NextRequest) {
         alipay: alipayReady,
         wechat: wechatReady,
       },
+      // 返回收款码图片URL供前端展示
+      qrUrls: {
+        wechat: wechatReady ? wechatQrUrl : '',
+        alipay: alipayReady ? alipayQrUrl : '',
+      },
+      note,
       canRecharge: methods.length > 0,
       methods,
     });
   } catch {
-    return NextResponse.json({ success: false, canRecharge: false, methods: [] });
+    return NextResponse.json({ success: false, canRecharge: false, methods: [], qrUrls: { wechat: '', alipay: '' }, note: '' });
   }
 }

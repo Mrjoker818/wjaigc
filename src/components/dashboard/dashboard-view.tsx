@@ -149,20 +149,20 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [rechargeError, setRechargeError] = useState('');
   // Payment flow state
   const [paymentStep, setPaymentStep] = useState<'select' | 'paying' | 'success'>('select');
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'alipay' | 'wechat'>('alipay');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'alipay' | 'wechat'>('wechat');
   const [pendingOrderId, setPendingOrderId] = useState<string | null>(null);
   const [pendingOrderAmount, setPendingOrderAmount] = useState(0);
-  const [paymentQrUrl, setPaymentQrUrl] = useState<string | null>(null);
-  const [paymentPageUrl, setPaymentPageUrl] = useState<string | null>(null);
   const [paymentPolling, setPaymentPolling] = useState(false);
-  // Payment config state (admin)
+  // Payment config state (admin) — personal QR code mode
   const [paymentConfig, setPaymentConfig] = useState<{
-    alipay: { appId: string; privateKey: string; publicKey: string; notifyUrl: string; sandbox: boolean } | null;
-    wechat: { mchId: string; appId: string; apiKey: string; notifyUrl: string } | null;
-  }>({ alipay: null, wechat: null });
+    wechatQrUrl: string;
+    alipayQrUrl: string;
+  }>({ wechatQrUrl: '', alipayQrUrl: '' });
   const [paymentStatus, setPaymentStatus] = useState<{ alipay: boolean; wechat: boolean }>({ alipay: false, wechat: false });
   const [configSaving, setConfigSaving] = useState(false);
   const [configSaveMsg, setConfigSaveMsg] = useState<string | null>(null);
+  // Admin pending orders
+  const [pendingOrders, setPendingOrders] = useState<Array<{ orderId: string; userId: string; userName: string; amount: number; priceCny: number; paymentMethod: string; createdAt: string }>>([]);
   const [creditsPricing, setCreditsPricing] = useState<{
     creditsToCNY: number;
     cnyToCredits: number;
@@ -192,7 +192,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         ]);
         if (configRes.ok) {
           const configData = await configRes.json();
-          if (configData.success) setPaymentConfig(configData.config);
+          if (configData.success && configData.config) {
+            setPaymentConfig({
+              wechatQrUrl: configData.config.wechatQrUrl || '',
+              alipayQrUrl: configData.config.alipayQrUrl || '',
+            });
+          }
         }
         if (statusRes.ok) {
           const statusData = await statusRes.json();
@@ -733,7 +738,6 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     }
     setIsRecharging(true);
     setRechargeError('');
-    setPaymentStep('paying');
     setSelectedPaymentMethod(method);
     try {
       const resp = await fetch('/api/credits', {
@@ -745,22 +749,20 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       if (data.success && data.orderId) {
         setPendingOrderId(data.orderId);
         setPendingOrderAmount(data.amount);
-        setPaymentQrUrl(data.paymentData?.qrCode || null);
-        setPaymentPageUrl(data.paymentData?.payUrl || null);
-        // Start polling for payment status
+        setPaymentStep('paying');
+        // Start polling for admin confirmation
         setPaymentPolling(true);
         pollOrderStatus(data.orderId);
       } else {
         setRechargeError(data.error || '创建订单失败');
-        setPaymentStep('select');
       }
-    } catch { setRechargeError('网络错误'); setPaymentStep('select'); }
+    } catch { setRechargeError('网络错误'); }
     setIsRecharging(false);
   }, []);
 
   const pollOrderStatus = useCallback(async (orderId: string) => {
     let attempts = 0;
-    const maxAttempts = 120; // 10 minutes max (5s interval)
+    const maxAttempts = 240; // 20 minutes max (5s interval)
     const poll = async () => {
       try {
         const resp = await fetch('/api/credits', {
@@ -769,14 +771,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           body: JSON.stringify({ action: 'query-order', orderId }),
         });
         const data = await resp.json();
-        if (data.success && data.order?.paymentStatus === 'paid') {
+        if (data.success && data.order?.paymentStatus === 'confirmed') {
           setPaymentStep('success');
           setPaymentPolling(false);
           await loadCreditsData();
           return;
         }
         if (data.order?.paymentStatus === 'expired' || data.order?.paymentStatus === 'failed') {
-          setRechargeError(data.order.paymentStatus === 'expired' ? '订单已过期，请重新发起' : '支付失败，请重试');
+          setRechargeError(data.order.paymentStatus === 'expired' ? '订单已过期，请重新发起' : '订单已取消');
           setPaymentStep('select');
           setPaymentPolling(false);
           return;
@@ -799,11 +801,17 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       const resp = await fetch('/api/credits/payment-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'save', alipay: paymentConfig.alipay, wechat: paymentConfig.wechat }),
+        body: JSON.stringify({ action: 'save', wechatQrUrl: paymentConfig.wechatQrUrl, alipayQrUrl: paymentConfig.alipayQrUrl }),
       });
       const data = await resp.json();
       if (data.success) {
         setConfigSaveMsg('保存成功');
+        // Refresh payment status
+        const statusRes = await fetch('/api/credits/payment-status');
+        if (statusRes.ok) {
+          const statusData = await statusRes.json();
+          if (statusData.success) setPaymentStatus(statusData.status);
+        }
         setTimeout(() => setConfigSaveMsg(null), 3000);
       } else {
         setConfigSaveMsg(data.error || '保存失败');
@@ -814,22 +822,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setConfigSaving(false);
   }, [paymentConfig]);
 
-  const handleTestPaymentConfig = useCallback(async (method: 'alipay' | 'wechat') => {
+  const loadPendingOrders = useCallback(async () => {
     try {
-      const resp = await fetch('/api/credits/payment-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'test', method }),
-      });
+      const resp = await fetch('/api/credits?action=pending-orders');
       const data = await resp.json();
-      if (data.success && data.result?.pass) {
-        alert(`${method === 'alipay' ? '支付宝' : '微信支付'}配置验证通过！`);
-      } else {
-        alert(`配置验证失败：${data.result?.message || data.error || '未知错误'}`);
-      }
-    } catch {
-      alert('网络错误，无法验证');
-    }
+      if (data.success) setPendingOrders(data.orders || []);
+    } catch { /* ignore */ }
   }, []);
 
   const loadCreditsOverview = useCallback(async () => {
@@ -841,6 +839,23 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     } catch { /* ignore */ }
     setCreditsLoading(false);
   }, []);
+
+  const handleConfirmOrder = useCallback(async (orderId: string, action: 'confirm' | 'reject') => {
+    try {
+      const resp = await fetch('/api/credits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'confirm-order', orderId, confirmAction: action }),
+      });
+      const data = await resp.json();
+      if (data.success) {
+        await loadPendingOrders();
+        await loadCreditsOverview();
+      } else {
+        alert(data.error || '操作失败');
+      }
+    } catch { alert('网络错误'); }
+  }, [loadPendingOrders, loadCreditsOverview]);
 
   const loadCreditsTransactions = useCallback(async (userId: string) => {
     try {
@@ -875,7 +890,24 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   useEffect(() => {
     if (activeTab === 'credits') {
       void loadCreditsData();
-      if (isAdmin) void loadCreditsOverview();
+      if (isAdmin) {
+        void loadCreditsOverview();
+        void loadPendingOrders();
+      } else {
+        // Non-admin users need to check payment status
+        (async () => {
+          try {
+            const res = await fetch('/api/credits/payment-status');
+            if (res.ok) {
+              const data = await res.json();
+              if (data.success) setPaymentStatus(data.status);
+            }
+          } catch { /* ignore */ }
+        })();
+      }
+    }
+    if (activeTab === 'payment-config' && isAdmin) {
+      void loadPendingOrders();
     }
   }, [activeTab, isAdmin, loadCreditsData, loadCreditsOverview]);
 
@@ -1350,18 +1382,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     <CreditCard className="w-12 h-12 mx-auto mb-4 opacity-40" />
                     <h3 className={`text-lg font-semibold ${textPrimary} mb-2`}>支付功能暂未开通</h3>
                     <p className={`text-sm ${textSecondary} mb-4`}>
-                      管理员尚未配置支付平台，暂时无法在线充值。<br/>
+                      管理员尚未配置收款码，暂时无法在线充值。<br/>
                       如需充值积分，请联系管理员手动添加。
                     </p>
-                    {isAdmin && (
-                      <button
-                        onClick={() => setActiveTab('payment-config')}
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500 text-white text-sm font-medium hover:bg-blue-600 transition-colors"
-                      >
-                        <Settings className="w-4 h-4" />
-                        前往配置支付
-                      </button>
-                    )}
                   </div>
                 ) : (
                 <>
@@ -1417,40 +1440,40 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   {/* Payment Method Selection */}
                   <div className={`text-sm font-medium ${textPrimary} mb-2`}>选择支付方式</div>
                   <div className="flex gap-3 mb-4">
-                    <button
-                      onClick={() => setSelectedPaymentMethod('alipay')}
-                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border transition-all ${
-                        selectedPaymentMethod === 'alipay'
-                          ? 'border-blue-500 bg-blue-500/10'
-                          : `${borderColor} ${cardBg} hover:border-blue-500/50`
-                      }`}
-                    >
-                      <div className="w-8 h-8 rounded-lg bg-[#1677FF] flex items-center justify-center text-white text-xs font-bold">支</div>
-                      <span className={`text-sm font-medium ${selectedPaymentMethod === 'alipay' ? 'text-blue-500' : textPrimary}`}>支付宝</span>
-                    </button>
-                    <button
-                      onClick={() => setSelectedPaymentMethod('wechat')}
-                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border transition-all ${
-                        selectedPaymentMethod === 'wechat'
-                          ? 'border-green-500 bg-green-500/10'
-                          : `${borderColor} ${cardBg} hover:border-green-500/50`
-                      }`}
-                    >
-                      <div className="w-8 h-8 rounded-lg bg-[#07C160] flex items-center justify-center text-white text-xs font-bold">微</div>
-                      <span className={`text-sm font-medium ${selectedPaymentMethod === 'wechat' ? 'text-green-500' : textPrimary}`}>微信支付</span>
-                    </button>
+                    {paymentStatus.wechat && (
+                      <button
+                        onClick={() => setSelectedPaymentMethod('wechat')}
+                        className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border transition-all ${
+                          selectedPaymentMethod === 'wechat'
+                            ? 'border-green-500 bg-green-500/10'
+                            : `${borderColor} ${cardBg} hover:border-green-500/50`
+                        }`}
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-[#07C160] flex items-center justify-center text-white text-xs font-bold">微</div>
+                        <span className={`text-sm font-medium ${selectedPaymentMethod === 'wechat' ? 'text-green-500' : textPrimary}`}>微信支付</span>
+                      </button>
+                    )}
+                    {paymentStatus.alipay && (
+                      <button
+                        onClick={() => setSelectedPaymentMethod('alipay')}
+                        className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border transition-all ${
+                          selectedPaymentMethod === 'alipay'
+                            ? 'border-blue-500 bg-blue-500/10'
+                            : `${borderColor} ${cardBg} hover:border-blue-500/50`
+                        }`}
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-[#1677FF] flex items-center justify-center text-white text-xs font-bold">支</div>
+                        <span className={`text-sm font-medium ${selectedPaymentMethod === 'alipay' ? 'text-blue-500' : textPrimary}`}>支付宝</span>
+                      </button>
+                    )}
                   </div>
 
                   <button
                     onClick={() => handleCreateOrder(Number(rechargeAmount) || 0, selectedPaymentMethod)}
                     disabled={isRecharging || !rechargeAmount || Number(rechargeAmount) <= 0}
-                    className={`w-full py-3 rounded-xl text-sm font-semibold text-white transition-colors disabled:opacity-50 ${
-                      selectedPaymentMethod === 'alipay'
-                        ? 'bg-[#1677FF] hover:bg-[#0958d9]'
-                        : 'bg-[#07C160] hover:bg-[#06ad56]'
-                    }`}
+                    className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-colors disabled:opacity-50 bg-[#07C160] hover:bg-[#06ad56]"
                   >
-                    {isRecharging ? '创建订单中...' : `${selectedPaymentMethod === 'alipay' ? '支付宝' : '微信'}支付 ¥${(Number(rechargeAmount || 0) * 0.01).toFixed(2)}`}
+                    {isRecharging ? '创建订单中...' : `扫码支付 ¥${(Number(rechargeAmount || 0) * 0.01).toFixed(2)}`}
                   </button>
 
                   {rechargeError && (
@@ -1462,13 +1485,15 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             </>
             )}
 
-            {/* ── Payment Step: Paying ── */}
+            {/* ── Payment Step: Paying (QR Code Display) ── */}
             {paymentStep === 'paying' && (
               <div className={`${cardBg} rounded-xl border ${borderColor} p-6 mb-6`}>
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className={`text-base font-semibold ${textPrimary}`}>确认支付</h3>
+                  <h3 className={`text-base font-semibold ${textPrimary}`}>
+                    {selectedPaymentMethod === 'wechat' ? '微信' : '支付宝'}扫码支付
+                  </h3>
                   <button
-                    onClick={() => { setPaymentStep('select'); setPaymentPolling(false); setRechargeError(''); }}
+                    onClick={() => { setPaymentStep('select'); setPaymentPolling(false); setRechargeError(''); setPendingOrderId(null); }}
                     className={`text-xs ${textSecondary} hover:text-red-500`}
                   >
                     取消支付
@@ -1476,47 +1501,51 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 </div>
                 <div className="text-center">
                   <div className={`text-sm ${textSecondary} mb-2`}>支付金额</div>
-                  <div className="text-4xl font-bold text-blue-500 mb-1">¥{(pendingOrderAmount * 0.01).toFixed(2)}</div>
+                  <div className="text-4xl font-bold text-green-500 mb-1">¥{(pendingOrderAmount * 0.01).toFixed(2)}</div>
                   <div className={`text-sm ${textSecondary} mb-6`}>{pendingOrderAmount} 积分</div>
 
-                  {/* QR Code / Payment Link */}
-                  {paymentQrUrl ? (
-                    <div className="inline-block p-4 bg-white rounded-xl mb-4">
-                      <img src={paymentQrUrl} alt="支付二维码" className="w-48 h-48" />
-                    </div>
-                  ) : paymentPageUrl ? (
-                    <div className="mb-4">
-                      <a
-                        href={paymentPageUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={`inline-flex items-center gap-2 px-6 py-3 rounded-xl text-white font-medium ${
-                          selectedPaymentMethod === 'alipay' ? 'bg-[#1677FF] hover:bg-[#0958d9]' : 'bg-[#07C160] hover:bg-[#06ad56]'
-                        }`}
-                      >
-                        {selectedPaymentMethod === 'alipay' ? '打开支付宝支付' : '打开微信支付'}
-                        <ArrowRight className="w-4 h-4" />
-                      </a>
-                    </div>
-                  ) : (
-                    <div className="mb-4">
-                      <div className={`inline-block p-4 rounded-xl ${inputBg}`}>
-                        <div className={`text-sm ${textSecondary}`}>
-                          {paymentPolling ? '正在等待支付...' : '请完成支付'}
-                        </div>
+                  {/* QR Code Image */}
+                  <div className="inline-block p-4 bg-white rounded-xl mb-4">
+                    {selectedPaymentMethod === 'wechat' && paymentStatus.wechat ? (
+                      <img
+                        src={`/api/credits/payment-config?qrcode=wechat&_t=${Date.now()}`}
+                        alt="微信收款码"
+                        className="w-52 h-52 object-contain"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    ) : selectedPaymentMethod === 'alipay' && paymentStatus.alipay ? (
+                      <img
+                        src={`/api/credits/payment-config?qrcode=alipay&_t=${Date.now()}`}
+                        alt="支付宝收款码"
+                        className="w-52 h-52 object-contain"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    ) : (
+                      <div className={`w-52 h-52 flex items-center justify-center ${inputBg} rounded-lg`}>
+                        <span className={`text-sm ${textSecondary}`}>收款码未配置</span>
                       </div>
+                    )}
+                  </div>
+
+                  <div className={`text-sm ${textSecondary} mb-4`}>
+                    请使用{selectedPaymentMethod === 'alipay' ? '支付宝' : '微信'}扫描上方收款码<br/>
+                    支付 <span className="text-green-500 font-semibold">¥{(pendingOrderAmount * 0.01).toFixed(2)}</span>（{pendingOrderAmount}积分）
+                  </div>
+
+                  <div className={`text-xs ${textSecondary} mb-4 p-3 rounded-lg ${inputBg}`}>
+                    完成支付后，管理员将确认到账，积分会自动到账
+                  </div>
+
+                  {paymentPolling && (
+                    <div className="flex items-center justify-center gap-2 text-green-500">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span className="text-sm">等待管理员确认到账...</span>
                     </div>
                   )}
 
-
-
-                  <div className={`text-sm ${textSecondary} mb-2`}>
-                    请使用{selectedPaymentMethod === 'alipay' ? '支付宝' : '微信'}扫描二维码完成支付
-                  </div>
-                  {paymentPolling && (
-                    <div className="flex items-center justify-center gap-2 text-blue-500">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span className="text-sm">等待支付确认...</span>
+                  {pendingOrderId && (
+                    <div className={`text-[11px] ${textSecondary} mt-3`}>
+                      订单号: {pendingOrderId}
                     </div>
                   )}
                 </div>
@@ -1536,11 +1565,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     setPaymentStep('select');
                     setPendingOrderId(null);
                     setPendingOrderAmount(0);
-                    setPaymentQrUrl(null);
-                    setPaymentPageUrl(null);
                     setRechargeAmount('');
                   }}
-                  className="px-6 py-2.5 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors"
+                  className="px-6 py-2.5 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 transition-colors"
                 >
                   继续充值
                 </button>
@@ -2079,82 +2106,122 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           <div className="h-full overflow-y-auto p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h1 className={`text-xl font-bold ${textPrimary}`}>支付配置</h1>
-                <p className={`text-sm ${textSecondary}`}>配置支付宝和微信支付参数，启用真实充值功能</p>
+                <h1 className={`text-xl font-bold ${textPrimary}`}>收款码配置</h1>
+                <p className={`text-sm ${textSecondary}`}>上传微信/支付宝个人收款码，用户扫码后由管理员确认到账</p>
               </div>
               <div className="flex items-center gap-2">
-                {paymentStatus.alipay && <span className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-green-500/15 text-green-400"><CheckCircle2 size={12}/> 支付宝已配置</span>}
                 {paymentStatus.wechat && <span className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-green-500/15 text-green-400"><CheckCircle2 size={12}/> 微信已配置</span>}
-                {!paymentStatus.alipay && !paymentStatus.wechat && <span className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-red-500/15 text-red-400"><AlertTriangle size={12}/> 未配置支付，充值不可用</span>}
+                {paymentStatus.alipay && <span className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-blue-500/15 text-blue-400"><CheckCircle2 size={12}/> 支付宝已配置</span>}
+                {!paymentStatus.alipay && !paymentStatus.wechat && <span className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-red-500/15 text-red-400"><AlertTriangle size={12}/> 未配置收款码，充值不可用</span>}
               </div>
             </div>
 
             <div className="space-y-6 max-w-3xl">
-              {/* 支付宝配置 */}
-              <div className={`rounded-xl border p-5 ${softClass}`}>
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-9 h-9 rounded-lg bg-blue-500/15 flex items-center justify-center">
-                    <svg viewBox="0 0 24 24" className="w-5 h-5 text-blue-400" fill="currentColor"><path d="M21.422 15.358c-3.32-1.326-6.092-2.786-6.092-2.786s1.439-3.667 1.853-5.927H13.01V4.78h5.06V3.273h-5.06V.5h-2.494s-.073.003-.073.077V3.273H5.385v1.508h5.058v1.865H7.755v1.508h8.206c-.326 1.695-1.078 3.513-1.078 3.513s-3.858-1.732-6.592-2.18c-3.592-.594-6.291.802-6.47 3.286-.178 2.483 2.407 4.09 5.246 4.284 2.838.195 5.59-1.113 7.55-2.856 2.696 1.456 7.484 3.373 9.982 3.94.464-.867 1.657-3.063 1.657-3.063s-2.733-.59-4.834-1.48zm-12.84 2.275c-2.296-.157-3.71-1.463-3.588-2.838.123-1.375 1.843-2.352 4.139-2.195 2.06.141 4.332 1.103 5.698 2.053-1.63 1.402-3.953 3.137-6.249 2.98z"/></svg>
-                  </div>
-                  <div>
-                    <h3 className={`text-sm font-semibold ${textPrimary}`}>支付宝配置</h3>
-                    <p className={`text-xs ${textSecondary}`}>对接支付宝网页/手机支付</p>
-                  </div>
-                  {paymentConfig.alipay?.appId && <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 ml-auto">已配置</span>}
-                </div>
-                <div className="grid grid-cols-1 gap-3">
-                  <div>
-                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>应用ID (APP_ID)</label>
-                    <input className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="支付宝应用 AppId" value={paymentConfig.alipay?.appId || ''} onChange={e => setPaymentConfig(prev => ({...prev, alipay: {...(prev.alipay || { appId: '', privateKey: '', publicKey: '', notifyUrl: '', sandbox: false }), appId: e.target.value}}))} />
-                  </div>
-                  <div>
-                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>应用私钥 (RSA2)</label>
-                    <textarea className={`w-full h-20 px-3 py-2 rounded-lg border text-sm ${inputClass} resize-y font-mono text-[11px]`} placeholder="支付宝应用私钥（Base64格式）" value={paymentConfig.alipay?.privateKey || ''} onChange={e => setPaymentConfig(prev => ({...prev, alipay: {...(prev.alipay || { appId: '', privateKey: '', publicKey: '', notifyUrl: '', sandbox: false }), privateKey: e.target.value}}))} />
-                  </div>
-                  <div>
-                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>支付宝公钥</label>
-                    <textarea className={`w-full h-20 px-3 py-2 rounded-lg border text-sm ${inputClass} resize-y font-mono text-[11px]`} placeholder="支付宝公钥（用于验签）" value={paymentConfig.alipay?.publicKey || ''} onChange={e => setPaymentConfig(prev => ({...prev, alipay: {...(prev.alipay || { appId: '', privateKey: '', publicKey: '', notifyUrl: '', sandbox: false }), publicKey: e.target.value}}))} />
-                  </div>
-                  <div>
-                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>异步通知URL (NOTIFY_URL)</label>
-                    <input className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="https://your-domain.com/api/credits/payment-notify" value={paymentConfig.alipay?.notifyUrl || ''} onChange={e => setPaymentConfig(prev => ({...prev, alipay: {...(prev.alipay || { appId: '', privateKey: '', publicKey: '', notifyUrl: '', sandbox: false }), notifyUrl: e.target.value}}))} />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input type="checkbox" id="alipaySandbox" checked={paymentConfig.alipay?.sandbox || false} onChange={e => setPaymentConfig(prev => ({...prev, alipay: {...(prev.alipay || { appId: '', privateKey: '', publicKey: '', notifyUrl: '', sandbox: false }), sandbox: e.target.checked}}))} className="rounded cursor-pointer" />
-                    <label htmlFor="alipaySandbox" className={`text-xs ${textSecondary} cursor-pointer`}>沙箱模式（开发测试用）</label>
-                  </div>
-                </div>
-              </div>
-
-              {/* 微信支付配置 */}
+              {/* 微信收款码 */}
               <div className={`rounded-xl border p-5 ${softClass}`}>
                 <div className="flex items-center gap-3 mb-4">
                   <div className="w-9 h-9 rounded-lg bg-green-500/15 flex items-center justify-center">
                     <svg viewBox="0 0 24 24" className="w-5 h-5 text-green-400" fill="currentColor"><path d="M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 01.213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 00.167-.054l1.903-1.114a.864.864 0 01.717-.098 10.16 10.16 0 002.837.403c.276 0 .543-.027.811-.05-.857-2.578.157-4.972 1.932-6.446 1.703-1.415 3.882-1.98 5.853-1.838-.576-3.583-4.196-6.348-8.596-6.348zM5.785 5.991c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 01-1.162 1.178A1.17 1.17 0 014.623 7.17c0-.651.52-1.18 1.162-1.18zm5.813 0c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 01-1.162 1.178 1.17 1.17 0 01-1.162-1.178c0-.651.52-1.18 1.162-1.18zm3.97 3.258c-2.031 0-3.898.767-5.309 1.944-1.66 1.386-2.622 3.277-2.622 5.343 0 1.56.564 3.023 1.538 4.234a.466.466 0 01.168.527l-.308 1.172c-.016.055-.037.11-.037.169 0 .13.104.234.231.234.057 0 .107-.019.155-.046l1.499-.881a.679.679 0 01.567-.078 8.064 8.064 0 002.418.369c4.156 0 7.53-2.915 7.53-6.498s-3.374-6.498-7.53-6.498v-.001zm-2.573 3.492c.509 0 .923.42.923.938a.93.93 0 01-.923.938.93.93 0 01-.923-.938c0-.518.414-.938.923-.938zm5.146 0c.509 0 .923.42.923.938a.93.93 0 01-.923.938.93.93 0 01-.923-.938c0-.518.414-.938.923-.938z"/></svg>
                   </div>
                   <div>
-                    <h3 className={`text-sm font-semibold ${textPrimary}`}>微信支付配置</h3>
-                    <p className={`text-xs ${textSecondary}`}>对接微信支付 Native（扫码支付）</p>
+                    <h3 className={`text-sm font-semibold ${textPrimary}`}>微信收款码</h3>
+                    <p className={`text-xs ${textSecondary}`}>上传微信个人收款码图片</p>
                   </div>
-                  {paymentConfig.wechat?.mchId && <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 ml-auto">已配置</span>}
+                  {paymentConfig.wechatQrUrl && <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 ml-auto">已配置</span>}
                 </div>
-                <div className="grid grid-cols-1 gap-3">
+                <div className="space-y-3">
                   <div>
-                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>商户号 (MCH_ID)</label>
-                    <input className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="微信支付商户号" value={paymentConfig.wechat?.mchId || ''} onChange={e => setPaymentConfig(prev => ({...prev, wechat: {...(prev.wechat || { mchId: '', appId: '', apiKey: '', notifyUrl: '' }), mchId: e.target.value}}))} />
+                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>收款码图片URL</label>
+                    <input
+                      className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`}
+                      placeholder="粘贴微信收款码图片URL，或上传图片后自动填入"
+                      value={paymentConfig.wechatQrUrl}
+                      onChange={e => setPaymentConfig(prev => ({ ...prev, wechatQrUrl: e.target.value }))}
+                    />
                   </div>
                   <div>
-                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>应用ID (APP_ID)</label>
-                    <input className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="微信公众号/小程序 AppId" value={paymentConfig.wechat?.appId || ''} onChange={e => setPaymentConfig(prev => ({...prev, wechat: {...(prev.wechat || { mchId: '', appId: '', apiKey: '', notifyUrl: '' }), appId: e.target.value}}))} />
+                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>上传收款码图片</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        formData.append('type', 'payment-qr');
+                        try {
+                          const res = await fetch('/api/save-image', { method: 'POST', body: formData });
+                          const data = await res.json();
+                          if (data.success && data.url) {
+                            setPaymentConfig(prev => ({ ...prev, wechatQrUrl: data.url }));
+                          } else {
+                            alert('上传失败：' + (data.error || '未知错误'));
+                          }
+                        } catch { alert('上传失败：网络错误'); }
+                      }}
+                      className={`w-full text-sm ${textSecondary} file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:cursor-pointer ${isDark ? 'file:bg-green-500/20 file:text-green-400' : 'file:bg-green-50 file:text-green-600'}`}
+                    />
+                  </div>
+                  {paymentConfig.wechatQrUrl && (
+                    <div className="flex justify-center p-3 bg-white rounded-lg">
+                      <img src={paymentConfig.wechatQrUrl} alt="微信收款码预览" className="w-40 h-40 object-contain" />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 支付宝收款码 */}
+              <div className={`rounded-xl border p-5 ${softClass}`}>
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-9 h-9 rounded-lg bg-blue-500/15 flex items-center justify-center">
+                    <svg viewBox="0 0 24 24" className="w-5 h-5 text-blue-400" fill="currentColor"><path d="M21.422 15.358c-3.32-1.326-6.092-2.786-6.092-2.786s1.439-3.667 1.853-5.927H13.01V4.78h5.06V3.273h-5.06V.5h-2.494s-.073.003-.073.077V3.273H5.385v1.508h5.058v1.865H7.755v1.508h8.206c-.326 1.695-1.078 3.513-1.078 3.513s-3.858-1.732-6.592-2.18c-3.592-.594-6.291.802-6.47 3.286-.178 2.483 2.407 4.09 5.246 4.284 2.838.195 5.59-1.113 7.55-2.856 2.696 1.456 7.484 3.373 9.982 3.94.464-.867 1.657-3.063 1.657-3.063s-2.733-.59-4.834-1.48zm-12.84 2.275c-2.296-.157-3.71-1.463-3.588-2.838.123-1.375 1.843-2.352 4.139-2.195 2.06.141 4.332 1.103 5.698 2.053-1.63 1.402-3.953 3.137-6.249 2.98z"/></svg>
                   </div>
                   <div>
-                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>API密钥 (V3)</label>
-                    <input className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass} font-mono`} type="password" placeholder="微信支付 APIv3 密钥" value={paymentConfig.wechat?.apiKey || ''} onChange={e => setPaymentConfig(prev => ({...prev, wechat: {...(prev.wechat || { mchId: '', appId: '', apiKey: '', notifyUrl: '' }), apiKey: e.target.value}}))} />
+                    <h3 className={`text-sm font-semibold ${textPrimary}`}>支付宝收款码</h3>
+                    <p className={`text-xs ${textSecondary}`}>上传支付宝个人收款码图片</p>
+                  </div>
+                  {paymentConfig.alipayQrUrl && <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 ml-auto">已配置</span>}
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>收款码图片URL</label>
+                    <input
+                      className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`}
+                      placeholder="粘贴支付宝收款码图片URL，或上传图片后自动填入"
+                      value={paymentConfig.alipayQrUrl}
+                      onChange={e => setPaymentConfig(prev => ({ ...prev, alipayQrUrl: e.target.value }))}
+                    />
                   </div>
                   <div>
-                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>异步通知URL (NOTIFY_URL)</label>
-                    <input className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="https://your-domain.com/api/credits/payment-notify" value={paymentConfig.wechat?.notifyUrl || ''} onChange={e => setPaymentConfig(prev => ({...prev, wechat: {...(prev.wechat || { mchId: '', appId: '', apiKey: '', notifyUrl: '' }), notifyUrl: e.target.value}}))} />
+                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>上传收款码图片</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        formData.append('type', 'payment-qr');
+                        try {
+                          const res = await fetch('/api/save-image', { method: 'POST', body: formData });
+                          const data = await res.json();
+                          if (data.success && data.url) {
+                            setPaymentConfig(prev => ({ ...prev, alipayQrUrl: data.url }));
+                          } else {
+                            alert('上传失败：' + (data.error || '未知错误'));
+                          }
+                        } catch { alert('上传失败：网络错误'); }
+                      }}
+                      className={`w-full text-sm ${textSecondary} file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:cursor-pointer ${isDark ? 'file:bg-blue-500/20 file:text-blue-400' : 'file:bg-blue-50 file:text-blue-600'}`}
+                    />
                   </div>
+                  {paymentConfig.alipayQrUrl && (
+                    <div className="flex justify-center p-3 bg-white rounded-lg">
+                      <img src={paymentConfig.alipayQrUrl} alt="支付宝收款码预览" className="w-40 h-40 object-contain" />
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -2162,22 +2229,65 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               <div className="flex items-center gap-3">
                 <button onClick={handleSavePaymentConfig} disabled={configSaving} className={`flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-medium ${accentBgClass} ${accentTextOnBgClass} ${accentHoverBgClass} transition-colors cursor-pointer disabled:opacity-50`}>
                   {configSaving ? <Loader2 size={14} className="animate-spin"/> : <CheckCircle2 size={14}/>}
-                  {configSaving ? '保存中...' : '保存支付配置'}
+                  {configSaving ? '保存中...' : '保存收款码配置'}
                 </button>
                 {configSaveMsg && (
                   <span className={`text-xs ${configSaveMsg.includes('成功') ? 'text-green-400' : 'text-red-400'}`}>{configSaveMsg}</span>
                 )}
               </div>
 
+              {/* 待确认订单 */}
+              {pendingOrders.length > 0 && (
+                <div className={`rounded-xl border p-5 ${isDark ? 'bg-orange-500/5 border-orange-500/20' : 'bg-orange-50 border-orange-200'}`}>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Clock className="w-4 h-4 text-orange-500" />
+                    <h3 className={`text-sm font-semibold ${textPrimary}`}>待确认订单 ({pendingOrders.length})</h3>
+                  </div>
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {pendingOrders.map((order) => (
+                      <div key={order.orderId} className={`flex items-center justify-between px-3 py-2.5 rounded-lg ${cardBg} border ${borderColor}`}>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-sm font-medium ${textPrimary}`}>¥{order.priceCny.toFixed(2)}</span>
+                            <span className={`text-xs ${textSecondary}`}>({order.amount}积分)</span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${order.paymentMethod === 'wechat' ? 'bg-green-500/15 text-green-400' : 'bg-blue-500/15 text-blue-400'}`}>
+                              {order.paymentMethod === 'wechat' ? '微信' : '支付宝'}
+                            </span>
+                          </div>
+                          <div className={`text-xs ${textSecondary} mt-0.5`}>
+                            用户: {order.userName || order.userId.slice(0, 8)} · {new Date(order.createdAt).toLocaleString('zh-CN')}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 ml-3">
+                          <button
+                            onClick={() => handleConfirmOrder(order.orderId, 'confirm')}
+                            className="px-3 py-1.5 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                          >
+                            确认到账
+                          </button>
+                          <button
+                            onClick={() => handleConfirmOrder(order.orderId, 'reject')}
+                            className="px-3 py-1.5 text-xs font-medium bg-red-500/15 text-red-400 rounded-lg hover:bg-red-500/25 transition-colors"
+                          >
+                            拒绝
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* 配置说明 */}
               <div className={`rounded-xl border p-4 ${isDark ? 'bg-[#1a1a1a] border-[#333]' : 'bg-amber-50 border-amber-200'}`}>
-                <h4 className={`text-xs font-semibold mb-2 ${isDark ? 'text-[#d4af37]' : 'text-amber-600'}`}>配置说明</h4>
+                <h4 className={`text-xs font-semibold mb-2 ${isDark ? 'text-[#d4af37]' : 'text-amber-600'}`}>使用说明</h4>
                 <ul className={`text-[11px] space-y-1 ${isDark ? 'text-[#888]' : 'text-amber-700'}`}>
-                  <li>1. 支付宝：前往 open.alipay.com 创建应用，获取 APP_ID、应用私钥和支付宝公钥</li>
-                  <li>2. 微信支付：前往 pay.weixin.qq.com 获取商户号，在 API安全 中设置 V3 密钥</li>
-                  <li>3. 异步通知URL 必须是 HTTPS 公网可访问地址，用于接收支付结果通知</li>
-                  <li>4. 配置完成后，用户积分中心将自动启用支付宝/微信充值入口</li>
-                  <li>5. 也可通过环境变量 ALIPAY_APP_ID / WECHAT_MCH_ID 等配置（数据库配置优先）</li>
+                  <li>1. 打开微信/支付宝，找到"收付款"→"二维码收款"→保存收款码图片</li>
+                  <li>2. 将收款码图片上传到上方对应区域</li>
+                  <li>3. 用户充值时会看到您的收款码，扫码付款</li>
+                  <li>4. 付款完成后，用户等待管理员确认到账</li>
+                  <li>5. 管理员在"待确认订单"中点击"确认到账"，积分自动到账用户</li>
+                  <li>6. 无需开通商户号，使用个人收款码即可</li>
                 </ul>
               </div>
             </div>
