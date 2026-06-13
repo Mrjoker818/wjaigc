@@ -49,7 +49,8 @@ export async function GET(request: NextRequest) {
   const { realQrUrl, method, expiresAt } = tokenData;
   const methodName = method === 'wechat' ? '微信' : '支付宝';
   const methodColor = method === 'wechat' ? '#07C160' : '#1677FF';
-  const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
+  let domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
+  domain = domain.replace(/^https?:\/\//, '');
   const fullQrUrl = realQrUrl.startsWith('http') ? realQrUrl : `https://${domain}${realQrUrl}`;
 
   const html = `<!DOCTYPE html>

@@ -55,7 +55,9 @@ function generateToken(): string {
 
 /** 获取完整的跳转 URL（扫码后访问） */
 function getRedirectUrl(token: string): string {
-  const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
+  let domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
+  // 去除可能存在的协议前缀
+  domain = domain.replace(/^https?:\/\//, '');
   if (domain) {
     return `https://${domain}/api/credits/pay-redirect?token=${token}`;
   }
