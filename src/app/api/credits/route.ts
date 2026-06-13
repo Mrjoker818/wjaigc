@@ -121,8 +121,14 @@ export async function GET(request: NextRequest) {
 
 /**
  * POST /api/credits
- * - User: recharge (add credits to own account)
- * - Admin: adjust any user's credits
+ * - action=create-order: User creates a recharge order (pending payment)
+ * - action=query-order: User queries order payment status
+ * - action=admin_adjust / action=admin-recharge: Admin adjusts any user's credits
+ * 
+ * SECURITY: Users can NO longer directly add credits to their own account.
+ * Credits can only be added through:
+ * 1. Payment verification (Alipay/WeChat callback)
+ * 2. Admin manual adjustment
  */
 export async function POST(request: NextRequest) {
   try {
@@ -132,33 +138,147 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { action, amount, description, userId: targetUserId, packageName } = body as {
-      action: 'recharge' | 'admin_adjust' | 'admin-recharge';
+    const { action, amount, description, userId: targetUserId, packageName, paymentMethod, orderId } = body as {
+      action: 'create-order' | 'query-order' | 'admin_adjust' | 'admin-recharge';
       amount?: number;
       description?: string;
       userId?: string;
       packageName?: string;
+      paymentMethod?: 'alipay' | 'wechat';
+      orderId?: string;
     };
 
     const isAdmin = user.role === 'admin';
 
-    if (action === 'recharge') {
-      // User self-recharge
+    // ===== User: Create recharge order =====
+    if (action === 'create-order') {
       const rechargeAmount = amount || 0;
       if (rechargeAmount <= 0) {
-        return NextResponse.json({ success: false, error: '充值金额必须大于0' }, { status: 400 });
+        return NextResponse.json({ success: false, error: '充值数量必须大于0' }, { status: 400 });
+      }
+      const method = paymentMethod || 'alipay';
+      if (method !== 'alipay' && method !== 'wechat') {
+        return NextResponse.json({ success: false, error: '不支持的支付方式' }, { status: 400 });
       }
 
-      const desc = description || `充值 ${rechargeAmount} 积分${packageName ? ` (${packageName})` : ''}`;
-      const result = await dbAdjustCredits(user.id, rechargeAmount, 'recharge', desc);
-      if (!result.success) {
-        return NextResponse.json({ success: false, error: result.message || '充值失败' }, { status: 400 });
+      // Validate amount matches a package
+      const pkg = RECHARGE_PACKAGES.find(p => p.amount === rechargeAmount);
+      const priceCny = pkg ? pkg.price : rechargeAmount * CREDITS_TO_CNY;
+      const bonusCredits = pkg ? pkg.bonus : 0;
+
+      // Create order in database
+      const orderId = `order_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const expiresAt = Date.now() + 30 * 60 * 1000; // 30 minutes expiry
+
+      try {
+        await execSql(
+          `INSERT INTO wujie_recharge_orders (id, user_id, amount, price_cny, bonus, payment_method, payment_status, expires_at)
+           VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)`,
+          [orderId, user.id, rechargeAmount + bonusCredits, priceCny, bonusCredits, method, expiresAt]
+        );
+      } catch (dbErr) {
+        console.error('[credits] create order error:', dbErr);
+        return NextResponse.json({ success: false, error: '创建订单失败' }, { status: 500 });
       }
-      return NextResponse.json({ success: true, balance: result.balance, message: '充值成功' });
+
+      // Generate payment parameters based on payment method
+      const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || 'http://localhost:5000';
+      const notifyUrl = `${domain.startsWith('http') ? domain : 'https://' + domain}/api/credits/payment-notify`;
+
+      let paymentData: Record<string, unknown> = {};
+
+      if (method === 'alipay') {
+        // Alipay payment integration
+        const alipayConfig = getAlipayConfig();
+        if (alipayConfig.enabled) {
+          paymentData = await createAlipayOrder({
+            orderId,
+            amount: priceCny,
+            subject: `无界AI积分充值 - ${rechargeAmount}积分`,
+            notifyUrl,
+            returnUrl: `${domain.startsWith('http') ? domain : 'https://' + domain}`,
+          });
+        } else {
+          // Demo mode: no real Alipay configured, return simulated payment
+          paymentData = {
+            mode: 'demo',
+            message: '支付宝支付暂未配置，请联系管理员。当前为演示模式，订单已创建。',
+            orderId,
+            amount: priceCny,
+            qrCode: `https://qr.alipay.com/demo_${orderId}`,
+          };
+        }
+      } else if (method === 'wechat') {
+        // WeChat Pay integration
+        const wechatConfig = getWechatConfig();
+        if (wechatConfig.enabled) {
+          paymentData = await createWechatOrder({
+            orderId,
+            amount: priceCny,
+            description: `无界AI积分充值 - ${rechargeAmount}积分`,
+            notifyUrl,
+          });
+        } else {
+          // Demo mode: no real WeChat Pay configured
+          paymentData = {
+            mode: 'demo',
+            message: '微信支付暂未配置，请联系管理员。当前为演示模式，订单已创建。',
+            orderId,
+            amount: priceCny,
+            qrCode: `weixin://wxpay/bizpayurl?pr=demo_${orderId}`,
+          };
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        orderId,
+        amount: rechargeAmount + bonusCredits,
+        priceCny,
+        bonusCredits,
+        paymentMethod: method,
+        expiresAt,
+        paymentData,
+      });
     }
 
+    // ===== User: Query order status =====
+    if (action === 'query-order') {
+      if (!orderId) {
+        return NextResponse.json({ success: false, error: '缺少订单号' }, { status: 400 });
+      }
+      try {
+        const result = await execSql(
+          'SELECT * FROM wujie_recharge_orders WHERE id = $1 AND user_id = $2',
+          [orderId, user.id]
+        );
+        if (result.rows.length === 0) {
+          return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 });
+        }
+        const order = result.rows[0] as Record<string, unknown>;
+        return NextResponse.json({
+          success: true,
+          order: {
+            id: order.id,
+            amount: order.amount,
+            priceCny: order.price_cny,
+            bonus: order.bonus,
+            paymentMethod: order.payment_method,
+            paymentStatus: order.payment_status,
+            tradeNo: order.trade_no,
+            paidAt: order.paid_at,
+            createdAt: order.created_at,
+            expiresAt: order.expires_at,
+          },
+        });
+      } catch (dbErr) {
+        console.error('[credits] query order error:', dbErr);
+        return NextResponse.json({ success: false, error: '查询订单失败' }, { status: 500 });
+      }
+    }
+
+    // ===== Admin: Adjust credits =====
     if ((action === 'admin_adjust' || action === 'admin-recharge') && isAdmin) {
-      // Admin adjust/recharge credits for any user
       const effectiveUserId = targetUserId || user.id;
       const adjustAmount = amount || 0;
       if (adjustAmount === 0) {
@@ -177,5 +297,185 @@ export async function POST(request: NextRequest) {
   } catch (e) {
     console.error('[credits] POST error:', e);
     return NextResponse.json({ success: false, error: '服务器错误' }, { status: 500 });
+  }
+}
+
+// ========== Alipay Integration ==========
+
+interface AlipayConfig {
+  enabled: boolean;
+  appId: string;
+  privateKey: string;
+  alipayPublicKey: string;
+  gateway: string;
+}
+
+function getAlipayConfig(): AlipayConfig {
+  return {
+    enabled: !!(process.env.ALIPAY_APP_ID && process.env.ALIPAY_PRIVATE_KEY),
+    appId: process.env.ALIPAY_APP_ID || '',
+    privateKey: process.env.ALIPAY_PRIVATE_KEY || '',
+    alipayPublicKey: process.env.ALIPAY_PUBLIC_KEY || '',
+    gateway: process.env.ALIPAY_GATEWAY || 'https://openapi.alipay.com/gateway.do',
+  };
+}
+
+async function createAlipayOrder(params: {
+  orderId: string;
+  amount: number;
+  subject: string;
+  notifyUrl: string;
+  returnUrl: string;
+}): Promise<Record<string, unknown>> {
+  const config = getAlipayConfig();
+  const bizContent = {
+    out_trade_no: params.orderId,
+    total_amount: params.amount.toFixed(2),
+    subject: params.subject,
+    product_code: 'FAST_INSTANT_TRADE_PAY',
+    timeout_express: '30m',
+  };
+
+  // Build sign params for Alipay
+  const signParams: Record<string, string> = {
+    app_id: config.appId,
+    method: 'alipay.trade.page.pay',
+    charset: 'utf-8',
+    sign_type: 'RSA2',
+    timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+    version: '1.0',
+    notify_url: params.notifyUrl,
+    return_url: params.returnUrl,
+    biz_content: JSON.stringify(bizContent),
+  };
+
+  // In production, sign with RSA2 private key
+  // For now, return the payment URL structure
+  try {
+    const crypto = await import('crypto');
+    const signString = Object.keys(signParams)
+      .filter(k => k !== 'sign' && signParams[k] !== '')
+      .sort()
+      .map(k => `${k}=${signParams[k]}`)
+      .join('&');
+
+    const sign = crypto.createSign('RSA-SHA256');
+    sign.update(signString, 'utf-8');
+    const signature = sign.sign(config.privateKey, 'base64');
+    signParams.sign = signature;
+
+    const paymentUrl = `${config.gateway}?${Object.entries(signParams).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')}`;
+
+    return {
+      mode: 'production',
+      paymentUrl,
+      orderId: params.orderId,
+    };
+  } catch (signErr) {
+    console.error('[credits] alipay sign error:', signErr);
+    return {
+      mode: 'demo',
+      message: '支付宝签名失败，请检查密钥配置',
+      orderId: params.orderId,
+      amount: params.amount,
+    };
+  }
+}
+
+// ========== WeChat Pay Integration ==========
+
+interface WechatConfig {
+  enabled: boolean;
+  appId: string;
+  mchId: string;
+  apiKey: string;
+  certPath: string;
+}
+
+function getWechatConfig(): WechatConfig {
+  return {
+    enabled: !!(process.env.WECHAT_APP_ID && process.env.WECHAT_MCH_ID && process.env.WECHAT_API_KEY),
+    appId: process.env.WECHAT_APP_ID || '',
+    mchId: process.env.WECHAT_MCH_ID || '',
+    apiKey: process.env.WECHAT_API_KEY || '',
+    certPath: process.env.WECHAT_CERT_PATH || '',
+  };
+}
+
+async function createWechatOrder(params: {
+  orderId: string;
+  amount: number;
+  description: string;
+  notifyUrl: string;
+}): Promise<Record<string, unknown>> {
+  const config = getWechatConfig();
+
+  try {
+    const crypto = await import('crypto');
+    // WeChat Pay NATIVE API (QR code payment)
+    const amountInFen = Math.round(params.amount * 100); // WeChat uses fen (cents)
+    
+    const orderParams: Record<string, string | number> = {
+      appid: config.appId,
+      mch_id: config.mchId,
+      nonce_str: crypto.randomBytes(16).toString('hex'),
+      body: params.description,
+      out_trade_no: params.orderId,
+      total_fee: amountInFen,
+      spbill_create_ip: '127.0.0.1',
+      notify_url: params.notifyUrl,
+      trade_type: 'NATIVE',
+      product_id: params.orderId,
+    };
+
+    // Sign
+    const signString = Object.keys(orderParams)
+      .sort()
+      .map(k => `${k}=${orderParams[k]}`)
+      .join('&') + `&key=${config.apiKey}`;
+
+    const sign = crypto.createHash('md5').update(signString, 'utf-8').digest('hex').toUpperCase();
+    orderParams.sign = sign;
+
+    // Build XML request
+    const xml = `<xml>${Object.entries(orderParams).map(([k, v]) => `<${k}>${v}</${k}>`).join('')}</xml>`;
+
+    // Call WeChat unified order API
+    const resp = await fetch('https://api.mch.weixin.qq.com/pay/unifiedorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/xml' },
+      body: xml,
+    });
+
+    const respText = await resp.text();
+    // Parse XML response
+    const codeUrlMatch = respText.match(/<code_url><!\[CDATA\[(.*?)\]\]><\/code_url>/);
+    const returnCodeMatch = respText.match(/<return_code><!\[CDATA\[(.*?)\]\]><\/return_code>/);
+    const resultCodeMatch = respText.match(/<result_code><!\[CDATA\[(.*?)\]\]><\/result_code>/);
+
+    if (returnCodeMatch?.[1] === 'SUCCESS' && resultCodeMatch?.[1] === 'SUCCESS' && codeUrlMatch?.[1]) {
+      return {
+        mode: 'production',
+        qrCode: codeUrlMatch[1],
+        orderId: params.orderId,
+      };
+    }
+
+    const errMsg = respText.match(/<err_code_des><!\[CDATA\[(.*?)\]\]><\/err_code_des>/);
+    console.error('[credits] wechat order error:', errMsg?.[1] || respText);
+    return {
+      mode: 'demo',
+      message: `微信下单失败: ${errMsg?.[1] || '未知错误'}`,
+      orderId: params.orderId,
+      amount: params.amount,
+    };
+  } catch (err) {
+    console.error('[credits] wechat order error:', err);
+    return {
+      mode: 'demo',
+      message: '微信支付创建失败，请检查配置',
+      orderId: params.orderId,
+      amount: params.amount,
+    };
   }
 }

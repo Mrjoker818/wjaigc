@@ -145,6 +145,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [rechargeAmount, setRechargeAmount] = useState<number | ''>('');
   const [isRecharging, setIsRecharging] = useState(false);
   const [rechargeError, setRechargeError] = useState('');
+  // Payment flow state
+  const [paymentStep, setPaymentStep] = useState<'select' | 'paying' | 'success'>('select');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'alipay' | 'wechat'>('alipay');
+  const [pendingOrderId, setPendingOrderId] = useState<string | null>(null);
+  const [pendingOrderAmount, setPendingOrderAmount] = useState(0);
+  const [paymentQrUrl, setPaymentQrUrl] = useState<string | null>(null);
+  const [paymentPageUrl, setPaymentPageUrl] = useState<string | null>(null);
+  const [paymentPolling, setPaymentPolling] = useState(false);
   const [creditsPricing, setCreditsPricing] = useState<{
     creditsToCNY: number;
     cnyToCredits: number;
@@ -687,26 +695,68 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     } catch { /* ignore */ }
   }, []);
 
-  const handleRecharge = useCallback(async (amount: number) => {
-    if (amount <= 0) return;
+  const handleCreateOrder = useCallback(async (credits: number, method: 'alipay' | 'wechat') => {
+    if (credits <= 0) return;
     setIsRecharging(true);
     setRechargeError('');
+    setPaymentStep('paying');
+    setSelectedPaymentMethod(method);
     try {
       const resp = await fetch('/api/credits', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'recharge', amount }),
+        body: JSON.stringify({ action: 'create-order', credits, paymentMethod: method }),
       });
       const data = await resp.json();
-      if (data.success) {
-        await loadCreditsData();
-        setRechargeAmount('');
+      if (data.success && data.order) {
+        setPendingOrderId(data.order.orderId);
+        setPendingOrderAmount(data.order.amount);
+        setPaymentQrUrl(data.order.qrCodeUrl || null);
+        setPaymentPageUrl(data.order.paymentUrl || null);
+        // Start polling for payment status
+        setPaymentPolling(true);
+        pollOrderStatus(data.order.orderId);
       } else {
-        setRechargeError(data.error || '充值失败');
+        setRechargeError(data.error || '创建订单失败');
+        setPaymentStep('select');
       }
-    } catch { setRechargeError('网络错误'); }
+    } catch { setRechargeError('网络错误'); setPaymentStep('select'); }
     setIsRecharging(false);
-  }, [loadCreditsData]);
+  }, []);
+
+  const pollOrderStatus = useCallback(async (orderId: string) => {
+    let attempts = 0;
+    const maxAttempts = 120; // 10 minutes max (5s interval)
+    const poll = async () => {
+      try {
+        const resp = await fetch('/api/credits', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'query-order', orderId }),
+        });
+        const data = await resp.json();
+        if (data.success && data.order?.status === 'paid') {
+          setPaymentStep('success');
+          setPaymentPolling(false);
+          await loadCreditsData();
+          return;
+        }
+        if (data.order?.status === 'expired' || data.order?.status === 'failed') {
+          setRechargeError(data.order.status === 'expired' ? '订单已过期，请重新发起' : '支付失败，请重试');
+          setPaymentStep('select');
+          setPaymentPolling(false);
+          return;
+        }
+      } catch { /* ignore network errors during polling */ }
+      attempts++;
+      if (attempts < maxAttempts && paymentPolling) {
+        setTimeout(poll, 5000);
+      } else {
+        setPaymentPolling(false);
+      }
+    };
+    poll();
+  }, [loadCreditsData, paymentPolling]);
 
   const loadCreditsOverview = useCallback(async () => {
     setCreditsLoading(true);
@@ -1216,59 +1266,188 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               </div>
             )}
 
-            {/* Recharge Packages */}
-            <div className="mb-6">
-              <h3 className={`text-base font-semibold ${textPrimary} mb-3`}>充值套餐</h3>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { credits: 100, price: '¥1', label: '体验' },
-                  { credits: 500, price: '¥5', label: '基础' },
-                  { credits: 2000, price: '¥20', label: '标准' },
-                  { credits: 10000, price: '¥100', label: '专业' },
-                ].map((pkg) => (
+            {/* ── Payment Step: Select Package ── */}
+            {paymentStep === 'select' && (
+              <>
+                {/* Recharge Packages */}
+                <div className="mb-6">
+                  <h3 className={`text-base font-semibold ${textPrimary} mb-3`}>充值套餐</h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    {(creditsPricing?.rechargePackages || [
+                      { credits: 100, bonusCredits: 0, label: '体验', price: 1 },
+                      { credits: 500, bonusCredits: 10, label: '基础', price: 5 },
+                      { credits: 2000, bonusCredits: 100, label: '标准', price: 20 },
+                      { credits: 10000, bonusCredits: 1000, label: '专业', price: 100 },
+                    ]).map((pkg) => (
+                      <button
+                        key={pkg.credits}
+                        onClick={() => {
+                          setRechargeAmount(pkg.credits);
+                          setPaymentStep('select');
+                        }}
+                        className={`${cardBg} rounded-xl p-4 border ${borderColor} hover:border-blue-500/50 transition-all text-left group`}
+                      >
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <div className={`text-xs ${textSecondary} mb-1`}>{pkg.label}</div>
+                            <div className="text-xl font-bold text-blue-500">{pkg.credits}</div>
+                            <div className={`text-xs ${textSecondary}`}>积分{pkg.bonusCredits > 0 ? <span className="text-green-500 ml-1">+{pkg.bonusCredits}赠送</span> : ''}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-sm font-semibold text-green-500">¥{pkg.price}</div>
+                            <Zap className="w-4 h-4 text-blue-500 mt-1 ml-auto" />
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Custom Amount + Payment Method Selection */}
+                <div className="mb-6">
+                  <h3 className={`text-base font-semibold ${textPrimary} mb-3`}>自定义充值</h3>
+                  <div className="flex gap-3 mb-4">
+                    <input
+                      type="number"
+                      min="1"
+                      value={rechargeAmount}
+                      onChange={(e) => setRechargeAmount(Math.max(1, parseInt(e.target.value) || 0))}
+                      className={`flex-1 px-4 py-2.5 rounded-lg border ${borderColor} ${inputBg} ${textPrimary} text-sm focus:outline-none focus:border-blue-500`}
+                      placeholder="输入积分数量"
+                    />
+                    <div className={`px-4 py-2.5 rounded-lg ${cardBg} border ${borderColor} text-sm ${textSecondary} flex items-center whitespace-nowrap`}>
+                      ¥{(Number(rechargeAmount || 0) * 0.01).toFixed(2)}
+                    </div>
+                  </div>
+
+                  {/* Payment Method Selection */}
+                  <div className={`text-sm font-medium ${textPrimary} mb-2`}>选择支付方式</div>
+                  <div className="flex gap-3 mb-4">
+                    <button
+                      onClick={() => setSelectedPaymentMethod('alipay')}
+                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border transition-all ${
+                        selectedPaymentMethod === 'alipay'
+                          ? 'border-blue-500 bg-blue-500/10'
+                          : `${borderColor} ${cardBg} hover:border-blue-500/50`
+                      }`}
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-[#1677FF] flex items-center justify-center text-white text-xs font-bold">支</div>
+                      <span className={`text-sm font-medium ${selectedPaymentMethod === 'alipay' ? 'text-blue-500' : textPrimary}`}>支付宝</span>
+                    </button>
+                    <button
+                      onClick={() => setSelectedPaymentMethod('wechat')}
+                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border transition-all ${
+                        selectedPaymentMethod === 'wechat'
+                          ? 'border-green-500 bg-green-500/10'
+                          : `${borderColor} ${cardBg} hover:border-green-500/50`
+                      }`}
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-[#07C160] flex items-center justify-center text-white text-xs font-bold">微</div>
+                      <span className={`text-sm font-medium ${selectedPaymentMethod === 'wechat' ? 'text-green-500' : textPrimary}`}>微信支付</span>
+                    </button>
+                  </div>
+
                   <button
-                    key={pkg.credits}
-                    onClick={() => handleRecharge(pkg.credits)}
-                    disabled={isRecharging}
-                    className={`${cardBg} rounded-xl p-4 border ${borderColor} hover:border-blue-500/50 transition-all text-left group disabled:opacity-50`}
+                    onClick={() => handleCreateOrder(Number(rechargeAmount) || 0, selectedPaymentMethod)}
+                    disabled={isRecharging || !rechargeAmount || Number(rechargeAmount) <= 0}
+                    className={`w-full py-3 rounded-xl text-sm font-semibold text-white transition-colors disabled:opacity-50 ${
+                      selectedPaymentMethod === 'alipay'
+                        ? 'bg-[#1677FF] hover:bg-[#0958d9]'
+                        : 'bg-[#07C160] hover:bg-[#06ad56]'
+                    }`}
                   >
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <div className={`text-xs ${textSecondary} mb-1`}>{pkg.label}</div>
-                        <div className="text-xl font-bold text-blue-500">{pkg.credits}</div>
-                        <div className={`text-xs ${textSecondary}`}>积分</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-sm font-semibold text-green-500">{pkg.price}</div>
-                        <Zap className="w-4 h-4 text-blue-500 mt-1 ml-auto" />
+                    {isRecharging ? '创建订单中...' : `${selectedPaymentMethod === 'alipay' ? '支付宝' : '微信'}支付 ¥${(Number(rechargeAmount || 0) * 0.01).toFixed(2)}`}
+                  </button>
+
+                  {rechargeError && (
+                    <div className="mt-3 text-sm text-red-500 text-center">{rechargeError}</div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* ── Payment Step: Paying ── */}
+            {paymentStep === 'paying' && (
+              <div className={`${cardBg} rounded-xl border ${borderColor} p-6 mb-6`}>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className={`text-base font-semibold ${textPrimary}`}>确认支付</h3>
+                  <button
+                    onClick={() => { setPaymentStep('select'); setPaymentPolling(false); setRechargeError(''); }}
+                    className={`text-xs ${textSecondary} hover:text-red-500`}
+                  >
+                    取消支付
+                  </button>
+                </div>
+                <div className="text-center">
+                  <div className={`text-sm ${textSecondary} mb-2`}>支付金额</div>
+                  <div className="text-4xl font-bold text-blue-500 mb-1">¥{(pendingOrderAmount * 0.01).toFixed(2)}</div>
+                  <div className={`text-sm ${textSecondary} mb-6`}>{pendingOrderAmount} 积分</div>
+
+                  {/* QR Code / Payment Link */}
+                  {paymentQrUrl ? (
+                    <div className="inline-block p-4 bg-white rounded-xl mb-4">
+                      <img src={paymentQrUrl} alt="支付二维码" className="w-48 h-48" />
+                    </div>
+                  ) : paymentPageUrl ? (
+                    <div className="mb-4">
+                      <a
+                        href={paymentPageUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`inline-flex items-center gap-2 px-6 py-3 rounded-xl text-white font-medium ${
+                          selectedPaymentMethod === 'alipay' ? 'bg-[#1677FF] hover:bg-[#0958d9]' : 'bg-[#07C160] hover:bg-[#06ad56]'
+                        }`}
+                      >
+                        {selectedPaymentMethod === 'alipay' ? '打开支付宝支付' : '打开微信支付'}
+                        <ArrowRight className="w-4 h-4" />
+                      </a>
+                    </div>
+                  ) : (
+                    <div className="mb-4">
+                      <div className={`inline-block p-4 rounded-xl ${inputBg}`}>
+                        <div className={`text-sm ${textSecondary}`}>
+                          {paymentPolling ? '正在等待支付...' : '请完成支付'}
+                        </div>
                       </div>
                     </div>
-                  </button>
-                ))}
-              </div>
-            </div>
+                  )}
 
-            {/* Custom Recharge */}
-            <div className="mb-6">
-              <h3 className={`text-base font-semibold ${textPrimary} mb-3`}>自定义充值</h3>
-              <div className="flex gap-3">
-                <input
-                  type="number"
-                  min="1"
-                  value={rechargeAmount}
-                  onChange={(e) => setRechargeAmount(Math.max(1, parseInt(e.target.value) || 0))}
-                  className={`flex-1 px-4 py-2.5 rounded-lg border ${borderColor} ${inputBg} ${textPrimary} text-sm focus:outline-none focus:border-blue-500`}
-                  placeholder="输入积分数量"
-                />
+                  <div className={`text-sm ${textSecondary} mb-2`}>
+                    请使用{selectedPaymentMethod === 'alipay' ? '支付宝' : '微信'}扫描二维码完成支付
+                  </div>
+                  {paymentPolling && (
+                    <div className="flex items-center justify-center gap-2 text-blue-500">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span className="text-sm">等待支付确认...</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── Payment Step: Success ── */}
+            {paymentStep === 'success' && (
+              <div className={`${cardBg} rounded-xl border ${borderColor} p-8 mb-6 text-center`}>
+                <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto mb-4" />
+                <h3 className={`text-xl font-bold ${textPrimary} mb-2`}>充值成功</h3>
+                <div className={`text-sm ${textSecondary} mb-4`}>
+                  已成功充值 {pendingOrderAmount} 积分
+                </div>
                 <button
-                  onClick={() => handleRecharge(Number(rechargeAmount) || 0)}
-                  disabled={isRecharging || !rechargeAmount || Number(rechargeAmount) <= 0}
-                  className="px-6 py-2.5 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 disabled:opacity-50 transition-colors"
+                  onClick={() => {
+                    setPaymentStep('select');
+                    setPendingOrderId(null);
+                    setPendingOrderAmount(0);
+                    setPaymentQrUrl(null);
+                    setPaymentPageUrl(null);
+                    setRechargeAmount('');
+                  }}
+                  className="px-6 py-2.5 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors"
                 >
-                  {isRecharging ? '充值中...' : `充值 ¥${(Number(rechargeAmount || 0) * 0.01).toFixed(2)}`}
+                  继续充值
                 </button>
               </div>
-            </div>
+            )}
 
             {/* Transaction History */}
             <div>

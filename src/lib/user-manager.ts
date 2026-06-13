@@ -103,14 +103,24 @@ export class UserManager {
         };
       }
       this.ensureDefaultAdmin();
-      // 构造函数加载数据后，验证所有用户的项目数据隔离
+      // 构造函数加载数据后，严格验证所有用户的项目数据隔离
+      // 核心原则：每个用户键下只能保留属于该用户的项目
+      // - 有 userId 且匹配 → 保留
+      // - 有 userId 但不匹配 → 删除（跨用户数据泄露）
+      // - 无 userId → 补上当前键的用户ID后保留（历史数据兼容）
       if (this.multiUserData?.userData) {
         for (const uid of Object.keys(this.multiUserData.userData)) {
           const ud = this.multiUserData.userData[uid];
           if (ud?.projects) {
-            ud.projects = ud.projects.filter(p => !p.userId || p.userId === uid);
-            for (const project of ud.projects) {
-              if (!project.userId) project.userId = uid;
+            const before = ud.projects.length;
+            ud.projects = ud.projects.filter(p => {
+              if (p.userId && p.userId !== uid) return false; // 跨用户数据，严格拒绝
+              if (!p.userId) p.userId = uid; // 历史数据补上 userId
+              return true;
+            });
+            const removed = before - ud.projects.length;
+            if (removed > 0) {
+              console.warn(`[DataIsolation] loadData: removed ${removed} cross-user projects from user ${uid}`);
             }
           }
         }
@@ -247,11 +257,22 @@ export class UserManager {
     }
 
     try {
-      // 只同步项目数据（最关键的画布数据），强制附带userId确保数据隔离
-      const projectsPayload = userData.projects.map(p => ({
-        ...p,
-        userId: this.currentUserId || p.userId,
-      }));
+      // 只同步当前用户自己的项目，强制附带userId确保数据隔离
+      // 双重过滤：先移除不属于当前用户的项目（防止跨用户泄露），再附加 userId
+      const currentUserId = this.currentUserId;
+      const projectsPayload = userData.projects
+        .filter(p => {
+          // 严格隔离：只同步属于当前用户的项目
+          if (p.userId && p.userId !== currentUserId) {
+            console.warn(`[DataIsolation] syncToServer: skipping cross-user project "${p.name}" (owner=${p.userId}, current=${currentUserId})`);
+            return false;
+          }
+          return true;
+        })
+        .map(p => ({
+          ...p,
+          userId: currentUserId, // 强制设置当前用户ID
+        }));
 
       const syncRes = await fetch('/api/user-data/sync', {
         method: 'POST',
@@ -328,6 +349,39 @@ export class UserManager {
         if (!p.userId) p.userId = currentUserId;
         return true;
       });
+
+      // 【数据隔离增强】跨用户ID冲突检测
+      // 如果某个项目ID同时出现在其他用户的数据槽中，说明该数据已被污染
+      // 此时应以服务器数据为准，本地该项目不可信
+      const otherUserProjectIds = new Set<string>();
+      if (this.multiUserData) {
+        for (const uid of Object.keys(this.multiUserData.userData)) {
+          if (uid === currentUserId) continue;
+          const otherProjects = this.multiUserData.userData[uid]?.projects || [];
+          for (const op of otherProjects) {
+            if (op.id) otherUserProjectIds.add(op.id);
+          }
+        }
+      }
+      if (otherUserProjectIds.size > 0) {
+        const beforeConflict = localProjectsFiltered.length;
+        const conflictIds: string[] = [];
+        // 检查本地项目是否与其他用户的项目ID冲突
+        for (let i = localProjectsFiltered.length - 1; i >= 0; i--) {
+          const p = localProjectsFiltered[i];
+          if (otherUserProjectIds.has(p.id)) {
+            conflictIds.push(p.id);
+            // 如果该项目的服务器版本不存在，说明该项目不属于当前用户
+            if (!serverProjects.some(sp => sp.id === p.id)) {
+              localProjectsFiltered.splice(i, 1);
+            }
+            // 如果服务器版本存在，保留本地版本（当前用户确实有这个项目）
+          }
+        }
+        if (conflictIds.length > 0) {
+          console.warn(`[DataIsolation] cross-user project ID conflict detected: ${conflictIds.join(', ')}. Filtered local projects: ${beforeConflict} → ${localProjectsFiltered.length}`);
+        }
+      }
 
       // 合并策略：按项目 ID 合并，保留更新时间更晚的版本
       const localHasData = localProjectsFiltered.length > 0;
@@ -500,8 +554,8 @@ export class UserManager {
       this.multiUserData.users[index] = nextUser;
     }
 
-    const isExistingUser = !!this.multiUserData.userData[nextUser.id];
-
+    // ★ 数据隔离关键修复：清除该用户本地的项目缓存，强制从服务器重新加载
+    // 防止 localStorage 中残留的跨用户项目数据泄露
     if (!isExistingUser) {
       this.multiUserData.userData[nextUser.id] = {
         user: nextUser,
@@ -511,17 +565,22 @@ export class UserManager {
       };
     } else {
       this.multiUserData.userData[nextUser.id].user = nextUser;
+      // 清除旧的项目缓存，强制从服务器重新加载
+      this.multiUserData.userData[nextUser.id].projects = [];
     }
 
     // 始终尝试从服务器加载项目数据（解决跨设备同步问题）
     // ensureDefaultAdmin() 可能在 localStorage 中创建了空的用户条目，
     // 导致上面的 isExistingUser 为 true 但项目实际为空
-    const prevUserId = this.currentUserId;
     this.currentUserId = nextUser.id;
+    // 取消旧用户的同步定时器，防止旧定时器将数据写入新用户
+    if (this.serverSyncTimer) {
+      clearTimeout(this.serverSyncTimer);
+      this.serverSyncTimer = null;
+    }
+    this._serverSyncReady = false;
     await this.loadProjectsFromServer();
-    this.currentUserId = prevUserId || nextUser.id;
 
-    this.currentUserId = nextUser.id;
     this.saveData();
     void this.ensureServerFolder(nextUser.id);
     return nextUser;
@@ -548,6 +607,19 @@ export class UserManager {
     const user = this.multiUserData?.users.find(u => u.name === name);
     if (!user || user.status === 'disabled') return null;
     if ((user.password || '') !== password) return null;
+
+    // ★ 数据隔离关键修复：登录时清除该用户本地的项目缓存，强制从服务器重新加载
+    // 这防止了 localStorage 中残留的跨用户项目数据泄露
+    if (this.multiUserData?.userData[user.id]) {
+      this.multiUserData.userData[user.id].projects = [];
+    }
+    // 取消待执行的同步定时器（来自上一个用户的）
+    if (this.serverSyncTimer) {
+      clearTimeout(this.serverSyncTimer);
+      this.serverSyncTimer = null;
+    }
+    this._serverSyncReady = false; // 重置同步状态，需要重新从服务器加载
+
     this.currentUserId = user.id;
     this.saveData();
     void this.ensureServerFolder(user.id);
@@ -1074,9 +1146,15 @@ export class UserManager {
   }
 
   /**
-   * ??????????
+   * 退出登录 - 清除当前用户状态，取消待执行的同步任务
    */
   logout(): void {
+    // 取消待执行的同步定时器，防止切换用户后旧定时器将数据写入新用户
+    if (this.serverSyncTimer) {
+      clearTimeout(this.serverSyncTimer);
+      this.serverSyncTimer = null;
+    }
+    this._serverSyncReady = false; // 重置同步状态，新用户登录后需重新加载
     this.currentUserId = null;
     if (this.canUseStorage()) {
       localStorage.removeItem(CURRENT_USER_KEY);
