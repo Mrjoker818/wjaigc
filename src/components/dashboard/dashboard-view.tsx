@@ -13,7 +13,7 @@ import {
   XCircle, BarChart3, Upload, RotateCcw, Film,
 } from 'lucide-react';
 import { UserManager } from '@/lib/user-manager';
-import { RECHARGE_PACKAGES } from '@/lib/credits';
+import { RECHARGE_PACKAGES } from '@/lib/credits-constants';
 import type { Project, CanvasImage, User, UsageStats } from '@/lib/user-types';
 import { ConfirmDialog } from '@/components/custom-dialogs';
 import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
