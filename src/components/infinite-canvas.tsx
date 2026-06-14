@@ -12666,7 +12666,7 @@ export function InfiniteCanvas({
                             <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>其他工具</span>
                           </div>
                           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                            {[['编辑元素', '按元素智能分层'], ['多角度', '多视角旋转生成'], ['转3D', '生成3D模型预览'], ['裁切', '自由/预设比例裁切'], ['字境大师', 'AI字体设计与生成'], ['精修引擎', '产品商业级精修'], ['品牌电商', '电商视觉内容生成'], ['下载', 'PNG/SVG/PSD多格式']].map(([k, v]) => (
+                            {[['编辑元素', '按元素智能分层'], ['多角度', '多视角旋转生成'], ['转3D', '生成3D模型预览'], ['裁切', '自由/预设比例裁切'], ['Logo Pro', 'AI Logo设计与生成'], ['图生图', '基于原图风格生成'], ['品牌工厂', '品牌视觉资产生成'], ['下载', 'PNG/SVG/PSD多格式']].map(([k, v]) => (
                               <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/70'}`}>{v}</span></div>
                             ))}
                           </div>
@@ -12707,7 +12707,7 @@ export function InfiniteCanvas({
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-gold'}`}>左上角工具栏</div>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                        {[['Oh My Prompt', '提示词管理'], ['参考融合', 'Ctrl+Click融合生成'], ['设置', '应用配置'], ['主题切换', '黑白/彩色切换'], ['用户管理', '多用户管理'], ['项目数据', '项目保存加载'], ['管理员系统', 'API配置（管理员）'], ['使用说明', '操作与更新'], ['字境大师', 'AI字体设计（底部栏）']].map(([k, v]) => (
+                        {[['Oh My Prompt', '提示词管理'], ['参考融合', 'Ctrl+Click融合生成'], ['设置', '应用配置'], ['主题切换', '黑白/彩色切换'], ['用户管理', '多用户管理'], ['项目数据', '项目保存加载'], ['管理员系统', 'API配置（管理员）'], ['使用说明', '操作与更新']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/70'}`}>{v}</span></div>
                         ))}
                       </div>
@@ -12719,7 +12719,7 @@ export function InfiniteCanvas({
                     <div>
                       <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-gold'}`}>底部工具栏</div>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                        {[['选择工具', '点击/框选图片'], ['抓手工具', '平移画布'], ['图片上传', '上传本地图片'], ['图像生成器', 'AI生成（金色按钮）'], ['语言修图', '自然语言修改图片'], ['Agent编排', '智能编排多工具'], ['品牌电商', '电商视觉生成'], ['精修引擎', '产品商业级精修'], ['字境大师', 'AI字体设计与生成'], ['六面体', '6面贴图预览'], ['缩放控制', '放大/缩小/重置']].map(([k, v]) => (
+                        {[['选择工具', '点击/框选图片'], ['抓手工具', '平移画布'], ['图片上传', '上传本地图片'], ['图像生成器', 'AI图像生成（金色按钮）'], ['视频生成器', 'AI视频生成与编辑'], ['语言修图', '自然语言修改图片'], ['Agent编排', '智能编排多工具'], ['Logo Pro', 'AI Logo设计与生成'], ['品牌工厂', '品牌视觉资产生成'], ['精修引擎', '产品商业级精修'], ['字境大师', 'AI字体设计与生成'], ['节点编辑器', '可视化工作流编排'], ['六面体', '6面贴图预览'], ['缩放控制', '放大/缩小/重置']].map(([k, v]) => (
                           <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/70'}`}>{v}</span></div>
                         ))}
                       </div>
@@ -12730,25 +12730,25 @@ export function InfiniteCanvas({
                     <div className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isMonochrome ? 'text-gray-400' : 'text-gold'}`}>{APP_VERSION_LABEL}</div>
                     <div className="space-y-2.5">
                       {[
-                        '字境大师 Pro：9大字体风格库 + 12种使用场景 + AI设计方案生成 + 即梦提示词增强',
-                        '字境大师：支持完整版/黑底白字/透明Logo三种提示词模式，AI字体图片一键生成',
-                        '精修引擎：标准/专家双模式，AI商业级产品精修，适合电商和广告场景',
+                        '视频生成：文生视频/图生视频/首尾帧/多参考图，6种API协议适配，20+视频模型',
+                        '视频编辑：语言描述修改视频内容，视频延长，黑金主题播放器',
+                        'Logo Pro：AI Logo设计与生成，5种风格方向+10种行业类型+3种视觉风格',
+                        '品牌工厂：品牌DNA定义+品牌视觉资产生成，配色/字体/调性一站式管理',
+                        '节点编辑器：可视化工作流DAG编排，30+节点类型，AI自然语言建图，ComfyUI导入',
+                        '字境大师 Pro：9大字体风格库+12种使用场景+AI设计方案生成+即梦提示词增强',
+                        '精修引擎：标准/专家双模式，AI商业级产品精修',
                         '品牌电商：品牌电商视觉内容生成，商品场景图/营销素材一键出图',
-                        '图片编辑工具：放大/移除背景/SVG描摹/擦除/蒙版/编辑元素/多角度/转3D/扩展/裁切/Agent编排/下载',
-                        '移除背景：同时生成透明底主体图和黑白蒙版图，本地 BiRefNet/U2Net/Silueta 优先，AI 原生透明+边缘修复',
-                        '擦除：本地 LaMa/ZITS/Anime-Lama 优先，AI 修复+边界扩散兜底',
-                        '蒙版：AI 重新生成指定区域，后端精确蒙版合成+边缘羽化过渡，仅替换编辑区域',
-                        '语言修图：支持 OpenAI+Gemini，自动裁切适配比例，不变形',
-                        'Agent 编排：智能选择修图/生图/分析/调色工具，多轮循环决策',
-                        'SVG 智能描摹：小图智能放大+降噪预处理，AI 专业 SVG 提示词工程+安全过滤+重试+标准化',
-                        '26+模型参数适配：所有模型尺寸/质量参数按官方文档修正，节点模式同步对齐',
-                        '任务管理：统一任务注册中心，SSE 实时推送进度，支持取消和排队',
-                        '图片压缩上传：前端 canvas+后端 sharp 双重压缩',
-                        'API 协议验证：管理员一键验证提供商兼容性',
-                        'Alt+Click 标记参考图，Ctrl+Click 参考融合',
-                        'Ctrl+Z 无限撤回，组功能（右键创建/折叠/拖动）',
-                        '下载：PNG/SVG/PSD 三种格式，PSD 支持 Basic/Pro/Studio 模式',
-                        '服务器端 API 密钥管理 + 通用多提供商兼容层',
+                        '图片编辑：放大/移除背景/SVG描摹/擦除/蒙版/编辑元素/多角度/转3D/扩展/裁切/图生图',
+                        '移除背景：同时生成透明底主体图+黑白蒙版图，BiRefNet/U2Net/Silueta优先+边缘修复',
+                        '擦除：LaMa/ZITS/Anime-Lama优先，AI修复+边界扩散兜底',
+                        '蒙版：AI重新生成指定区域，精确蒙版合成+边缘羽化过渡',
+                        '语言修图：支持OpenAI+Gemini，自动裁切适配比例',
+                        'Agent编排：智能选择修图/生图/分析/调色工具，多轮循环决策',
+                        'SVG智能描摹：彩色/黑白模式，AI专业SVG提示词+安全过滤+重试',
+                        '任务管理：统一任务注册中心，SSE实时推送，支持取消和排队',
+                        'Ctrl+Z无限撤回，组功能（右键创建/折叠/拖动），Alt+Click标记参考图',
+                        '下载：PNG/SVG/PSD三种格式，PSD支持Basic/Pro/Studio模式',
+                        '服务器端API密钥管理+通用多提供商兼容层+协议验证',
                       ].map((item, i) => (
                         <div key={i} className="flex items-start gap-2"><span className={`mt-1.5 w-1 h-1 rounded-full flex-shrink-0 ${isMonochrome ? 'bg-gray-400' : 'bg-gold'}`} /><span className="text-xs">{item}</span></div>
                       ))}

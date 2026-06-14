@@ -6,15 +6,16 @@ import {
   BookOpen, X, Info, Pen, Wand2, ImagePlus, GitMerge, ImageIcon,
   ZoomIn, Eraser, Maximize, Download, Shapes, Settings, Database,
   FileBox, ChevronRight, Check, PenTool, Pencil, Box, Type,
-  LayoutGrid, Bot, Palette, FolderOpen
+  LayoutGrid, Bot, Palette, FolderOpen, FileImage, Building2, ShoppingBag
 } from 'lucide-react';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
 
 // ─── Types ──────────────────────────────────────────────────────
 
-type SectionId = 'canvas' | 'generate' | 'img2img' | 'chat' | 'tools'
+type SectionId = 'canvas' | 'generate' | 'img2img' | 'video' | 'tools'
   | 'svg-trace' | 'lang-edit' | 'agent-edit' | 'refine-engine' | 'sticker'
-  | 'font-design' | 'node-editor' | 'scene-studio' | 'project' | 'admin'
+  | 'font-design' | 'logo-pro' | 'brand-factory' | 'brand-ecommerce'
+  | 'node-editor' | 'scene-studio' | 'ai-psd' | 'chat' | 'project' | 'admin'
   | 'shortcuts' | 'tips' | 'changelog';
 
 interface SectionDef {
@@ -28,6 +29,7 @@ const SECTIONS: SectionDef[] = [
   { id: 'canvas', label: '无限画布', icon: <Move size={14} />, group: '使用说明' },
   { id: 'generate', label: '图像生成', icon: <Sparkles size={14} />, group: '使用说明' },
   { id: 'img2img', label: '图生图', icon: <ImagePlus size={14} />, group: '使用说明' },
+  { id: 'video', label: '视频生成', icon: <FileBox size={14} />, group: '使用说明' },
   { id: 'tools', label: '图片编辑工具', icon: <Pencil size={14} />, group: '使用说明' },
   { id: 'svg-trace', label: 'SVG 智能描摹', icon: <PenTool size={14} />, group: '使用说明' },
   { id: 'lang-edit', label: '语言修图', icon: <Wand2 size={14} />, group: '使用说明' },
@@ -35,8 +37,12 @@ const SECTIONS: SectionDef[] = [
   { id: 'refine-engine', label: '精修引擎', icon: <Palette size={14} />, group: '使用说明' },
   { id: 'sticker', label: '表情助手', icon: <Shapes size={14} />, group: '使用说明' },
   { id: 'font-design', label: '字境大师', icon: <Type size={14} />, group: '使用说明' },
+  { id: 'logo-pro', label: 'Logo 生成器 Pro', icon: <PenTool size={14} />, group: '使用说明' },
+  { id: 'brand-factory', label: '品牌工厂', icon: <Building2 size={14} />, group: '使用说明' },
+  { id: 'brand-ecommerce', label: '品牌电商', icon: <ShoppingBag size={14} />, group: '使用说明' },
   { id: 'node-editor', label: '工作流节点模式', icon: <GitMerge size={14} />, group: '使用说明' },
   { id: 'scene-studio', label: '3D 构图', icon: <Box size={14} />, group: '使用说明' },
+  { id: 'ai-psd', label: 'AI PSD 生成器', icon: <FileImage size={14} />, group: '使用说明' },
   { id: 'chat', label: 'AI 聊天', icon: <MessageSquare size={14} />, group: '使用说明' },
   { id: 'project', label: '项目管理', icon: <FolderOpen size={14} />, group: '使用说明' },
   { id: 'admin', label: '管理员系统', icon: <Settings size={14} />, group: '使用说明' },
@@ -75,7 +81,7 @@ function CanvasSection() {
     <div>
       <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">无限画布</h3>
       <p className="text-xs text-[var(--color-on-surface-variant)] mb-3">
-        核心操作区域，支持图片拖拽、缩放、多选、框选、编辑等丰富交互。
+        核心操作区域，支持图片与视频混合编排、拖拽、缩放、多选、框选、编辑等丰富交互。
       </p>
       <SubTitle>交互方式</SubTitle>
       <FeatureItem>左键点击：选择图片（单选 / <KeyBadge>Ctrl</KeyBadge> 多选 / 框选）</FeatureItem>
@@ -86,14 +92,17 @@ function CanvasSection() {
       <FeatureItem><KeyBadge>Delete</KeyBadge> / <KeyBadge>Backspace</KeyBadge>：删除选中图片</FeatureItem>
       <FeatureItem><KeyBadge>Ctrl+Z</KeyBadge>：无限步数撤回</FeatureItem>
       <SubTitle>底部浮动工具栏</SubTitle>
-      <FeatureItem>选择工具（鼠标指针）/ 平移工具（手掌）</FeatureItem>
-      <FeatureItem>上传图片 / 放大 / 缩小 / 缩放百分比 / 重置视图</FeatureItem>
+      <FeatureItem>选择工具 / 平移工具 / 上传图片 / 缩放控制 / 重置视图</FeatureItem>
+      <FeatureItem>功能按钮：精修 / 语言修图 / Agent / 字境 / Logo / 品牌 / 电商 / PSD / 表情 / 六面体 / ChatCanvas / 节点 / 3D</FeatureItem>
       <SubTitle>图片操作工具栏（选中图片后顶部显示）</SubTitle>
       <FeatureItem>放大、移除背景、SVG 描摹、擦除、蒙版、编辑元素</FeatureItem>
       <FeatureItem>扩展画面、图生图、裁切、下载（PNG / SVG / PSD）</FeatureItem>
+      <SubTitle>视频支持</SubTitle>
+      <FeatureItem>视频图片显示播放按钮覆盖层，点击播放或右键菜单操作</FeatureItem>
+      <FeatureItem>视频编辑 / 视频延长 / 视频压缩</FeatureItem>
       <SubTitle>下载格式</SubTitle>
-      <FeatureItem>PSD：Basic（原图 + 注释）/ Pro（前景背景分离 + 重建）/ Studio（语义命名 + 阴影 + JSON 元数据）</FeatureItem>
-      <FeatureItem>SVG：Fast（快速）/ Pro（优化）/ Studio（精细）</FeatureItem>
+      <FeatureItem>PSD：Basic / Pro / Studio 三种导出模式</FeatureItem>
+      <FeatureItem>SVG：Fast / Pro / Studio 三种矢量化精度</FeatureItem>
     </div>
   );
 }
@@ -219,6 +228,9 @@ function AgentEditSection() {
       <FeatureItem>generate_image：从零生成新图片</FeatureItem>
       <FeatureItem>analyze_image：图片内容分析</FeatureItem>
       <FeatureItem>adjust_color：色彩 / 亮度 / 对比度调整</FeatureItem>
+      <FeatureItem>generate_video：文生视频 / 图生视频</FeatureItem>
+      <FeatureItem>extend_video：视频延长</FeatureItem>
+      <FeatureItem>adjust_color：色彩 / 亮度 / 对比度调整</FeatureItem>
       <SubTitle>Agent 循环</SubTitle>
       <FeatureItem>LLM 思考 → 选工具 → 执行 → 反馈 → 再思考，重复直到任务完成</FeatureItem>
       <FeatureItem>最大轮次可选（3 / 5 / 8），安全限制：单轮 60 秒超时，全局 5 分钟超时</FeatureItem>
@@ -294,7 +306,7 @@ function NodeEditorSection() {
       <FeatureItem>连线语义类型：prompt / image / reference / mask，端口类型约束</FeatureItem>
       <FeatureItem>节点间数据传递：上游 output 自动流入下游 input</FeatureItem>
       <FeatureItem>@图片引用：提示词中输入 @ 插入画布图片</FeatureItem>
-      <FeatureItem>27+ 节点类型：输入、AI 图像、控制、输出四大类</FeatureItem>
+      <FeatureItem>30+ 节点类型：输入、AI 图像、AI 视频、控制、输出五大类</FeatureItem>
       <SubTitle>增强功能</SubTitle>
       <FeatureItem>8 种专业预设工作流模板，一键加载</FeatureItem>
       <FeatureItem>素材库系统：双层（本地 + 服务器）管理，分类筛选</FeatureItem>
@@ -337,13 +349,17 @@ function ChatSection() {
     <div>
       <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">AI 聊天</h3>
       <p className="text-xs text-[var(--color-on-surface-variant)] mb-3">
-        支持管理员配置的任意 LLM 模型，Agent 联网思考模式，支持图像理解。
+        支持管理员配置的任意 LLM 模型，Agent 联网思考模式，支持图像理解与提示词优化。
       </p>
       <SubTitle>功能</SubTitle>
       <FeatureItem>多模型选择：管理员配置的聊天模型列表</FeatureItem>
       <FeatureItem>图像理解：发送图片让 AI 分析内容</FeatureItem>
       <FeatureItem>提示词优化：增强 / 扩展 / 精简三种模式，优化结果可一键发送到图像生成面板</FeatureItem>
-      <FeatureItem>优化历史记录，支持快速复用</FeatureItem>
+      <FeatureItem>Skills 系统：21 个预设 Skill（图像 / 设计 / 品牌 / 编辑 / 社交），对话经验沉淀为可复用工作流</FeatureItem>
+      <FeatureItem>模糊意图追问：AI 自动判断意图清晰度，主动追问或补全</FeatureItem>
+      <FeatureItem>生成后引导：AI 回复末尾推荐后续操作（图生图 / 修图 / 放大等）</FeatureItem>
+      <FeatureItem>@引用系统：输入 @ 触发引用菜单（@图片 / @品牌 / @模型 / @提示词）</FeatureItem>
+      <FeatureItem>Tab 模式：选中画布图片后自动切换为"针对此图片"模式</FeatureItem>
     </div>
   );
 }
@@ -423,69 +439,160 @@ function TipsSection() {
   );
 }
 
+function VideoSection() {
+  return (
+    <div>
+      <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">视频生成</h3>
+      <p className="text-xs text-[var(--color-on-surface-variant)] mb-3">
+        支持 20+ 视频模型的视频生成与编辑功能，6 种 API 协议自动适配。
+      </p>
+      <SubTitle>生成模式</SubTitle>
+      <FeatureItem>文生视频：纯文字描述生成视频，支持画面比例 / 时长 / 质量选择</FeatureItem>
+      <FeatureItem>图生视频 - 首帧驱动：上传首帧图片，AI 生成后续视频内容</FeatureItem>
+      <FeatureItem>图生视频 - 首尾帧驱动：上传首帧 + 尾帧图片，AI 生成中间过渡</FeatureItem>
+      <FeatureItem>图生视频 - 多参考图：上传多张参考图，AI 综合参考生成</FeatureItem>
+      <SubTitle>视频编辑</SubTitle>
+      <FeatureItem>视频延长：在现有视频末尾继续生成内容（支持可灵 V3 / Seedance 等）</FeatureItem>
+      <FeatureItem>音效生成：生成视频时可选同时生成音效</FeatureItem>
+      <FeatureItem>视频播放器：黑金主题，进度条 / 音量 / 倍速（0.5x ~ 2x） / 全屏</FeatureItem>
+      <SubTitle>入口</SubTitle>
+      <FeatureItem>右侧面板图像 / 视频 Tab 切换到视频生成</FeatureItem>
+      <FeatureItem>画布右键菜单"视频编辑" / "视频延长"</FeatureItem>
+      <FeatureItem>视频图片点击播放按钮覆盖层</FeatureItem>
+    </div>
+  );
+}
+
+function LogoProSection() {
+  return (
+    <div>
+      <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">Logo 生成器 Pro</h3>
+      <p className="text-xs text-[var(--color-on-surface-variant)] mb-3">
+        3 步式专业 Logo 设计工具，从方向选择到最终生成，支持多种风格和颜色方案。
+      </p>
+      <SubTitle>设计流程</SubTitle>
+      <FeatureItem>Step 1 - 方向：输入品牌名称和描述，选择设计方向（极简 / 字母标志 / 图标 / 吉祥物 / 徽章 / 排版）</FeatureItem>
+      <FeatureItem>Step 2 - 风格：选择风格预设和配色方案，自定义设计细节</FeatureItem>
+      <FeatureItem>Step 3 - 生成：AI 生成多款 Logo 方案，支持下载 PNG</FeatureItem>
+      <SubTitle>功能特点</SubTitle>
+      <FeatureItem>6 种设计方向 + 多种风格预设</FeatureItem>
+      <FeatureItem>8 种配色方案（单色 / 双色 / 渐变 / 金属 / 霓虹 / 水彩 / 几何 / 自然）</FeatureItem>
+      <FeatureItem>黑金主题浮动面板，支持缩小 / 拖动</FeatureItem>
+      <SubTitle>入口</SubTitle>
+      <FeatureItem>底部工具栏"Logo"按钮</FeatureItem>
+    </div>
+  );
+}
+
+function BrandFactorySection() {
+  return (
+    <div>
+      <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">品牌工厂</h3>
+      <p className="text-xs text-[var(--color-on-surface-variant)] mb-3">
+        BrandDNA 品牌规范定义 + 品牌视觉套图生成，一站式品牌视觉资产管理。
+      </p>
+      <SubTitle>BrandDNA 定义</SubTitle>
+      <FeatureItem>品牌名称 / 品牌口号 / 品牌调性描述</FeatureItem>
+      <FeatureItem>品牌色彩（主色 / 辅助色 / 强调色）</FeatureItem>
+      <FeatureItem>字体偏好 / 禁区规则</FeatureItem>
+      <SubTitle>视觉套图生成</SubTitle>
+      <FeatureItem>基于 BrandDNA 自动生成品牌视觉套图</FeatureItem>
+      <FeatureItem>支持多种场景：品牌主视觉 / 海报 / 社交媒体 / 包装等</FeatureItem>
+      <FeatureItem>生成的图片自动注入品牌色彩和调性</FeatureItem>
+      <SubTitle>入口</SubTitle>
+      <FeatureItem>底部工具栏"品牌"按钮</FeatureItem>
+    </div>
+  );
+}
+
+function BrandEcommerceSection() {
+  return (
+    <div>
+      <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">品牌电商</h3>
+      <p className="text-xs text-[var(--color-on-surface-variant)] mb-3">
+        电商模板套图批量生成，自动适配主图 / 详情页 / 海报等多种电商场景。
+      </p>
+      <SubTitle>功能</SubTitle>
+      <FeatureItem>选择电商模板类型（主图 / 详情页 / 海报 / 直播封面等）</FeatureItem>
+      <FeatureItem>输入商品信息和描述，AI 自动生成适配模板的图片</FeatureItem>
+      <FeatureItem>支持品牌工厂 BrandDNA 注入，保持品牌一致性</FeatureItem>
+      <FeatureItem>批量生成，一次产出多张不同角度的电商图</FeatureItem>
+      <SubTitle>入口</SubTitle>
+      <FeatureItem>底部工具栏"电商"按钮</FeatureItem>
+    </div>
+  );
+}
+
+function AiPsdSection() {
+  return (
+    <div>
+      <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">AI PSD 生成器</h3>
+      <p className="text-xs text-[var(--color-on-surface-variant)] mb-3">
+        AI 生成图片并自动导出 PSD，支持多种导出模式，便于后续 Photoshop 编辑。
+      </p>
+      <SubTitle>PSD 导出模式</SubTitle>
+      <FeatureItem>Basic：原图层 + 白色背景 + 注释层（安全快速）</FeatureItem>
+      <FeatureItem>Pro：背景移除 + 连通域前景分析 + 语义图层命名 + 背景重建 + XMP 元数据</FeatureItem>
+      <FeatureItem>Studio：所有 Pro 功能 + 阴影估算 + 语义分组 + 质量评分 + 完整 V4 清单</FeatureItem>
+      <SubTitle>功能</SubTitle>
+      <FeatureItem>选择图像模型，输入提示词生成图片</FeatureItem>
+      <FeatureItem>自动分层导出 PSD，V4 规范图层命名（bg/main, subject/{'{idx}'}/{'{label}'} 等）</FeatureItem>
+      <FeatureItem>使用 ag-psd 确保 Photoshop 兼容性</FeatureItem>
+      <SubTitle>入口</SubTitle>
+      <FeatureItem>底部工具栏"PSD"按钮</FeatureItem>
+    </div>
+  );
+}
+
 function ChangelogSection() {
   return (
     <div>
       <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">更新内容</h3>
 
+      <SubTitle>v3.2.0</SubTitle>
+      <FeatureItem>视频生成核心功能：6 种视频 API 协议适配层，20+ 视频模型注册表</FeatureItem>
+      <FeatureItem>文生视频 / 图生视频（首帧驱动 / 首尾帧驱动 / 多参考图）三种模式</FeatureItem>
+      <FeatureItem>视频延长：基于可灵 V3 / Seedance 等模型延长视频</FeatureItem>
+      <FeatureItem>音效生成：部分模型支持生成视频时同时生成音效</FeatureItem>
+      <FeatureItem>视频播放器：黑金主题，进度条 / 音量 / 倍速 / 全屏</FeatureItem>
+      <FeatureItem>视频编辑面板：语言编辑 + 视频延长双 Tab，黑金 / 单色双主题</FeatureItem>
+      <FeatureItem>Logo 生成器 Pro：3 步式 Logo 设计（方向 → 风格 → 生成），支持下载</FeatureItem>
+      <FeatureItem>品牌工厂：BrandDNA 品牌规范定义 + 品牌视觉套图生成</FeatureItem>
+      <FeatureItem>品牌电商：电商模板套图批量生成（主图 / 详情页 / 海报等）</FeatureItem>
+      <FeatureItem>AI PSD 生成器：AI 生成 + PSD 导出，支持 Basic / Pro / Studio 三种模式</FeatureItem>
+      <FeatureItem>充值系统修复：套餐点击 / 自定义充值 / 演示模式充值完成</FeatureItem>
+      <FeatureItem>数据隔离修复：普通用户 / 管理员数据完全隔离，跨用户项目清理</FeatureItem>
+      <FeatureItem>工作流新增 3 个视频节点类型：ai-video-generate / ai-video-i2v / output-video</FeatureItem>
+      <FeatureItem>Agent 编排注册视频工具：generate_video / extend_video</FeatureItem>
+
       <SubTitle>v3.1.0</SubTitle>
-      <FeatureItem>修复：扩展命令在 gemini-image 协议模型上自动回退到支持编辑的模型，不再变形或不出图</FeatureItem>
-      <FeatureItem>修复：精修引擎 4sapi / pearapi 模型无法生图（images[].image_url 格式适配）</FeatureItem>
-      <FeatureItem>修复：精修引擎模型选择列表多供应商同名模型点击后显示错误（providerId 区分）</FeatureItem>
+      <FeatureItem>修复：扩展命令在 gemini-image 协议模型上自动回退到支持编辑的模型</FeatureItem>
+      <FeatureItem>修复：精修引擎多供应商同名模型点击后显示错误</FeatureItem>
       <FeatureItem>修复：表情助手生图全部失败（串行生成防限流 + 错误处理改进）</FeatureItem>
       <FeatureItem>修复：3D 构图功能右侧面板不可用（后端 API 重写 + 前端模型选择器）</FeatureItem>
-      <FeatureItem>修复：submitImageTask 对 gemini-image 协议的请求体转换（扩展/擦除/蒙版等编辑操作）</FeatureItem>
-      <FeatureItem>修复：adjustRequestForProfile 图片格式转换（image/image_urls → images[].image_url）</FeatureItem>
       <FeatureItem>新增：3D 构图功能支持图像模型和 LLM 模型独立选择</FeatureItem>
-      <FeatureItem>新增：精修引擎、表情助手使用 providerId::modelId 格式区分不同供应商的同名模型</FeatureItem>
+      <FeatureItem>新增：精修引擎、表情助手使用 providerId::modelId 格式区分不同供应商模型</FeatureItem>
 
       <SubTitle>v3.0.0</SubTitle>
-      <FeatureItem>SVG 智能描摹全面升级：VTracer 预处理管道 + AI SVG 提示词工程 + 安全过滤 + 标准化</FeatureItem>
+      <FeatureItem>SVG 智能描摹全面升级：VTracer 预处理管道 + AI SVG 提示词工程</FeatureItem>
       <FeatureItem>移除背景边缘修复：边缘颜色混合修复，消除抠图锯齿和色差</FeatureItem>
-      <FeatureItem>放大超时修复 + 任务注册：放大异步任务注册到 task-registry</FeatureItem>
       <FeatureItem>26+ 模型参数适配：完整重写 MODEL_QUALITIES 和 MODEL_PIXEL_SIZES</FeatureItem>
-      <FeatureItem>节点模式与画布模式对齐：模型名称友好显示 + 质量/比例动态更新</FeatureItem>
-      <FeatureItem>AI 图像编辑模型默认对齐：工具栏工具统一使用图像生成面板当前模型</FeatureItem>
       <FeatureItem>任务基础设施升级：task-registry + SSE 推送 + 任务取消 + 队列管理</FeatureItem>
-      <FeatureItem>RemoveBG 同时输出透明图 + 黑白蒙版图</FeatureItem>
-      <FeatureItem>图片压缩上传：前端 canvas 压缩 + 后端 sharp 压缩</FeatureItem>
-      <FeatureItem>API 协议验证：管理员面板一键验证提供商协议兼容性</FeatureItem>
       <FeatureItem>Agent 编排引擎：工具注册表 + Agent 循环 + 多轮决策</FeatureItem>
-      <FeatureItem>IOPaint 本地集成：多模型擦除（LaMa / ZITS / Anime-Lama）+ RemoveBG（3 模型）</FeatureItem>
-      <FeatureItem>PNG→JPEG 自动转换：无透明需求时自动压缩（有透明需求绝不转换）</FeatureItem>
-      <FeatureItem>画布缩略图清晰度优化：THUMBNAIL_MAX 1280px + zoom 感知动态切换</FeatureItem>
+      <FeatureItem>IOPaint 本地集成：多模型擦除 + RemoveBG（3 模型）</FeatureItem>
 
       <SubTitle>v2.9.0</SubTitle>
       <FeatureItem>RemoveBG 同时输出透明背景图 + 黑白蒙版图</FeatureItem>
-      <FeatureItem>任务注册中心：统一任务管理、SSE 推送、取消、队列</FeatureItem>
-      <FeatureItem>图片压缩上传：前端 canvas 压缩 + 后端 sharp 压缩</FeatureItem>
-      <FeatureItem>API 协议验证 + 任务队列 + Agent 编排引擎</FeatureItem>
-      <FeatureItem>IOPaint 本地集成：多模型擦除 + RemoveBG</FeatureItem>
+      <FeatureItem>任务注册中心 + API 协议验证 + Agent 编排引擎</FeatureItem>
 
       <SubTitle>v2.8.0</SubTitle>
-      <FeatureItem>SVG 智能描摹：彩色 + 黑白双模式，多级质量预设</FeatureItem>
-      <FeatureItem>语言修图：OpenAI + Gemini 双提供商支持</FeatureItem>
-      <FeatureItem>擦除功能 AI 增强：AI 模型优先 + BFS 兜底</FeatureItem>
-      <FeatureItem>蒙版修图 AI 增强：AI 生成 + 后端精确蒙版合成</FeatureItem>
-      <FeatureItem>API 兼容层升级：通用多提供商适配</FeatureItem>
-
-      <SubTitle>v2.7.0</SubTitle>
-      <FeatureItem>客户端数据服务器同步</FeatureItem>
-      <FeatureItem>z-index 层级规范</FeatureItem>
-      <FeatureItem>组数据持久化修复</FeatureItem>
+      <FeatureItem>SVG 智能描摹 / 语言修图 / 擦除 & 蒙版 AI 增强 / API 兼容层升级</FeatureItem>
 
       <SubTitle>v2.6.0</SubTitle>
-      <FeatureItem>数据库持久化存储：PostgreSQL + 双写策略</FeatureItem>
-      <FeatureItem>API 兼容性修复：fetchWithV1Retry</FeatureItem>
+      <FeatureItem>数据库持久化存储：PostgreSQL + 双写策略 + API 兼容性修复</FeatureItem>
 
       <SubTitle>v2.5.0</SubTitle>
-      <FeatureItem>参考图与图生图类别统一（6 大类）</FeatureItem>
-      <FeatureItem>工具栏功能优化：放大/移除背景/擦除/蒙版/扩展语义更新</FeatureItem>
-      <FeatureItem>管理员系统增强：5 种模型类型 + API 用量分析</FeatureItem>
-
-      <SubTitle>v2.4.0</SubTitle>
-      <FeatureItem>服务器端 API 密钥管理</FeatureItem>
-      <FeatureItem>移除前端 API Key 输入框，模型列表从服务器加载</FeatureItem>
+      <FeatureItem>参考图与图生图类别统一 / 工具栏功能优化 / 管理员 5 种模型类型</FeatureItem>
 
       <SubTitle>v2.3.0</SubTitle>
       <FeatureItem>图生图功能：黑金配色浮动面板 + 四个参考类别</FeatureItem>
@@ -499,6 +606,7 @@ const SECTION_CONTENT: Record<SectionId, React.ReactNode> = {
   'canvas': <CanvasSection />,
   'generate': <GenerateSection />,
   'img2img': <Img2ImgSection />,
+  'video': <VideoSection />,
   'chat': <ChatSection />,
   'tools': <ToolsSection />,
   'svg-trace': <SvgTraceSection />,
@@ -507,8 +615,12 @@ const SECTION_CONTENT: Record<SectionId, React.ReactNode> = {
   'refine-engine': <RefineEngineSection />,
   'sticker': <StickerSection />,
   'font-design': <FontDesignSection />,
+  'logo-pro': <LogoProSection />,
+  'brand-factory': <BrandFactorySection />,
+  'brand-ecommerce': <BrandEcommerceSection />,
   'node-editor': <NodeEditorSection />,
   'scene-studio': <SceneStudioSection />,
+  'ai-psd': <AiPsdSection />,
   'project': <ProjectSection />,
   'admin': <AdminSection />,
   'shortcuts': <ShortcutsSection />,
