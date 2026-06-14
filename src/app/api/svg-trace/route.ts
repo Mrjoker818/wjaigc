@@ -10,6 +10,7 @@ import { uploadImageToS3, isS3Available } from '@/lib/s3-storage';
 import { PYTHON_BIN } from '@/lib/image-tools/config';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits } from '@/lib/credits';
+import { optimize as runSvgoOptimize } from 'svgo';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -887,7 +888,7 @@ function mergeSameColorPaths(svg: string): string {
 // ─── SVG Comprehensive Post-Processing Pipeline ──────────────
 // 丹青AI级别 SVG 后处理管线
 
-function postProcessSvg(svg: string): string {
+async function postProcessSvg(svg: string): Promise<string> {
   // NOTE: 不做路径简化(simplifySvgPaths)——对path d属性的字符串级解析可能破坏复杂命令序列,
   // 导致SVG格式错误(Illustrator/Figma无法打开)。VTracer输出本身已是优化过的路径。
   // NOTE: 不做同色路径合并(mergeSameColorPaths)——stacked模式下路径有严格的z-order层叠顺序，
@@ -895,7 +896,115 @@ function postProcessSvg(svg: string): string {
   // NOTE: 不做图层分组(groupPathsByFill)——索引计算在路径删除后可能偏移，产生格式错误SVG。
   // 保留optimizeSvgLayers仅做id重命名(安全操作)。
   svg = optimizeSvgLayers(svg);
+  // SVGO专业级优化：路径精简、坐标精度、弧线拟合、冗余移除
+  svg = await optimizeWithSvgo(svg);
   return svg;
+}
+
+// ─── SVGO Professional Post-Processing ──────────────
+// 使用 SVGO 进行专业级SVG优化：路径精简、坐标精度、冗余移除
+// 与手写字符串级处理不同，SVGO基于AST操作，安全且不破坏SVG结构
+
+async function optimizeWithSvgo(svg: string): Promise<string> {
+  try {
+    const { optimize } = await import('svgo');
+    const result = optimize(svg, {
+      plugins: [
+        // 清理：移除冗余属性
+        'removeDoctype',
+        'removeXMLProcInst',
+        'removeComments',
+        'removeMetadata',
+        'removeEditorsNSData',
+        'cleanupAttrs',
+        'mergeStyles',
+        'inlineStyles',
+        'minifyStyles',
+        'cleanupIds',
+        'removeUselessDefs',
+        'cleanupNumericValues',
+        
+        // 路径优化：核心质量提升
+        {
+          name: 'convertPathData',
+          params: {
+            // 使用最短路径命令（相对/绝对混合）
+            makeArcs: {
+              threshold: 2.5,    // 弧线拟合容差，越低越精确
+              tolerance: 0.5,   // 弧线偏移容差
+            },
+            // 精度：保留2位小数（足够精度，减少文件体积）
+            floatPrecision: 2,
+            // 转换为相对坐标（更短路径数据）
+            transformPrecision: 3,
+            // 移除无用的路径命令
+            removeUseless: true,
+            // 合并连续的相同命令
+            collapseRepeated: true,
+            // 转换直线为更短的命令
+            lineShorthands: true,
+            // 曲线平滑：将直线段转为平滑曲线
+            curveSmoothShorthands: true,
+            // 转换二次贝塞尔为三次贝塞尔（更广泛兼容）
+            convertToQ: false,
+            // 负偏移（更短的负数坐标）
+            negativeExtraSpace: true,
+            // 强制绝对坐标（Illustrator兼容）
+            forceAbsolutePath: false,
+            // 移除路径首尾的冗余Z/M命令
+            smartArcRounding: true,
+          }
+        },
+        
+        // 合并相邻路径（相同fill/stroke的路径合并为一个<path>）
+        {
+          name: 'mergePaths',
+          params: {
+            force: false,       // 不强制合并不同风格的路径
+            noSpaceAfterFlags: true, // 路径命令标志后无空格（更短）
+          }
+        },
+        
+        // 转换变换矩阵为简短属性
+        'convertTransform',
+        
+        // 移除空容器和不可见元素
+        'removeEmptyContainers',
+        'removeHiddenElems',
+        
+        // 移除默认值的属性
+        'removeEmptyAttrs',
+        
+        // 移除非空<use>和嵌套<svg>
+        'removeNonInheritableGroupAttrs',
+        
+        // 移除空白
+        'removeDesc',
+        'removeTitle',
+        // 保留viewBox（SVG缩放必需，不能移除）
+        // 'removeViewBox' 已禁用 — viewBox 是正确缩放的关键
+        
+        // 形状优化
+        'convertShapeToPath',
+        'convertEllipseToCircle',
+        
+        // 排序属性（更好的可读性）
+        'sortAttrs',
+        'sortDefsChildren',
+      ],
+      // 保留SVG结构完整性
+      multipass: true,  // 多轮优化，确保最佳结果
+    });
+    
+    if (result.data && result.data.length > 0) {
+      console.log(`[svg-trace] SVGO optimized: ${svg.length} → ${result.data.length} bytes (${Math.round((1 - result.data.length / svg.length) * 100)}% reduction)`);
+      return result.data;
+    }
+    return svg;
+  } catch (err) {
+    console.warn('[svg-trace] SVGO optimization failed, using raw SVG:', (err as Error).message);
+    return svg;
+  }
 }
 
 // ─── SVG Sanitization for Adobe Illustrator ─────────────
@@ -1601,7 +1710,7 @@ async function tryDesignVectorizeFallback(req: NextRequest, imageUrl: string, mo
     }
     svgContent = safetyResult.sanitized || svgContent;
     // 丹青AI级别后处理
-    svgContent = postProcessSvg(svgContent);
+    svgContent = await postProcessSvg(svgContent);
     // SVG 标准化
     svgContent = normalizeVectorSvg(svgContent, 0, 0);
     const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
@@ -1662,6 +1771,7 @@ export async function POST(req: NextRequest) {
         });
       });
       if (!vtracerCheck) {
+        // Fallback: AI矢量化API
         const fallback = await tryDesignVectorizeFallback(req, imageUrl, mode);
         if (fallback) return fallback;
         return NextResponse.json({
@@ -1707,6 +1817,40 @@ export async function POST(req: NextRequest) {
         );
 
         let svgContent = await runVTracer(preprocessed, vtracerParams);
+        let usedEngine = 'vtracer';
+
+        // VTracer失败时使用 ImageTracer.js 作为高质量JS兜底
+        if (!svgContent || svgContent.trim().length < 50) {
+          console.warn('[svg-trace] VTracer输出为空，尝试ImageTracer.js兜底');
+          try {
+            const ImageTracer = require('imagetracerjs');
+            const sharp = require('sharp');
+            const pngBuffer = await sharp(preprocessed).png().toBuffer();
+            const base64Data = pngBuffer.toString('base64');
+            const dataUri = `data:image/png;base64,${base64Data}`;
+            svgContent = ImageTracer.imageToSVG(dataUri, {
+              numberofcolors: vtracerParams.colorPrecision >= 8 ? 64 : 32,
+              pathomit: 8,
+              rcorner: 1,
+              ltres: 1,
+              qtres: 1,
+              scale: 1,
+              roundcoords: 2,
+              desc: false,
+              viewbox: false,
+              colorsampling: 2,
+              blurradius: 1,
+              strokewidth: 1,
+              linefilter: true,
+              lcpr: 0,
+              qcpr: 0,
+            });
+            usedEngine = 'imagetracerjs';
+            console.log('[svg-trace] ImageTracer.js兜底成功，路径数:', (svgContent.match(/<path/g) || []).length);
+          } catch (itrErr) {
+            console.warn('[svg-trace] ImageTracer.js兜底失败:', itrErr);
+          }
+        }
 
         // Sanitize SVG for Adobe Illustrator compatibility
         svgContent = sanitizeSvgForIllustrator(svgContent, imgW, imgH);
@@ -1714,8 +1858,8 @@ export async function POST(req: NextRequest) {
         // 温和颜色合并：仅合并视觉上无法区分的近色
         svgContent = mergeSvgColors(svgContent);
 
-        // 丹青AI级别后处理：路径简化 + 语义化图层命名 + 同色路径合并
-        svgContent = postProcessSvg(svgContent);
+        // 丹青AI级别后处理：路径简化 + 语义化图层命名 + 同色路径合并 + SVGO优化
+        svgContent = await postProcessSvg(svgContent);
 
         // 标准化 SVG（统一 viewBox / width / height）
         svgContent = normalizeVectorSvg(svgContent, imgW, imgH);
@@ -1764,7 +1908,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({
           success: true,
           mode: 'color',
-          engine: 'vtracer',
+          engine: usedEngine,
           svg: svgContent,
           url,
           dataUrl: pngPreviewUrl || svgDataUrl,
@@ -1801,8 +1945,8 @@ export async function POST(req: NextRequest) {
           invert: body.invert,
         });
 
-        // 丹青AI级别后处理（黑白模式仅路径简化）
-        svgContent = simplifySvgPaths(svgContent);
+        // 专业后处理（SVGO路径优化+曲线平滑）
+        svgContent = await postProcessSvg(svgContent);
 
         // 标准化 SVG（统一 viewBox / width / height）
         svgContent = normalizeVectorSvg(svgContent, bwImgW, bwImgH);

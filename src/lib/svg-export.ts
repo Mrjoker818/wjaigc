@@ -859,9 +859,46 @@ export async function downloadSVG(
   mode: 'fast' | 'pro' | 'studio' = 'pro',
   onProgress?: (stage: string, progress: number) => void
 ): Promise<void> {
-  // Try server-side vectorize API first (uses admin-configured vectorize model for better quality)
+  const modeToQuality: Record<string, string> = {
+    fast: 'fast',
+    pro: 'balanced',
+    studio: 'hd',
+  };
+  const quality = modeToQuality[mode] || 'balanced';
+
+  // Strategy 1: Server-side svg-trace API (vtracer + SVGO + imagetracerjs fallback)
   try {
-    onProgress?.('calling_vector_model', 10);
+    onProgress?.('calling_svg_trace', 10);
+    const response = await fetch('/api/svg-trace', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageUrl, mode: 'color', quality }),
+    });
+    const data = await response.json();
+    if (data.success && data.svgDataUrl) {
+      // svgDataUrl is a data URL containing the SVG
+      onProgress?.('rendering_preview', 90);
+      const svgContent = decodeURIComponent(data.svgDataUrl.split(',')[1] || '');
+      const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `vectorized-${mode}.svg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      onProgress?.('completed', 100);
+      return;
+    }
+    console.warn('svg-trace API unavailable, trying design/vectorize:', data.error);
+  } catch (e) {
+    console.warn('svg-trace API error, trying design/vectorize:', e);
+  }
+
+  // Strategy 2: Server-side design/vectorize API (admin vectorize model)
+  try {
+    onProgress?.('calling_vector_model', 20);
     const response = await fetch('/api/design/vectorize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -882,13 +919,42 @@ export async function downloadSVG(
       onProgress?.('completed', 100);
       return;
     }
-    // Server API failed, fall through to client-side
-    console.warn('Server vectorize API unavailable, falling back to client-side:', data.error);
+    console.warn('design/vectorize API unavailable, falling back to client-side:', data.error);
   } catch (e) {
-    console.warn('Server vectorize API error, falling back to client-side:', e);
+    console.warn('design/vectorize API error, falling back to client-side:', e);
   }
 
-  // Fallback: client-side vtracer algorithm
+  // Strategy 3 (last resort): Client-side imagetracerjs
+  try {
+    onProgress?.('client_side_trace', 30);
+    const ImageTracer = (await import('imagetracerjs')).default;
+    const svgString = await new Promise<string>((resolve, reject) => {
+      const options = mode === 'fast'
+        ? { ltres: 2, qtres: 4, pathomit: 15, colorsampling: 2, numberofcolors: 32, blurradius: 1 }
+        : mode === 'pro'
+        ? { ltres: 0.5, qtres: 1, pathomit: 5, colorsampling: 2, numberofcolors: 128, blurradius: 0 }
+        : { ltres: 0.2, qtres: 0.5, pathomit: 2, colorsampling: 2, numberofcolors: 256, blurradius: 0 };
+      ImageTracer.imageToSVG(imageUrl, (svg: string) => {
+        if (svg && svg.includes('<svg')) resolve(svg);
+        else reject(new Error('imagetracerjs produced empty output'));
+      }, options);
+    });
+    const blob = new Blob([svgString], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `vectorized-${mode}.svg`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    onProgress?.('completed', 100);
+    return;
+  } catch (e) {
+    console.warn('imagetracerjs fallback failed:', e);
+  }
+
+  // Strategy 4 (absolute last resort): Original client-side algorithm
   const result = await exportAsSVG(imageUrl, { mode, onProgress });
   const blob = new Blob([result.svgString], { type: 'image/svg+xml' });
   const url = URL.createObjectURL(blob);
