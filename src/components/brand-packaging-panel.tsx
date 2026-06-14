@@ -62,6 +62,7 @@ interface PackagingProject {
   id: string;
   name: string;
   brandName: string;
+  productName?: string;
   createdAt: string;
 }
 
@@ -313,7 +314,7 @@ export default function BrandPackagingPanel({ onClose, onAddImages, isMonochrome
                 type: outputModes[i % outputModes.length] || 'package_render',
                 url: u,
                 prompt,
-              }))];
+              }))]);
               onAddImages(urls);
               // Analysis
               if (advancedOptions.brandConsistency || advancedOptions.feasibility) {
@@ -541,7 +542,7 @@ export default function BrandPackagingPanel({ onClose, onAddImages, isMonochrome
           style={{ padding: '14px 18px', borderBottom: `1px solid ${c('border')}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: isMonochrome ? M_BG_CARD : 'rgb(32,22,22)' }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <button onClick={() => setShowSidebar(s => !s)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: c('accent)', padding: '2px' }} title="项目库">
+            <button onClick={() => setShowSidebar(s => !s)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: c('accent'), padding: '2px' }} title="项目库">
               <FolderOpen size={18} />
             </button>
             <Package size={20} style={{ color: c('accent') }} />
@@ -647,7 +648,7 @@ export default function BrandPackagingPanel({ onClose, onAddImages, isMonochrome
                     <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 8px', borderRadius: '6px', fontSize: '12px', background: c('input'), color: c('text2') }}>
                       <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: color, border: `1px solid ${c('border')}` }}></span>
                       {color}
-                      <button onClick={() => setBrandColors(prev => prev.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: c('text3)', padding: 0 }}><X size={11} /></button>
+                      <button onClick={() => setBrandColors(prev => prev.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: c('text3'), padding: 0 }}><X size={11} /></button>
                     </span>
                   ))}
                 </div>
@@ -723,7 +724,7 @@ export default function BrandPackagingPanel({ onClose, onAddImages, isMonochrome
                         style={{ width: '100%', marginTop: '3px', padding: '6px 8px', borderRadius: '6px', fontSize: '14px', background: c('input'), border: `1px solid ${c('border')}`, color: c('text'), outline: 'none', textAlign: 'center' }} />
                     </label>
                   ))}
-                  <span style={{ fontSize: '12px', color: c('text3)', alignSelf: 'flex-end', paddingBottom: '8px' }}>mm</span>
+                  <span style={{ fontSize: '12px', color: c('text3'), alignSelf: 'flex-end', paddingBottom: '8px' }}>mm</span>
                 </div>
               </div>
 
@@ -836,7 +837,7 @@ export default function BrandPackagingPanel({ onClose, onAddImages, isMonochrome
                       </div>
                     ))}
                     <button onClick={() => handleUpload(type)}
-                      style={{ width: '56px', height: '56px', borderRadius: '6px', border: `1px dashed ${c('border')}`, background: c('input'), cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: c('text3)' }}>
+                      style={{ width: '56px', height: '56px', borderRadius: '6px', border: `1px dashed ${c('border')}`, background: c('input'), cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: c('text3') }}>
                       <Plus size={16} />
                     </button>
                   </div>
@@ -862,7 +863,7 @@ export default function BrandPackagingPanel({ onClose, onAddImages, isMonochrome
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {outputModes.includes(o.mode) ? <CheckSquare size={15} style={{ color: c('accent') }} /> : <Square size={15} style={{ color: c('text3)' }} />}
+                    {outputModes.includes(o.mode) ? <CheckSquare size={15} style={{ color: c('accent') }} /> : <Square size={15} style={{ color: c('text3') }} />}
                     <span style={{ fontSize: '14px', fontWeight: 700, color: outputModes.includes(o.mode) ? c('accent') : c('text') }}>{o.label}</span>
                   </div>
                   <div style={{ fontSize: '12px', color: c('text3'), marginLeft: '23px', marginTop: '2px' }}>{o.desc}</div>
@@ -894,7 +895,7 @@ export default function BrandPackagingPanel({ onClose, onAddImages, isMonochrome
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {advancedOptions[item.key] ? <CheckSquare size={15} style={{ color: c('accent') }} /> : <Square size={15} style={{ color: c('text3)' }} />}
+                    {advancedOptions[item.key] ? <CheckSquare size={15} style={{ color: c('accent') }} /> : <Square size={15} style={{ color: c('text3') }} />}
                     <span style={{ color: c('accent'), marginRight: '2px' }}>{item.icon}</span>
                     <span style={{ fontSize: '14px', fontWeight: 700, color: advancedOptions[item.key] ? c('accent') : c('text') }}>{item.label}</span>
                   </div>
@@ -954,11 +955,11 @@ export default function BrandPackagingPanel({ onClose, onAddImages, isMonochrome
                   一键同系列
                 </button>
                 <button onClick={handleGenerateScene} disabled={isGenerating}
-                  style={{ padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, background: isMonochrome ? 'rgba(59,130,246,0.1)' : ACCENT_GLOW, border: `1px solid ${c('accent')}`, color: c('accent)', cursor: 'pointer' }}>
+                  style={{ padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, background: isMonochrome ? 'rgba(59,130,246,0.1)' : ACCENT_GLOW, border: `1px solid ${c('accent')}`, color: c('accent'), cursor: 'pointer' }}>
                   场景展示
                 </button>
                 <button onClick={handleNewProject}
-                  style={{ padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, background: c('input'), border: `1px solid ${c('border')}`, color: c('text2)', cursor: 'pointer' }}>
+                  style={{ padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, background: c('input'), border: `1px solid ${c('border')}`, color: c('text2'), cursor: 'pointer' }}>
                   新建项目
                 </button>
               </>
@@ -969,7 +970,7 @@ export default function BrandPackagingPanel({ onClose, onAddImages, isMonochrome
         {/* Results Body */}
         <div className="flex-1 overflow-y-auto" style={{ padding: '16px' }}>
           {results.length === 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: c('text3)' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: c('text3') }}>
               <Package size={48} style={{ marginBottom: '12px', opacity: 0.3 }} />
               <div style={{ fontSize: '15px', fontWeight: 600 }}>暂无方案</div>
               <div style={{ fontSize: '13px', marginTop: '4px' }}>填写品牌信息后点击生成</div>
@@ -987,11 +988,11 @@ export default function BrandPackagingPanel({ onClose, onAddImages, isMonochrome
                     </div>
                     <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
                       <button onClick={() => handleDownloadImage(r.url, `packaging_${r.id}.png`)}
-                        style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', background: c('input'), border: `1px solid ${c('border')}`, color: c('text2)', cursor: 'pointer' }}>
+                        style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', background: c('input'), border: `1px solid ${c('border')}`, color: c('text2'), cursor: 'pointer' }}>
                         <Download size={11} style={{ verticalAlign: '-1px' }} /> 下载
                       </button>
                       <button onClick={() => onAddImages([r.url])}
-                        style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', background: isMonochrome ? 'rgba(59,130,246,0.1)' : ACCENT_GLOW, border: `1px solid ${c('accent')}`, color: c('accent)', cursor: 'pointer' }}>
+                        style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', background: isMonochrome ? 'rgba(59,130,246,0.1)' : ACCENT_GLOW, border: `1px solid ${c('accent')}`, color: c('accent'), cursor: 'pointer' }}>
                         <Send size={11} style={{ verticalAlign: '-1px' }} /> 画布
                       </button>
                     </div>
@@ -1016,15 +1017,15 @@ export default function BrandPackagingPanel({ onClose, onAddImages, isMonochrome
               ].map(item => (
                 <div key={item.label} style={{ marginBottom: '6px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '3px' }}>
-                    <span style={{ color: c('text2)' }}>{item.label}</span>
-                    <span style={{ color: c('accent)', fontWeight: 700 }}>{item.value}%</span>
+                    <span style={{ color: c('text2') }}>{item.label}</span>
+                    <span style={{ color: c('accent'), fontWeight: 700 }}>{item.value}%</span>
                   </div>
-                  <div style={{ height: '4px', borderRadius: '2px', background: c('input)', overflow: 'hidden' }}>
+                  <div style={{ height: '4px', borderRadius: '2px', background: c('input'), overflow: 'hidden' }}>
                     <div style={{ height: '100%', width: `${item.value}%`, background: c('accent'), borderRadius: '2px', transition: 'width 0.5s' }} />
                   </div>
                 </div>
               ))}
-              <div style={{ marginTop: '10px', textAlign: 'center', fontSize: '18px', fontWeight: 800, color: c('accent)' }}>
+              <div style={{ marginTop: '10px', textAlign: 'center', fontSize: '18px', fontWeight: 800, color: c('accent') }}>
                 综合评分 {analysis.overallScore}
               </div>
             </div>
@@ -1032,7 +1033,7 @@ export default function BrandPackagingPanel({ onClose, onAddImages, isMonochrome
 
           {/* Disclaimer */}
           <div style={{ marginTop: '12px', padding: '10px 12px', borderRadius: '8px', background: 'rgba(200,150,50,0.06)', border: `1px solid rgba(200,150,50,0.15)` }}>
-            <div style={{ fontSize: '12px', color: c('text3)', display: 'flex', alignItems: 'flex-start', gap: '6px', lineHeight: '1.6' }}>
+            <div style={{ fontSize: '12px', color: c('text3'), display: 'flex', alignItems: 'flex-start', gap: '6px', lineHeight: '1.6' }}>
               <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: '2px', color: isMonochrome ? M_ACCENT : ACCENT }} />
               <span>视觉展开图不是最终印刷刀版 / 结构参考展开图需要人工复核 / 准刀版需接入标准包装结构模板库 / 小字内容建议由设计师后期排版</span>
             </div>
