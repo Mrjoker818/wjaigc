@@ -27,10 +27,26 @@ export interface PromptSelectorInput {
   visualNotes: VisualSystemNotes;
   targetPlatform: TargetPlatform;
   outputLayout: OutputLayout;
-  /** 是否包含中文品牌名称 */
+  /** 是否包含英文名称（可选） */
+  includeEnglishName?: boolean;
+  /** 英文品牌名称（可选，brandName 默认为中文） */
+  englishName?: string;
+  /** @deprecated 使用 englishName 代替，向后兼容 */
   includeChineseName?: boolean;
-  /** 中文品牌名称（如果与 brandName 不同） */
+  /** @deprecated 使用 englishName 代替，向后兼容 */
   chineseName?: string;
+}
+
+/**
+ * 规范化新旧字段：优先使用 englishName，向后兼容 chineseName
+ * brandName 默认为中文，englishName 为可选英文名
+ */
+function resolveSecondaryName(input: PromptSelectorInput): { hasSecondary: boolean; secondaryName: string; namePart: string } {
+  // 优先 englishName（新字段），兼容 chineseName（旧字段）
+  const secondaryName = input.englishName || input.chineseName || '';
+  const hasSecondary = !!(input.includeEnglishName || input.includeChineseName) && !!secondaryName;
+  const namePart = hasSecondary ? `"${input.brandName}" (English: "${secondaryName}")` : `"${input.brandName}"`;
+  return { hasSecondary, secondaryName, namePart };
 }
 
 /**
@@ -106,12 +122,13 @@ export function getBestGenerationPrompt(input: PromptSelectorInput): string {
 // ─── 内部构建函数 ─────────────────────────────────────────────────
 
 function buildUniversalPrompt(input: PromptSelectorInput): string {
-  const { brandName, direction, symbol, visualNotes, outputLayout, includeChineseName, chineseName } = input;
+  const { brandName, direction, symbol, visualNotes, outputLayout } = input;
+  const { hasSecondary, secondaryName } = resolveSecondaryName(input);
   const parts: string[] = [];
 
   parts.push(`Logo design for "${brandName}"`);
-  if (includeChineseName && chineseName) {
-    parts.push(`with Chinese brand name "${chineseName}"`);
+  if (hasSecondary) {
+    parts.push(`with English name "${secondaryName}"`);
   }
 
   // 方向
@@ -147,11 +164,8 @@ function buildUniversalPrompt(input: PromptSelectorInput): string {
 }
 
 function buildGptImagePrompt(input: PromptSelectorInput): string {
-  const { brandName, direction, symbol, visualNotes, outputLayout, includeChineseName, chineseName } = input;
-
-  const namePart = includeChineseName && chineseName
-    ? `"${brandName}" (Chinese: "${chineseName}")`
-    : `"${brandName}"`;
+  const { brandName, direction, symbol, visualNotes, outputLayout } = input;
+  const { namePart } = resolveSecondaryName(input);
 
   if (outputLayout === 'brand-system-board') {
     return `Create a professional brand system board for the logo of ${namePart}.
@@ -252,8 +266,9 @@ function buildFluxPrompt(input: PromptSelectorInput): string {
 }
 
 function buildIdeogramPrompt(input: PromptSelectorInput): string {
-  const { brandName, direction, symbol, outputLayout, includeChineseName, chineseName } = input;
-  const namePart = includeChineseName && chineseName ? `${brandName} ${chineseName}` : brandName;
+  const { brandName, direction, symbol, outputLayout } = input;
+  const { hasSecondary, secondaryName } = resolveSecondaryName(input);
+  const namePart = hasSecondary ? `${brandName} ${secondaryName}` : brandName;
   const paletteStr = direction.colorPalette.slice(0, 3).join(', ');
 
   if (outputLayout === 'brand-system-board') {

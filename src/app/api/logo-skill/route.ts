@@ -104,6 +104,7 @@ async function handleGenerateDirections(body: Record<string, unknown>) {
   const directionResult = parseDirectionResponse(llmResult.content);
 
   // 3. 生成多平台 Prompt
+  const secondaryName = (body.englishName || body.chineseName) as string | undefined;
   const platformPrompts = selectPlatformPrompts({
     brandName: sanbaoInput.brand_name,
     direction: directionResult.direction,
@@ -111,8 +112,10 @@ async function handleGenerateDirections(body: Record<string, unknown>) {
     visualNotes: directionResult.visualNotes,
     targetPlatform: (sanbaoInput.target_platform || 'all') as TargetPlatform,
     outputLayout: (sanbaoInput.output_layout || 'brand-system-board') as OutputLayout,
-    includeChineseName: !!body.chineseName,
-    chineseName: body.chineseName as string | undefined,
+    includeEnglishName: !!secondaryName,
+    englishName: secondaryName,
+    includeChineseName: !!secondaryName, // 向后兼容
+    chineseName: secondaryName, // 向后兼容
   });
 
   return NextResponse.json({

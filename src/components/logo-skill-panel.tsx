@@ -159,7 +159,7 @@ export default function LogoSkillPanel({
   const [audience, setAudience] = useState(brandProject?.targetAudience || '');
   const [preferredStyle, setPreferredStyle] = useState(brandProject?.tone || '');
   const [referenceStyle, setReferenceStyle] = useState('');
-  const [chineseName, setChineseName] = useState('');
+  const [englishName, setEnglishName] = useState('');
   const [outputLayout, setOutputLayout] = useState('brand-system-board');
   const [targetPlatform, setTargetPlatform] = useState('all');
   const [revisionNotes, setRevisionNotes] = useState('');
@@ -276,7 +276,7 @@ export default function LogoSkillPanel({
           referenceStyle: referenceStyle.trim() || undefined,
           outputLayout,
           targetPlatform,
-          chineseName: chineseName.trim() || undefined,
+          englishName: englishName.trim() || undefined,
           llmModel: selectedLlmModel || undefined,
         }),
       });
@@ -315,7 +315,7 @@ export default function LogoSkillPanel({
           referenceStyle: referenceStyle.trim() || undefined,
           outputLayout,
           targetPlatform,
-          chineseName: chineseName.trim() || undefined,
+          englishName: englishName.trim() || undefined,
           revisionNotes: revisionNotes.trim(),
           llmModel: selectedLlmModel || undefined,
         }),
@@ -588,14 +588,14 @@ export default function LogoSkillPanel({
             <input
               value={brandName}
               onChange={e => setBrandName(e.target.value)}
-              placeholder="英文品牌名称"
+              placeholder="中文品牌名称"
               className={`flex-1 px-3 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} placeholder:text-gray-500 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'}`}
             />
             <input
-              value={chineseName}
-              onChange={e => setChineseName(e.target.value)}
-              placeholder="中文名"
-              className={`w-28 px-3 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} placeholder:text-gray-500 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'}`}
+              value={englishName}
+              onChange={e => setEnglishName(e.target.value)}
+              placeholder="英文名(可选)"
+              className={`w-32 px-3 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} placeholder:text-gray-500 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'}`}
             />
           </div>
         </div>
