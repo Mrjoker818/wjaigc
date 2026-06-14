@@ -35,5 +35,25 @@ export async function register() {
     import('@/lib/check-local-models').then(({ checkLocalModels }) => {
       checkLocalModels().catch(() => {});
     }).catch(() => {});
+
+    // 异步确保 SVG 转换 Python 依赖已安装（cairosvg/ezdxf，不阻塞启动）
+    const ensureSvgConvertDeps = async () => {
+      try {
+        const { execSync } = await import('child_process');
+        const missing: string[] = [];
+        try { execSync('python3 -c "import cairosvg"', { stdio: 'ignore', timeout: 5000 }); } catch { missing.push('cairosvg'); }
+        try { execSync('python3 -c "import ezdxf"', { stdio: 'ignore', timeout: 5000 }); } catch { missing.push('ezdxf'); }
+        if (missing.length > 0) {
+          console.log(`[instrumentation] Installing SVG convert deps: ${missing.join(', ')}`);
+          execSync(`pip3 install ${missing.join(' ')} -q`, { stdio: 'ignore', timeout: 120000 });
+          console.log('[instrumentation] SVG convert deps installed successfully');
+        } else {
+          console.log('[instrumentation] SVG convert deps (cairosvg, ezdxf) already available');
+        }
+      } catch (e) {
+        console.warn('[instrumentation] SVG convert deps installation failed (non-fatal):', e);
+      }
+    };
+    ensureSvgConvertDeps().catch(() => {});
   }
 }
