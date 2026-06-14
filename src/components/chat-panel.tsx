@@ -1320,13 +1320,14 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   const mentionPickerItems: MentionRef[] = useMemo(() => {
     const items: MentionRef[] = [];
     // Canvas images
-    canvasImages.forEach(img => {
+    canvasImages.forEach((img, idx) => {
+      const num = idx + 1;
       items.push({
         type: 'canvas-image',
         id: img.id,
-        label: img.prompt ? img.prompt.slice(0, 40) + (img.prompt.length > 40 ? '...' : '') : `图片 ${img.id.slice(0, 6)}`,
+        label: img.prompt ? `#${num} ${img.prompt.slice(0, 30)}${img.prompt.length > 30 ? '...' : ''}` : `图片 #${num}`,
         imageUrl: img.url,
-        data: { url: img.url, prompt: img.prompt || '', width: img.width, height: img.height },
+        data: { url: img.url, prompt: img.prompt || '', width: img.width, height: img.height, num },
       });
     });
     // Brand DNA
@@ -5085,12 +5086,16 @@ ${imageDescriptions}
                         : isGold ? 'text-white/80 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
                     }`}
                   >
-                    {item.type === 'canvas-image' && <ImageIcon size={12} className="shrink-0" />}
+                    {item.type === 'canvas-image' && item.imageUrl ? (
+                      <img src={item.imageUrl} alt="" className="w-5 h-5 rounded object-cover shrink-0 border border-white/10" crossOrigin="anonymous" />
+                    ) : item.type === 'canvas-image' ? (
+                      <ImageIcon size={12} className="shrink-0" />
+                    ) : null}
                     {item.type === 'brand' && <Palette size={12} className="shrink-0" />}
                     {item.type === 'prompt' && <Sparkles size={12} className="shrink-0" />}
                     <span className="truncate">{item.label}</span>
                     <span className={`ml-auto text-[10px] ${isGold ? 'text-white/30' : 'text-gray-300'}`}>
-                      {item.type === 'canvas-image' ? '图片' : item.type === 'brand' ? '品牌' : '提示词'}
+                      {item.type === 'canvas-image' ? `#${(item.data as Record<string, unknown>)?.num ?? ''}` : item.type === 'brand' ? '品牌' : '提示词'}
                     </span>
                   </button>
                 ))}

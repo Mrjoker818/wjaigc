@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { X, Pencil, Eraser, Trash2, Loader2, Check, Sparkles, History, Image as ImageIcon, ChevronDown, ChevronUp, Plus, Minus, Maximize2, GripVertical, Upload, RefreshCw, FileText } from 'lucide-react';
 import type { CanvasImage } from './infinite-canvas';
 
@@ -258,6 +258,13 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   const [refPickerOpen, setRefPickerOpen] = useState(false); // 从画布选择参考图弹窗
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ★ @图片提及
+  const [atImagePickerOpen, setAtImagePickerOpen] = useState(false);
+  const [atImageFilter, setAtImageFilter] = useState('');
+  const [atImageIndex, setAtImageIndex] = useState(0); // 光标位置，用于定位下拉菜单
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const atDropdownRef = useRef<HTMLDivElement>(null);
+
   // ★ 多轮上下文历史（最近5轮编辑记录，用于LLM连续理解）
   const [editContextHistory, setEditContextHistory] = useState<Array<{userPrompt: string; llmInstruction: string}>>([]);
 
@@ -265,6 +272,43 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   const [autoMaskPreview, setAutoMaskPreview] = useState<string | null>(null); // 预览用data URL
 
   // ★ 进度计时器
+
+  // ★ @图片提及：画布图片列表（带编号）
+  const canvasImagesWithNumbers = useMemo(() => {
+    if (!canvasImages || canvasImages.length === 0) return [];
+    return canvasImages.map((img, idx) => ({
+      ...img,
+      displayLabel: img.prompt ? `#${idx + 1} ${img.prompt.slice(0, 20)}` : `#${idx + 1} 画布图片`,
+      number: idx + 1,
+    }));
+  }, [canvasImages]);
+
+  const filteredAtImages = useMemo(() => {
+    if (!atImagePickerOpen) return [];
+    const filter = atImageFilter.toLowerCase();
+    return canvasImagesWithNumbers.filter(img => {
+      if (!filter) return true;
+      return img.displayLabel.toLowerCase().includes(filter) || (img.prompt || '').toLowerCase().includes(filter);
+    }).slice(0, 8);
+  }, [atImagePickerOpen, atImageFilter, canvasImagesWithNumbers]);
+
+  const handleSelectAtImage = useCallback((img: typeof canvasImagesWithNumbers[number]) => {
+    // 将图片添加为参考图
+    const alreadyRef = referenceImages.some(r => r.url === img.url);
+    if (!alreadyRef) {
+      setReferenceImages(prev => [...prev, { id: `at-${img.id}`, url: img.url, prompt: img.prompt }]);
+    }
+    // 替换 @xxx 为 @图片#N
+    const val = prompt;
+    const lastAtIndex = val.lastIndexOf('@');
+    if (lastAtIndex >= 0) {
+      const before = val.slice(0, lastAtIndex);
+      setPrompt(before + `@图片#${img.number} `);
+    }
+    setAtImagePickerOpen(false);
+    setAtImageFilter('');
+  }, [prompt, referenceImages]);
+
   useEffect(() => {
     if (editStartTime && !editTotalTime) {
       editTimerRef.current = setInterval(() => {
@@ -1916,10 +1960,28 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           {/* 编辑指令 */}
           <div className="relative">
             <textarea
+              ref={textareaRef}
               value={prompt}
               onChange={(e) => {
                 setPrompt(e.target.value);
                 const val = e.target.value;
+                // @图片提及检测
+                const lastAtIndex = val.lastIndexOf('@');
+                if (lastAtIndex >= 0) {
+                  const afterAt = val.slice(lastAtIndex + 1);
+                  const textBeforeAt = val.slice(0, lastAtIndex);
+                  // @前面必须是空白或开头
+                  const isValidTrigger = textBeforeAt === '' || /[\s\n]$/.test(textBeforeAt);
+                  if (isValidTrigger && !afterAt.includes(' ') && !afterAt.includes('\n') && afterAt.length <= 20) {
+                    setAtImagePickerOpen(true);
+                    setAtImageFilter(afterAt);
+                  } else {
+                    setAtImagePickerOpen(false);
+                  }
+                } else {
+                  setAtImagePickerOpen(false);
+                }
+                // /模板检测
                 if (val.endsWith('/')) {
                   setShowTemplatePopup(true);
                   setTemplateSearch('');
@@ -1940,6 +2002,23 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                 }
               }}
               onKeyDown={(e) => {
+                // @图片下拉键盘导航
+                if (atImagePickerOpen && filteredAtImages.length > 0) {
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setAtImageIndex((i) => (i - 1 + filteredAtImages.length) % filteredAtImages.length);
+                  } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setAtImageIndex((i) => (i + 1) % filteredAtImages.length);
+                  } else if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSelectAtImage(filteredAtImages[atImageIndex]);
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setAtImagePickerOpen(false);
+                  }
+                  return;
+                }
                 if (showTemplatePopup && filteredTemplates.length > 0) {
                   if (e.key === 'ArrowUp') {
                     e.preventDefault();
@@ -1965,7 +2044,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                   handleKeyDown(e);
                 }
               }}
-              placeholder="描述修改内容，如：把背景换成日落... (输入 / 使用模板)"
+              placeholder="描述修改内容，如：把背景换成日落... (输入 / 模板 · @ 引用图片)"
               className={`w-full ${promptExpanded ? 'h-32' : 'h-14'} ${thInput} rounded-lg px-3 py-2 text-sm ${thTextPlaceholder} resize-none transition-all duration-200`}
             />
             {showTemplatePopup && filteredTemplates.length > 0 && (
@@ -1984,6 +2063,33 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                   >
                     <div className="font-medium">{tpl.name}</div>
                     <div className="text-xs text-gray-500 truncate">{tpl.content}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+            {/* @图片提及下拉菜单 */}
+            {atImagePickerOpen && filteredAtImages.length > 0 && (
+              <div
+                ref={atDropdownRef}
+                className="absolute bottom-full left-0 right-0 mb-1 max-h-56 overflow-y-auto rounded-lg border border-[#d4af37]/30 bg-[#1a1a1a] shadow-[0_0_15px_rgba(212,175,55,0.15)] z-50"
+              >
+                <div className="px-2 py-1 text-[10px] text-gray-500 border-b border-white/5">
+                  输入 @ 引用画布图片作为参考
+                </div>
+                {filteredAtImages.map((img, i) => (
+                  <button
+                    key={img.id}
+                    onClick={() => handleSelectAtImage(img)}
+                    className={`w-full text-left px-2 py-1.5 text-sm border-b border-white/5 last:border-0 transition-colors flex items-center gap-2 ${i === atImageIndex ? 'bg-[#d4af37]/20 text-white' : 'text-gray-300 hover:bg-white/5'}`}
+                  >
+                    <img
+                      src={img.url}
+                      alt=""
+                      className="w-8 h-8 rounded object-cover flex-shrink-0 border border-white/10"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
+                    <span className="truncate flex-1">{img.displayLabel}</span>
+                    <span className="text-[10px] text-gray-500 flex-shrink-0">#{img.number}</span>
                   </button>
                 ))}
               </div>
