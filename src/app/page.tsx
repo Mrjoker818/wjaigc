@@ -1980,9 +1980,50 @@ function CanvasApp() {
         } as CanvasImage : img
       ));
 
-      // 轮询视频任务
-      const pollInterval = setInterval(async () => {
+      // 渐进式轮询视频任务（与图片生成一致，SSE加速 + 渐进间隔）
+      const pollVideoResult = async (attempt = 0): Promise<void> => {
+        if (attempt > 200) { // 最多200次轮询
+          setImages(prev => prev.filter(img => img.id !== phId));
+          toast.error('视频生成超时', { description: '已超过最大等待时间', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
+          setActiveGenerationCount(prev => Math.max(0, prev - 1));
+          return;
+        }
+        // 渐进式间隔：1s → 1.5s → 2s → 3s（视频生成通常较慢，间隔不宜过短）
+        const getVideoPollInterval = (a: number) => {
+          if (a < 3) return 1000;    // 前3次：1秒（快速检测早期完成）
+          if (a < 8) return 1500;    // 3-8次：1.5秒
+          if (a < 20) return 2000;   // 8-20次：2秒
+          return 3000;               // 20次后：3秒
+        };
+
         try {
+          // 首次轮询立即执行（不等待间隔），后续轮询SSE加速 + 渐进间隔
+          if (attempt > 0) {
+            // SSE加速：同时等待SSE事件和定时器，哪个先到用哪个
+            const ssePromise = new Promise<void>((resolve) => {
+              let resolved = false;
+              const handler = (event: { taskId?: string; task?: { status?: string } }) => {
+                if (event.taskId === taskId && !resolved) {
+                  resolved = true;
+                  unsub();
+                  resolve();
+                }
+              };
+              const unsub = taskEventsClient.onTaskEvent(handler);
+              // 5秒后移除监听，避免内存泄漏
+              setTimeout(() => {
+                if (!resolved) { resolved = true; unsub(); resolve(); }
+              }, 5000);
+            });
+
+            const pollPromise = (async () => {
+              const interval = getVideoPollInterval(attempt);
+              await new Promise(r => setTimeout(r, interval));
+            })();
+
+            await Promise.race([ssePromise, pollPromise]);
+          }
+
           const pollRes = await fetch('/api/poll-task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1991,7 +2032,6 @@ function CanvasApp() {
           const pollData = await pollRes.json();
 
           if (pollData.status === 'completed') {
-            clearInterval(pollInterval);
             const videoUrl = pollData.videoUrl || pollData.url;
             const thumbnailUrl = pollData.thumbnailUrl || pollData.url;
             if (videoUrl) {
@@ -2017,12 +2057,11 @@ function CanvasApp() {
             }
             setActiveGenerationCount(prev => Math.max(0, prev - 1));
           } else if (pollData.status === 'failed') {
-            clearInterval(pollInterval);
             setImages(prev => prev.filter(img => img.id !== phId));
             toast.error('视频生成失败', { description: pollData.error || '未知错误', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
             setActiveGenerationCount(prev => Math.max(0, prev - 1));
           } else {
-            // 更新进度
+            // 更新进度，继续轮询
             const progress = pollData.progress || 0;
             setImages(prev => prev.map(img =>
               img.id === phId ? {
@@ -2030,14 +2069,17 @@ function CanvasApp() {
                 processing: { ...img.processing, progress: Math.max(10, progress), status: 'processing' as const, label: pollData.label || '视频生成中' },
               } as CanvasImage : img
             ));
+            // 递归继续轮询
+            pollVideoResult(attempt + 1);
           }
         } catch {
-          // 轮询错误，继续
+          // 轮询错误，继续尝试
+          pollVideoResult(attempt + 1);
         }
-      }, 3000);
+      };
 
-      // 5分钟超时
-      setTimeout(() => clearInterval(pollInterval), 300000);
+      // 立即开始第一次轮询（不等待间隔）
+      pollVideoResult(0);
 
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : '视频生成失败';
