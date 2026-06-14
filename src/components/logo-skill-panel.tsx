@@ -494,16 +494,21 @@ export default function LogoSkillPanel({
   return (
     <div
       ref={panelRef}
-      className={`fixed z-[90] flex flex-col rounded-2xl shadow-2xl border overflow-hidden ${bg} ${border} ${dragging ? `ring-2 ${isMonochrome ? 'ring-blue-500/30' : 'ring-[#d4af37]/30'} ${isMonochrome ? 'shadow-[0_0_30px_rgba(59,130,246,0.15)]' : 'shadow-[0_0_30px_rgba(212,175,55,0.2)]'}` : ''}`}
-      style={{
-        left: pos.x,
-        top: pos.y,
-        width: PANEL_W,
-        maxHeight: isMinimized ? undefined : `calc(100vh - 96px)`,
-        ...(isMonochrome ? { boxShadow: '0 8px 32px rgba(0,0,0,0.12)' } : { boxShadow: '0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(212,175,55,0.15)' }),
-      }}
+      className={`fixed z-[90] ${dragging ? 'cursor-grabbing' : ''}`}
+      style={{ left: pos.x, top: pos.y, width: PANEL_W }}
+      onMouseDown={e => e.stopPropagation()}
+      onPointerDown={e => e.stopPropagation()}
+      onWheel={e => e.stopPropagation()}
       data-popup
     >
+      <div
+        data-floating-panel="true"
+        className={`flex flex-col rounded-2xl overflow-hidden ${bg} ${border} ${dragging ? `ring-2 ${isMonochrome ? 'ring-blue-500/30' : 'ring-[#d4af37]/30'} ${isMonochrome ? 'shadow-[0_0_30px_rgba(59,130,246,0.15)]' : 'shadow-[0_0_30px_rgba(212,175,55,0.2)]'}` : ''}`}
+        style={{
+          maxHeight: isMinimized ? undefined : `calc(100vh - 96px)`,
+          ...(isMonochrome ? { boxShadow: dragging ? undefined : '0 8px 32px rgba(0,0,0,0.12)' } : { boxShadow: dragging ? undefined : '0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(212,175,55,0.15)' }),
+        }}
+      >
       {/* ─── 可拖动标题栏 ─────────────────────────────────────── */}
       <div
         className={`flex items-center justify-between px-4 py-3 border-b select-none cursor-grab active:cursor-grabbing shrink-0 ${
@@ -560,6 +565,7 @@ export default function LogoSkillPanel({
         {step === 'result' && renderResultStep()}
       </div>
       )}
+      </div>
     </div>
   );
 
