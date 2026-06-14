@@ -2315,11 +2315,11 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               <div className={`rounded-xl border p-4 ${isDark ? 'bg-[#1a1a1a] border-[#333]' : 'bg-amber-50 border-amber-200'}`}>
                 <h4 className={`text-xs font-semibold mb-2 ${isDark ? 'text-[#d4af37]' : 'text-amber-600'}`}>使用说明</h4>
                 <ul className={`text-[11px] space-y-1 ${isDark ? 'text-[#888]' : 'text-amber-700'}`}>
-                  <li>1. 打开微信/支付宝，找到"收付款"→"二维码收款"→保存收款码图片</li>
+                  <li>1. 打开微信/支付宝，找到&ldquo;收付款&rdquo;→&ldquo;二维码收款&rdquo;→保存收款码图片</li>
                   <li>2. 将收款码图片上传到上方对应区域</li>
                   <li>3. 用户充值时会看到您的收款码，扫码付款</li>
-                  <li>4. 付款完成后，用户点击"我已付款"，积分自动到账</li>
-                  <li>5. 管理员可在"最近订单"中查看并撤销欺诈订单（积分将扣回）</li>
+                  <li>4. 付款完成后，用户点击&ldquo;我已付款&rdquo;，积分自动到账</li>
+                  <li>5. 管理员可在&ldquo;最近订单&rdquo;中查看并撤销欺诈订单（积分将扣回）</li>
                   <li>6. 无需开通商户号，使用个人收款码即可</li>
                 </ul>
               </div>
@@ -2335,7 +2335,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               <button onClick={() => { setEditingEcomTpl({ id: `tpl_${Date.now()}`, name: '', icon: '📄', description: '', prompt_template: '', negative_prompt: 'low quality, blurry, distorted, deformed, watermark', aspect_ratio: '1:1', category: 'product', fidelity_anchor: '', sort_order: ecomTemplates.length + 1, is_enabled: true }); setShowNewEcomTpl(true); }} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${accentBgClass} ${accentTextOnBgClass} ${accentHoverBgClass} transition-colors cursor-pointer`}><Plus size={12} /> 新增模板</button>
             </div>
             <div className="space-y-2 max-h-[500px] overflow-y-auto">
-              {ecomTemplates.length === 0 ? (<div className={`text-center py-8 text-sm ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>暂无自定义模板，点击"新增模板"添加</div>) : ecomTemplates.map((tpl, idx) => (
+              {ecomTemplates.length === 0 ? (<div className={`text-center py-8 text-sm ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>暂无自定义模板，点击&ldquo;新增模板&rdquo;添加</div>) : ecomTemplates.map((tpl, idx) => (
                 <div key={tpl.id as string} className={`flex items-center gap-3 rounded-lg px-4 py-3 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-white hover:bg-gray-50'} transition-colors`}>
                   <span className="text-lg">{tpl.icon as string || '📄'}</span>
                   <div className="flex-1 min-w-0">
