@@ -1392,7 +1392,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
         if (!query.includes('\n') && query.length <= 30) {
           setTemplatePopupSearch(query);
           const results = query ? searchTemplates(query) : getPromptTemplates();
-          setTemplatePopupItems(results.slice(0, 8));
+          setTemplatePopupItems(results.slice(0, 20));
           setTemplatePopupIndex(0);
           setTemplatePopupOpen(results.length > 0);
           return;
@@ -5113,13 +5113,17 @@ ${imageDescriptions}
                     <button
                       key={template.id}
                       onClick={() => selectPromptTemplate(template)}
-                      className={`w-full flex items-start gap-2 px-3 py-2 text-xs transition-colors text-left ${
+                      className={`w-full flex items-start gap-2 px-3 py-2 text-xs transition-colors text-left group/tpl relative ${
                         idx === templatePopupIndex
                           ? isGold ? 'bg-gold/10 text-gold' : 'bg-blue-50 text-blue-700'
                           : isGold ? 'text-white/80 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
                       }`}
                     >
-                      <FileText size={12} className="shrink-0 mt-0.5" />
+                      {template.thumbnail ? (
+                        <img src={template.thumbnail} alt={template.name} className="w-6 h-6 rounded object-cover flex-shrink-0 mt-0.5 border border-white/10" />
+                      ) : (
+                        <FileText size={12} className="shrink-0 mt-0.5" />
+                      )}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
                           <span className="font-medium truncate">{template.name}</span>
@@ -5131,6 +5135,14 @@ ${imageDescriptions}
                           {template.content}
                         </p>
                       </div>
+                      {template.thumbnail && (
+                        <div className="absolute right-full mr-2 top-0 z-[60] hidden group-hover/tpl:block">
+                          <div className={`rounded-lg shadow-2xl overflow-hidden border ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
+                            <img src={template.thumbnail} alt={template.name} className="w-36 h-36 object-cover" />
+                            <div className={`px-2 py-1 text-[10px] truncate ${isGold ? 'text-gold-muted' : 'text-gray-600'}`}>{template.name}</div>
+                          </div>
+                        </div>
+                      )}
                     </button>
                   ))}
                 </div>

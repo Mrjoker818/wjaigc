@@ -1079,7 +1079,7 @@ export function GenerationPanel(
                                         const query = textBeforeCursor.slice(lastSlashIndex + 1);
                                         setTemplateSearchQuery(query);
                                         const results = query ? searchTemplates(query) : getPromptTemplates();
-                                        setFilteredTemplates(results.slice(0, 8));
+                                        setFilteredTemplates(results.slice(0, 20));
                                         setSelectedTemplateIndex(0);
                                         setShowTemplatePopup(true);
                                     } else {
@@ -1188,14 +1188,18 @@ export function GenerationPanel(
                                                 setShowTemplatePopup(false);
                                                 promptTextareaRef.current?.focus();
                                             }}
-                                            className={`w-full text-left px-3 py-2.5 transition-colors ${
+                                            className={`w-full text-left px-3 py-2.5 transition-colors group/tpl relative ${
                                                 index === selectedTemplateIndex
                                                     ? mc ? 'bg-gray-100' : 'bg-white/[0.06]'
                                                     : mc ? 'hover:bg-gray-50' : 'hover:bg-white/[0.03]'
                                             }`}
                                         >
                                             <div className="flex items-center gap-2">
-                                                <FileText className={`w-3.5 h-3.5 flex-shrink-0 ${mc ? 'text-gray-400' : 'text-gold-muted/50'}`} />
+                                                {template.thumbnail ? (
+                                                    <img src={template.thumbnail} alt={template.name} className={`w-7 h-7 rounded object-cover flex-shrink-0 ${mc ? 'border border-gray-200' : 'border border-white/[0.08]'}`} />
+                                                ) : (
+                                                    <FileText className={`w-3.5 h-3.5 flex-shrink-0 ${mc ? 'text-gray-400' : 'text-gold-muted/50'}`} />
+                                                )}
                                                 <span className={`text-sm font-medium truncate ${mc ? 'text-gray-900' : 'text-foreground'}`}>
                                                     {template.name}
                                                 </span>
@@ -1205,9 +1209,17 @@ export function GenerationPanel(
                                                     {template.category}
                                                 </span>
                                             </div>
-                                            <p className={`text-xs mt-1 line-clamp-1 pl-5.5 ${mc ? 'text-gray-500' : 'text-gold-muted/50'}`}>
+                                            <p className={`text-xs mt-1 line-clamp-1 pl-9 ${mc ? 'text-gray-500' : 'text-gold-muted/50'}`}>
                                                 {template.content}
                                             </p>
+                                            {template.thumbnail && (
+                                                <div className="absolute left-full ml-2 top-0 z-[60] hidden group-hover/tpl:block">
+                                                    <div className={`rounded-lg shadow-2xl overflow-hidden border ${mc ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-white/[0.12]'}`}>
+                                                        <img src={template.thumbnail} alt={template.name} className="w-40 h-40 object-cover" />
+                                                        <div className={`px-2 py-1 text-[10px] truncate ${mc ? 'text-gray-600' : 'text-gold-muted'}`}>{template.name}</div>
+                                                    </div>
+                                                </div>
+                                            )}
                                         </button>
                                     ))}
                                 </div>
